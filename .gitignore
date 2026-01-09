@@ -1,0 +1,31 @@
+# --- secrets ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# --- runtime artifacts ---
+logs/
+*.log
+service.log
+*.out
+*.err
+
+# --- backups / scratch ---
+backups/
+*.bak
+*.bak.*
