@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from rag_engine.rag_router import router as rag_router
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.forms_router import router as forms_router
+from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.vb_tagging import infer_vb_tags
 from rag_engine.gravity import compute_gravity, write_gravity_card
 from rag_engine.vb_desire_profile import build_vb_desire_profile, write_vb_desire_profile_card
@@ -27,6 +28,7 @@ app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(rag_router, prefix="/rag")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(forms_router, prefix="/forms")
+app.include_router(telemetry_router)
 def parse_uuid(s: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(str(s))
