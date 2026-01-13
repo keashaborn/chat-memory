@@ -64,12 +64,18 @@ async def telemetry_event(req: Request):
     except Exception:
         body = {}
 
+    req_request_id = getattr(req.state, "request_id", None)
+
     events = (body or {}).get("events")
     if not isinstance(events, list) or not events:
         return JSONResponse(
             {"accepted": 0, "rejected": 0, "errors": [{"reason": "missing events[]"}]},
             status_code=400,
         )
+
+    actor_user_id = (req.headers.get("x-vs-actor-user-id") or "").strip() or None
+    if actor_user_id:
+        actor_user_id = actor_user_id[:128]
 
     conn = await _connect()
     accepted = 0
@@ -78,22 +84,24 @@ async def telemetry_event(req: Request):
 
     sql = """
         INSERT INTO telemetry_event (
-          event_id, event_type,
-          subject_type, subject_id,
-          target_model_id, target_model_version,
-          judge_model_id, judge_model_version,
-          vantage_id, condition_id,
-          thread_id, turn_id,
-          payload, occurred_at
+        event_id, event_type,
+        subject_type, subject_id,
+        target_model_id, target_model_version,
+        judge_model_id, judge_model_version,
+        vantage_id, condition_id,
+        thread_id, turn_id,
+        actor_user_id,
+        payload, occurred_at
         )
         VALUES (
-          $1,$2,
-          $3,$4,
-          $5,$6,
-          $7,$8,
-          $9,$10,
-          $11,$12,
-          $13,$14
+        $1,$2,
+        $3,$4,
+        $5,$6,
+        $7,$8,
+        $9,$10,
+        $11,$12,
+        $13,
+        $14,$15
         )
         ON CONFLICT (event_id) DO NOTHING
     """
@@ -124,6 +132,8 @@ async def telemetry_event(req: Request):
             payload = e.get("payload")
             if not isinstance(payload, dict):
                 payload = {}
+            if req_request_id and "request_id" not in payload:
+                payload["request_id"] = str(req_request_id)
 
             target_model_id = (e.get("target_model_id") or None)
             target_model_version = (e.get("target_model_version") or None)
@@ -142,6 +152,7 @@ async def telemetry_event(req: Request):
                 judge_model_id, judge_model_version,
                 vantage_id, condition_id,
                 thread_id, turn_id,
+                actor_user_id,
                 payload, occurred_at
             )
 
@@ -195,6 +206,7 @@ def _metric_expr(metric_key: str) -> Tuple[str, str]:
 
 @router.get("/metrics/timeseries")
 async def metrics_timeseries(
+    req: Request,
     metric_key: str = Query(...),
     subject_type: str = Query(...),
     subject_id: str = Query(...),
@@ -217,14 +229,25 @@ async def metrics_timeseries(
     except KeyError:
         return JSONResponse({"error": f"unknown metric_key '{metric_key}'"}, status_code=400)
 
+    actor_user_id = (req.headers.get("x-vs-actor-user-id") or "").strip() or None
+    if actor_user_id:
+        actor_user_id = actor_user_id[:128]
+
     conn = await _connect()
     try:
         wh = ["subject_type=$1", "subject_id=$2", "occurred_at >= $3", "occurred_at < $4", default_where]
         params: List[Any] = [subject_type, subject_id, start, end]
 
+        idx = 5
         if target_model_id:
-            wh.append("target_model_id=$5")
+            wh.append(f"target_model_id=${idx}")
             params.append(target_model_id)
+            idx += 1
+
+        if actor_user_id:
+            wh.append(f"actor_user_id=${idx}")
+            params.append(actor_user_id)
+            idx += 1
 
         where_sql = " AND ".join(f"({w})" for w in wh)
         dt_unit_param = "day" if bucket == "day" else "hour"
@@ -252,26 +275,51 @@ async def metrics_timeseries(
             })
 
         phases = []
-        base = await conn.fetchrow(
-            """
-            SELECT condition_id, occurred_at, payload
-            FROM telemetry_event
-            WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set' AND occurred_at < $3
-            ORDER BY occurred_at DESC
-            LIMIT 1
-            """,
-            subject_type, subject_id, start
-        )
-        within = await conn.fetch(
-            """
-            SELECT condition_id, occurred_at, payload
-            FROM telemetry_event
-            WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set'
-              AND occurred_at >= $3 AND occurred_at < $4
-            ORDER BY occurred_at ASC
-            """,
-            subject_type, subject_id, start, end
-        )
+
+        if actor_user_id:
+            base = await conn.fetchrow(
+                """
+                SELECT condition_id, occurred_at, payload
+                FROM telemetry_event
+                WHERE subject_type=$1 AND subject_id=$2 AND actor_user_id=$3
+                AND event_type='condition.set' AND occurred_at < $4
+                ORDER BY occurred_at DESC
+                LIMIT 1
+                """,
+                subject_type, subject_id, actor_user_id, start
+            )
+            within = await conn.fetch(
+                """
+                SELECT condition_id, occurred_at, payload
+                FROM telemetry_event
+                WHERE subject_type=$1 AND subject_id=$2 AND actor_user_id=$3
+                AND event_type='condition.set'
+                AND occurred_at >= $4 AND occurred_at < $5
+                ORDER BY occurred_at ASC
+                """,
+                subject_type, subject_id, actor_user_id, start, end
+            )
+        else:
+            base = await conn.fetchrow(
+                """
+                SELECT condition_id, occurred_at, payload
+                FROM telemetry_event
+                WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set' AND occurred_at < $3
+                ORDER BY occurred_at DESC
+                LIMIT 1
+                """,
+                subject_type, subject_id, start
+            )
+            within = await conn.fetch(
+                """
+                SELECT condition_id, occurred_at, payload
+                FROM telemetry_event
+                WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set'
+                AND occurred_at >= $3 AND occurred_at < $4
+                ORDER BY occurred_at ASC
+                """,
+                subject_type, subject_id, start, end
+            )
 
         seq = []
         if base:

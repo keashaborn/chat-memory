@@ -29,6 +29,38 @@ app.include_router(rag_router, prefix="/rag")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(forms_router, prefix="/forms")
 app.include_router(telemetry_router)
+
+# ---------- request correlation ----------
+def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # Prevent header/log abuse
+    if len(s) > 128:
+        return None
+    return s
+
+def _get_request_id(req: Request) -> str:
+    rid = _sanitize_request_id(req.headers.get("x-request-id")) or _sanitize_request_id(
+        req.headers.get("x-correlation-id")
+    )
+    return rid or str(uuid.uuid4())
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    rid = _get_request_id(request)
+    request.state.request_id = rid
+    response = await call_next(request)
+    # Echo for end-to-end correlation
+    try:
+        response.headers["x-request-id"] = rid
+    except Exception:
+        pass
+    return response
+
+
 def parse_uuid(s: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(str(s))
@@ -340,6 +372,7 @@ async def log_chat(req: Request):
     source = body.get("source") or "frontend"
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
+    request_id = _sanitize_request_id(getattr(req.state, "request_id", None)) or str(uuid.uuid4())
 
     # Canonicalize user_id (alias -> canonical) for ALL writes
     user_id, _alias_uid = await resolve_canonical_user_id(vantage_id, user_id_alias)
@@ -434,6 +467,7 @@ async def log_chat(req: Request):
         await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS thread_id uuid")
         await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS vantage_id text")
         await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS user_id_alias text")
+        await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS request_id text")
 
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.
@@ -459,8 +493,10 @@ async def log_chat(req: Request):
                     thread_id = None
 
         await conn.execute(
-            "INSERT INTO chat_log(id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            rec_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, created_dt
+            "INSERT INTO chat_log("
+            "id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
+            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+            rec_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
         )
 
         # Touch thread timestamp so list ordering works
@@ -485,6 +521,7 @@ async def log_chat(req: Request):
             payload = {
                 "text": text,
                 "user_id": user_id,
+                "request_id": request_id,
                 "user_id_alias": user_id_alias,
                 "source": source,
                 "tags": tags,
@@ -502,7 +539,7 @@ async def log_chat(req: Request):
     else:
         print("log_chat: OPENAI_API_KEY missing; skipping Qdrant upsert")
 
-    return {"status": "ok", "id": rec_id}
+    return {"status": "ok", "id": rec_id, "request_id": request_id}
 
 # ---------- retrieval ----------
 # Use env defaults already defined above:
