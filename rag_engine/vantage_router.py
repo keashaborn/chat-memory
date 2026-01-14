@@ -224,7 +224,10 @@ async def _write_vantage_answer_trace(
         finally:
             await conn.close()
     except Exception as e:
-        print(f"[vantage] write_answer_trace error: {e}")
+        import sys, traceback
+        sys.stderr.write(f"[vantage] write_answer_trace error: {e}\n")
+        traceback.print_exc()
+        sys.stderr.flush()
 
 
 class VantageLimits(BaseModel):
@@ -550,6 +553,13 @@ def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | 
 
 @router.post("/query", response_model=VantageResponse, response_model_exclude_none=True)
 def vantage_query(req: Request, payload: VantageQuery):
+    # Correlation id for end-to-end tracing (frontend -> brains -> Postgres)
+    req_request_id = getattr(getattr(req, "state", None), "request_id", None)
+    if not req_request_id:
+        req_request_id = (req.headers.get("x-request-id") or req.headers.get("x-correlation-id") or "").strip() or None
+    if not req_request_id:
+        req_request_id = str(uuid.uuid4())
+
     try:
         user_overlay_text = overlay_to_instructions(payload.overlay) if payload.overlay else ""
 
@@ -1131,7 +1141,10 @@ def vantage_query(req: Request, payload: VantageQuery):
                 memory_ids=memory_ids,
             ))
         except Exception as e:
-            print(f"[vantage] write_answer_trace error: {e}")
+            import sys, traceback
+            sys.stderr.write(f"[vantage] write_answer_trace error request_id={req_request_id!r} answer_id={answer_id}: {e}\n")
+            traceback.print_exc()
+            sys.stderr.flush()
 
         return VantageResponse(
             answer=answer,
@@ -1141,6 +1154,8 @@ def vantage_query(req: Request, payload: VantageQuery):
             system_prompt=(system_prompt if debug_on else None),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
