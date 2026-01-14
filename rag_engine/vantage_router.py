@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import math
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .openai_client import complete_chat, complete_chat_messages
@@ -176,6 +176,7 @@ async def _write_vantage_answer_trace(
     answer_id: str,
     answer_text: str,
     memory_ids: List[str],
+    request_id: str | None = None,
 ) -> None:
     """
     Durable attribution record for a /vantage/query answer.
@@ -189,6 +190,14 @@ async def _write_vantage_answer_trace(
 
     tid = thread_id if (thread_id and _UUID_RE.match(thread_id)) else None
 
+    rid: str | None = None
+    try:
+        rid = str(request_id).strip() if request_id is not None else None
+    except Exception:
+        rid = None
+    if rid:
+        rid = rid[:256]
+
     try:
         conn = await asyncpg.connect(dsn)
         try:
@@ -196,10 +205,12 @@ async def _write_vantage_answer_trace(
                 """
                 INSERT INTO public.vantage_answer_trace(
                   answer_id, user_id, thread_id, vantage_id, model_id,
-                  answer_text, answer_text_hash, answer_text_len, memory_ids
+                  answer_text, answer_text_hash, answer_text_len, memory_ids,
+                  request_id
                 )
                 VALUES ($1::uuid, $2, $3::uuid, $4, $5,
-                        $6, md5($6), length($6), $7::text[])
+                        $6, md5($6), length($6), $7::text[],
+                        $8)
                 """,
                 answer_id,
                 user_id,
@@ -208,6 +219,7 @@ async def _write_vantage_answer_trace(
                 model_id,
                 answer_text,
                 memory_ids,
+                rid,
             )
         finally:
             await conn.close()
@@ -537,7 +549,7 @@ def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | 
 
 
 @router.post("/query", response_model=VantageResponse, response_model_exclude_none=True)
-def vantage_query(payload: VantageQuery):
+def vantage_query(req: Request, payload: VantageQuery):
     try:
         user_overlay_text = overlay_to_instructions(payload.overlay) if payload.overlay else ""
 
@@ -762,6 +774,7 @@ def vantage_query(payload: VantageQuery):
             try:
                 asyncio.run(_write_vantage_answer_trace(
                     user_id=(payload.user_id or "").strip() or "anon",
+                    request_id=req_request_id,
                     thread_id=payload.thread_id,
                     vantage_id=((payload.vantage_id or "").strip() or "default"),
                     model_id=model_id,
@@ -845,6 +858,7 @@ def vantage_query(payload: VantageQuery):
             try:
                 asyncio.run(_write_vantage_answer_trace(
                     user_id=(payload.user_id or "").strip() or "anon",
+                    request_id=req_request_id,
                     thread_id=payload.thread_id,
                     vantage_id=((payload.vantage_id or "").strip() or "default"),
                     model_id=model_id,
@@ -1108,6 +1122,7 @@ def vantage_query(payload: VantageQuery):
         try:
             asyncio.run(_write_vantage_answer_trace(
                 user_id=(payload.user_id or "").strip() or "anon",
+                request_id=req_request_id,
                 thread_id=payload.thread_id,
                 vantage_id=vid,
                 model_id=model_id,
