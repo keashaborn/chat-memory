@@ -580,6 +580,39 @@ def vantage_query(req: Request, payload: VantageQuery):
         if os.getenv("ENABLE_VANTAGE_ENDPOINTS", "0") != "1":
             raise HTTPException(status_code=404, detail="not found")
 
+                # CI / offline test mode: avoid external model + Qdrant dependencies
+        if os.getenv("VANTAGE_TEST_MODE", "0").strip() == "1":
+            answer = f"[VANTAGE_TEST_MODE] ok request_id={req_request_id}"
+            answer_id = str(uuid.uuid4())
+            _last_vantage_result[_vantage_key(payload.user_id, payload.thread_id, payload.vantage_id)] = {
+                "answer": answer,
+                "memory_ids": [],
+                "decision": decision,
+                "answer_id": answer_id,
+            }
+            try:
+                asyncio.run(_write_vantage_answer_trace(
+                    user_id=(payload.user_id or "").strip() or "anon",
+                    request_id=req_request_id,
+                    thread_id=payload.thread_id,
+                    vantage_id=((payload.vantage_id or "").strip() or "default"),
+                    model_id="vantage_test_mode",
+                    answer_id=answer_id,
+                    answer_text=answer,
+                    memory_ids=[],
+                ))
+            except Exception as e:
+                import sys, traceback
+                sys.stderr.write(f"[vantage] trace write failed (test mode) request_id={req_request_id!r}: {e}\n")
+                traceback.print_exc()
+                sys.stderr.flush()
+
+            meta = {
+                "model": {"id": "vantage_test_mode"},
+                "vantage": {"counts": {"k_memory": 0, "k_corpus": 0}},
+            }
+            return VantageResponse(answer=answer, answer_id=answer_id, meta_explanation=meta)
+
         debug_on = bool(payload.debug) or os.getenv("VANTAGE_DEBUG", "0") == "1"
         use_personal = os.getenv("VANTAGE_PERSONAL_MEMORY", "0") == "1"
 

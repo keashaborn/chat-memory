@@ -10,9 +10,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install deps
-        run: sudo apt-get update && sudo apt-get install -y ripgrep postgresql-client curl python3
-      - name: Explain limitation
+
+      - name: Build and start CI stack
         run: |
-          echo "This repo canary requires a running Brains + Postgres in CI."
-          echo "If you want CI enforcement, add a docker-compose for postgres + uvicorn, then run tools/audit_canary.sh."
+          docker compose -f docker-compose.ci.yml build
+          docker compose -f docker-compose.ci.yml up -d
+          docker compose -f docker-compose.ci.yml ps
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8088/healthz >/dev/null && exit 0
+            sleep 2
+          done
+          echo "brains did not become healthy"
+          docker compose -f docker-compose.ci.yml logs brains
+          exit 1
+
+      - name: Run audit canary
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T brains \
+            bash -lc 'HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=strongpassword PGDATABASE=memory ./tools/audit_canary.sh'
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.ci.yml logs brains
+          docker compose -f docker-compose.ci.yml logs postgres
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
