@@ -1,0 +1,18 @@
+name: Auditability Guard (seebx)
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  audit-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y ripgrep postgresql-client curl python3
+      - name: Explain limitation
+        run: |
+          echo "This repo canary requires a running Brains + Postgres in CI."
+          echo "If you want CI enforcement, add a docker-compose for postgres + uvicorn, then run tools/audit_canary.sh."
