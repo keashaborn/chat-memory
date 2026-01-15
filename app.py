@@ -9,6 +9,7 @@ from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
 from qdrant_client import QdrantClient
+from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from pydantic import BaseModel
@@ -197,15 +198,14 @@ def get_qdrant():
     global qdrant_client
     if qdrant_client is None:
         try:
-            qdrant_client = QdrantClient(
+            qdrant_client = make_qdrant_client(
                 url=QDRANT_URL,
                 timeout=60,
                 prefer_grpc=False,
                 https=False,
-                check_compatibility=False,
             )
         except TypeError:
-            qdrant_client = QdrantClient(
+            qdrant_client = make_qdrant_client(
                 url=QDRANT_URL,
                 timeout=60,
                 prefer_grpc=False,

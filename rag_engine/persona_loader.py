@@ -21,6 +21,7 @@ import uuid
 import datetime
 
 from qdrant_client import QdrantClient
+from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
 
@@ -54,15 +55,14 @@ def get_qdrant() -> QdrantClient:
     global _qdrant_client
     if _qdrant_client is None:
         try:
-            _qdrant_client = QdrantClient(
+            _qdrant_client = make_qdrant_client(
                 url=QDRANT_URL,
                 timeout=60,
                 prefer_grpc=False,
                 https=False,
-                check_compatibility=False,
             )
         except TypeError:
-            _qdrant_client = QdrantClient(
+            _qdrant_client = make_qdrant_client(
                 url=QDRANT_URL,
                 timeout=60,
                 prefer_grpc=False,

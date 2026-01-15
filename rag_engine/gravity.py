@@ -4,6 +4,7 @@ import os
 import uuid
 
 from qdrant_client import QdrantClient
+from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
 import uuid
@@ -16,15 +17,14 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 try:
-    qdrant = QdrantClient(
+    qdrant = make_qdrant_client(
         url=QDRANT_URL,
         timeout=60,
         prefer_grpc=False,
         https=False,
-        check_compatibility=False,
     )
 except TypeError:
-    qdrant = QdrantClient(
+    qdrant = make_qdrant_client(
         url=QDRANT_URL,
         timeout=60,
         prefer_grpc=False,
