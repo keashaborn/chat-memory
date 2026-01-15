@@ -18,6 +18,12 @@ need python3
 RID="canary-$(date -u +%Y%m%d_%H%M%S)-$RANDOM"
 echo "RID=$RID"
 
+echo "== wait for healthz =="
+for i in $(seq 1 120); do
+  curl -sf "${BASE}/healthz" >/dev/null && break
+  sleep 0.25
+done
+
 echo "== healthz echo =="
 hdr="$(curl -sS -i "${BASE}/healthz" -H "x-request-id: ${RID}" | sed -n '1,30p')"
 echo "$hdr" | rg -i '^x-request-id:' >/dev/null || { echo "FAIL: no x-request-id echo"; echo "$hdr"; exit 1; }
