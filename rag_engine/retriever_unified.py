@@ -24,13 +24,21 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-qdrant = QdrantClient(
-    url=QDRANT_URL,
-    timeout=60,
-    prefer_grpc=False,
-    https=False,
-    check_compatibility=False,
-)
+try:
+    qdrant = QdrantClient(
+        url=QDRANT_URL,
+        timeout=60,
+        prefer_grpc=False,
+        https=False,
+        check_compatibility=False,
+    )
+except TypeError:
+    qdrant = QdrantClient(
+        url=QDRANT_URL,
+        timeout=60,
+        prefer_grpc=False,
+        https=False,
+    )
 
 # collections we NEVER use as corpus
 IGNORED = {"memory_raw"}

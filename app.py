@@ -196,13 +196,21 @@ def get_qdrant():
     """Return a singleton QdrantClient, creating it on first use."""
     global qdrant_client
     if qdrant_client is None:
-        qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            timeout=60,
-            prefer_grpc=False,
-            https=False,
-            check_compatibility=False,
-        )
+        try:
+            qdrant_client = QdrantClient(
+                url=QDRANT_URL,
+                timeout=60,
+                prefer_grpc=False,
+                https=False,
+                check_compatibility=False,
+            )
+        except TypeError:
+            qdrant_client = QdrantClient(
+                url=QDRANT_URL,
+                timeout=60,
+                prefer_grpc=False,
+                https=False,
+            )
     return qdrant_client
 
 def current_default_collection() -> str:

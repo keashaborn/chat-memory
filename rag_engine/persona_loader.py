@@ -53,21 +53,21 @@ def get_qdrant() -> QdrantClient:
     """Return a singleton QdrantClient."""
     global _qdrant_client
     if _qdrant_client is None:
-    try:
-        _qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            timeout=60,
-            prefer_grpc=False,
-            https=False,
-            check_compatibility=False,
-        )
-    except TypeError:
-        _qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            timeout=60,
-            prefer_grpc=False,
-            https=False,
-        )
+        try:
+            _qdrant_client = QdrantClient(
+                url=QDRANT_URL,
+                timeout=60,
+                prefer_grpc=False,
+                https=False,
+                check_compatibility=False,
+            )
+        except TypeError:
+            _qdrant_client = QdrantClient(
+                url=QDRANT_URL,
+                timeout=60,
+                prefer_grpc=False,
+                https=False,
+            )
     return _qdrant_client
 
 
