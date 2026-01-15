@@ -1,4 +1,4 @@
--- Minimal schema for CI canary
+-- Minimal schema for CI canary (matches rag_engine/telemetry_router.py)
 
 CREATE TABLE IF NOT EXISTS public.vantage_answer_trace (
   answer_id uuid PRIMARY KEY,
@@ -17,11 +17,16 @@ CREATE TABLE IF NOT EXISTS public.vantage_answer_trace (
 CREATE INDEX IF NOT EXISTS vantage_answer_trace_request_id_idx
   ON public.vantage_answer_trace (request_id);
 
+-- Must match telemetry_router.py INSERT target columns
 CREATE TABLE IF NOT EXISTS telemetry_event (
   event_id uuid PRIMARY KEY,
   event_type text NOT NULL,
   subject_type text NOT NULL,
   subject_id text NOT NULL,
+
+  -- NEW: required by telemetry_router.py insert
+  actor_user_id text NULL,
+
   target_model_id text NULL,
   target_model_version text NULL,
   judge_model_id text NULL,
