@@ -32,7 +32,7 @@ echo "OK"
 
 echo
 echo "== vantage/query writes request_id =="
-curl -sS "${BASE}/vantage/query" \
+curl -sfS "${BASE}/vantage/query" \
   -H "Content-Type: application/json" \
   -H "x-request-id: ${RID}" \
   -d '{"user_id":"audit_user","message":"audit canary","vantage_id":"default","top_k":1,"debug":false}' \
@@ -53,10 +53,17 @@ import uuid
 print(uuid.uuid4())
 PY
 )"
-curl -sS "${BASE}/telemetry/event" \
+
+echo "== wait for telemetry endpoint =="
+for i in $(seq 1 120); do
+  curl -sf "${BASE}/healthz" >/dev/null && break
+  sleep 0.25
+done
+
+curl -sfS "${BASE}/telemetry/event" \
   -H "Content-Type: application/json" \
   -H "x-request-id: ${RID}" \
-  -d "{\"events\":[{\"event_id\":\"${EVENT_ID}\",\"event_type\":\"audit.canary\",\"subject_type\":\"user\",\"subject_id\":\"audit_user\",\"payload\":{\"note\":\"canary\"}}]}" \
+  -d "{\"events\":[{\"event_id\":\"${EVENT_ID}\",\"event_type\":\"audit.canary\",\"subject_type\":\"user\",\"subject_id\":\"audit_user\",\"payload\":{\"note\":\"canary\",\"request_id\":\"${RID}\"}}]}" \
   >/dev/null
 
 PGPASSWORD="${PGPASSWORD}" psql -P pager=off -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -c \
