@@ -18,6 +18,16 @@ need python3
 RID="canary-$(date -u +%Y%m%d_%H%M%S)-$RANDOM"
 echo "RID=$RID"
 
+echo
+echo "== bootstrap schema (if needed) =="
+# CI runs against an empty Postgres. Ensure the minimal schema exists.
+if ! PGPASSWORD="${PGPASSWORD}" psql -qtAX -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -c \
+  "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='vantage_answer_trace';" \
+  | grep -q '^1$'; then
+  PGPASSWORD="${PGPASSWORD}" psql -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -f "$(dirname "$0")/ci_bootstrap.sql"
+fi
+
+
 echo "== wait for healthz =="
 for i in $(seq 1 120); do
   curl -sf "${BASE}/healthz" >/dev/null && break
