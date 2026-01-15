@@ -5,8 +5,7 @@ services:
       POSTGRES_USER: sage
       POSTGRES_PASSWORD: strongpassword
       POSTGRES_DB: memory
-    ports:
-      - "5432:5432"
+     # no ports; brains connects on the docker network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sage -d memory"]
       interval: 2s
