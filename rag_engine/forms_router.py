@@ -356,3 +356,78 @@ async def list_entries(
         return out
     finally:
         await conn.close()
+
+def _cmd_count(cmd: str) -> int:
+    # asyncpg returns strings like "DELETE 12" / "UPDATE 1"
+    try:
+        return int(str(cmd).strip().split()[-1])
+    except Exception:
+        return 0
+
+
+class DeleteTemplateResp(BaseModel):
+    template_id: str
+    deleted_entries: int
+    deleted_versions: int
+    deleted_templates: int
+
+
+@router.delete("/templates/{owner_user_id}/{template_id}", response_model=DeleteTemplateResp)
+async def delete_template(owner_user_id: str, template_id: str, confirm: bool = False) -> DeleteTemplateResp:
+    owner = (owner_user_id or "").strip()
+    if not owner:
+        raise HTTPException(status_code=400, detail="owner_user_id required")
+
+    if not confirm:
+        # guardrail to prevent fat-finger deletes
+        raise HTTPException(status_code=400, detail="confirm=true required")
+
+    tid = _parse_uuid(template_id, "template_id")
+
+    conn = await _connect()
+    try:
+        async with conn.transaction():
+            tpl = await conn.fetchrow(
+                "select id, owner_user_id, name from vb_form_templates where id=$1",
+                tid,
+            )
+            if tpl is None:
+                raise HTTPException(status_code=404, detail="template not found")
+            if tpl["owner_user_id"] != owner:
+                raise HTTPException(status_code=403, detail="template_id does not belong to owner_user_id")
+
+            # Delete order matters (FK safety): entries -> versions -> template
+            cmd_entries = await conn.execute(
+                """
+                delete from vb_form_entries
+                where owner_user_id=$1
+                  and template_version_id in (
+                    select id from vb_form_versions where template_id=$2
+                  )
+                """,
+                owner,
+                tid,
+            )
+            deleted_entries = _cmd_count(cmd_entries)
+
+            cmd_versions = await conn.execute(
+                "delete from vb_form_versions where template_id=$1",
+                tid,
+            )
+            deleted_versions = _cmd_count(cmd_versions)
+
+            cmd_tpl = await conn.execute(
+                "delete from vb_form_templates where id=$1 and owner_user_id=$2",
+                tid,
+                owner,
+            )
+            deleted_templates = _cmd_count(cmd_tpl)
+
+        return DeleteTemplateResp(
+            template_id=str(tid),
+            deleted_entries=deleted_entries,
+            deleted_versions=deleted_versions,
+            deleted_templates=deleted_templates,
+        )
+    finally:
+        await conn.close()
