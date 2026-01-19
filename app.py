@@ -1656,3 +1656,20 @@ async def ws_voice_relay(ws: WebSocket):
             await ws.close(code=1011)
         except Exception:
             pass
+
+@app.get("/readyz", include_in_schema=False)
+async def readyz():
+    """
+    Readiness: Postgres connectivity only.
+    Avoids OpenAPI generation (currently broken) and avoids Qdrant dependency.
+    """
+    try:
+        conn = await asyncpg.connect(DSN)
+        v = await conn.fetchval("select 1")
+        await conn.close()
+        if v != 1:
+            raise RuntimeError("postgres select 1 failed")
+    except Exception as e:
+        return JSONResponse({"ok": False, "postgres": str(e)}, status_code=503)
+    return {"ok": True, "postgres": True}
+

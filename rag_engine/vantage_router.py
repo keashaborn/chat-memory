@@ -39,6 +39,19 @@ router = APIRouter()
 class RagPolicyUpsertReq(BaseModel):
     policy: Dict[str, Any] = {}
 
+# ---------- Vantage feedback payload ----------
+# Required for OpenAPI generation; used by /vantage/feedback.
+# Fields are limited to what the handler actually reads.
+from typing import Optional
+
+class VantageFeedbackPayload(BaseModel):
+    user_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    vantage_id: Optional[str] = "default"
+    answer_id: Optional[str] = None
+    message: Optional[str] = None
+
+
 def _csv_env(name: str) -> List[str]:
     raw = (os.getenv(name) or "").strip()
     if not raw:
@@ -1193,7 +1206,7 @@ def vantage_query(req: Request, payload: VantageQuery):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/feedback")
+@router.post("/feedback", include_in_schema=False)
 def vantage_feedback(payload: VantageFeedbackPayload):
     if os.getenv("ENABLE_VANTAGE_ENDPOINTS", "0") != "1":
         raise HTTPException(status_code=404, detail="not found")
