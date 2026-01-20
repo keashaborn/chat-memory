@@ -41,6 +41,11 @@ if not DSN:
 CATALOG_SCHEMA = os.getenv("CATALOG_SCHEMA", "catalog_dev")
 USDA_API_KEY = os.getenv("USDA_API_KEY")
 
+HTTP_CONNECT_TIMEOUT = float(os.getenv("HTTP_CONNECT_TIMEOUT", "2"))
+HTTP_READ_TIMEOUT = float(os.getenv("HTTP_READ_TIMEOUT", "30"))
+HTTP_TIMEOUT = (HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT)
+DEFAULT_PUBLIC_IMPORT = os.getenv('DEFAULT_PUBLIC_IMPORT', '0') == '1'
+
 async def _db():
     return await asyncpg.connect(DSN)
 
@@ -75,8 +80,10 @@ async def search_foods(
     try:
         rows = await conn.fetch(
             f"""
-            select food_id, display_name, brand, barcode, source, basis, kcal, protein_g, carbs_g, fat_g, score, matched_text, matched_source
-            from {CATALOG_SCHEMA}.search_foods($1::text, $2::int, $3::text)
+            select sf.food_id, sf.display_name, sf.brand, sf.barcode, sf.source, sf.basis, sf.kcal, sf.protein_g, sf.carbs_g, sf.fat_g, sf.score, sf.matched_text, sf.matched_source
+            from {CATALOG_SCHEMA}.search_foods($1::text, $2::int, $3::text) sf
+            join {CATALOG_SCHEMA}.food f on f.food_id = sf.food_id
+            where f.is_public
             """,
             q,
             limit,
@@ -113,7 +120,7 @@ async def food_by_barcode(
         def _fetch():
             return requests.get(
                 f"https://world.openfoodfacts.org/api/v2/product/{bc}.json",
-                timeout=30,
+                timeout=HTTP_TIMEOUT,
             )
 
         r = await asyncio.to_thread(_fetch)
@@ -168,7 +175,7 @@ async def food_by_barcode(
             values
               ($1,$2,$3,'open_food_facts',$4,'per_100g',
                $5,$6,$7,$8,$9,$10,$11,
-               true,true,$12::jsonb)
+               $13::bool,true,$12::jsonb)
             on conflict (source, source_id) do update
               set display_name = excluded.display_name,
                   brand = excluded.brand,
@@ -189,6 +196,7 @@ async def food_by_barcode(
             name, brand, bc, bc,
             kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
             json.dumps(j),
+            DEFAULT_PUBLIC_IMPORT,
         )
 
         return JSONResponse(_row_to_jsonable(up))
@@ -210,7 +218,7 @@ async def usda_food_search(
         return requests.get(
             "https://api.nal.usda.gov/fdc/v1/foods/search",
             params={"api_key": USDA_API_KEY, "query": q, "pageSize": limit},
-            timeout=30,
+            timeout=HTTP_TIMEOUT,
         )
 
     r = await asyncio.to_thread(_do)
@@ -248,7 +256,7 @@ async def usda_food_import(
         return requests.get(
             f"https://api.nal.usda.gov/fdc/v1/food/{int(fdc_id)}",
             params={"api_key": USDA_API_KEY},
-            timeout=30,
+            timeout=HTTP_TIMEOUT,
         )
 
     r = await asyncio.to_thread(_do)
@@ -296,7 +304,7 @@ async def usda_food_import(
             values
               ($1,$2,$3,'usda_fdc',$4,'per_100g',
                $5,$6,$7,$8,$9,$10,$11,
-               true,true,$12::jsonb)
+               $13::bool,true,$12::jsonb)
             on conflict (source, source_id) do update
               set display_name = excluded.display_name,
                   brand = excluded.brand,
@@ -320,7 +328,37 @@ async def usda_food_import(
             str(int(fdc_id)),
             kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
             json.dumps(j),
+            DEFAULT_PUBLIC_IMPORT,
         )
         return JSONResponse(_row_to_jsonable(up))
+    finally:
+        await conn.close()
+
+
+@router.post("/foods/approve")
+async def approve_food(
+    food_id: str = Query(..., min_length=10),
+):
+    # Admin operation: mark a food as public/approved.
+    try:
+        fid = str(uuid.UUID(food_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid food_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {CATALOG_SCHEMA}.food
+               set is_public = true,
+                   updated_at = now()
+             where food_id = $1::uuid
+             returning food_id, display_name, brand, barcode, source, source_id, is_public
+            """,
+            fid,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="food_id not found")
+        return JSONResponse(_row_to_jsonable(row))
     finally:
         await conn.close()
