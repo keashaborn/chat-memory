@@ -17,6 +17,7 @@ from rag_engine.rag_router import router as rag_router
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.forms_router import router as forms_router
 from rag_engine.telemetry_router import router as telemetry_router
+from rag_engine.lifeswitch_nutrition_router import router as lifeswitch_nutrition_router
 from rag_engine.catalog_router import router as catalog_router
 from rag_engine.vb_tagging import infer_vb_tags
 from rag_engine.gravity import compute_gravity, write_gravity_card
@@ -31,6 +32,7 @@ app.include_router(rag_router, prefix="/rag")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(forms_router, prefix="/forms")
 app.include_router(telemetry_router)
+app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(catalog_router, prefix="/catalog")
 
 # ---------- request correlation ----------
