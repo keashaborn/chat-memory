@@ -29,6 +29,7 @@ if not DSN:
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
+CATALOG_SCHEMA = os.getenv("CATALOG_SCHEMA", "catalog_dev")
 def _as_uuid(s: str, name: str) -> str:
     try:
         return str(uuid.UUID(str(s)))
@@ -161,3 +162,118 @@ async def list_items(meal_plan_id: str):
         return JSONResponse([_row_to_jsonable(r) for r in rows])
     finally:
         await conn.close()
+
+# ----------------------------
+# My Foods (private, user-owned)
+# ----------------------------
+
+@router.get("/my_foods")
+async def list_my_foods(
+    owner_user_id: str = Query(..., min_length=1),
+    q: str | None = Query(None, min_length=1, max_length=120),
+    include_inactive: int = Query(0, ge=0, le=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await asyncpg.connect(DSN)
+    try:
+        where = "owner_user_id = $1::uuid"
+        args: list[object] = [owner]
+
+        if include_inactive == 0:
+            where += " and is_active"
+
+        if q:
+            where += " and (display_name ilike $2 or coalesce(brand,'') ilike $2 or coalesce(variant,'') ilike $2)"
+            args.append(f"%{q}%")
+
+        rows = await conn.fetch(
+            f"""
+            select my_food_id, owner_user_id, display_name, brand, variant,
+                   source_type, source_food_id, source, source_id, barcode,
+                   basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
+                   is_verified, is_active, created_at, updated_at
+            from {SCHEMA}.my_food
+            where {where}
+            order by lower(display_name), lower(coalesce(brand,'')), lower(coalesce(variant,''))
+            """,
+            *args,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/my_foods/create_from_catalog")
+async def create_my_food_from_catalog(
+    owner_user_id: str = Query(..., min_length=1),
+    food_id: str = Query(..., min_length=1),
+    variant: str | None = Query(None, max_length=128),
+    display_name: str | None = Query(None, max_length=200),
+    brand: str | None = Query(None, max_length=200),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    fid = _as_uuid(food_id, "food_id")
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        src = await conn.fetchrow(
+            f"""
+            select food_id, display_name, brand, barcode, source, source_id, basis,
+                   kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg
+            from {CATALOG_SCHEMA}.food
+            where food_id = $1::uuid and is_public and is_active
+            limit 1
+            """,
+            fid,
+        )
+        if not src:
+            raise HTTPException(status_code=404, detail="catalog food not found or not public")
+
+        dn = (display_name or (src.get("display_name") if hasattr(src, "get") else src["display_name"]) or "").strip()
+        if not dn:
+            dn = "Unnamed food"
+
+        br = (brand or (src.get("brand") if hasattr(src, "get") else src["brand"]) or None)
+        bc = ((src.get("barcode") if hasattr(src, "get") else src["barcode"]) or None)
+
+        src_id = (src.get("source_id") if hasattr(src, "get") else src["source_id"])
+        src_id_txt = str(src_id) if src_id is not None else None
+
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.my_food(
+              owner_user_id, display_name, brand, variant,
+              source_type, source_food_id, source, source_id, barcode,
+              basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
+              is_verified, is_active
+            )
+            values(
+              $1::uuid, $2::text, $3::text, $4::text,
+              'catalog', $5::uuid, $6::text, $7::text, $8::text,
+              $9::text, $10::numeric, $11::numeric, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric,
+              true, true
+            )
+            returning *
+            """,
+            owner,
+            dn,
+            br,
+            (variant or None),
+            fid,
+            (src.get("source") if hasattr(src, "get") else src["source"]),
+            src_id_txt,
+            bc,
+            (src.get("basis") if hasattr(src, "get") else src["basis"]),
+            (src.get("kcal") if hasattr(src, "get") else src["kcal"]),
+            (src.get("protein_g") if hasattr(src, "get") else src["protein_g"]),
+            (src.get("carbs_g") if hasattr(src, "get") else src["carbs_g"]),
+            (src.get("fat_g") if hasattr(src, "get") else src["fat_g"]),
+            (src.get("fiber_g") if hasattr(src, "get") else src["fiber_g"]),
+            (src.get("sugar_g") if hasattr(src, "get") else src["sugar_g"]),
+            (src.get("sodium_mg") if hasattr(src, "get") else src["sodium_mg"]),
+        )
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
