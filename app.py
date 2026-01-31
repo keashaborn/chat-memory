@@ -20,6 +20,7 @@ from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
 from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutrition_log_router
 from rag_engine.lifeswitch_nutrition_router import router as lifeswitch_nutrition_router
+from rag_engine.lifeswitch_training_router import router as lifeswitch_training_router
 from rag_engine.catalog_router import router as catalog_router
 from rag_engine.vb_tagging import infer_vb_tags
 from rag_engine.gravity import compute_gravity, write_gravity_card
@@ -38,6 +39,7 @@ app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_nutrition_log_router, prefix="/lifeswitch/nutrition")
 app.include_router(catalog_router, prefix="/catalog")
+app.include_router(lifeswitch_training_router, prefix="/lifeswitch/training")
 
 # ---------- request correlation ----------
 def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:

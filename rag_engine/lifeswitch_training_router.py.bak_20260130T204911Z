@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import os
+import uuid
+import decimal
+import datetime as _dt
+import asyncpg
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
+
+router = APIRouter()
+
+DSN = os.getenv("POSTGRES_DSN") or ""
+if not DSN:
+    raise RuntimeError("POSTGRES_DSN missing")
+
+SCHEMA = os.getenv("LIFESWITCH_TRAINING_SCHEMA", "lifeswitch_training")
+
+def _json_safe(v):
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, (decimal.Decimal,)):
+        return float(v)
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.isoformat()
+    return v
+
+def _row_to_jsonable(r):
+    d = dict(r)
+    return {k: _json_safe(v) for k, v in d.items()}
+
+def _as_uuid(s: str, name: str) -> str:
+    try:
+        return str(uuid.UUID(str(s)))
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"invalid {name}")
+
+async def _db():
+    return await asyncpg.connect(DSN)
+
+@router.get("/my_exercises")
+async def list_my_exercises(owner_user_id: str = Query(..., min_length=1)):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              my_exercise_id, owner_user_id,
+              exercise_id, display_name, kind, modality,
+              brand_name, model_name, matched_text, matched_source,
+              is_active, created_at, updated_at
+            from {SCHEMA}.my_exercise
+            where owner_user_id=$1::uuid
+              and is_active=true
+            order by lower(display_name) asc
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+@router.get("/workout_templates")
+async def list_workout_templates(owner_user_id: str = Query(..., min_length=1)):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              workout_template_id, owner_user_id,
+              name, notes, is_active, created_at, updated_at
+            from {SCHEMA}.workout_template
+            where owner_user_id=$1::uuid
+              and is_active=true
+            order by updated_at desc
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+@router.get("/workout_templates/{workout_template_id}/exercises")
+async def list_workout_template_exercises(workout_template_id: str):
+    wid = _as_uuid(workout_template_id, "workout_template_id")
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              workout_template_exercise_id, workout_template_id,
+              exercise_id, sort_order,
+              planned_sets, default_weight, default_reps, flags,
+              created_at, updated_at
+            from {SCHEMA}.workout_template_exercise
+            where workout_template_id=$1::uuid
+            order by sort_order asc, created_at asc
+            """,
+            wid,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
