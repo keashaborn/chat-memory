@@ -494,42 +494,87 @@ async def create_my_food_serving(
         if ok is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
 
-        # Idempotency: if same (name, grams) exists, return it; optionally set default.
+        # Upsert by (my_food_id, lower(name)):
+        # - If name exists, overwrite grams and optionally set default.
+        # - If not, insert new row.
         row = await conn.fetchrow(
             f"""
             select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
             from {SCHEMA}.my_food_serving
             where my_food_id=$1::uuid
               and lower(name)=lower($2)
-              and grams=$3
+            order by updated_at desc nulls last, created_at desc
             limit 1
             """,
-            fid, nm, grams,
+            fid,
+            nm,
         )
 
         if row:
+            sid = row["my_food_serving_id"]
+
+            # overwrite grams if changed
+            if float(row["grams"]) != float(grams):
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.my_food_serving
+                    set grams=$2, updated_at=now()
+                    where my_food_serving_id=$1::uuid
+                    """,
+                    sid,
+                    grams,
+                )
+
+            # optionally set as default
             if is_default == 1 and row["is_default"] is not True:
                 await conn.execute(
-                    f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and is_default",
+                    f"""
+                    update {SCHEMA}.my_food_serving
+                    set is_default=false, updated_at=now()
+                    where my_food_id=$1::uuid and is_default
+                    """,
                     fid,
                 )
                 await conn.execute(
-                    f"update {SCHEMA}.my_food_serving set is_default=true, updated_at=now() where my_food_serving_id=$1::uuid",
-                    row["my_food_serving_id"],
-                )
-                row = await conn.fetchrow(
                     f"""
-                    select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
-                    from {SCHEMA}.my_food_serving
+                    update {SCHEMA}.my_food_serving
+                    set is_default=true, updated_at=now()
                     where my_food_serving_id=$1::uuid
                     """,
-                    row["my_food_serving_id"],
+                    sid,
                 )
-            return JSONResponse(_row_to_jsonable(row))
 
+            # HARDEN: delete any older duplicates for the same (my_food_id, lower(name))
+            await conn.execute(
+                f"""
+                delete from {SCHEMA}.my_food_serving
+                where my_food_id=$1::uuid
+                  and lower(name)=lower($2)
+                  and my_food_serving_id <> $3::uuid
+                """,
+                fid,
+                nm,
+                sid,
+            )
+
+            row2 = await conn.fetchrow(
+                f"""
+                select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
+                from {SCHEMA}.my_food_serving
+                where my_food_serving_id=$1::uuid
+                """,
+                sid,
+            )
+            return JSONResponse(_row_to_jsonable(row2 or row))
+
+        # insert new row
         if is_default == 1:
             await conn.execute(
-                f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and is_default",
+                f"""
+                update {SCHEMA}.my_food_serving
+                set is_default=false, updated_at=now()
+                where my_food_id=$1::uuid and is_default
+                """,
                 fid,
             )
 
@@ -539,8 +584,28 @@ async def create_my_food_serving(
             values ($1::uuid, $2, $3, $4::bool)
             returning my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
             """,
-            fid, nm, grams, (is_default == 1),
+            fid,
+            nm,
+            grams,
+            (is_default == 1),
         )
+
+        if row:
+            sid = row["my_food_serving_id"]
+
+            # HARDEN: delete any older duplicates for the same (my_food_id, lower(name))
+            await conn.execute(
+                f"""
+                delete from {SCHEMA}.my_food_serving
+                where my_food_id=$1::uuid
+                  and lower(name)=lower($2)
+                  and my_food_serving_id <> $3::uuid
+                """,
+                fid,
+                nm,
+                sid,
+            )
+
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
     finally:
         await conn.close()
