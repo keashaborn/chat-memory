@@ -118,6 +118,47 @@ async def create_log_entry(
     finally:
         await conn.close()
 
+@router.patch("/log/entry")
+async def update_log_entry(
+    owner_user_id: str = Query(..., min_length=1),
+    nutrition_entry_id: str = Query(..., min_length=1),
+    qty_g: float = Query(..., gt=0),
+    sort_order: int | None = Query(None),
+    notes: str | None = Query(None, max_length=500),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.nutrition_entry e
+            set
+              qty_g = $3,
+              sort_order = coalesce($4, e.sort_order),
+              notes = coalesce($5, e.notes),
+              updated_at = now()
+            from {SCHEMA}.nutrition_day d
+            where e.nutrition_day_id = d.nutrition_day_id
+              and d.owner_user_id = $1::uuid
+              and e.nutrition_entry_id = $2::uuid
+            returning
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
+              e.created_at, e.updated_at
+            """,
+            owner,
+            eid,
+            qty_g,
+            sort_order,
+            notes,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
+        return JSONResponse({"entry": _row_to_jsonable(row)})
+    finally:
+        await conn.close()
+
 
 @router.get("/log/day")
 async def get_log_day(
