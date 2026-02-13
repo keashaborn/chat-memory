@@ -159,6 +159,36 @@ async def update_log_entry(
     finally:
         await conn.close()
 
+@router.delete("/log/entry")
+async def delete_log_entry(
+    owner_user_id: str = Query(..., min_length=1),
+    nutrition_entry_id: str = Query(..., min_length=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            delete from {SCHEMA}.nutrition_entry e
+            using {SCHEMA}.nutrition_day d
+            where e.nutrition_day_id = d.nutrition_day_id
+              and d.owner_user_id = $1::uuid
+              and e.nutrition_entry_id = $2::uuid
+            returning
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
+              e.created_at, e.updated_at
+            """,
+            owner,
+            eid,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
+        return JSONResponse({"deleted": _row_to_jsonable(row)})
+    finally:
+        await conn.close()
+
 
 @router.get("/log/day")
 async def get_log_day(
@@ -190,10 +220,20 @@ async def get_log_day(
               e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
               e.created_at, e.updated_at,
 
-              coalesce(m.name, f.display_name) as label,
-              m.meal_type as meal_type,
+            coalesce(m.name, f.display_name) as label,
+            m.meal_type as meal_type,
 
-              f.kcal as food_kcal_100g, f.protein_g as food_protein_100g, f.carbs_g as food_carbs_100g, f.fat_g as food_fat_100g,
+            -- Food identity fields (so frontend can render like FoodsPage)
+            f.brand as food_brand,
+            f.variant as food_variant,
+            f.source_type as food_source_type,
+            f.source_id as food_source_id,
+
+            -- per 100g
+            f.kcal as food_kcal_100g,
+            f.protein_g as food_protein_100g,
+            f.carbs_g as food_carbs_100g,
+            f.fat_g as food_fat_100g,
 
               mt.kcal as meal_kcal, mt.protein_g as meal_protein, mt.carbs_g as meal_carbs, mt.fat_g as meal_fat
 
