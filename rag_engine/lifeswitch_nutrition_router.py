@@ -610,3 +610,96 @@ async def create_my_food_serving(
     finally:
         await conn.close()
 
+
+# ----------------------------
+# My Food overrides (alias + default grams + sort)
+# ----------------------------
+
+@router.get("/my_food_overrides")
+async def list_my_food_overrides(
+    owner_user_id: str = Query(..., min_length=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select owner_user_id, my_food_id, alias, default_grams, sort_order, created_at, updated_at
+            from {SCHEMA}.my_food_override
+            where owner_user_id = $1::uuid
+            order by sort_order asc, updated_at desc nulls last, created_at desc
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/my_food_overrides/upsert")
+async def upsert_my_food_override(
+    owner_user_id: str = Query(..., min_length=1),
+    my_food_id: str = Query(..., min_length=1),
+    alias: str | None = Query(None, max_length=200),
+    default_grams: float | None = Query(None, gt=0),
+    sort_order: int = Query(0),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    fid = _as_uuid(my_food_id, "my_food_id")
+
+    al = (alias or "").strip() if alias is not None else None
+    if al == "":
+        al = None
+
+    conn = await _db()
+    try:
+        ok = await conn.fetchval(
+            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
+            fid,
+        )
+        if ok is not True:
+            raise HTTPException(status_code=404, detail="my_food not found or inactive")
+
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.my_food_override
+              (owner_user_id, my_food_id, alias, default_grams, sort_order)
+            values
+              ($1::uuid, $2::uuid, $3, $4, $5)
+            on conflict (owner_user_id, my_food_id) do update
+              set
+                alias = coalesce(excluded.alias, {SCHEMA}.my_food_override.alias),
+                default_grams = coalesce(excluded.default_grams, {SCHEMA}.my_food_override.default_grams),
+                sort_order = excluded.sort_order,
+                updated_at = now()
+            returning owner_user_id, my_food_id, alias, default_grams, sort_order, created_at, updated_at
+            """,
+            owner, fid, al, default_grams, sort_order,
+        )
+        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.delete("/my_food_overrides")
+async def delete_my_food_override(
+    owner_user_id: str = Query(..., min_length=1),
+    my_food_id: str = Query(..., min_length=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    fid = _as_uuid(my_food_id, "my_food_id")
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            delete from {SCHEMA}.my_food_override
+            where owner_user_id=$1::uuid and my_food_id=$2::uuid
+            returning owner_user_id, my_food_id
+            """,
+            owner, fid,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="override not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
