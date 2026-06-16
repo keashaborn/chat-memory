@@ -1563,6 +1563,278 @@ async def profiles_get_default(user_id: str, vantage_id: str = "default"):
 # Client should send xAI *client events* as JSON (forwarded verbatim), e.g.:
 #   {"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
 #   {"type":"response.create","response":{"modalities":["text","audio"]}}
+
+
+# ---------- vantages (Supabase mirror for backend processing) ----------
+class VantageSyncReq(BaseModel):
+    user_id: str
+    profiles: List[Dict[str, Any]] = []
+    defaultId: Optional[str] = None
+    active: Optional[Dict[str, Any]] = None
+    source_updated_at: Optional[str] = None
+    mode: Optional[str] = "full"  # "full" replaces mirrored presets; "active" only updates active state
+
+
+def _clean_vantage_id(v: Any) -> str:
+    s = str(v or "").strip()[:64]
+    return s or "default"
+
+
+def _clean_profile_name(v: Any, fallback: str) -> str:
+    s = str(v or "").strip()[:128]
+    return s or fallback or "default"
+
+
+async def _ensure_vantage_profile_registry(conn):
+    await conn.execute("""
+      CREATE SCHEMA IF NOT EXISTS vantage_profile
+    """)
+    await conn.execute("""
+      CREATE TABLE IF NOT EXISTS vantage_profile.registry (
+        user_id text NOT NULL,
+        vantage_id text NOT NULL,
+
+        profile_id text,
+        name text NOT NULL,
+
+        is_default boolean NOT NULL DEFAULT false,
+        is_active boolean NOT NULL DEFAULT false,
+
+        state jsonb NOT NULL DEFAULT '{}'::jsonb,
+
+        source text NOT NULL DEFAULT 'supabase',
+        source_updated_at timestamptz,
+        last_applied_at timestamptz,
+
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+
+        PRIMARY KEY (user_id, vantage_id)
+      )
+    """)
+    await conn.execute("""
+      CREATE INDEX IF NOT EXISTS registry_user_idx
+      ON vantage_profile.registry(user_id)
+    """)
+    await conn.execute("""
+      CREATE INDEX IF NOT EXISTS registry_active_idx
+      ON vantage_profile.registry(user_id, is_active, updated_at DESC)
+    """)
+    await conn.execute("""
+      CREATE INDEX IF NOT EXISTS registry_default_idx
+      ON vantage_profile.registry(user_id, is_default, updated_at DESC)
+    """)
+
+
+async def _fetch_vantage_registry_items(conn, user_id: str) -> List[Dict[str, Any]]:
+    rows = await conn.fetch("""
+      SELECT user_id, vantage_id, profile_id, name, is_default, is_active,
+             state, source, source_updated_at, last_applied_at, created_at, updated_at
+      FROM vantage_profile.registry
+      WHERE user_id=$1
+      ORDER BY is_active DESC, is_default DESC, name ASC
+    """, user_id)
+
+    items = []
+    for r in rows:
+        d = dict(r)
+        if isinstance(d.get("state"), str):
+            try:
+                d["state"] = json.loads(d["state"])
+            except Exception:
+                pass
+        items.append(d)
+    return items
+
+
+def _profile_to_registry_row(profile: Dict[str, Any], default_id: str | None) -> Dict[str, Any]:
+    profile = profile or {}
+    state = profile.get("state") if isinstance(profile.get("state"), dict) else {}
+    profile_id = str(profile.get("id") or "").strip() or None
+    vid = _clean_vantage_id(state.get("vantageId") or profile.get("name") or profile_id)
+    name = _clean_profile_name(profile.get("name"), vid)
+    return {
+        "profile_id": profile_id,
+        "vantage_id": vid,
+        "name": name,
+        "state": state,
+        "is_default": bool(profile_id and default_id and profile_id == default_id),
+        "source_updated_at": profile.get("updated_at"),
+    }
+
+
+@app.post("/vantages/sync")
+async def vantages_sync(req: VantageSyncReq):
+    """
+    Mirror Supabase Vantage presets into Brains/Postgres.
+
+    Supabase remains the account/settings source.
+    This table gives Brains background jobs a local registry of saved vantages.
+    """
+    user_id = (req.user_id or "").strip()
+    if not user_id:
+        return JSONResponse({"status": "bad_request", "detail": "missing user_id"}, status_code=400)
+
+    default_id = (req.defaultId or "").strip() or None
+    active = req.active if isinstance(req.active, dict) else {}
+    active_vid = _clean_vantage_id(active.get("vantageId") or active.get("vantage_id") or "")
+    active_state = active.get("state") if isinstance(active.get("state"), dict) else active
+
+    sync_mode = str(req.mode or "full").strip().lower()
+    if sync_mode not in ("full", "active"):
+        return JSONResponse({"status": "bad_request", "detail": "mode must be full or active"}, status_code=400)
+
+    rows = []
+    seen = set()
+
+    for p in (req.profiles or []):
+        if not isinstance(p, dict):
+            continue
+        row = _profile_to_registry_row(p, default_id)
+        key = row["vantage_id"]
+        seen.add(key)
+        rows.append(row)
+
+    # If active vantage is not in saved profiles, mirror it as an active ad-hoc row.
+    if active_vid and active_vid not in seen:
+        rows.append({
+            "profile_id": None,
+            "vantage_id": active_vid,
+            "name": active_vid,
+            "state": active_state if isinstance(active_state, dict) else {},
+            "is_default": False,
+            "source_updated_at": req.source_updated_at,
+        })
+        seen.add(active_vid)
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _ensure_vantage_profile_registry(conn)
+
+        if sync_mode == "active":
+            if not active_vid:
+                return JSONResponse({"status": "bad_request", "detail": "missing active vantage"}, status_code=400)
+
+            active_state_json = json.dumps(active_state if isinstance(active_state, dict) else {}, ensure_ascii=False)
+
+            async with conn.transaction():
+                await conn.execute("""
+                  UPDATE vantage_profile.registry
+                     SET is_active=false,
+                         updated_at=now()
+                   WHERE user_id=$1
+                     AND source='supabase'
+                """, user_id)
+
+                await conn.execute("""
+                  INSERT INTO vantage_profile.registry(
+                    user_id, vantage_id, profile_id, name,
+                    is_default, is_active, state,
+                    source, source_updated_at, last_applied_at
+                  )
+                  VALUES(
+                    $1, $2, NULL, $2,
+                    false, true, $3::jsonb,
+                    'supabase', NULLIF($4::text, '')::timestamptz, now()
+                  )
+                  ON CONFLICT (user_id, vantage_id)
+                  DO UPDATE SET
+                    is_active=true,
+                    state=EXCLUDED.state,
+                    source='supabase',
+                    source_updated_at=COALESCE(EXCLUDED.source_updated_at, vantage_profile.registry.source_updated_at),
+                    last_applied_at=now(),
+                    updated_at=now()
+                """, user_id, active_vid, active_state_json, req.source_updated_at)
+
+            items = await _fetch_vantage_registry_items(conn, user_id)
+            return {"status": "ok", "mode": "active", "user_id": user_id, "count": len(items), "items": items}
+
+        async with conn.transaction():
+            # Reset flags for this user's mirrored rows before setting current values.
+            await conn.execute("""
+              UPDATE vantage_profile.registry
+                 SET is_default=false,
+                     is_active=false,
+                     updated_at=now()
+               WHERE user_id=$1
+                 AND source='supabase'
+            """, user_id)
+
+            for row in rows:
+                state_json = json.dumps(row["state"] or {}, ensure_ascii=False)
+                row_source_updated = row.get("source_updated_at") or req.source_updated_at
+                is_active = row["vantage_id"] == active_vid
+
+                await conn.execute("""
+                  INSERT INTO vantage_profile.registry(
+                    user_id, vantage_id, profile_id, name,
+                    is_default, is_active, state,
+                    source, source_updated_at, last_applied_at
+                  )
+                  VALUES(
+                    $1, $2, $3, $4,
+                    $5, $6, $7::jsonb,
+                    'supabase', NULLIF($8::text, '')::timestamptz,
+                    CASE WHEN $6 THEN now() ELSE NULL END
+                  )
+                  ON CONFLICT (user_id, vantage_id)
+                  DO UPDATE SET
+                    profile_id=EXCLUDED.profile_id,
+                    name=EXCLUDED.name,
+                    is_default=EXCLUDED.is_default,
+                    is_active=EXCLUDED.is_active,
+                    state=EXCLUDED.state,
+                    source=EXCLUDED.source,
+                    source_updated_at=EXCLUDED.source_updated_at,
+                    last_applied_at=CASE
+                      WHEN EXCLUDED.is_active THEN now()
+                      ELSE vantage_profile.registry.last_applied_at
+                    END,
+                    updated_at=now()
+                """,
+                    user_id,
+                    row["vantage_id"],
+                    row["profile_id"],
+                    row["name"],
+                    bool(row["is_default"]),
+                    bool(is_active),
+                    state_json,
+                    row_source_updated,
+                )
+
+            # Mirror semantics: remove Supabase rows no longer present in the saved/active payload.
+            if seen:
+                await conn.execute("""
+                  DELETE FROM vantage_profile.registry
+                   WHERE user_id=$1
+                     AND source='supabase'
+                     AND NOT (vantage_id = ANY($2::text[]))
+                """, user_id, list(seen))
+
+        items = await _fetch_vantage_registry_items(conn, user_id)
+        return {"status": "ok", "mode": "full", "user_id": user_id, "count": len(items), "items": items}
+    finally:
+        await conn.close()
+
+
+@app.get("/vantages/{user_id}")
+async def vantages_list(user_id: str):
+    """
+    List mirrored Vantage registry rows for a user.
+    """
+    uid = (user_id or "").strip()
+    if not uid:
+        return JSONResponse({"status": "bad_request", "detail": "missing user_id"}, status_code=400)
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _ensure_vantage_profile_registry(conn)
+        items = await _fetch_vantage_registry_items(conn, uid)
+        return {"status": "ok", "user_id": uid, "count": len(items), "items": items}
+    finally:
+        await conn.close()
+
 #
 # Server forwards xAI *server events* back to the client unchanged.
 @app.websocket("/ws/voice")
