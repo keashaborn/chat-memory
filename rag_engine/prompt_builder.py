@@ -2,7 +2,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import List, Dict, Any
 
-from .persona_loader import build_persona_block, build_user_instructions_block
+from .persona_loader import build_persona_block, build_user_instructions_block, build_vantage_preference_cards_block, build_vantage_profile_cards_block
 def format_memory_chunks(chunks: List[Dict[str, Any]]) -> str:
     """
     Render retrieved chunks into a compact bullet list.
@@ -93,6 +93,15 @@ def build_system_prompt(
         instr = build_user_instructions_block(user_id, vantage_id=vantage_id)
         if instr and instr.strip():
             pieces.append(instr.strip())
+
+    vantage_pref_block = build_vantage_preference_cards_block(user_id, vantage_id=vantage_id)
+    if vantage_pref_block and vantage_pref_block.strip():
+        pieces.append(vantage_pref_block.strip())
+
+    vantage_profile_block = build_vantage_profile_cards_block(user_id, vantage_id=vantage_id)
+    if vantage_profile_block and vantage_profile_block.strip():
+        pieces.append(vantage_profile_block.strip())
+
     if include_memory:
         memory_block = format_memory_chunks(memory_chunks)
         if memory_block and memory_block.strip():

@@ -57,6 +57,72 @@ def _load_env_file(path: str) -> None:
         return
 
 
+async def fetch_registry_vantage_ids(conn: asyncpg.Connection) -> List[str]:
+    """
+    Return Vantage ids mirrored from Supabase.
+
+    This is the registry-driven replacement for one systemd daemon per Vantage.
+    """
+    rows = await conn.fetch("""
+      SELECT DISTINCT vantage_id, is_active, is_default, updated_at
+      FROM vantage_profile.registry
+      WHERE source='supabase'
+        AND COALESCE(vantage_id, '') <> ''
+      ORDER BY is_active DESC, is_default DESC, updated_at DESC, vantage_id ASC
+    """)
+
+    out: List[str] = []
+    seen = set()
+    for r in rows:
+        vid = str(r["vantage_id"] or "").strip()
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        out.append(vid)
+    return out
+
+
+async def ensure_controller_config_for_vantage(conn: asyncpg.Connection, vantage_id: str) -> None:
+    """
+    Ensure a controller_config row exists for a registry Vantage.
+
+    New Vantages created in the UI will be mirrored into vantage_profile.registry.
+    They may not yet have a controller_config row. Copy the default controller settings.
+    """
+    vid = str(vantage_id or "").strip() or "default"
+
+    exists = await conn.fetchval(
+        "SELECT 1 FROM vantage_initiator.controller_config WHERE vantage_id=$1",
+        vid,
+    )
+    if exists:
+        return
+
+    await conn.execute("""
+      INSERT INTO vantage_initiator.controller_config(
+        vantage_id,
+        enabled,
+        tick_seconds,
+        max_jobs_per_tick,
+        max_running_jobs,
+        daily_cost_budget_usd,
+        allowed_job_types
+      )
+      SELECT
+        $1,
+        enabled,
+        tick_seconds,
+        max_jobs_per_tick,
+        max_running_jobs,
+        daily_cost_budget_usd,
+        allowed_job_types
+      FROM vantage_initiator.controller_config
+      WHERE vantage_id='default'
+      ON CONFLICT (vantage_id) DO NOTHING
+    """, vid)
+
+
+
 async def fetch_controller_config(conn: asyncpg.Connection, vantage_id: str) -> Dict[str, Any]:
     row = await conn.fetchrow(
         """
@@ -462,7 +528,7 @@ async def process_job(
 
         if any(x in allowed for x in ("fact_seed_from_chat_log_v1","fact_drives_v1","fact_extract_v1","fact_contradiction_scan_v1")):
             try:
-                fdr = await fact_jobs.compute_fact_drives(conn)
+                fdr = await fact_jobs.compute_fact_drives(conn, vantage_id=vantage_id)
             except Exception as e:
                 fdr = {"pending_sources": 0, "active_claims": 0, "open_contradictions": 0, "error": f"{type(e).__name__}: {e}"}
 
@@ -487,7 +553,7 @@ async def process_job(
                 if jid:
                     enqueued.append({"job_type": "fact_drives_v1", "job_id": jid})
 
-            if "fact_extract_v1" in allowed and (int(fdr.get("pending_sources", 0)) > 0 or seed_enabled):
+            if "fact_extract_v1" in allowed and int(fdr.get("pending_sources", 0)) > 0:
                 jid = await ensure_singleton_job(conn, vantage_id, "fact_extract_v1", payload={}, priority=30)
                 if jid:
                     enqueued.append({"job_type": "fact_extract_v1", "job_id": jid})
@@ -506,12 +572,16 @@ async def process_job(
 
 
     if job_type == "fact_drives_v1":
-        drives = await fact_jobs.compute_fact_drives(conn)
+        drives = await fact_jobs.compute_fact_drives(conn, vantage_id=vantage_id)
         snapshot_id = await insert_drive_snapshot(conn, vantage_id, drives, notes="fact_drives_v1")
         return {"ok": True, "job_type": "fact_drives_v1", "snapshot_id": snapshot_id, "drives": drives}
 
     if job_type == "fact_extract_v1":
-        out = await fact_jobs.fact_extract_once(conn, max_facts=int(payload.get("max_facts", 50)))
+        out = await fact_jobs.fact_extract_once(
+            conn,
+            vantage_id=vantage_id,
+            max_facts=int(payload.get("max_facts", 50)),
+        )
         return {"ok": True, "job_type": "fact_extract_v1", **out}
 
     if job_type == "fact_contradiction_scan_v1":
@@ -613,6 +683,7 @@ async def tick(pool: asyncpg.Pool, vantage_id: str, worker_id: str) -> None:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vantage-id", default=os.getenv("VANTAGE_ID", "default"))
+    ap.add_argument("--all-from-registry", action="store_true", help="Process all vantages mirrored in vantage_profile.registry.")
     ap.add_argument("--once", action="store_true")
     ap.add_argument(
         "--env-file",
@@ -634,11 +705,54 @@ async def main() -> int:
 
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     logging.basicConfig(level=logging.INFO, format="%(asctime)sZ %(levelname)s %(message)s")
-    logging.info("initiator starting worker_id=%s vantage_id=%s", worker_id, args.vantage_id)
+    logging.info("initiator starting worker_id=%s vantage_id=%s all_from_registry=%s", worker_id, args.vantage_id, args.all_from_registry)
 
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=3)
 
     try:
+        if args.all_from_registry:
+            if args.once:
+                async with pool.acquire() as conn:
+                    vids = await fetch_registry_vantage_ids(conn)
+                    for vid in vids:
+                        await ensure_controller_config_for_vantage(conn, vid)
+
+                if not vids:
+                    logging.warning("registry mode: no vantages found in vantage_profile.registry")
+                    return 0
+
+                logging.info("registry mode --once: vantages=%s", vids)
+                for vid in vids:
+                    await tick(pool, vid, worker_id)
+                logging.info("initiator --all-from-registry --once complete")
+                return 0
+
+            while True:
+                async with pool.acquire() as conn:
+                    vids = await fetch_registry_vantage_ids(conn)
+                    for vid in vids:
+                        await ensure_controller_config_for_vantage(conn, vid)
+
+                    tick_seconds = 60
+                    if vids:
+                        vals = []
+                        for vid in vids:
+                            cfg = await fetch_controller_config(conn, vid)
+                            vals.append(max(1, int(cfg["tick_seconds"])))
+                        tick_seconds = min(vals) if vals else 60
+
+                if not vids:
+                    logging.warning("registry mode: no vantages found; sleeping %ss", tick_seconds)
+                else:
+                    logging.info("registry mode: ticking vantages=%s", vids)
+                    for vid in vids:
+                        try:
+                            await tick(pool, vid, worker_id)
+                        except Exception:
+                            logging.exception("registry mode: tick failed for vantage_id=%s", vid)
+
+                await asyncio.sleep(tick_seconds)
+
         if args.once:
             await tick(pool, args.vantage_id, worker_id)
             logging.info("initiator --once complete")

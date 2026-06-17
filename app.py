@@ -1093,6 +1093,86 @@ class CardUpsertReq(BaseModel):
     if_match_updated_at: str | None = None
 
 
+@app.get("/vantage-cards/{user_id}")
+async def vantage_cards_list(
+    user_id: str,
+    vantage_id: str = "default",
+    kinds: Optional[str] = None,
+    limit: int = 100,
+):
+    """
+    List Postgres Vantage cards from vantage_card.card_head.
+
+    This is the newer Vantage-scoped card system, distinct from legacy Qdrant
+    memory cards served by /cards/{user_id}.
+    """
+    uid = (user_id or "").strip() or "anon"
+    vid = (vantage_id or "default").strip() or "default"
+    uid, _alias_uid = await resolve_canonical_user_id(vid, uid)
+
+    klist = [k.strip() for k in (kinds.split(",") if kinds else []) if k.strip()]
+    limit_n = max(1, min(int(limit or 100), 500))
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        where = """
+          WHERE vantage_id=$1
+            AND (
+              topic_key LIKE $2
+              OR payload->>'user_id' = $3
+            )
+        """
+        args = [vid, f"user/{uid}/%", uid]
+
+        if klist:
+            where += " AND kind = ANY($4::text[])"
+            args.append(klist)
+
+        sql = f"""
+          SELECT
+            card_id,
+            vantage_id,
+            kind,
+            topic_key,
+            summary,
+            payload,
+            strength,
+            confidence,
+            created_at,
+            updated_at
+          FROM vantage_card.card_head
+          {where}
+          ORDER BY updated_at DESC NULLS LAST, card_id DESC
+          LIMIT {limit_n}
+        """
+
+        rows = await conn.fetch(sql, *args)
+
+        items = []
+        for r in rows:
+            d = dict(r)
+            d["id"] = str(d.get("card_id"))
+            d["source"] = "vantage_card"
+            if isinstance(d.get("payload"), str):
+                try:
+                    d["payload"] = json.loads(d["payload"])
+                except Exception:
+                    pass
+            d["text"] = d.get("summary") or ""
+            items.append(d)
+
+        return {
+            "status": "ok",
+            "source": "vantage_card",
+            "user_id": uid,
+            "vantage_id": vid,
+            "count": len(items),
+            "items": items,
+        }
+    finally:
+        await conn.close()
+
+
 @app.post("/cards/{user_id}")
 async def cards_upsert(user_id: str, req: CardUpsertReq, vantage_id: str = "default"):
     """

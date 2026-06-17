@@ -19,6 +19,9 @@ from typing import List, Dict, Any, Optional
 import os
 import uuid
 import datetime
+import asyncio
+import threading
+import asyncpg
 
 from qdrant_client import QdrantClient
 from rag_engine.qdrant_compat import make_qdrant_client
@@ -199,6 +202,182 @@ def _pick_top_text(points, kind: str, max_items: int) -> List[str]:
         if text:
             texts.append(text)
     return texts
+
+
+
+# ------------------------------------------------------------------------
+# POSTGRES VANTAGE CARD LOADING
+# ------------------------------------------------------------------------
+
+def _norm_dsn(dsn: str) -> str:
+    if dsn.startswith("postgres://"):
+        return "postgresql://" + dsn[len("postgres://"):]
+    return dsn
+
+
+def _run_coro_sync(coro):
+    """
+    Run asyncpg coroutines from sync prompt-building code.
+
+    If no event loop is running, use asyncio.run().
+    If an event loop is already running, run the coroutine in a short-lived thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    box = {"value": None, "error": None}
+
+    def _target():
+        try:
+            box["value"] = asyncio.run(coro)
+        except Exception as e:
+            box["error"] = e
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+
+    if box["error"] is not None:
+        raise box["error"]
+    return box["value"]
+
+
+async def _load_vantage_preference_cards_async(user_id: str, vantage_id: str | None = None, limit: int = 8) -> List[str]:
+    uid = str(user_id or "").strip()
+    vid = (vantage_id or "").strip() or "default"
+    if not uid:
+        return []
+
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        return []
+
+    conn = await asyncpg.connect(_norm_dsn(dsn))
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT kind, topic_key, summary, strength, confidence, updated_at
+            FROM vantage_card.card_head
+            WHERE vantage_id=$1
+              AND kind IN ('pref','style')
+              AND topic_key LIKE $2
+              AND COALESCE(summary, '') <> ''
+            ORDER BY strength DESC NULLS LAST,
+                     confidence DESC NULLS LAST,
+                     updated_at DESC NULLS LAST
+            LIMIT $3
+            """,
+            vid,
+            f"user/{uid}/%",
+            int(limit),
+        )
+
+        out: List[str] = []
+        for r in rows:
+            summary = str(r["summary"] or "").strip()
+            if not summary:
+                continue
+            # Keep only the first summary line for prompt compactness.
+            first = summary.splitlines()[0].strip()
+            if first:
+                out.append(first[:240])
+        return out
+    finally:
+        await conn.close()
+
+
+async def _load_vantage_profile_cards_async(user_id: str, vantage_id: str | None = None, limit: int = 10) -> List[str]:
+    uid = str(user_id or "").strip()
+    vid = (vantage_id or "").strip() or "default"
+    if not uid:
+        return []
+
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        return []
+
+    conn = await asyncpg.connect(_norm_dsn(dsn))
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT kind, topic_key, summary, strength, confidence, updated_at
+            FROM vantage_card.card_head
+            WHERE vantage_id=$1
+              AND kind IN ('identity','background','project')
+              AND topic_key LIKE $2
+              AND COALESCE(summary, '') <> ''
+            ORDER BY
+                     CASE kind
+                       WHEN 'identity' THEN 1
+                       WHEN 'background' THEN 2
+                       WHEN 'project' THEN 3
+                       ELSE 9
+                     END ASC,
+                     strength DESC NULLS LAST,
+                     confidence DESC NULLS LAST,
+                     updated_at DESC NULLS LAST
+            LIMIT $3
+            """,
+            vid,
+            f"user/{uid}/%",
+            int(limit),
+        )
+
+        out: List[str] = []
+        for r in rows:
+            summary = str(r["summary"] or "").strip()
+            if not summary:
+                continue
+            first = summary.splitlines()[0].strip()
+            if first:
+                out.append(first[:240])
+        return out
+    finally:
+        await conn.close()
+
+
+def build_vantage_profile_cards_block(user_id: str, vantage_id: str | None = None) -> str:
+    """
+    Load current Postgres Vantage identity/background/project cards into the live prompt.
+
+    These are adaptive user-profile cards produced from normal user speech.
+    """
+    try:
+        lines = _run_coro_sync(_load_vantage_profile_cards_async(user_id, vantage_id=vantage_id))
+    except Exception as e:
+        print(f"[persona_loader] Postgres Vantage profile card load failed user_id={user_id} vantage_id={vantage_id}: {e}")
+        return ""
+
+    if not lines:
+        return ""
+
+    block = ["[VANTAGE PROFILE CARDS]"]
+    block.append("Use these as user/Vantage context when relevant. Do not list them unless asked.")
+    block.extend(f"- {line}" for line in lines)
+    return "\n".join(block)
+
+
+def build_vantage_preference_cards_block(user_id: str, vantage_id: str | None = None) -> str:
+    """
+    Load current Postgres Vantage preference/style cards into the live prompt.
+
+    These are produced by the fact/card pipeline and are separate from older
+    Qdrant memory_card persona cards.
+    """
+    try:
+        lines = _run_coro_sync(_load_vantage_preference_cards_async(user_id, vantage_id=vantage_id))
+    except Exception as e:
+        print(f"[persona_loader] Postgres Vantage card load failed user_id={user_id} vantage_id={vantage_id}: {e}")
+        return ""
+
+    if not lines:
+        return ""
+
+    block = ["[VANTAGE PREFERENCE CARDS]"]
+    block.extend(f"- {line}" for line in lines)
+    return "\n".join(block)
 
 
 # ------------------------------------------------------------------------

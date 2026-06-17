@@ -988,12 +988,13 @@ def vantage_query(req: Request, payload: VantageQuery):
                         "threshold": thr_f,
                         "similarity_threshold": thr_f,
                         "score_threshold": thr_f,
+                        "vantage_id": vid,
                     },
                 ) or []
             except TypeError:
                 try:
                     personal_hits = _await_if_needed(
-                        retrieve_personal_memory((payload.user_id or "").strip() or "anon", payload.message, k_personal, thr_f)
+                        retrieve_personal_memory((payload.user_id or "").strip() or "anon", payload.message, k_personal, thr_f, vantage_id=vid)
                     ) or []
                 except Exception as e:
                     print(f"[vantage] retrieve_personal_memory error: {e}")

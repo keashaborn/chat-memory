@@ -123,11 +123,16 @@ async def card_consolidate_from_kv_once(
         WHERE s.status='done'
           AND s.source_type='chat_log'
           AND l.card_id IS NULL
+          AND (
+            ($3::text = 'default' AND COALESCE(s.metadata->>'vantage_id', 'default') = 'default')
+            OR (s.metadata->>'vantage_id' = $3::text)
+          )
         ORDER BY s.source_id DESC
         LIMIT $1
         """,
         limit_sources,
         cursor_card_id,
+        vantage_id,
     )
 
     updated = 0
@@ -231,8 +236,25 @@ async def card_consolidate_from_kv_once(
                     continue
                 val = str(val).strip()
 
-                kind = "audit" if attr_key == "audit" else "pref"
-                topic_key = f"user/{user_id}/{kind}/{attr_key}"
+                card_attr_key = attr_key
+                if attr_key == "audit":
+                    kind = "audit"
+                elif attr_key.startswith("identity_"):
+                    kind = "identity"
+                    card_attr_key = attr_key.replace("identity_", "", 1)
+                elif attr_key.startswith("background_"):
+                    kind = "background"
+                    card_attr_key = attr_key.replace("background_", "", 1)
+                elif attr_key.startswith("project_"):
+                    kind = "project"
+                    card_attr_key = attr_key.replace("project_", "", 1)
+                elif attr_key.startswith("preference_"):
+                    kind = "pref"
+                    card_attr_key = attr_key.replace("preference_", "", 1)
+                else:
+                    kind = "pref"
+
+                topic_key = f"user/{user_id}/{kind}/{card_attr_key}"
 
                 card_id = await _get_or_create_card(conn, vantage_id, kind, topic_key)
                 head = await conn.fetchrow(
@@ -264,6 +286,7 @@ async def card_consolidate_from_kv_once(
                     "user_id": user_id,
                     "user_id_alias": alias_user_id,
                     "attr_key": attr_key,
+                    "card_attr_key": card_attr_key,
                     "current_value": val,
                     "value_counts": counts,
                     "last_seen_at": str(r["created_at"]),
@@ -271,7 +294,7 @@ async def card_consolidate_from_kv_once(
 
                 top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
                 hist = ", ".join([f"{k}×{n}" for k,n in top])
-                summary = f"{kind}/{attr_key}: {val}\nseen: {hist}"
+                summary = f"{kind}/{card_attr_key}: {val}\nseen: {hist}"
 
                 await _write_revision(conn, card_id, summary, payload, reason="consolidate_kv_v2")
 
@@ -366,7 +389,17 @@ async def card_consolidate_from_kv_once(
 
         cursor_now = await conn.fetchval("SELECT now()::text")
         done_n = await conn.fetchval(
-            "SELECT count(*) FROM vantage_fact.source WHERE source_type='chat_log' AND status='done'"
+            """
+            SELECT count(*)
+            FROM vantage_fact.source
+            WHERE source_type='chat_log'
+              AND status='done'
+              AND (
+                ($1::text = 'default' AND COALESCE(metadata->>'vantage_id', 'default') = 'default')
+                OR (metadata->>'vantage_id' = $1::text)
+              )
+            """,
+            vantage_id,
         )
         done_n = int(done_n or 0)
 

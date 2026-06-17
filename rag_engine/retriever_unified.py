@@ -490,15 +490,22 @@ def retrieve_personal_memory(
     emb = client.embeddings.create(model=EMBED_MODEL, input=q)
     vec = emb.data[0].embedding
 
+    vid = (vantage_id or "").strip() or "default"
+
     # 1b) Infer query tags for this personal-memory search
     query_tags = set(infer_query_tags(q))
 
-    # --- Gravity / escape detector ---
-    gravity_weights = load_gravity_profile(user_id) if user_id else {}
+    # --- Legacy gravity containment ---
+    # Global gravity_profile is allowed only for default Vantage unless explicitly enabled.
+    use_global_gravity = (
+        vid == "default"
+        or os.getenv("VANTAGE_LEGACY_GRAVITY_FALLBACK", "0").strip().lower() in ("1", "true", "yes", "on")
+    )
+    gravity_weights = load_gravity_profile(user_id) if (user_id and use_global_gravity) else {}
     misalignment = 0.0
     if gravity_weights:
         misalignment = compute_misalignment(list(query_tags), gravity_weights)
-    print(f"[gravity] user_id={user_id} misalignment={misalignment:.3f} tags={list(query_tags)}")
+    print(f"[gravity] user_id={user_id} vid={vid} legacy_gravity={use_global_gravity} misalignment={misalignment:.3f} tags={list(query_tags)}")
 
     # 2) Filter by user_id if provided
     must = []
@@ -510,26 +517,29 @@ def retrieve_personal_memory(
             )
         )
 
-    vid = (vantage_id or "").strip() or "default"
-
     # Namespace filter:
-    # - keep points in the active vid
-    # - ALSO keep legacy points with missing payload.vantage_id (older data + many cards)
+    # - keep points in the active Vantage.
+    # - legacy/global points with missing payload.vantage_id are allowed only for default,
+    #   unless explicitly enabled with VANTAGE_LEGACY_MEMORY_FALLBACK=1.
+    legacy_fallback = os.getenv("VANTAGE_LEGACY_MEMORY_FALLBACK", "0").strip().lower() in ("1", "true", "yes", "on")
+    allow_legacy = (vid == "default") or legacy_fallback
+
     use_is_empty = hasattr(qmodels, "IsEmptyCondition") and hasattr(qmodels, "PayloadField")
 
     should = None
     if use_is_empty:
         should = [
             qmodels.FieldCondition(key="vantage_id", match=qmodels.MatchValue(value=vid)),
-            qmodels.IsEmptyCondition(is_empty=qmodels.PayloadField(key="vantage_id")),
         ]
+        if allow_legacy:
+            should.append(qmodels.IsEmptyCondition(is_empty=qmodels.PayloadField(key="vantage_id")))
     else:
         # Older qdrant_client: can't express "is_empty" server-side.
         # We'll post-filter payload.vantage_id below.
         should = None
 
     # Exclude assistant chat + daemon/system cards from episodic retrieval.
-    # Keep memory_card INCLUDED (identity/style cards live there).
+    # Exclude legacy memory_card records here; live Vantage cards are injected separately.
     must_not = [
         qmodels.FieldCondition(key="source", match=qmodels.MatchValue(value="frontend/chat:assistant")),
         qmodels.FieldCondition(key="source", match=qmodels.MatchValue(value="gravity_daemon")),
@@ -589,7 +599,12 @@ def retrieve_personal_memory(
         # enforce namespace here: allow either matching vid OR missing vantage_id.
         if not use_is_empty:
             pv = payload.get("vantage_id", None)
-            if not ((pv == vid) or (pv in (None, "") and vid == "default")):
+            if not ((pv == vid) or (allow_legacy and pv in (None, ""))):
+                continue
+        else:
+            # Server-side should filter normally, but hard-enforce anyway.
+            pv = payload.get("vantage_id", None)
+            if not ((pv == vid) or (allow_legacy and pv in (None, ""))):
                 continue
 
         # If the *query itself* is a test/probe query, allow test/probe memories through.
