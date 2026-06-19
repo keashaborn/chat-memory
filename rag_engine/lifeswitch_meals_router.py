@@ -101,6 +101,33 @@ async def create_meal(
         await conn.close()
 
 
+@router.post("/meals/{meal_id}/deactivate")
+async def deactivate_meal(
+    meal_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    mid = _as_uuid(meal_id, "meal_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.meal
+               set is_active=false, updated_at=now()
+             where meal_id=$1::uuid
+               and owner_user_id=$2::uuid
+            returning meal_id, owner_user_id, name, meal_type, is_active, created_at, updated_at
+            """,
+            mid, owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="meal not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
 # ----------------------------
 # Meal items (support grams OR servings preset)
 # ----------------------------
