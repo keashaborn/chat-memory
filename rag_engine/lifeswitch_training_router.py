@@ -262,7 +262,7 @@ async def list_workout_template_exercises(workout_template_id: str):
             f"""
             select
               workout_template_exercise_id, workout_template_id,
-              exercise_id, sort_order,
+              exercise_id, sort_order, set_type,
               planned_sets, default_weight, default_reps, flags,
               created_at, updated_at
             from {SCHEMA}.workout_template_exercise
@@ -280,6 +280,7 @@ async def upsert_workout_template_exercise(
     workout_template_id: str,
     exercise_id: str = Query(..., min_length=1, max_length=200),
     sort_order: int = Query(0),
+    set_type: str = Query("straight", max_length=40),
     planned_sets: int = Query(3, ge=0, le=50),
     default_weight: float = Query(0),
     default_reps: int = Query(10, ge=0, le=200),
@@ -291,11 +292,12 @@ async def upsert_workout_template_exercise(
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.workout_template_exercise
-              (workout_template_id, exercise_id, sort_order, planned_sets, default_weight, default_reps, flags)
+              (workout_template_id, exercise_id, sort_order, set_type, planned_sets, default_weight, default_reps, flags)
             values
-              ($1::uuid, $2, $3, $4, $5, $6, $7)
+              ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
             on conflict (workout_template_id, exercise_id) do update
               set sort_order=excluded.sort_order,
+                  set_type=excluded.set_type,
                   planned_sets=excluded.planned_sets,
                   default_weight=excluded.default_weight,
                   default_reps=excluded.default_reps,
@@ -303,12 +305,13 @@ async def upsert_workout_template_exercise(
                   updated_at=now()
             returning
               workout_template_exercise_id, workout_template_id,
-              exercise_id, sort_order, planned_sets, default_weight, default_reps, flags,
+              exercise_id, sort_order, set_type, planned_sets, default_weight, default_reps, flags,
               created_at, updated_at
             """,
             wid,
             exercise_id.strip(),
             int(sort_order),
+              (set_type or "straight").strip().lower(),
             int(planned_sets),
             float(default_weight),
             int(default_reps),
@@ -336,6 +339,104 @@ async def delete_workout_template_exercise(
             weid, wid
         )
         # asyncpg returns "DELETE N"
+        return JSONResponse({"ok": True, "result": str(res)})
+    finally:
+        await conn.close()
+
+
+
+# ----------------------------
+# Workout Template Exercise Segments
+# ----------------------------
+
+@router.get("/workout_template_exercises/{workout_template_exercise_id}/segments")
+async def list_workout_template_exercise_segments(workout_template_exercise_id: str):
+    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              workout_template_exercise_segment_id,
+              workout_template_exercise_id,
+              segment_index,
+              label,
+              default_weight,
+              default_reps,
+              created_at,
+              updated_at
+            from {SCHEMA}.workout_template_exercise_segment
+            where workout_template_exercise_id=$1::uuid
+            order by segment_index asc, created_at asc
+            """,
+            weid,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/workout_template_exercises/{workout_template_exercise_id}/segments/upsert")
+async def upsert_workout_template_exercise_segment(
+    workout_template_exercise_id: str,
+    segment_index: int = Query(1, ge=1, le=50),
+    label: str | None = Query(None, max_length=120),
+    default_weight: float = Query(0),
+    default_reps: int = Query(0, ge=0, le=1000),
+):
+    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.workout_template_exercise_segment
+              (workout_template_exercise_id, segment_index, label, default_weight, default_reps)
+            values
+              ($1::uuid, $2, $3, $4, $5)
+            on conflict (workout_template_exercise_id, segment_index) do update
+              set label=excluded.label,
+                  default_weight=excluded.default_weight,
+                  default_reps=excluded.default_reps,
+                  updated_at=now()
+            returning
+              workout_template_exercise_segment_id,
+              workout_template_exercise_id,
+              segment_index,
+              label,
+              default_weight,
+              default_reps,
+              created_at,
+              updated_at
+            """,
+            weid,
+            int(segment_index),
+            (label or "").strip(),
+            float(default_weight),
+            int(default_reps),
+        )
+        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.post("/workout_template_exercises/{workout_template_exercise_id}/segments/{workout_template_exercise_segment_id}/delete")
+async def delete_workout_template_exercise_segment(
+    workout_template_exercise_id: str,
+    workout_template_exercise_segment_id: str,
+):
+    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
+    segid = _as_uuid(workout_template_exercise_segment_id, "workout_template_exercise_segment_id")
+    conn = await _db()
+    try:
+        res = await conn.execute(
+            f"""
+            delete from {SCHEMA}.workout_template_exercise_segment
+             where workout_template_exercise_segment_id=$1::uuid
+               and workout_template_exercise_id=$2::uuid
+            """,
+            segid,
+            weid,
+        )
         return JSONResponse({"ok": True, "result": str(res)})
     finally:
         await conn.close()
