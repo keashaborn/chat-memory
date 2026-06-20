@@ -339,3 +339,367 @@ async def delete_workout_template_exercise(
         return JSONResponse({"ok": True, "result": str(res)})
     finally:
         await conn.close()
+
+
+# ----------------------------
+# Training Sessions / Set Log
+# ----------------------------
+
+@router.post("/sessions/create")
+async def create_training_session(
+    owner_user_id: str = Query(..., min_length=1),
+    day: str = Query(..., min_length=10, max_length=10),
+    name: str = Query(..., min_length=1, max_length=160),
+    workout_template_id: str | None = Query(None),
+    notes: str | None = Query(None, max_length=800),
+    started_at: str | None = Query(None),
+    finished_at: str | None = Query(None),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
+
+    try:
+        day_val = _dt.date.fromisoformat(day)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid day")
+
+    started = None
+    finished = None
+    try:
+        if started_at:
+            started = _dt.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        if finished_at:
+            finished = _dt.datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid timestamp")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.training_session
+              (owner_user_id, day, workout_template_id, name, notes, started_at, finished_at, is_active)
+            values
+              ($1::uuid, $2::date, $3::uuid, $4, $5, $6::timestamptz, $7::timestamptz, true)
+            returning
+              training_session_id, owner_user_id, day, workout_template_id, name, notes,
+              started_at, finished_at, is_active, created_at, updated_at
+            """,
+            owner,
+            day_val,
+            wid,
+            name.strip(),
+            (notes or "").strip(),
+            started,
+            finished,
+        )
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.get("/sessions")
+async def list_training_sessions(
+    owner_user_id: str = Query(..., min_length=1),
+    day: str | None = Query(None),
+    include_inactive: int = Query(0, ge=0, le=1),
+    limit: int = Query(100, ge=1, le=500),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    day_val = None
+    if day:
+        try:
+            day_val = _dt.date.fromisoformat(day)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid day")
+
+    conn = await _db()
+    try:
+        where = ["s.owner_user_id=$1::uuid"]
+        args = [owner]
+        if day_val:
+            args.append(day_val)
+            where.append(f"s.day=${len(args)}::date")
+        if not include_inactive:
+            where.append("s.is_active=true")
+
+        rows = await conn.fetch(
+            f"""
+            select
+              s.training_session_id, s.owner_user_id, s.day, s.workout_template_id,
+              s.name, s.notes, s.started_at, s.finished_at, s.is_active,
+              s.created_at, s.updated_at,
+              coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
+              coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
+              coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume
+            from {SCHEMA}.training_session s
+            left join {SCHEMA}.training_set_log l
+              on l.training_session_id=s.training_session_id
+            where {' and '.join(where)}
+            group by s.training_session_id
+            order by s.day desc, s.created_at desc
+            limit {int(limit)}
+            """,
+            *args,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.get("/sessions/{training_session_id}")
+async def get_training_session(
+    training_session_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            select
+              training_session_id, owner_user_id, day, workout_template_id,
+              name, notes, started_at, finished_at, is_active, created_at, updated_at
+            from {SCHEMA}.training_session
+            where training_session_id=$1::uuid
+              and owner_user_id=$2::uuid
+            """,
+            sid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="session not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.get("/sessions/{training_session_id}/sets")
+async def list_training_session_sets(
+    training_session_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+    include_inactive: int = Query(0, ge=0, le=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        where_active = "" if include_inactive else "and is_active=true"
+        rows = await conn.fetch(
+            f"""
+            select
+              training_set_log_id, training_session_id, owner_user_id,
+              workout_template_id, exercise_id, exercise_name,
+              exercise_sort_order, set_index, weight, reps, volume,
+              flags, notes, is_active, created_at, updated_at
+            from {SCHEMA}.training_set_log
+            where training_session_id=$1::uuid
+              and owner_user_id=$2::uuid
+              {where_active}
+            order by exercise_sort_order asc, set_index asc, created_at asc
+            """,
+            sid,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/sets/add")
+async def add_training_set_log(
+    training_session_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+    exercise_id: str = Query(..., min_length=1, max_length=200),
+    exercise_name: str = Query(..., min_length=1, max_length=240),
+    workout_template_id: str | None = Query(None),
+    exercise_sort_order: int = Query(0),
+    set_index: int = Query(1, ge=1, le=200),
+    weight: float = Query(0),
+    reps: int = Query(0, ge=0, le=1000),
+    flags: str | None = Query(None, max_length=240),
+    notes: str | None = Query(None, max_length=800),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
+    volume = float(weight) * int(reps)
+
+    conn = await _db()
+    try:
+        session = await conn.fetchrow(
+            f"""
+            select training_session_id, workout_template_id
+            from {SCHEMA}.training_session
+            where training_session_id=$1::uuid
+              and owner_user_id=$2::uuid
+              and is_active=true
+            """,
+            sid,
+            owner,
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        if wid is None and session.get("workout_template_id"):
+            wid = str(session["workout_template_id"])
+
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.training_set_log
+              (training_session_id, owner_user_id, workout_template_id,
+               exercise_id, exercise_name, exercise_sort_order, set_index,
+               weight, reps, volume, flags, notes, is_active)
+            values
+              ($1::uuid, $2::uuid, $3::uuid,
+               $4, $5, $6, $7,
+               $8, $9, $10, $11, $12, true)
+            returning
+              training_set_log_id, training_session_id, owner_user_id,
+              workout_template_id, exercise_id, exercise_name,
+              exercise_sort_order, set_index, weight, reps, volume,
+              flags, notes, is_active, created_at, updated_at
+            """,
+            sid,
+            owner,
+            wid,
+            exercise_id.strip(),
+            exercise_name.strip(),
+            int(exercise_sort_order),
+            int(set_index),
+            float(weight),
+            int(reps),
+            float(volume),
+            (flags or "").strip(),
+            (notes or "").strip(),
+        )
+
+        await conn.execute(
+            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
+            sid,
+        )
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/update")
+async def update_training_set_log(
+    training_session_id: str,
+    training_set_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+    exercise_sort_order: int | None = Query(None),
+    set_index: int | None = Query(None, ge=1, le=200),
+    weight: float | None = Query(None),
+    reps: int | None = Query(None, ge=0, le=1000),
+    flags: str | None = Query(None, max_length=240),
+    notes: str | None = Query(None, max_length=800),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    setid = _as_uuid(training_set_log_id, "training_set_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        old = await conn.fetchrow(
+            f"""
+            select weight, reps
+            from {SCHEMA}.training_set_log
+            where training_set_log_id=$1::uuid
+              and training_session_id=$2::uuid
+              and owner_user_id=$3::uuid
+            """,
+            setid,
+            sid,
+            owner,
+        )
+        if not old:
+            raise HTTPException(status_code=404, detail="set not found")
+
+        next_weight = float(weight) if weight is not None else float(old["weight"])
+        next_reps = int(reps) if reps is not None else int(old["reps"])
+        next_volume = next_weight * next_reps
+
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.training_set_log
+               set exercise_sort_order=coalesce($4, exercise_sort_order),
+                   set_index=coalesce($5, set_index),
+                   weight=$6,
+                   reps=$7,
+                   volume=$8,
+                   flags=coalesce($9, flags),
+                   notes=coalesce($10, notes),
+                   updated_at=now()
+             where training_set_log_id=$1::uuid
+               and training_session_id=$2::uuid
+               and owner_user_id=$3::uuid
+            returning
+              training_set_log_id, training_session_id, owner_user_id,
+              workout_template_id, exercise_id, exercise_name,
+              exercise_sort_order, set_index, weight, reps, volume,
+              flags, notes, is_active, created_at, updated_at
+            """,
+            setid,
+            sid,
+            owner,
+            exercise_sort_order,
+            set_index,
+            next_weight,
+            next_reps,
+            next_volume,
+            (flags.strip() if flags is not None else None),
+            (notes.strip() if notes is not None else None),
+        )
+
+        await conn.execute(
+            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
+            sid,
+        )
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/delete")
+async def delete_training_set_log(
+    training_session_id: str,
+    training_set_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    setid = _as_uuid(training_set_log_id, "training_set_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.training_set_log
+               set is_active=false, updated_at=now()
+             where training_set_log_id=$1::uuid
+               and training_session_id=$2::uuid
+               and owner_user_id=$3::uuid
+            returning training_set_log_id, training_session_id, owner_user_id, is_active, updated_at
+            """,
+            setid,
+            sid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="set not found")
+
+        await conn.execute(
+            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
+            sid,
+        )
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
