@@ -477,6 +477,36 @@ async def get_training_session(
         await conn.close()
 
 
+
+@router.post("/sessions/{training_session_id}/deactivate")
+async def deactivate_training_session(
+    training_session_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.training_session
+               set is_active=false, updated_at=now()
+             where training_session_id=$1::uuid
+               and owner_user_id=$2::uuid
+            returning
+              training_session_id, owner_user_id, day, name, is_active, updated_at
+            """,
+            sid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="session not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
 @router.get("/sessions/{training_session_id}/sets")
 async def list_training_session_sets(
     training_session_id: str,
