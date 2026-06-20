@@ -625,6 +625,7 @@ async def list_training_session_sets(
             select
               training_set_log_id, training_session_id, owner_user_id,
               workout_template_id, exercise_id, exercise_name,
+              set_type,
               exercise_sort_order, set_index, weight, reps, volume,
               flags, notes, is_active, created_at, updated_at
             from {SCHEMA}.training_set_log
@@ -650,6 +651,7 @@ async def add_training_set_log(
     workout_template_id: str | None = Query(None),
     exercise_sort_order: int = Query(0),
     set_index: int = Query(1, ge=1, le=200),
+    set_type: str = Query("straight", max_length=40),
     weight: float = Query(0),
     reps: int = Query(0, ge=0, le=1000),
     flags: str | None = Query(None, max_length=240),
@@ -683,15 +685,16 @@ async def add_training_set_log(
             f"""
             insert into {SCHEMA}.training_set_log
               (training_session_id, owner_user_id, workout_template_id,
-               exercise_id, exercise_name, exercise_sort_order, set_index,
+               exercise_id, exercise_name, exercise_sort_order, set_index, set_type,
                weight, reps, volume, flags, notes, is_active)
             values
               ($1::uuid, $2::uuid, $3::uuid,
-               $4, $5, $6, $7,
-               $8, $9, $10, $11, $12, true)
+               $4, $5, $6, $7, $8,
+               $9, $10, $11, $12, $13, true)
             returning
               training_set_log_id, training_session_id, owner_user_id,
               workout_template_id, exercise_id, exercise_name,
+              set_type,
               exercise_sort_order, set_index, weight, reps, volume,
               flags, notes, is_active, created_at, updated_at
             """,
@@ -702,6 +705,7 @@ async def add_training_set_log(
             exercise_name.strip(),
             int(exercise_sort_order),
             int(set_index),
+              (set_type or "straight").strip().lower(),
             float(weight),
             int(reps),
             float(volume),
@@ -726,6 +730,7 @@ async def update_training_set_log(
     owner_user_id: str = Query(..., min_length=1),
     exercise_sort_order: int | None = Query(None),
     set_index: int | None = Query(None, ge=1, le=200),
+    set_type: str | None = Query(None, max_length=40),
     weight: float | None = Query(None),
     reps: int | None = Query(None, ge=0, le=1000),
     flags: str | None = Query(None, max_length=240),
@@ -739,7 +744,7 @@ async def update_training_set_log(
     try:
         old = await conn.fetchrow(
             f"""
-            select weight, reps
+            select weight, reps, set_type
             from {SCHEMA}.training_set_log
             where training_set_log_id=$1::uuid
               and training_session_id=$2::uuid
@@ -754,18 +759,30 @@ async def update_training_set_log(
 
         next_weight = float(weight) if weight is not None else float(old["weight"])
         next_reps = int(reps) if reps is not None else int(old["reps"])
-        next_volume = next_weight * next_reps
+        next_set_type = set_type.strip().lower() if set_type is not None else str(old.get("set_type") or "straight")
+
+        segment_total = await conn.fetchval(
+            f"""
+            select coalesce(sum(volume), 0)
+            from {SCHEMA}.training_set_log_segment
+            where training_set_log_id=$1::uuid
+            """,
+            setid,
+        )
+        segment_total_float = float(segment_total or 0)
+        next_volume = segment_total_float if next_set_type == "drop" and segment_total_float > 0 else next_weight * next_reps
 
         row = await conn.fetchrow(
             f"""
             update {SCHEMA}.training_set_log
                set exercise_sort_order=coalesce($4, exercise_sort_order),
                    set_index=coalesce($5, set_index),
-                   weight=$6,
-                   reps=$7,
-                   volume=$8,
-                   flags=coalesce($9, flags),
-                   notes=coalesce($10, notes),
+                   set_type=coalesce($6, set_type),
+                   weight=$7,
+                   reps=$8,
+                   volume=$9,
+                   flags=coalesce($10, flags),
+                   notes=coalesce($11, notes),
                    updated_at=now()
              where training_set_log_id=$1::uuid
                and training_session_id=$2::uuid
@@ -773,6 +790,7 @@ async def update_training_set_log(
             returning
               training_set_log_id, training_session_id, owner_user_id,
               workout_template_id, exercise_id, exercise_name,
+              set_type,
               exercise_sort_order, set_index, weight, reps, volume,
               flags, notes, is_active, created_at, updated_at
             """,
@@ -781,6 +799,7 @@ async def update_training_set_log(
             owner,
             exercise_sort_order,
             set_index,
+            next_set_type,
             next_weight,
             next_reps,
             next_volume,
@@ -794,6 +813,222 @@ async def update_training_set_log(
         )
 
         return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.get("/sessions/{training_session_id}/sets/{training_set_log_id}/segments")
+async def list_training_set_log_segments(
+    training_session_id: str,
+    training_set_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    setid = _as_uuid(training_set_log_id, "training_set_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        parent = await conn.fetchrow(
+            f"""
+            select training_set_log_id
+            from {SCHEMA}.training_set_log
+            where training_set_log_id=$1::uuid
+              and training_session_id=$2::uuid
+              and owner_user_id=$3::uuid
+              and is_active=true
+            """,
+            setid,
+            sid,
+            owner,
+        )
+        if not parent:
+            raise HTTPException(status_code=404, detail="set not found")
+
+        rows = await conn.fetch(
+            f"""
+            select
+              training_set_log_segment_id,
+              training_set_log_id,
+              segment_index,
+              label,
+              weight,
+              reps,
+              volume,
+              notes,
+              created_at,
+              updated_at
+            from {SCHEMA}.training_set_log_segment
+            where training_set_log_id=$1::uuid
+            order by segment_index asc, created_at asc
+            """,
+            setid,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/segments/add")
+async def add_training_set_log_segment(
+    training_session_id: str,
+    training_set_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+    segment_index: int = Query(1, ge=1, le=50),
+    label: str | None = Query(None, max_length=120),
+    weight: float = Query(0),
+    reps: int = Query(0, ge=0, le=1000),
+    notes: str | None = Query(None, max_length=800),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    setid = _as_uuid(training_set_log_id, "training_set_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    volume = float(weight) * int(reps)
+
+    conn = await _db()
+    try:
+        parent = await conn.fetchrow(
+            f"""
+            select training_set_log_id
+            from {SCHEMA}.training_set_log
+            where training_set_log_id=$1::uuid
+              and training_session_id=$2::uuid
+              and owner_user_id=$3::uuid
+              and is_active=true
+            """,
+            setid,
+            sid,
+            owner,
+        )
+        if not parent:
+            raise HTTPException(status_code=404, detail="set not found")
+
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.training_set_log_segment
+              (training_set_log_id, segment_index, label, weight, reps, volume, notes)
+            values
+              ($1::uuid, $2, $3, $4, $5, $6, $7)
+            on conflict (training_set_log_id, segment_index) do update
+              set label=excluded.label,
+                  weight=excluded.weight,
+                  reps=excluded.reps,
+                  volume=excluded.volume,
+                  notes=excluded.notes,
+                  updated_at=now()
+            returning
+              training_set_log_segment_id,
+              training_set_log_id,
+              segment_index,
+              label,
+              weight,
+              reps,
+              volume,
+              notes,
+              created_at,
+              updated_at
+            """,
+            setid,
+            int(segment_index),
+            (label or "").strip(),
+            float(weight),
+            int(reps),
+            float(volume),
+            (notes or "").strip(),
+        )
+
+        total = await conn.fetchval(
+            f"""
+            select coalesce(sum(volume), 0)
+            from {SCHEMA}.training_set_log_segment
+            where training_set_log_id=$1::uuid
+            """,
+            setid,
+        )
+        await conn.execute(
+            f"""
+            update {SCHEMA}.training_set_log
+               set volume=$4,
+                   updated_at=now()
+             where training_set_log_id=$1::uuid
+               and training_session_id=$2::uuid
+               and owner_user_id=$3::uuid
+            """,
+            setid,
+            sid,
+            owner,
+            float(total or 0),
+        )
+        await conn.execute(
+            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
+            sid,
+        )
+
+        return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/segments/{training_set_log_segment_id}/delete")
+async def delete_training_set_log_segment(
+    training_session_id: str,
+    training_set_log_id: str,
+    training_set_log_segment_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    setid = _as_uuid(training_set_log_id, "training_set_log_id")
+    segid = _as_uuid(training_set_log_segment_id, "training_set_log_segment_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        res = await conn.execute(
+            f"""
+            delete from {SCHEMA}.training_set_log_segment
+             where training_set_log_segment_id=$1::uuid
+               and training_set_log_id=$2::uuid
+               and exists (
+                 select 1
+                 from {SCHEMA}.training_set_log l
+                 where l.training_set_log_id=$2::uuid
+                   and l.training_session_id=$3::uuid
+                   and l.owner_user_id=$4::uuid
+               )
+            """,
+            segid,
+            setid,
+            sid,
+            owner,
+        )
+
+        total = await conn.fetchval(
+            f"""
+            select coalesce(sum(volume), 0)
+            from {SCHEMA}.training_set_log_segment
+            where training_set_log_id=$1::uuid
+            """,
+            setid,
+        )
+        await conn.execute(
+            f"""
+            update {SCHEMA}.training_set_log
+               set volume=$4,
+                   updated_at=now()
+             where training_set_log_id=$1::uuid
+               and training_session_id=$2::uuid
+               and owner_user_id=$3::uuid
+            """,
+            setid,
+            sid,
+            owner,
+            float(total or 0),
+        )
+        await conn.execute(
+            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
+            sid,
+        )
+
+        return JSONResponse({"ok": True, "result": str(res)})
     finally:
         await conn.close()
 
