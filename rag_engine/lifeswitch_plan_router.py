@@ -81,7 +81,7 @@ def _clean_date(v):
     if v is None or str(v).strip() == "":
         return None
     try:
-        return _dt.date.fromisoformat(str(v).strip()).isoformat()
+        return _dt.date.fromisoformat(str(v).strip())
     except Exception:
         raise HTTPException(status_code=400, detail="invalid date; expected YYYY-MM-DD")
 
