@@ -262,7 +262,7 @@ async def list_workout_template_exercises(workout_template_id: str):
             f"""
             select
               workout_template_exercise_id, workout_template_id,
-              exercise_id, sort_order, set_type,
+              exercise_id, display_name_snapshot, sort_order, set_type,
               planned_sets, default_weight, default_reps, flags,
               created_at, updated_at
             from {SCHEMA}.workout_template_exercise
@@ -293,11 +293,12 @@ async def upsert_workout_template_exercise(
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.workout_template_exercise
-              (workout_template_id, exercise_id, sort_order, set_type, planned_sets, default_weight, default_reps, flags)
+              (workout_template_id, exercise_id, display_name_snapshot, sort_order, set_type, planned_sets, default_weight, default_reps, flags)
             values
-              ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
+              ($1::uuid, $2, nullif($3, ''), $4, $5, $6, $7, $8, $9)
             on conflict (workout_template_id, exercise_id) do update
-              set sort_order=excluded.sort_order,
+              set display_name_snapshot=coalesce(excluded.display_name_snapshot, {SCHEMA}.workout_template_exercise.display_name_snapshot),
+                  sort_order=excluded.sort_order,
                   set_type=excluded.set_type,
                   planned_sets=excluded.planned_sets,
                   default_weight=excluded.default_weight,
@@ -306,11 +307,12 @@ async def upsert_workout_template_exercise(
                   updated_at=now()
             returning
               workout_template_exercise_id, workout_template_id,
-              exercise_id, sort_order, set_type, planned_sets, default_weight, default_reps, flags,
+              exercise_id, display_name_snapshot, sort_order, set_type, planned_sets, default_weight, default_reps, flags,
               created_at, updated_at
             """,
             wid,
             exercise_id.strip(),
+              (display_name_snapshot or "").strip(),
             int(sort_order),
               (set_type or "straight").strip().lower(),
             int(planned_sets),
