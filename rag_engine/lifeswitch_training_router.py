@@ -279,6 +279,7 @@ async def list_workout_template_exercises(workout_template_id: str):
 async def upsert_workout_template_exercise(
     workout_template_id: str,
     exercise_id: str = Query(..., min_length=1, max_length=200),
+    display_name_snapshot: str | None = Query(None, max_length=240),
     sort_order: int = Query(0),
     set_type: str = Query("straight", max_length=40),
     planned_sets: int = Query(3, ge=0, le=50),
