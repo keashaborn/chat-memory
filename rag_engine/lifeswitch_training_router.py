@@ -374,6 +374,224 @@ async def deactivate_my_conditioning_prescription(
 
 
 # ----------------------------
+# Conditioning Session Log
+# ----------------------------
+
+@router.post("/conditioning_sessions/create")
+async def create_conditioning_session(
+    owner_user_id: str = Query(..., min_length=1),
+    day: str = Query(..., min_length=10, max_length=10),
+    my_conditioning_prescription_id: str | None = Query(None),
+
+    name: str = Query(..., min_length=1, max_length=180),
+    category: str = Query("", max_length=120),
+    modality: str = Query("", max_length=120),
+
+    duration_min: float = Query(0, ge=0, le=1440),
+    intensity: str = Query("", max_length=400),
+    distance: str = Query("", max_length=160),
+    heart_rate_avg: float | None = Query(None, ge=0, le=260),
+    recovery_impact: str = Query("", max_length=400),
+    notes: str = Query("", max_length=1600),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
+
+    try:
+        day_val = _dt.date.fromisoformat(day)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid day")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.conditioning_session_log
+              (owner_user_id, my_conditioning_prescription_id, day,
+               name, category, modality,
+               duration_min, intensity, distance, heart_rate_avg,
+               recovery_impact, notes, is_active)
+            values
+              ($1::uuid, $2::uuid, $3::date,
+               $4, $5, $6,
+               $7, $8, $9, $10,
+               $11, $12, true)
+            returning
+              conditioning_session_log_id,
+              owner_user_id,
+              my_conditioning_prescription_id,
+              day,
+              name,
+              category,
+              modality,
+              duration_min,
+              intensity,
+              distance,
+              heart_rate_avg,
+              recovery_impact,
+              notes,
+              is_active,
+              created_at,
+              updated_at
+            """,
+            owner,
+            pid,
+            day_val,
+            name.strip(),
+            category.strip(),
+            modality.strip(),
+            float(duration_min),
+            intensity.strip(),
+            distance.strip(),
+            float(heart_rate_avg) if heart_rate_avg is not None else None,
+            recovery_impact.strip(),
+            notes.strip(),
+        )
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.get("/conditioning_sessions")
+async def list_conditioning_sessions(
+    owner_user_id: str = Query(..., min_length=1),
+    day: str | None = Query(None),
+    include_inactive: int = Query(0, ge=0, le=1),
+    limit: int = Query(100, ge=1, le=500),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    day_val = None
+    if day:
+        try:
+            day_val = _dt.date.fromisoformat(day)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid day")
+
+    conn = await _db()
+    try:
+        where = ["c.owner_user_id=$1::uuid"]
+        args = [owner]
+
+        if day_val:
+            args.append(day_val)
+            where.append(f"c.day=${len(args)}::date")
+
+        if not include_inactive:
+            where.append("c.is_active=true")
+
+        rows = await conn.fetch(
+            f"""
+            select
+              c.conditioning_session_log_id,
+              c.owner_user_id,
+              c.my_conditioning_prescription_id,
+              c.day,
+              c.name,
+              c.category,
+              c.modality,
+              c.duration_min,
+              c.intensity,
+              c.distance,
+              c.heart_rate_avg,
+              c.recovery_impact,
+              c.notes,
+              c.is_active,
+              c.created_at,
+              c.updated_at,
+              p.name as prescription_name
+            from {SCHEMA}.conditioning_session_log c
+            left join {SCHEMA}.my_conditioning_prescription p
+              on p.my_conditioning_prescription_id=c.my_conditioning_prescription_id
+            where {' and '.join(where)}
+            order by c.day desc, c.created_at desc
+            limit {int(limit)}
+            """,
+            *args,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.get("/conditioning_sessions/{conditioning_session_log_id}")
+async def get_conditioning_session(
+    conditioning_session_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            select
+              conditioning_session_log_id,
+              owner_user_id,
+              my_conditioning_prescription_id,
+              day,
+              name,
+              category,
+              modality,
+              duration_min,
+              intensity,
+              distance,
+              heart_rate_avg,
+              recovery_impact,
+              notes,
+              is_active,
+              created_at,
+              updated_at
+            from {SCHEMA}.conditioning_session_log
+            where conditioning_session_log_id=$1::uuid
+              and owner_user_id=$2::uuid
+            """,
+            sid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="conditioning session not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.post("/conditioning_sessions/{conditioning_session_log_id}/deactivate")
+async def deactivate_conditioning_session(
+    conditioning_session_log_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.conditioning_session_log
+               set is_active=false, updated_at=now()
+             where conditioning_session_log_id=$1::uuid
+               and owner_user_id=$2::uuid
+            returning
+              conditioning_session_log_id,
+              owner_user_id,
+              day,
+              name,
+              is_active,
+              updated_at
+            """,
+            sid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="conditioning session not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+# ----------------------------
 # Workout Templates
 # ----------------------------
 
