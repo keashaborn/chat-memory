@@ -148,6 +148,232 @@ async def deactivate_my_exercise(
         await conn.close()
 
 # ----------------------------
+# Conditioning Library / Prescriptions
+# ----------------------------
+
+@router.get("/conditioning_library")
+async def list_conditioning_library(
+    include_inactive: int = Query(0, ge=0, le=1),
+):
+    conn = await _db()
+    try:
+        where_active = "" if include_inactive else "where is_active=true"
+        rows = await conn.fetch(
+            f"""
+            select
+              conditioning_library_id, slug, name, category, modality,
+              purpose, default_duration_min, default_frequency_per_week,
+              default_intensity, interference_risk, joint_stress, equipment,
+              progression_notes, contraindication_notes,
+              sort_order, is_active, created_at, updated_at
+            from {SCHEMA}.conditioning_library
+            {where_active}
+            order by sort_order asc, lower(name) asc
+            """
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.get("/my_conditioning_prescriptions")
+async def list_my_conditioning_prescriptions(
+    owner_user_id: str = Query(..., min_length=1),
+    include_inactive: int = Query(0, ge=0, le=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        where_active = "" if include_inactive else "and p.is_active=true"
+        rows = await conn.fetch(
+            f"""
+            select
+              p.my_conditioning_prescription_id,
+              p.owner_user_id,
+              p.conditioning_library_id,
+              p.name,
+              p.category,
+              p.modality,
+              p.purpose,
+              p.target_duration_min,
+              p.target_frequency_per_week,
+              p.target_intensity,
+              p.preferred_timing,
+              p.recovery_constraints,
+              p.notes,
+              p.is_active,
+              p.created_at,
+              p.updated_at,
+              l.slug as library_slug,
+              l.name as library_name
+            from {SCHEMA}.my_conditioning_prescription p
+            left join {SCHEMA}.conditioning_library l
+              on l.conditioning_library_id=p.conditioning_library_id
+            where p.owner_user_id=$1::uuid
+              {where_active}
+            order by p.updated_at desc, lower(p.name) asc
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/my_conditioning_prescriptions/upsert")
+async def upsert_my_conditioning_prescription(
+    owner_user_id: str = Query(..., min_length=1),
+    my_conditioning_prescription_id: str | None = Query(None),
+    conditioning_library_id: str | None = Query(None),
+
+    name: str = Query(..., min_length=1, max_length=160),
+    category: str = Query("", max_length=120),
+    modality: str = Query("", max_length=120),
+    purpose: str = Query("", max_length=800),
+
+    target_duration_min: int = Query(0, ge=0, le=600),
+    target_frequency_per_week: float = Query(0, ge=0, le=21),
+    target_intensity: str = Query("", max_length=400),
+
+    preferred_timing: str = Query("", max_length=400),
+    recovery_constraints: str = Query("", max_length=800),
+    notes: str = Query("", max_length=1200),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
+    libid = _as_uuid(conditioning_library_id, "conditioning_library_id") if conditioning_library_id else None
+
+    conn = await _db()
+    try:
+        if pid:
+            row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.my_conditioning_prescription
+                  (my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
+                   name, category, modality, purpose,
+                   target_duration_min, target_frequency_per_week, target_intensity,
+                   preferred_timing, recovery_constraints, notes, is_active)
+                values
+                  ($1::uuid, $2::uuid, $3::uuid,
+                   $4, $5, $6, $7,
+                   $8, $9, $10,
+                   $11, $12, $13, true)
+                on conflict (my_conditioning_prescription_id) do update
+                  set conditioning_library_id=excluded.conditioning_library_id,
+                      name=excluded.name,
+                      category=excluded.category,
+                      modality=excluded.modality,
+                      purpose=excluded.purpose,
+                      target_duration_min=excluded.target_duration_min,
+                      target_frequency_per_week=excluded.target_frequency_per_week,
+                      target_intensity=excluded.target_intensity,
+                      preferred_timing=excluded.preferred_timing,
+                      recovery_constraints=excluded.recovery_constraints,
+                      notes=excluded.notes,
+                      is_active=true,
+                      updated_at=now()
+                returning
+                  my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
+                  name, category, modality, purpose,
+                  target_duration_min, target_frequency_per_week, target_intensity,
+                  preferred_timing, recovery_constraints, notes,
+                  is_active, created_at, updated_at
+                """,
+                pid,
+                owner,
+                libid,
+                name.strip(),
+                category.strip(),
+                modality.strip(),
+                purpose.strip(),
+                int(target_duration_min),
+                float(target_frequency_per_week),
+                target_intensity.strip(),
+                preferred_timing.strip(),
+                recovery_constraints.strip(),
+                notes.strip(),
+            )
+        else:
+            row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.my_conditioning_prescription
+                  (owner_user_id, conditioning_library_id,
+                   name, category, modality, purpose,
+                   target_duration_min, target_frequency_per_week, target_intensity,
+                   preferred_timing, recovery_constraints, notes, is_active)
+                values
+                  ($1::uuid, $2::uuid,
+                   $3, $4, $5, $6,
+                   $7, $8, $9,
+                   $10, $11, $12, true)
+                on conflict (owner_user_id, name) do update
+                  set conditioning_library_id=excluded.conditioning_library_id,
+                      category=excluded.category,
+                      modality=excluded.modality,
+                      purpose=excluded.purpose,
+                      target_duration_min=excluded.target_duration_min,
+                      target_frequency_per_week=excluded.target_frequency_per_week,
+                      target_intensity=excluded.target_intensity,
+                      preferred_timing=excluded.preferred_timing,
+                      recovery_constraints=excluded.recovery_constraints,
+                      notes=excluded.notes,
+                      is_active=true,
+                      updated_at=now()
+                returning
+                  my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
+                  name, category, modality, purpose,
+                  target_duration_min, target_frequency_per_week, target_intensity,
+                  preferred_timing, recovery_constraints, notes,
+                  is_active, created_at, updated_at
+                """,
+                owner,
+                libid,
+                name.strip(),
+                category.strip(),
+                modality.strip(),
+                purpose.strip(),
+                int(target_duration_min),
+                float(target_frequency_per_week),
+                target_intensity.strip(),
+                preferred_timing.strip(),
+                recovery_constraints.strip(),
+                notes.strip(),
+            )
+
+        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.post("/my_conditioning_prescriptions/{my_conditioning_prescription_id}/deactivate")
+async def deactivate_my_conditioning_prescription(
+    my_conditioning_prescription_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.my_conditioning_prescription
+               set is_active=false, updated_at=now()
+             where my_conditioning_prescription_id=$1::uuid
+               and owner_user_id=$2::uuid
+            returning my_conditioning_prescription_id, owner_user_id, is_active, updated_at
+            """,
+            pid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+# ----------------------------
 # Workout Templates
 # ----------------------------
 
