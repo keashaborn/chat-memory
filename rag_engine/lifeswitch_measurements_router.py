@@ -351,3 +351,43 @@ async def create_measurement_entry(
         return JSONResponse(_row_to_jsonable(row))
     finally:
         await conn.close()
+
+
+@router.post("/entries/{measurement_entry_id}/deactivate")
+async def deactivate_measurement_entry(
+    measurement_entry_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    entry_id = _as_uuid(measurement_entry_id, "measurement_entry_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            """
+            update public.lifeswitch_measurement_entries
+               set is_active=false,
+                   updated_at=now()
+             where measurement_entry_id=$1::uuid
+               and owner_user_id=$2
+               and is_active=true
+            returning
+              measurement_entry_id,
+              owner_user_id,
+              local_date,
+              entry_kind,
+              source,
+              is_active,
+              created_at,
+              updated_at
+            """,
+            entry_id,
+            owner,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="measurement entry not found")
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
