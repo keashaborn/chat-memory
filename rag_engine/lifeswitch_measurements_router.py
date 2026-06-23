@@ -105,6 +105,7 @@ async def list_measurement_entries(
 
               measurement_unit,
               source,
+              entry_kind,
               notes,
               skinfolds_json,
               scan_json,
@@ -154,6 +155,7 @@ async def create_measurement_entry(
 
     measurement_unit: str = Body("in"),
     source: str = Body("manual"),
+    entry_kind: str = Body("general"),
 
     notes: str = Body(""),
     skinfolds_json: dict | None = Body(None),
@@ -172,6 +174,7 @@ async def create_measurement_entry(
     weight_unit = _clean_text(weight_unit, 20) or "lb"
     measurement_unit = _clean_text(measurement_unit, 20) or "in"
     source = _clean_text(source, 80) or "manual"
+    entry_kind = _clean_text(entry_kind, 80) or "general"
     body_fat_method = _clean_text(body_fat_method, 80) or None
     notes = _clean_text(notes, 2000)
 
@@ -208,6 +211,7 @@ async def create_measurement_entry(
 
               measurement_unit,
               source,
+              entry_kind,
               notes,
               skinfolds_json,
               scan_json,
@@ -241,39 +245,40 @@ async def create_measurement_entry(
               $19,
               $20,
               $21,
-              $22::jsonb,
+              $22,
               $23::jsonb,
+              $24::jsonb,
 
               true
             )
-            on conflict (owner_user_id, local_date, source)
+            on conflict (owner_user_id, local_date, source, entry_kind)
               where is_active=true
             do update set
-              measured_at=excluded.measured_at,
+              measured_at=coalesce(excluded.measured_at, public.lifeswitch_measurement_entries.measured_at),
 
-              weight_value=excluded.weight_value,
+              weight_value=coalesce(excluded.weight_value, public.lifeswitch_measurement_entries.weight_value),
               weight_unit=excluded.weight_unit,
 
-              waist_value=excluded.waist_value,
-              abdomen_value=excluded.abdomen_value,
-              neck_value=excluded.neck_value,
-              chest_value=excluded.chest_value,
-              hip_value=excluded.hip_value,
+              waist_value=coalesce(excluded.waist_value, public.lifeswitch_measurement_entries.waist_value),
+              abdomen_value=coalesce(excluded.abdomen_value, public.lifeswitch_measurement_entries.abdomen_value),
+              neck_value=coalesce(excluded.neck_value, public.lifeswitch_measurement_entries.neck_value),
+              chest_value=coalesce(excluded.chest_value, public.lifeswitch_measurement_entries.chest_value),
+              hip_value=coalesce(excluded.hip_value, public.lifeswitch_measurement_entries.hip_value),
 
-              left_arm_value=excluded.left_arm_value,
-              right_arm_value=excluded.right_arm_value,
-              left_thigh_value=excluded.left_thigh_value,
-              right_thigh_value=excluded.right_thigh_value,
-              left_calf_value=excluded.left_calf_value,
-              right_calf_value=excluded.right_calf_value,
+              left_arm_value=coalesce(excluded.left_arm_value, public.lifeswitch_measurement_entries.left_arm_value),
+              right_arm_value=coalesce(excluded.right_arm_value, public.lifeswitch_measurement_entries.right_arm_value),
+              left_thigh_value=coalesce(excluded.left_thigh_value, public.lifeswitch_measurement_entries.left_thigh_value),
+              right_thigh_value=coalesce(excluded.right_thigh_value, public.lifeswitch_measurement_entries.right_thigh_value),
+              left_calf_value=coalesce(excluded.left_calf_value, public.lifeswitch_measurement_entries.left_calf_value),
+              right_calf_value=coalesce(excluded.right_calf_value, public.lifeswitch_measurement_entries.right_calf_value),
 
-              body_fat_percent=excluded.body_fat_percent,
-              body_fat_method=excluded.body_fat_method,
+              body_fat_percent=coalesce(excluded.body_fat_percent, public.lifeswitch_measurement_entries.body_fat_percent),
+              body_fat_method=coalesce(excluded.body_fat_method, public.lifeswitch_measurement_entries.body_fat_method),
 
               measurement_unit=excluded.measurement_unit,
-              notes=excluded.notes,
-              skinfolds_json=excluded.skinfolds_json,
-              scan_json=excluded.scan_json,
+              notes=case when excluded.notes <> '' then excluded.notes else public.lifeswitch_measurement_entries.notes end,
+              skinfolds_json=coalesce(excluded.skinfolds_json, public.lifeswitch_measurement_entries.skinfolds_json),
+              scan_json=coalesce(excluded.scan_json, public.lifeswitch_measurement_entries.scan_json),
 
               updated_at=now()
             returning
@@ -303,6 +308,7 @@ async def create_measurement_entry(
 
               measurement_unit,
               source,
+              entry_kind,
               notes,
               skinfolds_json,
               scan_json,
@@ -336,6 +342,7 @@ async def create_measurement_entry(
 
             measurement_unit,
             source,
+            entry_kind,
             notes,
             skinfolds,
             scan,

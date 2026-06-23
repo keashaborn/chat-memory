@@ -46,3 +46,12 @@ create index if not exists idx_lifeswitch_measurement_entries_owner_active
 create unique index if not exists ux_lifeswitch_measurement_entries_owner_date_source_active
   on lifeswitch_measurement_entries(owner_user_id, local_date, source)
   where is_active = true;
+
+alter table public.lifeswitch_measurement_entries
+  add column if not exists entry_kind text not null default 'general';
+
+drop index if exists ux_lifeswitch_measurement_entries_owner_date_source_active;
+
+create unique index if not exists ux_lifeswitch_measurement_entries_owner_date_source_kind_active
+  on public.lifeswitch_measurement_entries(owner_user_id, local_date, source, entry_kind)
+  where is_active = true;
