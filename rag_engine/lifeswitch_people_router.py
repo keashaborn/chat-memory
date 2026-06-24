@@ -124,6 +124,42 @@ async def list_relationships(
         await conn.close()
 
 
+
+@router.get("/profiles")
+async def list_profiles(
+    owner_user_id: str = Query(..., min_length=1),
+    user_ids: str = Query("", max_length=4000),
+):
+    # owner_user_id is required for auth-proxy symmetry. It is not used for filtering yet.
+    _as_uuid(owner_user_id, "owner_user_id")
+
+    ids: list[str] = []
+    for part in str(user_ids or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        ids.append(_as_uuid(part, "user_id"))
+
+    if not ids:
+        return JSONResponse([])
+
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select user_id, display_name, email, source, is_active, created_at, updated_at
+            from {SCHEMA}.user_profile
+            where user_id = any($1::uuid[])
+              and is_active=true
+            order by lower(display_name) asc
+            """,
+            ids,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
 @router.post("/relationships/upsert")
 async def upsert_relationship(
     owner_user_id: str = Query(..., min_length=1),
@@ -204,6 +240,7 @@ async def list_conversations(
                 when c.conversation_kind='direct' and c.direct_user_high_id=$1::uuid then c.direct_user_low_id
                 else null
               end as other_user_id,
+              coalesce(other_profile.display_name, '') as other_display_name,
               lm.message_id as last_message_id,
               lm.author_user_id as last_message_author_user_id,
               lm.body as last_message_body,
@@ -221,6 +258,13 @@ async def list_conversations(
               order by m.created_at desc
               limit 1
             ) lm on true
+            left join {SCHEMA}.user_profile other_profile
+              on other_profile.user_id = case
+                when c.conversation_kind='direct' and c.direct_user_low_id=$1::uuid then c.direct_user_high_id
+                when c.conversation_kind='direct' and c.direct_user_high_id=$1::uuid then c.direct_user_low_id
+                else null
+              end
+             and other_profile.is_active=true
             where c.is_active=true
             order by coalesce(lm.created_at, c.updated_at) desc
             limit $2
@@ -312,13 +356,17 @@ async def list_messages(
         rows = await conn.fetch(
             f"""
             select
-              message_id, conversation_id, author_user_id,
-              body, body_format, metadata,
-              is_deleted, created_at, updated_at
-            from {SCHEMA}.message
-            where conversation_id=$1::uuid
-              and is_deleted=false
-            order by created_at asc
+              m.message_id, m.conversation_id, m.author_user_id,
+              coalesce(up.display_name, '') as author_display_name,
+              m.body, m.body_format, m.metadata,
+              m.is_deleted, m.created_at, m.updated_at
+            from {SCHEMA}.message m
+            left join {SCHEMA}.user_profile up
+              on up.user_id=m.author_user_id
+             and up.is_active=true
+            where m.conversation_id=$1::uuid
+              and m.is_deleted=false
+            order by m.created_at asc
             limit $2
             """,
             cid,
