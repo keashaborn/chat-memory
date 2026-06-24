@@ -140,21 +140,29 @@ async def list_profiles(
             continue
         ids.append(_as_uuid(part, "user_id"))
 
-    if not ids:
-        return JSONResponse([])
-
     conn = await _db()
     try:
-        rows = await conn.fetch(
-            f"""
-            select user_id, display_name, email, source, is_active, created_at, updated_at
-            from {SCHEMA}.user_profile
-            where user_id = any($1::uuid[])
-              and is_active=true
-            order by lower(display_name) asc
-            """,
-            ids,
-        )
+        if ids:
+            rows = await conn.fetch(
+                f"""
+                select user_id, display_name, email, source, is_active, created_at, updated_at
+                from {SCHEMA}.user_profile
+                where user_id = any($1::uuid[])
+                  and is_active=true
+                order by lower(display_name) asc
+                """,
+                ids,
+            )
+        else:
+            rows = await conn.fetch(
+                f"""
+                select user_id, display_name, email, source, is_active, created_at, updated_at
+                from {SCHEMA}.user_profile
+                where is_active=true
+                order by lower(display_name) asc
+                """
+            )
+
         return JSONResponse([_row_to_jsonable(r) for r in rows])
     finally:
         await conn.close()
