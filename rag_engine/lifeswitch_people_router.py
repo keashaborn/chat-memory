@@ -168,6 +168,128 @@ async def list_profiles(
         await conn.close()
 
 
+
+async def _assert_relationship_participant(conn, relationship_id: str, owner_user_id: str):
+    row = await conn.fetchrow(
+        f"""
+        select
+          relationship_id, requester_user_id, addressee_user_id,
+          status, relationship_kind, label, notes, created_at, updated_at
+        from {SCHEMA}.relationship
+        where relationship_id=$1::uuid
+          and (requester_user_id=$2::uuid or addressee_user_id=$2::uuid)
+        limit 1
+        """,
+        relationship_id,
+        owner_user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="relationship not found")
+    return row
+
+
+@router.get("/relationships/{relationship_id}/permissions")
+async def list_relationship_permissions(
+    relationship_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    rid = _as_uuid(relationship_id, "relationship_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        await _assert_relationship_participant(conn, rid, owner)
+        rows = await conn.fetch(
+            f"""
+            select
+              relationship_permission_id,
+              relationship_id,
+              permission_scope,
+              permission_level,
+              is_enabled,
+              notes,
+              created_at,
+              updated_at
+            from {SCHEMA}.relationship_permission
+            where relationship_id=$1::uuid
+            order by permission_scope asc
+            """,
+            rid,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.post("/relationships/{relationship_id}/permissions/upsert")
+async def upsert_relationship_permission(
+    relationship_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+    permission_scope: str = Query(..., min_length=1),
+    permission_level: str = Query("none"),
+    is_enabled: int = Query(0, ge=0, le=1),
+    payload: dict = Body(default_factory=dict),
+):
+    rid = _as_uuid(relationship_id, "relationship_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    permission_scope = _clean_text(permission_scope, 80)
+    allowed_scopes = {
+        "messages:send",
+        "training:view",
+        "nutrition:view",
+        "measurements:view",
+        "plan:view",
+        "plan:comment",
+        "plan:edit",
+    }
+    if permission_scope not in allowed_scopes:
+        raise HTTPException(status_code=400, detail="invalid permission_scope")
+
+    permission_level = _clean_text(permission_level, 40) or "none"
+    if permission_level not in {"none", "view", "comment", "edit", "admin"}:
+        raise HTTPException(status_code=400, detail="invalid permission_level")
+
+    conn = await _db()
+    try:
+        await _assert_relationship_participant(conn, rid, owner)
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.relationship_permission (
+              relationship_id,
+              permission_scope,
+              permission_level,
+              is_enabled,
+              notes
+            )
+            values ($1::uuid, $2, $3, $4::boolean, $5)
+            on conflict (relationship_id, permission_scope)
+            do update set
+              permission_level=excluded.permission_level,
+              is_enabled=excluded.is_enabled,
+              notes=excluded.notes,
+              updated_at=now()
+            returning
+              relationship_permission_id,
+              relationship_id,
+              permission_scope,
+              permission_level,
+              is_enabled,
+              notes,
+              created_at,
+              updated_at
+            """,
+            rid,
+            permission_scope,
+            permission_level,
+            bool(is_enabled),
+            _clean_text(payload.get("notes", "") if isinstance(payload, dict) else "", 2000),
+        )
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
 @router.post("/relationships/upsert")
 async def upsert_relationship(
     owner_user_id: str = Query(..., min_length=1),
