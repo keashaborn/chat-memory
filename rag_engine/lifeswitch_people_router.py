@@ -174,6 +174,10 @@ async def _assert_relationship_participant(conn, relationship_id: str, owner_use
         f"""
         select
           relationship_id, requester_user_id, addressee_user_id,
+          case
+            when requester_user_id=$2::uuid then addressee_user_id
+            else requester_user_id
+          end as other_user_id,
           status, relationship_kind, label, notes, created_at, updated_at
         from {SCHEMA}.relationship
         where relationship_id=$1::uuid
@@ -204,6 +208,8 @@ async def list_relationship_permissions(
             select
               relationship_permission_id,
               relationship_id,
+              grantor_user_id,
+              grantee_user_id,
               permission_scope,
               permission_level,
               is_enabled,
@@ -239,9 +245,13 @@ async def upsert_relationship_permission(
         "training:view",
         "nutrition:view",
         "measurements:view",
+        "measurements:enter",
+        "measurements:edit_recent",
         "plan:view",
         "plan:comment",
         "plan:edit",
+        "workout_template:share",
+        "workout_template:copy",
     }
     if permission_scope not in allowed_scopes:
         raise HTTPException(status_code=400, detail="invalid permission_scope")
@@ -252,18 +262,22 @@ async def upsert_relationship_permission(
 
     conn = await _db()
     try:
-        await _assert_relationship_participant(conn, rid, owner)
+        rel = await _assert_relationship_participant(conn, rid, owner)
+        grantee = str(rel["other_user_id"])
+
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.relationship_permission (
               relationship_id,
+              grantor_user_id,
+              grantee_user_id,
               permission_scope,
               permission_level,
               is_enabled,
               notes
             )
-            values ($1::uuid, $2, $3, $4::boolean, $5)
-            on conflict (relationship_id, permission_scope)
+            values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::boolean, $7)
+            on conflict (relationship_id, grantor_user_id, grantee_user_id, permission_scope)
             do update set
               permission_level=excluded.permission_level,
               is_enabled=excluded.is_enabled,
@@ -272,6 +286,8 @@ async def upsert_relationship_permission(
             returning
               relationship_permission_id,
               relationship_id,
+              grantor_user_id,
+              grantee_user_id,
               permission_scope,
               permission_level,
               is_enabled,
@@ -280,6 +296,8 @@ async def upsert_relationship_permission(
               updated_at
             """,
             rid,
+            owner,
+            grantee,
             permission_scope,
             permission_level,
             bool(is_enabled),
