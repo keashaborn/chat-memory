@@ -125,6 +125,54 @@ async def list_relationships(
 
 
 
+
+@router.get("/permissions/granted-to-me")
+async def list_permissions_granted_to_me(
+    owner_user_id: str = Query(..., min_length=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              rp.relationship_permission_id,
+              rp.relationship_id,
+              rp.grantor_user_id,
+              coalesce(grantor_profile.display_name, '') as grantor_display_name,
+              rp.grantee_user_id,
+              coalesce(grantee_profile.display_name, '') as grantee_display_name,
+              rp.permission_scope,
+              rp.permission_level,
+              rp.is_enabled,
+              rp.notes,
+              r.relationship_kind,
+              r.status as relationship_status,
+              rp.created_at,
+              rp.updated_at
+            from {SCHEMA}.relationship_permission rp
+            join {SCHEMA}.relationship r
+              on r.relationship_id=rp.relationship_id
+            left join {SCHEMA}.user_profile grantor_profile
+              on grantor_profile.user_id=rp.grantor_user_id
+             and grantor_profile.is_active=true
+            left join {SCHEMA}.user_profile grantee_profile
+              on grantee_profile.user_id=rp.grantee_user_id
+             and grantee_profile.is_active=true
+            where rp.grantee_user_id=$1::uuid
+              and rp.is_enabled=true
+              and r.status='accepted'
+            order by lower(coalesce(grantor_profile.display_name, '')) asc,
+                     rp.permission_scope asc
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
 @router.get("/profiles")
 async def list_profiles(
     owner_user_id: str = Query(..., min_length=1),
