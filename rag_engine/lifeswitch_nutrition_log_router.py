@@ -15,6 +15,7 @@ if not DSN:
     raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
+PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
 
 def _as_uuid(s: str, name: str) -> str:
@@ -41,6 +42,40 @@ def _row_to_jsonable(r):
 
 async def _db():
     return await asyncpg.connect(DSN)
+
+
+async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
+    row = await conn.fetchrow(
+        f"""
+        select rp.relationship_permission_id
+        from {PEOPLE_SCHEMA}.relationship_permission rp
+        join {PEOPLE_SCHEMA}.relationship r
+          on r.relationship_id=rp.relationship_id
+        where rp.grantor_user_id=$1::uuid
+          and rp.grantee_user_id=$2::uuid
+          and rp.permission_scope=$3
+          and rp.is_enabled=true
+          and r.status='accepted'
+        limit 1
+        """,
+        grantor_user_id,
+        grantee_user_id,
+        scope,
+    )
+    return bool(row)
+
+
+async def _resolve_nutrition_view_target(conn, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
+    viewer = _as_uuid(viewer_user_id, "owner_user_id")
+    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
+    delegated = target != viewer
+
+    if delegated:
+        allowed = await _has_people_permission(conn, target, viewer, "nutrition:view")
+        if not allowed:
+            raise HTTPException(status_code=403, detail="nutrition:view permission required")
+
+    return target, delegated
 
 
 def _parse_day(day: str) -> _dt.date:
@@ -194,12 +229,15 @@ async def delete_log_entry(
 async def get_log_day(
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
+    target_user_id: str = Query("", max_length=80),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
     d = _parse_day(day)
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
+
         day_row = await conn.fetchrow(
             f"""
             select nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
@@ -210,7 +248,12 @@ async def get_log_day(
             d,
         )
         if not day_row:
-            return JSONResponse({"day": None, "entries": []})
+            return JSONResponse({
+                "day": None,
+                "entries": [],
+                "_target_user_id": owner,
+                "_delegated_view": delegated,
+            })
 
         ndid = str(day_row["nutrition_day_id"])
 
@@ -258,6 +301,11 @@ async def get_log_day(
             ndid,
         )
 
-        return JSONResponse({"day": _row_to_jsonable(day_row), "entries": [_row_to_jsonable(r) for r in rows]})
+        return JSONResponse({
+            "day": _row_to_jsonable(day_row),
+            "entries": [_row_to_jsonable(r) for r in rows],
+            "_target_user_id": owner,
+            "_delegated_view": delegated,
+        })
     finally:
         await conn.close()
