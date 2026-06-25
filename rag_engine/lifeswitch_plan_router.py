@@ -16,6 +16,7 @@ if not DSN:
     raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_PLAN_SCHEMA", "lifeswitch_plan")
+PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
 JSON_FIELDS = {
     "body_state",
@@ -110,15 +111,46 @@ async def _fetch_profile(conn, owner: str):
     )
 
 
+async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
+    row = await conn.fetchrow(
+        f"""
+        select rp.relationship_permission_id
+        from {PEOPLE_SCHEMA}.relationship_permission rp
+        join {PEOPLE_SCHEMA}.relationship r
+          on r.relationship_id=rp.relationship_id
+        where rp.grantor_user_id=$1::uuid
+          and rp.grantee_user_id=$2::uuid
+          and rp.permission_scope=$3
+          and rp.is_enabled=true
+          and r.status='accepted'
+        limit 1
+        """,
+        grantor_user_id,
+        grantee_user_id,
+        scope,
+    )
+    return bool(row)
+
+
 @router.get("/profile")
 async def get_plan_profile(
     owner_user_id: str = Query(..., min_length=1),
     create_if_missing: int = Query(1, ge=0, le=1),
+    target_user_id: str = Query("", max_length=80),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
+    delegated = target != viewer
+
     conn = await _db()
     try:
-        row = await _fetch_profile(conn, owner)
+        if delegated:
+            allowed = await _has_people_permission(conn, target, viewer, "plan:view")
+            if not allowed:
+                raise HTTPException(status_code=403, detail="plan:view permission required")
+            create_if_missing = 0
+
+        row = await _fetch_profile(conn, target)
         if not row and create_if_missing:
             row = await conn.fetchrow(
                 f"""
@@ -136,9 +168,17 @@ async def get_plan_profile(
                   monitoring_rules, coach_notes,
                   is_active, created_at, updated_at
                 """,
-                owner,
+                target,
             )
-        return JSONResponse(_row_to_jsonable(row) if row else None)
+
+        if not row:
+            return JSONResponse(None)
+
+        out = _row_to_jsonable(row)
+        out["_viewer_user_id"] = viewer
+        out["_target_user_id"] = target
+        out["_delegated_view"] = delegated
+        return JSONResponse(out)
     finally:
         await conn.close()
 
