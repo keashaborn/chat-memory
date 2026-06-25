@@ -132,6 +132,32 @@ async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: st
     return bool(row)
 
 
+async def _has_any_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scopes: list[str]) -> bool:
+    for scope in scopes:
+        if await _has_people_permission(conn, grantor_user_id, grantee_user_id, scope):
+            return True
+    return False
+
+
+async def _resolve_plan_target(
+    conn,
+    viewer_user_id: str,
+    target_user_id: str = "",
+    required_scopes: list[str] | None = None,
+) -> tuple[str, bool]:
+    viewer = _as_uuid(viewer_user_id, "owner_user_id")
+    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
+    delegated = target != viewer
+
+    if delegated:
+        scopes = required_scopes or ["plan:view"]
+        allowed = await _has_any_people_permission(conn, target, viewer, scopes)
+        if not allowed:
+            raise HTTPException(status_code=403, detail=f"{'/'.join(scopes)} permission required")
+
+    return target, delegated
+
+
 @router.get("/profile")
 async def get_plan_profile(
     owner_user_id: str = Query(..., min_length=1),
@@ -139,15 +165,11 @@ async def get_plan_profile(
     target_user_id: str = Query("", max_length=80),
 ):
     viewer = _as_uuid(owner_user_id, "owner_user_id")
-    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
-    delegated = target != viewer
 
     conn = await _db()
     try:
+        target, delegated = await _resolve_plan_target(conn, viewer, target_user_id, ["plan:view"])
         if delegated:
-            allowed = await _has_people_permission(conn, target, viewer, "plan:view")
-            if not allowed:
-                raise HTTPException(status_code=403, detail="plan:view permission required")
             create_if_missing = 0
 
         row = await _fetch_profile(conn, target)
@@ -187,6 +209,7 @@ async def get_plan_profile(
 async def upsert_plan_profile(
     owner_user_id: str = Query(..., min_length=1),
     snapshot_reason: str = Query("manual_update", max_length=120),
+    target_user_id: str = Query("", max_length=80),
 
     phase: str = Body("maintenance"),
     phase_label: str = Body(""),
@@ -205,7 +228,7 @@ async def upsert_plan_profile(
 
     coach_notes: str = Body(""),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
 
     phase = _clean_text(phase, 40)
     if phase not in VALID_PHASES:
@@ -213,6 +236,8 @@ async def upsert_plan_profile(
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_plan_target(conn, viewer, target_user_id, ["plan:edit"])
+
         async with conn.transaction():
             existing = await _fetch_profile(conn, owner)
 
@@ -294,7 +319,127 @@ async def upsert_plan_profile(
                 _clean_text(coach_notes, 10000),
             )
 
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+        out = _row_to_jsonable(row) if row else {"error": "upsert_failed"}
+        if isinstance(out, dict):
+            out["_viewer_user_id"] = viewer
+            out["_target_user_id"] = owner
+            out["_delegated_view"] = delegated
+        return JSONResponse(out)
+    finally:
+        await conn.close()
+
+
+@router.get("/profile/comments")
+async def list_plan_comments(
+    owner_user_id: str = Query(..., min_length=1),
+    target_user_id: str = Query("", max_length=80),
+    limit: int = Query(50, ge=1, le=200),
+):
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    conn = await _db()
+    try:
+        target, delegated = await _resolve_plan_target(
+            conn,
+            viewer,
+            target_user_id,
+            ["plan:view", "plan:comment", "plan:edit"],
+        )
+
+        profile = await _fetch_profile(conn, target)
+        if not profile:
+            return JSONResponse([])
+
+        rows = await conn.fetch(
+            f"""
+            select
+              c.plan_comment_id,
+              c.plan_profile_id,
+              c.target_user_id,
+              c.author_user_id,
+              coalesce(up.display_name, c.author_user_id::text) as author_display_name,
+              c.comment_text,
+              c.comment_kind,
+              c.is_active,
+              c.resolved_at,
+              c.created_at,
+              c.updated_at
+            from {SCHEMA}.plan_comment c
+            left join {PEOPLE_SCHEMA}.user_profile up
+              on up.user_id = c.author_user_id
+            where c.plan_profile_id=$1::uuid
+              and c.target_user_id=$2::uuid
+              and c.is_active=true
+            order by c.created_at desc
+            limit $3
+            """,
+            str(profile["plan_profile_id"]),
+            target,
+            int(limit),
+        )
+
+        out = [_row_to_jsonable(r) for r in rows]
+        return JSONResponse(out)
+    finally:
+        await conn.close()
+
+
+@router.post("/profile/comments/create")
+async def create_plan_comment(
+    owner_user_id: str = Query(..., min_length=1),
+    target_user_id: str = Query("", max_length=80),
+    comment_text: str = Body(...),
+    comment_kind: str = Body("comment"),
+):
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    text = _clean_text(comment_text, 4000)
+    kind = _clean_text(comment_kind, 80) or "comment"
+
+    if not text:
+        raise HTTPException(status_code=400, detail="comment_text required")
+
+    conn = await _db()
+    try:
+        target, delegated = await _resolve_plan_target(
+            conn,
+            viewer,
+            target_user_id,
+            ["plan:comment", "plan:edit"],
+        )
+
+        profile = await _fetch_profile(conn, target)
+        if not profile:
+            raise HTTPException(status_code=404, detail="target plan not found")
+
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.plan_comment
+              (plan_profile_id, target_user_id, author_user_id, comment_text, comment_kind)
+            values
+              ($1::uuid, $2::uuid, $3::uuid, $4, $5)
+            returning
+              plan_comment_id,
+              plan_profile_id,
+              target_user_id,
+              author_user_id,
+              comment_text,
+              comment_kind,
+              is_active,
+              resolved_at,
+              created_at,
+              updated_at
+            """,
+            str(profile["plan_profile_id"]),
+            target,
+            viewer,
+            text,
+            kind,
+        )
+
+        out = _row_to_jsonable(row)
+        out["_viewer_user_id"] = viewer
+        out["_target_user_id"] = target
+        out["_delegated_view"] = delegated
+        return JSONResponse(out)
     finally:
         await conn.close()
 
