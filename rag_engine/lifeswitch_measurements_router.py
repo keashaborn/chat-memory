@@ -16,6 +16,8 @@ DSN = os.getenv("POSTGRES_DSN") or ""
 if not DSN:
     raise RuntimeError("POSTGRES_DSN missing")
 
+PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
+
 
 def _json_safe(v):
     if isinstance(v, uuid.UUID):
@@ -65,17 +67,54 @@ async def _db():
     return await asyncpg.connect(DSN)
 
 
+async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
+    row = await conn.fetchrow(
+        f"""
+        select rp.relationship_permission_id
+        from {PEOPLE_SCHEMA}.relationship_permission rp
+        join {PEOPLE_SCHEMA}.relationship r
+          on r.relationship_id=rp.relationship_id
+        where rp.grantor_user_id=$1::uuid
+          and rp.grantee_user_id=$2::uuid
+          and rp.permission_scope=$3
+          and rp.is_enabled=true
+          and r.status='accepted'
+        limit 1
+        """,
+        grantor_user_id,
+        grantee_user_id,
+        scope,
+    )
+    return bool(row)
+
+
+async def _resolve_measurements_view_target(conn, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
+    viewer = _as_uuid(viewer_user_id, "owner_user_id")
+    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
+    delegated = target != viewer
+
+    if delegated:
+        allowed = await _has_people_permission(conn, target, viewer, "measurements:view")
+        if not allowed:
+            raise HTTPException(status_code=403, detail="measurements:view permission required")
+
+    return target, delegated
+
+
 @router.get("/entries")
 async def list_measurement_entries(
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(90, ge=1, le=500),
     include_inactive: int = Query(0, ge=0, le=1),
+    target_user_id: str = Query("", max_length=80),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
     where_active = "" if include_inactive else "and is_active=true"
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_measurements_view_target(conn, viewer, target_user_id)
+
         rows = await conn.fetch(
             f"""
             select
