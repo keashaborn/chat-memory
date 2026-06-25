@@ -1329,12 +1329,15 @@ async def list_training_set_log_segments(
     training_session_id: str,
     training_set_log_id: str,
     owner_user_id: str = Query(..., min_length=1),
+    target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
     conn = await _db()
     try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+
         parent = await conn.fetchrow(
             f"""
             select training_set_log_id
@@ -1363,12 +1366,16 @@ async def list_training_set_log_segments(
               volume,
               notes,
               created_at,
-              updated_at
+              updated_at,
+              $2::uuid as _target_user_id,
+              $3::boolean as _delegated_view
             from {SCHEMA}.training_set_log_segment
             where training_set_log_id=$1::uuid
             order by segment_index asc, created_at asc
             """,
             setid,
+            owner,
+            delegated,
         )
         return JSONResponse([_row_to_jsonable(r) for r in rows])
     finally:
