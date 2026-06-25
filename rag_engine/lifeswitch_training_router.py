@@ -1046,23 +1046,30 @@ async def list_training_sessions(
 async def get_training_session(
     training_session_id: str,
     owner_user_id: str = Query(..., min_length=1),
+    target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+
         row = await conn.fetchrow(
             f"""
             select
               training_session_id, owner_user_id, day, workout_template_id,
-              name, notes, started_at, finished_at, is_active, created_at, updated_at
+              name, notes, started_at, finished_at, is_active, created_at, updated_at,
+              $3::uuid as _target_user_id,
+              $4::boolean as _delegated_view
             from {SCHEMA}.training_session
             where training_session_id=$1::uuid
               and owner_user_id=$2::uuid
             """,
             sid,
             owner,
+            owner,
+            delegated,
         )
         if not row:
             raise HTTPException(status_code=404, detail="session not found")
@@ -1106,12 +1113,15 @@ async def list_training_session_sets(
     training_session_id: str,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
+    target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+
         where_active = "" if include_inactive else "and is_active=true"
         rows = await conn.fetch(
             f"""
@@ -1120,7 +1130,9 @@ async def list_training_session_sets(
               workout_template_id, exercise_id, exercise_name,
               set_type,
               exercise_sort_order, set_index, weight, reps, volume,
-              flags, notes, is_active, created_at, updated_at
+              flags, notes, is_active, created_at, updated_at,
+              $3::uuid as _target_user_id,
+              $4::boolean as _delegated_view
             from {SCHEMA}.training_set_log
             where training_session_id=$1::uuid
               and owner_user_id=$2::uuid
@@ -1129,6 +1141,8 @@ async def list_training_session_sets(
             """,
             sid,
             owner,
+            owner,
+            delegated,
         )
         return JSONResponse([_row_to_jsonable(r) for r in rows])
     finally:
