@@ -15,6 +15,7 @@ if not DSN:
     raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_TRAINING_SCHEMA", "lifeswitch_training")
+PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
 def _json_safe(v):
     if isinstance(v, uuid.UUID):
@@ -37,6 +38,41 @@ def _as_uuid(s: str, name: str) -> str:
 
 async def _db():
     return await asyncpg.connect(DSN)
+
+
+async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
+    row = await conn.fetchrow(
+        f"""
+        select rp.relationship_permission_id
+        from {PEOPLE_SCHEMA}.relationship_permission rp
+        join {PEOPLE_SCHEMA}.relationship r
+          on r.relationship_id=rp.relationship_id
+        where rp.grantor_user_id=$1::uuid
+          and rp.grantee_user_id=$2::uuid
+          and rp.permission_scope=$3
+          and rp.is_enabled=true
+          and r.status='accepted'
+        limit 1
+        """,
+        grantor_user_id,
+        grantee_user_id,
+        scope,
+    )
+    return bool(row)
+
+
+async def _resolve_training_view_target(conn, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
+    viewer = _as_uuid(viewer_user_id, "owner_user_id")
+    target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
+    delegated = target != viewer
+
+    if delegated:
+        allowed = await _has_people_permission(conn, target, viewer, "training:view")
+        if not allowed:
+            raise HTTPException(status_code=403, detail="training:view permission required")
+
+    return target, delegated
+
 
 # ----------------------------
 # My Exercises
@@ -458,8 +494,9 @@ async def list_conditioning_sessions(
     day: str | None = Query(None),
     include_inactive: int = Query(0, ge=0, le=1),
     limit: int = Query(100, ge=1, le=500),
+    target_user_id: str = Query("", max_length=80),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
 
     day_val = None
     if day:
@@ -470,8 +507,10 @@ async def list_conditioning_sessions(
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+
         where = ["c.owner_user_id=$1::uuid"]
-        args = [owner]
+        args = [owner, delegated]
 
         if day_val:
             args.append(day_val)
@@ -499,6 +538,8 @@ async def list_conditioning_sessions(
               c.is_active,
               c.created_at,
               c.updated_at,
+              $1::uuid as _target_user_id,
+              $2::boolean as _delegated_view,
               p.name as prescription_name
             from {SCHEMA}.conditioning_session_log c
             left join {SCHEMA}.my_conditioning_prescription p
@@ -952,8 +993,9 @@ async def list_training_sessions(
     day: str | None = Query(None),
     include_inactive: int = Query(0, ge=0, le=1),
     limit: int = Query(100, ge=1, le=500),
+    target_user_id: str = Query("", max_length=80),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = _as_uuid(owner_user_id, "owner_user_id")
 
     day_val = None
     if day:
@@ -964,8 +1006,10 @@ async def list_training_sessions(
 
     conn = await _db()
     try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+
         where = ["s.owner_user_id=$1::uuid"]
-        args = [owner]
+        args = [owner, delegated]
         if day_val:
             args.append(day_val)
             where.append(f"s.day=${len(args)}::date")
@@ -978,6 +1022,8 @@ async def list_training_sessions(
               s.training_session_id, s.owner_user_id, s.day, s.workout_template_id,
               s.name, s.notes, s.started_at, s.finished_at, s.is_active,
               s.created_at, s.updated_at,
+              $1::uuid as _target_user_id,
+              $2::boolean as _delegated_view,
               coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
               coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
               coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume
