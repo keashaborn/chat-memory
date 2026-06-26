@@ -39,6 +39,13 @@ def _as_uuid(s: str, name: str) -> str:
         raise HTTPException(status_code=400, detail=f"invalid {name}")
 
 
+def _clean_text(v, max_len: int | None = None) -> str:
+    s = str(v or "").strip()
+    if max_len is not None and len(s) > max_len:
+        s = s[:max_len]
+    return s
+
+
 
 def _new_share_token() -> str:
     return secrets.token_urlsafe(32)
