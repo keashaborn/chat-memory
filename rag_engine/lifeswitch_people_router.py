@@ -5,6 +5,8 @@ import uuid
 import json
 import decimal
 import datetime as _dt
+import hashlib
+import secrets
 import asyncpg
 
 from fastapi import APIRouter, HTTPException, Query, Body
@@ -66,6 +68,24 @@ def _direct_pair(a: str, b: str) -> tuple[str, str]:
     return str(low), str(high)
 
 
+def _new_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _token_hash(token: str) -> str:
+    raw = str(token or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="token required")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _safe_invitation_row(row):
+    out = _row_to_jsonable(row)
+    if isinstance(out, dict):
+        out.pop("token_hash", None)
+    return out
+
+
 async def _db():
     return await asyncpg.connect(DSN)
 
@@ -85,6 +105,322 @@ async def _assert_member(conn, conversation_id: str, owner_user_id: str) -> None
     )
     if not row:
         raise HTTPException(status_code=404, detail="conversation not found")
+
+
+@router.post("/invitations/create")
+async def create_invitation(
+    owner_user_id: str = Query(..., min_length=1),
+    relationship_kind: str = Query("friend"),
+    label: str = Body(""),
+    notes: str = Body(""),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    relationship_kind = _clean_text(relationship_kind, 80) or "friend"
+    if relationship_kind not in {"friend", "training_partner", "plan_helper", "coach"}:
+        raise HTTPException(status_code=400, detail="invalid relationship_kind")
+
+    token = _new_invite_token()
+    thash = _token_hash(token)
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            insert into {SCHEMA}.invitation (
+              token_hash,
+              created_by_user_id,
+              relationship_kind,
+              label,
+              notes,
+              status
+            )
+            values ($1, $2::uuid, $3, $4, $5, 'pending')
+            returning
+              invitation_id,
+              token_hash,
+              created_by_user_id,
+              accepted_by_user_id,
+              relationship_kind,
+              label,
+              notes,
+              status,
+              expires_at,
+              accepted_at,
+              revoked_at,
+              created_at,
+              updated_at
+            """,
+            thash,
+            owner,
+            relationship_kind,
+            _clean_text(label, 200),
+            _clean_text(notes, 2000),
+        )
+
+        out = _safe_invitation_row(row)
+        out["token"] = token
+        return JSONResponse(out)
+    finally:
+        await conn.close()
+
+
+@router.get("/invitations")
+async def list_invitations(
+    owner_user_id: str = Query(..., min_length=1),
+    include_inactive: int = Query(0, ge=0, le=1),
+):
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+    status_filter = "" if include_inactive else "and i.status='pending'"
+
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select
+              i.invitation_id,
+              i.created_by_user_id,
+              coalesce(creator.display_name, i.created_by_user_id::text) as creator_display_name,
+              i.accepted_by_user_id,
+              coalesce(accepted.display_name, '') as accepted_display_name,
+              i.relationship_kind,
+              i.label,
+              i.notes,
+              i.status,
+              i.expires_at,
+              i.accepted_at,
+              i.revoked_at,
+              i.created_at,
+              i.updated_at
+            from {SCHEMA}.invitation i
+            left join {SCHEMA}.user_profile creator
+              on creator.user_id=i.created_by_user_id
+            left join {SCHEMA}.user_profile accepted
+              on accepted.user_id=i.accepted_by_user_id
+            where i.created_by_user_id=$1::uuid
+              {status_filter}
+            order by i.created_at desc
+            limit 100
+            """,
+            owner,
+        )
+        return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.get("/invitations/preview")
+async def preview_invitation(
+    token: str = Query(..., min_length=10),
+):
+    thash = _token_hash(token)
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            select
+              i.invitation_id,
+              i.created_by_user_id,
+              coalesce(creator.display_name, i.created_by_user_id::text) as creator_display_name,
+              i.relationship_kind,
+              i.label,
+              i.notes,
+              i.status,
+              i.expires_at,
+              i.accepted_at,
+              i.revoked_at,
+              i.created_at,
+              i.updated_at
+            from {SCHEMA}.invitation i
+            left join {SCHEMA}.user_profile creator
+              on creator.user_id=i.created_by_user_id
+            where i.token_hash=$1
+            limit 1
+            """,
+            thash,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="invitation not found")
+
+        out = _row_to_jsonable(row)
+        if out.get("status") == "pending" and str(out.get("expires_at") or ""):
+            # The accept route enforces expiration. Preview reports current row.
+            pass
+        return JSONResponse(out)
+    finally:
+        await conn.close()
+
+
+@router.post("/invitations/accept")
+async def accept_invitation(
+    owner_user_id: str = Query(..., min_length=1),
+    token: str = Query(..., min_length=10),
+):
+    accepter = _as_uuid(owner_user_id, "owner_user_id")
+    thash = _token_hash(token)
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            inv = await conn.fetchrow(
+                f"""
+                select
+                  invitation_id,
+                  created_by_user_id,
+                  accepted_by_user_id,
+                  relationship_kind,
+                  label,
+                  notes,
+                  status,
+                  expires_at
+                from {SCHEMA}.invitation
+                where token_hash=$1
+                for update
+                """,
+                thash,
+            )
+
+            if not inv:
+                raise HTTPException(status_code=404, detail="invitation not found")
+
+            inviter = str(inv["created_by_user_id"])
+            if inviter == accepter:
+                raise HTTPException(status_code=400, detail="cannot accept your own invitation")
+
+            if str(inv["status"]) != "pending":
+                raise HTTPException(status_code=400, detail=f"invitation is {inv['status']}")
+
+            expires_at = inv["expires_at"]
+            if expires_at and expires_at < _dt.datetime.now(_dt.timezone.utc):
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.invitation
+                       set status='expired',
+                           updated_at=now()
+                     where invitation_id=$1::uuid
+                    """,
+                    str(inv["invitation_id"]),
+                )
+                raise HTTPException(status_code=400, detail="invitation expired")
+
+            row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.relationship (
+                  requester_user_id,
+                  addressee_user_id,
+                  status,
+                  relationship_kind,
+                  label,
+                  notes
+                )
+                values ($1::uuid, $2::uuid, 'accepted', $3, $4, $5)
+                on conflict (
+                  least(requester_user_id, addressee_user_id),
+                  greatest(requester_user_id, addressee_user_id)
+                )
+                do update set
+                  status='accepted',
+                  relationship_kind=excluded.relationship_kind,
+                  label=excluded.label,
+                  notes=excluded.notes,
+                  updated_at=now()
+                returning
+                  relationship_id,
+                  requester_user_id,
+                  addressee_user_id,
+                  status,
+                  relationship_kind,
+                  label,
+                  notes,
+                  created_at,
+                  updated_at
+                """,
+                inviter,
+                accepter,
+                str(inv["relationship_kind"]),
+                _clean_text(inv["label"], 200),
+                _clean_text(inv["notes"], 2000),
+            )
+
+            updated_inv = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.invitation
+                   set status='accepted',
+                       accepted_by_user_id=$2::uuid,
+                       accepted_at=now(),
+                       updated_at=now()
+                 where invitation_id=$1::uuid
+                returning
+                  invitation_id,
+                  created_by_user_id,
+                  accepted_by_user_id,
+                  relationship_kind,
+                  label,
+                  notes,
+                  status,
+                  expires_at,
+                  accepted_at,
+                  revoked_at,
+                  created_at,
+                  updated_at
+                """,
+                str(inv["invitation_id"]),
+                accepter,
+            )
+
+        return JSONResponse({
+            "invitation": _row_to_jsonable(updated_inv),
+            "relationship": _row_to_jsonable(row),
+        })
+    finally:
+        await conn.close()
+
+
+@router.post("/invitations/{invitation_id}/revoke")
+async def revoke_invitation(
+    invitation_id: str,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    iid = _as_uuid(invitation_id, "invitation_id")
+    owner = _as_uuid(owner_user_id, "owner_user_id")
+
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.invitation
+               set status='revoked',
+                   revoked_at=now(),
+                   updated_at=now()
+             where invitation_id=$1::uuid
+               and created_by_user_id=$2::uuid
+               and status='pending'
+            returning
+              invitation_id,
+              created_by_user_id,
+              accepted_by_user_id,
+              relationship_kind,
+              label,
+              notes,
+              status,
+              expires_at,
+              accepted_at,
+              revoked_at,
+              created_at,
+              updated_at
+            """,
+            iid,
+            owner,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="pending invitation not found")
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
 
 
 @router.get("/relationships")
