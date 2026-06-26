@@ -540,11 +540,33 @@ async def list_profiles(
         else:
             rows = await conn.fetch(
                 f"""
-                select user_id, display_name, email, source, is_active, created_at, updated_at
-                from {SCHEMA}.user_profile
-                where is_active=true
-                order by lower(display_name) asc
-                """
+                with related as (
+                  select $1::uuid as user_id
+                  union
+                  select
+                    case
+                      when r.requester_user_id=$1::uuid then r.addressee_user_id
+                      else r.requester_user_id
+                    end as user_id
+                  from {SCHEMA}.relationship r
+                  where (r.requester_user_id=$1::uuid or r.addressee_user_id=$1::uuid)
+                    and r.status in ('pending','accepted')
+                )
+                select
+                  p.user_id,
+                  p.display_name,
+                  p.email,
+                  p.source,
+                  p.is_active,
+                  p.created_at,
+                  p.updated_at
+                from related rel
+                join {SCHEMA}.user_profile p
+                  on p.user_id=rel.user_id
+                 and p.is_active=true
+                order by lower(p.display_name) asc
+                """,
+                owner_user_id,
             )
 
         return JSONResponse([_row_to_jsonable(r) for r in rows])
