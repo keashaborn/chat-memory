@@ -5,84 +5,87 @@ from typing import List, Dict, Any, Tuple
 from openai import OpenAI
 
 # ----------------------------
-# Provider routing (OpenAI-compatible)
+# OpenAI-only gateway
 # ----------------------------
-# Model strings can be:
-#   "gpt-5.1"                     -> defaults to provider "openai"
-#   "xai:grok-2"                  -> provider "xai", model "grok-2"
-#   "groq:llama-3.3-70b-versatile"-> provider "groq", model "llama-3.3-70b-versatile"
 #
-# Env vars:
-#   OPENAI_API_KEY
-#   XAI_API_KEY
-#   GROQ_API_KEY
-#   TOGETHER_API_KEY
-#   FIREWORKS_API_KEY
-#   OPENROUTER_API_KEY
-#   PERPLEXITY_API_KEY
-#   DEEPSEEK_API_KEY
+# This module intentionally supports OpenAI only.
 #
-# Optional base URL overrides (rarely needed):
-#   OPENAI_BASE_URL, XAI_BASE_URL, GROQ_BASE_URL, TOGETHER_BASE_URL, FIREWORKS_BASE_URL,
-#   OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, DEEPSEEK_BASE_URL
+# Historical provider-prefixed model strings such as:
 #
-# Defaults:
-_DEFAULT_BASE_URL = {
-    "openai":    "https://api.openai.com/v1",
-    "xai":       "https://api.x.ai/v1",
-    "groq":      "https://api.groq.com/openai/v1",
-    "together":  "https://api.together.xyz/v1",
-    "fireworks": "https://api.fireworks.ai/inference/v1",
-    "openrouter":"https://openrouter.ai/api/v1",
-    "perplexity":"https://api.perplexity.ai",
-    "deepseek":  "https://api.deepseek.com",
+#   xai:grok-*
+#   groq:*
+#   openrouter:*
+#
+# are normalized back to the default OpenAI chat model instead of being
+# routed to another provider. This prevents stale cookies, old UI settings,
+# or future env vars from reactivating non-OpenAI providers accidentally.
+
+DEFAULT_CHAT_MODEL = (os.getenv("VANTAGE_MODEL") or os.getenv("OPENAI_CHAT_MODEL") or "gpt-5.2").strip()
+
+_ALLOWED_CHAT_MODELS = {
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
 }
 
-_DEFAULT_KEY_ENV = {
-    "openai":    "OPENAI_API_KEY",
-    "xai":       "XAI_API_KEY",
-    "groq":      "GROQ_API_KEY",
-    "together":  "TOGETHER_API_KEY",
-    "fireworks": "FIREWORKS_API_KEY",
-    "openrouter":"OPENROUTER_API_KEY",
-    "perplexity":"PERPLEXITY_API_KEY",
-    "deepseek":  "DEEPSEEK_API_KEY",
-}
+_client_cache: Dict[Tuple[str, str], OpenAI] = {}
 
-_client_cache: Dict[Tuple[str, str, str], OpenAI] = {}
 
-def _split_model(model: str) -> Tuple[str, str]:
-    """Return (provider, model_name). Default provider is 'openai'."""
-    if model and ":" in model:
-        prov, name = model.split(":", 1)
-        prov = prov.strip().lower()
-        name = name.strip()
-        if prov and name:
-            return prov, name
-    return "openai", (model or "gpt-5.1")
+def normalize_chat_model(model: str | None, default: str | None = None) -> str:
+    """
+    Return an allowed OpenAI chat model.
 
-def _get_client(provider: str) -> OpenAI:
+    Any provider-prefixed model, unknown model, blank value, or stale Grok/xAI
+    cookie is normalized to the default OpenAI model.
+    """
+    fallback = (default or DEFAULT_CHAT_MODEL or "gpt-5.2").strip()
+    if fallback not in _ALLOWED_CHAT_MODELS:
+        fallback = "gpt-5.2"
+
+    raw = str(model or "").strip()
+    if not raw:
+        return fallback
+
+    # OpenAI consolidation rule: provider prefixes are not accepted.
+    if ":" in raw:
+        return fallback
+
+    if raw in _ALLOWED_CHAT_MODELS:
+        return raw
+
+    return fallback
+
+
+def _split_model(model: str | None) -> Tuple[str, str]:
+    """
+    Compatibility helper for older callers.
+
+    Provider is always openai. Model is normalized to the OpenAI allowlist.
+    """
+    return "openai", normalize_chat_model(model)
+
+
+def _get_client(provider: str = "openai") -> OpenAI:
     provider = (provider or "openai").strip().lower()
+    if provider != "openai":
+        raise RuntimeError("Only OpenAI provider is enabled")
 
-    base_env = f"{provider.upper()}_BASE_URL"
-    key_env = _DEFAULT_KEY_ENV.get(provider, f"{provider.upper()}_API_KEY")
-
-    base_url = os.getenv(base_env) or _DEFAULT_BASE_URL.get(provider)
-    api_key = os.getenv(key_env)
-
-    if not base_url:
-        raise RuntimeError(f"Unknown provider '{provider}' and no {base_env} set")
+    base_url = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key:
-        raise RuntimeError(f"Missing API key for provider '{provider}'. Set {key_env}.")
+        raise RuntimeError("Missing OPENAI_API_KEY")
 
-    cache_key = (provider, base_url, key_env)
+    cache_key = (base_url, "OPENAI_API_KEY")
     c = _client_cache.get(cache_key)
     if c is None:
-        # OpenAI SDK supports OpenAI-compatible base_url + api_key routing.
         c = OpenAI(api_key=api_key, base_url=base_url)
         _client_cache[cache_key] = c
     return c
+
 
 # ----------------------------
 # Public helpers
@@ -90,23 +93,29 @@ def _get_client(provider: str) -> OpenAI:
 
 def embed_text(text: str, model: str = "text-embedding-3-large") -> List[float]:
     """
-    Embeddings are assumed to be OpenAI by default.
-    If you want embeddings per-provider later, we can extend this the same way as chat.
+    Run an OpenAI embedding request.
+
+    Embeddings are OpenAI-only. Provider-prefixed embedding model strings are
+    not accepted; callers should pass a plain OpenAI embedding model name.
     """
-    provider, model_name = _split_model(model)
-    c = _get_client(provider)
+    model_name = str(model or "text-embedding-3-large").strip()
+    if ":" in model_name:
+        model_name = "text-embedding-3-large"
+
+    c = _get_client("openai")
     r = c.embeddings.create(model=model_name, input=text)
     return r.data[0].embedding
 
+
 def complete_chat_messages(
     messages: List[Dict[str, str]],
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.2",
     temperature: float = 0.4,
     top_p: float = 1.0
 ) -> str:
-    """Run a chat completion with an explicit OpenAI messages[] list."""
-    provider, model_name = _split_model(model)
-    c = _get_client(provider)
+    """Run an OpenAI chat completion with an explicit messages[] list."""
+    model_name = normalize_chat_model(model)
+    c = _get_client("openai")
     r = c.chat.completions.create(
         model=model_name,
         messages=messages,
@@ -115,10 +124,11 @@ def complete_chat_messages(
     )
     return r.choices[0].message.content
 
-def complete_chat(system_prompt: str, user_message: str, model: str = "gpt-5.1") -> str:
-    """Run a chat completion with a system prompt and user message."""
-    provider, model_name = _split_model(model)
-    c = _get_client(provider)
+
+def complete_chat(system_prompt: str, user_message: str, model: str = "gpt-5.2") -> str:
+    """Run an OpenAI chat completion with a system prompt and user message."""
+    model_name = normalize_chat_model(model)
+    c = _get_client("openai")
     r = c.chat.completions.create(
         model=model_name,
         messages=[

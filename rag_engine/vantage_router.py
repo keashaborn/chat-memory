@@ -14,7 +14,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from .openai_client import complete_chat, complete_chat_messages
+from .openai_client import complete_chat, complete_chat_messages, normalize_chat_model
 from .prompt_builder import build_system_prompt
 from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve
@@ -785,7 +785,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             # deterministic ritual response, no retrieval
             answer = _ritual_reply(payload.message, pe)
             meta = build_meta_explanation(payload.user_id, payload.message, []) or {}
-            model_id = (payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2").strip()
+            model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
             meta["model"] = {"id": model_id}
 
             # counts-only, always on
@@ -865,7 +865,7 @@ def vantage_query(req: Request, payload: VantageQuery):
                 system_prompt = system_prompt + "\n\n" + overlay_text
 
             meta = build_meta_explanation(payload.user_id, payload.message, []) or {}
-            model_id = (payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2").strip()
+            model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
             meta["model"] = {"id": model_id}
 
             meta.setdefault("vantage", {})
@@ -1092,7 +1092,7 @@ def vantage_query(req: Request, payload: VantageQuery):
         )
 
         meta = build_meta_explanation(payload.user_id, payload.message, memory_chunks) or {}
-        model_id = (payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2").strip()
+        model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
         meta["model"] = {"id": model_id}
 
         meta.setdefault("vantage", {})
