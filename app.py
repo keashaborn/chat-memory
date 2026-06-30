@@ -1008,11 +1008,15 @@ async def retrieve_memory(body: MemoryReq):
 
 # NEW: feedback endpoint
 @app.post("/memory_feedback")
-async def memory_feedback(sig: FeedbackSignal):
+async def memory_feedback(sig: FeedbackSignal, req: Request):
     """
     Attach a positive/negative feedback signal to a specific memory point in memory_raw.
     This does not change ranking directly; it just updates payload.feedback.
     """
+    actor_err, _uid = await _require_actor_for_user(req, sig.user_id, "default")
+    if actor_err:
+        return actor_err
+
     qdrant = get_qdrant()
 
     # 1) Retrieve the point by id
