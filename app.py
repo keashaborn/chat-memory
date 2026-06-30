@@ -246,65 +246,6 @@ def _sha(s: str) -> str:
 async def openapi_json():
     return get_openapi(title="Brains API", version="1.0.0", routes=app.routes)
 
-@app.post("/tts")
-async def tts(req: Request):
-    """
-    Text-to-speech proxy (keep OPENAI_API_KEY on Brains only).
-    """
-    if not OPENAI_API_KEY:
-        return Response("Server missing OPENAI_API_KEY", status_code=500, media_type="text/plain")
-
-    try:
-        body = await req.json()
-    except Exception:
-        body = {}
-
-    text = str((body or {}).get("text") or "").strip()
-    if not text:
-        return Response("Missing text", status_code=400, media_type="text/plain")
-
-    voice = str((body or {}).get("voice") or "sage").strip()
-    model = str((body or {}).get("model") or "gpt-4o-mini-tts").strip()
-    instructions = str((body or {}).get("instructions") or "").strip()
-
-    try:
-        speed = float((body or {}).get("speed", 1.0))
-    except Exception:
-        speed = 1.0
-    speed = max(0.25, min(4.0, speed))
-
-    payload = {
-        "model": model,
-        "voice": voice,
-        "input": text,
-        "response_format": "mp3",
-        "speed": speed,
-    }
-    if instructions and model == "gpt-4o-mini-tts":
-        payload["instructions"] = instructions
-
-    import requests
-
-    def _do():
-        return requests.post(
-            "https://api.openai.com/v1/audio/speech",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=60,
-        )
-
-    r = await asyncio.to_thread(_do)
-
-    if not r.ok:
-        return Response(
-            f"TTS upstream error: HTTP {r.status_code}\n{r.text}",
-            status_code=502,
-            media_type="text/plain",
-        )
-
-    return Response(content=r.content, status_code=200, media_type="audio/mpeg")
-
-
 async def get_seconds_since_last_user_message(user_id: str) -> Optional[float]:
     """
     Returns seconds since the most recent chat_log row for this user_id.
