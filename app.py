@@ -80,6 +80,60 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
+# ---------- service boundary ----------
+# Brains is an internal backend. When VS_SERVICE_TOKEN is set, protected routes
+# must be called by a trusted server-side proxy using X-VS-Service-Token.
+# This is not user auth. It is the first wall: browser/client traffic should not
+# directly reach user-owned Brains routes.
+PUBLIC_SERVICE_TOKEN_EXACT = {
+    "/openapi.json",
+    "/docs",
+    "/redoc",
+}
+
+PUBLIC_SERVICE_TOKEN_PREFIXES = (
+    "/catalog/",
+    "/lifeswitch/training/workout_template_shares/preview",
+    "/lifeswitch/people/invitations/preview",
+    "/ws/voice",
+)
+
+def _service_token_required(path: str) -> bool:
+    path = str(path or "")
+    if path in PUBLIC_SERVICE_TOKEN_EXACT:
+        return False
+    if path.startswith("/docs/") or path.startswith("/redoc/") or path.startswith("/openapi"):
+        return False
+    for prefix in PUBLIC_SERVICE_TOKEN_PREFIXES:
+        if path.startswith(prefix):
+            return False
+    return True
+
+@app.middleware("http")
+async def service_token_middleware(request: Request, call_next):
+    expected = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
+
+    # Disabled until env is set. This lets us deploy the middleware before
+    # updating every Next.js proxy route.
+    if not expected:
+        return await call_next(request)
+
+    path = request.url.path
+    if not _service_token_required(path):
+        return await call_next(request)
+
+    provided = (request.headers.get("x-vs-service-token") or "").strip()
+    if provided != expected:
+        rid = _get_request_id(request)
+        return JSONResponse(
+            {"status": "unauthorized", "detail": "missing_or_invalid_service_token"},
+            status_code=401,
+            headers={"x-request-id": rid},
+        )
+
+    return await call_next(request)
+
+
 def parse_uuid(s: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(str(s))
