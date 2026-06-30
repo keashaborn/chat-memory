@@ -711,12 +711,13 @@ async def deactivate_conditioning_session(
 
 @router.post("/workout_template_shares/create")
 async def create_workout_template_share(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     workout_template_id: str = Query(..., min_length=1),
     label: str = Body(""),
     notes: str = Body(""),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id")
 
     token = _new_share_token()
@@ -780,10 +781,11 @@ async def create_workout_template_share(
 
 @router.get("/workout_template_shares")
 async def list_workout_template_shares(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     status_filter = "" if include_inactive else "and s.status='active'"
 
     conn = await _db()
@@ -1133,10 +1135,11 @@ async def import_workout_template_share(
 @router.post("/workout_template_shares/{workout_template_share_id}/revoke")
 async def revoke_workout_template_share(
     workout_template_share_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(workout_template_share_id, "workout_template_share_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -1174,10 +1177,11 @@ async def revoke_workout_template_share(
 
 @router.get("/workout_templates")
 async def list_workout_templates(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         where_active = "" if include_inactive else "and is_active=true"
@@ -1199,17 +1203,25 @@ async def list_workout_templates(
 
 @router.post("/workout_templates/upsert")
 async def upsert_workout_template(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     workout_template_id: str | None = Query(None),
     name: str = Query(..., min_length=1, max_length=120),
     notes: str | None = Query(None, max_length=400),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
 
     conn = await _db()
     try:
         if wid:
+            existing_owner = await conn.fetchval(
+                f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
+                wid,
+            )
+            if existing_owner and str(existing_owner) != owner:
+                raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.workout_template
@@ -1248,10 +1260,11 @@ async def upsert_workout_template(
 @router.post("/workout_templates/{workout_template_id}/deactivate")
 async def deactivate_workout_template(
     workout_template_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     wid = _as_uuid(workout_template_id, "workout_template_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         row = await conn.fetchrow(
@@ -1275,10 +1288,18 @@ async def deactivate_workout_template(
 # ----------------------------
 
 @router.get("/workout_templates/{workout_template_id}/exercises")
-async def list_workout_template_exercises(workout_template_id: str):
+async def list_workout_template_exercises(workout_template_id: str, req: Request):
     wid = _as_uuid(workout_template_id, "workout_template_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
+            wid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template not found")
+        require_actor_matches_owner(req, str(owner))
+
         rows = await conn.fetch(
             f"""
             select
@@ -1299,6 +1320,7 @@ async def list_workout_template_exercises(workout_template_id: str):
 @router.post("/workout_templates/{workout_template_id}/exercises/upsert")
 async def upsert_workout_template_exercise(
     workout_template_id: str,
+    req: Request,
     exercise_id: str = Query(..., min_length=1, max_length=200),
     display_name_snapshot: str | None = Query(None, max_length=240),
     sort_order: int = Query(0),
@@ -1311,6 +1333,14 @@ async def upsert_workout_template_exercise(
     wid = _as_uuid(workout_template_id, "workout_template_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid and is_active",
+            wid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template not found or inactive")
+        require_actor_matches_owner(req, str(owner))
+
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.workout_template_exercise
@@ -1349,11 +1379,20 @@ async def upsert_workout_template_exercise(
 async def delete_workout_template_exercise(
     workout_template_id: str,
     workout_template_exercise_id: str,
+    req: Request,
 ):
     wid = _as_uuid(workout_template_id, "workout_template_id")
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
+            wid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template not found")
+        require_actor_matches_owner(req, str(owner))
+
         res = await conn.execute(
             f"""
             delete from {SCHEMA}.workout_template_exercise
@@ -1374,10 +1413,24 @@ async def delete_workout_template_exercise(
 # ----------------------------
 
 @router.get("/workout_template_exercises/{workout_template_exercise_id}/segments")
-async def list_workout_template_exercise_segments(workout_template_exercise_id: str):
+async def list_workout_template_exercise_segments(workout_template_exercise_id: str, req: Request):
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"""
+            select wt.owner_user_id
+            from {SCHEMA}.workout_template_exercise e
+            join {SCHEMA}.workout_template wt
+              on wt.workout_template_id=e.workout_template_id
+            where e.workout_template_exercise_id=$1::uuid
+            """,
+            weid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template_exercise not found")
+        require_actor_matches_owner(req, str(owner))
+
         rows = await conn.fetch(
             f"""
             select
@@ -1403,6 +1456,7 @@ async def list_workout_template_exercise_segments(workout_template_exercise_id: 
 @router.post("/workout_template_exercises/{workout_template_exercise_id}/segments/upsert")
 async def upsert_workout_template_exercise_segment(
     workout_template_exercise_id: str,
+    req: Request,
     segment_index: int = Query(1, ge=1, le=50),
     label: str | None = Query(None, max_length=120),
     default_weight: float = Query(0),
@@ -1411,6 +1465,21 @@ async def upsert_workout_template_exercise_segment(
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"""
+            select wt.owner_user_id
+            from {SCHEMA}.workout_template_exercise e
+            join {SCHEMA}.workout_template wt
+              on wt.workout_template_id=e.workout_template_id
+            where e.workout_template_exercise_id=$1::uuid
+              and wt.is_active=true
+            """,
+            weid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template_exercise not found or inactive")
+        require_actor_matches_owner(req, str(owner))
+
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.workout_template_exercise_segment
@@ -1447,11 +1516,26 @@ async def upsert_workout_template_exercise_segment(
 async def delete_workout_template_exercise_segment(
     workout_template_exercise_id: str,
     workout_template_exercise_segment_id: str,
+    req: Request,
 ):
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
     segid = _as_uuid(workout_template_exercise_segment_id, "workout_template_exercise_segment_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"""
+            select wt.owner_user_id
+            from {SCHEMA}.workout_template_exercise e
+            join {SCHEMA}.workout_template wt
+              on wt.workout_template_id=e.workout_template_id
+            where e.workout_template_exercise_id=$1::uuid
+            """,
+            weid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="workout_template_exercise not found")
+        require_actor_matches_owner(req, str(owner))
+
         res = await conn.execute(
             f"""
             delete from {SCHEMA}.workout_template_exercise_segment
