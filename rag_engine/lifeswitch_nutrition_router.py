@@ -42,8 +42,8 @@ async def _db():
     return await asyncpg.connect(DSN)
 
 @router.get("/meal_plans")
-async def list_meal_plans(owner_user_id: str = Query(...)):
-    uid = _as_uuid(owner_user_id, "owner_user_id")
+async def list_meal_plans(req: Request, owner_user_id: str = Query(...)):
+    uid = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         rows = await conn.fetch(
@@ -63,6 +63,7 @@ async def list_meal_plans(owner_user_id: str = Query(...)):
 
 @router.post("/meal_plans/create")
 async def create_meal_plan(
+    req: Request,
     owner_user_id: str = Query(...),
     name: str = Query(..., min_length=1, max_length=80),
     goal: str = Query("maintain"),
@@ -71,7 +72,7 @@ async def create_meal_plan(
     target_carbs_g: float | None = Query(None),
     target_fat_g: float | None = Query(None),
 ):
-    uid = _as_uuid(owner_user_id, "owner_user_id")
+    uid = require_actor_matches_owner(req, owner_user_id)
     if goal not in ("cut", "bulk", "maintain"):
         raise HTTPException(status_code=400, detail="goal must be cut|bulk|maintain")
 
@@ -105,11 +106,12 @@ async def create_meal_plan(
 
 @router.post("/my_foods/create_from_usda")
 async def create_my_food_from_usda(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     fdc_id: int = Query(..., ge=1),
     variant: str | None = Query(None, max_length=120),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     api_key = os.getenv("USDA_API_KEY")
     if not api_key:
@@ -318,11 +320,12 @@ async def list_items(meal_plan_id: str, req: Request):
 
 @router.get("/my_foods")
 async def list_my_foods(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     q: str | None = Query(None, min_length=1, max_length=120),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await asyncpg.connect(DSN)
     try:
         where = "owner_user_id = $1::uuid"
@@ -354,13 +357,14 @@ async def list_my_foods(
 
 @router.post("/my_foods/create_from_catalog")
 async def create_my_food_from_catalog(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     food_id: str = Query(..., min_length=1),
     variant: str | None = Query(None, max_length=128),
     display_name: str | None = Query(None, max_length=200),
     brand: str | None = Query(None, max_length=200),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(food_id, "food_id")
 
     conn = await asyncpg.connect(DSN)
@@ -654,9 +658,10 @@ async def create_my_food_serving(
 
 @router.get("/my_food_overrides")
 async def list_my_food_overrides(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         rows = await conn.fetch(
@@ -675,13 +680,14 @@ async def list_my_food_overrides(
 
 @router.post("/my_food_overrides/upsert")
 async def upsert_my_food_override(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     my_food_id: str = Query(..., min_length=1),
     alias: str | None = Query(None, max_length=200),
     default_grams: float | None = Query(None, gt=0),
     sort_order: int = Query(0),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
 
     al = (alias or "").strip() if alias is not None else None
@@ -720,10 +726,11 @@ async def upsert_my_food_override(
 
 @router.delete("/my_food_overrides")
 async def delete_my_food_override(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     my_food_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
     conn = await _db()
     try:

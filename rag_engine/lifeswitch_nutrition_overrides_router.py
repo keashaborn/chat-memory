@@ -5,7 +5,8 @@ import uuid
 import decimal
 import datetime as _dt
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -45,9 +46,10 @@ async def _db():
 
 @router.get("/my_food_overrides")
 async def list_my_food_overrides(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         rows = await conn.fetch(
@@ -66,13 +68,14 @@ async def list_my_food_overrides(
 
 @router.post("/my_food_overrides/upsert")
 async def upsert_my_food_override(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     my_food_id: str = Query(..., min_length=1),
     alias: str | None = Query(None, max_length=200),
     default_grams: float | None = Query(None, gt=0),
     sort_order: int = Query(0),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
 
     a = (alias or "").strip()

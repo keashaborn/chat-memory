@@ -50,10 +50,11 @@ async def _db():
 
 @router.get("/meals")
 async def list_meals(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         where = "owner_user_id=$1::uuid"
@@ -75,11 +76,12 @@ async def list_meals(
 
 @router.post("/meals/create")
 async def create_meal(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     name: str = Query(..., min_length=1, max_length=120),
     meal_type: str = Query("other"),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     if meal_type not in ("breakfast", "lunch", "dinner", "snack", "other"):
         raise HTTPException(status_code=400, detail="meal_type must be breakfast|lunch|dinner|snack|other")
 
@@ -105,10 +107,11 @@ async def create_meal(
 @router.post("/meals/{meal_id}/deactivate")
 async def deactivate_meal(
     meal_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     mid = _as_uuid(meal_id, "meal_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -249,9 +252,10 @@ async def list_meal_items(meal_id: str, req: Request):
 async def delete_meal_item(
     meal_id: str,
     meal_item_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     mid = _as_uuid(meal_id, "meal_id")
     iid = _as_uuid(meal_item_id, "meal_item_id")
 
