@@ -9,7 +9,8 @@ import hashlib
 import secrets
 import asyncpg
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -109,12 +110,13 @@ async def _assert_member(conn, conversation_id: str, owner_user_id: str) -> None
 
 @router.post("/invitations/create")
 async def create_invitation(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     relationship_kind: str = Query("friend"),
     label: str = Body(""),
     notes: str = Body(""),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     relationship_kind = _clean_text(relationship_kind, 80) or "friend"
     if relationship_kind not in {"friend", "training_partner", "plan_helper", "coach"}:
@@ -167,10 +169,11 @@ async def create_invitation(
 
 @router.get("/invitations")
 async def list_invitations(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     status_filter = "" if include_inactive else "and i.status='pending'"
 
     conn = await _db()
@@ -255,10 +258,11 @@ async def preview_invitation(
 
 @router.post("/invitations/accept")
 async def accept_invitation(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     token: str = Query(..., min_length=10),
 ):
-    accepter = _as_uuid(owner_user_id, "owner_user_id")
+    accepter = require_actor_matches_owner(req, owner_user_id)
     thash = _token_hash(token)
 
     conn = await _db()
@@ -381,10 +385,11 @@ async def accept_invitation(
 @router.post("/invitations/{invitation_id}/revoke")
 async def revoke_invitation(
     invitation_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     iid = _as_uuid(invitation_id, "invitation_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -425,10 +430,11 @@ async def revoke_invitation(
 
 @router.get("/relationships")
 async def list_relationships(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         status_filter = "" if include_inactive else "and r.status in ('pending','accepted')"
@@ -464,9 +470,10 @@ async def list_relationships(
 
 @router.get("/permissions/granted-to-me")
 async def list_permissions_granted_to_me(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -511,11 +518,12 @@ async def list_permissions_granted_to_me(
 
 @router.get("/profiles")
 async def list_profiles(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     user_ids: str = Query("", max_length=4000),
 ):
-    # owner_user_id is required for auth-proxy symmetry. It is not used for filtering yet.
-    _as_uuid(owner_user_id, "owner_user_id")
+    # owner_user_id is required for auth-proxy symmetry.
+    owner_user_id = require_actor_matches_owner(req, owner_user_id)
 
     ids: list[str] = []
     for part in str(user_ids or "").split(","):
@@ -601,10 +609,11 @@ async def _assert_relationship_participant(conn, relationship_id: str, owner_use
 @router.get("/relationships/{relationship_id}/permissions")
 async def list_relationship_permissions(
     relationship_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     rid = _as_uuid(relationship_id, "relationship_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -636,6 +645,7 @@ async def list_relationship_permissions(
 @router.post("/relationships/{relationship_id}/permissions/upsert")
 async def upsert_relationship_permission(
     relationship_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     permission_scope: str = Query(..., min_length=1),
     permission_level: str = Query("none"),
@@ -643,7 +653,7 @@ async def upsert_relationship_permission(
     payload: dict = Body(default_factory=dict),
 ):
     rid = _as_uuid(relationship_id, "relationship_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     permission_scope = _clean_text(permission_scope, 80)
     allowed_scopes = {
@@ -716,6 +726,7 @@ async def upsert_relationship_permission(
 
 @router.post("/relationships/upsert")
 async def upsert_relationship(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     other_user_id: str = Query(..., min_length=1),
     status: str = Query("accepted"),
@@ -723,7 +734,7 @@ async def upsert_relationship(
     label: str = Body(""),
     notes: str = Body(""),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     other = _as_uuid(other_user_id, "other_user_id")
     if owner == other:
         raise HTTPException(status_code=400, detail="cannot relate user to self")
@@ -773,10 +784,11 @@ async def upsert_relationship(
 
 @router.get("/conversations")
 async def list_conversations(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(50, ge=1, le=200),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         rows = await conn.fetch(
@@ -833,10 +845,11 @@ async def list_conversations(
 
 @router.post("/conversations/direct")
 async def get_or_create_direct_conversation(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     other_user_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     other = _as_uuid(other_user_id, "other_user_id")
     if owner == other:
         raise HTTPException(status_code=400, detail="cannot create direct conversation with self")
@@ -899,11 +912,12 @@ async def get_or_create_direct_conversation(
 @router.get("/conversations/{conversation_id}/messages")
 async def list_messages(
     conversation_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(100, ge=1, le=500),
 ):
     cid = _as_uuid(conversation_id, "conversation_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         await _assert_member(conn, cid, owner)
@@ -944,13 +958,14 @@ async def list_messages(
 @router.post("/conversations/{conversation_id}/messages")
 async def create_message(
     conversation_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     body: str = Body(...),
     body_format: str = Body("plain"),
     metadata: dict = Body(default_factory=dict),
 ):
     cid = _as_uuid(conversation_id, "conversation_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     body = _clean_text(body, 8000)
     if not body:
