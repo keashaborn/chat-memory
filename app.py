@@ -1185,13 +1185,14 @@ async def resolve_canonical_user_id(vantage_id: str, alias_user_id: str) -> tupl
 
 
 @app.get("/cards/{user_id}")
-async def cards_list(user_id: str, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
+async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
     """
     Lists card-like artifacts in Qdrant memory_raw for a user.
     kinds: comma-separated list. Defaults to CARD_KINDS_DEFAULT.
     """
-    uid = (user_id or "").strip() or "anon"
-    uid, _alias_uid = await resolve_canonical_user_id(vantage_id, uid)
+    actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
+    if actor_err:
+        return actor_err
     vid = (vantage_id or "default").strip() or "default"
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else CARD_KINDS_DEFAULT) if k.strip()]
@@ -1256,6 +1257,7 @@ class CardUpsertReq(BaseModel):
 @app.get("/vantage-cards/{user_id}")
 async def vantage_cards_list(
     user_id: str,
+    req: Request,
     vantage_id: str = "default",
     kinds: Optional[str] = None,
     limit: int = 100,
@@ -1266,9 +1268,10 @@ async def vantage_cards_list(
     This is the newer Vantage-scoped card system, distinct from legacy Qdrant
     memory cards served by /cards/{user_id}.
     """
-    uid = (user_id or "").strip() or "anon"
     vid = (vantage_id or "default").strip() or "default"
-    uid, _alias_uid = await resolve_canonical_user_id(vid, uid)
+    actor_err, uid = await _require_actor_for_user(req, user_id, vid)
+    if actor_err:
+        return actor_err
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else []) if k.strip()]
     limit_n = max(1, min(int(limit or 100), 500))
@@ -1334,7 +1337,7 @@ async def vantage_cards_list(
 
 
 @app.post("/cards/{user_id}")
-async def cards_upsert(user_id: str, req: CardUpsertReq, vantage_id: str = "default"):
+async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vantage_id: str = "default"):
     """
     Idempotent card upsert into Qdrant memory_raw.
 
@@ -1343,8 +1346,9 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, vantage_id: str = "defa
 
     topic_key defaults to "__singleton__" for true singletons.
     """
-    uid = (user_id or "").strip() or "anon"
-    uid, _alias_uid = await resolve_canonical_user_id(vantage_id, uid)
+    actor_err, uid = await _require_actor_for_user(request, user_id, vantage_id)
+    if actor_err:
+        return actor_err
     kind = (req.kind or "").strip()
     if not kind:
         return JSONResponse({"status": "bad_request", "detail": "missing kind"}, status_code=400)
@@ -1420,13 +1424,14 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, vantage_id: str = "defa
     }
 
 @app.delete("/cards/{user_id}/{card_id}")
-async def cards_delete(user_id: str, card_id: str, vantage_id: str = "default"):
+async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str = "default"):
     """
     Deletes a card point from Qdrant memory_raw.
     Safety: only delete if payload.user_id matches.
     """
-    uid = (user_id or "").strip() or "anon"
-    uid, _alias_uid = await resolve_canonical_user_id(vantage_id, uid)
+    actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
+    if actor_err:
+        return actor_err
     qdrant = get_qdrant()
 
     # verify ownership
@@ -1466,8 +1471,10 @@ async def cards_delete(user_id: str, card_id: str, vantage_id: str = "default"):
 
 # ---------- security/privacy: delete all user data ----------
 @app.delete("/user/{user_id}/data")
-async def delete_all_user_data(user_id: str):
-    uid = (user_id or "").strip() or "anon"
+async def delete_all_user_data(user_id: str, req: Request):
+    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
+    if actor_err:
+        return actor_err
 
     # 1) Delete Postgres transcript + threads
     pg_chat = None
@@ -1515,12 +1522,14 @@ from datetime import timedelta
 from fastapi.responses import Response
 
 @app.delete("/user/{user_id}/recent")
-async def delete_recent_user_data(user_id: str, minutes: int = 60):
+async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60):
     """
     Soft-delete: remove recent chat_log rows for user_id and delete matching Qdrant points by id.
     minutes: how far back to delete (default 60).
     """
-    uid = (user_id or "").strip() or "anon"
+    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
+    if actor_err:
+        return actor_err
     minutes = int(minutes or 60)
     if minutes < 1:
         return JSONResponse({"status":"bad_request","detail":"minutes must be >= 1"}, status_code=400)
@@ -1575,12 +1584,14 @@ async def delete_recent_user_data(user_id: str, minutes: int = 60):
 
 
 @app.get("/user/{user_id}/export")
-async def export_user_data(user_id: str, limit: int = 20000):
+async def export_user_data(user_id: str, req: Request, limit: int = 20000):
     """
     Export: threads + chat_log transcript + latest cards.
     limit: max chat_log rows to include (default 20k).
     """
-    uid = (user_id or "").strip() or "anon"
+    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
+    if actor_err:
+        return actor_err
     limit = int(limit or 20000)
     if limit < 1:
         return JSONResponse({"status":"bad_request","detail":"limit must be >= 1"}, status_code=400)
