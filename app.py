@@ -100,7 +100,6 @@ PUBLIC_SERVICE_TOKEN_PREFIXES = (
     "/catalog/",
     "/lifeswitch/training/workout_template_shares/preview",
     "/lifeswitch/people/invitations/preview",
-    "/ws/voice",
 )
 
 def _service_token_required(path: str) -> bool:
@@ -1815,16 +1814,6 @@ async def profiles_get_default(user_id: str, vantage_id: str = "default"):
         await conn.close()
 
 
-# --- xAI Grok Voice Agent relay (server-side) ---
-# Thin WebSocket bridge: hides XAI_API_KEY server-side and relays xAI realtime events.
-# Client connects to:  ws://<brains>/ws/voice?voice=Ara&turn=none
-# Server connects to:  wss://api.x.ai/v1/realtime (Authorization: Bearer XAI_API_KEY)
-#
-# Client should send xAI *client events* as JSON (forwarded verbatim), e.g.:
-#   {"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
-#   {"type":"response.create","response":{"modalities":["text","audio"]}}
-
-
 # ---------- vantages (Supabase mirror for backend processing) ----------
 class VantageSyncReq(BaseModel):
     user_id: str
@@ -2094,110 +2083,6 @@ async def vantages_list(user_id: str):
         return {"status": "ok", "user_id": uid, "count": len(items), "items": items}
     finally:
         await conn.close()
-
-#
-# Server forwards xAI *server events* back to the client unchanged.
-@app.websocket("/ws/voice")
-async def ws_voice_relay(ws: WebSocket):
-    await ws.accept()
-
-    # Token gate (prevents public abuse)
-    expected = os.getenv("VOICE_WS_TOKEN")
-    if expected:
-        provided = ws.query_params.get("token", "")
-        if not provided or provided != expected:
-            await ws.send_text(json.dumps({"type":"error","error":"unauthorized"}))
-            await ws.close(code=1008)
-            return
-
-    xai_key = os.getenv("XAI_API_KEY")
-    if not xai_key:
-        await ws.send_text(json.dumps({"type":"error","error":"XAI_API_KEY missing on server"}))
-        await ws.close(code=1011)
-        return
-
-    voice = ws.query_params.get("voice", "Ara")
-    instructions = ws.query_params.get("instructions", "You are a helpful assistant.")
-    # turn=server_vad for automatic turn detection, otherwise manual ("none")
-    turn = (ws.query_params.get("turn", "none") or "none").strip().lower()
-
-    in_rate = int(ws.query_params.get("in_rate", "24000"))
-    out_rate = int(ws.query_params.get("out_rate", "24000"))
-
-    turn_detection = {"type": "server_vad"} if turn == "server_vad" else {"type": None}
-
-    async def _send_err(msg: str):
-        try:
-            await ws.send_text(json.dumps({"type":"error","error":msg}))
-        except Exception:
-            pass
-
-    try:
-        async with websockets.connect(
-            uri="wss://api.x.ai/v1/realtime",
-            ssl=True,
-            family=socket.AF_INET,
-            additional_headers={"Authorization": f"Bearer {xai_key}"},
-            open_timeout=30,
-            ping_interval=20,
-            ping_timeout=20,
-            close_timeout=5,
-            max_size=8 * 1024 * 1024,
-        ) as xws:
-            # Configure xAI session immediately
-            session_update = {
-            "type": "session.update",
-            "session": {
-                "instructions": instructions,
-                "voice": voice,
-                "turn_detection": turn_detection,
-
-                "audio": {
-                "input":  {"format": {"type": "audio/pcm", "rate": in_rate}},
-                "output": {"format": {"type": "audio/pcm", "rate": out_rate}},
-                },
-
-                "input_audio_transcription": {"model": "default"},
-            },
-            }
-            await xws.send(json.dumps(session_update))
-
-            async def pump_client_to_xai():
-                while True:
-                    try:
-                        raw = await ws.receive_text()
-                    except WebSocketDisconnect:
-                        break
-                    # only forward JSON text frames
-                    try:
-                        json.loads(raw)
-                    except Exception:
-                        await _send_err("client sent non-JSON message (expected xAI realtime event JSON)")
-                        continue
-                    await xws.send(raw)
-
-            async def pump_xai_to_client():
-                while True:
-                    try:
-                        msg = await xws.recv()
-                    except websockets.exceptions.ConnectionClosed:
-                        break
-                    if isinstance(msg, bytes):
-                        msg = msg.decode("utf-8", "ignore")
-                    await ws.send_text(msg)
-
-            t1 = asyncio.create_task(pump_client_to_xai())
-            t2 = asyncio.create_task(pump_xai_to_client())
-            done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
-            for t in pending:
-                t.cancel()
-
-    except Exception as e:
-        await _send_err(str(e))
-        try:
-            await ws.close(code=1011)
-        except Exception:
-            pass
 
 @app.get("/readyz", include_in_schema=False)
 async def readyz():
