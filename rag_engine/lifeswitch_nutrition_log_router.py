@@ -5,7 +5,8 @@ import uuid
 import decimal
 import datetime as _dt
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -87,6 +88,7 @@ def _parse_day(day: str) -> _dt.date:
 
 @router.post("/log/entry")
 async def create_log_entry(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
     meal_id: str | None = Query(None),
@@ -95,7 +97,7 @@ async def create_log_entry(
     sort_order: int = Query(0),
     notes: str | None = Query(None, max_length=500),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     d = _parse_day(day)
 
     # exactly one of meal_id / my_food_id
@@ -155,13 +157,14 @@ async def create_log_entry(
 
 @router.patch("/log/entry")
 async def update_log_entry(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     nutrition_entry_id: str = Query(..., min_length=1),
     qty_g: float = Query(..., gt=0),
     sort_order: int | None = Query(None),
     notes: str | None = Query(None, max_length=500),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
 
     conn = await _db()
@@ -196,10 +199,11 @@ async def update_log_entry(
 
 @router.delete("/log/entry")
 async def delete_log_entry(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     nutrition_entry_id: str = Query(..., min_length=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
 
     conn = await _db()
@@ -227,11 +231,12 @@ async def delete_log_entry(
 
 @router.get("/log/day")
 async def get_log_day(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
     d = _parse_day(day)
 
     conn = await _db()

@@ -5,7 +5,8 @@ import uuid
 import decimal
 import datetime as _dt
 import asyncpg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -67,8 +68,8 @@ class LogBatchIn(BaseModel):
 
 
 @router.post("/log/entries")
-async def create_log_entries_batch(payload: LogBatchIn):
-    owner = _as_uuid(payload.owner_user_id, "owner_user_id")
+async def create_log_entries_batch(payload: LogBatchIn, req: Request):
+    owner = require_actor_matches_owner(req, payload.owner_user_id)
     d = _parse_day(payload.day)
 
     conn = await _db()
