@@ -561,13 +561,14 @@ async def create_conditioning_session(
 
 @router.get("/conditioning_sessions")
 async def list_conditioning_sessions(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str | None = Query(None),
     include_inactive: int = Query(0, ge=0, le=1),
     limit: int = Query(100, ge=1, le=500),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     day_val = None
     if day:
@@ -1556,6 +1557,7 @@ async def delete_workout_template_exercise_segment(
 
 @router.post("/sessions/create")
 async def create_training_session(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
     name: str = Query(..., min_length=1, max_length=160),
@@ -1564,7 +1566,7 @@ async def create_training_session(
     started_at: str | None = Query(None),
     finished_at: str | None = Query(None),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
 
     try:
@@ -1609,13 +1611,14 @@ async def create_training_session(
 
 @router.get("/sessions")
 async def list_training_sessions(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str | None = Query(None),
     include_inactive: int = Query(0, ge=0, le=1),
     limit: int = Query(100, ge=1, le=500),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     day_val = None
     if day:
@@ -1665,11 +1668,12 @@ async def list_training_sessions(
 @router.get("/sessions/{training_session_id}")
 async def get_training_session(
     training_session_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -1702,10 +1706,11 @@ async def get_training_session(
 @router.post("/sessions/{training_session_id}/deactivate")
 async def deactivate_training_session(
     training_session_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -1731,12 +1736,13 @@ async def deactivate_training_session(
 @router.get("/sessions/{training_session_id}/sets")
 async def list_training_session_sets(
     training_session_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -1772,6 +1778,7 @@ async def list_training_session_sets(
 @router.post("/sessions/{training_session_id}/sets/add")
 async def add_training_set_log(
     training_session_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     exercise_id: str = Query(..., min_length=1, max_length=200),
     exercise_name: str = Query(..., min_length=1, max_length=240),
@@ -1785,7 +1792,7 @@ async def add_training_set_log(
     notes: str | None = Query(None, max_length=800),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
     volume = float(weight) * int(reps)
 
@@ -1854,6 +1861,7 @@ async def add_training_set_log(
 async def update_training_set_log(
     training_session_id: str,
     training_set_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     exercise_sort_order: int | None = Query(None),
     set_index: int | None = Query(None, ge=1, le=200),
@@ -1865,7 +1873,7 @@ async def update_training_set_log(
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -1948,12 +1956,13 @@ async def update_training_set_log(
 async def list_training_set_log_segments(
     training_session_id: str,
     training_set_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
@@ -2006,6 +2015,7 @@ async def list_training_set_log_segments(
 async def add_training_set_log_segment(
     training_session_id: str,
     training_set_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     segment_index: int = Query(1, ge=1, le=50),
     label: str | None = Query(None, max_length=120),
@@ -2015,7 +2025,7 @@ async def add_training_set_log_segment(
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     volume = float(weight) * int(reps)
 
     conn = await _db()
@@ -2107,12 +2117,13 @@ async def delete_training_set_log_segment(
     training_session_id: str,
     training_set_log_id: str,
     training_set_log_segment_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
     segid = _as_uuid(training_set_log_segment_id, "training_set_log_segment_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -2171,11 +2182,12 @@ async def delete_training_set_log_segment(
 async def delete_training_set_log(
     training_session_id: str,
     training_set_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
