@@ -7,7 +7,8 @@ import datetime as _dt
 import hashlib
 import secrets
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -137,10 +138,11 @@ async def _resolve_training_view_target(conn, viewer_user_id: str, target_user_i
 
 @router.get("/my_exercises")
 async def list_my_exercises(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         where_active = "" if include_inactive else "and is_active=true"
@@ -164,6 +166,7 @@ async def list_my_exercises(
 
 @router.post("/my_exercises/upsert")
 async def upsert_my_exercise(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     exercise_id: str = Query(..., min_length=1, max_length=200),
     display_name: str = Query(..., min_length=1, max_length=200),
@@ -174,7 +177,7 @@ async def upsert_my_exercise(
     matched_text: str | None = Query(None, max_length=240),
     matched_source: str | None = Query(None, max_length=120),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         row = await conn.fetchrow(
@@ -218,10 +221,11 @@ async def upsert_my_exercise(
 @router.post("/my_exercises/{my_exercise_id}/deactivate")
 async def deactivate_my_exercise(
     my_exercise_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     mid = _as_uuid(my_exercise_id, "my_exercise_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         row = await conn.fetchrow(
@@ -271,10 +275,11 @@ async def list_conditioning_library(
 
 @router.get("/my_conditioning_prescriptions")
 async def list_my_conditioning_prescriptions(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         where_active = "" if include_inactive else "and p.is_active=true"
@@ -315,6 +320,7 @@ async def list_my_conditioning_prescriptions(
 
 @router.post("/my_conditioning_prescriptions/upsert")
 async def upsert_my_conditioning_prescription(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     my_conditioning_prescription_id: str | None = Query(None),
     conditioning_library_id: str | None = Query(None),
@@ -332,13 +338,20 @@ async def upsert_my_conditioning_prescription(
     recovery_constraints: str = Query("", max_length=800),
     notes: str = Query("", max_length=1200),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
     libid = _as_uuid(conditioning_library_id, "conditioning_library_id") if conditioning_library_id else None
 
     conn = await _db()
     try:
         if pid:
+            existing_owner = await conn.fetchval(
+                f"select owner_user_id from {SCHEMA}.my_conditioning_prescription where my_conditioning_prescription_id=$1::uuid",
+                pid,
+            )
+            if existing_owner and str(existing_owner) != owner:
+                raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.my_conditioning_prescription
@@ -441,10 +454,11 @@ async def upsert_my_conditioning_prescription(
 @router.post("/my_conditioning_prescriptions/{my_conditioning_prescription_id}/deactivate")
 async def deactivate_my_conditioning_prescription(
     my_conditioning_prescription_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
