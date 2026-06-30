@@ -7,7 +7,8 @@ import decimal
 import datetime as _dt
 import asyncpg
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -103,12 +104,13 @@ async def _resolve_measurements_view_target(conn, viewer_user_id: str, target_us
 
 @router.get("/entries")
 async def list_measurement_entries(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(90, ge=1, le=500),
     include_inactive: int = Query(0, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
     where_active = "" if include_inactive else "and is_active=true"
 
     conn = await _db()
@@ -168,6 +170,7 @@ async def list_measurement_entries(
 
 @router.post("/entries/create")
 async def create_measurement_entry(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 
     local_date: str = Body(...),
@@ -200,7 +203,7 @@ async def create_measurement_entry(
     skinfolds_json: dict | None = Body(None),
     scan_json: dict | None = Body(None),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     day = _clean_date(local_date)
 
     measured_at_val = None
@@ -395,10 +398,11 @@ async def create_measurement_entry(
 @router.post("/entries/{measurement_entry_id}/deactivate")
 async def deactivate_measurement_entry(
     measurement_entry_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     entry_id = _as_uuid(measurement_entry_id, "measurement_entry_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:

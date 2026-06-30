@@ -6,7 +6,8 @@ import json
 import decimal
 import datetime as _dt
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -160,11 +161,12 @@ async def _resolve_plan_target(
 
 @router.get("/profile")
 async def get_plan_profile(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     create_if_missing: int = Query(1, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -207,6 +209,7 @@ async def get_plan_profile(
 
 @router.post("/profile/upsert")
 async def upsert_plan_profile(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     snapshot_reason: str = Query("manual_update", max_length=120),
     target_user_id: str = Query("", max_length=80),
@@ -228,7 +231,7 @@ async def upsert_plan_profile(
 
     coach_notes: str = Body(""),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
 
     phase = _clean_text(phase, 40)
     if phase not in VALID_PHASES:
@@ -331,11 +334,12 @@ async def upsert_plan_profile(
 
 @router.get("/profile/comments")
 async def list_plan_comments(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     target_user_id: str = Query("", max_length=80),
     limit: int = Query(50, ge=1, le=200),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         target, delegated = await _resolve_plan_target(
@@ -385,12 +389,13 @@ async def list_plan_comments(
 
 @router.post("/profile/comments/create")
 async def create_plan_comment(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     target_user_id: str = Query("", max_length=80),
     comment_text: str = Body(...),
     comment_kind: str = Body("comment"),
 ):
-    viewer = _as_uuid(owner_user_id, "owner_user_id")
+    viewer = require_actor_matches_owner(req, owner_user_id)
     text = _clean_text(comment_text, 4000)
     kind = _clean_text(comment_kind, 80) or "comment"
 
@@ -446,10 +451,11 @@ async def create_plan_comment(
 
 @router.get("/profile/history")
 async def list_plan_profile_history(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
         rows = await conn.fetch(
