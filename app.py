@@ -141,6 +141,84 @@ def parse_uuid(s: str) -> Optional[uuid.UUID]:
         return None
 
 
+# ---------- actor / owner enforcement ----------
+def _actor_user_id(req: Request) -> Optional[str]:
+    raw = (req.headers.get("x-vs-actor-user-id") or "").strip()
+    if not raw or len(raw) > 128:
+        return None
+    return raw
+
+
+def _actor_missing_response() -> JSONResponse:
+    return JSONResponse(
+        {"status": "unauthorized", "detail": "missing_actor_user_id"},
+        status_code=401,
+    )
+
+
+def _owner_mismatch_response() -> JSONResponse:
+    return JSONResponse(
+        {"status": "forbidden", "detail": "actor_owner_mismatch"},
+        status_code=403,
+    )
+
+
+async def _require_actor_for_user(req: Request, requested_user_id: str, vantage_id: str = "default"):
+    """
+    Service token proves trusted infrastructure.
+    x-vs-actor-user-id identifies the authenticated user resolved by the frontend.
+    This helper canonicalizes both actor and requested user and requires equality.
+    Returns (response_or_none, canonical_requested_user_id).
+    """
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response(), None
+
+    requested_alias = (requested_user_id or "").strip() or "anon"
+    vid = (vantage_id or "default").strip() or "default"
+
+    requested_uid, _ = await resolve_canonical_user_id(vid, requested_alias)
+    actor_uid, _ = await resolve_canonical_user_id(vid, actor)
+
+    if str(actor_uid) != str(requested_uid):
+        return _owner_mismatch_response(), requested_uid
+
+    return None, requested_uid
+
+
+async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
+    """
+    Require the requested thread row to belong to x-vs-actor-user-id.
+    Returns (response_or_none, actor_user_id).
+    """
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response(), None
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        row = await conn.fetchrow(
+            "SELECT user_id FROM threads WHERE id=$1",
+            thread_id,
+        )
+    finally:
+        await conn.close()
+
+    if not row:
+        return JSONResponse(
+            {"status": "not_found", "detail": "thread_not_found"},
+            status_code=404,
+        ), None
+
+    owner_uid = str(row["user_id"])
+    actor_uid, _ = await resolve_canonical_user_id("default", actor)
+
+    if str(actor_uid) != owner_uid:
+        return _owner_mismatch_response(), actor_uid
+
+    return None, actor_uid
+
+
 # single global qdrant client
 qdrant_client = None
 
@@ -634,11 +712,14 @@ class RetrieveReq(BaseModel):
     collection: Optional[str] = None  # if set and != "ALL", restrict to that one
 
 @app.post("/threads/new")
-async def threads_new(body: NewThreadReq):
+async def threads_new(body: NewThreadReq, req: Request):
     user_id_alias = (body.user_id or "").strip() or "anon"
     title = (body.title or "New chat").strip() or "New chat"
     vantage_id = (getattr(body, "vantage_id", None) or "default").strip() or "default"
-    user_id, _alias_uid = await resolve_canonical_user_id(vantage_id, user_id_alias)
+
+    actor_err, user_id = await _require_actor_for_user(req, user_id_alias, vantage_id)
+    if actor_err:
+        return actor_err
 
     conn = await asyncpg.connect(DSN)
     try:
@@ -651,9 +732,12 @@ async def threads_new(body: NewThreadReq):
         await conn.close()
 
 @app.get("/threads/list/{user_id}")
-async def threads_list(user_id: str, vantage_id: str = "default"):
+async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
     user_id_alias = (user_id or "").strip() or "anon"
-    user_id, _alias_uid = await resolve_canonical_user_id(vantage_id, user_id_alias)
+
+    actor_err, user_id = await _require_actor_for_user(req, user_id_alias, vantage_id)
+    if actor_err:
+        return actor_err
     conn = await asyncpg.connect(DSN)
     try:
         rows = await conn.fetch(
@@ -665,10 +749,14 @@ async def threads_list(user_id: str, vantage_id: str = "default"):
         await conn.close()
 
 @app.get("/threads/{thread_id}/messages")
-async def threads_messages(thread_id: str, limit: int = 200):
+async def threads_messages(thread_id: str, req: Request, limit: int = 200):
     tid = parse_uuid(thread_id)
     if not tid:
         return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
+
+    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
 
     conn = await asyncpg.connect(DSN)
     try:
@@ -690,10 +778,14 @@ class RenameThreadReq(BaseModel):
     title: str
 
 @app.post("/threads/{thread_id}/rename")
-async def threads_rename(thread_id: str, body: RenameThreadReq):
+async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
     tid = parse_uuid(thread_id)
     if not tid:
         return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
+
+    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
 
     title = (body.title or "").strip() or "New chat"
 
@@ -708,10 +800,14 @@ async def threads_rename(thread_id: str, body: RenameThreadReq):
         await conn.close()
 
 @app.post("/threads/{thread_id}/archive")
-async def threads_archive(thread_id: str):
+async def threads_archive(thread_id: str, req: Request):
     tid = parse_uuid(thread_id)
     if not tid:
         return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
+
+    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
 
     conn = await asyncpg.connect(DSN)
     try:
@@ -724,10 +820,14 @@ async def threads_archive(thread_id: str):
         await conn.close()
 
 @app.delete("/threads/{thread_id}")
-async def threads_delete(thread_id: str):
+async def threads_delete(thread_id: str, req: Request):
     tid = parse_uuid(thread_id)
     if not tid:
         return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
+
+    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
 
     conn = await asyncpg.connect(DSN)
     try:
