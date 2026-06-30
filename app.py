@@ -33,6 +33,8 @@ class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
     vantage_id: Optional[str] = "default"
+from rag_engine.voice_realtime_router import router as voice_realtime_router
+
 
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(rag_router, prefix="/rag")
@@ -48,6 +50,7 @@ app.include_router(lifeswitch_training_router, prefix="/lifeswitch/training")
 app.include_router(lifeswitch_plan_router, prefix="/lifeswitch/plan")
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
+app.include_router(voice_realtime_router)
 
 # ---------- request correlation ----------
 def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:
