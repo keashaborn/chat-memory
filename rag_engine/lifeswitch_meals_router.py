@@ -5,7 +5,8 @@ import uuid
 import decimal
 import datetime as _dt
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -135,6 +136,7 @@ async def deactivate_meal(
 @router.post("/meals/{meal_id}/items/add")
 async def add_meal_item(
     meal_id: str,
+    req: Request,
     my_food_id: str = Query(..., min_length=1),
     qty_g: float | None = Query(None, gt=0),
     my_food_serving_id: str | None = Query(None, min_length=1),
@@ -164,9 +166,18 @@ async def add_meal_item(
 
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid and is_active",
+            mid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="meal not found or inactive")
+        owner = require_actor_matches_owner(req, str(owner))
+
         ok = await conn.fetchval(
-            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
+            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid and owner_user_id=$2::uuid",
             fid,
+            owner,
         )
         if ok is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
@@ -197,10 +208,18 @@ async def add_meal_item(
 
 
 @router.get("/meals/{meal_id}/items")
-async def list_meal_items(meal_id: str):
+async def list_meal_items(meal_id: str, req: Request):
     mid = _as_uuid(meal_id, "meal_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid",
+            mid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="meal not found")
+        require_actor_matches_owner(req, str(owner))
+
         rows = await conn.fetch(
             f"""
             select

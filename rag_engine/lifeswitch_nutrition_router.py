@@ -4,7 +4,8 @@ import os
 import asyncio
 import uuid
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
 import decimal
 import datetime as _dt
@@ -206,6 +207,7 @@ async def create_my_food_from_usda(
 @router.post("/meal_plans/{meal_plan_id}/items/add")
 async def add_item(
     meal_plan_id: str,
+    req: Request,
     my_food_id: str | None = Query(None),
     food_id: str | None = Query(None),  # legacy
     meal_label: str = Query("other"),
@@ -224,15 +226,24 @@ async def add_item(
 
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid and is_active",
+            mpid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="meal_plan not found or inactive")
+        owner = require_actor_matches_owner(req, str(owner))
+
         mfid = None
         fid = None
 
         if my_food_id:
             mfid = _as_uuid(my_food_id, "my_food_id")
-            # must exist + active
+            # must exist + active + belong to same owner as meal plan
             ok = await conn.fetchval(
-                f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
+                f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid and owner_user_id=$2::uuid",
                 mfid,
+                owner,
             )
             if ok is not True:
                 raise HTTPException(status_code=404, detail="my_food not found or inactive")
@@ -265,10 +276,18 @@ async def add_item(
         await conn.close()
 
 @router.get("/meal_plans/{meal_plan_id}/items")
-async def list_items(meal_plan_id: str):
+async def list_items(meal_plan_id: str, req: Request):
     mpid = _as_uuid(meal_plan_id, "meal_plan_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid",
+            mpid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="meal_plan not found")
+        require_actor_matches_owner(req, str(owner))
+
         rows = await conn.fetch(
             f"""
             select
@@ -430,10 +449,18 @@ async def create_my_food_from_catalog(
 
 
 @router.post("/my_foods/{my_food_id}/deactivate")
-async def deactivate_my_food(my_food_id: str):
+async def deactivate_my_food(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
+            fid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="my_food not found")
+        require_actor_matches_owner(req, str(owner))
+
         row = await conn.fetchrow(
             f"""
             update {SCHEMA}.my_food
@@ -455,10 +482,18 @@ async def deactivate_my_food(my_food_id: str):
 # ----------------------------
 
 @router.get("/my_foods/{my_food_id}/servings")
-async def list_my_food_servings(my_food_id: str):
+async def list_my_food_servings(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
     conn = await _db()
     try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
+            fid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="my_food not found")
+        require_actor_matches_owner(req, str(owner))
+
         rows = await conn.fetch(
             f"""
             select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
@@ -476,6 +511,7 @@ async def list_my_food_servings(my_food_id: str):
 @router.post("/my_foods/{my_food_id}/servings/create")
 async def create_my_food_serving(
     my_food_id: str,
+    req: Request,
     name: str = Query(..., min_length=1, max_length=120),
     grams: float = Query(..., gt=0),
     is_default: int = Query(0, ge=0, le=1),
@@ -487,12 +523,13 @@ async def create_my_food_serving(
 
     conn = await _db()
     try:
-        ok = await conn.fetchval(
-            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
+        food = await conn.fetchrow(
+            f"select owner_user_id, is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
             fid,
         )
-        if ok is not True:
+        if not food or food["is_active"] is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
+        require_actor_matches_owner(req, str(food["owner_user_id"]))
 
         # Upsert by (my_food_id, lower(name)):
         # - If name exists, overwrite grams and optionally set default.
