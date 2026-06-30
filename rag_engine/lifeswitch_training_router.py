@@ -486,6 +486,7 @@ async def deactivate_my_conditioning_prescription(
 
 @router.post("/conditioning_sessions/create")
 async def create_conditioning_session(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
     my_conditioning_prescription_id: str | None = Query(None),
@@ -501,7 +502,7 @@ async def create_conditioning_session(
     recovery_impact: str = Query("", max_length=400),
     notes: str = Query("", max_length=1600),
 ):
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
 
     try:
@@ -630,10 +631,11 @@ async def list_conditioning_sessions(
 @router.get("/conditioning_sessions/{conditioning_session_log_id}")
 async def get_conditioning_session(
     conditioning_session_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -673,10 +675,11 @@ async def get_conditioning_session(
 @router.post("/conditioning_sessions/{conditioning_session_log_id}/deactivate")
 async def deactivate_conditioning_session(
     conditioning_session_log_id: str,
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
-    owner = _as_uuid(owner_user_id, "owner_user_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
@@ -935,10 +938,11 @@ async def preview_workout_template_share(
 
 @router.post("/workout_template_shares/import")
 async def import_workout_template_share(
+    req: Request,
     owner_user_id: str = Query(..., min_length=1),
     token: str = Query(..., min_length=10),
 ):
-    importer = _as_uuid(owner_user_id, "owner_user_id")
+    importer = require_actor_matches_owner(req, owner_user_id)
     thash = _token_hash(token)
 
     conn = await _db()
