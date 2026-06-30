@@ -1,22 +1,40 @@
-from fastapi import APIRouter, Request, HTTPException
+from __future__ import annotations
+
+import hashlib
+import json
 import os
 import uuid
+from typing import Any
+
 import httpx
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 
 router = APIRouter()
 
-DEFAULT_REALTIME_MODEL = (os.getenv("OPENAI_REALTIME_MODEL") or "gpt-4o-realtime-preview").strip()
-OPENAI_REALTIME_SESSIONS_URL = (
-    os.getenv("OPENAI_REALTIME_SESSIONS_URL")
-    or "https://api.openai.com/v1/realtime/sessions"
+DEFAULT_REALTIME_MODEL = (os.getenv("OPENAI_REALTIME_MODEL") or "gpt-realtime-2").strip()
+DEFAULT_REALTIME_VOICE = (os.getenv("OPENAI_REALTIME_VOICE") or "marin").strip().lower()
+
+# Current browser-first WebRTC unified interface.
+OPENAI_REALTIME_CALLS_URL = (
+    os.getenv("OPENAI_REALTIME_CALLS_URL")
+    or "https://api.openai.com/v1/realtime/calls"
+).strip()
+
+# Retained only for compatibility/probing until frontend is fully wired to WebRTC calls.
+OPENAI_REALTIME_CLIENT_SECRETS_URL = (
+    os.getenv("OPENAI_REALTIME_CLIENT_SECRETS_URL")
+    or "https://api.openai.com/v1/realtime/client_secrets"
 ).strip()
 
 ALLOWED_VOICES = {
     "alloy",
     "ash",
     "ballad",
+    "cedar",
     "coral",
     "echo",
+    "marin",
     "sage",
     "shimmer",
     "verse",
@@ -33,27 +51,58 @@ def _require_actor(req: Request) -> str:
         raise HTTPException(status_code=400, detail="invalid_actor_user_id")
 
 
-def _clean_model(raw: object) -> str:
-    model = str(raw or DEFAULT_REALTIME_MODEL or "gpt-4o-realtime-preview").strip()
-    # OpenAI-only rule: reject provider-prefixed stale values such as xai:grok-*
+def _clean_model(raw: Any) -> str:
+    model = str(raw or DEFAULT_REALTIME_MODEL or "gpt-realtime-2").strip()
+    # OpenAI-only rule: reject provider-prefixed stale values.
     if not model or ":" in model:
-        return DEFAULT_REALTIME_MODEL or "gpt-4o-realtime-preview"
+        return DEFAULT_REALTIME_MODEL or "gpt-realtime-2"
     return model[:120]
 
 
-def _clean_voice(raw: object) -> str:
-    voice = str(raw or "alloy").strip().lower()
-    return voice if voice in ALLOWED_VOICES else "alloy"
+def _clean_voice(raw: Any) -> str:
+    voice = str(raw or DEFAULT_REALTIME_VOICE or "marin").strip().lower()
+    return voice if voice in ALLOWED_VOICES else (DEFAULT_REALTIME_VOICE if DEFAULT_REALTIME_VOICE in ALLOWED_VOICES else "marin")
+
+
+def _clean_instructions(raw: Any) -> str:
+    instructions = str(raw or "").strip()
+    if not instructions:
+        instructions = (
+            "You are Sage, a concise, useful voice assistant inside Verbal Sage. "
+            "Use normal conversational language. Keep responses brief unless the user asks for detail."
+        )
+    return instructions[:8000]
+
+
+def _session_config(body: dict[str, Any]) -> dict[str, Any]:
+    model = _clean_model(body.get("model"))
+    voice = _clean_voice(body.get("voice"))
+    instructions = _clean_instructions(body.get("instructions"))
+
+    return {
+        "type": "realtime",
+        "model": model,
+        "instructions": instructions,
+        "audio": {
+            "output": {
+                "voice": voice,
+            },
+        },
+    }
+
+
+def _safety_identifier(actor_user_id: str) -> str:
+    return hashlib.sha256(actor_user_id.encode("utf-8")).hexdigest()
 
 
 @router.post("/voice/openai/session")
-async def create_realtime_session(req: Request):
+async def create_realtime_client_secret(req: Request):
     """
-    Mint an ephemeral OpenAI Realtime session for browser use.
+    Compatibility endpoint: create a short-lived OpenAI Realtime client secret.
 
-    Security boundary:
-    - x-vs-service-token is enforced by app.py middleware.
-    - x-vs-actor-user-id is required here before any OpenAI call is made.
+    Preferred browser path is /voice/openai/webrtc-offer, which uses the
+    modern WebRTC unified interface and does not expose a reusable secret to
+    the browser.
     """
 
     actor_user_id = _require_actor(req)
@@ -70,35 +119,33 @@ async def create_realtime_session(req: Request):
     if not isinstance(body, dict):
         body = {}
 
-    voice = _clean_voice(body.get("voice"))
-    model = _clean_model(body.get("model"))
-    instructions = str(body.get("instructions") or "").strip()[:8000]
+    session = _session_config(body)
 
-    payload = {
-        "model": model,
-        "voice": voice,
-        "instructions": instructions,
-        "modalities": ["audio", "text"],
-    }
-
-    # Safe route probe. Requires service token + actor, but avoids vendor call.
     if body.get("dry_run") is True:
         return {
             "status": "ok",
             "provider": "openai",
+            "mode": "client_secret",
             "actor_user_id": actor_user_id,
-            "model": model,
-            "voice": voice,
-            "modalities": payload["modalities"],
+            "session": session,
             "dry_run": True,
         }
 
+    payload = {
+        "expires_after": {
+            "anchor": "created_at",
+            "seconds": 600,
+        },
+        "session": session,
+    }
+
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
-            OPENAI_REALTIME_SESSIONS_URL,
+            OPENAI_REALTIME_CLIENT_SECRETS_URL,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
             },
             json=payload,
         )
@@ -107,3 +154,89 @@ async def create_realtime_session(req: Request):
         raise HTTPException(status_code=502, detail=r.text)
 
     return r.json()
+
+
+@router.post("/voice/openai/webrtc-offer")
+async def create_realtime_webrtc_offer(req: Request):
+    """
+    Modern browser WebRTC unified interface.
+
+    Input:
+    - request body may be raw SDP text, or JSON { "sdp": "...", ...sessionOptions }
+
+    Output:
+    - OpenAI answer SDP as application/sdp.
+    """
+
+    actor_user_id = _require_actor(req)
+
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="missing_openai_key")
+
+    content_type = (req.headers.get("content-type") or "").lower()
+    raw = await req.body()
+
+    body: dict[str, Any] = {}
+    sdp = ""
+
+    if "application/json" in content_type:
+        try:
+            parsed = json.loads(raw.decode("utf-8", "ignore") or "{}")
+        except Exception:
+            parsed = {}
+        if isinstance(parsed, dict):
+            body = parsed
+            sdp = str(parsed.get("sdp") or "").strip()
+    else:
+        sdp = raw.decode("utf-8", "ignore").strip()
+        # Optional session controls can still be sent as query params.
+        body = {
+            "model": req.query_params.get("model"),
+            "voice": req.query_params.get("voice"),
+            "instructions": req.query_params.get("instructions"),
+        }
+
+    session = _session_config(body)
+
+    if body.get("dry_run") is True:
+        return {
+            "status": "ok",
+            "provider": "openai",
+            "mode": "webrtc_unified",
+            "actor_user_id": actor_user_id,
+            "session": session,
+            "sdp_chars": len(sdp),
+            "dry_run": True,
+        }
+
+    if not sdp:
+        raise HTTPException(status_code=400, detail="missing_sdp")
+
+    files = {
+        "sdp": ("offer.sdp", sdp, "application/sdp"),
+        "session": (None, json.dumps(session), "application/json"),
+    }
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        r = await client.post(
+            OPENAI_REALTIME_CALLS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
+            },
+            files=files,
+        )
+
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=r.text[:4000])
+
+    return Response(
+        content=r.content,
+        status_code=200,
+        media_type=r.headers.get("content-type") or "application/sdp",
+        headers={
+            "x-vs-voice-provider": "openai",
+            "x-vs-realtime-mode": "webrtc_unified",
+        },
+    )
