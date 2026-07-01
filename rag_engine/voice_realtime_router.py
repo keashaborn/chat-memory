@@ -187,9 +187,9 @@ async def create_realtime_webrtc_offer(req: Request):
             parsed = {}
         if isinstance(parsed, dict):
             body = parsed
-            sdp = str(parsed.get("sdp") or "").strip()
+            sdp = str(parsed.get("sdp") or "")
     else:
-        sdp = raw.decode("utf-8", "ignore").strip()
+        sdp = raw.decode("utf-8", "ignore")
         # Optional session controls can still be sent as query params.
         body = {
             "model": req.query_params.get("model"),
@@ -210,12 +210,20 @@ async def create_realtime_webrtc_offer(req: Request):
             "dry_run": True,
         }
 
-    if not sdp:
+    if not sdp.strip():
         raise HTTPException(status_code=400, detail="missing_sdp")
 
-    files = {
-        "sdp": ("offer.sdp", sdp, "application/sdp"),
-        "session": (None, json.dumps(session), "application/json"),
+    print(
+        f"[voice-webrtc] offer actor={actor_user_id} raw_len={len(raw)} sdp_len={len(sdp)}",
+        flush=True,
+    )
+
+    # OpenAI Realtime unified WebRTC expects multipart FormData string fields.
+    # In httpx, filename=None creates normal multipart fields, equivalent to
+    # FormData.set("sdp", raw_sdp) and FormData.set("session", session_json).
+    multipart_fields = {
+        "sdp": (None, sdp),
+        "session": (None, json.dumps(session)),
     }
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
@@ -225,16 +233,23 @@ async def create_realtime_webrtc_offer(req: Request):
                 "Authorization": f"Bearer {api_key}",
                 "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
             },
-            files=files,
+            files=multipart_fields,
         )
 
     if r.status_code >= 400:
+        print(f"[voice-webrtc] openai_error status={r.status_code}", flush=True)
         raise HTTPException(status_code=502, detail=r.text[:4000])
 
+    answer_text = r.text
+    print(
+        f"[voice-webrtc] openai_ok status={r.status_code} answer_len={len(answer_text)}",
+        flush=True,
+    )
+
     return Response(
-        content=r.content,
+        content=answer_text,
         status_code=200,
-        media_type=r.headers.get("content-type") or "application/sdp",
+        media_type="application/sdp",
         headers={
             "x-vs-voice-provider": "openai",
             "x-vs-realtime-mode": "webrtc_unified",
