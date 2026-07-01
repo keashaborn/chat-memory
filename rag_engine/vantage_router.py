@@ -677,20 +677,33 @@ def vantage_query(req: Request, payload: VantageQuery):
         }
 
         # weights + threshold
+        # Personal memory should be active by default when VANTAGE_PERSONAL_MEMORY=1.
+        # Request mix can still override it explicitly with memory_cards=0.
         try:
-            w_mem = float(mix.get("memory_cards", 0.0))
+            if "memory_cards" in (mix or {}):
+                w_mem = float((mix or {}).get("memory_cards", 0.0))
+            else:
+                w_mem = float(os.getenv("VANTAGE_DEFAULT_MEMORY_WEIGHT", "1.0") or 1.0)
         except Exception:
-            w_mem = 0.0
+            w_mem = 1.0
+
         try:
-            w_corpus = float(mix.get("corpus", 1.0))
+            w_corpus = float((mix or {}).get("corpus", 1.0))
         except Exception:
             w_corpus = 1.0
 
-        thr = mix.get("similarity_threshold", None)
+        w_mem = max(0.0, min(1.0, w_mem))
+        w_corpus = max(0.0, min(1.0, w_corpus))
+
+        thr = (mix or {}).get("similarity_threshold", None)
         try:
             thr_f = float(thr) if thr is not None else None
         except Exception:
             thr_f = None
+
+        # retrieve_personal_memory expects a numeric threshold.
+        # None caused float(None) inside retriever_unified and silently returned [].
+        personal_thr_f = float(thr_f) if thr_f is not None else float(os.getenv("VANTAGE_PERSONAL_SCORE_THRESHOLD", "0.20") or 0.20)
 
         base_k = int(payload.top_k or 5)
         k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(1, int(round(base_k * w_mem)))
@@ -985,9 +998,9 @@ def vantage_query(req: Request, payload: VantageQuery):
                         "top_k": k_personal,
                         "k": k_personal,
                         "limit": k_personal,
-                        "threshold": thr_f,
-                        "similarity_threshold": thr_f,
-                        "score_threshold": thr_f,
+                        "threshold": personal_thr_f,
+                        "similarity_threshold": personal_thr_f,
+                        "score_threshold": personal_thr_f,
                         "vantage_id": vid,
                     },
                 ) or []
@@ -1022,6 +1035,7 @@ def vantage_query(req: Request, payload: VantageQuery):
                         "deny_collections": deny_collections,
                         "vantage_id": vid,
                         "threshold": thr_f,
+            "personal_threshold": personal_thr_f,
                         "similarity_threshold": thr_f,
                         "score_threshold": thr_f,
                     },
@@ -1082,6 +1096,18 @@ def vantage_query(req: Request, payload: VantageQuery):
 
         k_memory = sum(1 for h in memory_chunks if (h or {}).get("_src") == "personal")
         k_corpus_used = sum(1 for h in memory_chunks if (h or {}).get("_src") == "corpus")
+        debug_retrieval_counts = {
+            "use_personal": bool(use_personal),
+            "w_mem": w_mem,
+            "w_corpus": w_corpus,
+            "base_k": base_k,
+            "k_personal_requested": k_personal,
+            "k_corpus_requested": k_corpus,
+            "personal_hits_raw": len(personal_hits or []),
+            "corpus_hits_raw": len(corpus_hits or []),
+            "combined_after_trim": len(memory_chunks or []),
+            "threshold": thr_f,
+        }
 
         system_prompt = build_system_prompt(
             payload.user_id,
@@ -1097,6 +1123,8 @@ def vantage_query(req: Request, payload: VantageQuery):
 
         meta.setdefault("vantage", {})
         meta["vantage"]["counts"] = {"k_memory": k_memory, "k_corpus": k_corpus_used}
+        if debug_on:
+            meta["vantage"]["retrieval_debug"] = debug_retrieval_counts
         try:
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:
