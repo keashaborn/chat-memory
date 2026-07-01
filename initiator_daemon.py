@@ -59,21 +59,73 @@ def _load_env_file(path: str) -> None:
 
 async def fetch_registry_vantage_ids(conn: asyncpg.Connection) -> List[str]:
     """
-    Return Vantage ids mirrored from Supabase.
+    Return Vantage ids to tick in --all-from-registry mode.
 
-    This is the registry-driven replacement for one systemd daemon per Vantage.
+    Sources:
+      1. Supabase-mirrored UI registry rows.
+      2. Enabled controller_config rows.
+
+    Rationale:
+      vantage_profile.registry is a UI/profile mirror. It may not contain standard
+      system vantages such as RILEY/MORGAN yet. The initiator's job authority is
+      vantage_initiator.controller_config.
     """
     rows = await conn.fetch("""
-      SELECT DISTINCT vantage_id, is_active, is_default, updated_at
-      FROM vantage_profile.registry
-      WHERE source='supabase'
-        AND COALESCE(vantage_id, '') <> ''
-      ORDER BY is_active DESC, is_default DESC, updated_at DESC, vantage_id ASC
+      WITH supabase_registry AS (
+        SELECT
+          vantage_id,
+          is_active,
+          is_default,
+          updated_at,
+          0 AS source_rank
+        FROM vantage_profile.registry
+        WHERE source='supabase'
+          AND COALESCE(vantage_id, '') <> ''
+      ),
+      controller_registry AS (
+        SELECT
+          vantage_id,
+          enabled AS is_active,
+          false AS is_default,
+          updated_at,
+          1 AS source_rank
+        FROM vantage_initiator.controller_config
+        WHERE enabled = true
+          AND COALESCE(vantage_id, '') <> ''
+      ),
+      unioned AS (
+        SELECT * FROM supabase_registry
+        UNION ALL
+        SELECT * FROM controller_registry
+      )
+      SELECT DISTINCT ON (vantage_id)
+        vantage_id,
+        is_active,
+        is_default,
+        updated_at,
+        source_rank
+      FROM unioned
+      ORDER BY
+        vantage_id,
+        source_rank ASC,
+        is_active DESC,
+        is_default DESC,
+        updated_at DESC
     """)
+
+    ordered = sorted(
+        rows,
+        key=lambda r: (
+            -int(bool(r["is_active"])),
+            -int(bool(r["is_default"])),
+            int(r["source_rank"]),
+            str(r["vantage_id"] or ""),
+        ),
+    )
 
     out: List[str] = []
     seen = set()
-    for r in rows:
+    for r in ordered:
         vid = str(r["vantage_id"] or "").strip()
         if not vid or vid in seen:
             continue
