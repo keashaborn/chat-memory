@@ -244,6 +244,67 @@ def _run_coro_sync(coro):
     return box["value"]
 
 
+
+def _card_vantage_candidates(vantage_id: str | None, *, include_legacy: bool = True) -> list[str]:
+    """
+    Runtime compatibility list while migrating from vantage-owned memory to
+    user-owned memory. Active standard modes should inherit existing global/legacy
+    cards rather than seeing an empty profile.
+    """
+    active = (vantage_id or "").strip() or "default"
+    vals: list[str] = []
+
+    def add(x: str):
+        x = (x or "").strip()
+        if x and x not in vals:
+            vals.append(x)
+
+    # Prefer active mode first for true mode-specific style cards.
+    add(active)
+
+    if include_legacy:
+        # Existing historical rows observed in production.
+        for v in ("default", "RESSE", "EVA", "RILEY", "MORGAN"):
+            add(v)
+
+    return vals
+
+
+_IGNORED_CARD_ATTR_KEYS = {
+    "return_exactly",
+    "say_exactly",
+    "seedmemory",
+    "seed_note",
+    "threadctx",
+    "audit",
+}
+
+# Historical role-play/persona artifact. Do not inject into standard LifeSwitch/Sage modes.
+_IGNORED_PREF_TOPIC_SUFFIXES = {
+    "/pref/personalization",
+}
+
+
+def _topic_attr_key(topic_key: str) -> str:
+    parts = str(topic_key or "").strip().split("/")
+    return parts[-1] if parts else ""
+
+
+def _should_inject_card_topic(kind: str, topic_key: str) -> bool:
+    key = _topic_attr_key(topic_key)
+    if key in _IGNORED_CARD_ATTR_KEYS:
+        return False
+
+    tk = str(topic_key or "")
+    if kind in ("pref", "style"):
+        for suffix in _IGNORED_PREF_TOPIC_SUFFIXES:
+            if tk.endswith(suffix):
+                return False
+
+    return True
+
+
+
 async def _load_vantage_preference_cards_async(user_id: str, vantage_id: str | None = None, limit: int = 8) -> List[str]:
     uid = str(user_id or "").strip()
     vid = (vantage_id or "").strip() or "default"
@@ -254,28 +315,44 @@ async def _load_vantage_preference_cards_async(user_id: str, vantage_id: str | N
     if not dsn:
         return []
 
+    vids = _card_vantage_candidates(vid, include_legacy=True)
+
     conn = await asyncpg.connect(_norm_dsn(dsn))
     try:
         rows = await conn.fetch(
             """
-            SELECT kind, topic_key, summary, strength, confidence, updated_at
+            SELECT kind, topic_key, summary, strength, confidence, updated_at, vantage_id
             FROM vantage_card.card_head
-            WHERE vantage_id=$1
+            WHERE vantage_id = ANY($1::text[])
               AND kind IN ('pref','style')
               AND topic_key LIKE $2
               AND COALESCE(summary, '') <> ''
-            ORDER BY strength DESC NULLS LAST,
+            ORDER BY
+                     CASE WHEN vantage_id=$3 THEN 0 ELSE 1 END ASC,
+                     strength DESC NULLS LAST,
                      confidence DESC NULLS LAST,
                      updated_at DESC NULLS LAST
-            LIMIT $3
+            LIMIT $4
             """,
-            vid,
+            vids,
             f"user/{uid}/%",
+            vid,
             int(limit),
         )
 
         out: List[str] = []
+        seen_keys: set[str] = set()
         for r in rows:
+            kind = str(r["kind"] or "").strip()
+            topic_key = str(r["topic_key"] or "").strip()
+            if not _should_inject_card_topic(kind, topic_key):
+                continue
+
+            dedupe_key = f"{kind}:{topic_key}"
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+
             summary = str(r["summary"] or "").strip()
             if not summary:
                 continue
@@ -298,13 +375,15 @@ async def _load_vantage_profile_cards_async(user_id: str, vantage_id: str | None
     if not dsn:
         return []
 
+    vids = _card_vantage_candidates(vid, include_legacy=True)
+
     conn = await asyncpg.connect(_norm_dsn(dsn))
     try:
         rows = await conn.fetch(
             """
-            SELECT kind, topic_key, summary, strength, confidence, updated_at
+            SELECT kind, topic_key, summary, strength, confidence, updated_at, vantage_id
             FROM vantage_card.card_head
-            WHERE vantage_id=$1
+            WHERE vantage_id = ANY($1::text[])
               AND kind IN ('identity','background','project')
               AND topic_key LIKE $2
               AND COALESCE(summary, '') <> ''
@@ -315,18 +394,31 @@ async def _load_vantage_profile_cards_async(user_id: str, vantage_id: str | None
                        WHEN 'project' THEN 3
                        ELSE 9
                      END ASC,
+                     CASE WHEN vantage_id=$3 THEN 0 ELSE 1 END ASC,
                      strength DESC NULLS LAST,
                      confidence DESC NULLS LAST,
                      updated_at DESC NULLS LAST
-            LIMIT $3
+            LIMIT $4
             """,
-            vid,
+            vids,
             f"user/{uid}/%",
+            vid,
             int(limit),
         )
 
         out: List[str] = []
+        seen_keys: set[str] = set()
         for r in rows:
+            kind = str(r["kind"] or "").strip()
+            topic_key = str(r["topic_key"] or "").strip()
+            if not _should_inject_card_topic(kind, topic_key):
+                continue
+
+            dedupe_key = f"{kind}:{topic_key}"
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+
             summary = str(r["summary"] or "").strip()
             if not summary:
                 continue

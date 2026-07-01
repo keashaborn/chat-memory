@@ -518,24 +518,27 @@ def retrieve_personal_memory(
         )
 
     # Namespace filter:
-    # - keep points in the active Vantage.
-    # - legacy/global points with missing payload.vantage_id are allowed only for default,
-    #   unless explicitly enabled with VANTAGE_LEGACY_MEMORY_FALLBACK=1.
+    # Current product direction treats Resse/Riley/Morgan as standard interface modes,
+    # not separate long-term memory containers. Therefore episodic personal memory is
+    # user-global by default. Keep strict vantage filtering behind an env flag for
+    # rollback or future role-play/persona isolation.
+    strict_vantage_memory = os.getenv("VANTAGE_PERSONAL_MEMORY_STRICT_VANTAGE", "0").strip().lower() in ("1", "true", "yes", "on")
+
     legacy_fallback = os.getenv("VANTAGE_LEGACY_MEMORY_FALLBACK", "0").strip().lower() in ("1", "true", "yes", "on")
     allow_legacy = (vid == "default") or legacy_fallback
 
     use_is_empty = hasattr(qmodels, "IsEmptyCondition") and hasattr(qmodels, "PayloadField")
 
     should = None
-    if use_is_empty:
+    if strict_vantage_memory and use_is_empty:
         should = [
             qmodels.FieldCondition(key="vantage_id", match=qmodels.MatchValue(value=vid)),
         ]
         if allow_legacy:
             should.append(qmodels.IsEmptyCondition(is_empty=qmodels.PayloadField(key="vantage_id")))
     else:
-        # Older qdrant_client: can't express "is_empty" server-side.
-        # We'll post-filter payload.vantage_id below.
+        # Default: no vantage filter for episodic personal memory.
+        # User ownership is enforced by payload.user_id above.
         should = None
 
     # Exclude assistant chat + daemon/system cards from episodic retrieval.
@@ -595,14 +598,9 @@ def retrieve_personal_memory(
 
         txt = (payload.get("text") or "").strip()
 
-        # If the Qdrant client can't express "vantage_id is empty" server-side,
-        # enforce namespace here: allow either matching vid OR missing vantage_id.
-        if not use_is_empty:
-            pv = payload.get("vantage_id", None)
-            if not ((pv == vid) or (allow_legacy and pv in (None, ""))):
-                continue
-        else:
-            # Server-side should filter normally, but hard-enforce anyway.
+        # Optional strict namespace enforcement.
+        # Default: user-global episodic memory across Resse/Riley/Morgan.
+        if strict_vantage_memory:
             pv = payload.get("vantage_id", None)
             if not ((pv == vid) or (allow_legacy and pv in (None, ""))):
                 continue
