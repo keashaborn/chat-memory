@@ -328,6 +328,7 @@ async def _load_vantage_preference_cards_async(user_id: str, vantage_id: str | N
             FROM vantage_card.card_head
             WHERE vantage_id = ANY($1::text[])
               AND kind IN ('pref','style')
+              AND status='active'
               AND topic_key LIKE $2
               AND COALESCE(summary, '') <> ''
             ORDER BY
@@ -393,6 +394,7 @@ async def _load_vantage_profile_cards_async(user_id: str, vantage_id: str | None
             FROM vantage_card.card_head
             WHERE vantage_id = ANY($1::text[])
               AND kind IN ('identity','background','project')
+              AND status='active'
               AND topic_key LIKE $2
               AND COALESCE(summary, '') <> ''
             ORDER BY
