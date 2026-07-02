@@ -10,6 +10,27 @@ def _jsonb(v: Any) -> str:
     return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
 
 
+USER_GLOBAL_VANTAGE_ID = "user_global"
+_GLOBAL_DURABLE_CARD_KINDS = {"identity", "background", "project", "pref"}
+
+
+def _card_write_vantage_id(job_vantage_id: str, kind: str, attr_key: str) -> str:
+    """
+    Durable user facts/preferences are user-global. System/cursor/audit cards and
+    future non-durable mode/persona cards remain scoped to the job vantage.
+    """
+    job_vid = (job_vantage_id or "").strip() or "default"
+    k = (kind or "").strip()
+
+    if k in ("system", "audit"):
+        return job_vid
+
+    if k in _GLOBAL_DURABLE_CARD_KINDS:
+        return USER_GLOBAL_VANTAGE_ID
+
+    return job_vid
+
+
 async def _canonicalize_user_id(conn: asyncpg.Connection, vantage_id: str, user_id: str) -> str:
     """Resolve user_id aliases to a canonical id (best-effort)."""
     uid = str(user_id or "").strip()
@@ -255,8 +276,10 @@ async def card_consolidate_from_kv_once(
                     kind = "pref"
 
                 topic_key = f"user/{user_id}/{kind}/{card_attr_key}"
+                card_vantage_id = _card_write_vantage_id(vantage_id, kind, attr_key)
+                source_vantage_id = str(md.get("vantage_id") or "default").strip() or "default"
 
-                card_id = await _get_or_create_card(conn, vantage_id, kind, topic_key)
+                card_id = await _get_or_create_card(conn, card_vantage_id, kind, topic_key)
                 head = await conn.fetchrow(
                     "SELECT payload, strength, confidence FROM vantage_card.card_head WHERE card_id=$1",
                     card_id
@@ -279,8 +302,20 @@ async def card_consolidate_from_kv_once(
 
                 counts[val] = int(counts.get(val, 0)) + 1
 
+                source_vantage_counts = payload.get("source_vantage_counts") or {}
+                if not isinstance(source_vantage_counts, dict):
+                    source_vantage_counts = {}
+                source_vantage_counts[source_vantage_id] = int(source_vantage_counts.get(source_vantage_id, 0)) + 1
+                source_vantage_ids = sorted(source_vantage_counts.keys())
+
                 payload.update({
                     "mode": "card_consolidate_kv_v2",
+                    "card_scope": "user_global" if card_vantage_id == USER_GLOBAL_VANTAGE_ID else "vantage",
+                    "card_vantage_id": card_vantage_id,
+                    "job_vantage_id": vantage_id,
+                    "source_vantage_id": source_vantage_id,
+                    "source_vantage_ids": source_vantage_ids,
+                    "source_vantage_counts": source_vantage_counts,
                     "source_id_last": source_id,
                     "chat_log_id_last": chat_log_id,
                     "user_id": user_id,

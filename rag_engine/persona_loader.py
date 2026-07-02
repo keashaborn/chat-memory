@@ -262,6 +262,9 @@ def _card_vantage_candidates(vantage_id: str | None, *, include_legacy: bool = T
     # Prefer active mode first for true mode-specific style cards.
     add(active)
 
+    # New durable user facts/preferences live here.
+    add("user_global")
+
     if include_legacy:
         # Existing historical rows observed in production.
         for v in ("default", "RESSE", "EVA", "RILEY", "MORGAN"):
@@ -328,7 +331,12 @@ async def _load_vantage_preference_cards_async(user_id: str, vantage_id: str | N
               AND topic_key LIKE $2
               AND COALESCE(summary, '') <> ''
             ORDER BY
-                     CASE WHEN vantage_id=$3 THEN 0 ELSE 1 END ASC,
+                       CASE
+                         WHEN kind='style' AND vantage_id=$3 THEN 0
+                         WHEN vantage_id='user_global' THEN 1
+                         WHEN vantage_id=$3 THEN 2
+                         ELSE 3
+                       END ASC,
                      strength DESC NULLS LAST,
                      confidence DESC NULLS LAST,
                      updated_at DESC NULLS LAST
@@ -394,7 +402,11 @@ async def _load_vantage_profile_cards_async(user_id: str, vantage_id: str | None
                        WHEN 'project' THEN 3
                        ELSE 9
                      END ASC,
-                     CASE WHEN vantage_id=$3 THEN 0 ELSE 1 END ASC,
+                       CASE
+                         WHEN vantage_id='user_global' THEN 0
+                         WHEN vantage_id=$3 THEN 1
+                         ELSE 2
+                       END ASC,
                      strength DESC NULLS LAST,
                      confidence DESC NULLS LAST,
                      updated_at DESC NULLS LAST
