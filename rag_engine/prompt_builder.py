@@ -57,6 +57,79 @@ def format_memory_chunks(chunks: List[Dict[str, Any]]) -> str:
     return "\n".join(formatted)
 
 
+
+
+def _looks_like_technical_admin_turn(text: str | None) -> bool:
+    """
+    Conservative first-pass mention gate:
+    do not inject durable biography/profile cards into obvious technical/admin/dev turns.
+    Preference/style cards still load. Specific recall and personal-context questions
+    can still get profile cards.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+
+    personal_cues = (
+        "my background",
+        "my history",
+        "about me",
+        "what do you know about me",
+        "what do you remember about me",
+        "personal",
+        "family",
+        "father",
+        "mother",
+        "dad",
+        "mom",
+        "wife",
+        "sister",
+        "caravel",
+        "clinical psychologist",
+        "bcba",
+    )
+    if any(cue in t for cue in personal_cues):
+        return False
+
+    technical_cues = (
+        "restart",
+        "rebuild",
+        "build",
+        "deploy",
+        "frontend",
+        "backend",
+        "server",
+        "service",
+        "systemctl",
+        "journalctl",
+        "nginx",
+        "node",
+        "npm",
+        "pnpm",
+        "python",
+        "postgres",
+        "qdrant",
+        "redis",
+        "docker",
+        "supabase",
+        "api",
+        "route",
+        "endpoint",
+        "code",
+        "script",
+        "patch",
+        "debug",
+        "error",
+        "logs",
+        "grep",
+        "sed",
+        "git",
+        "commit",
+        "branch",
+    )
+    return any(cue in t for cue in technical_cues)
+
+
 def build_system_prompt(
     user_id: str,
     memory_chunks: List[Dict[str, Any]],
@@ -66,6 +139,7 @@ def build_system_prompt(
     include_memory: bool = True,
     memory_header: str = "Relevant context from memory:",
       vantage_id: str | None = None,
+      current_message: str | None = None,
 ) -> str:
     """
     Combine:
@@ -98,9 +172,11 @@ def build_system_prompt(
     if vantage_pref_block and vantage_pref_block.strip():
         pieces.append(vantage_pref_block.strip())
 
-    vantage_profile_block = build_vantage_profile_cards_block(user_id, vantage_id=vantage_id)
-    if vantage_profile_block and vantage_profile_block.strip():
-        pieces.append(vantage_profile_block.strip())
+    include_profile_cards = not _looks_like_technical_admin_turn(current_message)
+    if include_profile_cards:
+        vantage_profile_block = build_vantage_profile_cards_block(user_id, vantage_id=vantage_id)
+        if vantage_profile_block and vantage_profile_block.strip():
+            pieces.append(vantage_profile_block.strip())
 
     if include_memory:
         memory_block = format_memory_chunks(memory_chunks)

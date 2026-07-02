@@ -1115,6 +1115,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             overlay_text=overlay_text,
             include_persona=False,
             vantage_id=vid,
+            current_message=payload.message,
         )
 
         meta = build_meta_explanation(payload.user_id, payload.message, memory_chunks) or {}
