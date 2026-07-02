@@ -13,6 +13,24 @@ def _jsonb(v: Any) -> str:
 USER_GLOBAL_VANTAGE_ID = "user_global"
 _GLOBAL_DURABLE_CARD_KINDS = {"identity", "background", "project", "pref"}
 
+_IGNORED_CARD_ATTR_KEYS = {
+    # harness/test injection artifacts
+    "return_exactly",
+    "say_exactly",
+    "seedmemory",
+    "seed_note",
+    "threadctx",
+    "audit",
+
+    # persona/vantage config artifacts; not durable user preferences
+    "personalization",
+    "preference_personalization",
+
+    # explicit MEMQA/test recall artifacts; belongs in episodic/vector archive only
+    "remember_this_test_detail_for_later",
+    "preference_remember_this_test_detail_for_later",
+}
+
 
 def _card_write_vantage_id(job_vantage_id: str, kind: str, attr_key: str) -> str:
     """
@@ -219,7 +237,7 @@ async def card_consolidate_from_kv_once(
                 continue
 
             # mark source processed on the cursor card; distinguish ignored-only sources
-            ignored_keys = {"return_exactly","say_exactly","seedmemory","seed_note","threadctx","audit"}
+            ignored_keys = _IGNORED_CARD_ATTR_KEYS
             has_effective = False
             for _c in claims:
                 _pred = str(_c["predicate"])
@@ -243,7 +261,7 @@ async def card_consolidate_from_kv_once(
                 attr_key = pred.replace("attr.", "", 1)
 
                 # ignore harness/test attributes so they don't pollute preference cards
-                if attr_key in {"return_exactly","say_exactly","seedmemory","seed_note","threadctx","audit"}:
+                if attr_key in _IGNORED_CARD_ATTR_KEYS:
                     continue
 
                 obj = c["object_literal"]
