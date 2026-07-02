@@ -334,6 +334,36 @@ def _looks_tasky(text: str) -> bool:
     return bool(_TASKY_RE.search(t))
 
 
+_RECALL_RE = re.compile(
+    r"\b("
+    r"what (was|is|did|do) (my|i|you)|"
+    r"what .* remember|"
+    r"what .* told you|"
+    r"remind me|"
+    r"do you remember|"
+    r"remember .* about|"
+    r"memory qa|"
+    r"marker animal|"
+    r"my dad'?s name|"
+    r"my father'?s name|"
+    r"my mother'?s name"
+    r")\b",
+    re.I,
+)
+
+
+def _looks_specific_personal_recall(text: str) -> bool:
+    """
+    Direct recall mode: favor user personal/archive memory and avoid corpus crowd-out.
+    This is for queries like "what was my marker animal?" or "what is my dad's name?",
+    not for general technical/product questions.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    return bool(_RECALL_RE.search(t))
+
+
 def _ritual_reply(text: str, pe: int) -> str:
     t = (text or "").strip().lower()
 
@@ -708,6 +738,15 @@ def vantage_query(req: Request, payload: VantageQuery):
         base_k = int(payload.top_k or 5)
         k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(1, int(round(base_k * w_mem)))
         k_corpus = 0 if (w_corpus <= 0.0) else max(1, int(round(base_k * w_corpus)))
+
+        recall_mode = _looks_specific_personal_recall(payload.message)
+        if recall_mode and use_personal:
+            # Specific personal recall should search the user's archive first.
+            # Do not let broad corpus hits crowd out one-off personal facts.
+            base_k = int(os.getenv("VANTAGE_RECALL_BASE_K", "3") or 3)
+            k_personal = max(k_personal, int(os.getenv("VANTAGE_RECALL_PERSONAL_K", "10") or 10))
+            k_corpus = int(os.getenv("VANTAGE_RECALL_CORPUS_K", "0") or 0)
+            personal_thr_f = min(personal_thr_f, float(os.getenv("VANTAGE_RECALL_PERSONAL_THRESHOLD", "0.05") or 0.05))
 
 
 
@@ -1107,6 +1146,8 @@ def vantage_query(req: Request, payload: VantageQuery):
             "corpus_hits_raw": len(corpus_hits or []),
             "combined_after_trim": len(memory_chunks or []),
             "threshold": thr_f,
+            "personal_threshold": personal_thr_f,
+            "recall_mode": bool(recall_mode),
         }
 
         system_prompt = build_system_prompt(

@@ -61,34 +61,11 @@ def format_memory_chunks(chunks: List[Dict[str, Any]]) -> str:
 
 def _looks_like_technical_admin_turn(text: str | None) -> bool:
     """
-    Conservative first-pass mention gate:
-    do not inject durable biography/profile cards into obvious technical/admin/dev turns.
-    Preference/style cards still load. Specific recall and personal-context questions
-    can still get profile cards.
+    Conservative first-pass technical detector.
+    Used only as one input to profile-card gating.
     """
     t = (text or "").lower().strip()
     if not t:
-        return False
-
-    personal_cues = (
-        "my background",
-        "my history",
-        "about me",
-        "what do you know about me",
-        "what do you remember about me",
-        "personal",
-        "family",
-        "father",
-        "mother",
-        "dad",
-        "mom",
-        "wife",
-        "sister",
-        "caravel",
-        "clinical psychologist",
-        "bcba",
-    )
-    if any(cue in t for cue in personal_cues):
         return False
 
     technical_cues = (
@@ -129,6 +106,79 @@ def _looks_like_technical_admin_turn(text: str | None) -> bool:
     )
     return any(cue in t for cue in technical_cues)
 
+
+def _looks_like_specific_recall_turn(text: str | None) -> bool:
+    """
+    Specific recall should search archive/vector memory, not inject the full
+    durable biography/profile card block.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+
+    recall_cues = (
+        "what is my",
+        "what was my",
+        "who is my",
+        "who was my",
+        "what did i tell you",
+        "what have i told you",
+        "do you remember",
+        "remind me",
+        "my dad's name",
+        "my dad’s name",
+        "my father's name",
+        "my father’s name",
+        "my mom's name",
+        "my mom’s name",
+        "my mother's name",
+        "my mother’s name",
+        "marker animal",
+        "memory qa",
+    )
+    return any(cue in t for cue in recall_cues)
+
+
+def _looks_like_broad_profile_turn(text: str | None) -> bool:
+    """
+    Broad personal integration questions may use profile cards.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+
+    broad_cues = (
+        "my background",
+        "my history",
+        "about me",
+        "what do you know about me",
+        "what do you remember about me",
+        "what do you know about my background",
+        "my current project",
+        "my work history",
+        "my professional background",
+        "caravel",
+        "clinical psychologist",
+        "bcba",
+    )
+    return any(cue in t for cue in broad_cues)
+
+
+def _should_include_profile_cards(text: str | None) -> bool:
+    """
+    Runtime mention gate v0:
+    - include profile cards for broad profile/background integration
+    - suppress for technical/admin/dev turns
+    - suppress for narrow specific recall; vector/archive retrieval should answer
+    - default include for now to preserve existing nontechnical behavior
+    """
+    if _looks_like_broad_profile_turn(text):
+        return True
+    if _looks_like_technical_admin_turn(text):
+        return False
+    if _looks_like_specific_recall_turn(text):
+        return False
+    return True
 
 def build_system_prompt(
     user_id: str,
@@ -172,7 +222,7 @@ def build_system_prompt(
     if vantage_pref_block and vantage_pref_block.strip():
         pieces.append(vantage_pref_block.strip())
 
-    include_profile_cards = not _looks_like_technical_admin_turn(current_message)
+    include_profile_cards = _should_include_profile_cards(current_message)
     if include_profile_cards:
         vantage_profile_block = build_vantage_profile_cards_block(user_id, vantage_id=vantage_id)
         if vantage_profile_block and vantage_profile_block.strip():
