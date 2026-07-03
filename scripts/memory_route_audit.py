@@ -279,9 +279,9 @@ def main() -> int:
             "expect_plan": {
                 "turn_intent": "TECH",
                 "recall_mode": False,
-                "personal_archive_enabled": True,
+                "personal_archive_enabled": False,
                 "corpus_enabled": True,
-                "k_personal": 5,
+                "k_personal": 0,
                 "k_corpus": 5,
             },
         },
@@ -306,6 +306,7 @@ def main() -> int:
                 "[VANTAGE PREFERENCE CARDS]",
                 "lens_fm clamped to 0.0 because turn_intent=TECH",
                 "conversation clamped to 0.0 because turn_intent=TECH",
+                "memory_cards/personal archive clamped to 0.0 because turn_intent=TECH",
             ],
             "expect_false": [
                 "[FM LENS]",
@@ -321,14 +322,20 @@ def main() -> int:
             "expect_plan": {
                 "turn_intent": "TECH",
                 "recall_mode": False,
+                "personal_archive_enabled": False,
+                "k_personal": 0,
             },
             "expect_turn_plan": {
                 "requested_controls.lens_fm": 0.7,
                 "effective_controls.lens_fm": 0.0,
                 "requested_controls.conversation": 0.7,
                 "effective_controls.conversation": 0.0,
+                "requested_controls.memory_cards": 0.7,
+                "effective_controls.memory_cards": 0.0,
                 "injection_budget.thread_messages_injected": 0,
                 "injection_budget.thread_chars_injected": 0,
+                "injection_budget.max_personal_hits_requested": 0,
+                "allowed_stores.personal_archive": False,
             },
         },
         {

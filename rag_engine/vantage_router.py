@@ -526,9 +526,13 @@ def _build_turn_plan_v0(
         effective_controls["conversation"] = 0.0
         suppressed.append("conversation clamped to 0.0 because turn_intent=TECH")
 
+    if ti == "TECH" and effective_controls.get("memory_cards", 0.0) > 0.0:
+        effective_controls["memory_cards"] = 0.0
+        suppressed.append("memory_cards/personal archive clamped to 0.0 because turn_intent=TECH")
+
     notes: List[str] = []
     if ti == "TECH":
-        notes.append("TECH clamps FM lens and broad thread context now; personal archive and profile biography should be clamped next.")
+        notes.append("TECH clamps FM lens, broad thread context, and personal archive now; profile biography remains suppressed.")
     elif ti == "SPECIFIC_RECALL":
         notes.append("SPECIFIC_RECALL should prioritize personal archive and suppress corpus/profile cards.")
     elif ti == "PROFILE_SUMMARY":
@@ -1050,10 +1054,17 @@ def vantage_query(req: Request, payload: VantageQuery):
         # Explicit memory retrieval plan.
         # Personal memory should be active by default when VANTAGE_PERSONAL_MEMORY=1.
         # Request mix can still override it explicitly with memory_cards=0.
+        retrieval_mix = mix
+        retrieval_use_personal = use_personal
+        if turn_intent == "TECH":
+            retrieval_mix = dict(mix or {})
+            retrieval_mix["memory_cards"] = 0.0
+            retrieval_use_personal = False
+
         retrieval_plan = _build_memory_retrieval_plan(
             turn_intent=turn_intent,
-            use_personal=use_personal,
-            mix=mix,
+            use_personal=retrieval_use_personal,
+            mix=retrieval_mix,
             requested_top_k=payload.top_k,
         )
         recall_mode = bool(retrieval_plan["recall_mode"])
