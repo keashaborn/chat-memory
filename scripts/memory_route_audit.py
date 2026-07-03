@@ -110,6 +110,14 @@ def main() -> int:
             ],
             "expect_recall_mode": False,
             "expect_turn_intent": "TECH",
+            "expect_plan": {
+                "turn_intent": "TECH",
+                "recall_mode": False,
+                "personal_archive_enabled": True,
+                "corpus_enabled": True,
+                "k_personal": 5,
+                "k_corpus": 5,
+            },
         },
         {
             "name": "specific_recall_dad",
@@ -129,6 +137,15 @@ def main() -> int:
             ],
             "expect_recall_mode": True,
             "expect_turn_intent": "SPECIFIC_RECALL",
+            "expect_plan": {
+                "turn_intent": "SPECIFIC_RECALL",
+                "recall_mode": True,
+                "personal_archive_enabled": True,
+                "corpus_enabled": False,
+                "base_k": 3,
+                "k_personal": 10,
+                "k_corpus": 0,
+            },
         },
         {
             "name": "broad_background",
@@ -150,6 +167,14 @@ def main() -> int:
             ],
             "expect_recall_mode": False,
             "expect_turn_intent": "PROFILE_SUMMARY",
+            "expect_plan": {
+                "turn_intent": "PROFILE_SUMMARY",
+                "recall_mode": False,
+                "personal_archive_enabled": True,
+                "corpus_enabled": True,
+                "k_personal": 5,
+                "k_corpus": 5,
+            },
         },
         {
             "name": "lucifer_isolation_recall",
@@ -171,6 +196,15 @@ def main() -> int:
             ],
             "expect_recall_mode": True,
             "expect_turn_intent": "SPECIFIC_RECALL",
+            "expect_plan": {
+                "turn_intent": "SPECIFIC_RECALL",
+                "recall_mode": True,
+                "personal_archive_enabled": True,
+                "corpus_enabled": False,
+                "base_k": 3,
+                "k_personal": 10,
+                "k_corpus": 0,
+            },
         },
     ]
 
@@ -187,10 +221,12 @@ def main() -> int:
         print(f"MESSAGE: {t['body']['message']}")
         print(f"recall_mode: {rd.get('recall_mode')}")
         print(f"turn_intent: {rd.get('turn_intent')}")
+        plan = rd.get("retrieval_plan") or {}
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
         print(f"memory_used_count: {len(memory)}")
+        print(f"retrieval_plan: {json.dumps(plan, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
 
@@ -207,6 +243,14 @@ def main() -> int:
             passed = got_intent == str(expected_intent)
             ok = ok and passed
             print(f"EXPECT turn_intent={expected_intent}: {passed} (got={got_intent})")
+
+        expected_plan = t.get("expect_plan") or {}
+        plan = rd.get("retrieval_plan") or {}
+        for key, expected_value in expected_plan.items():
+            got_value = plan.get(key)
+            passed = got_value == expected_value
+            ok = ok and passed
+            print(f"EXPECT plan.{key}={expected_value!r}: {passed} (got={got_value!r})")
 
         for marker in t["expect_true"]:
             present = contains(data, marker)
