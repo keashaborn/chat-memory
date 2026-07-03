@@ -1246,7 +1246,7 @@ async def vantage_cards_list(
             vantage_id,
             kind,
             topic_key,
-              status::text as status,
+            status::text as status,
             summary,
             payload,
             strength,
