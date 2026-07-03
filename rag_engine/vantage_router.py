@@ -530,9 +530,13 @@ def _build_turn_plan_v0(
         effective_controls["memory_cards"] = 0.0
         suppressed.append("memory_cards/personal archive clamped to 0.0 because turn_intent=TECH")
 
+    if ti == "TECH" and effective_controls.get("corpus", 0.0) > 0.0:
+        effective_controls["corpus"] = 0.0
+        suppressed.append("corpus clamped to 0.0 because turn_intent=TECH")
+
     notes: List[str] = []
     if ti == "TECH":
-        notes.append("TECH clamps FM lens, broad thread context, and personal archive now; profile biography remains suppressed.")
+        notes.append("TECH clamps FM lens, broad thread context, personal archive, and general corpus now; profile biography remains suppressed.")
     elif ti == "SPECIFIC_RECALL":
         notes.append("SPECIFIC_RECALL should prioritize personal archive and suppress corpus/profile cards.")
     elif ti == "PROFILE_SUMMARY":
@@ -1059,6 +1063,7 @@ def vantage_query(req: Request, payload: VantageQuery):
         if turn_intent == "TECH":
             retrieval_mix = dict(mix or {})
             retrieval_mix["memory_cards"] = 0.0
+            retrieval_mix["corpus"] = 0.0
             retrieval_use_personal = False
 
         retrieval_plan = _build_memory_retrieval_plan(
