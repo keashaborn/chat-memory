@@ -388,11 +388,13 @@ def main() -> int:
         print(f"recall_mode: {rd.get('recall_mode')}")
         print(f"turn_intent: {rd.get('turn_intent')}")
         plan = rd.get("retrieval_plan") or {}
+        turn_plan = (((data.get("meta_explanation") or {}).get("vantage") or {}).get("turn_plan") or {})
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
         print(f"memory_used_count: {len(memory)}")
         print(f"retrieval_plan: {json.dumps(plan, ensure_ascii=False, sort_keys=True)}")
+        print(f"turn_plan: {json.dumps(turn_plan, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
 
@@ -417,6 +419,28 @@ def main() -> int:
             passed = got_value == expected_value
             ok = ok and passed
             print(f"EXPECT plan.{key}={expected_value!r}: {passed} (got={got_value!r})")
+
+
+        # turn_plan is diagnostic visibility for control arbitration.
+        tp_version = turn_plan.get("version")
+        tp_intent = turn_plan.get("turn_intent")
+        tp_req = turn_plan.get("requested_controls") or {}
+        tp_eff = turn_plan.get("effective_controls") or {}
+        tp_budget = turn_plan.get("injection_budget") or {}
+        tp_stores = turn_plan.get("allowed_stores") or {}
+
+        tp_checks = [
+            ("version", tp_version == "turn_plan_v0_visibility", tp_version),
+            ("turn_intent", tp_intent == t.get("expect_turn_intent"), tp_intent),
+            ("requested_controls", isinstance(tp_req, dict) and "conversation" in tp_req and "memory_cards" in tp_req, tp_req),
+            ("effective_controls", isinstance(tp_eff, dict) and "conversation" in tp_eff and "memory_cards" in tp_eff, tp_eff),
+            ("injection_budget", isinstance(tp_budget, dict) and "base_k" in tp_budget, tp_budget),
+            ("allowed_stores", isinstance(tp_stores, dict) and "profile_cards" in tp_stores, tp_stores),
+        ]
+
+        for label, check, got in tp_checks:
+            print(f"EXPECT turn_plan.{label}: {check} (got={got!r})")
+            ok = ok and check
 
         for marker in t["expect_true"]:
             present = contains(data, marker)
