@@ -29,6 +29,26 @@ _IGNORED_CARD_ATTR_KEYS = {
     # explicit MEMQA/test recall artifacts; belongs in episodic/vector archive only
     "remember_this_test_detail_for_later",
     "preference_remember_this_test_detail_for_later",
+
+    # memory-system design/spec artifacts; not user preferences
+    "allowed_memory_scopes",
+    "preference_allowed_memory_scopes",
+    "corpus_allowed",
+    "preference_corpus_allowed",
+    "domain",
+    "preference_domain",
+    "personal_archive_allowed",
+    "preference_personal_archive_allowed",
+    "profile_cards_allowed",
+    "preference_profile_cards_allowed",
+    "surface_personal_details",
+    "preference_surface_personal_details",
+    "turn_intent",
+    "preference_turn_intent",
+    "it_sharpens_the_roadmap_in_one_important_way",
+    "preference_it_sharpens_the_roadmap_in_one_important_way",
+    "the_point_is_valid",
+    "preference_the_point_is_valid",
 }
 
 
