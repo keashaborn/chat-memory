@@ -452,6 +452,114 @@ def _classify_memory_turn_intent(text: str) -> str:
     return "GENERAL"
 
 
+def _clamp_float01(raw: Any, default: float = 0.0) -> float:
+    try:
+        n = float(raw)
+    except Exception:
+        n = float(default)
+    return max(0.0, min(1.0, n))
+
+
+def _build_turn_plan_v0(
+    *,
+    turn_intent: str,
+    mix: Dict[str, Any] | None,
+    routing: Dict[str, Any] | None,
+    pragmatics: Dict[str, Any] | None,
+    limits: Dict[str, Any] | None,
+    retrieval_plan: Dict[str, Any] | None,
+    thread_stats: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    V0 control arbitration visibility.
+
+    Diagnostic only for now: exposes requested vs effective controls without
+    changing behavior yet. Later patches should make retrieval, lens, thread
+    context, and injection budgets consume this plan.
+    """
+    mix = mix or {}
+    routing = routing or {}
+    pragmatics = pragmatics or {}
+    limits = limits or {}
+    retrieval_plan = retrieval_plan or {}
+    thread_stats = thread_stats or {}
+
+    ti = (turn_intent or "GENERAL").strip().upper() or "GENERAL"
+
+    def _int_range(raw: Any, lo: int, hi: int, default: int) -> int:
+        try:
+            n = int(raw)
+        except Exception:
+            n = int(default)
+        return max(lo, min(hi, n))
+
+    requested_controls = {
+        "conversation": _clamp_float01(mix.get("conversation", 0.0), 0.0),
+        "memory_cards": _clamp_float01(mix.get("memory_cards", 0.0), 0.0),
+        "corpus": _clamp_float01(mix.get("corpus", 1.0), 1.0),
+        "lens_fm": _clamp_float01(mix.get("lens_fm", 0.0), 0.0),
+        "recency_bias": _clamp_float01(mix.get("recency_bias", 0.0), 0.0),
+        "similarity_threshold": (
+            None if mix.get("similarity_threshold", None) is None
+            else _clamp_float01(mix.get("similarity_threshold"), 0.4)
+        ),
+        "answer_first": bool(routing.get("answer_first", True)),
+        "clarify_bias": _clamp_float01(routing.get("clarify_bias", 0.10), 0.10),
+        "max_clarify_questions": _int_range(routing.get("max_clarify_questions", 1), 0, 3, 1),
+        "rfg": _clamp_float01(pragmatics.get("rfg", 0.0), 0.0),
+        "df": _clamp_float01(pragmatics.get("df", 0.7), 0.7),
+        "pe": _int_range(pragmatics.get("pe", 2), 0, 3, 2),
+        "Y": _clamp_float01(limits.get("Y", 0.5), 0.5),
+        "R": _clamp_float01(limits.get("R", 0.5), 0.5),
+        "C": _clamp_float01(limits.get("C", 0.5), 0.5),
+        "S": _clamp_float01(limits.get("S", 0.5), 0.5),
+    }
+
+    # V0 mirrors current behavior. Later this becomes the authoritative clamp.
+    effective_controls = dict(requested_controls)
+
+    notes: List[str] = []
+    if ti == "TECH":
+        notes.append("TECH should eventually clamp personal archive, profile biography, FM lens, and broad thread context.")
+    elif ti == "SPECIFIC_RECALL":
+        notes.append("SPECIFIC_RECALL should prioritize personal archive and suppress corpus/profile cards.")
+    elif ti == "PROFILE_SUMMARY":
+        notes.append("PROFILE_SUMMARY may use profile cards and compressed personal archive.")
+    elif ti == "MEMORY_ARCHITECTURE":
+        notes.append("MEMORY_ARCHITECTURE should use compressed memory-system history and limited FM/AI corpus.")
+    else:
+        notes.append("GENERAL currently follows requested mix; later it should use stricter default budgets.")
+
+    injection_budget = {
+        "thread_messages_injected": int(thread_stats.get("n_messages") or 0),
+        "thread_chars_injected": int(thread_stats.get("n_chars") or 0),
+        "max_personal_hits_requested": int(retrieval_plan.get("k_personal") or 0),
+        "max_corpus_hits_requested": int(retrieval_plan.get("k_corpus") or 0),
+        "base_k": int(retrieval_plan.get("base_k") or 0),
+        "compression_required": bool(ti in ("GENERAL", "MEMORY_ARCHITECTURE", "PROFILE_SUMMARY")),
+        "raw_personal_memory_allowed": bool(ti == "SPECIFIC_RECALL"),
+    }
+
+    allowed_stores = {
+        "preference_cards": True,
+        "profile_cards": bool(ti == "PROFILE_SUMMARY"),
+        "personal_archive": bool(retrieval_plan.get("personal_archive_enabled")),
+        "corpus": bool(retrieval_plan.get("corpus_enabled")),
+        "thread_context": bool((thread_stats.get("n_messages") or 0) > 0),
+        "lifeswitch_structured": bool(ti == "LIFESWITCH"),
+    }
+
+    return {
+        "version": "turn_plan_v0_visibility",
+        "turn_intent": ti,
+        "requested_controls": requested_controls,
+        "effective_controls": effective_controls,
+        "allowed_stores": allowed_stores,
+        "injection_budget": injection_budget,
+        "suppressed": [],
+        "notes": notes,
+    }
+
 def _build_memory_retrieval_plan(
     *,
     turn_intent: str,
@@ -936,6 +1044,16 @@ def vantage_query(req: Request, payload: VantageQuery):
         thr_f = retrieval_plan["threshold"]
         personal_thr_f = float(retrieval_plan["personal_threshold"])
 
+        turn_plan = _build_turn_plan_v0(
+            turn_intent=turn_intent,
+            mix=mix,
+            routing=payload.routing,
+            pragmatics=payload.pragmatics,
+            limits=limits,
+            retrieval_plan=retrieval_plan,
+            thread_stats=thread_stats,
+        )
+
 
 
 
@@ -1379,6 +1497,7 @@ def vantage_query(req: Request, payload: VantageQuery):
                 "decision": decision,
                 "routing": payload.routing,
                 "mix": payload.mix,
+                "turn_plan": turn_plan,
                 "pragmatics": payload.pragmatics,
                 "roleplay": payload.roleplay,
                       "definition_overlay": payload.definition_overlay,
