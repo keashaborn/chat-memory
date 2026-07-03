@@ -86,8 +86,174 @@ def contains(data: dict[str, Any], marker: str) -> bool:
     return marker in json.dumps(data, ensure_ascii=False)
 
 
+
+def run_psql_scalar(sql: str) -> str:
+    cp = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "brains-postgres-1",
+            "psql",
+            "-U",
+            "sage",
+            "-d",
+            "memory",
+            "-At",
+            "-c",
+            sql,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return (cp.stdout or "").strip()
+
+
+def run_psql_table(sql: str) -> str:
+    cp = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "brains-postgres-1",
+            "psql",
+            "-U",
+            "sage",
+            "-d",
+            "memory",
+            "-P",
+            "pager=off",
+            "-c",
+            sql,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return cp.stdout or ""
+
+
+def audit_card_policy_metadata() -> bool:
+    """
+    Direct policy metadata audit.
+
+    This checks the card store itself, not route output. The route audit below
+    proves behavior; this proves the policy layer is populated and coherent.
+    """
+    checks = [
+        {
+            "name": "all_cards_have_policy_fields",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where payload ? 'use_scope' = false
+                   or payload ? 'surface_policy' = false
+                   or payload ? 'domains' = false
+                   or payload ? 'sensitivity' = false
+            """,
+            "expected": "0",
+        },
+        {
+            "name": "retired_cards_are_never_surface",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where status <> 'active'
+                  and coalesce(payload->>'use_scope','') <> 'NEVER_SURFACE'
+            """,
+            "expected": "0",
+        },
+        {
+            "name": "active_system_cards_are_never_surface",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where status='active'
+                  and kind in ('system','audit')
+                  and coalesce(payload->>'use_scope','') <> 'NEVER_SURFACE'
+            """,
+            "expected": "0",
+        },
+        {
+            "name": "active_pref_style_cards_are_style_only",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where status='active'
+                  and kind in ('pref','style')
+                  and coalesce(payload->>'use_scope','') <> 'STYLE_ONLY'
+            """,
+            "expected": "0",
+        },
+        {
+            "name": "active_profile_cards_are_content_ok",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where status='active'
+                  and kind in ('identity','background','project')
+                  and coalesce(payload->>'use_scope','') <> 'CONTENT_OK'
+            """,
+            "expected": "0",
+        },
+        {
+            "name": "no_active_user_global_test_or_design_artifacts",
+            "sql": """
+                select count(*)
+                from vantage_card.card_head
+                where status='active'
+                  and vantage_id='user_global'
+                  and kind='pref'
+                  and (
+                    topic_key like '%/pref/remember_this_test_detail_for_later'
+                    or topic_key like '%/pref/personalization'
+                    or topic_key like '%/pref/allowed_memory_scopes'
+                    or topic_key like '%/pref/corpus_allowed'
+                    or topic_key like '%/pref/domain'
+                    or topic_key like '%/pref/personal_archive_allowed'
+                    or topic_key like '%/pref/profile_cards_allowed'
+                    or topic_key like '%/pref/surface_personal_details'
+                    or topic_key like '%/pref/turn_intent'
+                    or topic_key like '%/pref/it_sharpens_the_roadmap_in_one_important_way'
+                    or topic_key like '%/pref/the_point_is_valid'
+                  )
+            """,
+            "expected": "0",
+        },
+    ]
+
+    print("\n" + "=" * 96)
+    print("CARD POLICY METADATA AUDIT")
+
+    ok = True
+    for check in checks:
+        got = run_psql_scalar(check["sql"])
+        passed = got == check["expected"]
+        ok = ok and passed
+        print(f"{check['name']}: {'PASS' if passed else 'FAIL'} got={got!r} expected={check['expected']!r}")
+
+    print("\nPolicy distribution:")
+    print(run_psql_table("""
+        select
+          status,
+          kind,
+          payload->>'use_scope' as use_scope,
+          payload->>'surface_policy' as surface_policy,
+          count(*) as n
+        from vantage_card.card_head
+        group by 1,2,3,4
+        order by 1,2,3,4
+    """).strip())
+
+    print(f"\nCARD POLICY RESULT: {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
 def main() -> int:
     token = load_env_token()
+
+    policy_ok = audit_card_policy_metadata()
 
     tests = [
         {
@@ -208,7 +374,7 @@ def main() -> int:
         },
     ]
 
-    overall = True
+    overall = bool(policy_ok)
 
     for t in tests:
         status, data, raw = request_vantage(token, t["body"], t["name"])
