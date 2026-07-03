@@ -452,6 +452,88 @@ def _classify_memory_turn_intent(text: str) -> str:
     return "GENERAL"
 
 
+def _build_memory_retrieval_plan(
+    *,
+    turn_intent: str,
+    use_personal: bool,
+    mix: Dict[str, Any],
+    requested_top_k: Any,
+) -> Dict[str, Any]:
+    """
+    Turn intent -> explicit retrieval plan.
+
+    This centralizes the decision about which memory stores to search and how
+    much context to inject. It preserves current behavior while making the
+    plan inspectable and testable.
+    """
+    try:
+        if "memory_cards" in (mix or {}):
+            w_mem = float((mix or {}).get("memory_cards", 0.0))
+        else:
+            w_mem = float(os.getenv("VANTAGE_DEFAULT_MEMORY_WEIGHT", "1.0") or 1.0)
+    except Exception:
+        w_mem = 1.0
+
+    try:
+        w_corpus = float((mix or {}).get("corpus", 1.0))
+    except Exception:
+        w_corpus = 1.0
+
+    w_mem = max(0.0, min(1.0, w_mem))
+    w_corpus = max(0.0, min(1.0, w_corpus))
+
+    thr = (mix or {}).get("similarity_threshold", None)
+    try:
+        thr_f = float(thr) if thr is not None else None
+    except Exception:
+        thr_f = None
+
+    personal_thr_f = float(thr_f) if thr_f is not None else float(
+        os.getenv("VANTAGE_PERSONAL_SCORE_THRESHOLD", "0.20") or 0.20
+    )
+
+    try:
+        base_k = int(requested_top_k or 5)
+    except Exception:
+        base_k = 5
+    base_k = max(0, min(50, base_k))
+
+    k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(1, int(round(base_k * w_mem)))
+    k_corpus = 0 if (w_corpus <= 0.0) else max(1, int(round(base_k * w_corpus)))
+
+    ti = (turn_intent or "GENERAL").strip().upper()
+    recall_mode = (ti == "SPECIFIC_RECALL")
+
+    if recall_mode and use_personal:
+        # Specific personal recall searches the user's archive first.
+        # It retrieves enough to find answer-bearing context, but injects only a small set.
+        base_k = int(os.getenv("VANTAGE_RECALL_BASE_K", "3") or 3)
+        base_k = max(1, min(20, base_k))
+        k_personal = max(k_personal, int(os.getenv("VANTAGE_RECALL_PERSONAL_K", "10") or 10))
+        k_personal = max(1, min(50, k_personal))
+        k_corpus = int(os.getenv("VANTAGE_RECALL_CORPUS_K", "0") or 0)
+        k_corpus = max(0, min(20, k_corpus))
+        personal_thr_f = min(
+            personal_thr_f,
+            float(os.getenv("VANTAGE_RECALL_PERSONAL_THRESHOLD", "0.05") or 0.05),
+        )
+
+    return {
+        "turn_intent": ti,
+        "recall_mode": bool(recall_mode),
+        "use_personal": bool(use_personal),
+        "w_mem": float(w_mem),
+        "w_corpus": float(w_corpus),
+        "base_k": int(base_k),
+        "k_personal": int(k_personal),
+        "k_corpus": int(k_corpus),
+        "threshold": thr_f,
+        "personal_threshold": float(personal_thr_f),
+        "personal_archive_enabled": bool(k_personal > 0),
+        "corpus_enabled": bool(k_corpus > 0),
+    }
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -835,48 +917,24 @@ def vantage_query(req: Request, payload: VantageQuery):
             "n_chars": sum(len((m.get("content") or "")) for m in thread_messages),
         }
 
-        # weights + threshold
+        # Explicit memory retrieval plan.
         # Personal memory should be active by default when VANTAGE_PERSONAL_MEMORY=1.
         # Request mix can still override it explicitly with memory_cards=0.
-        try:
-            if "memory_cards" in (mix or {}):
-                w_mem = float((mix or {}).get("memory_cards", 0.0))
-            else:
-                w_mem = float(os.getenv("VANTAGE_DEFAULT_MEMORY_WEIGHT", "1.0") or 1.0)
-        except Exception:
-            w_mem = 1.0
-
-        try:
-            w_corpus = float((mix or {}).get("corpus", 1.0))
-        except Exception:
-            w_corpus = 1.0
-
-        w_mem = max(0.0, min(1.0, w_mem))
-        w_corpus = max(0.0, min(1.0, w_corpus))
-
-        thr = (mix or {}).get("similarity_threshold", None)
-        try:
-            thr_f = float(thr) if thr is not None else None
-        except Exception:
-            thr_f = None
-
-        # retrieve_personal_memory expects a numeric threshold.
-        # None caused float(None) inside retriever_unified and silently returned [].
-        personal_thr_f = float(thr_f) if thr_f is not None else float(os.getenv("VANTAGE_PERSONAL_SCORE_THRESHOLD", "0.20") or 0.20)
-
-        base_k = int(payload.top_k or 5)
-        k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(1, int(round(base_k * w_mem)))
-        k_corpus = 0 if (w_corpus <= 0.0) else max(1, int(round(base_k * w_corpus)))
-
         turn_intent = _classify_memory_turn_intent(payload.message)
-        recall_mode = (turn_intent == "SPECIFIC_RECALL")
-        if recall_mode and use_personal:
-            # Specific personal recall should search the user's archive first.
-            # Do not let broad corpus hits crowd out one-off personal facts.
-            base_k = int(os.getenv("VANTAGE_RECALL_BASE_K", "3") or 3)
-            k_personal = max(k_personal, int(os.getenv("VANTAGE_RECALL_PERSONAL_K", "10") or 10))
-            k_corpus = int(os.getenv("VANTAGE_RECALL_CORPUS_K", "0") or 0)
-            personal_thr_f = min(personal_thr_f, float(os.getenv("VANTAGE_RECALL_PERSONAL_THRESHOLD", "0.05") or 0.05))
+        retrieval_plan = _build_memory_retrieval_plan(
+            turn_intent=turn_intent,
+            use_personal=use_personal,
+            mix=mix,
+            requested_top_k=payload.top_k,
+        )
+        recall_mode = bool(retrieval_plan["recall_mode"])
+        w_mem = float(retrieval_plan["w_mem"])
+        w_corpus = float(retrieval_plan["w_corpus"])
+        base_k = int(retrieval_plan["base_k"])
+        k_personal = int(retrieval_plan["k_personal"])
+        k_corpus = int(retrieval_plan["k_corpus"])
+        thr_f = retrieval_plan["threshold"]
+        personal_thr_f = float(retrieval_plan["personal_threshold"])
 
 
 
@@ -1286,6 +1344,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             "personal_threshold": personal_thr_f,
             "recall_mode": bool(recall_mode),
             "turn_intent": turn_intent,
+            "retrieval_plan": retrieval_plan,
         }
 
         system_prompt = build_system_prompt(
