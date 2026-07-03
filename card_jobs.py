@@ -69,6 +69,57 @@ def _card_write_vantage_id(job_vantage_id: str, kind: str, attr_key: str) -> str
     return job_vid
 
 
+def _card_policy(kind: str, card_attr_key: str, attr_key: str) -> dict:
+    """
+    Minimal runtime policy metadata v0.
+
+    This is intentionally conservative and stored in payload before any schema
+    migration. It lets loaders enforce NEVER_SURFACE and later lets the UI show
+    why a memory is usable only as style, content, or not at all.
+    """
+    k = (kind or "").strip()
+    ak = (card_attr_key or attr_key or "").strip()
+
+    if (attr_key or "").strip() in _IGNORED_CARD_ATTR_KEYS or ak in _IGNORED_CARD_ATTR_KEYS:
+        return {
+            "use_scope": "NEVER_SURFACE",
+            "surface_policy": "never",
+            "sensitivity": "low",
+            "domains": ["system_memory_design"],
+        }
+
+    if k in ("identity", "background", "project"):
+        return {
+            "use_scope": "CONTENT_OK",
+            "surface_policy": "mention_when_relevant",
+            "sensitivity": "medium" if k in ("identity", "background") else "low",
+            "domains": ["profile"],
+        }
+
+    if k in ("pref", "style"):
+        return {
+            "use_scope": "STYLE_ONLY",
+            "surface_policy": "silent_style_influence",
+            "sensitivity": "low",
+            "domains": ["style"],
+        }
+
+    if k in ("system", "audit"):
+        return {
+            "use_scope": "NEVER_SURFACE",
+            "surface_policy": "never",
+            "sensitivity": "low",
+            "domains": ["system"],
+        }
+
+    return {
+        "use_scope": "CONTENT_OK",
+        "surface_policy": "mention_when_relevant",
+        "sensitivity": "low",
+        "domains": ["general"],
+    }
+
+
 async def _canonicalize_user_id(conn: asyncpg.Connection, vantage_id: str, user_id: str) -> str:
     """Resolve user_id aliases to a canonical id (best-effort)."""
     uid = str(user_id or "").strip()
@@ -346,9 +397,12 @@ async def card_consolidate_from_kv_once(
                 source_vantage_counts[source_vantage_id] = int(source_vantage_counts.get(source_vantage_id, 0)) + 1
                 source_vantage_ids = sorted(source_vantage_counts.keys())
 
+                policy = _card_policy(kind, card_attr_key, attr_key)
+
                 payload.update({
                     "mode": "card_consolidate_kv_v2",
                     "card_scope": "user_global" if card_vantage_id == USER_GLOBAL_VANTAGE_ID else "vantage",
+                    **policy,
                     "card_vantage_id": card_vantage_id,
                     "job_vantage_id": vantage_id,
                     "source_vantage_id": source_vantage_id,
