@@ -1246,6 +1246,7 @@ async def vantage_cards_list(
             vantage_id,
             kind,
             topic_key,
+              status::text as status,
             summary,
             payload,
             strength,
@@ -1271,6 +1272,14 @@ async def vantage_cards_list(
                 except Exception:
                     pass
             d["text"] = d.get("summary") or ""
+            payload = d.get("payload") if isinstance(d.get("payload"), dict) else {}
+            d["use_scope"] = payload.get("use_scope")
+            d["surface_policy"] = payload.get("surface_policy")
+            d["sensitivity"] = payload.get("sensitivity")
+            d["domains"] = payload.get("domains") or []
+            d["suppressed_reason"] = payload.get("suppressed_reason")
+            d["source_vantage_counts"] = payload.get("source_vantage_counts") or {}
+            d["value_counts"] = payload.get("value_counts") or {}
             items.append(d)
 
         return {
