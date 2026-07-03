@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""
+Verbal Sage / Brains memory route audit.
+
+Checks:
+- technical/admin query suppresses biography/profile cards
+- specific recall query retrieves narrow personal archive context
+- broad background query includes profile cards
+- retired/test artifacts stay suppressed
+- Lucifer tenant isolation remains intact
+
+Usage:
+  VS_SERVICE_TOKEN=... python scripts/memory_route_audit.py
+  python scripts/memory_route_audit.py   # loads /opt/chat-memory/.env if present
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path("/opt/chat-memory")
+ENV_PATH = ROOT / ".env"
+BASE_URL = os.getenv("BRAINS_AUDIT_URL", "http://127.0.0.1:8088")
+OUT_DIR = Path(os.getenv("BRAINS_AUDIT_OUT_DIR", "/tmp"))
+
+
+def load_env_token() -> str:
+    token = os.getenv("VS_SERVICE_TOKEN", "").strip()
+    if token:
+        return token
+
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text(errors="replace").splitlines():
+            if line.startswith("VS_SERVICE_TOKEN="):
+                return line.split("=", 1)[1].strip()
+
+    raise SystemExit("missing VS_SERVICE_TOKEN")
+
+
+def request_vantage(token: str, body: dict[str, Any], name: str) -> tuple[int, dict[str, Any], str]:
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        json.dump(body, f)
+        req_path = f.name
+
+    out_path = OUT_DIR / f"memory_route_audit_{name}.out"
+
+    cp = subprocess.run(
+        [
+            "curl",
+            "-sS",
+            f"{BASE_URL}/vantage/query",
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            f"X-VS-Service-Token: {token}",
+            "--data-binary",
+            f"@{req_path}",
+            "-o",
+            str(out_path),
+            "-w",
+            "%{http_code}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    status = int((cp.stdout or "0").strip() or "0")
+    raw = out_path.read_text(errors="replace")
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {"_raw": raw}
+
+    return status, data, raw
+
+
+def contains(data: dict[str, Any], marker: str) -> bool:
+    return marker in json.dumps(data, ensure_ascii=False)
+
+
+def main() -> int:
+    token = load_env_token()
+
+    tests = [
+        {
+            "name": "tech_restart",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "How do I restart the frontend?",
+                "inspect_only": True,
+                "debug": True,
+            },
+            "expect_true": ["[VANTAGE PREFERENCE CARDS]"],
+            "expect_false": [
+                "[VANTAGE PROFILE CARDS]",
+                "Caravel",
+                "clinical psychologist",
+                "Jerry",
+                "DeeDee",
+                "silver fox",
+            ],
+            "expect_recall_mode": False,
+        },
+        {
+            "name": "specific_recall_dad",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "What is my dad's name?",
+                "inspect_only": True,
+                "debug": True,
+            },
+            "expect_true": ["Jerry"],
+            "expect_false": [
+                "[VANTAGE PROFILE CARDS]",
+                "Caravel",
+                "clinical psychologist",
+                "silver fox",
+            ],
+            "expect_recall_mode": True,
+        },
+        {
+            "name": "broad_background",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "What do you know about my background?",
+                "inspect_only": True,
+                "debug": True,
+            },
+            "expect_true": [
+                "[VANTAGE PROFILE CARDS]",
+                "background/company_history: founded Caravel Autism Health",
+                "background/profession: clinical psychologist",
+            ],
+            "expect_false": [
+                "silver fox",
+                "pref/remember_this_test_detail_for_later",
+            ],
+            # Current known wart: this may still be True until intent-plan cleanup.
+            "expect_recall_mode": None,
+        },
+        {
+            "name": "lucifer_isolation_recall",
+            "body": {
+                "user_id": "e049fcde-655a-4377-af91-e85fd98b4d8c",
+                "vantage_id": "RILEY",
+                "message": "What is my dad's name?",
+                "inspect_only": True,
+                "debug": True,
+            },
+            "expect_true": [],
+            "expect_false": [
+                "Jerry",
+                "DeeDee",
+                "Caravel",
+                "clinical psychologist",
+                "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "silver fox",
+            ],
+            "expect_recall_mode": True,
+        },
+    ]
+
+    overall = True
+
+    for t in tests:
+        status, data, raw = request_vantage(token, t["body"], t["name"])
+        rd = (((data.get("meta_explanation") or {}).get("vantage") or {}).get("retrieval_debug") or {})
+        memory = data.get("memory_used") or []
+
+        print("\n" + "=" * 96)
+        print(f"TEST: {t['name']}")
+        print(f"HTTP: {status}")
+        print(f"MESSAGE: {t['body']['message']}")
+        print(f"recall_mode: {rd.get('recall_mode')}")
+        print(f"k_personal_requested: {rd.get('k_personal_requested')}")
+        print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
+        print(f"combined_after_trim: {rd.get('combined_after_trim')}")
+        print(f"memory_used_count: {len(memory)}")
+
+        ok = status == 200
+
+        expected_recall = t.get("expect_recall_mode")
+        if expected_recall is not None:
+            got = bool(rd.get("recall_mode"))
+            passed = got == bool(expected_recall)
+            ok = ok and passed
+            print(f"EXPECT recall_mode={expected_recall}: {passed}")
+
+        for marker in t["expect_true"]:
+            present = contains(data, marker)
+            ok = ok and present
+            print(f"EXPECT TRUE  {marker!r}: {present}")
+
+        for marker in t["expect_false"]:
+            present = contains(data, marker)
+            ok = ok and not present
+            print(f"EXPECT FALSE {marker!r}: {present}")
+
+        print(f"RESULT: {'PASS' if ok else 'FAIL'}")
+        overall = overall and ok
+
+    print("\n" + "=" * 96)
+    print(f"OVERALL: {'PASS' if overall else 'FAIL'}")
+    return 0 if overall else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

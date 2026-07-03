@@ -364,6 +364,47 @@ def _looks_specific_personal_recall(text: str) -> bool:
     return bool(_RECALL_RE.search(t))
 
 
+def _hit_text(hit: Dict[str, Any]) -> str:
+    payload = (hit or {}).get("payload") or {}
+    text = (
+        payload.get("text")
+        or payload.get("content")
+        or payload.get("question")
+        or payload.get("answer")
+        or ""
+    )
+    if payload.get("question") and payload.get("answer"):
+        text = f"Q: {payload.get('question')}\nA: {payload.get('answer')}"
+    return str(text or "").strip()
+
+
+def _is_short_question_only_memory(hit: Dict[str, Any]) -> bool:
+    """
+    In specific recall mode, short question-only memories often crowd out
+    answer-bearing memories. Example: "My father's name?" is not useful context
+    unless paired with an answer. Keep longer narrative memories, even if they
+    contain questions.
+    """
+    text = _hit_text(hit)
+    if not text:
+        return True
+    compact = " ".join(text.split())
+    if len(compact) > 90:
+        return False
+    return compact.endswith("?") or compact.lower().startswith((
+        "what ",
+        "who ",
+        "do you ",
+        "did i ",
+        "my father",
+        "my fathers",
+        "my dad",
+        "my mother",
+        "my mothers",
+        "my mom",
+    ))
+
+
 def _ritual_reply(text: str, pe: int) -> str:
     t = (text or "").strip().lower()
 
@@ -1115,6 +1156,13 @@ def vantage_query(req: Request, payload: VantageQuery):
             except Exception:
                 scored_personal.append(h)
         personal_hits = scored_personal
+
+        if recall_mode:
+            # Specific recall needs answer-bearing archive context.
+            # Drop short question-only fragments that otherwise outrank useful memories.
+            filtered = [h for h in personal_hits if not _is_short_question_only_memory(h)]
+            if filtered:
+                personal_hits = filtered
 
         # Apply recency bias to corpus hits (optional)
         try:
