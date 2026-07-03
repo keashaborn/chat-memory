@@ -346,6 +346,41 @@ def main() -> int:
             },
         },
         {
+            "name": "memory_architecture_intent",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "What should our memory architecture do to avoid injection bloat while still retrieving useful memories?",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "conversation": 0.7,
+                    "memory_cards": 0.7,
+                    "corpus": 0.8,
+                    "lens_fm": 0.7,
+                    "recency_bias": 0.7,
+                    "similarity_threshold": 0.4,
+                },
+            },
+            "expect_true": [
+                "[VANTAGE PREFERENCE CARDS]",
+            ],
+            "expect_false": [
+                "silver fox",
+            ],
+            "expect_recall_mode": False,
+            "expect_turn_intent": "MEMORY_ARCHITECTURE",
+            "expect_plan": {
+                "turn_intent": "MEMORY_ARCHITECTURE",
+                "recall_mode": False,
+            },
+            "expect_turn_plan": {
+                "turn_intent": "MEMORY_ARCHITECTURE",
+                "injection_budget.compression_required": True,
+                "allowed_stores.profile_cards": False,
+            },
+        },
+        {
             "name": "specific_recall_dad",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",

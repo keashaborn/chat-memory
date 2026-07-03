@@ -434,6 +434,46 @@ def _looks_technical_admin_turn(text: str) -> bool:
     return any(cue in t for cue in cues)
 
 
+def _looks_memory_architecture_turn(text: str) -> bool:
+    t = (text or "").lower()
+    if not t.strip():
+        return False
+
+    strong_terms = [
+        "memory architecture",
+        "memory system",
+        "memory systems",
+        "prompt injection",
+        "injection bloat",
+        "retrieval plan",
+        "turn plan",
+        "turn_plan",
+        "memory inspector",
+        "prompt inspector",
+        "card policy",
+        "profile card",
+        "preference card",
+        "personal archive",
+        "vector memory",
+        "qdrant",
+        "memory route audit",
+        "route audit",
+        "vantage memory",
+        "memory retrieval",
+        "memory injection",
+        "raw memory dump",
+        "episodic memory",
+    ]
+    if any(term in t for term in strong_terms):
+        return True
+
+    # More general combinations, kept narrow to avoid stealing ordinary TECH turns.
+    memory_words = ("memory", "memories", "remembered", "retrieval", "retrieve", "inject", "injected", "injection")
+    architecture_words = ("architecture", "policy", "planner", "planning", "gating", "gate", "budget", "compress", "compression", "surface", "surfacing")
+    return any(a in t for a in memory_words) and any(b in t for b in architecture_words)
+
+
+
 def _classify_memory_turn_intent(text: str) -> str:
     """
     Explicit retrieval/injection planning intent.
@@ -445,6 +485,8 @@ def _classify_memory_turn_intent(text: str) -> str:
     """
     if _looks_broad_profile_summary(text):
         return "PROFILE_SUMMARY"
+    if _looks_memory_architecture_turn(text):
+        return "MEMORY_ARCHITECTURE"
     if _looks_technical_admin_turn(text):
         return "TECH"
     if _looks_specific_personal_recall(text):
