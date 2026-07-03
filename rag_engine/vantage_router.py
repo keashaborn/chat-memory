@@ -522,9 +522,13 @@ def _build_turn_plan_v0(
         effective_controls["lens_fm"] = 0.0
         suppressed.append("lens_fm clamped to 0.0 because turn_intent=TECH")
 
+    if ti == "TECH" and effective_controls.get("conversation", 0.0) > 0.0:
+        effective_controls["conversation"] = 0.0
+        suppressed.append("conversation clamped to 0.0 because turn_intent=TECH")
+
     notes: List[str] = []
     if ti == "TECH":
-        notes.append("TECH clamps FM lens now; personal archive, profile biography, and broad thread context should be clamped next.")
+        notes.append("TECH clamps FM lens and broad thread context now; personal archive and profile biography should be clamped next.")
     elif ti == "SPECIFIC_RECALL":
         notes.append("SPECIFIC_RECALL should prioritize personal archive and suppress corpus/profile cards.")
     elif ti == "PROFILE_SUMMARY":
@@ -1019,12 +1023,18 @@ def vantage_query(req: Request, payload: VantageQuery):
         recency_bias = max(0.0, min(1.0, recency_bias))
 
         # thread context (conversation) — send as messages[] (not SYSTEM)
-        thread_messages = _fetch_thread_context_messages(payload.thread_id, mix, current_message=payload.message)
+        # Technical/admin turns should not pull broad prior conversation context.
+        if turn_intent == "TECH":
+            thread_mix = dict(mix or {})
+            thread_mix["conversation"] = 0.0
+        else:
+            thread_mix = mix
+        thread_messages = _fetch_thread_context_messages(payload.thread_id, thread_mix, current_message=payload.message)
 
         # debug-only: thread context stats (counts only; no transcript leakage)
         conv_mix = 0.0
         try:
-            conv_mix = float((mix or {}).get("conversation", 0.0) or 0.0)
+            conv_mix = float((thread_mix or {}).get("conversation", 0.0) or 0.0)
         except Exception:
             conv_mix = 0.0
         conv_mix = max(0.0, min(1.0, conv_mix))

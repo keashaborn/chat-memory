@@ -305,6 +305,7 @@ def main() -> int:
             "expect_true": [
                 "[VANTAGE PREFERENCE CARDS]",
                 "lens_fm clamped to 0.0 because turn_intent=TECH",
+                "conversation clamped to 0.0 because turn_intent=TECH",
             ],
             "expect_false": [
                 "[FM LENS]",
@@ -324,6 +325,10 @@ def main() -> int:
             "expect_turn_plan": {
                 "requested_controls.lens_fm": 0.7,
                 "effective_controls.lens_fm": 0.0,
+                "requested_controls.conversation": 0.7,
+                "effective_controls.conversation": 0.0,
+                "injection_budget.thread_messages_injected": 0,
+                "injection_budget.thread_chars_injected": 0,
             },
         },
         {
