@@ -286,6 +286,47 @@ def main() -> int:
             },
         },
         {
+            "name": "tech_lens_clamp",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "How do I restart the frontend?",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "conversation": 0.7,
+                    "memory_cards": 0.7,
+                    "corpus": 0.8,
+                    "lens_fm": 0.7,
+                    "recency_bias": 0.7,
+                    "similarity_threshold": 0.4,
+                },
+            },
+            "expect_true": [
+                "[VANTAGE PREFERENCE CARDS]",
+                "lens_fm clamped to 0.0 because turn_intent=TECH",
+            ],
+            "expect_false": [
+                "[FM LENS]",
+                "[VANTAGE PROFILE CARDS]",
+                "Caravel",
+                "clinical psychologist",
+                "Jerry",
+                "DeeDee",
+                "silver fox",
+            ],
+            "expect_recall_mode": False,
+            "expect_turn_intent": "TECH",
+            "expect_plan": {
+                "turn_intent": "TECH",
+                "recall_mode": False,
+            },
+            "expect_turn_plan": {
+                "requested_controls.lens_fm": 0.7,
+                "effective_controls.lens_fm": 0.0,
+            },
+        },
+        {
             "name": "specific_recall_dad",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
@@ -441,6 +482,18 @@ def main() -> int:
         for label, check, got in tp_checks:
             print(f"EXPECT turn_plan.{label}: {check} (got={got!r})")
             ok = ok and check
+
+        for path, expected_value in (t.get("expect_turn_plan") or {}).items():
+            cur = turn_plan
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT turn_plan.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
 
         for marker in t["expect_true"]:
             present = contains(data, marker)

@@ -515,12 +515,16 @@ def _build_turn_plan_v0(
         "S": _clamp_float01(limits.get("S", 0.5), 0.5),
     }
 
-    # V0 mirrors current behavior. Later this becomes the authoritative clamp.
     effective_controls = dict(requested_controls)
+    suppressed: List[str] = []
+
+    if ti == "TECH" and effective_controls.get("lens_fm", 0.0) > 0.0:
+        effective_controls["lens_fm"] = 0.0
+        suppressed.append("lens_fm clamped to 0.0 because turn_intent=TECH")
 
     notes: List[str] = []
     if ti == "TECH":
-        notes.append("TECH should eventually clamp personal archive, profile biography, FM lens, and broad thread context.")
+        notes.append("TECH clamps FM lens now; personal archive, profile biography, and broad thread context should be clamped next.")
     elif ti == "SPECIFIC_RECALL":
         notes.append("SPECIFIC_RECALL should prioritize personal archive and suppress corpus/profile cards.")
     elif ti == "PROFILE_SUMMARY":
@@ -556,7 +560,7 @@ def _build_turn_plan_v0(
         "effective_controls": effective_controls,
         "allowed_stores": allowed_stores,
         "injection_budget": injection_budget,
-        "suppressed": [],
+        "suppressed": suppressed,
         "notes": notes,
     }
 
@@ -980,12 +984,20 @@ def vantage_query(req: Request, payload: VantageQuery):
 
         mix = payload.mix or {}
 
-        # FM lens (temporary)
+        # FM lens (temporary; now controlled by turn_plan)
         try:
-            lens_fm = float(mix.get("lens_fm", 0.0) or 0.0)
+            requested_lens_fm = float(mix.get("lens_fm", 0.0) or 0.0)
         except Exception:
+            requested_lens_fm = 0.0
+        requested_lens_fm = max(0.0, min(1.0, requested_lens_fm))
+
+        # Preliminary turn intent lets us clamp lens before building overlay text.
+        turn_intent = _classify_memory_turn_intent(payload.message)
+        if turn_intent == "TECH":
             lens_fm = 0.0
-        lens_fm = max(0.0, min(1.0, lens_fm))
+        else:
+            lens_fm = requested_lens_fm
+
         if lens_fm > 0.0:
             fm_block = "\n".join([
                 "[FM LENS]",
@@ -1028,7 +1040,6 @@ def vantage_query(req: Request, payload: VantageQuery):
         # Explicit memory retrieval plan.
         # Personal memory should be active by default when VANTAGE_PERSONAL_MEMORY=1.
         # Request mix can still override it explicitly with memory_cards=0.
-        turn_intent = _classify_memory_turn_intent(payload.message)
         retrieval_plan = _build_memory_retrieval_plan(
             turn_intent=turn_intent,
             use_personal=use_personal,
