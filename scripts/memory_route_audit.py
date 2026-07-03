@@ -109,6 +109,7 @@ def main() -> int:
                 "silver fox",
             ],
             "expect_recall_mode": False,
+            "expect_turn_intent": "TECH",
         },
         {
             "name": "specific_recall_dad",
@@ -127,6 +128,7 @@ def main() -> int:
                 "silver fox",
             ],
             "expect_recall_mode": True,
+            "expect_turn_intent": "SPECIFIC_RECALL",
         },
         {
             "name": "broad_background",
@@ -146,8 +148,8 @@ def main() -> int:
                 "silver fox",
                 "pref/remember_this_test_detail_for_later",
             ],
-            # Current known wart: this may still be True until intent-plan cleanup.
-            "expect_recall_mode": None,
+            "expect_recall_mode": False,
+            "expect_turn_intent": "PROFILE_SUMMARY",
         },
         {
             "name": "lucifer_isolation_recall",
@@ -168,6 +170,7 @@ def main() -> int:
                 "silver fox",
             ],
             "expect_recall_mode": True,
+            "expect_turn_intent": "SPECIFIC_RECALL",
         },
     ]
 
@@ -183,6 +186,7 @@ def main() -> int:
         print(f"HTTP: {status}")
         print(f"MESSAGE: {t['body']['message']}")
         print(f"recall_mode: {rd.get('recall_mode')}")
+        print(f"turn_intent: {rd.get('turn_intent')}")
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
@@ -196,6 +200,13 @@ def main() -> int:
             passed = got == bool(expected_recall)
             ok = ok and passed
             print(f"EXPECT recall_mode={expected_recall}: {passed}")
+
+        expected_intent = t.get("expect_turn_intent")
+        if expected_intent is not None:
+            got_intent = str(rd.get("turn_intent") or "")
+            passed = got_intent == str(expected_intent)
+            ok = ok and passed
+            print(f"EXPECT turn_intent={expected_intent}: {passed} (got={got_intent})")
 
         for marker in t["expect_true"]:
             present = contains(data, marker)

@@ -364,6 +364,94 @@ def _looks_specific_personal_recall(text: str) -> bool:
     return bool(_RECALL_RE.search(t))
 
 
+def _looks_broad_profile_summary(text: str) -> bool:
+    """
+    Broad profile/background integration. This is not narrow recall.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+    cues = (
+        "my background",
+        "my history",
+        "about me",
+        "what do you know about me",
+        "what do you remember about me",
+        "what do you know about my background",
+        "my current project",
+        "my work history",
+        "my professional background",
+        "caravel",
+        "clinical psychologist",
+        "bcba",
+    )
+    return any(cue in t for cue in cues)
+
+
+def _looks_technical_admin_turn(text: str) -> bool:
+    """
+    Technical/admin/dev turn. These should not get durable biography by default.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+    cues = (
+        "restart",
+        "rebuild",
+        "build",
+        "deploy",
+        "frontend",
+        "backend",
+        "server",
+        "service",
+        "systemctl",
+        "journalctl",
+        "nginx",
+        "node",
+        "npm",
+        "pnpm",
+        "python",
+        "postgres",
+        "qdrant",
+        "redis",
+        "docker",
+        "supabase",
+        "api",
+        "route",
+        "endpoint",
+        "code",
+        "script",
+        "patch",
+        "debug",
+        "error",
+        "logs",
+        "grep",
+        "sed",
+        "git",
+        "commit",
+        "branch",
+    )
+    return any(cue in t for cue in cues)
+
+
+def _classify_memory_turn_intent(text: str) -> str:
+    """
+    Explicit retrieval/injection planning intent.
+
+    Ordering matters:
+    - PROFILE_SUMMARY must win over broad "what do you..." recall regexes.
+    - TECH should suppress profile cards even if tasky wording is broad.
+    - SPECIFIC_RECALL is narrow archive lookup.
+    """
+    if _looks_broad_profile_summary(text):
+        return "PROFILE_SUMMARY"
+    if _looks_technical_admin_turn(text):
+        return "TECH"
+    if _looks_specific_personal_recall(text):
+        return "SPECIFIC_RECALL"
+    return "GENERAL"
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -780,7 +868,8 @@ def vantage_query(req: Request, payload: VantageQuery):
         k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(1, int(round(base_k * w_mem)))
         k_corpus = 0 if (w_corpus <= 0.0) else max(1, int(round(base_k * w_corpus)))
 
-        recall_mode = _looks_specific_personal_recall(payload.message)
+        turn_intent = _classify_memory_turn_intent(payload.message)
+        recall_mode = (turn_intent == "SPECIFIC_RECALL")
         if recall_mode and use_personal:
             # Specific personal recall should search the user's archive first.
             # Do not let broad corpus hits crowd out one-off personal facts.
@@ -1196,6 +1285,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             "threshold": thr_f,
             "personal_threshold": personal_thr_f,
             "recall_mode": bool(recall_mode),
+            "turn_intent": turn_intent,
         }
 
         system_prompt = build_system_prompt(
@@ -1205,6 +1295,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             include_persona=False,
             vantage_id=vid,
             current_message=payload.message,
+            turn_intent=turn_intent,
         )
 
         meta = build_meta_explanation(payload.user_id, payload.message, memory_chunks) or {}

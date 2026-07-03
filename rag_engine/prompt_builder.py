@@ -164,14 +164,20 @@ def _looks_like_broad_profile_turn(text: str | None) -> bool:
     return any(cue in t for cue in broad_cues)
 
 
-def _should_include_profile_cards(text: str | None) -> bool:
+def _should_include_profile_cards(text: str | None, turn_intent: str | None = None) -> bool:
     """
     Runtime mention gate v0:
-    - include profile cards for broad profile/background integration
-    - suppress for technical/admin/dev turns
-    - suppress for narrow specific recall; vector/archive retrieval should answer
-    - default include for now to preserve existing nontechnical behavior
+    - PROFILE_SUMMARY: include profile cards
+    - TECH: suppress profile cards
+    - SPECIFIC_RECALL: suppress profile cards; archive/vector retrieval should answer
+    - GENERAL: fall back to conservative text heuristics for compatibility
     """
+    ti = (turn_intent or "").strip().upper()
+    if ti == "PROFILE_SUMMARY":
+        return True
+    if ti in ("TECH", "SPECIFIC_RECALL"):
+        return False
+
     if _looks_like_broad_profile_turn(text):
         return True
     if _looks_like_technical_admin_turn(text):
@@ -190,6 +196,7 @@ def build_system_prompt(
     memory_header: str = "Relevant context from memory:",
       vantage_id: str | None = None,
       current_message: str | None = None,
+      turn_intent: str | None = None,
 ) -> str:
     """
     Combine:
@@ -222,7 +229,7 @@ def build_system_prompt(
     if vantage_pref_block and vantage_pref_block.strip():
         pieces.append(vantage_pref_block.strip())
 
-    include_profile_cards = _should_include_profile_cards(current_message)
+    include_profile_cards = _should_include_profile_cards(current_message, turn_intent=turn_intent)
     if include_profile_cards:
         vantage_profile_block = build_vantage_profile_cards_block(user_id, vantage_id=vantage_id)
         if vantage_profile_block and vantage_profile_block.strip():
