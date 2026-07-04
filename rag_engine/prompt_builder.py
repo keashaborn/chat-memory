@@ -3,13 +3,28 @@ from collections import OrderedDict
 from typing import List, Dict, Any
 
 from .persona_loader import build_persona_block, build_user_instructions_block, build_vantage_preference_cards_block, build_vantage_profile_cards_block
-def format_memory_chunks(chunks: List[Dict[str, Any]]) -> str:
+
+
+def _compact_memory_text(text: str, *, limit: int = 650) -> str:
+    """
+    Deterministic compacting for retrieval contexts that should not receive raw
+    episodic dumps. This is not semantic summarization; it is a safe excerpt cap.
+    """
+    t = " ".join(str(text or "").split()).strip()
+    if len(t) <= limit:
+        return t
+    return t[:limit].rstrip() + " …"
+
+def format_memory_chunks(chunks: List[Dict[str, Any]], *, turn_intent: str | None = None) -> str:
     """
     Render retrieved chunks into a compact bullet list.
     Dedupes by content (Q/A or text), even across collections, but preserves provenance.
     """
     if not chunks:
         return ""
+
+    ti = (turn_intent or "").strip().upper()
+    compact_mode = ti == "MEMORY_ARCHITECTURE"
 
     # key: normalized content text -> {"text": original_text, "sources": ["[coll][kind]", ...]}
     merged = OrderedDict()
@@ -33,6 +48,13 @@ def format_memory_chunks(chunks: List[Dict[str, Any]]) -> str:
         text = (text or "").strip()
         if not text:
             continue
+
+        if compact_mode:
+            try:
+                compact_limit = int(payload.get("compact_limit") or 650)
+            except Exception:
+                compact_limit = 650
+            text = _compact_memory_text(text, limit=compact_limit)
 
         prefix = f"[{coll}]"
         if kind:
@@ -238,7 +260,7 @@ def build_system_prompt(
             pieces.append(vantage_profile_block.strip())
 
     if include_memory:
-        memory_block = format_memory_chunks(memory_chunks)
+        memory_block = format_memory_chunks(memory_chunks, turn_intent=turn_intent)
         if memory_block and memory_block.strip():
             pieces.append(f"{memory_header}\n{memory_block.strip()}")
 

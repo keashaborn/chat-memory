@@ -371,6 +371,18 @@ def main() -> int:
                 "[VANTAGE PROFILE CARDS]",
                 "silver fox",
             ],
+            "expect_system_prompt_true": [
+                "Relevant context from memory:",
+                " …",
+            ],
+            "expect_system_prompt_false": [
+                "[FM LENS]",
+                "[VANTAGE PROFILE CARDS]",
+                "Jerry during dad-name recall",
+                "Caravel during background question",
+                "direct concise style in technical work",
+                "poetic/fractal explanation during command-patching",
+            ],
             "expect_recall_mode": False,
             "expect_turn_intent": "MEMORY_ARCHITECTURE",
             "expect_plan": {
@@ -487,6 +499,7 @@ def main() -> int:
         status, data, raw = request_vantage(token, t["body"], t["name"])
         rd = (((data.get("meta_explanation") or {}).get("vantage") or {}).get("retrieval_debug") or {})
         memory = data.get("memory_used") or []
+        system_prompt = data.get("system_prompt") or ""
 
         print("\n" + "=" * 96)
         print(f"TEST: {t['name']}")
@@ -500,6 +513,7 @@ def main() -> int:
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
         print(f"memory_used_count: {len(memory)}")
+        print(f"system_prompt_chars: {len(system_prompt)}")
         print(f"retrieval_plan: {json.dumps(plan, ensure_ascii=False, sort_keys=True)}")
         print(f"turn_plan: {json.dumps(turn_plan, ensure_ascii=False, sort_keys=True)}")
 
@@ -560,6 +574,16 @@ def main() -> int:
             passed = cur == expected_value
             print(f"EXPECT turn_plan.{path}={expected_value!r}: {passed} (got={cur!r})")
             ok = ok and passed
+
+        for marker in (t.get("expect_system_prompt_true") or []):
+            present = marker in system_prompt
+            ok = ok and present
+            print(f"EXPECT SYSTEM_PROMPT TRUE  {marker!r}: {present}")
+
+        for marker in (t.get("expect_system_prompt_false") or []):
+            present = marker in system_prompt
+            ok = ok and not present
+            print(f"EXPECT SYSTEM_PROMPT FALSE {marker!r}: {present}")
 
         for marker in t["expect_true"]:
             present = contains(data, marker)
