@@ -364,8 +364,11 @@ def main() -> int:
             },
             "expect_true": [
                 "[VANTAGE PREFERENCE CARDS]",
+                "lens_fm clamped to 0.0 because turn_intent=MEMORY_ARCHITECTURE",
             ],
             "expect_false": [
+                "[FM LENS]",
+                "[VANTAGE PROFILE CARDS]",
                 "silver fox",
             ],
             "expect_recall_mode": False,
@@ -376,6 +379,8 @@ def main() -> int:
             },
             "expect_turn_plan": {
                 "turn_intent": "MEMORY_ARCHITECTURE",
+                "requested_controls.lens_fm": 0.7,
+                "effective_controls.lens_fm": 0.0,
                 "injection_budget.compression_required": True,
                 "allowed_stores.profile_cards": False,
             },

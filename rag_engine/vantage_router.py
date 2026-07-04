@@ -564,6 +564,10 @@ def _build_turn_plan_v0(
         effective_controls["lens_fm"] = 0.0
         suppressed.append("lens_fm clamped to 0.0 because turn_intent=TECH")
 
+    if ti == "MEMORY_ARCHITECTURE" and effective_controls.get("lens_fm", 0.0) > 0.0:
+        effective_controls["lens_fm"] = 0.0
+        suppressed.append("lens_fm clamped to 0.0 because turn_intent=MEMORY_ARCHITECTURE")
+
     if ti == "TECH" and effective_controls.get("conversation", 0.0) > 0.0:
         effective_controls["conversation"] = 0.0
         suppressed.append("conversation clamped to 0.0 because turn_intent=TECH")
@@ -1047,7 +1051,7 @@ def vantage_query(req: Request, payload: VantageQuery):
 
         # Preliminary turn intent lets us clamp lens before building overlay text.
         turn_intent = _classify_memory_turn_intent(payload.message)
-        if turn_intent == "TECH":
+        if turn_intent in ("TECH", "MEMORY_ARCHITECTURE"):
             lens_fm = 0.0
         else:
             lens_fm = requested_lens_fm

@@ -173,6 +173,8 @@ def _should_include_profile_cards(text: str | None, turn_intent: str | None = No
     - GENERAL: fall back to conservative text heuristics for compatibility
     """
     ti = (turn_intent or "").strip().upper()
+    if ti in ("TECH", "MEMORY_ARCHITECTURE"):
+        return False
     if ti == "PROFILE_SUMMARY":
         return True
     if ti in ("TECH", "SPECIFIC_RECALL"):
