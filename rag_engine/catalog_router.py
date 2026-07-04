@@ -453,6 +453,7 @@ async def usda_food_guide(
         raise HTTPException(status_code=500, detail="USDA_API_KEY not configured on server")
 
     import requests
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     query = re.sub(r"\s+", " ", str(q or "").strip())
     query_variants = _usda_guide_query_variants(query)
@@ -465,49 +466,70 @@ async def usda_food_guide(
             timeout=HTTP_TIMEOUT,
         )
 
-    seen: dict[int, dict] = {}
-    for search_q in query_variants:
-        r = await asyncio.to_thread(_search_one, search_q, max(10, limit * 3))
-        if r.status_code != 200:
-            search_errors.append({"query": search_q, "status": r.status_code})
-            continue
+    def _run_searches() -> tuple[dict[int, dict], list[dict]]:
+        seen_local: dict[int, dict] = {}
+        errors_local: list[dict] = []
 
-        j = r.json() if r.content else {}
-        for f in (j or {}).get("foods") or []:
-            fid = f.get("fdcId")
-            try:
-                fid_int = int(fid)
-            except Exception:
-                continue
-
-            row = {
-                "fdc_id": fid_int,
-                "description": f.get("description"),
-                "brand_owner": f.get("brandOwner"),
-                "brand_name": f.get("brandName"),
-                "gtin_upc": f.get("gtinUpc"),
-                "data_type": f.get("dataType"),
-                "published_date": f.get("publishedDate"),
-                "score": f.get("score"),
-                "matched_queries": [search_q],
+        max_workers = max(1, min(6, len(query_variants)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {
+                ex.submit(_search_one, search_q, max(10, limit * 3)): search_q
+                for search_q in query_variants
             }
 
-            if fid_int not in seen:
-                seen[fid_int] = row
-            else:
-                seen[fid_int]["matched_queries"].append(search_q)
+            for fut in as_completed(futures):
+                search_q = futures[fut]
                 try:
-                    if float(row.get("score") or 0) > float(seen[fid_int].get("score") or 0):
-                        row["matched_queries"] = seen[fid_int]["matched_queries"]
-                        seen[fid_int] = row
-                except Exception:
-                    pass
+                    r = fut.result()
+                except Exception as e:
+                    errors_local.append({"query": search_q, "error": str(e)})
+                    continue
 
+                if r.status_code != 200:
+                    errors_local.append({"query": search_q, "status": r.status_code})
+                    continue
+
+                j = r.json() if r.content else {}
+                for f in (j or {}).get("foods") or []:
+                    fid = f.get("fdcId")
+                    try:
+                        fid_int = int(fid)
+                    except Exception:
+                        continue
+
+                    row = {
+                        "fdc_id": fid_int,
+                        "description": f.get("description"),
+                        "brand_owner": f.get("brandOwner"),
+                        "brand_name": f.get("brandName"),
+                        "gtin_upc": f.get("gtinUpc"),
+                        "data_type": f.get("dataType"),
+                        "published_date": f.get("publishedDate"),
+                        "score": f.get("score"),
+                        "matched_queries": [search_q],
+                    }
+
+                    if fid_int not in seen_local:
+                        seen_local[fid_int] = row
+                    else:
+                        seen_local[fid_int]["matched_queries"].append(search_q)
+                        try:
+                            if float(row.get("score") or 0) > float(seen_local[fid_int].get("score") or 0):
+                                row["matched_queries"] = seen_local[fid_int]["matched_queries"]
+                                seen_local[fid_int] = row
+                        except Exception:
+                            pass
+
+        return seen_local, errors_local
+
+    seen, search_errors = await asyncio.to_thread(_run_searches)
+
+    detail_depth = min(12, max(8, limit * 2))
     candidates = sorted(
         seen.values(),
         key=lambda x: float(x.get("score") or 0),
         reverse=True,
-    )[: max(12, limit * 3)]
+    )[:detail_depth]
 
     def _fetch_detail(fdc_id: int):
         return requests.get(
@@ -516,13 +538,33 @@ async def usda_food_guide(
             timeout=HTTP_TIMEOUT,
         )
 
-    enriched = []
-    for row in candidates:
-        r = await asyncio.to_thread(_fetch_detail, int(row["fdc_id"]))
-        if r.status_code != 200:
-            continue
+    def _run_detail_fetches() -> list[tuple[dict, dict]]:
+        pairs: list[tuple[dict, dict]] = []
+        if not candidates:
+            return pairs
 
-        detail = r.json() if r.content else {}
+        max_workers = max(1, min(8, len(candidates)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {
+                ex.submit(_fetch_detail, int(row["fdc_id"])): row
+                for row in candidates
+            }
+
+            for fut in as_completed(futures):
+                row = futures[fut]
+                try:
+                    r = fut.result()
+                except Exception:
+                    continue
+                if r.status_code != 200:
+                    continue
+                detail = r.json() if r.content else {}
+                pairs.append((row, detail))
+
+        return pairs
+
+    enriched = []
+    for row, detail in await asyncio.to_thread(_run_detail_fetches):
         nutrients = _usda_nutrient_summary(detail)
         guide_score, reasons, warnings = _usda_score_candidate(query, row, detail)
 
