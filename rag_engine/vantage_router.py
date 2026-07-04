@@ -688,6 +688,16 @@ def _build_memory_retrieval_plan(
             float(os.getenv("VANTAGE_RECALL_PERSONAL_THRESHOLD", "0.05") or 0.05),
         )
 
+    if ti == "MEMORY_ARCHITECTURE":
+        # Memory-system design turns benefit from targeted memory, but raw
+        # retrieved chunks should be budgeted tightly until compression is active.
+        base_k = int(os.getenv("VANTAGE_MEMORY_ARCH_BASE_K", "3") or 3)
+        base_k = max(1, min(10, base_k))
+        k_personal = 0 if (not use_personal or w_mem <= 0.0) else min(k_personal, int(os.getenv("VANTAGE_MEMORY_ARCH_PERSONAL_K", "2") or 2))
+        k_personal = max(0, min(10, k_personal))
+        k_corpus = 0 if (w_corpus <= 0.0) else min(k_corpus, int(os.getenv("VANTAGE_MEMORY_ARCH_CORPUS_K", "1") or 1))
+        k_corpus = max(0, min(10, k_corpus))
+
     return {
         "turn_intent": ti,
         "recall_mode": bool(recall_mode),
