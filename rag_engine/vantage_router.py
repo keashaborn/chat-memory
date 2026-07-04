@@ -806,6 +806,96 @@ def _build_memory_compression_preview_v0(
     }
 
 
+
+def _semantic_unit(
+    *,
+    semantic_type: str,
+    claim: str,
+    function: str,
+    domain: List[str],
+    source: str = "current_message",
+    surface_policy: str = "CONTENT_OK",
+    confidence: float = 0.75,
+) -> Dict[str, Any]:
+    return {
+        "semantic_type": semantic_type,
+        "claim": claim,
+        "function": function,
+        "domain": list(domain or []),
+        "source": source,
+        "surface_policy": surface_policy,
+        "confidence": float(confidence),
+    }
+
+
+def _build_semantic_extraction_preview_v0(
+    *,
+    turn_intent: str,
+    current_message: str,
+    memory_chunks: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """
+    Debug-only deterministic semantic extraction preview.
+
+    This is the first step toward meaning extraction. It does not store memory,
+    alter the prompt, or invoke an LLM. It only exposes candidate semantic units
+    so we can inspect whether the extraction layer is aiming at the right things.
+    """
+    ti = (turn_intent or "").strip().upper()
+    if ti != "MEMORY_ARCHITECTURE":
+        return None
+
+    text = " ".join(str(current_message or "").split()).strip()
+    low = text.lower()
+    units: List[Dict[str, Any]] = []
+
+    if "memory architecture" in low or "memory system" in low or "enterprise memory" in low:
+        units.append(_semantic_unit(
+            semantic_type="project_context",
+            claim="The current turn is about the Verbal Sage enterprise memory architecture.",
+            function="Scopes retrieval, compression, and design reasoning to memory-system architecture rather than general biography or technical deployment work.",
+            domain=["memory_architecture", "verbal_sage"],
+            confidence=0.9,
+        ))
+
+    if "injection bloat" in low or "prompt injection" in low:
+        units.append(_semantic_unit(
+            semantic_type="design_constraint",
+            claim="The memory architecture should avoid prompt-injection bloat.",
+            function="Constrains memory surfacing so retrieved context must be gated, budgeted, and compressed before prompt insertion.",
+            domain=["memory_architecture", "prompt_control", "compression"],
+            confidence=0.9,
+        ))
+
+    if "retriev" in low and ("useful" in low or "memories" in low or "memory" in low):
+        units.append(_semantic_unit(
+            semantic_type="design_goal",
+            claim="The memory architecture should still retrieve useful memories while controlling context size.",
+            function="Balances suppression/inhibition against recall usefulness; retrieval should not be disabled merely to avoid bloat.",
+            domain=["memory_architecture", "retrieval", "salience"],
+            confidence=0.86,
+        ))
+
+    if not units and text:
+        units.append(_semantic_unit(
+            semantic_type="open_question",
+            claim=text,
+            function="Represents the current user question as a candidate design issue for later semantic extraction.",
+            domain=["memory_architecture"],
+            confidence=0.55,
+        ))
+
+    return {
+        "version": "semantic_extraction_preview_v0",
+        "mode": "deterministic_preview",
+        "turn_intent": ti,
+        "source": "current_message",
+        "unit_count": len(units),
+        "memory_source_count": len(list(memory_chunks or [])),
+        "units": units,
+    }
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -1674,6 +1764,13 @@ def vantage_query(req: Request, payload: VantageQuery):
             )
             if compression_preview:
                 meta["vantage"]["memory_compression_preview"] = compression_preview
+            semantic_preview = _build_semantic_extraction_preview_v0(
+                turn_intent=turn_intent,
+                current_message=payload.message,
+                memory_chunks=memory_chunks,
+            )
+            if semantic_preview:
+                meta["vantage"]["semantic_extraction_preview"] = semantic_preview
         try:
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:

@@ -413,6 +413,17 @@ def main() -> int:
                 "raw_chars": 1,
                 "compact_chars": 1,
             },
+            "expect_semantic_preview": {
+                "version": "semantic_extraction_preview_v0",
+                "mode": "deterministic_preview",
+                "turn_intent": "MEMORY_ARCHITECTURE",
+                "source": "current_message",
+                "unit_count": 3,
+                "memory_source_count": 2,
+            },
+            "expect_semantic_preview_min": {
+                "unit_count": 1,
+            },
         },
         {
             "name": "specific_recall_dad",
@@ -521,6 +532,7 @@ def main() -> int:
         vantage_meta = ((data.get("meta_explanation") or {}).get("vantage") or {})
         turn_plan = vantage_meta.get("turn_plan") or {}
         compression_preview = vantage_meta.get("memory_compression_preview") or {}
+        semantic_preview = vantage_meta.get("semantic_extraction_preview") or {}
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
@@ -530,6 +542,8 @@ def main() -> int:
         print(f"turn_plan: {json.dumps(turn_plan, ensure_ascii=False, sort_keys=True)}")
         if compression_preview:
             print(f"memory_compression_preview: {json.dumps(compression_preview, ensure_ascii=False, sort_keys=True)}")
+        if semantic_preview:
+            print(f"semantic_extraction_preview: {json.dumps(semantic_preview, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
 
@@ -614,6 +628,33 @@ def main() -> int:
             except Exception:
                 passed = False
             print(f"EXPECT compression_preview.{path}>={expected_min!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_semantic_preview") or {}).items():
+            cur = semantic_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT semantic_preview.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for path, expected_min in (t.get("expect_semantic_preview_min") or {}).items():
+            cur = semantic_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            try:
+                passed = float(cur) >= float(expected_min)
+            except Exception:
+                passed = False
+            print(f"EXPECT semantic_preview.{path}>={expected_min!r}: {passed} (got={cur!r})")
             ok = ok and passed
 
         for marker in (t.get("expect_system_prompt_true") or []):
