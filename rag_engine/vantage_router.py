@@ -814,8 +814,13 @@ def _semantic_unit(
     function: str,
     domain: List[str],
     source: str = "current_message",
+    source_ref: str = "current_message",
     surface_policy: str = "CONTENT_OK",
     confidence: float = 0.75,
+    retrieval_conditions: List[str] | None = None,
+    suppression_conditions: List[str] | None = None,
+    durability: str = "project_session",
+    promotion_candidate: bool = False,
 ) -> Dict[str, Any]:
     return {
         "semantic_type": semantic_type,
@@ -823,8 +828,13 @@ def _semantic_unit(
         "function": function,
         "domain": list(domain or []),
         "source": source,
+        "source_ref": source_ref,
         "surface_policy": surface_policy,
         "confidence": float(confidence),
+        "retrieval_conditions": list(retrieval_conditions or []),
+        "suppression_conditions": list(suppression_conditions or []),
+        "durability": durability,
+        "promotion_candidate": bool(promotion_candidate),
     }
 
 
@@ -856,6 +866,16 @@ def _build_semantic_extraction_preview_v0(
             function="Scopes retrieval, compression, and design reasoning to memory-system architecture rather than general biography or technical deployment work.",
             domain=["memory_architecture", "verbal_sage"],
             confidence=0.9,
+            retrieval_conditions=[
+                "when discussing Verbal Sage memory architecture",
+                "when inspecting memory routing, compression, or semantic extraction",
+            ],
+            suppression_conditions=[
+                "ordinary frontend/backend deployment work",
+                "unrelated LifeSwitch nutrition or training turns",
+            ],
+            durability="project_session",
+            promotion_candidate=False,
         ))
 
     if "injection bloat" in low or "prompt injection" in low:
@@ -865,6 +885,16 @@ def _build_semantic_extraction_preview_v0(
             function="Constrains memory surfacing so retrieved context must be gated, budgeted, and compressed before prompt insertion.",
             domain=["memory_architecture", "prompt_control", "compression"],
             confidence=0.9,
+            retrieval_conditions=[
+                "when deciding whether retrieved memory should enter the prompt",
+                "when evaluating memory compression or prompt budget behavior",
+            ],
+            suppression_conditions=[
+                "specific factual recall where raw answer-bearing memory is required",
+                "ordinary technical command generation unless memory routing is the subject",
+            ],
+            durability="long_term_project_preference",
+            promotion_candidate=True,
         ))
 
     if "retriev" in low and ("useful" in low or "memories" in low or "memory" in low):
@@ -874,6 +904,16 @@ def _build_semantic_extraction_preview_v0(
             function="Balances suppression/inhibition against recall usefulness; retrieval should not be disabled merely to avoid bloat.",
             domain=["memory_architecture", "retrieval", "salience"],
             confidence=0.86,
+            retrieval_conditions=[
+                "when tuning retrieval budgets",
+                "when balancing recall usefulness against suppression or inhibition",
+            ],
+            suppression_conditions=[
+                "when user asks for no-memory technical execution",
+                "when retrieved memory is unrelated to the active domain",
+            ],
+            durability="long_term_project_preference",
+            promotion_candidate=True,
         ))
 
     if not units and text:
@@ -883,10 +923,19 @@ def _build_semantic_extraction_preview_v0(
             function="Represents the current user question as a candidate design issue for later semantic extraction.",
             domain=["memory_architecture"],
             confidence=0.55,
+            retrieval_conditions=[
+                "when reviewing unresolved memory architecture questions",
+            ],
+            suppression_conditions=[
+                "when higher-confidence semantic units supersede this fallback",
+            ],
+            durability="project_session",
+            promotion_candidate=False,
         ))
 
     return {
         "version": "semantic_extraction_preview_v0",
+        "schema_version": "semantic_unit_schema_v1",
         "mode": "deterministic_preview",
         "turn_intent": ti,
         "source": "current_message",

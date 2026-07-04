@@ -415,6 +415,7 @@ def main() -> int:
             },
             "expect_semantic_preview": {
                 "version": "semantic_extraction_preview_v0",
+                "schema_version": "semantic_unit_schema_v1",
                 "mode": "deterministic_preview",
                 "turn_intent": "MEMORY_ARCHITECTURE",
                 "source": "current_message",
@@ -423,6 +424,25 @@ def main() -> int:
             },
             "expect_semantic_preview_min": {
                 "unit_count": 1,
+            },
+            "expect_semantic_unit_fields": [
+                "semantic_type",
+                "claim",
+                "function",
+                "domain",
+                "source",
+                "source_ref",
+                "surface_policy",
+                "confidence",
+                "retrieval_conditions",
+                "suppression_conditions",
+                "durability",
+                "promotion_candidate",
+            ],
+            "expect_semantic_unit_values": {
+                "semantic_type": "design_constraint",
+                "durability": "long_term_project_preference",
+                "promotion_candidate": True,
             },
         },
         {
@@ -655,6 +675,29 @@ def main() -> int:
             except Exception:
                 passed = False
             print(f"EXPECT semantic_preview.{path}>={expected_min!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for field in (t.get("expect_semantic_unit_fields") or []):
+            units = semantic_preview.get("units") or []
+            passed = bool(units) and all(isinstance(u, dict) and field in u for u in units)
+            print(f"EXPECT semantic_preview.units[*].{field}: {passed}")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_semantic_unit_values") or {}).items():
+            parts = str(path).split(".")
+            units = semantic_preview.get("units") or []
+            got_values = []
+            for unit in units:
+                cur = unit
+                for part in parts:
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    else:
+                        cur = None
+                        break
+                got_values.append(cur)
+            passed = expected_value in got_values
+            print(f"EXPECT semantic_preview.units contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
 
         for marker in (t.get("expect_system_prompt_true") or []):
