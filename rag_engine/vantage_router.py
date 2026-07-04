@@ -714,6 +714,98 @@ def _build_memory_retrieval_plan(
     }
 
 
+
+def _preview_compact_text(text: str, *, limit: int = 520) -> str:
+    """
+    Deterministic extractive preview for inspect/debug use.
+    This is not semantic summarization; it preserves source wording and caps length.
+    """
+    t = " ".join(str(text or "").split()).strip()
+    if len(t) <= limit:
+        return t
+    return t[:limit].rstrip() + " …"
+
+
+def _memory_preview_ref(hit: Dict[str, Any], idx: int) -> str:
+    if not isinstance(hit, dict):
+        return f"unknown:{idx}"
+    payload = hit.get("payload") or {}
+    src = str(hit.get("_src") or payload.get("source") or "memory").strip() or "memory"
+    coll = str(hit.get("collection") or payload.get("dataset") or payload.get("source_file") or "unknown").strip() or "unknown"
+    raw_id = hit.get("id") or hit.get("memory_id") or hit.get("point_id") or payload.get("id") or payload.get("request_id") or idx
+    return f"{src}:{coll}:{raw_id}"
+
+
+def _build_memory_compression_preview_v0(
+    *,
+    turn_intent: str,
+    memory_chunks: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """
+    Debug-only preview object for future compression/summarization work.
+
+    It deliberately does not change the prompt. It lets the inspector compare:
+      raw retrieved hits -> compact excerpts -> proposed extractive bullets.
+    """
+    ti = (turn_intent or "").strip().upper()
+    if ti != "MEMORY_ARCHITECTURE":
+        return None
+
+    chunks = list(memory_chunks or [])
+    preview_items: List[Dict[str, Any]] = []
+    proposed_summary: List[Dict[str, Any]] = []
+    raw_chars = 0
+    compact_chars = 0
+    source_refs: List[str] = []
+
+    for idx, hit in enumerate(chunks, 1):
+        if not isinstance(hit, dict):
+            continue
+        payload = hit.get("payload") or {}
+        text = str(_hit_text(hit) or "").strip()
+        if not text:
+            continue
+
+        ref = _memory_preview_ref(hit, idx)
+        source_refs.append(ref)
+        raw_chars += len(text)
+
+        excerpt = _preview_compact_text(text, limit=520)
+        compact_chars += len(excerpt)
+
+        score = hit.get("score")
+        try:
+            score = float(score) if score is not None else None
+        except Exception:
+            score = None
+
+        preview_items.append({
+            "source_ref": ref,
+            "source": hit.get("_src") or payload.get("source"),
+            "collection": hit.get("collection") or payload.get("dataset") or payload.get("source_file"),
+            "score": score,
+            "raw_chars": len(text),
+            "excerpt_chars": len(excerpt),
+            "excerpt": excerpt,
+        })
+        proposed_summary.append({
+            "source_ref": ref,
+            "bullet": _preview_compact_text(text, limit=260),
+        })
+
+    return {
+        "version": "memory_compression_preview_v0",
+        "mode": "extractive_preview",
+        "turn_intent": ti,
+        "source_count": len(preview_items),
+        "source_refs": source_refs,
+        "raw_chars": int(raw_chars),
+        "compact_chars": int(compact_chars),
+        "preview": preview_items,
+        "proposed_summary": proposed_summary,
+    }
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -1576,6 +1668,12 @@ def vantage_query(req: Request, payload: VantageQuery):
         meta["vantage"]["counts"] = {"k_memory": k_memory, "k_corpus": k_corpus_used}
         if debug_on:
             meta["vantage"]["retrieval_debug"] = debug_retrieval_counts
+            compression_preview = _build_memory_compression_preview_v0(
+                turn_intent=turn_intent,
+                memory_chunks=memory_chunks,
+            )
+            if compression_preview:
+                meta["vantage"]["memory_compression_preview"] = compression_preview
         try:
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:
