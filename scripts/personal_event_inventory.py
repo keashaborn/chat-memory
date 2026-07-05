@@ -403,6 +403,114 @@ def find_candidates(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(candidates, key=sort_key)
 
 
+def merge_key_for_card(card: Dict[str, Any]) -> tuple:
+    card_type = str(card.get("card_type") or "")
+    event_type = str(card.get("event_type") or "")
+    subject = card.get("subject") or {}
+    subject_name = (
+        subject.get("known_name")
+        or subject.get("subject")
+        or "unknown"
+    )
+    event = str(card.get("event") or "")
+
+    if card_type == "relationship_anchor":
+        return (card_type, subject_name)
+
+    if event_type in ("death_loss", "pet_death_loss"):
+        return (card_type, event_type, subject_name, event)
+
+    if event_type == "caretaking_burden":
+        return (card_type, event_type, subject_name, event)
+
+    return (card_type, event_type, subject_name, event)
+
+
+def merge_card_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: Dict[tuple, Dict[str, Any]] = {}
+
+    for candidate in candidates:
+        card = candidate.get("card_candidate") or {}
+        if not card:
+            continue
+
+        key = merge_key_for_card(card)
+
+        if key not in merged:
+            merged[key] = {
+                "card_schema": "merged_personal_memory_card_candidate_v0",
+                "merge_key": list(key),
+                "card_type": card.get("card_type"),
+                "event_type": card.get("event_type"),
+                "subject": card.get("subject"),
+                "event": card.get("event"),
+                "claim": card.get("claim"),
+                "domain": list(card.get("domain") or []),
+                "salience": card.get("salience"),
+                "confidence": float(card.get("confidence") or 0.0),
+                "use_scope": card.get("use_scope"),
+                "surface_policy": card.get("surface_policy"),
+                "source_point_ids": [],
+                "source_thread_ids": [],
+                "source_created_ats": [],
+                "related_subjects": [],
+                "needs_review": True,
+                "write_intent": "none_preview_only",
+            }
+
+        item = merged[key]
+
+        for field, value in [
+            ("source_point_ids", card.get("source_point_id")),
+            ("source_thread_ids", card.get("source_thread_id")),
+            ("source_created_ats", card.get("source_created_at")),
+        ]:
+            if value and value not in item[field]:
+                item[field].append(value)
+
+        for subj in card.get("related_subjects") or []:
+            if subj not in item["related_subjects"]:
+                item["related_subjects"].append(subj)
+
+        try:
+            item["confidence"] = max(float(item.get("confidence") or 0.0), float(card.get("confidence") or 0.0))
+        except Exception:
+            pass
+
+        for d in card.get("domain") or []:
+            if d not in item["domain"]:
+                item["domain"].append(d)
+
+    return sorted(
+        merged.values(),
+        key=lambda x: (
+            {"high": 0, "medium_high": 1, "medium": 2}.get(str(x.get("salience")), 9),
+            str(x.get("card_type") or ""),
+            str((x.get("subject") or {}).get("known_name") or (x.get("subject") or {}).get("subject") or ""),
+        ),
+    )
+
+
+def unique_correction_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for c in candidates:
+        correction = c.get("correction_candidate")
+        if not correction:
+            continue
+        key = (
+            correction.get("correction_type"),
+            correction.get("incorrect_value"),
+            correction.get("canonical_value"),
+            correction.get("source_point_id"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(correction)
+    return out
+
+
 def main() -> int:
     points = scroll_points()
     candidates = find_candidates(points)
@@ -445,6 +553,15 @@ def main() -> int:
     print("unique_correction_candidate_count:", len(correction_candidates))
     for i, correction in enumerate(correction_candidates[:20], 1):
         print(f"{i}. {correction.get('correction_type')} | {correction.get('incorrect_value')} -> {correction.get('canonical_value')} | confidence={correction.get('confidence')} | source={correction.get('source_point_id')}")
+
+    merged_cards = merge_card_candidates(candidates)
+    print("\n=== merged card candidate summary ===")
+    print("raw_card_candidate_count:", len([c for c in candidates if c.get("card_candidate")]))
+    print("merged_card_candidate_count:", len(merged_cards))
+    for i, card in enumerate(merged_cards[:30], 1):
+        subject = card.get("subject") or {}
+        subject_name = subject.get("known_name") or subject.get("subject") or "unknown"
+        print(f"{i}. {card.get('card_type')} | {card.get('event_type')} | {subject_name} | {card.get('claim')} | sources={len(card.get('source_point_ids') or [])} | confidence={card.get('confidence')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
