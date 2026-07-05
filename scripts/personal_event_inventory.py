@@ -804,6 +804,88 @@ def build_promotion_mapping_preview(
     }
 
 
+def policy_retrieval_preview_for_question(
+    *,
+    question: str,
+    promotion_preview: Dict[str, Any],
+) -> Dict[str, Any]:
+    q = " ".join(str(question or "").lower().split())
+    rows = list(promotion_preview.get("card_head_rows") or []) + list(promotion_preview.get("correction_card_head_rows") or [])
+
+    selected: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+
+    wants_family_death = (
+        ("death" in q or "died" in q or "passed away" in q)
+        and ("family" in q or "mother" in q or "mom" in q or "dad" in q or "father" in q)
+    )
+    wants_pet_loss = (
+        ("death" in q or "died" in q or "lost" in q or "passed away" in q)
+        and ("pet" in q or "dog" in q or "cat" in q or "dahlia" in q or "helsing" in q or "neko" in q)
+    )
+    wants_relationship_names = (
+        ("name" in q or "who" in q)
+        and ("dog" in q or "cat" in q or "pet" in q or "mom" in q or "dad" in q or "mother" in q or "father" in q)
+    )
+
+    for row in rows:
+        payload = row.get("payload") or {}
+        kind = str(row.get("kind") or "")
+        summary = str(row.get("summary") or "")
+        topic_key = str(row.get("topic_key") or "")
+        use_scope = str(payload.get("use_scope") or "")
+        event_type = str(payload.get("event_type") or "")
+        domains = payload.get("domains") or payload.get("applies_to_domains") or []
+
+        reasons: List[str] = []
+        allowed = False
+
+        if use_scope in ("DIRECT_RECALL_OR_RELEVANT_SUPPORT", "DIRECT_RECALL", "MEMORY_NORMALIZATION"):
+            reasons.append("use_scope_allows_direct_recall")
+        else:
+            reasons.append("use_scope_not_direct_recall")
+
+        if wants_family_death and event_type == "death_loss" and "family" in domains:
+            allowed = True
+            reasons.append("matches_family_death_question")
+        elif wants_pet_loss and event_type == "pet_death_loss":
+            allowed = True
+            reasons.append("matches_pet_loss_question")
+        elif wants_relationship_names and kind == "relationship_anchor":
+            allowed = True
+            reasons.append("matches_relationship_name_question")
+        elif kind == "correction" and ("nemo" in q or "neko" in q):
+            allowed = True
+            reasons.append("matches_correction_alias_question")
+        else:
+            reasons.append("no_policy_match_for_question")
+
+        item = {
+            "topic_key": topic_key,
+            "kind": kind,
+            "event_type": event_type,
+            "summary": summary,
+            "use_scope": use_scope,
+            "confidence": row.get("confidence"),
+            "reasons": reasons,
+        }
+
+        if allowed:
+            selected.append(item)
+        else:
+            rejected.append(item)
+
+    return {
+        "schema": "personal_memory_policy_retrieval_preview_v0",
+        "mode": "preview_only_no_live_db_reads",
+        "question": question,
+        "selected_count": len(selected),
+        "rejected_count": len(rejected),
+        "selected": selected,
+        "rejected_sample": rejected[:10],
+    }
+
+
 def main() -> int:
     points = scroll_points()
     candidates = find_candidates(points)
@@ -885,6 +967,19 @@ def main() -> int:
         print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
     for i, row in enumerate((promotion_preview.get("correction_card_head_rows") or [])[:10], 1):
         print(f"correction {i}. {row.get('table')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
+
+    policy_preview = policy_retrieval_preview_for_question(
+        question="Have I had any deaths in my family recently?",
+        promotion_preview=promotion_preview,
+    )
+    print("\n=== policy retrieval preview ===")
+    print("schema:", policy_preview.get("schema"))
+    print("mode:", policy_preview.get("mode"))
+    print("question:", policy_preview.get("question"))
+    print("selected_count:", policy_preview.get("selected_count"))
+    print("rejected_count:", policy_preview.get("rejected_count"))
+    for i, item in enumerate(policy_preview.get("selected") or [], 1):
+        print(f"{i}. SELECT | {item.get('kind')} | {item.get('event_type')} | {item.get('topic_key')} | confidence={item.get('confidence')} | reasons={item.get('reasons')} | {item.get('summary')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
