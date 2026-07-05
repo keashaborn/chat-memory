@@ -945,6 +945,71 @@ def _build_semantic_extraction_preview_v0(
     }
 
 
+def _semantic_promotion_kind(unit: Dict[str, Any]) -> str:
+    semantic_type = str((unit or {}).get("semantic_type") or "").strip()
+    durability = str((unit or {}).get("durability") or "").strip()
+    domains = [str(x) for x in ((unit or {}).get("domain") or [])]
+
+    if semantic_type in ("design_constraint", "design_goal", "project_context"):
+        return "project"
+    if "style" in domains or semantic_type == "style_preference":
+        return "pref"
+    if durability.startswith("long_term"):
+        return "project"
+    return "topic"
+
+
+def _build_semantic_promotion_preview_v0(
+    *,
+    semantic_preview: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """
+    Debug-only bridge from semantic units to proposed durable memory candidates.
+
+    This does not write memory. It previews which semantic units would be eligible
+    for promotion and how they would be classified.
+    """
+    if not isinstance(semantic_preview, dict) or not semantic_preview:
+        return None
+
+    units = semantic_preview.get("units") or []
+    candidates: List[Dict[str, Any]] = []
+
+    for idx, unit in enumerate(units, 1):
+        if not isinstance(unit, dict):
+            continue
+        if not bool(unit.get("promotion_candidate")):
+            continue
+
+        kind = _semantic_promotion_kind(unit)
+        use_scope = str(unit.get("surface_policy") or "CONTENT_OK")
+        surface_policy = "mention_when_relevant" if use_scope == "CONTENT_OK" else "never"
+
+        candidates.append({
+            "candidate_id": f"semantic_promotion:{idx}",
+            "kind": kind,
+            "use_scope": use_scope,
+            "surface_policy": surface_policy,
+            "domains": list(unit.get("domain") or []),
+            "claim": unit.get("claim") or "",
+            "function": unit.get("function") or "",
+            "retrieval_conditions": list(unit.get("retrieval_conditions") or []),
+            "suppression_conditions": list(unit.get("suppression_conditions") or []),
+            "durability": unit.get("durability") or "project_session",
+            "source": unit.get("source") or "unknown",
+            "source_ref": unit.get("source_ref") or "unknown",
+            "confidence": float(unit.get("confidence") or 0.0),
+        })
+
+    return {
+        "version": "semantic_promotion_preview_v0",
+        "mode": "debug_only",
+        "source": "semantic_extraction_preview",
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+    }
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -1820,6 +1885,11 @@ def vantage_query(req: Request, payload: VantageQuery):
             )
             if semantic_preview:
                 meta["vantage"]["semantic_extraction_preview"] = semantic_preview
+                promotion_preview = _build_semantic_promotion_preview_v0(
+                    semantic_preview=semantic_preview,
+                )
+                if promotion_preview:
+                    meta["vantage"]["semantic_promotion_preview"] = promotion_preview
         try:
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:

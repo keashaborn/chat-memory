@@ -444,6 +444,33 @@ def main() -> int:
                 "durability": "long_term_project_preference",
                 "promotion_candidate": True,
             },
+            "expect_promotion_preview": {
+                "version": "semantic_promotion_preview_v0",
+                "mode": "debug_only",
+                "source": "semantic_extraction_preview",
+                "candidate_count": 2,
+            },
+            "expect_promotion_candidate_fields": [
+                "candidate_id",
+                "kind",
+                "use_scope",
+                "surface_policy",
+                "domains",
+                "claim",
+                "function",
+                "retrieval_conditions",
+                "suppression_conditions",
+                "durability",
+                "source",
+                "source_ref",
+                "confidence",
+            ],
+            "expect_promotion_candidate_values": {
+                "kind": "project",
+                "use_scope": "CONTENT_OK",
+                "surface_policy": "mention_when_relevant",
+                "durability": "long_term_project_preference",
+            },
         },
         {
             "name": "specific_recall_dad",
@@ -553,6 +580,7 @@ def main() -> int:
         turn_plan = vantage_meta.get("turn_plan") or {}
         compression_preview = vantage_meta.get("memory_compression_preview") or {}
         semantic_preview = vantage_meta.get("semantic_extraction_preview") or {}
+        promotion_preview = vantage_meta.get("semantic_promotion_preview") or {}
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
@@ -564,6 +592,8 @@ def main() -> int:
             print(f"memory_compression_preview: {json.dumps(compression_preview, ensure_ascii=False, sort_keys=True)}")
         if semantic_preview:
             print(f"semantic_extraction_preview: {json.dumps(semantic_preview, ensure_ascii=False, sort_keys=True)}")
+        if promotion_preview:
+            print(f"semantic_promotion_preview: {json.dumps(promotion_preview, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
 
@@ -698,6 +728,41 @@ def main() -> int:
                 got_values.append(cur)
             passed = expected_value in got_values
             print(f"EXPECT semantic_preview.units contains {path}={expected_value!r}: {passed} (got={got_values!r})")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_promotion_preview") or {}).items():
+            cur = promotion_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT promotion_preview.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for field in (t.get("expect_promotion_candidate_fields") or []):
+            candidates = promotion_preview.get("candidates") or []
+            passed = bool(candidates) and all(isinstance(c, dict) and field in c for c in candidates)
+            print(f"EXPECT promotion_preview.candidates[*].{field}: {passed}")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_promotion_candidate_values") or {}).items():
+            parts = str(path).split(".")
+            candidates = promotion_preview.get("candidates") or []
+            got_values = []
+            for candidate in candidates:
+                cur = candidate
+                for part in parts:
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    else:
+                        cur = None
+                        break
+                got_values.append(cur)
+            passed = expected_value in got_values
+            print(f"EXPECT promotion_preview.candidates contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
 
         for marker in (t.get("expect_system_prompt_true") or []):
