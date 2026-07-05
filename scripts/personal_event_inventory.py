@@ -137,6 +137,218 @@ def looks_like_memory_system_checkpoint(text: str) -> bool:
     return any(cue in low for cue in checkpoint_cues)
 
 
+def canonical_subjects_for_text(text: str) -> List[Dict[str, str]]:
+    low = text.lower()
+    subjects: List[Dict[str, str]] = []
+
+    def add(subject: str, relation: str, name: str = "") -> None:
+        item = {"subject": subject, "relation_to_user": relation}
+        if name:
+            item["known_name"] = name
+        if item not in subjects:
+            subjects.append(item)
+
+    if re.search(r"\b(my )?(mother|mom|mum)\b", low):
+        add("mother", "mother", "DeeDee" if re.search(r"\bdeedee\b", text, re.I) else "")
+    if re.search(r"\b(my )?(father|dad)\b", low):
+        add("father", "father", "Jerry" if re.search(r"\bjerry\b", text, re.I) else "")
+    if re.search(r"\bmonika\b|\bmy wife\b", text, re.I):
+        add("Monika", "wife", "Monika")
+    for pet in ("Dahlia", "Helsing", "Neko", "Nemo", "Nyx", "Арктика"):
+        if re.search(rf"\b{re.escape(pet)}\b", text, re.I):
+            add(pet, "pet", pet)
+
+    return subjects
+
+
+def canonical_event_for_rule(event_type: str, text: str) -> str:
+    low = text.lower()
+    if event_type == "death_loss":
+        return "died"
+    if event_type == "pet_death_loss":
+        if "put her to sleep" in low or "put him to sleep" in low or "put to sleep" in low:
+            return "euthanized_or_put_to_sleep"
+        if "rare blood cancer" in low:
+            return "died_of_rare_blood_cancer"
+        return "died_or_lost"
+    if event_type == "caretaking_burden":
+        if "psychotic break" in low:
+            return "ongoing_caretaking_after_wife_psychotic_break"
+        if "assisted living" in low or "memory lasts" in low:
+            return "father_assisted_living_memory_decline"
+        return "caretaking_load"
+    if event_type == "relationship_anchor":
+        return "important_relationship_anchor"
+    return event_type
+
+
+def time_reference_for_text(text: str, created_at: str | None) -> str:
+    low = text.lower()
+    m = re.search(r"\babout\s+([a-z0-9 ]{1,30}?)\s+ago\b", low)
+    if m:
+        return f"about {m.group(1).strip()} ago from source date {created_at or 'unknown'}"
+    m = re.search(r"\blast year\b", low)
+    if m:
+        return f"last year relative to source date {created_at or 'unknown'}"
+    m = re.search(r"\btwo years ago\b", low)
+    if m:
+        return f"two years ago relative to source date {created_at or 'unknown'}"
+    return f"source date {created_at or 'unknown'}"
+
+
+def choose_primary_subject(
+    *,
+    event_type: str,
+    event: str,
+    text: str,
+    subjects: List[Dict[str, str]],
+) -> Dict[str, str]:
+    low = text.lower()
+
+    def first_subject_with_relation(relation: str) -> Dict[str, str] | None:
+        for item in subjects:
+            if item.get("relation_to_user") == relation:
+                return item
+        return None
+
+    def subject_named(name: str) -> Dict[str, str] | None:
+        for item in subjects:
+            if (item.get("known_name") or item.get("subject") or "").lower() == name.lower():
+                return item
+        return None
+
+    if event_type == "death_loss":
+        if re.search(r"\b(my )?(mother|mom|mum)\b.{0,100}\b(died|death|passed away)\b", low, re.S):
+            return subject_named("DeeDee") or first_subject_with_relation("mother") or {"subject": "mother", "relation_to_user": "mother"}
+        if re.search(r"\b(my )?(father|dad)\b.{0,100}\b(died|death|passed away)\b", low, re.S):
+            return subject_named("Jerry") or first_subject_with_relation("father") or {"subject": "father", "relation_to_user": "father"}
+
+    if event_type == "pet_death_loss":
+        pet_subjects = [s for s in subjects if s.get("relation_to_user") == "pet"]
+        loss_mentions = 0
+        loss_mentions += len(re.findall(r"\bput (?:her|him|them)?\s*(?:to sleep|down)\b", text, re.I))
+        loss_mentions += len(re.findall(r"\b(died|death|rare blood cancer|lost)\b", text, re.I))
+        if len(pet_subjects) > 1 and loss_mentions > 1:
+            return {"subject": "multiple_pets", "relation_to_user": "pets"}
+
+        if re.search(r"\bdahlia\b.{0,160}\b(put .*sleep|put .*down|euthanized|died|death|lost)\b", text, re.I | re.S):
+            return subject_named("Dahlia") or {"subject": "Dahlia", "relation_to_user": "pet", "known_name": "Dahlia"}
+        if re.search(r"\bhelsing\b.{0,160}\b(died|death|rare blood cancer|lost)\b", text, re.I | re.S):
+            return subject_named("Helsing") or {"subject": "Helsing", "relation_to_user": "pet", "known_name": "Helsing"}
+        if re.search(r"\bneko\b.{0,160}\b(died|death|lost|after neko dies)\b", text, re.I | re.S):
+            return subject_named("Neko") or {"subject": "Neko", "relation_to_user": "pet", "known_name": "Neko"}
+        if re.search(r"\bnemo\b.{0,160}\b(died|death|lost|put .*sleep)\b", text, re.I | re.S):
+            return subject_named("Nemo") or {"subject": "Nemo", "relation_to_user": "pet", "known_name": "Nemo"}
+        pet = first_subject_with_relation("pet")
+        if pet:
+            return pet
+
+    if event_type == "caretaking_burden":
+        if "psychotic break" in low or "wife" in low or "monika" in low:
+            return subject_named("Monika") or {"subject": "Monika", "relation_to_user": "wife", "known_name": "Monika"}
+        if "assisted living" in low or "memory lasts" in low or "dad" in low or "jerry" in low:
+            return subject_named("Jerry") or first_subject_with_relation("father") or {"subject": "father", "relation_to_user": "father", "known_name": "Jerry"}
+
+    if event_type == "relationship_anchor":
+        for name in ("Dahlia", "Helsing", "Neko", "Nyx", "Арктика", "DeeDee", "Jerry", "Monika"):
+            hit = subject_named(name)
+            if hit:
+                return hit
+
+    return subjects[0] if subjects else {"subject": "unknown", "relation_to_user": "unknown"}
+
+
+def build_correction_candidate(candidate: Dict[str, Any]) -> Dict[str, Any] | None:
+    text = str(candidate.get("text_preview") or "")
+
+    # V0: deterministic correction pattern for user-authored corrections.
+    # Example: "It was Neko; spell check changed it accidentally to Nemo."
+    if re.search(r"\bit was\s+neko\b", text, re.I) and re.search(r"\bnemo\b", text, re.I):
+        return {
+            "card_schema": "memory_correction_candidate_v0",
+            "correction_type": "name_alias_correction",
+            "canonical_value": "Neko",
+            "incorrect_value": "Nemo",
+            "entity_type": "pet",
+            "claim": "User corrected a prior transcription/spellcheck error: the pet name should be Neko, not Nemo.",
+            "applies_to_domains": ["pets", "relationship_anchor", "pet_death_loss"],
+            "confidence": 0.92,
+            "use_scope": "MEMORY_NORMALIZATION",
+            "surface_policy": "do_not_surface_as_content_unless_asked",
+            "source_point_id": candidate.get("source_point_id"),
+            "source_thread_id": candidate.get("thread_id"),
+            "source_vantage_id": candidate.get("vantage_id"),
+            "source_created_at": candidate.get("created_at"),
+            "needs_review": True,
+            "write_intent": "none_preview_only",
+        }
+
+    return None
+
+
+def build_card_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    text = str(candidate.get("text_preview") or "")
+    event_type = str(candidate.get("event_type") or "")
+    created_at = candidate.get("created_at")
+
+    subjects = canonical_subjects_for_text(text)
+    event = canonical_event_for_rule(event_type, text)
+    primary_subject = choose_primary_subject(
+        event_type=event_type,
+        event=event,
+        text=text,
+        subjects=subjects,
+    )
+
+    card_type = "personal_life_event"
+    if event_type == "relationship_anchor":
+        card_type = "relationship_anchor"
+    elif event_type == "caretaking_burden":
+        card_type = "life_context"
+
+    time_reference = time_reference_for_text(text, created_at)
+
+    claim_parts = []
+    subject_label = primary_subject.get("known_name") or primary_subject.get("subject") or "Unknown subject"
+    relation = primary_subject.get("relation_to_user") or "unknown relation"
+
+    if event_type == "death_loss":
+        claim_parts.append(f"User's {relation} {subject_label} died; time reference: {time_reference}.")
+    elif event_type == "pet_death_loss":
+        if primary_subject.get("subject") == "multiple_pets":
+            claim_parts.append(f"User experienced multiple pet losses; event: {event}; time reference: {time_reference}.")
+        else:
+            claim_parts.append(f"User experienced a pet loss involving {subject_label}; event: {event}; time reference: {time_reference}.")
+    elif event_type == "caretaking_burden":
+        claim_parts.append(f"User has a relevant caretaking/life-context burden involving {subject_label}; event: {event}.")
+    elif event_type == "relationship_anchor":
+        claim_parts.append(f"{subject_label} is a relevant relationship anchor for the user.")
+    else:
+        claim_parts.append(f"Candidate personal memory event: {event_type} involving {subject_label}.")
+
+    return {
+        "card_schema": "personal_memory_card_candidate_v0",
+        "card_type": card_type,
+        "event_type": event_type,
+        "subject": primary_subject,
+        "related_subjects": subjects,
+        "event": event,
+        "time_reference": time_reference,
+        "claim": " ".join(claim_parts),
+        "domain": candidate.get("domain") or [],
+        "salience": candidate.get("salience"),
+        "confidence": 0.82 if candidate.get("matched_pattern_count", 0) >= 2 else 0.74,
+        "use_scope": candidate.get("use_scope"),
+        "surface_policy": candidate.get("surface_policy"),
+        "source_point_id": candidate.get("source_point_id"),
+        "source_thread_id": candidate.get("thread_id"),
+        "source_vantage_id": candidate.get("vantage_id"),
+        "source_created_at": created_at,
+        "needs_review": True,
+        "write_intent": "none_preview_only",
+    }
+
+
 def find_candidates(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
 
@@ -178,6 +390,10 @@ def find_candidates(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "matched_patterns": matched_patterns[:3],
                 "text_preview": text[:1200],
             }
+            candidate["card_candidate"] = build_card_candidate(candidate)
+            correction_candidate = build_correction_candidate(candidate)
+            if correction_candidate:
+                candidate["correction_candidate"] = correction_candidate
             candidates.append(candidate)
 
     def sort_key(c: Dict[str, Any]):
@@ -203,6 +419,32 @@ def main() -> int:
         counts[c["event_type"]] = counts.get(c["event_type"], 0) + 1
 
     print("event_type_counts:", json.dumps(counts, ensure_ascii=False, sort_keys=True))
+
+    print("\n=== canonical card candidate summary ===")
+    for i, c in enumerate(candidates[:20], 1):
+        card = c.get("card_candidate") or {}
+        print(f"{i}. {card.get('card_type')} | {card.get('event_type')} | {card.get('claim')} | confidence={card.get('confidence')} | use_scope={card.get('use_scope')}")
+
+    raw_correction_candidates = [c.get("correction_candidate") for c in candidates if c.get("correction_candidate")]
+    correction_candidates = []
+    correction_keys = set()
+    for correction in raw_correction_candidates:
+        key = (
+            correction.get("correction_type"),
+            correction.get("incorrect_value"),
+            correction.get("canonical_value"),
+            correction.get("source_point_id"),
+        )
+        if key in correction_keys:
+            continue
+        correction_keys.add(key)
+        correction_candidates.append(correction)
+
+    print("\n=== correction candidate summary ===")
+    print("raw_correction_candidate_count:", len(raw_correction_candidates))
+    print("unique_correction_candidate_count:", len(correction_candidates))
+    for i, correction in enumerate(correction_candidates[:20], 1):
+        print(f"{i}. {correction.get('correction_type')} | {correction.get('incorrect_value')} -> {correction.get('canonical_value')} | confidence={correction.get('confidence')} | source={correction.get('source_point_id')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
