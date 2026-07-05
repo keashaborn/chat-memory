@@ -885,6 +885,72 @@ def _build_semantic_dedupe_preview_v0(
     }
 
 
+def _apply_semantic_dedupe_v0(
+    *,
+    turn_intent: str,
+    memory_chunks: List[Dict[str, Any]],
+    dedupe_preview: Dict[str, Any] | None,
+) -> tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+    """
+    Apply deterministic dedupe for selected prompt-injection paths.
+
+    V0 is intentionally narrow:
+    - only FM_CONCEPTUAL
+    - only removes refs already identified by semantic_dedupe_preview
+    - keeps canonical chunk and non-clustered distinct chunks
+    """
+    ti = (turn_intent or "").strip().upper()
+    chunks = list(memory_chunks or [])
+
+    if ti != "FM_CONCEPTUAL":
+        return chunks, None
+    if not isinstance(dedupe_preview, dict) or not dedupe_preview:
+        return chunks, None
+
+    duplicate_refs: set[str] = set()
+    for cluster in (dedupe_preview.get("clusters") or []):
+        if not isinstance(cluster, dict):
+            continue
+        for ref in (cluster.get("duplicate_refs") or []):
+            if ref:
+                duplicate_refs.add(str(ref))
+
+    if not duplicate_refs:
+        return chunks, {
+            "version": "semantic_dedupe_apply_v0",
+            "mode": "deterministic_apply",
+            "turn_intent": ti,
+            "applied": False,
+            "input_count": len(chunks),
+            "output_count": len(chunks),
+            "removed_count": 0,
+            "removed_refs": [],
+            "reason": "no_duplicate_refs",
+        }
+
+    filtered: List[Dict[str, Any]] = []
+    removed_refs: List[str] = []
+
+    for idx, hit in enumerate(chunks, 1):
+        ref = _semantic_dedupe_ref(hit, idx)
+        if ref in duplicate_refs:
+            removed_refs.append(ref)
+            continue
+        filtered.append(hit)
+
+    return filtered, {
+        "version": "semantic_dedupe_apply_v0",
+        "mode": "deterministic_apply",
+        "turn_intent": ti,
+        "applied": bool(removed_refs),
+        "input_count": len(chunks),
+        "output_count": len(filtered),
+        "removed_count": len(removed_refs),
+        "removed_refs": removed_refs,
+        "reason": "remove_duplicate_refs_from_semantic_dedupe_preview",
+    }
+
+
 def _preview_compact_text(text: str, *, limit: int = 520) -> str:
     """
     Deterministic extractive preview for inspect/debug use.
@@ -2096,6 +2162,12 @@ def vantage_query(req: Request, payload: VantageQuery):
             turn_intent=turn_intent,
             memory_chunks=memory_chunks,
         )
+        semantic_dedupe_apply = None
+        memory_chunks, semantic_dedupe_apply = _apply_semantic_dedupe_v0(
+            turn_intent=turn_intent,
+            memory_chunks=memory_chunks,
+            dedupe_preview=semantic_dedupe_preview,
+        )
 
         k_memory = sum(1 for h in memory_chunks if (h or {}).get("_src") == "personal")
         k_corpus_used = sum(1 for h in memory_chunks if (h or {}).get("_src") == "corpus")
@@ -2136,6 +2208,8 @@ def vantage_query(req: Request, payload: VantageQuery):
             meta["vantage"]["retrieval_debug"] = debug_retrieval_counts
             if semantic_dedupe_preview:
                 meta["vantage"]["semantic_dedupe_preview"] = semantic_dedupe_preview
+            if semantic_dedupe_apply:
+                meta["vantage"]["semantic_dedupe_apply"] = semantic_dedupe_apply
             compression_preview = _build_memory_compression_preview_v0(
                 turn_intent=turn_intent,
                 memory_chunks=memory_chunks,

@@ -534,6 +534,7 @@ def main() -> int:
                 "direct concise style in technical work",
                 "poetic/fractal explanation during command-patching",
             ],
+            "expect_memory_used_count": 2,
             "expect_recall_mode": False,
             "expect_turn_intent": "FM_CONCEPTUAL",
             "expect_plan": {
@@ -578,6 +579,20 @@ def main() -> int:
                 "duplicate_count": 2,
                 "reason": "normalized_question_match",
             },
+            "expect_dedupe_apply": {
+                "version": "semantic_dedupe_apply_v0",
+                "mode": "deterministic_apply",
+                "turn_intent": "FM_CONCEPTUAL",
+                "applied": True,
+                "input_count": 4,
+                "output_count": 2,
+                "removed_count": 2,
+                "reason": "remove_duplicate_refs_from_semantic_dedupe_preview",
+            },
+            "expect_dedupe_apply_removed_ref_contains": [
+                "nta_primary_core_v1:75",
+                "nta_primary_core_v1:119",
+            ],
         },
         {
             "name": "specific_recall_dad",
@@ -687,6 +702,7 @@ def main() -> int:
         turn_plan = vantage_meta.get("turn_plan") or {}
         compression_preview = vantage_meta.get("memory_compression_preview") or {}
         dedupe_preview = vantage_meta.get("semantic_dedupe_preview") or {}
+        dedupe_apply = vantage_meta.get("semantic_dedupe_apply") or {}
         semantic_preview = vantage_meta.get("semantic_extraction_preview") or {}
         promotion_preview = vantage_meta.get("semantic_promotion_preview") or {}
         decision_preview = vantage_meta.get("semantic_promotion_decision_preview") or {}
@@ -701,6 +717,8 @@ def main() -> int:
             print(f"memory_compression_preview: {json.dumps(compression_preview, ensure_ascii=False, sort_keys=True)}")
         if dedupe_preview:
             print(f"semantic_dedupe_preview: {json.dumps(dedupe_preview, ensure_ascii=False, sort_keys=True)}")
+        if dedupe_apply:
+            print(f"semantic_dedupe_apply: {json.dumps(dedupe_apply, ensure_ascii=False, sort_keys=True)}")
         if semantic_preview:
             print(f"semantic_extraction_preview: {json.dumps(semantic_preview, ensure_ascii=False, sort_keys=True)}")
         if promotion_preview:
@@ -709,6 +727,12 @@ def main() -> int:
             print(f"semantic_promotion_decision_preview: {json.dumps(decision_preview, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
+
+        expected_memory_used_count = t.get("expect_memory_used_count")
+        if expected_memory_used_count is not None:
+            passed = len(memory) == int(expected_memory_used_count)
+            ok = ok and passed
+            print(f"EXPECT memory_used_count={expected_memory_used_count}: {passed} (got={len(memory)})")
 
         expected_recall = t.get("expect_recall_mode")
         if expected_recall is not None:
@@ -842,6 +866,39 @@ def main() -> int:
             passed = expected_value in got_values
             print(f"EXPECT dedupe_preview.clusters contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
+
+        for path, expected_value in (t.get("expect_dedupe_apply") or {}).items():
+            cur = dedupe_apply
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT dedupe_apply.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for path, expected_min in (t.get("expect_dedupe_apply_min") or {}).items():
+            cur = dedupe_apply
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            try:
+                passed = float(cur) >= float(expected_min)
+            except Exception:
+                passed = False
+            print(f"EXPECT dedupe_apply.{path}>={expected_min!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for marker in (t.get("expect_dedupe_apply_removed_ref_contains") or []):
+            removed_refs = dedupe_apply.get("removed_refs") or []
+            present = any(str(marker) in str(ref) for ref in removed_refs)
+            ok = ok and present
+            print(f"EXPECT dedupe_apply.removed_refs contains {marker!r}: {present} (got={removed_refs!r})")
 
         for path, expected_value in (t.get("expect_semantic_preview") or {}).items():
             cur = semantic_preview
