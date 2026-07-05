@@ -598,6 +598,212 @@ def build_review_decisions(
     ]
 
 
+def slugify_topic_part(value: str) -> str:
+    v = " ".join(str(value or "").strip().lower().split())
+    replacements = {
+        " ": "_",
+        "/": "_",
+        "\\": "_",
+        ":": "_",
+        ";": "_",
+        ",": "_",
+        ".": "",
+        "'": "",
+        '"': "",
+        "’": "",
+        "“": "",
+        "”": "",
+    }
+    for old, new in replacements.items():
+        v = v.replace(old, new)
+    v = re.sub(r"[^a-z0-9_\-\u0400-\u04FF]+", "", v)
+    v = re.sub(r"_+", "_", v).strip("_")
+    return v or "unknown"
+
+
+def kind_for_card(card: Dict[str, Any]) -> str:
+    card_type = str(card.get("card_type") or "")
+    if card_type == "personal_life_event":
+        return "personal_event"
+    if card_type == "life_context":
+        return "life_context"
+    if card_type == "relationship_anchor":
+        return "relationship_anchor"
+    return "personal_memory"
+
+
+def topic_key_for_card(card: Dict[str, Any]) -> str:
+    user_id = USER_ID
+    kind = kind_for_card(card)
+    event_type = slugify_topic_part(str(card.get("event_type") or "general"))
+    subject = card.get("subject") or {}
+    subject_value = slugify_topic_part(str(subject.get("known_name") or subject.get("subject") or "unknown"))
+    event = slugify_topic_part(str(card.get("event") or ""))
+    if event and event != event_type:
+        return f"user/{user_id}/{kind}/{event_type}/{subject_value}/{event}"
+    return f"user/{user_id}/{kind}/{event_type}/{subject_value}"
+
+
+def topic_key_for_correction(correction: Dict[str, Any]) -> str:
+    user_id = USER_ID
+    ctype = slugify_topic_part(str(correction.get("correction_type") or "correction"))
+    incorrect = slugify_topic_part(str(correction.get("incorrect_value") or "unknown"))
+    canonical = slugify_topic_part(str(correction.get("canonical_value") or "unknown"))
+    return f"user/{user_id}/correction/{ctype}/{incorrect}_to_{canonical}"
+
+
+def build_card_head_preview(card: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
+    kind = kind_for_card(card)
+    topic_key = topic_key_for_card(card)
+    confidence = float(card.get("confidence") or 0.0)
+    salience = str(card.get("salience") or "")
+    strength = 0.80 if salience == "high" else 0.65 if salience == "medium_high" else 0.50
+
+    payload = {
+        "mode": "personal_event_inventory_v0",
+        "user_id": USER_ID,
+        "card_schema": card.get("card_schema"),
+        "card_type": card.get("card_type"),
+        "event_type": card.get("event_type"),
+        "subject": card.get("subject"),
+        "related_subjects": card.get("related_subjects") or [],
+        "event": card.get("event"),
+        "domains": card.get("domain") or [],
+        "salience": salience,
+        "use_scope": card.get("use_scope"),
+        "surface_policy": card.get("surface_policy"),
+        "source_point_ids": card.get("source_point_ids") or [],
+        "source_thread_ids": card.get("source_thread_ids") or [],
+        "source_created_ats": card.get("source_created_ats") or [],
+        "review_decision": decision,
+        "needs_review": True,
+        "write_intent": "none_preview_only",
+    }
+
+    return {
+        "table": "vantage_card.card_head",
+        "vantage_id": "user_global",
+        "kind": kind,
+        "topic_key": topic_key,
+        "status": "active_after_review",
+        "strength": strength,
+        "confidence": confidence,
+        "summary": card.get("claim") or "",
+        "payload": payload,
+    }
+
+
+def build_card_revision_preview(card_head: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "table": "vantage_card.card_revision",
+        "card_id": "<new_or_existing_card_id>",
+        "summary": card_head.get("summary") or "",
+        "payload": card_head.get("payload") or {},
+        "reason": "personal_event_inventory_review_promotion",
+        "delta": {
+            "mode": "preview_only",
+            "source": "scripts/personal_event_inventory.py",
+        },
+    }
+
+
+def build_card_link_previews(card: Dict[str, Any]) -> List[Dict[str, Any]]:
+    links: List[Dict[str, Any]] = []
+    for source_point_id in card.get("source_point_ids") or []:
+        links.append({
+            "table": "vantage_card.card_link",
+            "card_id": "<new_or_existing_card_id>",
+            "link_type": "qdrant_point",
+            "ref_id": str(source_point_id),
+            "note": "memory_raw source point",
+        })
+    for thread_id in card.get("source_thread_ids") or []:
+        links.append({
+            "table": "vantage_card.card_link",
+            "card_id": "<new_or_existing_card_id>",
+            "link_type": "thread",
+            "ref_id": str(thread_id),
+            "note": "source thread",
+        })
+    return links
+
+
+def build_correction_card_head_preview(correction: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "mode": "personal_event_inventory_v0",
+        "user_id": USER_ID,
+        "card_schema": correction.get("card_schema"),
+        "correction_type": correction.get("correction_type"),
+        "canonical_value": correction.get("canonical_value"),
+        "incorrect_value": correction.get("incorrect_value"),
+        "entity_type": correction.get("entity_type"),
+        "applies_to_domains": correction.get("applies_to_domains") or [],
+        "use_scope": correction.get("use_scope"),
+        "surface_policy": correction.get("surface_policy"),
+        "source_point_id": correction.get("source_point_id"),
+        "source_thread_id": correction.get("source_thread_id"),
+        "source_created_at": correction.get("source_created_at"),
+        "needs_review": True,
+        "write_intent": "none_preview_only",
+    }
+    return {
+        "table": "vantage_card.card_head",
+        "vantage_id": "user_global",
+        "kind": "correction",
+        "topic_key": topic_key_for_correction(correction),
+        "status": "active_after_review",
+        "strength": 0.70,
+        "confidence": float(correction.get("confidence") or 0.0),
+        "summary": correction.get("claim") or "",
+        "payload": payload,
+    }
+
+
+def build_promotion_mapping_preview(
+    merged_cards: List[Dict[str, Any]],
+    review_decisions: List[Dict[str, Any]],
+    correction_candidates: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    decision_by_key = {
+        tuple(d.get("merge_key") or []): d
+        for d in review_decisions
+    }
+
+    card_rows: List[Dict[str, Any]] = []
+    revision_rows: List[Dict[str, Any]] = []
+    link_rows: List[Dict[str, Any]] = []
+
+    for card in merged_cards:
+        key = tuple(card.get("merge_key") or [])
+        decision = decision_by_key.get(key) or {}
+        if decision.get("suggested_action") not in ("candidate_for_review", "needs_review"):
+            continue
+
+        head = build_card_head_preview(card, decision)
+        card_rows.append(head)
+        revision_rows.append(build_card_revision_preview(head))
+        link_rows.extend(build_card_link_previews(card))
+
+    correction_rows = [
+        build_correction_card_head_preview(c)
+        for c in correction_candidates
+    ]
+
+    return {
+        "schema": "personal_memory_promotion_mapping_preview_v0",
+        "mode": "preview_only_no_writes",
+        "target_store": "vantage_card",
+        "card_head_count": len(card_rows),
+        "correction_card_head_count": len(correction_rows),
+        "card_revision_count": len(revision_rows),
+        "card_link_count": len(link_rows),
+        "card_head_rows": card_rows,
+        "correction_card_head_rows": correction_rows,
+        "card_revision_rows": revision_rows,
+        "card_link_rows": link_rows,
+    }
+
+
 def main() -> int:
     points = scroll_points()
     candidates = find_candidates(points)
@@ -661,6 +867,24 @@ def main() -> int:
     print("review_action_counts:", json.dumps(review_counts, ensure_ascii=False, sort_keys=True))
     for i, decision in enumerate(review_decisions[:30], 1):
         print(f"{i}. {decision.get('suggested_action')} | eligible={decision.get('eligible')} | confidence={decision.get('confidence')} | flags={decision.get('review_flags')} | blockers={decision.get('blockers')} | {decision.get('claim')}")
+
+    promotion_preview = build_promotion_mapping_preview(
+        merged_cards=merged_cards,
+        review_decisions=review_decisions,
+        correction_candidates=correction_candidates,
+    )
+    print("\n=== promotion mapping preview ===")
+    print("schema:", promotion_preview.get("schema"))
+    print("mode:", promotion_preview.get("mode"))
+    print("target_store:", promotion_preview.get("target_store"))
+    print("card_head_count:", promotion_preview.get("card_head_count"))
+    print("correction_card_head_count:", promotion_preview.get("correction_card_head_count"))
+    print("card_revision_count:", promotion_preview.get("card_revision_count"))
+    print("card_link_count:", promotion_preview.get("card_link_count"))
+    for i, row in enumerate((promotion_preview.get("card_head_rows") or [])[:20], 1):
+        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
+    for i, row in enumerate((promotion_preview.get("correction_card_head_rows") or [])[:10], 1):
+        print(f"correction {i}. {row.get('table')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
