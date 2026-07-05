@@ -886,6 +886,47 @@ def policy_retrieval_preview_for_question(
     }
 
 
+def build_answer_use_audit_preview(
+    *,
+    policy_preview: Dict[str, Any],
+    answer_id: str = "<answer_id>",
+    request_id: str = "<request_id>",
+    outcome: str = "selected_for_answer",
+) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+
+    for item in policy_preview.get("selected") or []:
+        rows.append({
+            "table": "vantage_card.card_signal",
+            "vantage_id": "user_global",
+            "kind": item.get("kind"),
+            "topic_key": item.get("topic_key"),
+            "signal_type": outcome,
+            "magnitude": 1.0,
+            "metadata": {
+                "schema": "personal_memory_answer_use_signal_v0",
+                "mode": "preview_only_no_writes",
+                "answer_id": answer_id,
+                "request_id": request_id,
+                "question": policy_preview.get("question"),
+                "event_type": item.get("event_type"),
+                "summary": item.get("summary"),
+                "confidence": item.get("confidence"),
+                "use_scope": item.get("use_scope"),
+                "selection_reasons": item.get("reasons") or [],
+                "write_intent": "none_preview_only",
+            },
+        })
+
+    return {
+        "schema": "personal_memory_answer_use_audit_preview_v0",
+        "mode": "preview_only_no_writes",
+        "target_store": "vantage_card.card_signal",
+        "signal_count": len(rows),
+        "signal_rows": rows,
+    }
+
+
 def main() -> int:
     points = scroll_points()
     candidates = find_candidates(points)
@@ -980,6 +1021,20 @@ def main() -> int:
     print("rejected_count:", policy_preview.get("rejected_count"))
     for i, item in enumerate(policy_preview.get("selected") or [], 1):
         print(f"{i}. SELECT | {item.get('kind')} | {item.get('event_type')} | {item.get('topic_key')} | confidence={item.get('confidence')} | reasons={item.get('reasons')} | {item.get('summary')}")
+
+    answer_audit_preview = build_answer_use_audit_preview(
+        policy_preview=policy_preview,
+        answer_id="<preview_answer_id>",
+        request_id="<preview_request_id>",
+        outcome="selected_for_answer",
+    )
+    print("\n=== answer-use audit preview ===")
+    print("schema:", answer_audit_preview.get("schema"))
+    print("mode:", answer_audit_preview.get("mode"))
+    print("target_store:", answer_audit_preview.get("target_store"))
+    print("signal_count:", answer_audit_preview.get("signal_count"))
+    for i, row in enumerate(answer_audit_preview.get("signal_rows") or [], 1):
+        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | signal={row.get('signal_type')} | magnitude={row.get('magnitude')} | reasons={(row.get('metadata') or {}).get('selection_reasons')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
