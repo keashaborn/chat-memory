@@ -474,6 +474,62 @@ def _looks_memory_architecture_turn(text: str) -> bool:
 
 
 
+def _looks_fm_conceptual_turn(text: str) -> bool:
+    t = (text or "").lower()
+    if not t.strip():
+        return False
+
+    strong_terms = [
+        "origin of consciousness",
+        "consciousness emerge",
+        "consciousness emerges",
+        "emergence of consciousness",
+        "development of consciousness",
+        "fractal monism",
+        "fractal monistic",
+        "recursive differentiation",
+        "perception create",
+        "perception creates",
+        "perception generate",
+        "perception generates",
+        "selfhood emerge",
+        "meaning emerge",
+        "meaning emerges",
+        "ontology",
+        "metaphysics",
+    ]
+    if any(term in t for term in strong_terms):
+        return True
+
+    concept_terms = (
+        "consciousness",
+        "perception",
+        "selfhood",
+        "meaning",
+        "identity",
+        "being",
+        "existence",
+        "duality",
+        "recursion",
+        "differentiation",
+        "oscillation",
+    )
+    request_terms = (
+        "describe",
+        "explain",
+        "how does",
+        "how do",
+        "what is",
+        "what are",
+        "origin",
+        "emerge",
+        "emerges",
+        "arise",
+        "arises",
+    )
+    return any(c in t for c in concept_terms) and any(r in t for r in request_terms)
+
+
 def _classify_memory_turn_intent(text: str) -> str:
     """
     Explicit retrieval/injection planning intent.
@@ -487,6 +543,8 @@ def _classify_memory_turn_intent(text: str) -> str:
         return "PROFILE_SUMMARY"
     if _looks_memory_architecture_turn(text):
         return "MEMORY_ARCHITECTURE"
+    if _looks_fm_conceptual_turn(text):
+        return "FM_CONCEPTUAL"
     if _looks_technical_admin_turn(text):
         return "TECH"
     if _looks_specific_personal_recall(text):
@@ -589,6 +647,8 @@ def _build_turn_plan_v0(
         notes.append("PROFILE_SUMMARY may use profile cards and compressed personal archive.")
     elif ti == "MEMORY_ARCHITECTURE":
         notes.append("MEMORY_ARCHITECTURE should use compressed memory-system history and limited FM/AI corpus.")
+    elif ti == "FM_CONCEPTUAL":
+        notes.append("FM_CONCEPTUAL should use FM lens and targeted conceptual corpus while suppressing profile biography and broad personal archive.")
     else:
         notes.append("GENERAL currently follows requested mix; later it should use stricter default budgets.")
 
@@ -598,7 +658,7 @@ def _build_turn_plan_v0(
         "max_personal_hits_requested": int(retrieval_plan.get("k_personal") or 0),
         "max_corpus_hits_requested": int(retrieval_plan.get("k_corpus") or 0),
         "base_k": int(retrieval_plan.get("base_k") or 0),
-        "compression_required": bool(ti in ("GENERAL", "MEMORY_ARCHITECTURE", "PROFILE_SUMMARY")),
+        "compression_required": bool(ti in ("GENERAL", "MEMORY_ARCHITECTURE", "PROFILE_SUMMARY", "FM_CONCEPTUAL")),
         "raw_personal_memory_allowed": bool(ti == "SPECIFIC_RECALL"),
     }
 
@@ -696,6 +756,16 @@ def _build_memory_retrieval_plan(
         k_personal = 0 if (not use_personal or w_mem <= 0.0) else min(k_personal, int(os.getenv("VANTAGE_MEMORY_ARCH_PERSONAL_K", "2") or 2))
         k_personal = max(0, min(10, k_personal))
         k_corpus = 0 if (w_corpus <= 0.0) else min(k_corpus, int(os.getenv("VANTAGE_MEMORY_ARCH_CORPUS_K", "1") or 1))
+        k_corpus = max(0, min(10, k_corpus))
+
+    if ti == "FM_CONCEPTUAL":
+        # Conceptual Fractal Monism turns should use the curated FM corpus and
+        # avoid broad personal archive/profile injection unless explicitly needed.
+        base_k = int(os.getenv("VANTAGE_FM_CONCEPTUAL_BASE_K", "4") or 4)
+        base_k = max(1, min(10, base_k))
+        k_personal = int(os.getenv("VANTAGE_FM_CONCEPTUAL_PERSONAL_K", "0") or 0)
+        k_personal = 0 if (not use_personal or w_mem <= 0.0) else max(0, min(5, k_personal))
+        k_corpus = 0 if (w_corpus <= 0.0) else int(os.getenv("VANTAGE_FM_CONCEPTUAL_CORPUS_K", "4") or 4)
         k_corpus = max(0, min(10, k_corpus))
 
     return {

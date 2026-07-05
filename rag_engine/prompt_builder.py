@@ -24,7 +24,7 @@ def format_memory_chunks(chunks: List[Dict[str, Any]], *, turn_intent: str | Non
         return ""
 
     ti = (turn_intent or "").strip().upper()
-    compact_mode = ti == "MEMORY_ARCHITECTURE"
+    compact_mode = ti in ("MEMORY_ARCHITECTURE", "FM_CONCEPTUAL")
 
     # key: normalized content text -> {"text": original_text, "sources": ["[coll][kind]", ...]}
     merged = OrderedDict()
@@ -195,7 +195,7 @@ def _should_include_profile_cards(text: str | None, turn_intent: str | None = No
     - GENERAL: fall back to conservative text heuristics for compatibility
     """
     ti = (turn_intent or "").strip().upper()
-    if ti in ("TECH", "MEMORY_ARCHITECTURE"):
+    if ti in ("TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"):
         return False
     if ti == "PROFILE_SUMMARY":
         return True
