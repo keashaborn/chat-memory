@@ -1010,6 +1010,93 @@ def _build_semantic_promotion_preview_v0(
     }
 
 
+def _promotion_decision_for_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    candidate_id = str((candidate or {}).get("candidate_id") or "unknown")
+    kind = str((candidate or {}).get("kind") or "").strip()
+    use_scope = str((candidate or {}).get("use_scope") or "").strip()
+    durability = str((candidate or {}).get("durability") or "").strip()
+    claim = " ".join(str((candidate or {}).get("claim") or "").split()).strip()
+
+    try:
+        confidence = float((candidate or {}).get("confidence") or 0.0)
+    except Exception:
+        confidence = 0.0
+
+    blocked_reasons: List[str] = []
+
+    if not claim:
+        blocked_reasons.append("missing_claim")
+    if kind not in ("project", "pref", "topic"):
+        blocked_reasons.append("unsupported_kind")
+    if use_scope not in ("CONTENT_OK", "STYLE_ONLY"):
+        blocked_reasons.append("unsupported_or_blocked_use_scope")
+    if use_scope == "NEVER_SURFACE":
+        blocked_reasons.append("never_surface")
+    if not durability.startswith("long_term"):
+        blocked_reasons.append("non_durable")
+    if confidence < 0.75:
+        blocked_reasons.append("low_confidence")
+
+    duplicate_risk = "unknown"
+    eligible = not blocked_reasons
+    needs_review = True
+
+    if eligible:
+        suggested_action = "candidate_for_review"
+        rationale = "Candidate passes deterministic eligibility checks but still requires review before any durable write."
+    else:
+        suggested_action = "do_not_store"
+        rationale = "Candidate failed deterministic eligibility checks and should not be promoted."
+
+    return {
+        "candidate_id": candidate_id,
+        "eligible": bool(eligible),
+        "needs_review": bool(needs_review),
+        "duplicate_risk": duplicate_risk,
+        "blocked_reason": ",".join(blocked_reasons) if blocked_reasons else "",
+        "suggested_action": suggested_action,
+        "rationale": rationale,
+    }
+
+
+def _build_semantic_promotion_decision_preview_v0(
+    *,
+    promotion_preview: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """
+    Debug-only decision gate for semantic promotion candidates.
+
+    This does not write memory. It only previews deterministic eligibility and
+    review status before any future durable-memory write path exists.
+    """
+    if not isinstance(promotion_preview, dict) or not promotion_preview:
+        return None
+
+    candidates = promotion_preview.get("candidates") or []
+    decisions: List[Dict[str, Any]] = []
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        decisions.append(_promotion_decision_for_candidate(candidate))
+
+    eligible_count = sum(1 for d in decisions if bool(d.get("eligible")))
+    blocked_count = len(decisions) - eligible_count
+    needs_review_count = sum(1 for d in decisions if bool(d.get("needs_review")))
+
+    return {
+        "version": "semantic_promotion_decision_preview_v0",
+        "mode": "debug_only",
+        "source": "semantic_promotion_preview",
+        "decision_count": len(decisions),
+        "eligible_count": eligible_count,
+        "blocked_count": blocked_count,
+        "needs_review_count": needs_review_count,
+        "write_intent": "none_debug_only",
+        "decisions": decisions,
+    }
+
+
 def _hit_text(hit: Dict[str, Any]) -> str:
     payload = (hit or {}).get("payload") or {}
     text = (
@@ -1890,6 +1977,11 @@ def vantage_query(req: Request, payload: VantageQuery):
                 )
                 if promotion_preview:
                     meta["vantage"]["semantic_promotion_preview"] = promotion_preview
+                    decision_preview = _build_semantic_promotion_decision_preview_v0(
+                        promotion_preview=promotion_preview,
+                    )
+                    if decision_preview:
+                        meta["vantage"]["semantic_promotion_decision_preview"] = decision_preview
         try:
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:

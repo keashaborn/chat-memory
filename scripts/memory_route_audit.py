@@ -471,6 +471,32 @@ def main() -> int:
                 "surface_policy": "mention_when_relevant",
                 "durability": "long_term_project_preference",
             },
+            "expect_decision_preview": {
+                "version": "semantic_promotion_decision_preview_v0",
+                "mode": "debug_only",
+                "source": "semantic_promotion_preview",
+                "decision_count": 2,
+                "eligible_count": 2,
+                "blocked_count": 0,
+                "needs_review_count": 2,
+                "write_intent": "none_debug_only",
+            },
+            "expect_decision_fields": [
+                "candidate_id",
+                "eligible",
+                "needs_review",
+                "duplicate_risk",
+                "blocked_reason",
+                "suggested_action",
+                "rationale",
+            ],
+            "expect_decision_values": {
+                "eligible": True,
+                "needs_review": True,
+                "duplicate_risk": "unknown",
+                "blocked_reason": "",
+                "suggested_action": "candidate_for_review",
+            },
         },
         {
             "name": "specific_recall_dad",
@@ -581,6 +607,7 @@ def main() -> int:
         compression_preview = vantage_meta.get("memory_compression_preview") or {}
         semantic_preview = vantage_meta.get("semantic_extraction_preview") or {}
         promotion_preview = vantage_meta.get("semantic_promotion_preview") or {}
+        decision_preview = vantage_meta.get("semantic_promotion_decision_preview") or {}
         print(f"k_personal_requested: {rd.get('k_personal_requested')}")
         print(f"k_corpus_requested: {rd.get('k_corpus_requested')}")
         print(f"combined_after_trim: {rd.get('combined_after_trim')}")
@@ -594,6 +621,8 @@ def main() -> int:
             print(f"semantic_extraction_preview: {json.dumps(semantic_preview, ensure_ascii=False, sort_keys=True)}")
         if promotion_preview:
             print(f"semantic_promotion_preview: {json.dumps(promotion_preview, ensure_ascii=False, sort_keys=True)}")
+        if decision_preview:
+            print(f"semantic_promotion_decision_preview: {json.dumps(decision_preview, ensure_ascii=False, sort_keys=True)}")
 
         ok = status == 200
 
@@ -763,6 +792,41 @@ def main() -> int:
                 got_values.append(cur)
             passed = expected_value in got_values
             print(f"EXPECT promotion_preview.candidates contains {path}={expected_value!r}: {passed} (got={got_values!r})")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_decision_preview") or {}).items():
+            cur = decision_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT decision_preview.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for field in (t.get("expect_decision_fields") or []):
+            decisions = decision_preview.get("decisions") or []
+            passed = bool(decisions) and all(isinstance(d, dict) and field in d for d in decisions)
+            print(f"EXPECT decision_preview.decisions[*].{field}: {passed}")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_decision_values") or {}).items():
+            parts = str(path).split(".")
+            decisions = decision_preview.get("decisions") or []
+            got_values = []
+            for decision in decisions:
+                cur = decision
+                for part in parts:
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    else:
+                        cur = None
+                        break
+                got_values.append(cur)
+            passed = expected_value in got_values
+            print(f"EXPECT decision_preview.decisions contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
 
         for marker in (t.get("expect_system_prompt_true") or []):
