@@ -124,3 +124,17 @@ The route audit includes FM conceptual probes for:
 ### Known parked issue
 
 FM conceptual retrieval and dedupe are now observable and controlled, but answer generation can still drift if the Vantage personality overlays introduce unrelated behavioral, control-theory, psychological, or predictive-processing synthesis. That is intentionally parked for a later `FM_CONCEPTUAL` answer-discipline pass.
+
+## Personal memory card pipeline preview
+
+Read-only preview pipeline now exists in scripts/personal_event_inventory.py.
+
+Pipeline: memory_raw -> personal-event candidates -> canonical card candidates -> correction candidates -> merged card candidates -> review decision preview -> promotion mapping preview -> policy retrieval preview.
+
+Detected categories: death_loss, pet_death_loss, caretaking_burden, relationship_anchor, name_alias_correction.
+
+Current test result: for the question Have I had any deaths in my family recently?, policy retrieval selects the DeeDee death card and rejects unrelated pet-loss, relationship-anchor, and caretaking cards.
+
+Durable store mapping targets the existing vantage_card schema: card_head, card_revision, and card_link. All generated rows are still preview-only with write_intent=none_preview_only.
+
+Known limitations: deterministic narrow extraction, multi-event memories need split review, correction relevance is over-broad, no durable writes yet, no live card retrieval wired into vantage_query yet, and answer-use/outcome logging is still pending.
