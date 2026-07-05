@@ -499,6 +499,62 @@ def main() -> int:
             },
         },
         {
+            "name": "fm_conceptual_origin_consciousness_current",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RILEY",
+                "message": "Could you describe the origin of consciousness.",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "conversation": 0.7,
+                    "memory_cards": 0.7,
+                    "corpus": 0.8,
+                    "lens_fm": 0.7,
+                    "recency_bias": 0.7,
+                    "similarity_threshold": 0.4,
+                },
+            },
+            "expect_true": [
+                "[FM LENS]",
+                "Relevant context from memory:",
+            ],
+            "expect_false": [
+                "Jerry",
+                "DeeDee",
+                "silver fox",
+            ],
+            "expect_system_prompt_true": [
+                "[FM LENS]",
+                "Relevant context from memory:",
+                "consciousness",
+            ],
+            "expect_system_prompt_false": [
+                "Jerry during dad-name recall",
+                "direct concise style in technical work",
+                "poetic/fractal explanation during command-patching",
+            ],
+            "expect_recall_mode": False,
+            "expect_turn_intent": "GENERAL",
+            "expect_plan": {
+                "turn_intent": "GENERAL",
+                "recall_mode": False,
+                "personal_archive_enabled": True,
+                "corpus_enabled": True,
+                "base_k": 5,
+                "k_personal": 4,
+                "k_corpus": 4,
+            },
+            "expect_turn_plan": {
+                "turn_intent": "GENERAL",
+                "requested_controls.lens_fm": 0.7,
+                "effective_controls.lens_fm": 0.7,
+                "allowed_stores.corpus": True,
+                "allowed_stores.personal_archive": True,
+                "injection_budget.compression_required": True,
+            },
+        },
+        {
             "name": "specific_recall_dad",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
