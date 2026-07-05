@@ -68,3 +68,59 @@ The main question is always:
 - how much context was injected
 - which store supplied it
 - whether the final answer had the right behavioral conditions
+
+
+## Semantic dedupe layer
+
+Semantic dedupe is currently implemented in `rag_engine/vantage_router.py`.
+
+### `semantic_dedupe_preview_v0`
+
+Purpose: expose obvious duplicate retrieved chunks in debug metadata without changing behavior.
+
+Current behavior:
+- Runs after retrieval trim.
+- Groups chunks by deterministic normalized question/text key.
+- Exposes:
+  - `input_count`
+  - `cluster_count`
+  - `duplicate_risk_count`
+  - duplicate refs
+  - canonical ref
+  - cluster reason
+- Does not write to storage.
+- Does not mutate memory by itself.
+
+### `semantic_dedupe_apply_v0`
+
+Purpose: remove exact normalized-question duplicate chunks before prompt injection for narrow, tested routes.
+
+Current behavior:
+- Applies only when `turn_intent == "FM_CONCEPTUAL"`.
+- Uses refs already identified by `semantic_dedupe_preview_v0`.
+- Keeps canonical chunk.
+- Keeps distinct non-clustered chunks.
+- Exposes apply metadata:
+  - `applied`
+  - `input_count`
+  - `output_count`
+  - `removed_count`
+  - `removed_refs`
+  - `reason`
+
+### Current regression probes
+
+The route audit includes FM conceptual probes for:
+
+- `Could you describe the origin of consciousness.`
+  - Confirms dedupe reduces 4 retrieved chunks to 2 injected chunks.
+  - Confirms personal archive and profile cards remain suppressed.
+
+- `Could you describe the process of the emergence of consciousness from nonexistence?`
+  - Confirms dedupe reduces 4 retrieved chunks to 3 injected chunks.
+  - Confirms `non-being` and `recursive differentiation` remain in the final prompt.
+  - Confirms personal archive and profile cards remain suppressed.
+
+### Known parked issue
+
+FM conceptual retrieval and dedupe are now observable and controlled, but answer generation can still drift if the Vantage personality overlays introduce unrelated behavioral, control-theory, psychological, or predictive-processing synthesis. That is intentionally parked for a later `FM_CONCEPTUAL` answer-discipline pass.
