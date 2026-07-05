@@ -511,6 +511,93 @@ def unique_correction_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[
     return out
 
 
+def review_decision_for_card(
+    card: Dict[str, Any],
+    correction_candidates: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    subject = card.get("subject") or {}
+    subject_value = str(subject.get("known_name") or subject.get("subject") or "").strip()
+    use_scope = str(card.get("use_scope") or "").strip()
+    claim = " ".join(str(card.get("claim") or "").split()).strip()
+    salience = str(card.get("salience") or "").strip()
+
+    try:
+        confidence = float(card.get("confidence") or 0.0)
+    except Exception:
+        confidence = 0.0
+
+    recognized_use_scopes = {
+        "DIRECT_RECALL",
+        "DIRECT_RECALL_OR_RELEVANT_SUPPORT",
+        "STYLE_AND_RELEVANT_SUPPORT",
+        "MEMORY_NORMALIZATION",
+    }
+
+    blockers: List[str] = []
+    review_flags: List[str] = []
+
+    if not claim:
+        blockers.append("missing_claim")
+    if not subject_value or subject_value == "unknown":
+        blockers.append("unknown_subject")
+    if use_scope not in recognized_use_scopes:
+        blockers.append("unsupported_use_scope")
+
+    if subject_value == "multiple_pets":
+        review_flags.append("multi_subject_card_needs_split_or_merge_review")
+    if confidence < 0.80:
+        review_flags.append("low_confidence_needs_review")
+    if salience not in ("high", "medium_high"):
+        review_flags.append("lower_salience_needs_review")
+
+    for correction in correction_candidates:
+        incorrect = str(correction.get("incorrect_value") or "")
+        canonical = str(correction.get("canonical_value") or "")
+        related = correction.get("applies_to_domains") or []
+        domains = card.get("domain") or []
+        if incorrect and (
+            incorrect == subject_value
+            or incorrect in claim
+            or any(d in related for d in domains)
+        ):
+            review_flags.append(f"correction_candidate_present:{incorrect}->{canonical}")
+
+    eligible = not blockers and confidence >= 0.80 and salience in ("high", "medium_high")
+    if blockers:
+        suggested_action = "auto_block"
+    elif review_flags:
+        suggested_action = "needs_review"
+    elif eligible:
+        suggested_action = "candidate_for_review"
+    else:
+        suggested_action = "needs_review"
+
+    return {
+        "decision_schema": "personal_memory_review_decision_v0",
+        "merge_key": card.get("merge_key"),
+        "suggested_action": suggested_action,
+        "eligible": bool(eligible and not blockers),
+        "needs_review": True,
+        "blockers": blockers,
+        "review_flags": review_flags,
+        "confidence": confidence,
+        "salience": salience,
+        "use_scope": use_scope,
+        "claim": claim,
+        "write_intent": "none_preview_only",
+    }
+
+
+def build_review_decisions(
+    merged_cards: List[Dict[str, Any]],
+    correction_candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return [
+        review_decision_for_card(card, correction_candidates)
+        for card in merged_cards
+    ]
+
+
 def main() -> int:
     points = scroll_points()
     candidates = find_candidates(points)
@@ -562,6 +649,18 @@ def main() -> int:
         subject = card.get("subject") or {}
         subject_name = subject.get("known_name") or subject.get("subject") or "unknown"
         print(f"{i}. {card.get('card_type')} | {card.get('event_type')} | {subject_name} | {card.get('claim')} | sources={len(card.get('source_point_ids') or [])} | confidence={card.get('confidence')}")
+
+    review_decisions = build_review_decisions(merged_cards, correction_candidates)
+    review_counts: Dict[str, int] = {}
+    for d in review_decisions:
+        action = str(d.get("suggested_action") or "unknown")
+        review_counts[action] = review_counts.get(action, 0) + 1
+
+    print("\n=== review decision preview ===")
+    print("review_decision_count:", len(review_decisions))
+    print("review_action_counts:", json.dumps(review_counts, ensure_ascii=False, sort_keys=True))
+    for i, decision in enumerate(review_decisions[:30], 1):
+        print(f"{i}. {decision.get('suggested_action')} | eligible={decision.get('eligible')} | confidence={decision.get('confidence')} | flags={decision.get('review_flags')} | blockers={decision.get('blockers')} | {decision.get('claim')}")
 
     for i, c in enumerate(candidates[:40], 1):
         print(f"\n--- candidate {i} ---")
