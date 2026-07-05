@@ -785,6 +785,106 @@ def _build_memory_retrieval_plan(
 
 
 
+def _semantic_dedupe_ref(hit: Dict[str, Any], idx: int) -> str:
+    if not isinstance(hit, dict):
+        return f"unknown:{idx}"
+    payload = hit.get("payload") or {}
+    src = str(hit.get("_src") or payload.get("source") or "memory").strip() or "memory"
+    coll = str(hit.get("collection") or payload.get("dataset") or payload.get("source_file") or "unknown").strip() or "unknown"
+    raw_id = hit.get("id") or hit.get("memory_id") or hit.get("point_id") or payload.get("id") or payload.get("request_id") or idx
+    return f"{src}:{coll}:{raw_id}"
+
+
+def _semantic_dedupe_key(hit: Dict[str, Any]) -> str:
+    payload = (hit or {}).get("payload") or {}
+    q = " ".join(str(payload.get("question") or "").lower().split()).strip()
+    if q:
+        q = (
+            q.replace("“", '"')
+             .replace("”", '"')
+             .replace("’", "'")
+             .replace("‘", "'")
+        )
+        q = q.replace('"', "")
+        q = q.replace("'", "")
+        q = q.replace("the i", "i")
+        q = " ".join(q.split())
+        return f"q:{q}"
+
+    text = (
+        payload.get("text")
+        or payload.get("content")
+        or payload.get("answer")
+        or ""
+    )
+    t = " ".join(str(text or "").lower().split()).strip()
+    return f"t:{t[:160]}" if t else ""
+
+
+def _build_semantic_dedupe_preview_v0(
+    *,
+    turn_intent: str,
+    memory_chunks: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """
+    Debug-only preview of obvious semantic redundancy in retrieved chunks.
+
+    V0 intentionally uses deterministic question/text normalization rather than
+    embeddings or LLM summarization. It does not change prompt insertion.
+    """
+    ti = (turn_intent or "").strip().upper()
+    if ti not in ("FM_CONCEPTUAL", "MEMORY_ARCHITECTURE", "GENERAL", "PROFILE_SUMMARY"):
+        return None
+
+    chunks = list(memory_chunks or [])
+    if not chunks:
+        return None
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for idx, hit in enumerate(chunks, 1):
+        if not isinstance(hit, dict):
+            continue
+        key = _semantic_dedupe_key(hit)
+        if not key:
+            continue
+        groups.setdefault(key, []).append({
+            "idx": idx,
+            "source_ref": _semantic_dedupe_ref(hit, idx),
+            "score": float(hit.get("score") or 0.0),
+            "question": ((hit.get("payload") or {}).get("question") or ""),
+        })
+
+    clusters: List[Dict[str, Any]] = []
+    duplicate_risk_count = 0
+
+    for key, items in groups.items():
+        if len(items) < 2:
+            continue
+        ordered = sorted(items, key=lambda x: float(x.get("score") or 0.0), reverse=True)
+        canonical = ordered[0]
+        duplicates = ordered[1:]
+        duplicate_risk_count += len(duplicates)
+        clusters.append({
+            "cluster_key": key[:180],
+            "canonical_ref": canonical.get("source_ref"),
+            "duplicate_refs": [d.get("source_ref") for d in duplicates],
+            "member_count": len(ordered),
+            "duplicate_count": len(duplicates),
+            "reason": "normalized_question_match" if key.startswith("q:") else "normalized_text_prefix_match",
+            "canonical_question": canonical.get("question") or "",
+        })
+
+    return {
+        "version": "semantic_dedupe_preview_v0",
+        "mode": "debug_only",
+        "turn_intent": ti,
+        "input_count": len(chunks),
+        "cluster_count": len(clusters),
+        "duplicate_risk_count": duplicate_risk_count,
+        "clusters": clusters,
+    }
+
+
 def _preview_compact_text(text: str, *, limit: int = 520) -> str:
     """
     Deterministic extractive preview for inspect/debug use.
@@ -1992,6 +2092,11 @@ def vantage_query(req: Request, payload: VantageQuery):
         if base_k > 0 and len(memory_chunks) > base_k:
             memory_chunks = memory_chunks[:base_k]
 
+        semantic_dedupe_preview = _build_semantic_dedupe_preview_v0(
+            turn_intent=turn_intent,
+            memory_chunks=memory_chunks,
+        )
+
         k_memory = sum(1 for h in memory_chunks if (h or {}).get("_src") == "personal")
         k_corpus_used = sum(1 for h in memory_chunks if (h or {}).get("_src") == "corpus")
         debug_retrieval_counts = {
@@ -2029,6 +2134,8 @@ def vantage_query(req: Request, payload: VantageQuery):
         meta["vantage"]["counts"] = {"k_memory": k_memory, "k_corpus": k_corpus_used}
         if debug_on:
             meta["vantage"]["retrieval_debug"] = debug_retrieval_counts
+            if semantic_dedupe_preview:
+                meta["vantage"]["semantic_dedupe_preview"] = semantic_dedupe_preview
             compression_preview = _build_memory_compression_preview_v0(
                 turn_intent=turn_intent,
                 memory_chunks=memory_chunks,

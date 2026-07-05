@@ -556,6 +556,28 @@ def main() -> int:
                 "injection_budget.max_personal_hits_requested": 0,
                 "injection_budget.max_corpus_hits_requested": 4,
             },
+            "expect_dedupe_preview": {
+                "version": "semantic_dedupe_preview_v0",
+                "mode": "debug_only",
+                "turn_intent": "FM_CONCEPTUAL",
+                "input_count": 4,
+                "cluster_count": 1,
+                "duplicate_risk_count": 2,
+            },
+            "expect_dedupe_cluster_fields": [
+                "cluster_key",
+                "canonical_ref",
+                "duplicate_refs",
+                "member_count",
+                "duplicate_count",
+                "reason",
+                "canonical_question",
+            ],
+            "expect_dedupe_cluster_values": {
+                "member_count": 3,
+                "duplicate_count": 2,
+                "reason": "normalized_question_match",
+            },
         },
         {
             "name": "specific_recall_dad",
@@ -664,6 +686,7 @@ def main() -> int:
         vantage_meta = ((data.get("meta_explanation") or {}).get("vantage") or {})
         turn_plan = vantage_meta.get("turn_plan") or {}
         compression_preview = vantage_meta.get("memory_compression_preview") or {}
+        dedupe_preview = vantage_meta.get("semantic_dedupe_preview") or {}
         semantic_preview = vantage_meta.get("semantic_extraction_preview") or {}
         promotion_preview = vantage_meta.get("semantic_promotion_preview") or {}
         decision_preview = vantage_meta.get("semantic_promotion_decision_preview") or {}
@@ -676,6 +699,8 @@ def main() -> int:
         print(f"turn_plan: {json.dumps(turn_plan, ensure_ascii=False, sort_keys=True)}")
         if compression_preview:
             print(f"memory_compression_preview: {json.dumps(compression_preview, ensure_ascii=False, sort_keys=True)}")
+        if dedupe_preview:
+            print(f"semantic_dedupe_preview: {json.dumps(dedupe_preview, ensure_ascii=False, sort_keys=True)}")
         if semantic_preview:
             print(f"semantic_extraction_preview: {json.dumps(semantic_preview, ensure_ascii=False, sort_keys=True)}")
         if promotion_preview:
@@ -766,6 +791,56 @@ def main() -> int:
             except Exception:
                 passed = False
             print(f"EXPECT compression_preview.{path}>={expected_min!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_dedupe_preview") or {}).items():
+            cur = dedupe_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            passed = cur == expected_value
+            print(f"EXPECT dedupe_preview.{path}={expected_value!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for path, expected_min in (t.get("expect_dedupe_preview_min") or {}).items():
+            cur = dedupe_preview
+            for part in str(path).split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(part)
+                else:
+                    cur = None
+                    break
+            try:
+                passed = float(cur) >= float(expected_min)
+            except Exception:
+                passed = False
+            print(f"EXPECT dedupe_preview.{path}>={expected_min!r}: {passed} (got={cur!r})")
+            ok = ok and passed
+
+        for field in (t.get("expect_dedupe_cluster_fields") or []):
+            clusters = dedupe_preview.get("clusters") or []
+            passed = bool(clusters) and all(isinstance(c, dict) and field in c for c in clusters)
+            print(f"EXPECT dedupe_preview.clusters[*].{field}: {passed}")
+            ok = ok and passed
+
+        for path, expected_value in (t.get("expect_dedupe_cluster_values") or {}).items():
+            parts = str(path).split(".")
+            clusters = dedupe_preview.get("clusters") or []
+            got_values = []
+            for cluster in clusters:
+                cur = cluster
+                for part in parts:
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    else:
+                        cur = None
+                        break
+                got_values.append(cur)
+            passed = expected_value in got_values
+            print(f"EXPECT dedupe_preview.clusters contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
 
         for path, expected_value in (t.get("expect_semantic_preview") or {}).items():
