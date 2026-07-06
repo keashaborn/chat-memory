@@ -1537,6 +1537,183 @@ def _fetch_thread_context_block(thread_id: str | None, mix: Dict[str, Any] | Non
 
 
 
+def _policy_match_personal_card_v0(message: str | None, row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deterministic debug-only policy matcher for approved durable personal cards.
+
+    This does not inject cards into the prompt. It only explains whether a card
+    would be a candidate for later controlled injection.
+    """
+    q = " ".join(str(message or "").lower().split())
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    kind = str(row.get("kind") or "")
+    topic_key = str(row.get("topic_key") or "")
+    summary = str(row.get("summary") or "")
+    use_scope = str(payload.get("use_scope") or "")
+    event_type = str(payload.get("event_type") or "")
+    domains = payload.get("domains") or []
+    surface_policy = str(payload.get("surface_policy") or "")
+
+    selected = False
+    reasons: List[str] = []
+
+    allowed_scopes = {
+        "DIRECT_RECALL",
+        "DIRECT_RECALL_OR_RELEVANT_SUPPORT",
+        "MEMORY_NORMALIZATION",
+    }
+    if use_scope in allowed_scopes:
+        reasons.append("use_scope_allows_direct_or_normalization_recall")
+    else:
+        reasons.append("use_scope_not_direct_recall")
+
+    wants_family_death = (
+        ("death" in q or "died" in q or "passed away" in q or "lost" in q)
+        and ("family" in q or "mother" in q or "mom" in q or "dad" in q or "father" in q)
+    )
+    wants_pet_loss = (
+        ("death" in q or "died" in q or "lost" in q or "passed away" in q)
+        and ("pet" in q or "dog" in q or "cat" in q or "dahlia" in q or "helsing" in q or "neko" in q or "nemo" in q)
+    )
+    wants_alias_correction = ("neko" in q or "nemo" in q) and (
+        "name" in q or "spell" in q or "spelled" in q or "correction" in q or "wrong" in q
+    )
+
+    if wants_family_death and kind == "personal_event" and event_type == "death_loss" and "family" in domains:
+        selected = True
+        reasons.append("matches_family_death_question")
+    elif wants_pet_loss and kind == "personal_event" and event_type == "pet_death_loss":
+        selected = True
+        reasons.append("matches_pet_loss_question")
+    elif wants_alias_correction and kind == "correction":
+        selected = True
+        reasons.append("matches_alias_correction_question")
+    else:
+        reasons.append("no_policy_match_for_question")
+
+    if surface_policy in ("never", "do_not_surface_as_content_unless_asked"):
+        if kind != "correction":
+            selected = False
+            reasons.append("surface_policy_blocks_content")
+        else:
+            reasons.append("correction_surface_policy_normalization_only")
+
+    return {
+        "selected": bool(selected),
+        "reasons": reasons,
+        "card_id": row.get("card_id"),
+        "vantage_id": row.get("vantage_id"),
+        "kind": kind,
+        "topic_key": topic_key,
+        "summary": summary,
+        "confidence": row.get("confidence"),
+        "use_scope": use_scope,
+        "surface_policy": surface_policy,
+        "event_type": event_type,
+        "domains": domains,
+    }
+
+
+def _load_personal_card_selection_preview_v0(
+    user_id: str | None,
+    message: str | None,
+    *,
+    turn_intent: str | None,
+    limit: int = 12,
+) -> Dict[str, Any]:
+    """
+    Debug-only durable-card retrieval preview.
+
+    Reads approved active cards from vantage_card.card_head and applies a small
+    deterministic policy matcher. It does not alter memory_chunks or prompt text.
+    """
+    uid = str(user_id or "").strip()
+    ti = str(turn_intent or "").strip() or "GENERAL"
+
+    out: Dict[str, Any] = {
+        "version": "personal_card_selection_preview_v0",
+        "mode": "debug_only_no_prompt_injection",
+        "turn_intent": ti,
+        "candidate_count": 0,
+        "selected_count": 0,
+        "selected": [],
+        "rejected_sample": [],
+    }
+
+    if not uid:
+        out["skip_reason"] = "missing_user_id"
+        return out
+
+    if ti in ("TECH", "FM_CONCEPTUAL"):
+        out["skip_reason"] = f"turn_intent_suppresses_personal_cards:{ti}"
+        return out
+
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        out["skip_reason"] = "missing_postgres_dsn"
+        return out
+    if dsn.startswith("postgres://"):
+        dsn = "postgresql://" + dsn[len("postgres://"):]
+
+    async def _q() -> List[Dict[str, Any]]:
+        conn = await asyncpg.connect(dsn)
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT card_id, vantage_id, kind, topic_key, status::text AS status,
+                       summary, payload, strength, confidence, updated_at
+                FROM vantage_card.card_head
+                WHERE status='active'
+                  AND vantage_id='user_global'
+                  AND topic_key LIKE $1
+                  AND kind IN ('personal_event','life_context','relationship_anchor','correction')
+                  AND COALESCE(payload->>'review_status','') = 'approved'
+                  AND COALESCE(payload->>'use_scope','') <> 'NEVER_SURFACE'
+                  AND COALESCE(summary,'') <> ''
+                ORDER BY strength DESC NULLS LAST,
+                         confidence DESC NULLS LAST,
+                         updated_at DESC NULLS LAST
+                LIMIT $2
+                """,
+                f"user/{uid}/%",
+                int(limit),
+            )
+            return [dict(r) for r in rows]
+        finally:
+            await conn.close()
+
+    try:
+        rows = asyncio.run(_q())
+    except Exception as e:
+        out["skip_reason"] = f"query_failed:{type(e).__name__}"
+        out["error"] = str(e)[:240]
+        return out
+
+    selected: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+
+    for row in rows:
+        item = _policy_match_personal_card_v0(message, row)
+        if item.get("selected"):
+            selected.append(item)
+        else:
+            rejected.append(item)
+
+    out["candidate_count"] = len(rows)
+    out["selected_count"] = len(selected)
+    out["selected"] = selected[: int(limit)]
+    out["rejected_sample"] = rejected[:8]
+    return out
+
+
 def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | None, current_message: str | None = None) -> List[Dict[str, str]]:
     """
     Fetch recent chat_log messages for thread_id and return OpenAI message dicts:
@@ -2202,6 +2379,14 @@ def vantage_query(req: Request, payload: VantageQuery):
         model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
         meta["model"] = {"id": model_id}
 
+        personal_card_selection_preview = None
+        if debug_on:
+            personal_card_selection_preview = _load_personal_card_selection_preview_v0(
+                payload.user_id,
+                payload.message,
+                turn_intent=turn_intent,
+            )
+
         meta.setdefault("vantage", {})
         meta["vantage"]["counts"] = {"k_memory": k_memory, "k_corpus": k_corpus_used}
         if debug_on:
@@ -2210,6 +2395,8 @@ def vantage_query(req: Request, payload: VantageQuery):
                 meta["vantage"]["semantic_dedupe_preview"] = semantic_dedupe_preview
             if semantic_dedupe_apply:
                 meta["vantage"]["semantic_dedupe_apply"] = semantic_dedupe_apply
+            if personal_card_selection_preview:
+                meta["vantage"]["personal_card_selection_preview"] = personal_card_selection_preview
             compression_preview = _build_memory_compression_preview_v0(
                 turn_intent=turn_intent,
                 memory_chunks=memory_chunks,
