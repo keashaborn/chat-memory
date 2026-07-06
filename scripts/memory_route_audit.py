@@ -250,6 +250,16 @@ def audit_card_policy_metadata() -> bool:
     return ok
 
 
+def _audit_get_path(obj, path: str):
+    cur = obj
+    for part in str(path or "").split("."):
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
 def main() -> int:
     token = load_env_token()
 
@@ -721,6 +731,46 @@ def main() -> int:
             },
         },
         {
+            "name": "durable_personal_card_preview_family_death",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RESSE",
+                "thread_id": "453de423-ce28-44d1-891c-2e82f5b2c164",
+                "message": "Have I had any deaths in my family recently?",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "memory_cards": 0.7,
+                    "corpus": 0.0,
+                    "conversation": 0.0,
+                },
+            },
+            "expect_recall_mode": False,
+            "expect_turn_intent": "GENERAL",
+            "expect_personal_card_preview": {
+                "version": "personal_card_selection_preview_v0",
+                "mode": "debug_only_no_prompt_injection",
+                "turn_intent": "GENERAL",
+                "candidate_count": 3,
+                "selected_count": 1,
+            },
+            "expect_personal_card_selected_values": {
+                "card_id": 104,
+                "kind": "personal_event",
+                "event_type": "death_loss",
+                "topic_key": "user/1240822d-ac9a-4096-95aa-e2b24d36ef50/personal_event/death_loss/deedee/died",
+                "use_scope": "DIRECT_RECALL_OR_RELEVANT_SUPPORT",
+                "surface_policy": "mention_when_directly_relevant",
+            },
+            "expect_personal_card_selected_reason_contains": [
+                "matches_family_death_question",
+            ],
+            "expect_system_prompt_false": [
+                "[DURABLE PERSONAL CARDS]",
+                "personal_card_selection_preview",
+            ],
+        },
+        {
             "name": "broad_background",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
@@ -1117,6 +1167,29 @@ def main() -> int:
             passed = expected_value in got_values
             print(f"EXPECT decision_preview.decisions contains {path}={expected_value!r}: {passed} (got={got_values!r})")
             ok = ok and passed
+
+        personal_card_preview = vantage_meta.get("personal_card_selection_preview") or {}
+        for path, expected_value in (t.get("expect_personal_card_preview") or {}).items():
+            cur = _audit_get_path(personal_card_preview, path)
+            passed = cur == expected_value
+            ok = ok and passed
+            print(f"EXPECT personal_card_preview.{path}={expected_value!r}: {passed} (got={cur!r})")
+
+        selected_cards = personal_card_preview.get("selected") or []
+        for path, expected_value in (t.get("expect_personal_card_selected_values") or {}).items():
+            got_values = [_audit_get_path(x, path) for x in selected_cards if isinstance(x, dict)]
+            passed = expected_value in got_values
+            ok = ok and passed
+            print(f"EXPECT personal_card_preview.selected contains {path}={expected_value!r}: {passed} (got={got_values!r})")
+
+        for expected_reason in (t.get("expect_personal_card_selected_reason_contains") or []):
+            reasons = []
+            for x in selected_cards:
+                if isinstance(x, dict):
+                    reasons.extend([str(r) for r in (x.get("reasons") or [])])
+            passed = any(expected_reason in r for r in reasons)
+            ok = ok and passed
+            print(f"EXPECT personal_card_preview.selected reasons contain {expected_reason!r}: {passed} (got={reasons!r})")
 
         for marker in (t.get("expect_system_prompt_true") or []):
             present = marker in system_prompt
