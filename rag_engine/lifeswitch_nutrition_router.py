@@ -137,6 +137,12 @@ async def create_my_food_from_usda(
     brand_owner = (j or {}).get("brandOwner")
     gtin = (j or {}).get("gtinUpc")
 
+    # Branded/package foods often include label serving metadata.
+    # Keep macros normalized per 100g, but create a user-facing serving row when possible.
+    serving_size = (j or {}).get("servingSize")
+    serving_unit = str((j or {}).get("servingSizeUnit") or "").strip().lower()
+    household_serving = str((j or {}).get("householdServingFullText") or "").strip()
+
     nutr = (j or {}).get("foodNutrients") or []
 
     def _nutr_amount(nutrient_number: str):
@@ -202,6 +208,63 @@ async def create_my_food_from_usda(
             str(gtin).strip() if gtin else None,
             kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
         )
+
+        # Auto-create a default serving row from USDA label serving metadata when usable.
+        if row:
+            grams = None
+            try:
+                grams = float(serving_size) if serving_size is not None else None
+            except Exception:
+                grams = None
+
+            if grams is not None and grams > 0 and serving_unit in ("g", "gram", "grams", "grm"):
+                serving_name = household_serving or "1 serving"
+                serving_name = " ".join(str(serving_name).strip().split())[:120] or "1 serving"
+                fid = row["my_food_id"]
+
+                existing = await conn.fetchrow(
+                    f"""
+                    select my_food_serving_id
+                    from {SCHEMA}.my_food_serving
+                    where my_food_id=$1::uuid
+                      and lower(name)=lower($2)
+                    order by updated_at desc nulls last, created_at desc
+                    limit 1
+                    """,
+                    fid,
+                    serving_name,
+                )
+
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.my_food_serving
+                    set is_default=false, updated_at=now()
+                    where my_food_id=$1::uuid and is_default
+                    """,
+                    fid,
+                )
+
+                if existing:
+                    await conn.execute(
+                        f"""
+                        update {SCHEMA}.my_food_serving
+                        set grams=$2, is_default=true, updated_at=now()
+                        where my_food_serving_id=$1::uuid
+                        """,
+                        existing["my_food_serving_id"],
+                        grams,
+                    )
+                else:
+                    await conn.execute(
+                        f"""
+                        insert into {SCHEMA}.my_food_serving (my_food_id, name, grams, is_default)
+                        values ($1::uuid, $2, $3, true)
+                        """,
+                        fid,
+                        serving_name,
+                        grams,
+                    )
+
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
     finally:
         await conn.close()
