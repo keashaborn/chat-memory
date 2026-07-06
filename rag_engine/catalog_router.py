@@ -444,6 +444,132 @@ def _usda_score_candidate(query: str, search_row: dict, detail: dict) -> tuple[f
     return score, reasons[:6], warnings[:6]
 
 
+@router.get("/foods/usda/barcode")
+async def usda_food_barcode(
+    upc: str = Query(..., min_length=6, max_length=32),
+    limit: int = Query(5, ge=1, le=10),
+):
+    if not USDA_API_KEY:
+        raise HTTPException(status_code=500, detail="USDA_API_KEY not configured on server")
+
+    import requests
+
+    digits = re.sub(r"\D+", "", str(upc or ""))
+    if len(digits) < 6:
+        raise HTTPException(status_code=400, detail="upc must contain at least 6 digits")
+
+    def _norm(v: str) -> str:
+        return re.sub(r"\D+", "", str(v or "")).lstrip("0")
+
+    target = _norm(digits)
+
+    def _search():
+        return requests.get(
+            "https://api.nal.usda.gov/fdc/v1/foods/search",
+            params={
+                "api_key": USDA_API_KEY,
+                "query": digits,
+                "dataType": ["Branded"],
+                "pageSize": max(10, limit * 3),
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+
+    r = await asyncio.to_thread(_search)
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"usda_fdc HTTP {r.status_code}")
+
+    j = r.json() if r.content else {}
+    foods = (j or {}).get("foods") or []
+
+    exact = []
+    loose = []
+    for f in foods:
+        gtin = f.get("gtinUpc") or ""
+        ng = _norm(gtin)
+        if ng and ng == target:
+            exact.append(f)
+        elif ng and (ng.endswith(target) or target.endswith(ng)):
+            loose.append(f)
+
+    matches = (exact or loose)[:limit]
+
+    def _fetch_detail(fdc_id: int):
+        return requests.get(
+            f"https://api.nal.usda.gov/fdc/v1/food/{int(fdc_id)}",
+            params={"api_key": USDA_API_KEY},
+            timeout=HTTP_TIMEOUT,
+        )
+
+    out = []
+    for f in matches:
+        fid = f.get("fdcId")
+        try:
+            fid_int = int(fid)
+        except Exception:
+            continue
+
+        detail = {}
+        try:
+            dr = await asyncio.to_thread(_fetch_detail, fid_int)
+            if dr.status_code == 200:
+                detail = dr.json() if dr.content else {}
+        except Exception:
+            detail = {}
+
+        nutrients = _usda_nutrient_summary(detail) if detail else {
+            "kcal": None,
+            "protein_g": None,
+            "carbs_g": None,
+            "fat_g": None,
+            "fiber_g": None,
+            "sugar_g": None,
+            "sodium_mg": None,
+            "macro_check": {"status": "unknown"},
+        }
+
+        out.append({
+            "fdc_id": fid_int,
+            "description": detail.get("description") or f.get("description"),
+            "brand_owner": detail.get("brandOwner") or f.get("brandOwner"),
+            "brand_name": detail.get("brandName") or f.get("brandName"),
+            "gtin_upc": detail.get("gtinUpc") or f.get("gtinUpc"),
+            "data_type": detail.get("dataType") or f.get("dataType"),
+            "published_date": detail.get("publishedDate") or f.get("publishedDate"),
+            "serving": {
+                "serving_size": detail.get("servingSize"),
+                "serving_size_unit": detail.get("servingSizeUnit"),
+                "household_serving": detail.get("householdServingFullText"),
+            },
+            "basis": "per_100g",
+            "nutrients": {
+                "kcal": nutrients["kcal"],
+                "protein_g": nutrients["protein_g"],
+                "carbs_g": nutrients["carbs_g"],
+                "fat_g": nutrients["fat_g"],
+                "fiber_g": nutrients["fiber_g"],
+                "sugar_g": nutrients["sugar_g"],
+                "sodium_mg": nutrients["sodium_mg"],
+            },
+            "macro_check": nutrients["macro_check"],
+            "search_score": f.get("score"),
+            "guide_score": 140 if exact else 100,
+            "confidence": 0.99 if exact else 0.75,
+            "reasons": ["exact UPC/barcode match"] if exact else ["UPC/barcode candidate"],
+            "warnings": [] if exact else ["UPC match was not exact after normalization"],
+            "matched_queries": [digits],
+            "import": {
+                "fdc_id": fid_int,
+            },
+        })
+
+    return JSONResponse({
+        "upc": digits,
+        "match_type": "exact" if exact else ("loose" if loose else "none"),
+        "candidates": out,
+    })
+
+
 @router.get("/foods/usda/guide")
 async def usda_food_guide(
     q: str = Query(..., min_length=1),
