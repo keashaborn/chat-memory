@@ -135,6 +135,61 @@ async def main() -> int:
             """
         )
 
+        missing_policy = await conn.fetch(
+            """
+            select card_id, vantage_id, kind, topic_key, status::text as status,
+                   summary, payload, confidence, updated_at
+            from vantage_card.card_head
+            where status='active'
+              and (
+                coalesce(payload->>'use_scope','')=''
+                or coalesce(payload->>'surface_policy','')=''
+                or coalesce(payload->>'sensitivity','')=''
+              )
+            order by kind, card_id
+            """
+        )
+
+        active_without_review_status = await conn.fetch(
+            """
+            select card_id, vantage_id, kind, topic_key, status::text as status,
+                   summary, payload, confidence, updated_at
+            from vantage_card.card_head
+            where status='active'
+              and coalesce(payload->>'review_status','')=''
+              and kind not in ('pref','background','identity','project','system')
+            order by kind, card_id
+            """
+        )
+
+        content_ok_cards = await conn.fetch(
+            """
+            select card_id, vantage_id, kind, topic_key, status::text as status,
+                   summary, payload, confidence, updated_at
+            from vantage_card.card_head
+            where status='active'
+              and coalesce(payload->>'use_scope','')='CONTENT_OK'
+            order by kind, card_id
+            """
+        )
+
+        possible_artifacts = await conn.fetch(
+            """
+            select card_id, vantage_id, kind, topic_key, status::text as status,
+                   summary, payload, confidence, updated_at
+            from vantage_card.card_head
+            where status='active'
+              and (
+                topic_key ilike '%cursor%'
+                or summary ilike '%cursor:%'
+                or summary ilike '%true/false%'
+                or summary ilike '%allowed_memory_scopes%'
+                or summary ilike '%turn_intent:%'
+              )
+            order by kind, card_id
+            """
+        )
+
         print("=== durable card catalog audit ===")
         print(f"total_card_head: {int(totals['total'] or 0)}")
         print(f"active_card_head: {int(totals['active'] or 0)}")
@@ -171,6 +226,57 @@ async def main() -> int:
                 f"use_scope={p.get('use_scope','')} "
                 f"surface_policy={p.get('surface_policy','')} "
                 f"sensitivity={p.get('sensitivity','')} "
+                f"topic_key={r['topic_key']}"
+            )
+            print(f"  summary={r['summary']}")
+        print()
+
+        print("=== risk check: active cards missing required policy fields ===")
+        if not missing_policy:
+            print("(none)")
+        for r in missing_policy:
+            p = _jsonish(r["payload"])
+            print(
+                f"- card_id={r['card_id']} kind={r['kind']} status={r['status']} "
+                f"use_scope={p.get('use_scope','')} surface_policy={p.get('surface_policy','')} "
+                f"sensitivity={p.get('sensitivity','')} topic_key={r['topic_key']}"
+            )
+            print(f"  summary={r['summary']}")
+        print()
+
+        print("=== risk check: active non-legacy cards without review_status ===")
+        if not active_without_review_status:
+            print("(none)")
+        for r in active_without_review_status:
+            p = _jsonish(r["payload"])
+            print(
+                f"- card_id={r['card_id']} kind={r['kind']} "
+                f"use_scope={p.get('use_scope','')} surface_policy={p.get('surface_policy','')} "
+                f"sensitivity={p.get('sensitivity','')} topic_key={r['topic_key']}"
+            )
+            print(f"  summary={r['summary']}")
+        print()
+
+        print("=== review queue: active CONTENT_OK cards ===")
+        if not content_ok_cards:
+            print("(none)")
+        for r in content_ok_cards:
+            p = _jsonish(r["payload"])
+            print(
+                f"- card_id={r['card_id']} kind={r['kind']} sensitivity={p.get('sensitivity','')} "
+                f"surface_policy={p.get('surface_policy','')} topic_key={r['topic_key']}"
+            )
+            print(f"  summary={r['summary']}")
+        print()
+
+        print("=== risk check: possible schema/control artifacts ===")
+        if not possible_artifacts:
+            print("(none)")
+        for r in possible_artifacts:
+            p = _jsonish(r["payload"])
+            print(
+                f"- card_id={r['card_id']} kind={r['kind']} status={r['status']} "
+                f"use_scope={p.get('use_scope','')} surface_policy={p.get('surface_policy','')} "
                 f"topic_key={r['topic_key']}"
             )
             print(f"  summary={r['summary']}")
