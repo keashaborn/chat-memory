@@ -771,6 +771,46 @@ def main() -> int:
             ],
         },
         {
+            "name": "durable_personal_card_preview_neko_correction",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RESSE",
+                "thread_id": "453de423-ce28-44d1-891c-2e82f5b2c164",
+                "message": "Was my cat name Neko or Nemo? I think one was a spell check correction.",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "memory_cards": 0.7,
+                    "corpus": 0.0,
+                    "conversation": 0.0,
+                },
+            },
+            "expect_recall_mode": False,
+            "expect_turn_intent": "GENERAL",
+            "expect_personal_card_preview": {
+                "version": "personal_card_selection_preview_v0",
+                "mode": "debug_only_no_prompt_injection",
+                "turn_intent": "GENERAL",
+                "candidate_count": 3,
+                "selected_count": 1,
+            },
+            "expect_personal_card_selected_values": {
+                "card_id": 106,
+                "kind": "correction",
+                "topic_key": "user/1240822d-ac9a-4096-95aa-e2b24d36ef50/correction/name_alias_correction/nemo_to_neko",
+                "use_scope": "MEMORY_NORMALIZATION",
+                "surface_policy": "do_not_surface_as_content_unless_asked",
+            },
+            "expect_personal_card_selected_reason_contains": [
+                "matches_alias_correction_question",
+                "correction_surface_policy_normalization_only",
+            ],
+            "expect_system_prompt_false": [
+                "[DURABLE PERSONAL CARDS]",
+                "personal_card_selection_preview",
+            ],
+        },
+        {
             "name": "broad_background",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
