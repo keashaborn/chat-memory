@@ -811,6 +811,47 @@ def main() -> int:
             ],
         },
         {
+            "name": "durable_personal_card_preview_monika_life_context",
+            "body": {
+                "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+                "vantage_id": "RESSE",
+                "thread_id": "453de423-ce28-44d1-891c-2e82f5b2c164",
+                "message": "When I ask about stress or life context, should you take into account my ongoing caretaking situation with Monika?",
+                "inspect_only": True,
+                "debug": True,
+                "mix": {
+                    "memory_cards": 0.7,
+                    "corpus": 0.0,
+                    "conversation": 0.0,
+                },
+            },
+            "expect_recall_mode": False,
+            "expect_turn_intent": "GENERAL",
+            "expect_personal_card_preview": {
+                "version": "personal_card_selection_preview_v0",
+                "mode": "debug_only_no_prompt_injection",
+                "turn_intent": "GENERAL",
+                "candidate_count": 3,
+                "selected_count": 1,
+            },
+            "expect_personal_card_selected_values": {
+                "card_id": 105,
+                "kind": "life_context",
+                "event_type": "caretaking_burden",
+                "topic_key": "user/1240822d-ac9a-4096-95aa-e2b24d36ef50/life_context/caretaking_burden/monika/ongoing_caretaking_after_wife_psychotic_break",
+                "use_scope": "STYLE_AND_RELEVANT_SUPPORT",
+                "surface_policy": "influence_when_relevant",
+            },
+            "expect_personal_card_selected_reason_contains": [
+                "matches_life_context_support_question",
+                "support_context_only_not_direct_answer_fact",
+            ],
+            "expect_system_prompt_false": [
+                "[DURABLE PERSONAL CARDS]",
+                "personal_card_selection_preview",
+            ],
+        },
+        {
             "name": "broad_background",
             "body": {
                 "user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",

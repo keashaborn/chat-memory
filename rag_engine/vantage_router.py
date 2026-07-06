@@ -1587,6 +1587,23 @@ def _policy_match_personal_card_v0(message: str | None, row: Dict[str, Any]) -> 
         "name" in q or "spell" in q or "spelled" in q or "correction" in q or "wrong" in q
     )
 
+    wants_life_context_support = (
+        "stress" in q
+        or "life context" in q
+        or "take into account" in q
+        or "keep in mind" in q
+        or "support" in q
+        or "caretaking" in q
+        or "caregiving" in q
+        or "monika" in q
+        or "wife" in q
+        or "family burden" in q
+        or "life situation" in q
+    )
+    domain_terms = set(str(x).lower() for x in (domains or []))
+    summary_l = summary.lower()
+    topic_l = topic_key.lower()
+
     if wants_family_death and kind == "personal_event" and event_type == "death_loss" and "family" in domains:
         selected = True
         reasons.append("matches_family_death_question")
@@ -1596,6 +1613,21 @@ def _policy_match_personal_card_v0(message: str | None, row: Dict[str, Any]) -> 
     elif wants_alias_correction and kind == "correction":
         selected = True
         reasons.append("matches_alias_correction_question")
+    elif (
+        wants_life_context_support
+        and use_scope == "STYLE_AND_RELEVANT_SUPPORT"
+        and kind in {"life_context", "relationship_anchor"}
+        and (
+            "caretaking" in domain_terms
+            or "life_context" in domain_terms
+            or "family" in domain_terms
+            or "caretaking" in summary_l
+            or "monika" in summary_l
+            or "monika" in topic_l
+        )
+    ):
+        selected = True
+        reasons.append("matches_life_context_support_question")
     else:
         reasons.append("no_policy_match_for_question")
 
@@ -1605,6 +1637,9 @@ def _policy_match_personal_card_v0(message: str | None, row: Dict[str, Any]) -> 
             reasons.append("surface_policy_blocks_content")
         else:
             reasons.append("correction_surface_policy_normalization_only")
+
+    if selected and use_scope == "STYLE_AND_RELEVANT_SUPPORT":
+        reasons.append("support_context_only_not_direct_answer_fact")
 
     return {
         "selected": bool(selected),
