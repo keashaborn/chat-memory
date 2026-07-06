@@ -4,12 +4,41 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 import asyncpg
 
 
+def _load_dotenv_if_needed() -> None:
+    """
+    Minimal .env loader for standalone script usage.
+
+    systemd services already receive POSTGRES_DSN, but an interactive shell may not.
+    This keeps the audit script runnable from /opt/chat-memory without exporting env vars.
+    """
+    if os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL"):
+        return
+
+    for path in ("/opt/chat-memory/.env", ".env"):
+        fp = Path(path)
+        if not fp.exists():
+            continue
+        for line in fp.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k in {"POSTGRES_DSN", "DATABASE_URL"} and v:
+                os.environ.setdefault(k, v)
+        if os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL"):
+            return
+
+
 def _dsn() -> str:
+    _load_dotenv_if_needed()
     dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
     if not dsn:
         raise SystemExit("ERROR: POSTGRES_DSN/DATABASE_URL missing")
@@ -110,7 +139,20 @@ async def main() -> int:
         if not recent:
             print("(none)")
         for r in recent:
-            md: Dict[str, Any] = dict(r["metadata"] or {})
+            raw_md = r["metadata"] or {}
+            if isinstance(raw_md, str):
+                try:
+                    md = json.loads(raw_md)
+                except Exception:
+                    md = {"_raw_metadata": raw_md}
+            elif isinstance(raw_md, dict):
+                md = dict(raw_md)
+            else:
+                try:
+                    md = dict(raw_md)
+                except Exception:
+                    md = {"_raw_metadata": str(raw_md)}
+
             compact = {
                 "signal_id": r["signal_id"],
                 "created_at": str(r["created_at"]),
