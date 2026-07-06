@@ -180,6 +180,79 @@ def _vantage_key(user_id: str, thread_id: str | None, vantage_id: str | None) ->
 
 _last_vantage_result: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
+async def _write_durable_personal_card_signals_v0(
+    *,
+    user_id: str,
+    thread_id: str | None,
+    vantage_id: str,
+    answer_id: str,
+    turn_intent: str,
+    selected_cards: List[Dict[str, Any]],
+) -> int:
+    """
+    Write one card_signal row for each selected durable personal card injected
+    into the prompt. Best-effort telemetry only; must not affect answering.
+    """
+    if not selected_cards:
+        return 0
+
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        return 0
+    if dsn.startswith("postgres://"):
+        dsn = "postgresql://" + dsn[len("postgres://"):]
+
+    rows = []
+    for card in selected_cards[:10]:
+        if not isinstance(card, dict):
+            continue
+        topic_key = str(card.get("topic_key") or "").strip()
+        if not topic_key:
+            continue
+
+        metadata = {
+            "version": "durable_personal_card_signal_v0",
+            "event": "injected_into_prompt",
+            "user_id": str(user_id or ""),
+            "thread_id": str(thread_id or ""),
+            "answer_id": str(answer_id or ""),
+            "turn_intent": str(turn_intent or ""),
+            "card_id": card.get("card_id"),
+            "card_vantage_id": card.get("vantage_id"),
+            "card_kind": card.get("kind"),
+            "event_type": card.get("event_type"),
+            "use_scope": card.get("use_scope"),
+            "surface_policy": card.get("surface_policy"),
+            "selected_reasons": card.get("reasons") or [],
+        }
+        rows.append((str(vantage_id or "default"), str(card.get("kind") or "durable_personal_card"), topic_key, metadata))
+
+    if not rows:
+        return 0
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        count = 0
+        for row_vantage_id, kind, topic_key, metadata in rows:
+            await conn.execute(
+                """
+                INSERT INTO vantage_card.card_signal
+                  (vantage_id, kind, topic_key, signal_type, magnitude, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                """,
+                row_vantage_id,
+                kind,
+                topic_key,
+                "injected_into_prompt",
+                1.0,
+                json.dumps(metadata),
+            )
+            count += 1
+        return count
+    finally:
+        await conn.close()
+
+
 async def _write_vantage_answer_trace(
     *,
     user_id: str,
@@ -2608,6 +2681,31 @@ def vantage_query(req: Request, payload: VantageQuery):
             sys.stderr.write(f"[vantage] write_answer_trace error request_id={req_request_id!r} answer_id={answer_id}: {e}\n")
             traceback.print_exc()
             sys.stderr.flush()
+
+        selected_durable_cards = []
+        try:
+            selected_durable_cards = list((personal_card_selection_preview or {}).get("selected") or [])
+        except Exception:
+            selected_durable_cards = []
+
+        if selected_durable_cards:
+            try:
+                signal_count = asyncio.run(_write_durable_personal_card_signals_v0(
+                    user_id=(payload.user_id or "").strip() or "anon",
+                    thread_id=payload.thread_id,
+                    vantage_id=vid,
+                    answer_id=answer_id,
+                    turn_intent=turn_intent,
+                    selected_cards=selected_durable_cards,
+                ))
+                if debug_on:
+                    meta.setdefault("vantage", {})
+                    meta["vantage"]["durable_card_signal_count"] = signal_count
+            except Exception as e:
+                import sys, traceback
+                sys.stderr.write(f"[vantage] durable_card_signal error request_id={req_request_id!r} answer_id={answer_id}: {e}\n")
+                traceback.print_exc()
+                sys.stderr.flush()
 
         return VantageResponse(
             answer=answer,
