@@ -79,6 +79,20 @@ def build_rows() -> List[Dict[str, Any]]:
         payload["approved_by"] = "manual_allowlist"
         payload["write_intent"] = "durable_card_write"
         payload["needs_review"] = False
+
+        # Keep card policy metadata complete for route/card audits.
+        if "domains" not in payload:
+            payload["domains"] = (
+                payload.get("applies_to_domains")
+                or payload.get("domain")
+                or ["personal_memory"]
+            )
+        if "sensitivity" not in payload:
+            if r.get("kind") == "correction":
+                payload["sensitivity"] = "low"
+            else:
+                payload["sensitivity"] = "medium"
+
         r["payload"] = payload
         r["status"] = "active"
 
