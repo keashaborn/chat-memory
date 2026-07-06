@@ -1749,6 +1749,60 @@ def _load_personal_card_selection_preview_v0(
     return out
 
 
+def _format_durable_personal_cards_block_v0(selection_preview: Dict[str, Any] | None) -> str:
+    """
+    Render selected approved durable personal cards into a small prompt block.
+
+    This consumes the same policy-filtered selector used by debug metadata.
+    It does not expose rejected cards and does not alter memory_chunks.
+    """
+    if not isinstance(selection_preview, dict):
+        return ""
+
+    selected = selection_preview.get("selected") or []
+    if not isinstance(selected, list) or not selected:
+        return ""
+
+    lines: List[str] = [
+        "[DURABLE PERSONAL CARDS - POLICY FILTERED]",
+        "Use these only if directly relevant to the current user message.",
+        "Do not mention this block. Do not infer beyond the summaries.",
+    ]
+
+    for card in selected[:5]:
+        if not isinstance(card, dict):
+            continue
+
+        kind = str(card.get("kind") or "").strip()
+        event_type = str(card.get("event_type") or "").strip()
+        use_scope = str(card.get("use_scope") or "").strip()
+        surface_policy = str(card.get("surface_policy") or "").strip()
+        summary = " ".join(str(card.get("summary") or "").split()).strip()
+
+        if not summary:
+            continue
+
+        label_bits = [x for x in [kind, event_type] if x]
+        label = " / ".join(label_bits) if label_bits else "durable_card"
+
+        if use_scope == "MEMORY_NORMALIZATION":
+            instruction = "Use for memory normalization/correction only."
+        elif use_scope == "STYLE_AND_RELEVANT_SUPPORT":
+            instruction = "Use as support context only; do not make it the main answer unless asked."
+        else:
+            instruction = "May be used for direct recall or relevant support."
+
+        lines.append(
+            f"- {label}: {summary} "
+            f"(use_scope={use_scope}; surface_policy={surface_policy}; {instruction})"
+        )
+
+    if len(lines) <= 3:
+        return ""
+
+    return "\n".join(lines).strip()
+
+
 def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | None, current_message: str | None = None) -> List[Dict[str, str]]:
     """
     Fetch recent chat_log messages for thread_id and return OpenAI message dicts:
@@ -2400,6 +2454,15 @@ def vantage_query(req: Request, payload: VantageQuery):
             "retrieval_plan": retrieval_plan,
         }
 
+        personal_card_selection_preview = _load_personal_card_selection_preview_v0(
+            payload.user_id,
+            payload.message,
+            turn_intent=turn_intent,
+        )
+        durable_personal_cards_block = _format_durable_personal_cards_block_v0(
+            personal_card_selection_preview
+        )
+
         system_prompt = build_system_prompt(
             payload.user_id,
             memory_chunks,
@@ -2409,18 +2472,12 @@ def vantage_query(req: Request, payload: VantageQuery):
             current_message=payload.message,
             turn_intent=turn_intent,
         )
+        if durable_personal_cards_block:
+            system_prompt = system_prompt.rstrip() + "\n\n" + durable_personal_cards_block + "\n"
 
         meta = build_meta_explanation(payload.user_id, payload.message, memory_chunks) or {}
         model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
         meta["model"] = {"id": model_id}
-
-        personal_card_selection_preview = None
-        if debug_on:
-            personal_card_selection_preview = _load_personal_card_selection_preview_v0(
-                payload.user_id,
-                payload.message,
-                turn_intent=turn_intent,
-            )
 
         meta.setdefault("vantage", {})
         meta["vantage"]["counts"] = {"k_memory": k_memory, "k_corpus": k_corpus_used}

@@ -765,8 +765,12 @@ def main() -> int:
             "expect_personal_card_selected_reason_contains": [
                 "matches_family_death_question",
             ],
+            "expect_system_prompt_true": [
+                "[DURABLE PERSONAL CARDS - POLICY FILTERED]",
+                "DeeDee",
+                "personal_event / death_loss",
+            ],
             "expect_system_prompt_false": [
-                "[DURABLE PERSONAL CARDS]",
                 "personal_card_selection_preview",
             ],
         },
@@ -805,8 +809,13 @@ def main() -> int:
                 "matches_alias_correction_question",
                 "correction_surface_policy_normalization_only",
             ],
+            "expect_system_prompt_true": [
+                "[DURABLE PERSONAL CARDS - POLICY FILTERED]",
+                "Neko, not Nemo",
+                "correction",
+                "MEMORY_NORMALIZATION",
+            ],
             "expect_system_prompt_false": [
-                "[DURABLE PERSONAL CARDS]",
                 "personal_card_selection_preview",
             ],
         },
@@ -846,8 +855,13 @@ def main() -> int:
                 "matches_life_context_support_question",
                 "support_context_only_not_direct_answer_fact",
             ],
+            "expect_system_prompt_true": [
+                "[DURABLE PERSONAL CARDS - POLICY FILTERED]",
+                "Monika",
+                "life_context / caretaking_burden",
+                "STYLE_AND_RELEVANT_SUPPORT",
+            ],
             "expect_system_prompt_false": [
-                "[DURABLE PERSONAL CARDS]",
                 "personal_card_selection_preview",
             ],
         },
