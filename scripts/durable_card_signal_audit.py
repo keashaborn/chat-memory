@@ -96,6 +96,35 @@ async def main() -> int:
             """
         )
 
+        by_policy = await conn.fetch(
+            """
+            select
+              coalesce(metadata->>'use_scope', '') as use_scope,
+              coalesce(metadata->>'surface_policy', '') as surface_policy,
+              count(*) as n,
+              max(created_at) as last_seen
+            from vantage_card.card_signal
+            where signal_type='injected_into_prompt'
+            group by 1, 2
+            order by n desc, last_seen desc
+            """
+        )
+
+        by_card_id = await conn.fetch(
+            """
+            select
+              coalesce(metadata->>'card_id', '') as card_id,
+              kind,
+              topic_key,
+              count(*) as n,
+              max(created_at) as last_seen
+            from vantage_card.card_signal
+            where signal_type='injected_into_prompt'
+            group by 1, 2, 3
+            order by card_id
+            """
+        )
+
         recent = await conn.fetch(
             """
             select
@@ -133,6 +162,27 @@ async def main() -> int:
             print("(none)")
         for r in by_turn_intent:
             print(f"- {r['turn_intent'] or '(blank)'}: {int(r['n'])}")
+        print()
+
+        print("=== counts by policy ===")
+        if not by_policy:
+            print("(none)")
+        for r in by_policy:
+            print(
+                f"- n={int(r['n'])} use_scope={r['use_scope'] or '(blank)'} "
+                f"surface_policy={r['surface_policy'] or '(blank)'} "
+                f"last_seen={r['last_seen']}"
+            )
+        print()
+
+        print("=== counts by card_id ===")
+        if not by_card_id:
+            print("(none)")
+        for r in by_card_id:
+            print(
+                f"- card_id={r['card_id'] or '(blank)'} n={int(r['n'])} "
+                f"kind={r['kind']} last_seen={r['last_seen']} topic_key={r['topic_key']}"
+            )
         print()
 
         print("=== recent signals ===")
