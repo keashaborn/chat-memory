@@ -1201,12 +1201,12 @@ def main() -> int:
             ok = ok and not present
             print(f"EXPECT SYSTEM_PROMPT FALSE {marker!r}: {present}")
 
-        for marker in t["expect_true"]:
+        for marker in (t.get("expect_true") or []):
             present = contains(data, marker)
             ok = ok and present
             print(f"EXPECT TRUE  {marker!r}: {present}")
 
-        for marker in t["expect_false"]:
+        for marker in (t.get("expect_false") or []):
             present = contains(data, marker)
             ok = ok and not present
             print(f"EXPECT FALSE {marker!r}: {present}")
