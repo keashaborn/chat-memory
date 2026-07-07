@@ -35,6 +35,7 @@ class NewThreadReq(BaseModel):
     vantage_id: Optional[str] = "default"
 from rag_engine.voice_realtime_router import router as voice_realtime_router
 from rag_engine.voice_tts_router import router as voice_tts_router
+from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
 app = FastAPI(title="Brains API", version="1.0.0")
@@ -459,6 +460,44 @@ def infer_extra_tags(text: str, source: str = "frontend") -> List[str]:
 
     return extra
 
+
+
+
+# ---------- admin memory review ----------
+@app.get("/admin/memory/review-plan")
+async def admin_memory_review_plan(req: Request):
+    """
+    Read-only memory promotion review plan.
+
+    Service-token middleware protects this route at the Brains boundary.
+    The frontend admin proxy is responsible for user/admin capability checks.
+    No writes are performed here.
+    """
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response()
+
+    try:
+        plan = build_personal_event_promotion_preview()
+    except Exception as e:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "review_plan_failed",
+                "detail": str(e),
+                "request_id": rid,
+            },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+    plan = dict(plan or {})
+    plan["ok"] = True
+    plan["endpoint"] = "admin_memory_review_plan"
+    plan["read_only"] = True
+    plan["actor_user_id"] = actor
+    return plan
 
 
 # ---------- persistent chat memory ----------
