@@ -16,10 +16,14 @@ Default mode is dry-run. --apply is guarded and requires exact confirmation args
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.util
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
+
+import asyncpg
 
 
 def _load_personal_event_inventory_module():
@@ -294,6 +298,149 @@ def build_sql_dry_run_for_create(row: Dict[str, Any]) -> List[str]:
     return lines
 
 
+
+
+def _load_dotenv_if_needed() -> None:
+    if os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL"):
+        return
+
+    for path in ("/opt/chat-memory/.env", ".env"):
+        fp = Path(path)
+        if not fp.exists():
+            continue
+        for line in fp.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k in {"POSTGRES_DSN", "DATABASE_URL"} and v:
+                os.environ.setdefault(k, v)
+
+
+def pg_dsn() -> str:
+    _load_dotenv_if_needed()
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL") or "postgresql://sage:strongpassword@127.0.0.1:5432/memory"
+    if dsn.startswith("postgres://"):
+        dsn = "postgresql://" + dsn[len("postgres://"):]
+    return dsn
+
+
+async def topic_key_exists(conn: asyncpg.Connection, topic_key: str) -> bool:
+    found = await conn.fetchval(
+        """
+        select 1
+        from vantage_card.card_head
+        where vantage_id='user_global'
+          and topic_key=$1
+        limit 1
+        """,
+        topic_key,
+    )
+    return bool(found)
+
+
+async def apply_create_new_card(row: Dict[str, Any]) -> Dict[str, Any]:
+    topic_key = str(row.get("topic_key") or "")
+    if not topic_key:
+        raise RuntimeError("missing topic_key")
+
+    payload = dict(row.get("payload") or {})
+    payload["mode"] = "review_promotion_plan_v1"
+    payload["review_status"] = "approved"
+    payload["approved_by"] = "guarded_cli_confirmation"
+    payload["write_intent"] = "durable_card_write"
+    payload["needs_review"] = False
+
+    # Keep policy metadata explicit for audits.
+    payload.setdefault("domains", payload.get("domain") or payload.get("domains") or ["personal_memory"])
+    payload.setdefault("sensitivity", "medium")
+
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    conn = await asyncpg.connect(pg_dsn())
+    try:
+        async with conn.transaction():
+            if await topic_key_exists(conn, topic_key):
+                raise RuntimeError(f"topic_key already exists: {topic_key}")
+
+            card_id = await conn.fetchval(
+                """
+                insert into vantage_card.card_head(
+                  vantage_id, kind, topic_key, status, strength, confidence, summary, payload
+                )
+                values($1, $2, $3, $4::vantage_card.card_status, $5, $6, $7, $8::jsonb)
+                returning card_id
+                """,
+                "user_global",
+                row["kind"],
+                topic_key,
+                "active",
+                row.get("strength") if row.get("strength") is not None else 0.50,
+                row.get("confidence") if row.get("confidence") is not None else 0.50,
+                row.get("summary") or "",
+                payload_json,
+            )
+
+            revision_id = await conn.fetchval(
+                """
+                insert into vantage_card.card_revision(card_id, summary, payload, reason, delta)
+                values($1, $2, $3::jsonb, $4, $5::jsonb)
+                returning revision_id
+                """,
+                card_id,
+                row.get("summary") or "",
+                payload_json,
+                "review_promotion_plan_create_new_card",
+                json.dumps(
+                    {
+                        "mode": "guarded_apply",
+                        "source": "scripts/review_promotion_plan.py",
+                        "action": "create_new_card",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+
+            link_count = 0
+            for source_point_id in payload.get("source_point_ids") or []:
+                result = await conn.execute(
+                    """
+                    insert into vantage_card.card_link(card_id, link_type, ref_id, note)
+                    values($1, 'qdrant_point', $2, 'memory_raw source point')
+                    on conflict (card_id, link_type, ref_id) do nothing
+                    """,
+                    card_id,
+                    str(source_point_id),
+                )
+                if result.endswith(" 1"):
+                    link_count += 1
+
+            for thread_id in payload.get("source_thread_ids") or []:
+                result = await conn.execute(
+                    """
+                    insert into vantage_card.card_link(card_id, link_type, ref_id, note)
+                    values($1, 'thread', $2, 'source thread')
+                    on conflict (card_id, link_type, ref_id) do nothing
+                    """,
+                    card_id,
+                    str(thread_id),
+                )
+                if result.endswith(" 1"):
+                    link_count += 1
+
+        return {
+            "card_id": int(card_id),
+            "revision_id": int(revision_id),
+            "link_count": int(link_count),
+            "topic_key": topic_key,
+        }
+    finally:
+        await conn.close()
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="Actually apply one confirmed create_new_card action")
@@ -379,8 +526,10 @@ def main() -> int:
         print("confirmed_topic_key:", args.confirm_topic_key)
         print("validated_row_action:", apply_row.get("action") if apply_row else None)
         print("validated_row_topic_key:", apply_row.get("topic_key") if apply_row else None)
-        print("NOTE: apply execution is not implemented in this patch; no writes performed.")
-        raise SystemExit("APPLY VALIDATED BUT NOT EXECUTED: write path not implemented yet")
+
+        result = asyncio.run(apply_create_new_card(apply_row))
+        print("apply_result:", json.dumps(result, ensure_ascii=False, sort_keys=True))
+        print("apply_complete")
 
     print()
     print("=== raw json ===")

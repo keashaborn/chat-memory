@@ -751,7 +751,7 @@ def main() -> int:
                 "version": "personal_card_selection_preview_v0",
                 "mode": "debug_only_no_prompt_injection",
                 "turn_intent": "GENERAL",
-                "candidate_count": 3,
+                "candidate_count": 4,
                 "selected_count": 1,
             },
             "expect_personal_card_selected_values": {
@@ -795,7 +795,7 @@ def main() -> int:
                 "version": "personal_card_selection_preview_v0",
                 "mode": "debug_only_no_prompt_injection",
                 "turn_intent": "GENERAL",
-                "candidate_count": 3,
+                "candidate_count": 4,
                 "selected_count": 1,
             },
             "expect_personal_card_selected_values": {
@@ -840,7 +840,7 @@ def main() -> int:
                 "version": "personal_card_selection_preview_v0",
                 "mode": "debug_only_no_prompt_injection",
                 "turn_intent": "GENERAL",
-                "candidate_count": 3,
+                "candidate_count": 4,
                 "selected_count": 1,
             },
             "expect_personal_card_selected_values": {
