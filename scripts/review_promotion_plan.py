@@ -160,18 +160,23 @@ def build_personal_event_promotion_preview() -> Dict[str, Any]:
         comp = row.get("existing_card_comparison") or {}
         best = comp.get("best_match") or {}
 
-        plan_rows.append({
+        plan_row = {
             "table": row.get("table"),
             "kind": row.get("kind"),
             "topic_key": row.get("topic_key"),
             "summary": row.get("summary"),
+            "strength": row.get("strength"),
             "confidence": row.get("confidence"),
+            "payload": row.get("payload") or {},
             "comparison_status": comp.get("status"),
             "best_existing_card_id": best.get("card_id"),
             "action": action,
             "action_reasons": decision.get("reasons") or [],
             "write_intent": "none_dry_run_only",
-        })
+        }
+        if action == "create_new_card":
+            plan_row["sql_dry_run"] = build_sql_dry_run_for_create(plan_row)
+        plan_rows.append(plan_row)
 
     return {
         "schema": "review_promotion_plan_v0",
@@ -185,6 +190,107 @@ def build_personal_event_promotion_preview() -> Dict[str, Any]:
         "action_counts": action_counts,
         "plan_rows": plan_rows,
     }
+
+
+
+
+def sql_literal(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    text = str(value)
+    return "'" + text.replace("'", "''") + "'"
+
+
+def sql_numeric(value: Any) -> str:
+    if value is None:
+        return "null"
+    try:
+        return str(float(value))
+    except Exception:
+        return "null"
+
+
+def build_sql_dry_run_for_create(row: Dict[str, Any]) -> List[str]:
+    """
+    Return SQL text that documents the insert shape for a create_new_card row.
+    This is intentionally not executed by this script.
+    """
+    payload = row.get("payload") or {}
+    topic_key = row.get("topic_key")
+    kind = row.get("kind")
+    summary = row.get("summary")
+    confidence = row.get("confidence")
+    strength = row.get("strength")
+
+    source_point_ids = payload.get("source_point_ids") or []
+    source_thread_ids = payload.get("source_thread_ids") or []
+
+    lines: List[str] = []
+    lines.append("-- DRY RUN ONLY: create_new_card")
+    lines.append("-- topic_key: " + str(topic_key))
+    lines.append("with inserted_card as (")
+    lines.append("  insert into vantage_card.card_head (")
+    lines.append("    vantage_id, kind, topic_key, status, strength, confidence, summary, payload")
+    lines.append("  ) values (")
+    lines.append(
+        "    'user_global', "
+        + sql_literal(kind)
+        + ", "
+        + sql_literal(topic_key)
+        + ", 'active', "
+        + sql_numeric(strength)
+        + ", "
+        + sql_numeric(confidence)
+        + ", "
+        + sql_literal(summary)
+        + ", "
+        + sql_literal(payload)
+        + "::jsonb"
+    )
+    lines.append("  )")
+    lines.append("  returning card_id")
+    lines.append("), inserted_revision as (")
+    lines.append("  insert into vantage_card.card_revision (card_id, summary, payload, reason, delta)")
+    lines.append("  select")
+    lines.append("    card_id,")
+    lines.append("    " + sql_literal(summary) + ",")
+    lines.append("    " + sql_literal(payload) + "::jsonb,")
+    lines.append("    'review_promotion_plan_create_new_card',")
+    lines.append("    " + sql_literal({"mode": "dry_run_shape", "source": "scripts/review_promotion_plan.py"}) + "::jsonb")
+    lines.append("  from inserted_card")
+    lines.append("  returning revision_id")
+    lines.append("), inserted_links as (")
+    lines.append("  insert into vantage_card.card_link (card_id, link_type, ref_id, note)")
+
+    link_selects: List[str] = []
+    for ref_id in source_point_ids:
+        link_selects.append(
+            "  select card_id, 'qdrant_point', "
+            + sql_literal(str(ref_id))
+            + ", 'memory_raw source point' from inserted_card"
+        )
+    for ref_id in source_thread_ids:
+        link_selects.append(
+            "  select card_id, 'thread', "
+            + sql_literal(str(ref_id))
+            + ", 'source thread' from inserted_card"
+        )
+
+    if link_selects:
+        lines.append("\n  union all\n".join(link_selects))
+    else:
+        lines.append("  select card_id, 'none', 'none', 'no source links' from inserted_card where false")
+
+    lines.append("  on conflict (card_id, link_type, ref_id) do nothing")
+    lines.append("  returning card_id, link_type, ref_id")
+    lines.append(")")
+    lines.append("select")
+    lines.append("  (select card_id from inserted_card) as card_id,")
+    lines.append("  (select count(*) from inserted_links) as link_count;")
+
+    return lines
 
 
 def main() -> int:
@@ -211,6 +317,17 @@ def main() -> int:
         )
         print(f"   summary={row['summary']}")
         print(f"   reasons={row['action_reasons']}")
+
+    print()
+    print("=== sql dry-run for create_new_card rows ===")
+    create_rows = [r for r in plan["plan_rows"] if r.get("action") == "create_new_card"]
+    if not create_rows:
+        print("(none)")
+    for i, row in enumerate(create_rows, 1):
+        print(f"-- create row {i}: {row.get('topic_key')}")
+        for line in row.get("sql_dry_run") or []:
+            print(line)
+        print()
 
     print()
     print("=== raw json ===")
