@@ -478,7 +478,10 @@ async def admin_memory_review_plan(req: Request):
         return _actor_missing_response()
 
     try:
-        plan = build_personal_event_promotion_preview()
+        # The planner reuses CLI/inventory code that may call asyncio.run().
+        # Execute it in a worker thread so it does not run inside FastAPI's
+        # already-running event loop.
+        plan = await asyncio.to_thread(build_personal_event_promotion_preview)
     except Exception as e:
         rid = getattr(req.state, "request_id", None) or _get_request_id(req)
         return JSONResponse(
