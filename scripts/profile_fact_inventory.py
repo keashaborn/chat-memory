@@ -10,14 +10,174 @@ education, work history, company history, professional identity, project context
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
+import asyncpg
 import requests
 
 QDRANT = "http://127.0.0.1:6333"
 COLLECTION = "memory_raw"
 USER_ID = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+
+
+def _load_dotenv_if_needed() -> None:
+    if os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL"):
+        return
+
+    for path in ("/opt/chat-memory/.env", ".env"):
+        fp = Path(path)
+        if not fp.exists():
+            continue
+        for line in fp.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k in {"POSTGRES_DSN", "DATABASE_URL"} and v:
+                os.environ.setdefault(k, v)
+
+
+def _norm_dsn(dsn: str) -> str:
+    if dsn.startswith("postgres://"):
+        return "postgresql://" + dsn[len("postgres://"):]
+    return dsn
+
+
+async def load_existing_profile_cards() -> List[Dict[str, Any]]:
+    _load_dotenv_if_needed()
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        return []
+
+    conn = await asyncpg.connect(_norm_dsn(dsn))
+    try:
+        rows = await conn.fetch(
+            """
+            select
+              card_id,
+              vantage_id,
+              kind,
+              topic_key,
+              summary,
+              confidence,
+              payload
+            from vantage_card.card_head
+            where status='active'
+              and kind in ('identity','background','project')
+              and topic_key like $1
+            order by
+              case when vantage_id='user_global' then 0 else 1 end,
+              confidence desc nulls last,
+              card_id
+            """,
+            f"user/{USER_ID}/%",
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+def norm_text(value: str) -> str:
+    return " ".join(str(value or "").lower().replace("-", " ").replace("_", " ").split())
+
+
+def compare_to_existing(candidate: Dict[str, Any], existing_cards: List[Dict[str, Any]]) -> Dict[str, Any]:
+    kind = str(candidate.get("kind") or "")
+    fact_type = str(candidate.get("fact_type") or "")
+    value = str(candidate.get("value") or "")
+    claim = str(candidate.get("claim") or "")
+
+    c_value = norm_text(value)
+    c_claim = norm_text(claim)
+
+    matches: List[Dict[str, Any]] = []
+
+    for row in existing_cards:
+        row_kind = str(row.get("kind") or "")
+        topic_key = str(row.get("topic_key") or "")
+        summary = str(row.get("summary") or "")
+        r_summary = norm_text(summary)
+        r_topic = norm_text(topic_key)
+
+        score = 0
+        reasons: List[str] = []
+
+        if row_kind == kind:
+            score += 2
+            reasons.append("same_kind")
+
+        if fact_type and fact_type in topic_key:
+            score += 3
+            reasons.append("fact_type_in_topic_key")
+
+        if c_value and c_value in r_summary:
+            score += 5
+            reasons.append("candidate_value_in_summary")
+
+        if c_value and c_value in r_topic:
+            score += 4
+            reasons.append("candidate_value_in_topic_key")
+
+        # Component match: "clinical psychologist, BCBA/BCBA-D" should notice
+        # existing "clinical psychologist" without calling it exact.
+        value_parts = [
+            norm_text(part)
+            for part in value.split(",")
+            if norm_text(part)
+        ]
+        matched_parts = [part for part in value_parts if part and part in r_summary]
+        if matched_parts:
+            score += 2 * len(matched_parts)
+            reasons.append("value_component_in_summary:" + ",".join(matched_parts))
+
+        # Project aliases.
+        if fact_type == "current_project":
+            if c_value == "seebx" and "project/company" in topic_key and "seebx" in r_summary:
+                score += 6
+                reasons.append("project_company_alias_match")
+            if c_value == "verbal sage" and "verbal sage" in r_summary:
+                score += 6
+                reasons.append("project_name_match")
+
+        substantive_reasons = [r for r in reasons if r != "same_kind"]
+
+        # Same kind alone is not a meaningful overlap. For example, NASM and
+        # Caravel are both background cards, but that does not make them similar.
+        if score > 0 and substantive_reasons:
+            matches.append({
+                "card_id": row.get("card_id"),
+                "vantage_id": row.get("vantage_id"),
+                "kind": row_kind,
+                "topic_key": topic_key,
+                "summary": summary.splitlines()[0] if summary else "",
+                "score": score,
+                "reasons": reasons,
+            })
+
+    matches.sort(key=lambda x: (int(x.get("score") or 0), x.get("vantage_id") == "user_global"), reverse=True)
+    best = matches[0] if matches else None
+
+    if not best:
+        status = "new_candidate"
+    elif int(best.get("score") or 0) >= 10:
+        status = "already_covered_or_duplicate"
+    elif int(best.get("score") or 0) >= 5:
+        status = "similar_existing_card"
+    else:
+        status = "weak_existing_overlap"
+
+    return {
+        "comparison_schema": "profile_fact_existing_card_comparison_v0",
+        "status": status,
+        "best_match": best,
+        "match_count": len(matches),
+        "matches": matches[:5],
+    }
 
 
 PROFILE_RULES = [
@@ -497,6 +657,7 @@ def card_head_preview(c: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, 
         "source_thread_ids": c.get("source_thread_ids") or [],
         "source_created_ats": c.get("source_created_ats") or [],
         "review_decision": decision,
+        "existing_card_comparison": c.get("existing_card_comparison") or {},
         "needs_review": True,
         "write_intent": "none_preview_only",
     }
@@ -515,9 +676,16 @@ def card_head_preview(c: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, 
 
 
 def main() -> int:
+    import asyncio
+
     points = scroll_points()
     candidates = find_candidates(points)
     merged = merge_candidates(candidates)
+    existing_cards = asyncio.run(load_existing_profile_cards())
+
+    for c in merged:
+        c["existing_card_comparison"] = compare_to_existing(c, existing_cards)
+
     decisions = [review_decision(c) for c in merged]
 
     review_counts: Dict[str, int] = {}
@@ -538,6 +706,7 @@ def main() -> int:
     print("points_scanned:", len(points))
     print("candidate_count:", len(candidates))
     print("merged_candidate_count:", len(merged))
+    print("existing_profile_project_card_count:", len(existing_cards))
 
     counts: Dict[str, int] = {}
     for c in candidates:
@@ -548,7 +717,10 @@ def main() -> int:
     print()
     print("=== merged candidate summary ===")
     for i, c in enumerate(merged[:40], 1):
-        print(f"{i}. {c.get('kind')} | {c.get('fact_type')} | {c.get('value')} | sources={len(c.get('source_point_ids') or [])} | confidence={c.get('confidence')} | {c.get('claim')}")
+        comp = c.get("existing_card_comparison") or {}
+        best = comp.get("best_match") or {}
+        best_label = f"best_existing={best.get('card_id')}:{best.get('topic_key')}" if best else "best_existing=None"
+        print(f"{i}. {c.get('kind')} | {c.get('fact_type')} | {c.get('value')} | comparison={comp.get('status')} | {best_label} | sources={len(c.get('source_point_ids') or [])} | confidence={c.get('confidence')} | {c.get('claim')}")
 
     print()
     print("=== review decision preview ===")
@@ -563,7 +735,9 @@ def main() -> int:
     print("mode: preview_only_no_writes")
     print("card_head_count:", len(rows))
     for i, row in enumerate(rows[:40], 1):
-        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
+        comp = ((row.get("payload") or {}).get("existing_card_comparison") or {})
+        best = comp.get("best_match") or {}
+        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | comparison={comp.get('status')} | best_existing={best.get('card_id')} | confidence={row.get('confidence')} | {row.get('summary')}")
 
     print()
     print("=== raw candidates sample ===")
