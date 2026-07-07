@@ -10,14 +10,197 @@ structured memory cards rather than relying on exact vector recall.
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
+import asyncpg
 import requests
 
 QDRANT = "http://127.0.0.1:6333"
 COLLECTION = "memory_raw"
 USER_ID = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+
+
+def _load_dotenv_if_needed() -> None:
+    if os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL"):
+        return
+
+    for path in ("/opt/chat-memory/.env", ".env"):
+        fp = Path(path)
+        if not fp.exists():
+            continue
+        for line in fp.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k in {"POSTGRES_DSN", "DATABASE_URL"} and v:
+                os.environ.setdefault(k, v)
+
+
+def _norm_dsn(dsn: str) -> str:
+    if dsn.startswith("postgres://"):
+        return "postgresql://" + dsn[len("postgres://"):]
+    return dsn
+
+
+async def load_existing_personal_cards() -> List[Dict[str, Any]]:
+    _load_dotenv_if_needed()
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        return []
+
+    conn = await asyncpg.connect(_norm_dsn(dsn))
+    try:
+        rows = await conn.fetch(
+            """
+            select
+              card_id,
+              vantage_id,
+              kind,
+              topic_key,
+              summary,
+              confidence,
+              payload
+            from vantage_card.card_head
+            where status='active'
+              and vantage_id='user_global'
+              and kind in ('personal_event','life_context','correction','relationship_anchor')
+              and topic_key like $1
+            order by confidence desc nulls last, card_id
+            """,
+            f"user/{USER_ID}/%",
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+def norm_text(value: str) -> str:
+    return " ".join(str(value or "").lower().replace("-", " ").replace("_", " ").split())
+
+
+
+def payload_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def compare_to_existing_card(row: Dict[str, Any], existing_cards: List[Dict[str, Any]]) -> Dict[str, Any]:
+    kind = str(row.get("kind") or "")
+    topic_key = str(row.get("topic_key") or "")
+    summary = str(row.get("summary") or "")
+    payload = payload_dict(row.get("payload"))
+
+    event_type = str(payload.get("event_type") or "")
+    event = str(payload.get("event") or "")
+    correction_type = str(payload.get("correction_type") or "")
+    canonical_value = str(payload.get("canonical_value") or "")
+    incorrect_value = str(payload.get("incorrect_value") or "")
+
+    n_topic = norm_text(topic_key)
+    n_summary = norm_text(summary)
+    n_event_type = norm_text(event_type)
+    n_event = norm_text(event)
+    n_correction_type = norm_text(correction_type)
+    n_canonical = norm_text(canonical_value)
+    n_incorrect = norm_text(incorrect_value)
+
+    matches: List[Dict[str, Any]] = []
+
+    for existing in existing_cards:
+        e_kind = str(existing.get("kind") or "")
+        e_topic_key = str(existing.get("topic_key") or "")
+        e_summary = str(existing.get("summary") or "")
+        e_payload = payload_dict(existing.get("payload"))
+
+        e_topic = norm_text(e_topic_key)
+        e_sum = norm_text(e_summary)
+
+        score = 0
+        reasons: List[str] = []
+
+        if e_kind == kind:
+            score += 3
+            reasons.append("same_kind")
+
+        if topic_key and topic_key == e_topic_key:
+            score += 20
+            reasons.append("exact_topic_key")
+
+        if n_summary and n_summary == e_sum:
+            score += 10
+            reasons.append("exact_summary")
+
+        if n_event_type and n_event_type in e_topic:
+            score += 3
+            reasons.append("event_type_in_existing_topic")
+
+        if n_event and n_event in e_topic:
+            score += 3
+            reasons.append("event_in_existing_topic")
+
+        # Subject/name overlap via topic/summary. This catches DeeDee, Monika, Neko.
+        for name in ("deedee", "monika", "jerry", "helsing", "dahlia", "neko", "nyx", "арктика"):
+            if name in n_topic and (name in e_topic or name in e_sum):
+                score += 5
+                reasons.append(f"subject_overlap:{name}")
+
+        # Correction-specific exactness.
+        if kind == "correction" and e_kind == "correction":
+            e_canonical = norm_text(e_payload.get("canonical_value") or "")
+            e_incorrect = norm_text(e_payload.get("incorrect_value") or "")
+            e_correction_type = norm_text(e_payload.get("correction_type") or "")
+            if n_correction_type and n_correction_type == e_correction_type:
+                score += 4
+                reasons.append("same_correction_type")
+            if n_canonical and n_canonical == e_canonical and n_incorrect and n_incorrect == e_incorrect:
+                score += 10
+                reasons.append("same_correction_values")
+
+        substantive_reasons = [r for r in reasons if r != "same_kind"]
+
+        if score > 0 and substantive_reasons:
+            matches.append({
+                "card_id": existing.get("card_id"),
+                "vantage_id": existing.get("vantage_id"),
+                "kind": e_kind,
+                "topic_key": e_topic_key,
+                "summary": e_summary.splitlines()[0] if e_summary else "",
+                "score": score,
+                "reasons": reasons,
+            })
+
+    matches.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+    best = matches[0] if matches else None
+
+    if not best:
+        status = "new_candidate"
+    elif int(best.get("score") or 0) >= 18:
+        status = "already_covered_or_duplicate"
+    elif int(best.get("score") or 0) >= 8:
+        status = "similar_existing_card"
+    else:
+        status = "weak_existing_overlap"
+
+    return {
+        "comparison_schema": "personal_event_existing_card_comparison_v0",
+        "status": status,
+        "best_match": best,
+        "match_count": len(matches),
+        "matches": matches[:5],
+    }
 
 
 EVENT_RULES = [
@@ -935,8 +1118,11 @@ def build_answer_use_audit_preview(
 
 
 def main() -> int:
+    import asyncio
+
     points = scroll_points()
     candidates = find_candidates(points)
+    existing_cards = asyncio.run(load_existing_personal_cards())
 
     print("=== personal event inventory preview ===")
     print("mode: read_only")
@@ -944,6 +1130,7 @@ def main() -> int:
     print("user_id:", USER_ID)
     print("points_scanned:", len(points))
     print("candidate_count:", len(candidates))
+    print("existing_personal_card_count:", len(existing_cards))
 
     counts: Dict[str, int] = {}
     for c in candidates:
@@ -1003,6 +1190,18 @@ def main() -> int:
         review_decisions=review_decisions,
         correction_candidates=correction_candidates,
     )
+
+    for row in promotion_preview.get("card_head_rows") or []:
+        row["existing_card_comparison"] = compare_to_existing_card(row, existing_cards)
+        payload = row.get("payload") or {}
+        payload["existing_card_comparison"] = row["existing_card_comparison"]
+        row["payload"] = payload
+
+    for row in promotion_preview.get("correction_card_head_rows") or []:
+        row["existing_card_comparison"] = compare_to_existing_card(row, existing_cards)
+        payload = row.get("payload") or {}
+        payload["existing_card_comparison"] = row["existing_card_comparison"]
+        row["payload"] = payload
     print("\n=== promotion mapping preview ===")
     print("schema:", promotion_preview.get("schema"))
     print("mode:", promotion_preview.get("mode"))
@@ -1012,9 +1211,13 @@ def main() -> int:
     print("card_revision_count:", promotion_preview.get("card_revision_count"))
     print("card_link_count:", promotion_preview.get("card_link_count"))
     for i, row in enumerate((promotion_preview.get("card_head_rows") or [])[:20], 1):
-        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
+        comp = row.get("existing_card_comparison") or {}
+        best = comp.get("best_match") or {}
+        print(f"{i}. {row.get('table')} | {row.get('vantage_id')} | {row.get('kind')} | {row.get('topic_key')} | comparison={comp.get('status')} | best_existing={best.get('card_id')} | confidence={row.get('confidence')} | {row.get('summary')}")
     for i, row in enumerate((promotion_preview.get("correction_card_head_rows") or [])[:10], 1):
-        print(f"correction {i}. {row.get('table')} | {row.get('topic_key')} | confidence={row.get('confidence')} | {row.get('summary')}")
+        comp = row.get("existing_card_comparison") or {}
+        best = comp.get("best_match") or {}
+        print(f"correction {i}. {row.get('table')} | {row.get('topic_key')} | comparison={comp.get('status')} | best_existing={best.get('card_id')} | confidence={row.get('confidence')} | {row.get('summary')}")
 
     policy_preview = policy_retrieval_preview_for_question(
         question="Have I had any deaths in my family recently?",
