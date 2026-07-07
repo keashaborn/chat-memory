@@ -551,14 +551,21 @@ def review_decision_for_card(
         review_flags.append("lower_salience_needs_review")
 
     for correction in correction_candidates:
-        incorrect = str(correction.get("incorrect_value") or "")
-        canonical = str(correction.get("canonical_value") or "")
-        related = correction.get("applies_to_domains") or []
-        domains = card.get("domain") or []
+        incorrect = str(correction.get("incorrect_value") or "").strip()
+        canonical = str(correction.get("canonical_value") or "").strip()
+
+        # Keep correction relevance narrow. A correction like Nemo -> Neko should
+        # flag cards about Neko/Nemo, not every card in the broad "pets" domain.
+        subject_l = subject_value.lower()
+        claim_l = claim.lower()
+        incorrect_l = incorrect.lower()
+        canonical_l = canonical.lower()
+
         if incorrect and (
-            incorrect == subject_value
-            or incorrect in claim
-            or any(d in related for d in domains)
+            incorrect_l == subject_l
+            or canonical_l == subject_l
+            or incorrect_l in claim_l
+            or canonical_l in claim_l
         ):
             review_flags.append(f"correction_candidate_present:{incorrect}->{canonical}")
 
