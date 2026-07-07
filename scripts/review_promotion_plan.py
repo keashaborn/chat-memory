@@ -10,11 +10,12 @@ V0 scope:
   create_new_card
   needs_manual_review
 
-No --apply mode yet.
+Default mode is dry-run. --apply is guarded and requires exact confirmation args.
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -293,12 +294,51 @@ def build_sql_dry_run_for_create(row: Dict[str, Any]) -> List[str]:
     return lines
 
 
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--apply", action="store_true", help="Actually apply one confirmed create_new_card action")
+    ap.add_argument("--confirm-action", default="", help="Required with --apply; must equal create_new_card")
+    ap.add_argument("--confirm-topic-key", default="", help="Required with --apply; exact topic_key to apply")
+    return ap.parse_args()
+
+
+def validate_apply_request(args: argparse.Namespace, plan: Dict[str, Any]) -> Dict[str, Any] | None:
+    if not args.apply:
+        return None
+
+    if args.confirm_action != "create_new_card":
+        raise SystemExit("REFUSING APPLY: --confirm-action must be exactly create_new_card")
+
+    if not args.confirm_topic_key:
+        raise SystemExit("REFUSING APPLY: --confirm-topic-key is required")
+
+    matches = [
+        row for row in plan.get("plan_rows") or []
+        if row.get("topic_key") == args.confirm_topic_key
+    ]
+
+    if len(matches) != 1:
+        raise SystemExit(f"REFUSING APPLY: expected exactly one matching topic_key, got {len(matches)}")
+
+    row = matches[0]
+
+    if row.get("action") != "create_new_card":
+        raise SystemExit(f"REFUSING APPLY: matching row action is {row.get('action')}, not create_new_card")
+
+    if row.get("comparison_status") != "new_candidate":
+        raise SystemExit(f"REFUSING APPLY: comparison_status is {row.get('comparison_status')}, not new_candidate")
+
+    return row
+
+
 def main() -> int:
+    args = parse_args()
     plan = build_personal_event_promotion_preview()
+    apply_row = validate_apply_request(args, plan)
 
     print("=== review promotion plan ===")
     print("schema:", plan["schema"])
-    print("mode:", plan["mode"])
+    print("mode:", "apply_requested_guarded" if args.apply else plan["mode"])
     print("source:", plan["source"])
     print("points_scanned:", plan["points_scanned"])
     print("raw_candidate_count:", plan["raw_candidate_count"])
@@ -328,6 +368,19 @@ def main() -> int:
         for line in row.get("sql_dry_run") or []:
             print(line)
         print()
+
+    print()
+    print("=== apply status ===")
+    if not args.apply:
+        print("dry_run_no_writes")
+    else:
+        print("apply_requested")
+        print("confirmed_action:", args.confirm_action)
+        print("confirmed_topic_key:", args.confirm_topic_key)
+        print("validated_row_action:", apply_row.get("action") if apply_row else None)
+        print("validated_row_topic_key:", apply_row.get("topic_key") if apply_row else None)
+        print("NOTE: apply execution is not implemented in this patch; no writes performed.")
+        raise SystemExit("APPLY VALIDATED BUT NOT EXECUTED: write path not implemented yet")
 
     print()
     print("=== raw json ===")
