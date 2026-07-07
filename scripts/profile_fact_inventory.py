@@ -336,6 +336,51 @@ def merge_key(c: Dict[str, Any]) -> tuple:
     )
 
 
+def _value_parts(value: str) -> set[str]:
+    return {
+        " ".join(part.strip().lower().split())
+        for part in str(value or "").split(",")
+        if part.strip()
+    }
+
+
+def _suppress_subset_profile_candidates(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    If we have both:
+      professional_identity = BCBA/BCBA-D
+      professional_identity = clinical psychologist, BCBA/BCBA-D
+
+    keep the broader candidate and suppress the strict subset.
+    """
+    out: List[Dict[str, Any]] = []
+
+    for item in items:
+        if str(item.get("fact_type") or "") != "professional_identity":
+            out.append(item)
+            continue
+
+        parts = _value_parts(str(item.get("value") or ""))
+        if not parts:
+            out.append(item)
+            continue
+
+        suppress = False
+        for other in items:
+            if other is item:
+                continue
+            if str(other.get("fact_type") or "") != "professional_identity":
+                continue
+            other_parts = _value_parts(str(other.get("value") or ""))
+            if parts < other_parts:
+                suppress = True
+                break
+
+        if not suppress:
+            out.append(item)
+
+    return out
+
+
 def merge_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     merged: Dict[tuple, Dict[str, Any]] = {}
 
@@ -374,8 +419,10 @@ def merge_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if d not in item["domain"]:
                 item["domain"].append(d)
 
+    items = _suppress_subset_profile_candidates(list(merged.values()))
+
     return sorted(
-        merged.values(),
+        items,
         key=lambda c: (
             str(c.get("kind") or ""),
             str(c.get("fact_type") or ""),
