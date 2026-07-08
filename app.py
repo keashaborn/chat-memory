@@ -748,17 +748,101 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
     conn = await asyncpg.connect(DSN)
     try:
         rows = await conn.fetch(
-            "SELECT source, text, created_at FROM chat_log WHERE thread_id=$1 ORDER BY created_at ASC LIMIT $2",
-            tid, limit
+            """
+            SELECT id, source, text, created_at
+            FROM chat_log
+            WHERE thread_id=$1
+            ORDER BY created_at ASC
+            LIMIT $2
+            """,
+            tid,
+            limit,
         )
         out = []
         for r in rows:
             src = (r["source"] or "")
             role = "assistant" if "assistant" in src else "user"
-            out.append({"role": role, "content": r["text"], "created_at": r["created_at"].isoformat()})
+            out.append({
+                "id": str(r["id"]),
+                "role": role,
+                "content": r["text"],
+                "created_at": r["created_at"].isoformat(),
+            })
         return out
     finally:
         await conn.close()
+
+
+@app.delete("/threads/{thread_id}/messages/{message_id}/truncate")
+async def threads_truncate_from_message(thread_id: str, message_id: str, req: Request):
+    tid = parse_uuid(thread_id)
+    mid = parse_uuid(message_id)
+    if not tid or not mid:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid thread_id or message_id"},
+            status_code=400,
+        )
+
+    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                """
+                SELECT id, source, created_at
+                FROM chat_log
+                WHERE thread_id=$1 AND id=$2
+                """,
+                tid,
+                mid,
+            )
+            if not target:
+                return JSONResponse(
+                    {"status": "not_found", "detail": "message not found in thread"},
+                    status_code=404,
+                )
+
+            src = str(target["source"] or "")
+            if "user" not in src:
+                return JSONResponse(
+                    {"status": "bad_request", "detail": "only user messages can be edited"},
+                    status_code=400,
+                )
+
+            result = await conn.execute(
+                """
+                DELETE FROM chat_log
+                WHERE thread_id=$1
+                  AND created_at >= $2
+                """,
+                tid,
+                target["created_at"],
+            )
+
+            await conn.execute(
+                "UPDATE threads SET updated_at=now() WHERE id=$1",
+                tid,
+            )
+
+        deleted = 0
+        try:
+            deleted = int(str(result).split()[-1])
+        except Exception:
+            deleted = 0
+
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "message_id": str(mid),
+            "deleted": deleted,
+        }
+    finally:
+        await conn.close()
+
+
 
 
 class RenameThreadReq(BaseModel):
