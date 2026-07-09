@@ -417,7 +417,7 @@ def main() -> int:
                 "version": "memory_compression_preview_v0",
                 "mode": "extractive_preview",
                 "turn_intent": "MEMORY_ARCHITECTURE",
-                "source_count": 2,
+                "source_count": 3,
             },
             "expect_compression_preview_min": {
                 "raw_chars": 1,
@@ -430,7 +430,7 @@ def main() -> int:
                 "turn_intent": "MEMORY_ARCHITECTURE",
                 "source": "current_message",
                 "unit_count": 3,
-                "memory_source_count": 2,
+                "memory_source_count": 3,
             },
             "expect_semantic_preview_min": {
                 "unit_count": 1,

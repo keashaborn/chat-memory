@@ -5,10 +5,13 @@ Dry-run review promotion planner for durable memory cards.
 V0 scope:
 - Uses personal_event_inventory preview functions.
 - Does not write to the database.
-- Classifies candidate card_head rows into:
-  skip_duplicate
-  create_new_card
-  needs_manual_review
+- Classifies candidate card_head rows into planner actions including:
+    create_new_card
+    duplicate_or_subsumed
+    split_or_skip
+    candidate_needs_rewrite
+    distinct_life_context_candidate
+    needs_manual_review
 
 Default mode is dry-run. --apply is guarded and requires exact confirmation args.
 """
@@ -39,18 +42,59 @@ def _load_personal_event_inventory_module():
 pei = _load_personal_event_inventory_module()
 
 
+def _row_blob(row: Dict[str, Any]) -> str:
+    payload = row.get("payload") or {}
+    parts = [
+        row.get("kind"),
+        row.get("topic_key"),
+        row.get("summary"),
+        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+    ]
+    return " ".join(str(x or "") for x in parts).lower()
+
+
+def _is_split_or_skip_row(row: Dict[str, Any], review_flags: List[str]) -> bool:
+    blob = _row_blob(row)
+    return (
+        "multiple_pets" in blob
+        or "multi_subject_card_needs_split_or_merge_review" in review_flags
+    )
+
+
+def _is_jerry_life_context_row(row: Dict[str, Any]) -> bool:
+    blob = _row_blob(row)
+    kind = str(row.get("kind") or "")
+    if kind != "life_context":
+        return False
+
+    has_jerry_or_father = "jerry" in blob or "father" in blob or "dad" in blob
+    has_assisted_memory_context = (
+        "father_assisted_living_memory_decline" in blob
+        or "assisted living" in blob
+        or "memory decline" in blob
+        or "memory lasts" in blob
+    )
+    return has_jerry_or_father and has_assisted_memory_context
+
+
 def classify_action(row: Dict[str, Any]) -> Dict[str, Any]:
     payload = row.get("payload") or {}
     comparison = row.get("existing_card_comparison") or payload.get("existing_card_comparison") or {}
     status = str(comparison.get("status") or "")
     kind = str(row.get("kind") or "")
     confidence = float(row.get("confidence") or 0.0)
-    summary = str(row.get("summary") or "")
     review_decision = payload.get("review_decision") or {}
     review_flags = list(review_decision.get("review_flags") or [])
     blockers = list(review_decision.get("blockers") or [])
 
     reasons: List[str] = []
+
+    if _is_split_or_skip_row(row, review_flags):
+        reasons.append("broad_multi_subject_candidate")
+        return {
+            "action": "split_or_skip",
+            "reasons": reasons + review_flags,
+        }
 
     if blockers:
         reasons.append("has_blockers")
@@ -62,12 +106,20 @@ def classify_action(row: Dict[str, Any]) -> Dict[str, Any]:
     if status == "already_covered_or_duplicate":
         reasons.append("existing_card_comparison_already_covered_or_duplicate")
         return {
-            "action": "skip_duplicate",
+            "action": "duplicate_or_subsumed",
             "reasons": reasons,
         }
 
     if status in ("similar_existing_card", "weak_existing_overlap"):
         reasons.append(f"existing_card_comparison_{status}")
+
+        if _is_jerry_life_context_row(row):
+            reasons.append("jerry_father_assisted_living_memory_decline_is_distinct_from_monika_life_context")
+            return {
+                "action": "distinct_life_context_candidate",
+                "reasons": reasons,
+            }
+
         return {
             "action": "needs_manual_review",
             "reasons": reasons,
@@ -85,7 +137,7 @@ def classify_action(row: Dict[str, Any]) -> Dict[str, Any]:
     if confidence < 0.80:
         reasons.append("confidence_below_create_threshold")
         return {
-            "action": "needs_manual_review",
+            "action": "candidate_needs_rewrite",
             "reasons": reasons,
         }
 
