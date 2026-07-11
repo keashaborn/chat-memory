@@ -665,29 +665,101 @@ async def create_conditioning_session(
     heart_rate_avg: float | None = Query(None, ge=0, le=260),
     recovery_impact: str = Query("", max_length=400),
     notes: str = Query("", max_length=1600),
+
+    dose_type: str = Query("open", max_length=40),
+    dose_config: str = Query("{}", max_length=12000),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
+
+    pid = (
+        _as_uuid(
+            my_conditioning_prescription_id,
+            "my_conditioning_prescription_id",
+        )
+        if my_conditioning_prescription_id
+        else None
+    )
 
     try:
         day_val = _dt.date.fromisoformat(day)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid day")
 
+    allowed_dose_types = {
+        "open",
+        "time",
+        "distance",
+        "rounds",
+        "intervals",
+        "laps",
+        "repetitions",
+        "loaded_carry",
+    }
+
+    clean_dose_type = str(dose_type or "open").strip().lower()
+    if clean_dose_type not in allowed_dose_types:
+        raise HTTPException(status_code=400, detail="invalid dose_type")
+
+    try:
+        parsed_dose_config = json.loads(dose_config or "{}")
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid dose_config_json",
+        )
+
+    if not isinstance(parsed_dose_config, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="dose_config_must_be_object",
+        )
+
+    dose_config_json = json.dumps(
+        parsed_dose_config,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
     conn = await _db()
     try:
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.conditioning_session_log
-              (owner_user_id, my_conditioning_prescription_id, day,
-               name, category, modality,
-               duration_min, intensity, distance, heart_rate_avg,
-               recovery_impact, notes, is_active)
+              (
+                owner_user_id,
+                my_conditioning_prescription_id,
+                day,
+                name,
+                category,
+                modality,
+                duration_min,
+                intensity,
+                distance,
+                heart_rate_avg,
+                recovery_impact,
+                notes,
+                dose_type,
+                dose_config,
+                is_active
+              )
             values
-              ($1::uuid, $2::uuid, $3::date,
-               $4, $5, $6,
-               $7, $8, $9, $10,
-               $11, $12, true)
+              (
+                $1::uuid,
+                $2::uuid,
+                $3::date,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13,
+                $14::jsonb,
+                true
+              )
             returning
               conditioning_session_log_id,
               owner_user_id,
@@ -702,6 +774,8 @@ async def create_conditioning_session(
               heart_rate_avg,
               recovery_impact,
               notes,
+              dose_type,
+              dose_config,
               is_active,
               created_at,
               updated_at
@@ -715,11 +789,18 @@ async def create_conditioning_session(
             float(duration_min),
             intensity.strip(),
             distance.strip(),
-            float(heart_rate_avg) if heart_rate_avg is not None else None,
+            float(heart_rate_avg)
+            if heart_rate_avg is not None
+            else None,
             recovery_impact.strip(),
             notes.strip(),
+            clean_dose_type,
+            dose_config_json,
         )
-        return JSONResponse(_row_to_jsonable(row))
+
+        return JSONResponse(
+            _conditioning_row_to_jsonable(row)
+        )
     finally:
         await conn.close()
 
@@ -772,6 +853,8 @@ async def list_conditioning_sessions(
               c.heart_rate_avg,
               c.recovery_impact,
               c.notes,
+              c.dose_type,
+              c.dose_config,
               c.is_active,
               c.created_at,
               c.updated_at,
@@ -787,7 +870,7 @@ async def list_conditioning_sessions(
             """,
             *args,
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
+        return JSONResponse([_conditioning_row_to_jsonable(r) for r in rows])
     finally:
         await conn.close()
 
@@ -819,6 +902,8 @@ async def get_conditioning_session(
               heart_rate_avg,
               recovery_impact,
               notes,
+              dose_type,
+              dose_config,
               is_active,
               created_at,
               updated_at
@@ -831,7 +916,7 @@ async def get_conditioning_session(
         )
         if not row:
             raise HTTPException(status_code=404, detail="conditioning session not found")
-        return JSONResponse(_row_to_jsonable(row))
+        return JSONResponse(_conditioning_row_to_jsonable(row))
     finally:
         await conn.close()
 
