@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import uuid
 import decimal
 import datetime as _dt
@@ -32,6 +33,22 @@ def _json_safe(v):
 def _row_to_jsonable(r):
     d = dict(r)
     return {k: _json_safe(v) for k, v in d.items()}
+
+def _conditioning_row_to_jsonable(r):
+    out = _row_to_jsonable(r)
+
+    raw = out.get("dose_config")
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            out["dose_config"] = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            out["dose_config"] = {}
+    elif not isinstance(raw, dict):
+        out["dose_config"] = {}
+
+    return out
+
 
 def _as_uuid(s: str, name: str) -> str:
     try:
@@ -299,6 +316,8 @@ async def list_my_conditioning_prescriptions(
               p.preferred_timing,
               p.recovery_constraints,
               p.notes,
+              p.dose_type,
+              p.dose_config,
               p.is_active,
               p.created_at,
               p.updated_at,
@@ -313,7 +332,7 @@ async def list_my_conditioning_prescriptions(
             """,
             owner,
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
+        return JSONResponse([_conditioning_row_to_jsonable(r) for r in rows])
     finally:
         await conn.close()
 
@@ -337,33 +356,114 @@ async def upsert_my_conditioning_prescription(
     preferred_timing: str = Query("", max_length=400),
     recovery_constraints: str = Query("", max_length=800),
     notes: str = Query("", max_length=1200),
+
+    dose_type: str = Query("open", max_length=40),
+    dose_config: str = Query("{}", max_length=12000),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id") if my_conditioning_prescription_id else None
-    libid = _as_uuid(conditioning_library_id, "conditioning_library_id") if conditioning_library_id else None
+    pid = (
+        _as_uuid(
+            my_conditioning_prescription_id,
+            "my_conditioning_prescription_id",
+        )
+        if my_conditioning_prescription_id
+        else None
+    )
+    libid = (
+        _as_uuid(conditioning_library_id, "conditioning_library_id")
+        if conditioning_library_id
+        else None
+    )
+
+    allowed_dose_types = {
+        "open",
+        "time",
+        "distance",
+        "rounds",
+        "intervals",
+        "laps",
+        "repetitions",
+        "loaded_carry",
+    }
+
+    clean_dose_type = str(dose_type or "open").strip().lower()
+    if clean_dose_type not in allowed_dose_types:
+        raise HTTPException(status_code=400, detail="invalid dose_type")
+
+    try:
+        parsed_dose_config = json.loads(dose_config or "{}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid dose_config_json")
+
+    if not isinstance(parsed_dose_config, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="dose_config_must_be_object",
+        )
+
+    dose_config_json = json.dumps(
+        parsed_dose_config,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
     conn = await _db()
     try:
         if pid:
             existing_owner = await conn.fetchval(
-                f"select owner_user_id from {SCHEMA}.my_conditioning_prescription where my_conditioning_prescription_id=$1::uuid",
+                f"""
+                select owner_user_id
+                from {SCHEMA}.my_conditioning_prescription
+                where my_conditioning_prescription_id=$1::uuid
+                """,
                 pid,
             )
             if existing_owner and str(existing_owner) != owner:
-                raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+                raise HTTPException(
+                    status_code=403,
+                    detail="actor_owner_mismatch",
+                )
 
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.my_conditioning_prescription
-                  (my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
-                   name, category, modality, purpose,
-                   target_duration_min, target_frequency_per_week, target_intensity,
-                   preferred_timing, recovery_constraints, notes, is_active)
+                  (
+                    my_conditioning_prescription_id,
+                    owner_user_id,
+                    conditioning_library_id,
+                    name,
+                    category,
+                    modality,
+                    purpose,
+                    target_duration_min,
+                    target_frequency_per_week,
+                    target_intensity,
+                    preferred_timing,
+                    recovery_constraints,
+                    notes,
+                    dose_type,
+                    dose_config,
+                    is_active
+                  )
                 values
-                  ($1::uuid, $2::uuid, $3::uuid,
-                   $4, $5, $6, $7,
-                   $8, $9, $10,
-                   $11, $12, $13, true)
+                  (
+                    $1::uuid,
+                    $2::uuid,
+                    $3::uuid,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    $14,
+                    $15::jsonb,
+                    true
+                  )
                 on conflict (my_conditioning_prescription_id) do update
                   set conditioning_library_id=excluded.conditioning_library_id,
                       name=excluded.name,
@@ -376,14 +476,29 @@ async def upsert_my_conditioning_prescription(
                       preferred_timing=excluded.preferred_timing,
                       recovery_constraints=excluded.recovery_constraints,
                       notes=excluded.notes,
+                      dose_type=excluded.dose_type,
+                      dose_config=excluded.dose_config,
                       is_active=true,
                       updated_at=now()
                 returning
-                  my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
-                  name, category, modality, purpose,
-                  target_duration_min, target_frequency_per_week, target_intensity,
-                  preferred_timing, recovery_constraints, notes,
-                  is_active, created_at, updated_at
+                  my_conditioning_prescription_id,
+                  owner_user_id,
+                  conditioning_library_id,
+                  name,
+                  category,
+                  modality,
+                  purpose,
+                  target_duration_min,
+                  target_frequency_per_week,
+                  target_intensity,
+                  preferred_timing,
+                  recovery_constraints,
+                  notes,
+                  dose_type,
+                  dose_config,
+                  is_active,
+                  created_at,
+                  updated_at
                 """,
                 pid,
                 owner,
@@ -398,20 +513,48 @@ async def upsert_my_conditioning_prescription(
                 preferred_timing.strip(),
                 recovery_constraints.strip(),
                 notes.strip(),
+                clean_dose_type,
+                dose_config_json,
             )
         else:
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.my_conditioning_prescription
-                  (owner_user_id, conditioning_library_id,
-                   name, category, modality, purpose,
-                   target_duration_min, target_frequency_per_week, target_intensity,
-                   preferred_timing, recovery_constraints, notes, is_active)
+                  (
+                    owner_user_id,
+                    conditioning_library_id,
+                    name,
+                    category,
+                    modality,
+                    purpose,
+                    target_duration_min,
+                    target_frequency_per_week,
+                    target_intensity,
+                    preferred_timing,
+                    recovery_constraints,
+                    notes,
+                    dose_type,
+                    dose_config,
+                    is_active
+                  )
                 values
-                  ($1::uuid, $2::uuid,
-                   $3, $4, $5, $6,
-                   $7, $8, $9,
-                   $10, $11, $12, true)
+                  (
+                    $1::uuid,
+                    $2::uuid,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    $14::jsonb,
+                    true
+                  )
                 on conflict (owner_user_id, name) do update
                   set conditioning_library_id=excluded.conditioning_library_id,
                       category=excluded.category,
@@ -423,14 +566,29 @@ async def upsert_my_conditioning_prescription(
                       preferred_timing=excluded.preferred_timing,
                       recovery_constraints=excluded.recovery_constraints,
                       notes=excluded.notes,
+                      dose_type=excluded.dose_type,
+                      dose_config=excluded.dose_config,
                       is_active=true,
                       updated_at=now()
                 returning
-                  my_conditioning_prescription_id, owner_user_id, conditioning_library_id,
-                  name, category, modality, purpose,
-                  target_duration_min, target_frequency_per_week, target_intensity,
-                  preferred_timing, recovery_constraints, notes,
-                  is_active, created_at, updated_at
+                  my_conditioning_prescription_id,
+                  owner_user_id,
+                  conditioning_library_id,
+                  name,
+                  category,
+                  modality,
+                  purpose,
+                  target_duration_min,
+                  target_frequency_per_week,
+                  target_intensity,
+                  preferred_timing,
+                  recovery_constraints,
+                  notes,
+                  dose_type,
+                  dose_config,
+                  is_active,
+                  created_at,
+                  updated_at
                 """,
                 owner,
                 libid,
@@ -444,9 +602,15 @@ async def upsert_my_conditioning_prescription(
                 preferred_timing.strip(),
                 recovery_constraints.strip(),
                 notes.strip(),
+                clean_dose_type,
+                dose_config_json,
             )
 
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+        return JSONResponse(
+            _conditioning_row_to_jsonable(row)
+            if row
+            else {"error": "upsert_failed"}
+        )
     finally:
         await conn.close()
 
