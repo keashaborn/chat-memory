@@ -187,11 +187,11 @@ async def add_meal_item(
 
         if sid:
             owns = await conn.fetchval(
-                f"select 1 from {SCHEMA}.my_food_serving where my_food_serving_id=$1::uuid and my_food_id=$2::uuid",
+                f"select 1 from {SCHEMA}.my_food_serving where my_food_serving_id=$1::uuid and my_food_id=$2::uuid and is_active",
                 sid, fid,
             )
             if owns != 1:
-                raise HTTPException(status_code=404, detail="serving not found for this my_food_id")
+                raise HTTPException(status_code=404, detail="active serving not found for this my_food_id")
 
         row = await conn.fetchrow(
             f"""
@@ -206,6 +206,87 @@ async def add_meal_item(
             mid, fid, qty_g, sid, qty_servings, sort_order, notes,
         )
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.patch("/meals/{meal_id}/items/{meal_item_id}")
+async def update_meal_item(
+    meal_id: str,
+    meal_item_id: str,
+    req: Request,
+    qty_g: float | None = Query(None, gt=0),
+    my_food_serving_id: str | None = Query(None, min_length=1),
+    qty_servings: float | None = Query(None, gt=0),
+):
+    """Replace an item's quantity while preserving its food and sort order."""
+    mid = _as_uuid(meal_id, "meal_id")
+    iid = _as_uuid(meal_item_id, "meal_item_id")
+
+    use_grams = qty_g is not None
+    use_serving = (my_food_serving_id is not None) or (qty_servings is not None)
+    if use_grams and use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR (my_food_serving_id + qty_servings), not both")
+    if not use_grams and not use_serving:
+        raise HTTPException(status_code=400, detail="must provide qty_g OR (my_food_serving_id + qty_servings)")
+    if use_serving and (my_food_serving_id is None or qty_servings is None):
+        raise HTTPException(status_code=400, detail="servings mode requires my_food_serving_id and qty_servings")
+
+    sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                f"""
+                select i.my_food_id, m.owner_user_id
+                from {SCHEMA}.meal_item i
+                join {SCHEMA}.meal m on m.meal_id=i.meal_id
+                where i.meal_item_id=$1::uuid
+                  and i.meal_id=$2::uuid
+                  and m.is_active=true
+                """,
+                iid,
+                mid,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail="meal item not found or meal inactive")
+            require_actor_matches_owner(req, str(current["owner_user_id"]))
+
+            if sid:
+                owns = await conn.fetchval(
+                    f"""
+                    select 1
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active=true
+                    """,
+                    sid,
+                    current["my_food_id"],
+                )
+                if owns != 1:
+                    raise HTTPException(status_code=404, detail="active serving not found for this meal item's food")
+
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.meal_item
+                set qty_g=$3,
+                    my_food_serving_id=$4::uuid,
+                    qty_servings=$5,
+                    updated_at=now()
+                where meal_item_id=$1::uuid
+                  and meal_id=$2::uuid
+                returning meal_item_id, meal_id, my_food_id,
+                          qty_g, my_food_serving_id, qty_servings,
+                          sort_order, notes, created_at, updated_at
+                """,
+                iid,
+                mid,
+                qty_g,
+                sid,
+                qty_servings,
+            )
+            return JSONResponse(_row_to_jsonable(row))
     finally:
         await conn.close()
 
