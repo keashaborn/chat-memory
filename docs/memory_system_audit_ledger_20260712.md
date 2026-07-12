@@ -121,7 +121,7 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 - Projection processing is owner-explicit, uses `FOR UPDATE SKIP LOCKED`, avoids external calls inside database transactions, and does not lose a concurrently refreshed outbox job.
 - The isolated schema/store/retrieval/projection test suite passes. Live prompt routing has not been switched to V1.
 - Exact actor/body UUID enforcement for `/log` and `/vantage/query` passes helper, route-level container, and production probes and is deployed at backend commit `18001ac`.
-- Production Qdrant and Redis host ports are loopback-only. Pre-change Qdrant snapshots and a Redis persistence checkpoint were taken; Brains health passed after recreation.
+- Production Qdrant and Redis host ports are loopback-only. Redis was checkpointed before recreation. Durable post-change Qdrant snapshots with checksums are stored under `/home/ubuntu/brains/snapshots/20260712_memory_v1`; Brains health passed after recreation.
 
 ## Unresolved checks
 
