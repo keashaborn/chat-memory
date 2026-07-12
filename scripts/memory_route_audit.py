@@ -59,6 +59,8 @@ def request_vantage(token: str, body: dict[str, Any], name: str) -> tuple[int, d
             "Content-Type: application/json",
             "-H",
             f"X-VS-Service-Token: {token}",
+            "-H",
+            f"X-VS-Actor-User-Id: {body.get('user_id', '')}",
             "--data-binary",
             f"@{req_path}",
             "-o",

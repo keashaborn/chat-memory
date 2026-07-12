@@ -20,7 +20,7 @@ jobs:
       - name: Wait for health
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://127.0.0.1:8088/healthz >/dev/null && exit 0
+            curl -sf -H 'x-vs-service-token: ci_only_service_token' http://127.0.0.1:8088/healthz >/dev/null && exit 0
             sleep 2
           done
           echo "brains did not become healthy"
@@ -30,7 +30,7 @@ jobs:
       - name: Run audit canary
         run: |
           docker compose -f docker-compose.ci.yml exec -T brains \
-            bash -lc 'HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
+            bash -lc 'VS_SERVICE_TOKEN=ci_only_service_token HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
 
       - name: Validate memory V1 schema firewall
         run: ./tools/memory_v1_schema_ci.sh

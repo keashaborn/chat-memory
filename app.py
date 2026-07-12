@@ -35,6 +35,7 @@ class NewThreadReq(BaseModel):
     vantage_id: Optional[str] = "default"
 from rag_engine.voice_realtime_router import router as voice_realtime_router
 from rag_engine.voice_tts_router import router as voice_tts_router
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -516,15 +517,15 @@ async def log_chat(req: Request):
         return JSONResponse({"status":"bad_request","detail":"invalid json"}, status_code=400)
 
     text = body.get("text") or body.get("input") or ""
-    user_id_alias = (body.get("user_id") or "anon")
-    user_id_alias = (user_id_alias or "").strip() or "anon"
+    user_id_alias = require_actor_matches_owner(req, body.get("user_id") or "")
     source = body.get("source") or "frontend"
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
     request_id = _sanitize_request_id(getattr(req.state, "request_id", None)) or str(uuid.uuid4())
 
-    # Canonicalize user_id (alias -> canonical) for ALL writes
-    user_id, _alias_uid = await resolve_canonical_user_id(vantage_id, user_id_alias)
+    # New writes are owned by the exact authenticated Supabase UUID. Vantage
+    # aliases must not partition or remap factual memory.
+    user_id = user_id_alias
 
 
     # Optional thread id for "real threads"
@@ -553,9 +554,6 @@ async def log_chat(req: Request):
     # Special case: identity logs from frontend (FULL_NAME:...)
     if source == "frontend/identity" and text.startswith("FULL_NAME:"):
         full_name = text.split("FULL_NAME:", 1)[1].strip()
-
-        # canonicalize user_id for identity card writes (alias -> canonical)
-        user_id, _alias_uid = await resolve_canonical_user_id(vantage_id, user_id)
 
         if not full_name:
             return {"status": "empty", "detail": "no full_name"}

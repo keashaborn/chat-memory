@@ -20,6 +20,7 @@ from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve
 from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
+from .lifeswitch_auth import require_actor_matches_owner
 
 # Reuse the exact behavior of the current /rag/query path where it matters:
 from .rag_router import (
@@ -1945,6 +1946,8 @@ def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | 
 
 @router.post("/query", response_model=VantageResponse, response_model_exclude_none=True)
 def vantage_query(req: Request, payload: VantageQuery):
+    payload.user_id = require_actor_matches_owner(req, payload.user_id)
+
     # Correlation id for end-to-end tracing (frontend -> brains -> Postgres)
     req_request_id = getattr(getattr(req, "state", None), "request_id", None)
     if not req_request_id:

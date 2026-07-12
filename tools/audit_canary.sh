@@ -5,6 +5,11 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8088}"
 BASE="http://${HOST}:${PORT}"
 
+SERVICE_HEADERS=()
+if [[ -n "${VS_SERVICE_TOKEN:-}" ]]; then
+  SERVICE_HEADERS=(-H "x-vs-service-token: ${VS_SERVICE_TOKEN}")
+fi
+
 PGHOST="${PGHOST:-localhost}"
 PGUSER="${PGUSER:-sage}"
 PGDATABASE="${PGDATABASE:-memory}"
@@ -16,6 +21,8 @@ need psql
 need python3
 
 RID="canary-$(date -u +%Y%m%d_%H%M%S)-$RANDOM"
+ACTOR_UUID="11111111-1111-4111-8111-111111111111"
+OTHER_UUID="22222222-2222-4222-8222-222222222222"
 echo "RID=$RID"
 
 echo
@@ -30,22 +37,53 @@ fi
 
 echo "== wait for healthz =="
 for i in $(seq 1 120); do
-  curl -sf "${BASE}/healthz" >/dev/null && break
+  curl -sf "${SERVICE_HEADERS[@]}" "${BASE}/healthz" >/dev/null && break
   sleep 0.25
 done
 
 echo "== healthz echo =="
-hdr="$(curl -sS -i "${BASE}/healthz" -H "x-request-id: ${RID}" | sed -n '1,30p')"
+hdr="$(curl -sS -i "${SERVICE_HEADERS[@]}" "${BASE}/healthz" -H "x-request-id: ${RID}" | sed -n '1,30p')"
 echo "$hdr" | rg -i '^x-request-id:' >/dev/null || { echo "FAIL: no x-request-id echo"; echo "$hdr"; exit 1; }
 echo "$hdr" | rg -i "x-request-id:\s*${RID}\b" >/dev/null || { echo "FAIL: x-request-id mismatch"; echo "$hdr"; exit 1; }
 echo "OK"
 
 echo
+echo "== memory routes enforce actor/owner equality =="
+missing_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "${SERVICE_HEADERS[@]}" "${BASE}/vantage/query" \
+  -H "Content-Type: application/json" \
+  -d "{\"user_id\":\"${ACTOR_UUID}\",\"message\":\"missing actor\"}")"
+[[ "${missing_status}" == "401" ]] || { echo "FAIL: vantage/query missing actor=${missing_status}"; exit 1; }
+
+mismatch_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "${SERVICE_HEADERS[@]}" "${BASE}/vantage/query" \
+  -H "Content-Type: application/json" \
+  -H "x-vs-actor-user-id: ${OTHER_UUID}" \
+  -d "{\"user_id\":\"${ACTOR_UUID}\",\"message\":\"mismatched actor\"}")"
+[[ "${mismatch_status}" == "403" ]] || { echo "FAIL: vantage/query mismatch=${mismatch_status}"; exit 1; }
+
+log_missing_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "${SERVICE_HEADERS[@]}" "${BASE}/log" \
+  -H "Content-Type: application/json" \
+  -d "{\"user_id\":\"${ACTOR_UUID}\",\"text\":\"missing actor\"}")"
+[[ "${log_missing_status}" == "401" ]] || { echo "FAIL: log missing actor=${log_missing_status}"; exit 1; }
+
+log_mismatch_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "${SERVICE_HEADERS[@]}" "${BASE}/log" \
+  -H "Content-Type: application/json" \
+  -H "x-vs-actor-user-id: ${OTHER_UUID}" \
+  -d "{\"user_id\":\"${ACTOR_UUID}\",\"text\":\"mismatched actor\"}")"
+[[ "${log_mismatch_status}" == "403" ]] || { echo "FAIL: log mismatch=${log_mismatch_status}"; exit 1; }
+echo "OK"
+
+echo
 echo "== vantage/query writes request_id =="
 curl -sfS "${BASE}/vantage/query" \
+  "${SERVICE_HEADERS[@]}" \
   -H "Content-Type: application/json" \
   -H "x-request-id: ${RID}" \
-  -d '{"user_id":"audit_user","message":"audit canary","vantage_id":"default","top_k":1,"debug":false}' \
+  -H "x-vs-actor-user-id: ${ACTOR_UUID}" \
+  -d "{\"user_id\":\"${ACTOR_UUID}\",\"message\":\"audit canary\",\"vantage_id\":\"default\",\"top_k\":1,\"debug\":false}" \
   >/dev/null
 
 PGPASSWORD="${PGPASSWORD}" psql -P pager=off -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -c \
@@ -66,11 +104,12 @@ PY
 
 echo "== wait for telemetry endpoint =="
 for i in $(seq 1 120); do
-  curl -sf "${BASE}/healthz" >/dev/null && break
+  curl -sf "${SERVICE_HEADERS[@]}" "${BASE}/healthz" >/dev/null && break
   sleep 0.25
 done
 
 curl -sfS "${BASE}/telemetry/event" \
+  "${SERVICE_HEADERS[@]}" \
   -H "Content-Type: application/json" \
   -H "x-request-id: ${RID}" \
   -d "{\"events\":[{\"event_id\":\"${EVENT_ID}\",\"event_type\":\"audit.canary\",\"subject_type\":\"user\",\"subject_id\":\"audit_user\",\"payload\":{\"note\":\"canary\",\"request_id\":\"${RID}\"}}]}" \
