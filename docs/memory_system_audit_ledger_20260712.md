@@ -36,8 +36,8 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 - Qdrant was published on every host interface. On 2026-07-12 it was changed to `127.0.0.1:6333`; persisted collections recovered green with `memory_raw=570` and `memory_claim_v1=4`, and a Verbal Sage private-VPC probe timed out.
 - Redis was published on every host interface. On 2026-07-12 it was changed to `127.0.0.1:6379`, its persisted volume was retained, and a Verbal Sage private-VPC probe timed out.
 - The Brains deployment Compose file contains database credentials directly instead of using an external secret. Rotation and dependency-safe secret migration remain required.
-- The currently deployed `/vantage/query` trusts request-body `user_id` and does not enforce `x-vs-actor-user-id` equality. An exact UUID equality patch and HTTP tests pass on the isolated branch but are not deployed.
-- The currently deployed `/log` also trusts request-body `user_id` before writing Postgres transcripts or Qdrant points. The isolated patch requires exact actor/owner UUID equality and removes Vantage alias remapping for new writes; it is not deployed.
+- `/vantage/query` now requires exact UUID equality between `x-vs-actor-user-id` and request-body `user_id`. Production probes return 401 for missing actor, 403 for mismatch, and 200 for a matching authenticated actor.
+- `/log` now requires the same exact actor/owner UUID equality before Postgres or Qdrant writes and no longer Vantage-remaps the owner for new transcript, identity, or raw-memory records.
 - The deployed frontend currently sends a verified Supabase ID, but Brains lacks defense in depth against a buggy or compromised service-token holder.
 - `resolve_canonical_user_id()` keys aliases by `(vantage_id, alias_user_id)`, so canonical account identity remains persona-dependent.
 - Durable personal records use `vantage_id='user_global'` while embedding the actual user ID inside `topic_key`; ownership is not a constrained column.
@@ -120,7 +120,7 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 - The Qdrant V1 projection uses a separate `memory_claim_v1` collection. Payloads contain owner, claim ID, revision, and policy metadata only; personal prose stays in Postgres.
 - Projection processing is owner-explicit, uses `FOR UPDATE SKIP LOCKED`, avoids external calls inside database transactions, and does not lose a concurrently refreshed outbox job.
 - The isolated schema/store/retrieval/projection test suite passes. Live prompt routing has not been switched to V1.
-- Exact actor/body UUID enforcement for `/log` and `/vantage/query` passes helper and route-level container tests on the isolated branch. Production deployment remains a separate gate.
+- Exact actor/body UUID enforcement for `/log` and `/vantage/query` passes helper, route-level container, and production probes and is deployed at backend commit `18001ac`.
 - Production Qdrant and Redis host ports are loopback-only. Pre-change Qdrant snapshots and a Redis persistence checkpoint were taken; Brains health passed after recreation.
 
 ## Unresolved checks
