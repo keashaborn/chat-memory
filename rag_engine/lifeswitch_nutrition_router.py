@@ -7,6 +7,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 import decimal
 import datetime as _dt
 
@@ -32,6 +33,47 @@ if not DSN:
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
 CATALOG_SCHEMA = os.getenv("CATALOG_SCHEMA", "catalog_dev")
+
+
+class MyFoodUpdate(BaseModel):
+    display_name: str | None = Field(None, max_length=200)
+    brand: str | None = Field(None, max_length=200)
+    variant: str | None = Field(None, max_length=120)
+    barcode: str | None = Field(None, max_length=80)
+    preferred_mode: str | None = None
+    preferred_quantity: float | None = Field(None, gt=0)
+    preferred_serving_id: str | None = None
+    nutrient_source: str | None = Field(None, max_length=40)
+    nutrient_source_detail: str | None = Field(None, max_length=240)
+    kcal: float | None = Field(None, ge=0)
+    protein_g: float | None = Field(None, ge=0)
+    carbs_g: float | None = Field(None, ge=0)
+    fat_g: float | None = Field(None, ge=0)
+    fiber_g: float | None = Field(None, ge=0)
+    sugar_g: float | None = Field(None, ge=0)
+    sodium_mg: float | None = Field(None, ge=0)
+    is_verified: bool | None = None
+
+
+class MyFoodServingUpdate(BaseModel):
+    name: str | None = Field(None, max_length=120)
+    grams: float | None = Field(None, gt=0)
+    is_active: bool | None = None
+    set_preferred: bool | None = None
+
+
+MY_FOOD_RETURN_COLUMNS = """
+  f.my_food_id, f.owner_user_id, f.display_name, f.source_display_name,
+  f.brand, f.variant, f.source_type, f.source_food_id, f.source, f.source_id,
+  f.barcode, f.basis, f.kcal, f.protein_g, f.carbs_g, f.fat_g,
+  f.fiber_g, f.sugar_g, f.sodium_mg, f.nutrient_source,
+  f.nutrient_source_detail, f.nutrient_updated_at, f.preferred_mode,
+  f.preferred_quantity, f.preferred_serving_id,
+  ps.name as preferred_serving_name, ps.grams as preferred_serving_grams,
+  f.is_verified, f.is_active, f.created_at, f.updated_at
+"""
+
+
 def _as_uuid(s: str, name: str) -> str:
     try:
         return str(uuid.UUID(str(s)))
@@ -134,7 +176,7 @@ async def create_my_food_from_usda(
 
     j = r.json() if r.content else {}
     desc = (j or {}).get("description") or f"FDC {fdc_id}"
-    brand_owner = (j or {}).get("brandOwner")
+    brand_owner = (j or {}).get("brandOwner") or (j or {}).get("brandName")
     gtin = (j or {}).get("gtinUpc")
 
     # Branded/package foods often include label serving metadata.
@@ -166,51 +208,69 @@ async def create_my_food_from_usda(
 
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.my_food
-              (owner_user_id, display_name, brand, variant,
-               source_type, source_food_id, source, source_id, barcode,
-               basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-               is_verified, is_active)
-            values
-              ($1::uuid, $2, $3, $4,
-               'usda', null, 'usda_fdc', $5, $6,
-               'per_100g', $7, $8, $9, $10, $11, $12, $13,
-               true, true)
-            on conflict (owner_user_id, source_type, source_id, coalesce(variant,''))
-            where is_active
-            do update set
-              display_name = excluded.display_name,
-              brand = excluded.brand,
-              barcode = excluded.barcode,
-              basis = excluded.basis,
-              kcal = excluded.kcal,
-              protein_g = excluded.protein_g,
-              carbs_g = excluded.carbs_g,
-              fat_g = excluded.fat_g,
-              fiber_g = excluded.fiber_g,
-              sugar_g = excluded.sugar_g,
-              sodium_mg = excluded.sodium_mg,
-              is_verified = excluded.is_verified,
-              is_active = true,
-              updated_at = now()
-            returning my_food_id, owner_user_id, display_name, brand, variant,
-                      source_type, source_food_id, source, source_id, barcode,
-                      basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-                      is_verified, is_active, created_at, updated_at
-            """,
-            owner,
-            str(desc).strip(),
-            str(brand_owner).strip() if brand_owner else None,
-            str(variant).strip() if variant else None,
-            str(int(fdc_id)),
-            str(gtin).strip() if gtin else None,
-            kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
-        )
+        async with conn.transaction():
+            source_id = str(int(fdc_id))
+            normalized_variant = str(variant).strip() if variant else None
+            existing_food = await conn.fetchrow(
+                f"""
+                select my_food_id, nutrient_source
+                from {SCHEMA}.my_food
+                where owner_user_id=$1::uuid
+                  and source_type='usda'
+                  and source_id=$2
+                  and coalesce(variant,'')=coalesce($3,'')
+                  and is_active
+                limit 1
+                """,
+                owner,
+                source_id,
+                normalized_variant,
+            )
+            is_new_food = existing_food is None
 
-        # Auto-create a default serving row from USDA label serving metadata when usable.
-        if row:
+            row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.my_food as current
+                  (owner_user_id, display_name, source_display_name, brand, variant,
+                   source_type, source_food_id, source, source_id, barcode,
+                   basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
+                   nutrient_source, nutrient_updated_at, is_verified, is_active)
+                values
+                  ($1::uuid, $2, $2, $3, $4,
+                   'usda', null, 'usda_fdc', $5, $6,
+                   'per_100g', $7, $8, $9, $10, $11, $12, $13,
+                   'usda', now(), true, true)
+                on conflict (owner_user_id, source_type, source_id, coalesce(variant,''))
+                where is_active
+                do update set
+                  source_display_name = excluded.source_display_name,
+                  brand = excluded.brand,
+                  barcode = excluded.barcode,
+                  basis = excluded.basis,
+                  kcal = case when current.nutrient_source='usda' then excluded.kcal else current.kcal end,
+                  protein_g = case when current.nutrient_source='usda' then excluded.protein_g else current.protein_g end,
+                  carbs_g = case when current.nutrient_source='usda' then excluded.carbs_g else current.carbs_g end,
+                  fat_g = case when current.nutrient_source='usda' then excluded.fat_g else current.fat_g end,
+                  fiber_g = case when current.nutrient_source='usda' then excluded.fiber_g else current.fiber_g end,
+                  sugar_g = case when current.nutrient_source='usda' then excluded.sugar_g else current.sugar_g end,
+                  sodium_mg = case when current.nutrient_source='usda' then excluded.sodium_mg else current.sodium_mg end,
+                  nutrient_updated_at = case when current.nutrient_source='usda' then now() else current.nutrient_updated_at end,
+                  is_verified = case when current.nutrient_source='usda' then true else current.is_verified end,
+                  is_active = true,
+                  updated_at = now()
+                returning my_food_id
+                """,
+                owner,
+                str(desc).strip(),
+                str(brand_owner).strip() if brand_owner else None,
+                normalized_variant,
+                source_id,
+                str(gtin).strip() if gtin else None,
+                kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
+            )
+            if not row:
+                raise HTTPException(status_code=500, detail="insert_failed")
+
             grams = None
             try:
                 grams = float(serving_size) if serving_size is not None else None
@@ -221,51 +281,84 @@ async def create_my_food_from_usda(
                 serving_name = household_serving or "1 serving"
                 serving_name = " ".join(str(serving_name).strip().split())[:120] or "1 serving"
                 fid = row["my_food_id"]
-
-                existing = await conn.fetchrow(
+                existing_serving = await conn.fetchrow(
                     f"""
-                    select my_food_serving_id
+                    select my_food_serving_id, source_type
                     from {SCHEMA}.my_food_serving
-                    where my_food_id=$1::uuid
-                      and lower(name)=lower($2)
-                    order by updated_at desc nulls last, created_at desc
+                    where my_food_id=$1::uuid and lower(name)=lower($2)
                     limit 1
                     """,
                     fid,
                     serving_name,
                 )
-
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food_serving
-                    set is_default=false, updated_at=now()
-                    where my_food_id=$1::uuid and is_default
-                    """,
+                has_default = await conn.fetchval(
+                    f"select 1 from {SCHEMA}.my_food_serving where my_food_id=$1::uuid and is_default and is_active",
                     fid,
                 )
+                should_default = is_new_food or not has_default
 
-                if existing:
+                if should_default:
+                    await conn.execute(
+                        f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and is_default",
+                        fid,
+                    )
+
+                if existing_serving:
+                    serving_id = existing_serving["my_food_serving_id"]
                     await conn.execute(
                         f"""
                         update {SCHEMA}.my_food_serving
-                        set grams=$2, is_default=true, updated_at=now()
+                        set grams=case when source_type in ('usda','legacy') then $2 else grams end,
+                            source_type=case when source_type in ('usda','legacy') then 'usda' else source_type end,
+                            source_label=coalesce(source_label, $3),
+                            is_active=true,
+                            is_default=case when $4::bool then true else is_default end,
+                            updated_at=now()
                         where my_food_serving_id=$1::uuid
                         """,
-                        existing["my_food_serving_id"],
+                        serving_id,
                         grams,
+                        serving_name,
+                        should_default,
                     )
                 else:
-                    await conn.execute(
+                    serving_id = await conn.fetchval(
                         f"""
-                        insert into {SCHEMA}.my_food_serving (my_food_id, name, grams, is_default)
-                        values ($1::uuid, $2, $3, true)
+                        insert into {SCHEMA}.my_food_serving
+                          (my_food_id, name, grams, is_default, source_type, source_label, is_active)
+                        values ($1::uuid, $2, $3, $4, 'usda', $2, true)
+                        returning my_food_serving_id
                         """,
                         fid,
                         serving_name,
                         grams,
+                        should_default,
                     )
 
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
+                if is_new_food and serving_id:
+                    await conn.execute(
+                        f"""
+                        update {SCHEMA}.my_food
+                        set preferred_mode='serving', preferred_quantity=1,
+                            preferred_serving_id=$2::uuid, updated_at=now()
+                        where my_food_id=$1::uuid
+                        """,
+                        fid,
+                        serving_id,
+                    )
+
+            updated = await conn.fetchrow(
+                f"""
+                select {MY_FOOD_RETURN_COLUMNS}
+                from {SCHEMA}.my_food f
+                left join {SCHEMA}.my_food_serving ps
+                  on ps.my_food_serving_id=f.preferred_serving_id
+                 and ps.my_food_id=f.my_food_id
+                where f.my_food_id=$1::uuid
+                """,
+                row["my_food_id"],
+            )
+            return JSONResponse(_row_to_jsonable(updated))
     finally:
         await conn.close()
 
@@ -391,25 +484,25 @@ async def list_my_foods(
     owner = require_actor_matches_owner(req, owner_user_id)
     conn = await asyncpg.connect(DSN)
     try:
-        where = "owner_user_id = $1::uuid"
+        where = "f.owner_user_id = $1::uuid"
         args: list[object] = [owner]
 
         if include_inactive == 0:
-            where += " and is_active"
+            where += " and f.is_active"
 
         if q:
-            where += " and (display_name ilike $2 or coalesce(brand,'') ilike $2 or coalesce(variant,'') ilike $2)"
+            where += " and (f.display_name ilike $2 or coalesce(f.brand,'') ilike $2 or coalesce(f.variant,'') ilike $2)"
             args.append(f"%{q}%")
 
         rows = await conn.fetch(
             f"""
-            select my_food_id, owner_user_id, display_name, brand, variant,
-                   source_type, source_food_id, source, source_id, barcode,
-                   basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-                   is_verified, is_active, created_at, updated_at
-            from {SCHEMA}.my_food
+            select {MY_FOOD_RETURN_COLUMNS}
+            from {SCHEMA}.my_food f
+            left join {SCHEMA}.my_food_serving ps
+              on ps.my_food_serving_id = f.preferred_serving_id
+             and ps.my_food_id = f.my_food_id
             where {where}
-            order by lower(display_name), lower(coalesce(brand,'')), lower(coalesce(variant,''))
+            order by lower(f.display_name), lower(coalesce(f.brand,'')), lower(coalesce(f.variant,''))
             """,
             *args,
         )
@@ -453,46 +546,43 @@ async def create_my_food_from_catalog(
         bc = ((src.get("barcode") if hasattr(src, "get") else src["barcode"]) or None)
 
         src_id = (src.get("source_id") if hasattr(src, "get") else src["source_id"])
-        src_id_txt = str(src_id) if src_id is not None else None
+        src_id_txt = str(src_id) if src_id is not None else str(fid)
+        source_display_name = str(src["display_name"] or dn).strip()
 
         row = await conn.fetchrow(
             f"""
-            insert into {SCHEMA}.my_food
-              (owner_user_id, display_name, brand, variant,
-              source_type, source_food_id, source, source_id, barcode,
-              basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-              is_verified, is_active)
-            )
-            values(
-              values
-              ($1::uuid, $2, $3, $4,
-              'usda', null, 'usda_fdc', $5, $6,
-              'per_100g', $7, $8, $9, $10, $11, $12, $13,
-              true, true)
+            insert into {SCHEMA}.my_food as current
+              (owner_user_id, display_name, source_display_name, brand, variant,
+               source_type, source_food_id, source, source_id, barcode,
+               basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
+               nutrient_source, nutrient_updated_at, is_verified, is_active)
+            values
+              ($1::uuid, $2, $3, $4, $5,
+               'catalog', $6::uuid, $7, $8, $9,
+               $10, $11, $12, $13, $14, $15, $16, $17,
+               'catalog', now(), true, true)
             on conflict (owner_user_id, source_type, source_id, coalesce(variant,''))
             where is_active
             do update set
-              display_name = excluded.display_name,
+              source_display_name = excluded.source_display_name,
               brand = excluded.brand,
               barcode = excluded.barcode,
               basis = excluded.basis,
-              kcal = excluded.kcal,
-              protein_g = excluded.protein_g,
-              carbs_g = excluded.carbs_g,
-              fat_g = excluded.fat_g,
-              fiber_g = excluded.fiber_g,
-              sugar_g = excluded.sugar_g,
-              sodium_mg = excluded.sodium_mg,
-              is_verified = excluded.is_verified,
+              kcal = case when current.nutrient_source='catalog' then excluded.kcal else current.kcal end,
+              protein_g = case when current.nutrient_source='catalog' then excluded.protein_g else current.protein_g end,
+              carbs_g = case when current.nutrient_source='catalog' then excluded.carbs_g else current.carbs_g end,
+              fat_g = case when current.nutrient_source='catalog' then excluded.fat_g else current.fat_g end,
+              fiber_g = case when current.nutrient_source='catalog' then excluded.fiber_g else current.fiber_g end,
+              sugar_g = case when current.nutrient_source='catalog' then excluded.sugar_g else current.sugar_g end,
+              sodium_mg = case when current.nutrient_source='catalog' then excluded.sodium_mg else current.sodium_mg end,
+              nutrient_updated_at = case when current.nutrient_source='catalog' then now() else current.nutrient_updated_at end,
               is_active = true,
               updated_at = now()
-            returning my_food_id, owner_user_id, display_name, brand, variant,
-                      source_type, source_food_id, source, source_id, barcode,
-                      basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-                      is_verified, is_active, created_at, updated_at;
+            returning my_food_id
             """,
             owner,
             dn,
+            source_display_name,
             br,
             (variant or None),
             fid,
@@ -508,11 +598,186 @@ async def create_my_food_from_catalog(
             (src.get("sugar_g") if hasattr(src, "get") else src["sugar_g"]),
             (src.get("sodium_mg") if hasattr(src, "get") else src["sodium_mg"]),
         )
-
-        return JSONResponse(_row_to_jsonable(row))
+        updated = await conn.fetchrow(
+            f"""
+            select {MY_FOOD_RETURN_COLUMNS}
+            from {SCHEMA}.my_food f
+            left join {SCHEMA}.my_food_serving ps
+              on ps.my_food_serving_id=f.preferred_serving_id
+             and ps.my_food_id=f.my_food_id
+            where f.my_food_id=$1::uuid
+            """,
+            row["my_food_id"],
+        )
+        return JSONResponse(_row_to_jsonable(updated))
     finally:
         await conn.close()
 
+
+
+@router.patch("/my_foods/{my_food_id}")
+async def update_my_food(
+    my_food_id: str,
+    payload: MyFoodUpdate,
+    req: Request,
+):
+    fid = _as_uuid(my_food_id, "my_food_id")
+    fields = set(payload.__fields_set__)
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields provided")
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                f"select * from {SCHEMA}.my_food where my_food_id=$1::uuid for update",
+                fid,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail="my_food not found")
+            require_actor_matches_owner(req, str(current["owner_user_id"]))
+
+            display_name = current["display_name"]
+            if "display_name" in fields:
+                display_name = str(payload.display_name or "").strip()
+                if not display_name:
+                    raise HTTPException(status_code=400, detail="display_name required")
+
+            def optional_text(name: str, value, current_value):
+                if name not in fields:
+                    return current_value
+                cleaned = str(value or "").strip()
+                return cleaned or None
+
+            brand = optional_text("brand", payload.brand, current["brand"])
+            variant = optional_text("variant", payload.variant, current["variant"])
+            barcode = optional_text("barcode", payload.barcode, current["barcode"])
+            nutrient_source_detail = optional_text(
+                "nutrient_source_detail",
+                payload.nutrient_source_detail,
+                current["nutrient_source_detail"],
+            )
+
+            nutrient_fields = {
+                "kcal", "protein_g", "carbs_g", "fat_g",
+                "fiber_g", "sugar_g", "sodium_mg",
+            }
+            nutrients_changed = bool(fields.intersection(nutrient_fields))
+
+            nutrient_source = current["nutrient_source"]
+            if "nutrient_source" in fields:
+                nutrient_source = str(payload.nutrient_source or "").strip()
+                if not nutrient_source:
+                    raise HTTPException(status_code=400, detail="nutrient_source required")
+            elif nutrients_changed:
+                nutrient_source = "manual"
+
+            preferred_mode = (
+                str(payload.preferred_mode or "").strip().lower()
+                if "preferred_mode" in fields
+                else current["preferred_mode"]
+            )
+            preferred_quantity = (
+                payload.preferred_quantity
+                if "preferred_quantity" in fields
+                else current["preferred_quantity"]
+            )
+            preferred_serving_id = current["preferred_serving_id"]
+            if "preferred_serving_id" in fields:
+                preferred_serving_id = (
+                    _as_uuid(payload.preferred_serving_id, "preferred_serving_id")
+                    if payload.preferred_serving_id
+                    else None
+                )
+
+            if preferred_mode not in ("grams", "serving"):
+                raise HTTPException(status_code=400, detail="preferred_mode must be grams|serving")
+            if preferred_quantity is None or float(preferred_quantity) <= 0:
+                raise HTTPException(status_code=400, detail="preferred_quantity must be > 0")
+            if preferred_mode == "grams" and preferred_serving_id is not None:
+                raise HTTPException(status_code=400, detail="grams mode cannot include preferred_serving_id")
+            if preferred_mode == "serving":
+                if preferred_serving_id is None:
+                    raise HTTPException(status_code=400, detail="serving mode requires preferred_serving_id")
+                serving_ok = await conn.fetchval(
+                    f"""
+                    select 1
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active
+                    """,
+                    preferred_serving_id,
+                    fid,
+                )
+                if not serving_ok:
+                    raise HTTPException(status_code=400, detail="preferred serving is not active for this food")
+
+            def numeric_value(name: str, payload_value):
+                return payload_value if name in fields else current[name]
+
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.my_food
+                set display_name=$2,
+                    brand=$3,
+                    variant=$4,
+                    barcode=$5,
+                    kcal=$6,
+                    protein_g=$7,
+                    carbs_g=$8,
+                    fat_g=$9,
+                    fiber_g=$10,
+                    sugar_g=$11,
+                    sodium_mg=$12,
+                    nutrient_source=$13,
+                    nutrient_source_detail=$14,
+                    nutrient_updated_at=case when $15::bool then now() else nutrient_updated_at end,
+                    preferred_mode=$16,
+                    preferred_quantity=$17,
+                    preferred_serving_id=$18::uuid,
+                    is_verified=$19,
+                    updated_at=now()
+                where my_food_id=$1::uuid
+                returning my_food_id
+                """,
+                fid,
+                display_name,
+                brand,
+                variant,
+                barcode,
+                numeric_value("kcal", payload.kcal),
+                numeric_value("protein_g", payload.protein_g),
+                numeric_value("carbs_g", payload.carbs_g),
+                numeric_value("fat_g", payload.fat_g),
+                numeric_value("fiber_g", payload.fiber_g),
+                numeric_value("sugar_g", payload.sugar_g),
+                numeric_value("sodium_mg", payload.sodium_mg),
+                nutrient_source,
+                nutrient_source_detail,
+                nutrients_changed or "nutrient_source" in fields,
+                preferred_mode,
+                preferred_quantity,
+                preferred_serving_id,
+                payload.is_verified if "is_verified" in fields else current["is_verified"],
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="my_food not found")
+
+            updated = await conn.fetchrow(
+                f"""
+                select {MY_FOOD_RETURN_COLUMNS}
+                from {SCHEMA}.my_food f
+                left join {SCHEMA}.my_food_serving ps
+                  on ps.my_food_serving_id=f.preferred_serving_id
+                 and ps.my_food_id=f.my_food_id
+                where f.my_food_id=$1::uuid
+                """,
+                fid,
+            )
+            return JSONResponse(_row_to_jsonable(updated))
+    finally:
+        await conn.close()
 
 
 @router.post("/my_foods/{my_food_id}/deactivate")
@@ -563,9 +828,10 @@ async def list_my_food_servings(my_food_id: str, req: Request):
 
         rows = await conn.fetch(
             f"""
-            select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
+            select my_food_serving_id, my_food_id, name, grams, is_default,
+                   source_type, source_label, is_active, created_at, updated_at
             from {SCHEMA}.my_food_serving
-            where my_food_id = $1::uuid
+            where my_food_id = $1::uuid and is_active
             order by is_default desc, lower(name), grams
             """,
             fid,
@@ -603,7 +869,8 @@ async def create_my_food_serving(
         # - If not, insert new row.
         row = await conn.fetchrow(
             f"""
-            select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
+            select my_food_serving_id, my_food_id, name, grams, is_default,
+                   source_type, source_label, is_active, created_at, updated_at
             from {SCHEMA}.my_food_serving
             where my_food_id=$1::uuid
               and lower(name)=lower($2)
@@ -617,17 +884,21 @@ async def create_my_food_serving(
         if row:
             sid = row["my_food_serving_id"]
 
-            # overwrite grams if changed
-            if float(row["grams"]) != float(grams):
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food_serving
-                    set grams=$2, updated_at=now()
-                    where my_food_serving_id=$1::uuid
-                    """,
-                    sid,
-                    grams,
-                )
+            await conn.execute(
+                f"""
+                update {SCHEMA}.my_food_serving
+                set name=$2,
+                    grams=$3,
+                    source_type='manual',
+                    source_label=coalesce(source_label, name),
+                    is_active=true,
+                    updated_at=now()
+                where my_food_serving_id=$1::uuid
+                """,
+                sid,
+                nm,
+                grams,
+            )
 
             # optionally set as default
             if is_default == 1 and row["is_default"] is not True:
@@ -648,22 +919,24 @@ async def create_my_food_serving(
                     sid,
                 )
 
-            # HARDEN: delete any older duplicates for the same (my_food_id, lower(name))
-            await conn.execute(
-                f"""
-                delete from {SCHEMA}.my_food_serving
-                where my_food_id=$1::uuid
-                  and lower(name)=lower($2)
-                  and my_food_serving_id <> $3::uuid
-                """,
-                fid,
-                nm,
-                sid,
-            )
+            if is_default == 1:
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.my_food
+                    set preferred_mode='serving',
+                        preferred_quantity=1,
+                        preferred_serving_id=$2::uuid,
+                        updated_at=now()
+                    where my_food_id=$1::uuid
+                    """,
+                    fid,
+                    sid,
+                )
 
             row2 = await conn.fetchrow(
                 f"""
-                select my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
+                select my_food_serving_id, my_food_id, name, grams, is_default,
+                       source_type, source_label, is_active, created_at, updated_at
                 from {SCHEMA}.my_food_serving
                 where my_food_serving_id=$1::uuid
                 """,
@@ -684,9 +957,11 @@ async def create_my_food_serving(
 
         row = await conn.fetchrow(
             f"""
-            insert into {SCHEMA}.my_food_serving (my_food_id, name, grams, is_default)
-            values ($1::uuid, $2, $3, $4::bool)
-            returning my_food_serving_id, my_food_id, name, grams, is_default, created_at, updated_at
+            insert into {SCHEMA}.my_food_serving
+              (my_food_id, name, grams, is_default, source_type, source_label, is_active)
+            values ($1::uuid, $2, $3, $4::bool, 'manual', $2, true)
+            returning my_food_serving_id, my_food_id, name, grams, is_default,
+                      source_type, source_label, is_active, created_at, updated_at
             """,
             fid,
             nm,
@@ -694,23 +969,145 @@ async def create_my_food_serving(
             (is_default == 1),
         )
 
-        if row:
-            sid = row["my_food_serving_id"]
-
-            # HARDEN: delete any older duplicates for the same (my_food_id, lower(name))
+        if row and is_default == 1:
             await conn.execute(
                 f"""
-                delete from {SCHEMA}.my_food_serving
+                update {SCHEMA}.my_food
+                set preferred_mode='serving',
+                    preferred_quantity=1,
+                    preferred_serving_id=$2::uuid,
+                    updated_at=now()
                 where my_food_id=$1::uuid
-                  and lower(name)=lower($2)
-                  and my_food_serving_id <> $3::uuid
                 """,
                 fid,
-                nm,
-                sid,
+                row["my_food_serving_id"],
             )
 
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
+    finally:
+        await conn.close()
+
+
+@router.patch("/my_foods/{my_food_id}/servings/{my_food_serving_id}")
+async def update_my_food_serving(
+    my_food_id: str,
+    my_food_serving_id: str,
+    payload: MyFoodServingUpdate,
+    req: Request,
+):
+    fid = _as_uuid(my_food_id, "my_food_id")
+    sid = _as_uuid(my_food_serving_id, "my_food_serving_id")
+    fields = set(payload.__fields_set__)
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields provided")
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                f"""
+                select s.*, f.owner_user_id, f.preferred_serving_id
+                from {SCHEMA}.my_food_serving s
+                join {SCHEMA}.my_food f on f.my_food_id=s.my_food_id
+                where s.my_food_serving_id=$1::uuid
+                  and s.my_food_id=$2::uuid
+                for update of s, f
+                """,
+                sid,
+                fid,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail="serving not found")
+            require_actor_matches_owner(req, str(current["owner_user_id"]))
+
+            name = current["name"]
+            if "name" in fields:
+                name = str(payload.name or "").strip()
+                if not name:
+                    raise HTTPException(status_code=400, detail="name required")
+
+            grams = payload.grams if "grams" in fields else current["grams"]
+            is_active = payload.is_active if "is_active" in fields else current["is_active"]
+            if grams is None or float(grams) <= 0:
+                raise HTTPException(status_code=400, detail="grams must be > 0")
+
+            set_preferred = payload.set_preferred if "set_preferred" in fields else None
+            if set_preferred is True and is_active is not True:
+                raise HTTPException(status_code=400, detail="inactive serving cannot be preferred")
+
+            manually_changed = bool(fields.intersection({"name", "grams"}))
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.my_food_serving
+                set name=$3,
+                    grams=$4,
+                    is_active=$5,
+                    source_type=case when $6::bool then 'manual' else source_type end,
+                    source_label=coalesce(source_label, name),
+                    is_default=case when $5::bool then is_default else false end,
+                    updated_at=now()
+                where my_food_serving_id=$1::uuid
+                  and my_food_id=$2::uuid
+                returning my_food_serving_id, my_food_id, name, grams, is_default,
+                          source_type, source_label, is_active, created_at, updated_at
+                """,
+                sid,
+                fid,
+                name,
+                grams,
+                is_active,
+                manually_changed,
+            )
+
+            currently_preferred = str(current["preferred_serving_id"] or "") == str(sid)
+            if set_preferred is True:
+                await conn.execute(
+                    f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and my_food_serving_id<>$2::uuid and is_default",
+                    fid,
+                    sid,
+                )
+                await conn.execute(
+                    f"update {SCHEMA}.my_food_serving set is_default=true, updated_at=now() where my_food_serving_id=$1::uuid",
+                    sid,
+                )
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.my_food
+                    set preferred_mode='serving', preferred_quantity=1,
+                        preferred_serving_id=$2::uuid, updated_at=now()
+                    where my_food_id=$1::uuid
+                    """,
+                    fid,
+                    sid,
+                )
+            elif currently_preferred and (is_active is not True or set_preferred is False):
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.my_food
+                    set preferred_mode='grams', preferred_quantity=$2,
+                        preferred_serving_id=null, updated_at=now()
+                    where my_food_id=$1::uuid
+                    """,
+                    fid,
+                    grams,
+                )
+                await conn.execute(
+                    f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_serving_id=$1::uuid",
+                    sid,
+                )
+
+            updated = await conn.fetchrow(
+                f"""
+                select my_food_serving_id, my_food_id, name, grams, is_default,
+                       source_type, source_label, is_active, created_at, updated_at
+                from {SCHEMA}.my_food_serving
+                where my_food_serving_id=$1::uuid
+                """,
+                sid,
+            )
+            return JSONResponse(_row_to_jsonable(updated or row))
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="serving name already exists for this food")
     finally:
         await conn.close()
 
