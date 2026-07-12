@@ -507,12 +507,15 @@ async def get_log_day(
 
             left join lateral (
               select
-                sum((mf.kcal * mi.qty_g)/100.0) as kcal,
-                sum((mf.protein_g * mi.qty_g)/100.0) as protein_g,
-                sum((mf.carbs_g * mi.qty_g)/100.0) as carbs_g,
-                sum((mf.fat_g * mi.qty_g)/100.0) as fat_g
+                sum((mf.kcal * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as kcal,
+                sum((mf.protein_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as protein_g,
+                sum((mf.carbs_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as carbs_g,
+                sum((mf.fat_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as fat_g
               from {SCHEMA}.meal_item mi
               join {SCHEMA}.my_food mf on mf.my_food_id = mi.my_food_id
+              left join {SCHEMA}.my_food_serving ms
+                on ms.my_food_serving_id = mi.my_food_serving_id
+               and ms.my_food_id = mi.my_food_id
               where mi.meal_id = e.meal_id
             ) mt on true
 
