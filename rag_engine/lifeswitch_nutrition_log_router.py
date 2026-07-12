@@ -387,42 +387,91 @@ async def update_log_entry(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
     nutrition_entry_id: str = Query(..., min_length=1),
-    qty_g: float = Query(..., gt=0),
+    qty_g: float | None = Query(None, gt=0),
+    my_food_serving_id: str | None = Query(None, min_length=1),
+    qty_servings: float | None = Query(None, gt=0),
     sort_order: int | None = Query(None),
     notes: str | None = Query(None, max_length=500),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
 
+    use_grams = qty_g is not None
+    use_serving = my_food_serving_id is not None or qty_servings is not None
+    if use_grams and use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity, not both")
+    if not use_grams and not use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity")
+    if use_serving and (my_food_serving_id is None or qty_servings is None):
+        raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
+
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.nutrition_entry e
-            set
-              qty_g = $3,
-              my_food_serving_id = null,
-              qty_servings = null,
-              sort_order = coalesce($4, e.sort_order),
-              notes = coalesce($5, e.notes),
-              updated_at = now()
-            from {SCHEMA}.nutrition_day d
-            where e.nutrition_day_id = d.nutrition_day_id
-              and d.owner_user_id = $1::uuid
-              and e.nutrition_entry_id = $2::uuid
-            returning
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
-              e.created_at, e.updated_at
-            """,
-            owner,
-            eid,
-            qty_g,
-            sort_order,
-            notes,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
-        return JSONResponse({"entry": _row_to_jsonable(row)})
+        async with conn.transaction():
+            entry = await conn.fetchrow(
+                f"""
+                select e.my_food_id, e.meal_id
+                from {SCHEMA}.nutrition_entry e
+                join {SCHEMA}.nutrition_day d
+                  on d.nutrition_day_id=e.nutrition_day_id
+                where d.owner_user_id=$1::uuid
+                  and e.nutrition_entry_id=$2::uuid
+                """,
+                owner,
+                eid,
+            )
+            if not entry:
+                raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
+            if entry["my_food_id"] is None:
+                raise HTTPException(status_code=400, detail="only single-food entries support quantity editing")
+
+            sid = None
+            resolved_qty_g = qty_g
+            if use_serving:
+                sid = _as_uuid(my_food_serving_id, "my_food_serving_id")
+                serving_grams = await conn.fetchval(
+                    f"""
+                    select grams
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active
+                    """,
+                    sid,
+                    entry["my_food_id"],
+                )
+                if serving_grams is None:
+                    raise HTTPException(status_code=400, detail="active serving not found for this food")
+                resolved_qty_g = float(serving_grams) * float(qty_servings)
+
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.nutrition_entry e
+                set
+                  qty_g = $3,
+                  my_food_serving_id = $4::uuid,
+                  qty_servings = $5,
+                  sort_order = coalesce($6, e.sort_order),
+                  notes = coalesce($7, e.notes),
+                  updated_at = now()
+                from {SCHEMA}.nutrition_day d
+                where e.nutrition_day_id = d.nutrition_day_id
+                  and d.owner_user_id = $1::uuid
+                  and e.nutrition_entry_id = $2::uuid
+                returning
+                  e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id,
+                  e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
+                  e.created_at, e.updated_at
+                """,
+                owner,
+                eid,
+                resolved_qty_g,
+                sid,
+                qty_servings if use_serving else None,
+                sort_order,
+                notes,
+            )
+            return JSONResponse({"entry": _row_to_jsonable(row)})
     finally:
         await conn.close()
 

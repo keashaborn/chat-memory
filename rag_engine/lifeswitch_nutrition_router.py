@@ -434,8 +434,9 @@ async def add_item(
     food_id: str | None = Query(None),  # legacy
     meal_label: str = Query("other"),
     sort_order: int = Query(0),
-    qty_g: float | None = Query(None),
-    qty_servings: float | None = Query(None),
+    qty_g: float | None = Query(None, gt=0),
+    my_food_serving_id: str | None = Query(None, min_length=1),
+    qty_servings: float | None = Query(None, gt=0),
     notes: str | None = Query(None),
 ):
     mpid = _as_uuid(meal_plan_id, "meal_plan_id")
@@ -445,6 +446,17 @@ async def add_item(
 
     if not my_food_id and not food_id:
         raise HTTPException(status_code=400, detail="must provide my_food_id (preferred) or food_id (legacy)")
+
+    use_grams = qty_g is not None
+    use_serving = my_food_serving_id is not None or qty_servings is not None
+    if use_grams and use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity, not both")
+    if not use_grams and not use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity")
+    if use_serving and (my_food_serving_id is None or qty_servings is None):
+        raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
+    if food_id and use_serving:
+        raise HTTPException(status_code=400, detail="legacy catalog foods support grams only")
 
     conn = await _db()
     try:
@@ -458,6 +470,7 @@ async def add_item(
 
         mfid = None
         fid = None
+        sid = None
 
         if my_food_id:
             mfid = _as_uuid(my_food_id, "my_food_id")
@@ -469,6 +482,22 @@ async def add_item(
             )
             if ok is not True:
                 raise HTTPException(status_code=404, detail="my_food not found or inactive")
+
+            if use_serving:
+                sid = _as_uuid(my_food_serving_id, "my_food_serving_id")
+                serving_ok = await conn.fetchval(
+                    f"""
+                    select 1
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active
+                    """,
+                    sid,
+                    mfid,
+                )
+                if not serving_ok:
+                    raise HTTPException(status_code=400, detail="active serving not found for this food")
 
         if (not mfid) and food_id:
             fid = _as_uuid(food_id, "food_id")
@@ -483,19 +512,139 @@ async def add_item(
         row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.meal_plan_item
-              (meal_plan_id, meal_label, sort_order, my_food_id, food_id, qty_g, qty_servings, notes)
+              (meal_plan_id, meal_label, sort_order, my_food_id, food_id,
+               qty_g, my_food_serving_id, qty_servings, notes)
             values
-              ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8)
-            returning meal_plan_item_id, meal_plan_id, meal_label, sort_order, my_food_id, food_id, qty_g, qty_servings, notes,
+              ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7::uuid, $8, $9)
+            returning meal_plan_item_id, meal_plan_id, meal_label, sort_order,
+                      my_food_id, food_id, qty_g, my_food_serving_id, qty_servings, notes,
                       created_at, updated_at
             """,
             mpid, meal_label, sort_order,
             mfid, fid,
-            qty_g, qty_servings, notes,
+            qty_g, sid, qty_servings, notes,
         )
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
     finally:
         await conn.close()
+
+@router.patch("/meal_plans/{meal_plan_id}/items/{meal_plan_item_id}")
+async def update_meal_plan_item(
+    meal_plan_id: str,
+    meal_plan_item_id: str,
+    req: Request,
+    meal_label: str = Query(...),
+    qty_g: float | None = Query(None, gt=0),
+    my_food_serving_id: str | None = Query(None, min_length=1),
+    qty_servings: float | None = Query(None, gt=0),
+):
+    mpid = _as_uuid(meal_plan_id, "meal_plan_id")
+    item_id = _as_uuid(meal_plan_item_id, "meal_plan_item_id")
+    if meal_label not in ("breakfast", "lunch", "dinner", "snack", "other"):
+        raise HTTPException(status_code=400, detail="invalid meal_label")
+
+    use_grams = qty_g is not None
+    use_serving = my_food_serving_id is not None or qty_servings is not None
+    if use_grams and use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity, not both")
+    if not use_grams and not use_serving:
+        raise HTTPException(status_code=400, detail="provide qty_g OR serving quantity")
+    if use_serving and (my_food_serving_id is None or qty_servings is None):
+        raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            item = await conn.fetchrow(
+                f"""
+                select i.my_food_id, i.food_id, p.owner_user_id
+                from {SCHEMA}.meal_plan_item i
+                join {SCHEMA}.meal_plan p on p.meal_plan_id=i.meal_plan_id
+                where i.meal_plan_id=$1::uuid
+                  and i.meal_plan_item_id=$2::uuid
+                """,
+                mpid,
+                item_id,
+            )
+            if not item:
+                raise HTTPException(status_code=404, detail="meal plan item not found")
+            require_actor_matches_owner(req, str(item["owner_user_id"]))
+            if item["food_id"] is not None and use_serving:
+                raise HTTPException(status_code=400, detail="legacy catalog foods support grams only")
+
+            sid = None
+            if use_serving:
+                sid = _as_uuid(my_food_serving_id, "my_food_serving_id")
+                serving_ok = await conn.fetchval(
+                    f"""
+                    select 1
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active
+                    """,
+                    sid,
+                    item["my_food_id"],
+                )
+                if not serving_ok:
+                    raise HTTPException(status_code=400, detail="active serving not found for this food")
+
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.meal_plan_item
+                set meal_label=$3,
+                    qty_g=$4,
+                    my_food_serving_id=$5::uuid,
+                    qty_servings=$6,
+                    updated_at=now()
+                where meal_plan_id=$1::uuid
+                  and meal_plan_item_id=$2::uuid
+                returning meal_plan_item_id, meal_plan_id, meal_label, sort_order,
+                          my_food_id, food_id, qty_g, my_food_serving_id, qty_servings,
+                          notes, created_at, updated_at
+                """,
+                mpid,
+                item_id,
+                meal_label,
+                qty_g if use_grams else None,
+                sid,
+                qty_servings if use_serving else None,
+            )
+            return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
+@router.delete("/meal_plans/{meal_plan_id}/items/{meal_plan_item_id}")
+async def delete_meal_plan_item(meal_plan_id: str, meal_plan_item_id: str, req: Request):
+    mpid = _as_uuid(meal_plan_id, "meal_plan_id")
+    item_id = _as_uuid(meal_plan_item_id, "meal_plan_item_id")
+    conn = await _db()
+    try:
+        owner = await conn.fetchval(
+            f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid",
+            mpid,
+        )
+        if not owner:
+            raise HTTPException(status_code=404, detail="meal plan not found")
+        require_actor_matches_owner(req, str(owner))
+
+        row = await conn.fetchrow(
+            f"""
+            delete from {SCHEMA}.meal_plan_item
+            where meal_plan_id=$1::uuid
+              and meal_plan_item_id=$2::uuid
+            returning meal_plan_item_id
+            """,
+            mpid,
+            item_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="meal plan item not found")
+        return JSONResponse({"deleted": str(row["meal_plan_item_id"])})
+    finally:
+        await conn.close()
+
 
 @router.get("/meal_plans/{meal_plan_id}/items")
 async def list_items(meal_plan_id: str, req: Request):
@@ -514,7 +663,10 @@ async def list_items(meal_plan_id: str, req: Request):
             f"""
             select
               i.meal_plan_item_id, i.meal_plan_id, i.meal_label, i.sort_order,
-              i.my_food_id, i.food_id, i.qty_g, i.qty_servings, i.notes,
+              i.my_food_id, i.food_id, i.qty_g, i.my_food_serving_id, i.qty_servings, i.notes,
+              s.name as serving_name,
+              s.grams as serving_grams,
+              coalesce(i.qty_g, s.grams * i.qty_servings) as qty_g_resolved,
               coalesce(m.display_name, f.display_name) as display_name,
               coalesce(m.brand, f.brand) as brand,
               coalesce(m.kcal, f.kcal) as kcal,
@@ -524,6 +676,9 @@ async def list_items(meal_plan_id: str, req: Request):
               i.created_at, i.updated_at
             from {SCHEMA}.meal_plan_item i
             left join {SCHEMA}.my_food m on m.my_food_id = i.my_food_id
+            left join {SCHEMA}.my_food_serving s
+              on s.my_food_serving_id = i.my_food_serving_id
+             and s.my_food_id = i.my_food_id
             left join catalog_dev.food f on f.food_id = i.food_id
             where i.meal_plan_id = $1::uuid
             order by i.meal_label, i.sort_order, i.created_at
