@@ -32,6 +32,9 @@ jobs:
           docker compose -f docker-compose.ci.yml exec -T brains \
             bash -lc 'HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
 
+      - name: Validate memory V1 schema firewall
+        run: ./tools/memory_v1_schema_ci.sh
+
       - name: Dump logs on failure
         if: failure()
         run: |
