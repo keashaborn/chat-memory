@@ -33,8 +33,8 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 
 ### Identity and security
 
-- Qdrant is currently published by Docker on `0.0.0.0:6333` without an authenticated gateway. A private-VPC probe from Verbal Sage timed out and UFW has no 6333 allow rule, but the host binding remains broader than required and should be restricted to loopback.
-- Redis is likewise published on every host interface. Its actual cross-host reachability still needs a direct probe; it should be restricted to loopback unless a documented external consumer exists.
+- Qdrant was published on every host interface. On 2026-07-12 it was changed to `127.0.0.1:6333`; persisted collections recovered green with `memory_raw=570` and `memory_claim_v1=4`, and a Verbal Sage private-VPC probe timed out.
+- Redis was published on every host interface. On 2026-07-12 it was changed to `127.0.0.1:6379`, its persisted volume was retained, and a Verbal Sage private-VPC probe timed out.
 - The Brains deployment Compose file contains database credentials directly instead of using an external secret. Rotation and dependency-safe secret migration remain required.
 - The currently deployed `/vantage/query` trusts request-body `user_id` and does not enforce `x-vs-actor-user-id` equality. An exact UUID equality patch and HTTP tests pass on the isolated branch but are not deployed.
 - The currently deployed `/log` also trusts request-body `user_id` before writing Postgres transcripts or Qdrant points. The isolated patch requires exact actor/owner UUID equality and removes Vantage alias remapping for new writes; it is not deployed.
@@ -121,6 +121,7 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 - Projection processing is owner-explicit, uses `FOR UPDATE SKIP LOCKED`, avoids external calls inside database transactions, and does not lose a concurrently refreshed outbox job.
 - The isolated schema/store/retrieval/projection test suite passes. Live prompt routing has not been switched to V1.
 - Exact actor/body UUID enforcement for `/log` and `/vantage/query` passes helper and route-level container tests on the isolated branch. Production deployment remains a separate gate.
+- Production Qdrant and Redis host ports are loopback-only. Pre-change Qdrant snapshots and a Redis persistence checkpoint were taken; Brains health passed after recreation.
 
 ## Unresolved checks
 
