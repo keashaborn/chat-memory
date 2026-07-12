@@ -373,7 +373,9 @@ def _load_dotenv_if_needed() -> None:
 
 def pg_dsn() -> str:
     _load_dotenv_if_needed()
-    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL") or "postgresql://sage:strongpassword@127.0.0.1:5432/memory"
+    dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError("POSTGRES_DSN or DATABASE_URL is required")
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://"):]
     return dsn

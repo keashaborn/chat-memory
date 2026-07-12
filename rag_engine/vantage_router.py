@@ -60,7 +60,7 @@ def _csv_env(name: str) -> List[str]:
 
 async def _rag_policy_get(vantage_id: str) -> Dict[str, Any]:
     vid = (vantage_id or "default").strip() or "default"
-    dsn = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+    dsn = os.environ["POSTGRES_DSN"]
     try:
         conn = await asyncpg.connect(dsn)
         try:
@@ -84,7 +84,7 @@ async def _rag_policy_get(vantage_id: str) -> Dict[str, Any]:
 
 async def _rag_policy_upsert(vantage_id: str, policy: Dict[str, Any]) -> Dict[str, Any]:
     vid = (vantage_id or "default").strip() or "default"
-    dsn = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+    dsn = os.environ["POSTGRES_DSN"]
     payload_json = json.dumps(policy or {}, ensure_ascii=False)
 
     conn = await asyncpg.connect(dsn)
@@ -1565,7 +1565,7 @@ def _fetch_thread_context_block(thread_id: str | None, mix: Dict[str, Any] | Non
     except Exception:
         return ""
 
-    dsn = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+    dsn = os.environ["POSTGRES_DSN"]
 
     async def _q() -> list[dict]:
         conn = await asyncpg.connect(dsn)
@@ -1901,7 +1901,7 @@ def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | 
     except Exception:
         return []
 
-    dsn = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+    dsn = os.environ["POSTGRES_DSN"]
 
     async def _q() -> list[dict]:
         conn = await asyncpg.connect(dsn)

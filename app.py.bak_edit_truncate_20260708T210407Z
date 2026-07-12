@@ -227,7 +227,7 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
 # single global qdrant client
 qdrant_client = None
 
-DSN = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+DSN = os.environ["POSTGRES_DSN"]
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -2103,4 +2103,3 @@ async def readyz():
     except Exception as e:
         return JSONResponse({"ok": False, "postgres": str(e)}, status_code=503)
     return {"ok": True, "postgres": True}
-

@@ -3,7 +3,7 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: sage
-      POSTGRES_PASSWORD: strongpassword
+      POSTGRES_PASSWORD: ci_only_postgres_password
       POSTGRES_DB: memory
      # no ports; brains connects on the docker network
     healthcheck:
@@ -17,7 +17,7 @@ services:
       context: .
       dockerfile: Dockerfile.ci
     environment:
-      POSTGRES_DSN: postgresql://sage:strongpassword@postgres:5432/memory
+      POSTGRES_DSN: postgresql://sage:ci_only_postgres_password@postgres:5432/memory
       ENABLE_VANTAGE_ENDPOINTS: "1"
       VANTAGE_TEST_MODE: "1"
       # keep these off; CI canary doesn't need them

@@ -30,7 +30,7 @@ jobs:
       - name: Run audit canary
         run: |
           docker compose -f docker-compose.ci.yml exec -T brains \
-            bash -lc 'HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=strongpassword PGDATABASE=memory ./tools/audit_canary.sh'
+            bash -lc 'HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
 
       - name: Dump logs on failure
         if: failure()

@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-import os, time, uuid, hashlib, asyncpg, json
+import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import websockets
 import socket
@@ -87,8 +87,8 @@ async def request_id_middleware(request: Request, call_next):
 
 
 # ---------- service boundary ----------
-# Brains is an internal backend. When VS_SERVICE_TOKEN is set, protected routes
-# must be called by a trusted server-side proxy using X-VS-Service-Token.
+# Brains is an internal backend. Protected routes must be called by a trusted
+# server-side proxy using X-VS-Service-Token.
 # This is not user auth. It is the first wall: browser/client traffic should not
 # directly reach user-owned Brains routes.
 PUBLIC_SERVICE_TOKEN_EXACT = {
@@ -97,38 +97,42 @@ PUBLIC_SERVICE_TOKEN_EXACT = {
     "/redoc",
 }
 
-PUBLIC_SERVICE_TOKEN_PREFIXES = (
+PUBLIC_GET_SERVICE_TOKEN_PREFIXES = (
     "/catalog/",
     "/lifeswitch/training/workout_template_shares/preview",
     "/lifeswitch/people/invitations/preview",
 )
 
-def _service_token_required(path: str) -> bool:
+def _service_token_required(path: str, method: str) -> bool:
     path = str(path or "")
     if path in PUBLIC_SERVICE_TOKEN_EXACT:
         return False
     if path.startswith("/docs/") or path.startswith("/redoc/") or path.startswith("/openapi"):
         return False
-    for prefix in PUBLIC_SERVICE_TOKEN_PREFIXES:
-        if path.startswith(prefix):
-            return False
+    if str(method or "").upper() == "GET":
+        for prefix in PUBLIC_GET_SERVICE_TOKEN_PREFIXES:
+            if path.startswith(prefix):
+                return False
     return True
 
 @app.middleware("http")
 async def service_token_middleware(request: Request, call_next):
     expected = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
 
-    # Disabled until env is set. This lets us deploy the middleware before
-    # updating every Next.js proxy route.
     if not expected:
-        return await call_next(request)
+        rid = _get_request_id(request)
+        return JSONResponse(
+            {"status": "unavailable", "detail": "service_token_not_configured"},
+            status_code=503,
+            headers={"x-request-id": rid},
+        )
 
     path = request.url.path
-    if not _service_token_required(path):
+    if not _service_token_required(path, request.method):
         return await call_next(request)
 
     provided = (request.headers.get("x-vs-service-token") or "").strip()
-    if provided != expected:
+    if not hmac.compare_digest(provided, expected):
         rid = _get_request_id(request)
         return JSONResponse(
             {"status": "unauthorized", "detail": "missing_or_invalid_service_token"},
@@ -227,7 +231,7 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
 # single global qdrant client
 qdrant_client = None
 
-DSN = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+DSN = os.environ["POSTGRES_DSN"]
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -2175,4 +2179,3 @@ async def readyz():
     except Exception as e:
         return JSONResponse({"ok": False, "postgres": str(e)}, status_code=503)
     return {"ok": True, "postgres": True}
-

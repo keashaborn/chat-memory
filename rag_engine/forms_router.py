@@ -8,7 +8,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-DSN = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+DSN = os.environ["POSTGRES_DSN"]
 
 router = APIRouter()
 

@@ -8,7 +8,7 @@ BASE="http://${HOST}:${PORT}"
 PGHOST="${PGHOST:-localhost}"
 PGUSER="${PGUSER:-sage}"
 PGDATABASE="${PGDATABASE:-memory}"
-PGPASSWORD="${PGPASSWORD:-strongpassword}"
+PGPASSWORD="${PGPASSWORD:-ci_only_postgres_password}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1"; exit 2; }; }
 need curl

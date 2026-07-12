@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
-DSN = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+DSN = os.environ["POSTGRES_DSN"]
 
 
 def _parse_uuid(s: Any) -> Optional[uuid.UUID]:

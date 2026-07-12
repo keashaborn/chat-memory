@@ -52,7 +52,7 @@ def is_identity_or_policy_query(message: str) -> bool:
     return False
 
 # ---------- identity canonicalization (alias -> canonical) ----------
-PG_DSN = os.getenv("POSTGRES_DSN", "postgres://sage:strongpassword@localhost:5432/memory")
+PG_DSN = os.environ["POSTGRES_DSN"]
 
 async def _resolve_canonical_user_id_async(vantage_id: str, alias_user_id: str) -> tuple[str, str]:
     """

@@ -36,7 +36,9 @@ APPROVED_TOPIC_KEYS = {
 
 
 def pg_dsn() -> str:
-    dsn = os.getenv("POSTGRES_DSN") or "postgresql://sage:strongpassword@127.0.0.1:5432/memory"
+    dsn = os.getenv("POSTGRES_DSN")
+    if not dsn:
+        raise RuntimeError("POSTGRES_DSN is required")
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://"):]
     return dsn
