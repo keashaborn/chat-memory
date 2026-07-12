@@ -87,6 +87,24 @@ def _parse_day(day: str) -> _dt.date:
         raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD")
 
 
+def _entry_totals(row) -> dict[str, float]:
+    if row["meal_id"] is not None:
+        return {
+            "kcal": float(row["meal_kcal"] or 0),
+            "protein_g": float(row["meal_protein"] or 0),
+            "carbs_g": float(row["meal_carbs"] or 0),
+            "fat_g": float(row["meal_fat"] or 0),
+        }
+
+    grams = float(row["qty_g"] or 0)
+    return {
+        "kcal": float(row["food_kcal_100g"] or 0) * grams / 100.0,
+        "protein_g": float(row["food_protein_100g"] or 0) * grams / 100.0,
+        "carbs_g": float(row["food_carbs_100g"] or 0) * grams / 100.0,
+        "fat_g": float(row["food_fat_100g"] or 0) * grams / 100.0,
+    }
+
+
 class NutritionBatchItem(BaseModel):
     my_food_id: str
     qty_g: float | None = Field(None, gt=0)
@@ -436,6 +454,139 @@ async def delete_log_entry(
         if not row:
             raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
         return JSONResponse({"deleted": _row_to_jsonable(row)})
+    finally:
+        await conn.close()
+
+
+@router.get("/log/range")
+async def get_log_range(
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    start_day: str = Query(..., min_length=10, max_length=10),
+    end_day: str = Query(..., min_length=10, max_length=10),
+    include_entries: int = Query(0, ge=0, le=1),
+    target_user_id: str = Query("", max_length=80),
+):
+    viewer = require_actor_matches_owner(req, owner_user_id)
+    start = _parse_day(start_day)
+    end = _parse_day(end_day)
+    if start > end:
+        raise HTTPException(status_code=400, detail="start_day must be on or before end_day")
+    if (end - start).days > 365:
+        raise HTTPException(status_code=400, detail="date range cannot exceed 366 days")
+
+    conn = await _db()
+    try:
+        owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
+        day_rows = await conn.fetch(
+            f"""
+            select nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+            from {SCHEMA}.nutrition_day
+            where owner_user_id=$1::uuid
+              and day between $2::date and $3::date
+            order by day desc
+            """,
+            owner,
+            start,
+            end,
+        )
+
+        entry_rows = await conn.fetch(
+            f"""
+            select
+              nd.day as nutrition_day_date,
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g,
+              e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
+              e.created_at, e.updated_at,
+
+              coalesce(m.name, f.display_name) as label,
+              m.meal_type as meal_type,
+              s.name as serving_name,
+              s.grams as serving_grams,
+
+              f.brand as food_brand,
+              f.variant as food_variant,
+              f.source_type as food_source_type,
+              f.source_id as food_source_id,
+
+              f.kcal as food_kcal_100g,
+              f.protein_g as food_protein_100g,
+              f.carbs_g as food_carbs_100g,
+              f.fat_g as food_fat_100g,
+
+              mt.kcal as meal_kcal,
+              mt.protein_g as meal_protein,
+              mt.carbs_g as meal_carbs,
+              mt.fat_g as meal_fat
+
+            from {SCHEMA}.nutrition_day nd
+            join {SCHEMA}.nutrition_entry e
+              on e.nutrition_day_id = nd.nutrition_day_id
+            left join {SCHEMA}.meal m on m.meal_id = e.meal_id
+            left join {SCHEMA}.my_food f on f.my_food_id = e.my_food_id
+            left join {SCHEMA}.my_food_serving s
+              on s.my_food_serving_id = e.my_food_serving_id
+             and s.my_food_id = e.my_food_id
+
+            left join lateral (
+              select
+                sum((mf.kcal * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as kcal,
+                sum((mf.protein_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as protein_g,
+                sum((mf.carbs_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as carbs_g,
+                sum((mf.fat_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as fat_g
+              from {SCHEMA}.meal_item mi
+              join {SCHEMA}.my_food mf on mf.my_food_id = mi.my_food_id
+              left join {SCHEMA}.my_food_serving ms
+                on ms.my_food_serving_id = mi.my_food_serving_id
+               and ms.my_food_id = mi.my_food_id
+              where mi.meal_id = e.meal_id
+            ) mt on true
+
+            where nd.owner_user_id=$1::uuid
+              and nd.day between $2::date and $3::date
+            order by nd.day desc, e.sort_order, e.created_at
+            """,
+            owner,
+            start,
+            end,
+        )
+
+        entries_by_day: dict[str, list[dict]] = {}
+        totals_by_day: dict[str, dict[str, float]] = {}
+        for row in entry_rows:
+            day_key = row["nutrition_day_date"].isoformat()
+            totals = totals_by_day.setdefault(
+                day_key,
+                {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0},
+            )
+            entry_totals = _entry_totals(row)
+            for key, value in entry_totals.items():
+                totals[key] += value
+
+            if include_entries:
+                entry = _row_to_jsonable(row)
+                entry.pop("nutrition_day_date", None)
+                entries_by_day.setdefault(day_key, []).append(entry)
+
+        days = []
+        for day_row in day_rows:
+            day_key = day_row["day"].isoformat()
+            days.append({
+                "day": _row_to_jsonable(day_row),
+                "entries": entries_by_day.get(day_key, []) if include_entries else [],
+                "totals": totals_by_day.get(
+                    day_key,
+                    {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0},
+                ),
+            })
+
+        return JSONResponse({
+            "start_day": start.isoformat(),
+            "end_day": end.isoformat(),
+            "days": days,
+            "_target_user_id": owner,
+            "_delegated_view": delegated,
+        })
     finally:
         await conn.close()
 
