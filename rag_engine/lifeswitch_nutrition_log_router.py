@@ -8,6 +8,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -84,6 +85,20 @@ def _parse_day(day: str) -> _dt.date:
         return _dt.date.fromisoformat(str(day))
     except Exception:
         raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD")
+
+
+class NutritionBatchItem(BaseModel):
+    my_food_id: str
+    qty_g: float | None = Field(None, gt=0)
+    my_food_serving_id: str | None = None
+    qty_servings: float | None = Field(None, gt=0)
+    sort_order: int = 1
+    notes: str | None = Field(None, max_length=500)
+
+
+class NutritionBatchCreate(BaseModel):
+    day: str = Field(..., min_length=10, max_length=10)
+    items: list[NutritionBatchItem] = Field(..., min_length=1, max_length=100)
 
 
 @router.post("/log/entry")
@@ -179,6 +194,7 @@ async def create_log_entry(
                     from {SCHEMA}.my_food_serving
                     where my_food_serving_id=$1::uuid
                       and my_food_id=$2::uuid
+                      and is_active=true
                     """,
                     sid,
                     fid,
@@ -237,6 +253,113 @@ async def create_log_entry(
             "day": _row_to_jsonable(day_row),
             "entry": _row_to_jsonable(entry_row) if entry_row else None,
         })
+    finally:
+        await conn.close()
+
+
+@router.post("/log/entries/batch")
+async def create_log_entries_batch(
+    body: NutritionBatchCreate,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    """Create several food entries in one transaction or create none."""
+    owner = require_actor_matches_owner(req, owner_user_id)
+    day = _parse_day(body.day)
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            prepared = []
+            for index, item in enumerate(body.items):
+                fid = _as_uuid(item.my_food_id, f"items[{index}].my_food_id")
+                use_grams = item.qty_g is not None
+                use_serving = item.my_food_serving_id is not None or item.qty_servings is not None
+                if use_grams and use_serving:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"items[{index}] must provide qty_g OR serving quantity, not both",
+                    )
+                if not use_grams and not use_serving:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"items[{index}] must provide qty_g OR serving quantity",
+                    )
+                if use_serving and (item.my_food_serving_id is None or item.qty_servings is None):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"items[{index}] serving mode requires my_food_serving_id and qty_servings",
+                    )
+
+                food_active = await conn.fetchval(
+                    f"""
+                    select is_active
+                    from {SCHEMA}.my_food
+                    where my_food_id=$1::uuid
+                      and owner_user_id=$2::uuid
+                    """,
+                    fid,
+                    owner,
+                )
+                if food_active is not True:
+                    raise HTTPException(status_code=404, detail=f"items[{index}] food not found or inactive")
+
+                sid = None
+                resolved_qty_g = item.qty_g
+                if use_serving:
+                    sid = _as_uuid(item.my_food_serving_id, f"items[{index}].my_food_serving_id")
+                    serving_grams = await conn.fetchval(
+                        f"""
+                        select grams
+                        from {SCHEMA}.my_food_serving
+                        where my_food_serving_id=$1::uuid
+                          and my_food_id=$2::uuid
+                          and is_active=true
+                        """,
+                        sid,
+                        fid,
+                    )
+                    if serving_grams is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"items[{index}] active serving not found for this food",
+                        )
+                    resolved_qty_g = float(serving_grams) * float(item.qty_servings)
+
+                prepared.append((fid, sid, resolved_qty_g, item.qty_servings, item.sort_order, item.notes))
+
+            day_row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.nutrition_day (owner_user_id, day)
+                values ($1::uuid, $2::date)
+                on conflict (owner_user_id, day) do update set updated_at=now()
+                returning nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+                """,
+                owner,
+                day,
+            )
+            entries = []
+            for fid, sid, resolved_qty_g, qty_servings, sort_order, notes in prepared:
+                row = await conn.fetchrow(
+                    f"""
+                    insert into {SCHEMA}.nutrition_entry
+                      (nutrition_day_id, my_food_id, qty_g, my_food_serving_id,
+                       qty_servings, sort_order, notes)
+                    values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
+                    returning nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
+                              qty_g, my_food_serving_id, qty_servings,
+                              sort_order, notes, created_at, updated_at
+                    """,
+                    day_row["nutrition_day_id"],
+                    fid,
+                    resolved_qty_g,
+                    sid,
+                    qty_servings,
+                    sort_order,
+                    notes,
+                )
+                entries.append(_row_to_jsonable(row))
+
+            return JSONResponse({"day": _row_to_jsonable(day_row), "entries": entries})
     finally:
         await conn.close()
 
