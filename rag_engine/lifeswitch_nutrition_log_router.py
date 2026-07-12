@@ -94,30 +94,101 @@ async def create_log_entry(
     meal_id: str | None = Query(None),
     my_food_id: str | None = Query(None),
     qty_g: float | None = Query(None, gt=0),
+    my_food_serving_id: str | None = Query(None, min_length=1),
+    qty_servings: float | None = Query(None, gt=0),
     sort_order: int = Query(0),
     notes: str | None = Query(None, max_length=500),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     d = _parse_day(day)
 
-    # exactly one of meal_id / my_food_id
     if (meal_id is None) == (my_food_id is None):
         raise HTTPException(status_code=400, detail="provide exactly one: meal_id or my_food_id")
 
     mid = _as_uuid(meal_id, "meal_id") if meal_id is not None else None
     fid = _as_uuid(my_food_id, "my_food_id") if my_food_id is not None else None
 
+    use_grams = qty_g is not None
+    use_serving = my_food_serving_id is not None or qty_servings is not None
+
+    if mid is not None and use_serving:
+        raise HTTPException(
+            status_code=400,
+            detail="serving quantity is only valid for my_food_id",
+        )
+
+    if fid is not None:
+        if use_grams and use_serving:
+            raise HTTPException(
+                status_code=400,
+                detail="provide qty_g OR (my_food_serving_id + qty_servings), not both",
+            )
+        if not use_grams and not use_serving:
+            raise HTTPException(
+                status_code=400,
+                detail="must provide qty_g OR (my_food_serving_id + qty_servings)",
+            )
+        if use_serving and (my_food_serving_id is None or qty_servings is None):
+            raise HTTPException(
+                status_code=400,
+                detail="serving mode requires my_food_serving_id and qty_servings",
+            )
+
+    sid = (
+        _as_uuid(my_food_serving_id, "my_food_serving_id")
+        if my_food_serving_id is not None
+        else None
+    )
+
     conn = await _db()
     try:
         if mid is not None:
-            ok = await conn.fetchval(f"select is_active from {SCHEMA}.meal where meal_id=$1::uuid", mid)
+            ok = await conn.fetchval(
+                f"""
+                select is_active
+                from {SCHEMA}.meal
+                where meal_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                mid,
+                owner,
+            )
             if ok is not True:
                 raise HTTPException(status_code=404, detail="meal not found or inactive")
 
+        resolved_qty_g = qty_g
+
         if fid is not None:
-            ok = await conn.fetchval(f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid", fid)
+            ok = await conn.fetchval(
+                f"""
+                select is_active
+                from {SCHEMA}.my_food
+                where my_food_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                fid,
+                owner,
+            )
             if ok is not True:
                 raise HTTPException(status_code=404, detail="my_food not found or inactive")
+
+            if sid is not None:
+                serving_grams = await conn.fetchval(
+                    f"""
+                    select grams
+                    from {SCHEMA}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                    """,
+                    sid,
+                    fid,
+                )
+                if serving_grams is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="serving not found for this my_food_id",
+                    )
+                resolved_qty_g = float(serving_grams) * float(qty_servings)
 
         day_row = await conn.fetchrow(
             f"""
@@ -125,7 +196,9 @@ async def create_log_entry(
             values ($1::uuid, $2::date)
             on conflict (owner_user_id, day) do update
               set updated_at=now()
-            returning nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+            returning
+              nutrition_day_id, owner_user_id, day, notes,
+              created_at, updated_at
             """,
             owner,
             d,
@@ -138,22 +211,35 @@ async def create_log_entry(
         entry_row = await conn.fetchrow(
             f"""
             insert into {SCHEMA}.nutrition_entry
-              (nutrition_day_id, meal_id, my_food_id, qty_g, sort_order, notes)
+              (
+                nutrition_day_id, meal_id, my_food_id, qty_g,
+                my_food_serving_id, qty_servings,
+                sort_order, notes
+              )
             values
-              ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6)
-            returning nutrition_entry_id, nutrition_day_id, meal_id, my_food_id, qty_g, sort_order, notes, created_at, updated_at
+              ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8)
+            returning
+              nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
+              qty_g, my_food_serving_id, qty_servings,
+              sort_order, notes, created_at, updated_at
             """,
             ndid,
             mid,
             fid,
-            qty_g,
+            resolved_qty_g,
+            sid,
+            qty_servings,
             sort_order,
             notes,
         )
 
-        return JSONResponse({"day": _row_to_jsonable(day_row), "entry": _row_to_jsonable(entry_row) if entry_row else None})
+        return JSONResponse({
+            "day": _row_to_jsonable(day_row),
+            "entry": _row_to_jsonable(entry_row) if entry_row else None,
+        })
     finally:
         await conn.close()
+
 
 @router.patch("/log/entry")
 async def update_log_entry(
@@ -174,6 +260,8 @@ async def update_log_entry(
             update {SCHEMA}.nutrition_entry e
             set
               qty_g = $3,
+              my_food_serving_id = null,
+              qty_servings = null,
               sort_order = coalesce($4, e.sort_order),
               notes = coalesce($5, e.notes),
               updated_at = now()
@@ -182,7 +270,7 @@ async def update_log_entry(
               and d.owner_user_id = $1::uuid
               and e.nutrition_entry_id = $2::uuid
             returning
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
               e.created_at, e.updated_at
             """,
             owner,
@@ -216,7 +304,7 @@ async def delete_log_entry(
               and d.owner_user_id = $1::uuid
               and e.nutrition_entry_id = $2::uuid
             returning
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
               e.created_at, e.updated_at
             """,
             owner,
@@ -265,11 +353,13 @@ async def get_log_day(
         rows = await conn.fetch(
             f"""
             select
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.sort_order, e.notes,
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
               e.created_at, e.updated_at,
 
             coalesce(m.name, f.display_name) as label,
             m.meal_type as meal_type,
+            s.name as serving_name,
+            s.grams as serving_grams,
 
             -- Food identity fields (so frontend can render like FoodsPage)
             f.brand as food_brand,
@@ -288,6 +378,9 @@ async def get_log_day(
             from {SCHEMA}.nutrition_entry e
             left join {SCHEMA}.meal m on m.meal_id = e.meal_id
             left join {SCHEMA}.my_food f on f.my_food_id = e.my_food_id
+            left join {SCHEMA}.my_food_serving s
+              on s.my_food_serving_id = e.my_food_serving_id
+             and s.my_food_id = e.my_food_id
 
             left join lateral (
               select
