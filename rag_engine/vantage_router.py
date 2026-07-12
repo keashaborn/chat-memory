@@ -21,6 +21,7 @@ from .retriever_unified import retrieve_personal_memory, unified_retrieve
 from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
+from .memory_v1_shadow import run_memory_v1_shadow
 
 # Reuse the exact behavior of the current /rag/query path where it matters:
 from .rag_router import (
@@ -2106,6 +2107,16 @@ def vantage_query(req: Request, payload: VantageQuery):
             limits=limits,
             retrieval_plan=retrieval_plan,
             thread_stats=thread_stats,
+        )
+
+        # Measurement only: this packet is traced and summarized for diagnostics,
+        # but never added to memory_chunks, system_prompt, or model messages.
+        turn_plan["memory_v1_shadow"] = run_memory_v1_shadow(
+            payload.user_id,
+            query=payload.message,
+            turn_intent=turn_intent,
+            request_id=req_request_id,
+            thread_id=payload.thread_id,
         )
 
 
