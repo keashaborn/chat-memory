@@ -35,6 +35,66 @@ SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 CATALOG_SCHEMA = os.getenv("CATALOG_SCHEMA", "catalog_dev")
 
 
+def _positive_float(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _infer_usda_serving_grams(food: dict, per_100g: dict[str, float | None]):
+    serving_size = _positive_float((food or {}).get("servingSize"))
+    serving_unit = str((food or {}).get("servingSizeUnit") or "").strip().lower()
+    if serving_size is not None and serving_unit in ("g", "gram", "grams", "grm"):
+        return serving_size
+
+    # Branded USDA records sometimes mislabel gram-equivalent servings as MLT or MG.
+    # Derive the serving mass only when multiple label/per-100g nutrient ratios agree.
+    label = (food or {}).get("labelNutrients") or {}
+    candidates = []
+    for label_key, nutrient_key in (
+        ("calories", "kcal"),
+        ("protein", "protein"),
+        ("carbohydrates", "carbs"),
+        ("fat", "fat"),
+        ("fiber", "fiber"),
+        ("sugars", "sugar"),
+        ("sodium", "sodium_mg"),
+    ):
+        label_value = _positive_float((label.get(label_key) or {}).get("value"))
+        per_100_value = _positive_float(per_100g.get(nutrient_key))
+        if label_value is None or per_100_value is None:
+            continue
+        inferred = label_value * 100.0 / per_100_value
+        if 0.1 <= inferred <= 5000:
+            candidates.append(inferred)
+
+    if len(candidates) < 2:
+        return None
+
+    candidates.sort()
+    midpoint = len(candidates) // 2
+    median = (
+        candidates[midpoint]
+        if len(candidates) % 2
+        else (candidates[midpoint - 1] + candidates[midpoint]) / 2.0
+    )
+    tolerance = max(2.0, median * 0.08)
+    inliers = [value for value in candidates if abs(value - median) <= tolerance]
+    if len(inliers) < 2:
+        return None
+
+    inliers.sort()
+    midpoint = len(inliers) // 2
+    inferred_grams = (
+        inliers[midpoint]
+        if len(inliers) % 2
+        else (inliers[midpoint - 1] + inliers[midpoint]) / 2.0
+    )
+    return round(inferred_grams, 3)
+
+
 class MyFoodUpdate(BaseModel):
     display_name: str | None = Field(None, max_length=200)
     brand: str | None = Field(None, max_length=200)
@@ -181,8 +241,6 @@ async def create_my_food_from_usda(
 
     # Branded/package foods often include label serving metadata.
     # Keep macros normalized per 100g, but create a user-facing serving row when possible.
-    serving_size = (j or {}).get("servingSize")
-    serving_unit = str((j or {}).get("servingSizeUnit") or "").strip().lower()
     household_serving = str((j or {}).get("householdServingFullText") or "").strip()
 
     nutr = (j or {}).get("foodNutrients") or []
@@ -205,6 +263,18 @@ async def create_my_food_from_usda(
     fiber = _nutr_amount("291")
     sugar = _nutr_amount("269")
     sodium_mg = _nutr_amount("307")
+    grams = _infer_usda_serving_grams(
+        j or {},
+        {
+            "kcal": kcal,
+            "protein": protein,
+            "carbs": carbs,
+            "fat": fat,
+            "fiber": fiber,
+            "sugar": sugar,
+            "sodium_mg": sodium_mg,
+        },
+    )
 
     conn = await _db()
     try:
@@ -271,13 +341,7 @@ async def create_my_food_from_usda(
             if not row:
                 raise HTTPException(status_code=500, detail="insert_failed")
 
-            grams = None
-            try:
-                grams = float(serving_size) if serving_size is not None else None
-            except Exception:
-                grams = None
-
-            if grams is not None and grams > 0 and serving_unit in ("g", "gram", "grams", "grm"):
+            if grams is not None and grams > 0:
                 serving_name = household_serving or "1 serving"
                 serving_name = " ".join(str(serving_name).strip().split())[:120] or "1 serving"
                 fid = row["my_food_id"]
