@@ -7,6 +7,7 @@ import decimal
 import datetime as _dt
 import hashlib
 import secrets
+import math
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Body, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
@@ -1808,58 +1809,257 @@ async def delete_workout_template_exercise_segment(
 # Training Sessions / Set Log
 # ----------------------------
 
-@router.post("/sessions/create")
-async def create_training_session(
+@router.post("/sessions/complete")
+async def complete_training_session(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
-    day: str = Query(..., min_length=10, max_length=10),
-    name: str = Query(..., min_length=1, max_length=160),
-    workout_template_id: str | None = Query(None),
-    notes: str | None = Query(None, max_length=800),
-    started_at: str | None = Query(None),
-    finished_at: str | None = Query(None),
+    payload: dict = Body(...),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+
+    day = _clean_text(payload.get("day"), 10)
+    name = _clean_text(payload.get("name"), 160)
+    notes = _clean_text(payload.get("notes"), 800)
+    workout_template_id = _clean_text(payload.get("workout_template_id"), 80)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
 
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
     try:
         day_val = _dt.date.fromisoformat(day)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid day")
 
-    started = None
-    finished = None
-    try:
-        if started_at:
-            started = _dt.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        if finished_at:
-            finished = _dt.datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid timestamp")
+    def parse_timestamp(value, field_name: str):
+        raw = _clean_text(value, 80)
+        if not raw:
+            return None
+        try:
+            parsed = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"invalid {field_name}")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+        return parsed
+
+    finished = parse_timestamp(payload.get("finished_at"), "finished_at") or _dt.datetime.now(_dt.timezone.utc)
+    started = parse_timestamp(payload.get("started_at"), "started_at") or finished
+    if finished < started:
+        raise HTTPException(status_code=400, detail="finished_at must be at or after started_at")
+
+    raw_sets = payload.get("sets")
+    if not isinstance(raw_sets, list) or not raw_sets:
+        raise HTTPException(status_code=400, detail="at least one completed set is required")
+    if len(raw_sets) > 500:
+        raise HTTPException(status_code=400, detail="too many completed sets")
+
+    normalized_sets = []
+    for position, raw_set in enumerate(raw_sets, start=1):
+        if not isinstance(raw_set, dict):
+            raise HTTPException(status_code=400, detail=f"set {position} must be an object")
+
+        exercise_id = _clean_text(raw_set.get("exercise_id"), 200)
+        exercise_name = _clean_text(raw_set.get("exercise_name"), 240)
+        if not exercise_id or not exercise_name:
+            raise HTTPException(status_code=400, detail=f"set {position} requires exercise_id and exercise_name")
+
+        try:
+            exercise_sort_order = int(raw_set.get("exercise_sort_order", 0))
+            set_index = int(raw_set.get("set_index", 1))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"set {position} has invalid ordering")
+        if set_index < 1 or set_index > 200:
+            raise HTTPException(status_code=400, detail=f"set {position} has invalid set_index")
+
+        set_type = _clean_text(raw_set.get("set_type") or "straight", 40).lower()
+        if set_type not in ("straight", "drop"):
+            raise HTTPException(status_code=400, detail=f"set {position} has invalid set_type")
+
+        flags = _clean_text(raw_set.get("flags"), 240)
+        set_notes = _clean_text(raw_set.get("notes"), 800)
+        segments = []
+
+        if set_type == "drop":
+            raw_segments = raw_set.get("segments")
+            if not isinstance(raw_segments, list) or not raw_segments:
+                raise HTTPException(status_code=400, detail=f"drop set {position} requires at least one segment")
+            if len(raw_segments) > 50:
+                raise HTTPException(status_code=400, detail=f"drop set {position} has too many segments")
+
+            seen_segment_indexes = set()
+            for segment_position, raw_segment in enumerate(raw_segments, start=1):
+                if not isinstance(raw_segment, dict):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"drop set {position} segment {segment_position} must be an object",
+                    )
+                try:
+                    segment_index = int(raw_segment.get("segment_index", segment_position))
+                    weight = float(raw_segment.get("weight", 0))
+                    reps = int(raw_segment.get("reps", 0))
+                except Exception:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"drop set {position} segment {segment_position} has invalid numbers",
+                    )
+                if segment_index < 1 or segment_index > 50 or segment_index in seen_segment_indexes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"drop set {position} has invalid or duplicate segment_index",
+                    )
+                if not math.isfinite(weight) or weight < 0 or reps < 1 or reps > 1000:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"drop set {position} segment {segment_position} requires nonnegative weight and positive reps",
+                    )
+                seen_segment_indexes.add(segment_index)
+                segments.append(
+                    {
+                        "segment_index": segment_index,
+                        "label": _clean_text(raw_segment.get("label"), 120),
+                        "weight": weight,
+                        "reps": reps,
+                        "volume": weight * reps,
+                        "notes": _clean_text(raw_segment.get("notes"), 800),
+                    }
+                )
+
+            segments.sort(key=lambda segment: segment["segment_index"])
+            weight = segments[0]["weight"]
+            reps = segments[0]["reps"]
+            volume = sum(segment["volume"] for segment in segments)
+        else:
+            try:
+                weight = float(raw_set.get("weight", 0))
+                reps = int(raw_set.get("reps", 0))
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"set {position} has invalid weight or reps")
+            if not math.isfinite(weight) or weight < 0 or reps < 1 or reps > 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"set {position} requires nonnegative weight and positive reps",
+                )
+            volume = weight * reps
+
+        normalized_sets.append(
+            {
+                "exercise_id": exercise_id,
+                "exercise_name": exercise_name,
+                "exercise_sort_order": exercise_sort_order,
+                "set_index": set_index,
+                "set_type": set_type,
+                "weight": weight,
+                "reps": reps,
+                "volume": volume,
+                "flags": flags,
+                "notes": set_notes,
+                "segments": segments,
+            }
+        )
 
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.training_session
-              (owner_user_id, day, workout_template_id, name, notes, started_at, finished_at, is_active)
-            values
-              ($1::uuid, $2::date, $3::uuid, $4, $5, $6::timestamptz, $7::timestamptz, true)
-            returning
-              training_session_id, owner_user_id, day, workout_template_id, name, notes,
-              started_at, finished_at, is_active, created_at, updated_at
-            """,
-            owner,
-            day_val,
-            wid,
-            name.strip(),
-            (notes or "").strip(),
-            started,
-            finished,
-        )
-        return JSONResponse(_row_to_jsonable(row))
+        async with conn.transaction():
+            if wid:
+                template_ok = await conn.fetchval(
+                    f"""
+                    select 1
+                    from {SCHEMA}.workout_template
+                    where workout_template_id=$1::uuid
+                      and owner_user_id=$2::uuid
+                      and is_active=true
+                    """,
+                    wid,
+                    owner,
+                )
+                if not template_ok:
+                    raise HTTPException(status_code=404, detail="workout template not found or inactive")
+
+            session = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.training_session
+                  (owner_user_id, day, workout_template_id, name, notes,
+                   started_at, finished_at, is_active)
+                values
+                  ($1::uuid, $2::date, $3::uuid, $4, $5, $6::timestamptz,
+                   $7::timestamptz, true)
+                returning
+                  training_session_id, owner_user_id, day, workout_template_id,
+                  name, notes, started_at, finished_at, is_active, created_at, updated_at
+                """,
+                owner,
+                day_val,
+                wid,
+                name,
+                notes,
+                started,
+                finished,
+            )
+            session_id = session["training_session_id"]
+
+            for completed_set in normalized_sets:
+                set_row = await conn.fetchrow(
+                    f"""
+                    insert into {SCHEMA}.training_set_log
+                      (training_session_id, owner_user_id, workout_template_id,
+                       exercise_id, exercise_name, exercise_sort_order, set_index,
+                       set_type, weight, reps, volume, flags, notes, is_active)
+                    values
+                      ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7,
+                       $8, $9, $10, $11, $12, $13, true)
+                    returning training_set_log_id
+                    """,
+                    session_id,
+                    owner,
+                    wid,
+                    completed_set["exercise_id"],
+                    completed_set["exercise_name"],
+                    completed_set["exercise_sort_order"],
+                    completed_set["set_index"],
+                    completed_set["set_type"],
+                    completed_set["weight"],
+                    completed_set["reps"],
+                    completed_set["volume"],
+                    completed_set["flags"],
+                    completed_set["notes"],
+                )
+
+                for segment in completed_set["segments"]:
+                    await conn.execute(
+                        f"""
+                        insert into {SCHEMA}.training_set_log_segment
+                          (training_set_log_id, segment_index, label, weight,
+                           reps, volume, notes)
+                        values ($1::uuid, $2, $3, $4, $5, $6, $7)
+                        """,
+                        set_row["training_set_log_id"],
+                        segment["segment_index"],
+                        segment["label"],
+                        segment["weight"],
+                        segment["reps"],
+                        segment["volume"],
+                        segment["notes"],
+                    )
+
+            result = _row_to_jsonable(session)
+            result["set_count"] = len(normalized_sets)
+            return JSONResponse(result)
     finally:
         await conn.close()
+
+
+@router.post("/sessions/create")
+async def create_training_session(
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="session creation moved to atomic /sessions/complete",
+    )
 
 
 @router.get("/sessions")
@@ -1891,6 +2091,13 @@ async def list_training_sessions(
             where.append(f"s.day=${len(args)}::date")
         if not include_inactive:
             where.append("s.is_active=true")
+            where.append("s.finished_at is not null")
+
+        having = (
+            "having count(l.training_set_log_id) filter (where l.is_active=true) > 0"
+            if not include_inactive
+            else ""
+        )
 
         rows = await conn.fetch(
             f"""
@@ -1908,6 +2115,7 @@ async def list_training_sessions(
               on l.training_session_id=s.training_session_id
             where {' and '.join(where)}
             group by s.training_session_id
+            {having}
             order by s.day desc, s.created_at desc
             limit {int(limit)}
             """,
