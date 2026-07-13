@@ -3,7 +3,7 @@
 # Unified retrieval + personal memory retrieval with tag-sensitive scoring.
 
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Sequence
 import os
 import asyncpg
 import asyncio
@@ -42,6 +42,20 @@ except TypeError:
 
 # collections we NEVER use as corpus
 IGNORED = {"memory_raw"}
+
+
+def _resolve_query_vector(
+    query: str, query_vector: Sequence[float] | None
+) -> List[float] | None:
+    if query_vector is not None:
+        vector = [float(value) for value in query_vector]
+        if not vector:
+            raise ValueError("query_vector must not be empty")
+        return vector
+    if not client:
+        return None
+    response = client.embeddings.create(model=EMBED_MODEL, input=query)
+    return [float(value) for value in response.data[0].embedding]
 
 
 def infer_query_tags(text: str) -> list[str]:
@@ -332,6 +346,7 @@ def unified_retrieve(
     top_k: int = 5,
     score_threshold: float | None = None,
     vantage_id: str | None = None,
+    query_vector: Sequence[float] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Unified retrieval used by RAG.
@@ -340,18 +355,16 @@ def unified_retrieve(
       - policy.corpus_primary / policy.corpus_fallback
       - policy.topic_overrides["topic:fm"].corpus_primary / corpus_fallback (etc)
     """
-    if not client:
-        print("ERROR: Missing OPENAI_API_KEY in unified_retrieve")
-        return []
-
     q = (query or "").strip()
     if not q:
         return []
 
     vid = (vantage_id or "").strip() or "default"
 
-    emb = client.embeddings.create(model=EMBED_MODEL, input=q)
-    vec = emb.data[0].embedding
+    vec = _resolve_query_vector(q, query_vector)
+    if vec is None:
+        print("ERROR: Missing OPENAI_API_KEY in unified_retrieve")
+        return []
 
     query_tags = set(infer_query_tags(q))
 
@@ -476,19 +489,19 @@ def retrieve_personal_memory(
     top_k: int = 5,
     score_threshold: float = 0.20,
     vantage_id: str | None = None,
+    query_vector: Sequence[float] | None = None,
 ) -> List[Dict[str, Any]]:
 
     q = (query or "").strip()
     if not q:
         return []
 
-    if not client:
+    # Use the request-scoped vector when supplied; direct callers retain the
+    # legacy behavior of creating their own embedding.
+    vec = _resolve_query_vector(q, query_vector)
+    if vec is None:
         print("ERROR: Missing OPENAI_API_KEY in retrieve_personal_memory")
         return []
-
-    # 1) Embed query
-    emb = client.embeddings.create(model=EMBED_MODEL, input=q)
-    vec = emb.data[0].embedding
 
     vid = (vantage_id or "").strip() or "default"
 

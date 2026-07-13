@@ -22,6 +22,7 @@ from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_shadow
+from .query_embedding_cache import QueryEmbeddingCache
 
 # Reuse the exact behavior of the current /rag/query path where it matters:
 from .rag_router import (
@@ -2109,6 +2110,11 @@ def vantage_query(req: Request, payload: VantageQuery):
             thread_stats=thread_stats,
         )
 
+        query_embedding = QueryEmbeddingCache(
+            payload.message,
+            model=os.getenv("EMBED_MODEL", "text-embedding-3-large"),
+        )
+
         # Measurement only: this packet is traced and summarized for diagnostics,
         # but never added to memory_chunks, system_prompt, or model messages.
         turn_plan["memory_v1_shadow"] = run_memory_v1_shadow(
@@ -2117,6 +2123,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             turn_intent=turn_intent,
             request_id=req_request_id,
             thread_id=payload.thread_id,
+            embedding_provider=query_embedding.get,
         )
 
 
@@ -2412,12 +2419,20 @@ def vantage_query(req: Request, payload: VantageQuery):
                         "similarity_threshold": personal_thr_f,
                         "score_threshold": personal_thr_f,
                         "vantage_id": vid,
+                        "query_vector": query_embedding.get(),
                     },
                 ) or []
             except TypeError:
                 try:
                     personal_hits = _await_if_needed(
-                        retrieve_personal_memory((payload.user_id or "").strip() or "anon", payload.message, k_personal, thr_f, vantage_id=vid)
+                        retrieve_personal_memory(
+                            (payload.user_id or "").strip() or "anon",
+                            payload.message,
+                            k_personal,
+                            thr_f,
+                            vantage_id=vid,
+                            query_vector=query_embedding.get(),
+                        )
                     ) or []
                 except Exception as e:
                     print(f"[vantage] retrieve_personal_memory error: {e}")
@@ -2448,11 +2463,18 @@ def vantage_query(req: Request, payload: VantageQuery):
             "personal_threshold": personal_thr_f,
                         "similarity_threshold": thr_f,
                         "score_threshold": thr_f,
+                        "query_vector": query_embedding.get(),
                     },
                 ) or []
             except TypeError:
                 try:
-                    corpus_hits = _await_if_needed(unified_retrieve(payload.message, k_corpus)) or []
+                    corpus_hits = _await_if_needed(
+                        unified_retrieve(
+                            payload.message,
+                            k_corpus,
+                            query_vector=query_embedding.get(),
+                        )
+                    ) or []
                 except Exception as e:
                     print(f"[vantage] unified_retrieve error: {e}")
                     corpus_hits = []
@@ -2605,6 +2627,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             pass
 
         if debug_on:
+            turn_plan["query_embedding"] = query_embedding.stats()
             meta.setdefault("vantage", {})
             meta["vantage"].update({
                 "sd": sd,

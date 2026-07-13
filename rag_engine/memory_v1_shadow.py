@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import asyncpg
 
@@ -165,6 +165,8 @@ def run_memory_v1_shadow(
     turn_intent: str,
     request_id: Optional[str] = None,
     thread_id: Optional[str] = None,
+    query_vector: Optional[Sequence[float]] = None,
+    embedding_provider: Optional[Callable[[], Sequence[float]]] = None,
 ) -> Dict[str, Any]:
     if os.getenv("MEMORY_V1_SHADOW", "0").strip() != "1":
         return {"version": "memory_v1_route_shadow_v1", "status": "disabled"}
@@ -196,9 +198,18 @@ def run_memory_v1_shadow(
 
     qdrant = make_qdrant_client(url=qdrant_url, timeout=15.0)
     try:
-        vector = embed_text(
-            query, model=os.getenv("EMBED_MODEL", "text-embedding-3-large")
-        )
+        if query_vector is not None and embedding_provider is not None:
+            raise ValueError("provide query_vector or embedding_provider, not both")
+        if query_vector is not None:
+            vector = [float(value) for value in query_vector]
+        elif embedding_provider is not None:
+            vector = [float(value) for value in embedding_provider()]
+        else:
+            vector = embed_text(
+                query, model=os.getenv("EMBED_MODEL", "text-embedding-3-large")
+            )
+        if not vector:
+            raise ValueError("query vector must not be empty")
         index = ClaimVectorIndex(
             qdrant,
             collection_name=os.getenv("MEMORY_V1_COLLECTION", "memory_claim_v1"),
