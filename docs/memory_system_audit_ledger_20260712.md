@@ -124,6 +124,9 @@ Status: architecture approved. Memory V1 foundation is deployed in parallel; leg
 - Production Qdrant and Redis host ports are loopback-only. Redis was checkpointed before recreation. Durable post-change Qdrant snapshots with checksums are stored under `/home/ubuntu/brains/snapshots/20260712_memory_v1`; Brains health passed after recreation.
 - Allowlisted, non-injecting route shadow evaluation is deployed for owner `1240822d-ac9a-4096-95aa-e2b24d36ef50`. Controlled probes selected exactly one claim for name correction, family loss, pet loss, and caregiving context; technical and unrelated nutrition turns created no V1 trace.
 - Controlled shadow probe latency was approximately 0.79–1.07 seconds per inspected turn. Before broader rollout, reuse the route's existing query embedding or otherwise remove the duplicate embedding request.
+- The first ordinary-use shadow sample contained 11 user turns: six governed-domain turns each selected exactly one intended claim, four negative controls correctly created no V1 trace, and one implicit family-event query was initially missed. The miss (`What happened with my mom?`) is fixed and now selects the DeeDee claim without classifying unrelated questions about the user's mother.
+- A legacy pet-loss answer used the explicitly corrected wrong name `Nemo` and combined several raw memories. Direct source review supports separate governed candidates for Neko's death about two years before the 2026-07-02 statement and Dahlia's euthanasia the previous year at age 12. These remain review findings until promoted with correction-aware provenance.
+- A recent-macros question received a generic “cannot access your data” response even though nutrition is a structured application domain. This is a structured nutrition-routing/integration defect, not a Memory V1 retrieval failure.
 
 ## Unresolved checks
 
