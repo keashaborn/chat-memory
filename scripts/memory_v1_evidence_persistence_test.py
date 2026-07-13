@@ -107,6 +107,44 @@ def main() -> int:
     ):
         raise AssertionError("belief evidence lost its epistemic role")
 
+    approximate = forced_atomic_plan(
+        source(
+            "50000000-0000-4000-8000-000000000002",
+            (
+                "I retired about five years ago. "
+                "I remember thinking this working stuff really sucks. "
+                "I believe antidepressant medication is minimally effective."
+            ),
+        )
+    )
+    approximate_resolutions = resolve_compound_plans([approximate])
+    reviewed = build_evidence_span_plans(
+        [approximate],
+        approximate_resolutions,
+        owner_user_id=OWNER,
+    )
+    if not any(
+        "uncertainty_qualifier_required" in plan.review_flags
+        for plan in reviewed
+        if "retired about five years" in plan.content
+    ):
+        raise AssertionError("approximate autobiographical evidence lacks uncertainty")
+    if not any(
+        plan.epistemic_role == "mixed_user_assertion_and_belief"
+        for plan in reviewed
+        if "working stuff really sucks" in plan.content
+    ):
+        raise AssertionError("mixed assertion/opinion evidence lost its mixed role")
+    health = [
+        plan
+        for plan in reviewed
+        if "antidepressant medication" in plan.content
+    ]
+    if not health or any(plan.sensitivity != "restricted" for plan in health):
+        raise AssertionError("high-stakes health belief was not restricted")
+    if any(plan.epistemic_role != "user_belief_or_opinion" for plan in health):
+        raise AssertionError("health belief became an external assertion")
+
     replay = build_evidence_span_plans(
         [atomic],
         resolutions,

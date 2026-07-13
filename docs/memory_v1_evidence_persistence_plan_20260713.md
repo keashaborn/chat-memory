@@ -54,6 +54,12 @@ Belief spans remain labeled `belief_not_external_fact` with epistemic role
 belief, opinion, preference, project statement, or biography into an approved
 claim.
 
+The final review layer conservatively adds metadata without changing source
+text: health or medication beliefs require high-stakes review and are
+`restricted`; approximate numeric autobiography requires an uncertainty
+qualifier; and inseparable event/opinion clauses use
+`mixed_user_assertion_and_belief`. These flags govern later extraction only.
+
 ## Replay and deduplication
 
 The future apply algorithm, if separately authorized, is:

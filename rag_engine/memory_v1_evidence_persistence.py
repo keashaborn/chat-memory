@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -27,6 +28,24 @@ REVIEW_DISPOSITIONS = frozenset(
         "review_preference_span",
         "review_project_span",
     }
+)
+APPROXIMATE_NUMERIC_ASSERTION_RE = re.compile(
+    r"(?:\b(?:about|around|approximately|probably|maybe)\s+"
+    r"(?:\$?[0-9]|one|two|three|four|five|six|seven|eight|nine|ten|a year)|"
+    r"\bi\s+think\s+(?:\$?[0-9]|one|two|three|four|five|six|seven|eight|nine|ten))",
+    re.IGNORECASE,
+)
+HIGH_STAKES_HEALTH_BELIEF_RE = re.compile(
+    r"\b(?:psychotherap\w*|mental illnesses?|anxiety|depression|pharmaceutical|"
+    r"medications?|antipsychotic|psychotic|bipolar|antidepressants?|anti-anxiety|serotonin|"
+    r"placebo)\b",
+    re.IGNORECASE,
+)
+MIXED_ASSERTION_BELIEF_RE = re.compile(
+    r"\b(?:i thought .{0,80}\bbest\b|"
+    r"i decided .{0,80}\bsucks\b|"
+    r"i remember thinking .{0,80}\bsucks\b)",
+    re.IGNORECASE,
 )
 
 
@@ -127,7 +146,38 @@ def _sensitivity(review_flags: Sequence[str]) -> str:
     return "high"
 
 
-def _epistemic_role(disposition: str) -> str:
+def _derived_review_flags(
+    disposition: str,
+    content: str,
+    review_flags: Sequence[str],
+) -> tuple[str, ...]:
+    flags = list(review_flags)
+    if (
+        disposition == "review_belief_span"
+        and HIGH_STAKES_HEALTH_BELIEF_RE.search(content)
+    ):
+        flags.extend(
+            [
+                "high_stakes_health_belief_review_required",
+                "sensitivity_review_required",
+            ]
+        )
+    if (
+        disposition == "review_claim_span"
+        and APPROXIMATE_NUMERIC_ASSERTION_RE.search(content)
+    ):
+        flags.append("uncertainty_qualifier_required")
+    if (
+        disposition == "review_claim_span"
+        and MIXED_ASSERTION_BELIEF_RE.search(content)
+    ):
+        flags.append("mixed_assertion_belief_review_required")
+    return tuple(dict.fromkeys(flags))
+
+
+def _epistemic_role(disposition: str, review_flags: Sequence[str]) -> str:
+    if "mixed_assertion_belief_review_required" in review_flags:
+        return "mixed_user_assertion_and_belief"
     return {
         "review_belief_span": "user_belief_or_opinion",
         "review_claim_span": "user_assertion",
@@ -156,7 +206,7 @@ def _metadata(
         "candidate_creation_authorized": False,
         "candidate_target": candidate_target,
         "disposition": disposition,
-        "epistemic_role": _epistemic_role(disposition),
+        "epistemic_role": _epistemic_role(disposition, review_flags),
         "parent_span_id": str(parent_span_id) if parent_span_id else None,
         "persistence_plan_version": PLAN_VERSION,
         "primary_lane": primary_lane,
@@ -211,7 +261,7 @@ def _build_plan(
         raise EvidencePersistencePlanError(f"source hash mismatch for {source.source_id}")
 
     external_id = _external_id(source.source_id, span_id)
-    flags = tuple(review_flags)
+    flags = _derived_review_flags(disposition, content, review_flags)
     metadata = _metadata(
         source=source,
         source_content_sha256=source_decision.content_sha256,
@@ -253,7 +303,7 @@ def _build_plan(
         char_end=char_end,
         disposition=disposition,
         candidate_target=candidate_target,
-        epistemic_role=_epistemic_role(disposition),
+        epistemic_role=_epistemic_role(disposition, flags),
         review_flags=flags,
         preview=" ".join(content.split())[:320],
     )
