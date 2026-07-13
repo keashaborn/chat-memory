@@ -4,7 +4,7 @@
   "batch_key": "reviewed_evidence_20260713_164_v1",
   "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
   "plan_version": "memory_v1_evidence_persistence_20260713_v1",
-  "apply_authorized": false,
+  "apply_authorized": true,
   "reviewed_report_sha256": "d122028cc07abc8d3d122ba9779f04514ec75c6be1996cf2256854189c1f642a",
   "reviewed_input_fingerprint_sha256": "201a828c35b6d1717c5b36061960cb32a8732bfa39ca59fe19e3c1d1ab404fad",
   "artifact_manifest_sha256": "f1f97c5a172f0c33ed2655233932b489dd9fb2156070d176da0b3cd9534fb856",
