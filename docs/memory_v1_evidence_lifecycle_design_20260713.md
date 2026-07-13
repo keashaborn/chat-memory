@@ -1,8 +1,8 @@
 # Memory V1 evidence lifecycle design
 
-Status: isolated implementation; not applied to production  
-Server: seebx backend  
-Schema: `memory`  
+Status: isolated implementation; not applied to production
+Server: seebx backend
+Schema: `memory`
 Migration: `ops/sql/20260713_memory_v1_evidence_lifecycle.sql`
 
 ## Scope
