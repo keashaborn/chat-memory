@@ -89,6 +89,86 @@ VALUES (
   1.000
 );
 
+INSERT INTO memory.artifact(
+  artifact_id,
+  owner_user_id,
+  artifact_kind,
+  title,
+  authorship,
+  content,
+  content_sha256
+)
+VALUES (
+  'a1000000-0000-4000-8000-000000000001',
+  '11111111-1111-4111-8111-111111111111',
+  'conversation_paste',
+  'Actor A endorsed outline',
+  'assistant',
+  'A preserved assistant-authored outline.',
+  repeat('a', 64)
+);
+
+INSERT INTO memory.artifact_occurrence(
+  owner_user_id,
+  artifact_id,
+  evidence_id,
+  occurrence_key,
+  relation,
+  observed_authorship
+)
+VALUES (
+  '11111111-1111-4111-8111-111111111111',
+  'a1000000-0000-4000-8000-000000000001',
+  :'actor_a_evidence_id',
+  'memory_v1_rls_test:actor-a-artifact',
+  'submitted',
+  'assistant'
+);
+
+INSERT INTO memory.artifact_section(
+  section_id,
+  owner_user_id,
+  artifact_id,
+  ordinal,
+  heading,
+  content,
+  content_sha256,
+  char_start,
+  char_end,
+  authorship
+)
+VALUES (
+  'a2000000-0000-4000-8000-000000000001',
+  '11111111-1111-4111-8111-111111111111',
+  'a1000000-0000-4000-8000-000000000001',
+  0,
+  'Outline',
+  'A preserved assistant-authored outline.',
+  repeat('b', 64),
+  0,
+  39,
+  'assistant'
+);
+
+INSERT INTO memory.artifact_endorsement(
+  owner_user_id,
+  artifact_id,
+  evidence_id,
+  endorsement_key,
+  endorsement_level,
+  explicit,
+  rationale
+)
+VALUES (
+  '11111111-1111-4111-8111-111111111111',
+  'a1000000-0000-4000-8000-000000000001',
+  :'actor_a_evidence_id',
+  'memory_v1_rls_test:actor-a-reference',
+  'reference',
+  true,
+  'Store this as a useful outline; do not treat it as authored by the user.'
+);
+
 DO $$
 BEGIN
   IF (SELECT count(*) FROM memory.claim) <> 1 THEN
@@ -112,6 +192,22 @@ BEGIN
     RAISE EXCEPTION 'actor B can see actor A evidence';
   END IF;
 
+  IF (SELECT count(*) FROM memory.artifact) <> 0 THEN
+    RAISE EXCEPTION 'actor B can see actor A artifacts';
+  END IF;
+
+  IF (SELECT count(*) FROM memory.artifact_occurrence) <> 0 THEN
+    RAISE EXCEPTION 'actor B can see actor A artifact occurrences';
+  END IF;
+
+  IF (SELECT count(*) FROM memory.artifact_section) <> 0 THEN
+    RAISE EXCEPTION 'actor B can see actor A artifact sections';
+  END IF;
+
+  IF (SELECT count(*) FROM memory.artifact_endorsement) <> 0 THEN
+    RAISE EXCEPTION 'actor B can see actor A artifact endorsements';
+  END IF;
+
   UPDATE memory.entity
   SET canonical_name = 'Cross-user update'
   WHERE entity_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -125,6 +221,21 @@ BEGIN
   GET DIAGNOSTICS affected = ROW_COUNT;
   IF affected <> 0 THEN
     RAISE EXCEPTION 'actor B deleted actor A entity';
+  END IF;
+
+  UPDATE memory.artifact
+  SET title = 'Cross-user update'
+  WHERE artifact_id = 'a1000000-0000-4000-8000-000000000001';
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 0 THEN
+    RAISE EXCEPTION 'actor B updated actor A artifact';
+  END IF;
+
+  DELETE FROM memory.artifact
+  WHERE artifact_id = 'a1000000-0000-4000-8000-000000000001';
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 0 THEN
+    RAISE EXCEPTION 'actor B deleted actor A artifact';
   END IF;
 
   BEGIN
@@ -143,6 +254,24 @@ BEGIN
 
   IF NOT blocked THEN
     RAISE EXCEPTION 'actor B wrote actor A entity';
+  END IF;
+
+  blocked := false;
+  BEGIN
+    INSERT INTO memory.artifact(
+      owner_user_id, artifact_kind, content, content_sha256
+    ) VALUES (
+      '11111111-1111-4111-8111-111111111111',
+      'conversation_paste',
+      'Forbidden cross-owner artifact.',
+      repeat('c', 64)
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    blocked := true;
+  END;
+
+  IF NOT blocked THEN
+    RAISE EXCEPTION 'actor B wrote actor A artifact';
   END IF;
 END
 $$;
