@@ -197,7 +197,18 @@ async def build_memory_packet(
                        importance, salience, sensitivity::text,
                        valid_from, valid_to, retrieval_policy,
                        subject_entity_id, predicate, object_entity_id, object_literal,
-                       qualifiers
+                       qualifiers,
+                       ARRAY(
+                         SELECT link.evidence_id
+                         FROM memory.claim_evidence AS link
+                         JOIN memory.evidence AS evidence
+                           ON evidence.owner_user_id=link.owner_user_id
+                          AND evidence.evidence_id=link.evidence_id
+                         WHERE link.owner_user_id=memory.claim.owner_user_id
+                           AND link.claim_id=memory.claim.claim_id
+                           AND evidence.status='active'
+                         ORDER BY link.evidence_id
+                       ) AS active_evidence_ids
                 FROM memory.claim
                 WHERE owner_user_id=$1
                   AND claim_id = ANY($2::uuid[])
@@ -218,9 +229,14 @@ async def build_memory_packet(
             sensitivity = str(row["sensitivity"])
             policy = _json_object(row["retrieval_policy"], "retrieval_policy")
             reasons: list[str] = []
+            active_evidence_refs = [
+                str(evidence_id) for evidence_id in row["active_evidence_ids"]
+            ]
 
             if status not in RETRIEVABLE_STATUSES:
                 reasons.append(f"status:{status}")
+            if not active_evidence_refs:
+                reasons.append("no_active_evidence")
 
             if SENSITIVITY_RANK[sensitivity] > SENSITIVITY_RANK[max_sensitivity]:
                 reasons.append("sensitivity")
@@ -282,6 +298,7 @@ async def build_memory_packet(
                     "reason_codes": reasons,
                     "surface": surface,
                     "qualifiers": _json_object(row["qualifiers"], "qualifiers"),
+                    "evidence_refs": active_evidence_refs,
                     "token_estimate": _token_estimate(text),
                 }
             )
@@ -309,23 +326,6 @@ async def build_memory_packet(
             for reason in item["reason_codes"]:
                 if reason not in {"claim_budget", "token_budget"}:
                     rejected_counts[reason] += 1
-
-        evidence_refs: Dict[uuid.UUID, list[str]] = {}
-        if selected_ids:
-            evidence_rows = await conn.fetch(
-                """
-                SELECT claim_id, evidence_id
-                FROM memory.claim_evidence
-                WHERE owner_user_id=$1
-                  AND claim_id = ANY($2::uuid[])
-                ORDER BY claim_id, evidence_id
-                """,
-                actor,
-                list(selected_ids),
-            )
-            for evidence_row in evidence_rows:
-                cid = uuid.UUID(str(evidence_row["claim_id"]))
-                evidence_refs.setdefault(cid, []).append(str(evidence_row["evidence_id"]))
 
         trace_id = uuid.uuid4()
         await conn.execute(
@@ -404,7 +404,7 @@ async def build_memory_packet(
                     item["status"], item["surface"]
                 ),
                 "qualifiers": item["qualifiers"],
-                "evidence_refs": evidence_refs.get(item["claim_id"], []),
+                "evidence_refs": item["evidence_refs"],
                 "score": round(item["final_score"], 6),
             }
             for item in selected

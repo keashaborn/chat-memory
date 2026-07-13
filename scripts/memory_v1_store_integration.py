@@ -13,6 +13,7 @@ from rag_engine.memory_v1_store import (
     CandidateNotApproved,
     CandidateNotFound,
     EvidenceConflict,
+    ProposalValidationError,
     apply_candidate,
     propose_candidate,
     record_evidence,
@@ -393,6 +394,130 @@ async def main() -> int:
             raise AssertionError("retrieval trace stored raw query preview")
         if any(len(row["query_hash"]) != 64 for row in traces):
             raise AssertionError("retrieval trace query hash is invalid")
+
+        await conn.fetchrow(
+            """
+            SELECT event_id
+            FROM memory.transition_evidence_lifecycle($1, $2, $3, $4)
+            """,
+            repeat_evidence,
+            uuid.UUID("f1000000-0000-4000-8000-000000000001"),
+            "redact_content",
+            "correction",
+        )
+
+        one_source_packet = await build_memory_packet(
+            conn,
+            ACTOR_A,
+            query="What is the corrected pet name?",
+            intent="personal_recall",
+            domain="name_correction",
+            candidate_hits=[
+                {"claim_id": neko_result["claim_id"], "semantic_score": 0.95}
+            ],
+            max_claims=4,
+            max_tokens=300,
+            request_id="memory-v1-integration-one-active-source",
+        )
+        if len(one_source_packet["claims"]) != 1:
+            raise AssertionError("claim with another active source was suppressed")
+        if one_source_packet["claims"][0]["evidence_refs"] != [str(neko_evidence)]:
+            raise AssertionError("redacted evidence leaked into packet evidence refs")
+
+        await expect_error(
+            EvidenceConflict,
+            record_evidence(
+                conn,
+                ACTOR_A,
+                kind="user_statement",
+                source_system="memory_v1_store_integration",
+                external_id="neko-repeat",
+                content="Neko is the correct spelling.",
+                directness=1.0,
+                sensitivity="low",
+            ),
+            "tombstoned evidence reinsertion",
+        )
+        await expect_error(
+            ProposalValidationError,
+            propose_candidate(
+                conn,
+                ACTOR_A,
+                evidence_id=repeat_evidence,
+                proposal=name_proposal("Neko"),
+                extractor="integration_manual_v1",
+                extractor_version="v1",
+            ),
+            "candidate from redacted evidence",
+        )
+
+        stale_evidence = await record_evidence(
+            conn,
+            ACTOR_A,
+            kind="user_statement",
+            source_system="memory_v1_store_integration",
+            external_id="stale-approved-candidate",
+            content="The temporary candidate value is Nyx.",
+            directness=1.0,
+            sensitivity="low",
+        )
+        stale_candidate = await propose_candidate(
+            conn,
+            ACTOR_A,
+            evidence_id=stale_evidence,
+            proposal=name_proposal("Nyx"),
+            extractor="explicit_user_correction_v1",
+            extractor_version="v1",
+            auto_approve=True,
+        )
+        await conn.fetchrow(
+            """
+            SELECT event_id
+            FROM memory.transition_evidence_lifecycle($1, $2, $3, $4)
+            """,
+            stale_evidence,
+            uuid.UUID("f1000000-0000-4000-8000-000000000002"),
+            "delete_tombstone",
+            "user_request",
+        )
+        await expect_error(
+            CandidateConflict,
+            apply_candidate(
+                conn,
+                ACTOR_A,
+                candidate_id=stale_candidate["candidate_id"],
+                expected_proposal_hash=stale_candidate["proposal_hash"],
+            ),
+            "approved candidate after evidence deletion",
+        )
+
+        await conn.fetchrow(
+            """
+            SELECT event_id
+            FROM memory.transition_evidence_lifecycle($1, $2, $3, $4)
+            """,
+            neko_evidence,
+            uuid.UUID("f1000000-0000-4000-8000-000000000003"),
+            "delete_tombstone",
+            "user_request",
+        )
+        no_source_packet = await build_memory_packet(
+            conn,
+            ACTOR_A,
+            query="What is the corrected pet name?",
+            intent="personal_recall",
+            domain="name_correction",
+            candidate_hits=[
+                {"claim_id": neko_result["claim_id"], "semantic_score": 0.95}
+            ],
+            max_claims=4,
+            max_tokens=300,
+            request_id="memory-v1-integration-no-active-source",
+        )
+        if no_source_packet["claims"]:
+            raise AssertionError("claim without active evidence entered the packet")
+        if no_source_packet["rejected_counts"].get("no_active_evidence") != 1:
+            raise AssertionError("missing active-evidence rejection reason")
 
         print("memory_v1_store_integration: PASS")
         return 0
