@@ -72,6 +72,10 @@ trap cleanup EXIT
 
 "${compose[@]}" run --rm --no-deps \
   -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_compound_span_test.py
+
+"${compose[@]}" run --rm --no-deps \
+  -e PYTHONPATH=/app \
   brains python scripts/memory_v1_actor_auth_test.py
 
 "${compose[@]}" run --rm --no-deps \
