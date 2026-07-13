@@ -16,6 +16,12 @@ from .qdrant_compat import make_qdrant_client
 
 SKIPPED_TURN_INTENTS = {"TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"}
 LOSS_TERMS = ("died", "dying", "death", "dead", "passed away", "loss", "lost")
+EVENT_RECALL_TERMS = (
+    "what happened",
+    "remember what happened",
+    "what was it that happened",
+    "remind me what happened",
+)
 
 
 def _contains(text: str, terms: tuple[str, ...]) -> bool:
@@ -67,7 +73,9 @@ def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
     domain: Optional[str] = None
     if _contains(text, name_terms):
         domain = "name_correction"
-    elif _contains(text, family_terms) and _contains(text, LOSS_TERMS):
+    elif _contains(text, family_terms) and (
+        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    ):
         domain = "family_death"
     elif _contains(text, pet_terms) and _contains(text, LOSS_TERMS):
         domain = "pet_loss"

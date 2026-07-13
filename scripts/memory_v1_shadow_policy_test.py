@@ -28,6 +28,12 @@ def main() -> int:
         intent="personal_recall",
     )
     expect(
+        "What happened with my mom?",
+        "SPECIFIC_RECALL",
+        domain="family_death",
+        intent="personal_recall",
+    )
+    expect(
         "Do you remember when I lost my pet?",
         "SPECIFIC_RECALL",
         domain="pet_loss",
@@ -49,6 +55,14 @@ def main() -> int:
     unrelated = classify_shadow_context("What should I eat today?", "GENERAL")
     if unrelated != {"eligible": False, "reason": "unclassified_domain"}:
         raise AssertionError(f"unclassified query was not suppressed: {unrelated}")
+
+    family_unrelated = classify_shadow_context(
+        "What is my mom's favorite color?", "SPECIFIC_RECALL"
+    )
+    if family_unrelated != {"eligible": False, "reason": "unclassified_domain"}:
+        raise AssertionError(
+            f"unrelated family query was incorrectly classified: {family_unrelated}"
+        )
 
     print("memory_v1_shadow_policy: PASS")
     return 0
