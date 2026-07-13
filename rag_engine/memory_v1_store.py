@@ -327,7 +327,7 @@ async def record_evidence(
 
         existing = await conn.fetchrow(
             """
-            SELECT evidence_id, content_sha256
+            SELECT evidence_id, content_sha256, status::text
             FROM memory.evidence
             WHERE owner_user_id=$1 AND source_system=$2 AND external_id=$3
             """,
@@ -337,6 +337,10 @@ async def record_evidence(
         )
         if not existing:
             raise EvidenceConflict("evidence conflict could not be resolved")
+        if existing["status"] in {"redacted", "deleted"}:
+            raise EvidenceConflict(
+                "evidence external_id is tombstoned and cannot be reinserted"
+            )
         if (existing["content_sha256"] or None) != content_hash:
             raise EvidenceConflict("evidence external_id already exists with different content")
         return uuid.UUID(str(existing["evidence_id"]))
@@ -371,11 +375,17 @@ async def propose_candidate(
     async with conn.transaction():
         await _set_actor(conn, actor)
         if not await conn.fetchval(
-            "SELECT 1 FROM memory.evidence WHERE owner_user_id=$1 AND evidence_id=$2",
+            """
+            SELECT 1
+            FROM memory.evidence
+            WHERE owner_user_id=$1 AND evidence_id=$2 AND status='active'
+            """,
             actor,
             evidence_uuid,
         ):
-            raise ProposalValidationError("evidence_id is not visible to the actor")
+            raise ProposalValidationError(
+                "evidence_id is not active and visible to the actor"
+            )
 
         row = await conn.fetchrow(
             """
@@ -425,10 +435,17 @@ async def review_candidate(
         await _set_actor(conn, actor)
         row = await conn.fetchrow(
             """
-            SELECT candidate_id, status::text, proposal_hash, comparison
-            FROM memory.candidate
-            WHERE owner_user_id=$1 AND candidate_id=$2
-            FOR UPDATE
+            SELECT candidate.candidate_id,
+                   candidate.status::text,
+                   candidate.proposal_hash,
+                   candidate.comparison,
+                   evidence.status::text AS evidence_status
+            FROM memory.candidate AS candidate
+            JOIN memory.evidence AS evidence
+              ON evidence.owner_user_id=candidate.owner_user_id
+             AND evidence.evidence_id=candidate.evidence_id
+            WHERE candidate.owner_user_id=$1 AND candidate.candidate_id=$2
+            FOR UPDATE OF candidate
             """,
             actor,
             candidate_uuid,
@@ -437,6 +454,8 @@ async def review_candidate(
             raise CandidateNotFound("candidate is not visible to the actor")
         if row["proposal_hash"] != expected:
             raise CandidateConflict("candidate proposal hash changed")
+        if approve and row["evidence_status"] != "active":
+            raise CandidateConflict("candidate evidence is not active")
         if row["status"] not in {"proposed", "review_required", "approved", "rejected"}:
             raise CandidateConflict(f"candidate cannot be reviewed from status {row['status']}")
 
@@ -647,6 +666,18 @@ async def apply_candidate(
             raise CandidateNotApproved(
                 f"candidate status must be approved, got {candidate['status']}"
             )
+
+        evidence_status = await conn.fetchval(
+            """
+            SELECT status::text
+            FROM memory.evidence
+            WHERE owner_user_id=$1 AND evidence_id=$2
+            """,
+            actor,
+            candidate["evidence_id"],
+        )
+        if evidence_status != "active":
+            raise CandidateConflict("candidate evidence is not active")
 
         proposal = normalize_proposal(
             _json_object(candidate["proposal"], "candidate proposal")

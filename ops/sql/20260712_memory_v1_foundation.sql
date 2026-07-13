@@ -496,7 +496,6 @@ GRANT USAGE ON SCHEMA memory TO brains_app;
 GRANT SELECT ON memory.predicate TO brains_app;
 GRANT SELECT, INSERT, UPDATE, DELETE
   ON memory.entity,
-     memory.evidence,
      memory.entity_alias,
      memory.claim,
      memory.claim_evidence,
@@ -509,6 +508,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE
      memory.retrieval_trace_item,
      memory.projection_outbox
   TO brains_app;
+GRANT SELECT, INSERT ON memory.evidence TO brains_app;
+REVOKE UPDATE, DELETE ON memory.evidence FROM brains_app;
 GRANT EXECUTE ON FUNCTION memory.current_actor_user_id() TO brains_app;
 GRANT EXECUTE ON FUNCTION memory.set_updated_at() TO brains_app;
 
