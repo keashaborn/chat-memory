@@ -54,11 +54,24 @@ trap cleanup EXIT
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch.sql
+
+# Re-applying must preserve insert-only grants, forced RLS, and audit guards.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_rls.sql
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_evidence_lifecycle.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_evidence_ingest_batch.sql
 
 "${compose[@]}" build brains
 "${compose[@]}" run --rm --no-deps \
@@ -111,6 +124,10 @@ if {
 fi
 
 # RLS test data was rolled back, so the guarded rollback must now succeed.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch_rollback.sql
+
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_lifecycle_rollback.sql
