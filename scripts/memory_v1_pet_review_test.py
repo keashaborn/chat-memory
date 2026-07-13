@@ -7,6 +7,7 @@ from rag_engine.memory_v1_pet_review import (
     neko_loss_proposal,
 )
 from rag_engine.memory_v1_store import proposal_hash
+from rag_engine.memory_v1_retrieval import structured_entity_values
 
 
 def main() -> int:
@@ -26,6 +27,10 @@ def main() -> int:
         raise AssertionError("Dahlia age-at-event qualifier is missing")
     if proposal_hash(neko) == proposal_hash(dahlia):
         raise AssertionError("distinct pet events produced the same proposal hash")
+    if structured_entity_values(neko["object_literal"], neko["qualifiers"]) != {"neko"}:
+        raise AssertionError("structured Neko entity extraction failed")
+    if structured_entity_values(dahlia["object_literal"], dahlia["qualifiers"]) != {"dahlia"}:
+        raise AssertionError("structured Dahlia entity extraction failed")
 
     print("memory_v1_pet_review: PASS")
     return 0

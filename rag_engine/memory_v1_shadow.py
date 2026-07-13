@@ -87,6 +87,15 @@ def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
     if domain is None:
         return {"eligible": False, "reason": "unclassified_domain"}
 
+    entity_hints = []
+    if domain == "pet_loss":
+        if "neko" in text or "nemo" in text:
+            entity_hints = ["neko"]
+        elif "dahlia" in text:
+            entity_hints = ["dahlia"]
+        elif "helsing" in text:
+            entity_hints = ["helsing"]
+
     if intent_key in {"SPECIFIC_RECALL", "PROFILE_SUMMARY"}:
         retrieval_intent = "personal_recall"
     elif domain == "life_context":
@@ -100,6 +109,7 @@ def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
         "domain": domain,
         "intent": retrieval_intent,
         "explicit_recall": intent_key == "SPECIFIC_RECALL",
+        "entity_hints": entity_hints,
     }
 
 
@@ -140,6 +150,7 @@ async def _packet(
             max_tokens=int(os.getenv("MEMORY_V1_SHADOW_MAX_TOKENS", "500") or 500),
             max_sensitivity=os.getenv("MEMORY_V1_SHADOW_MAX_SENSITIVITY", "medium"),
             explicit_recall=bool(context["explicit_recall"]),
+            entity_hints=context["entity_hints"],
             request_id=request_id,
             thread_id=thread_id,
         )
@@ -214,6 +225,7 @@ def run_memory_v1_shadow(
             "trace_id": packet["trace_id"],
             "domain": context["domain"],
             "intent": context["intent"],
+            "entity_hints": context["entity_hints"],
             "candidate_count": packet["candidate_count"],
             "selected_count": packet["selected_count"],
             "token_estimate": packet["token_estimate"],

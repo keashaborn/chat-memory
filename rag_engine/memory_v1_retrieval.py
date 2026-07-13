@@ -22,7 +22,7 @@ class RetrievalValidationError(RuntimeError):
     pass
 
 
-def _json_object(value: Any) -> Dict[str, Any]:
+def _json_object(value: Any, field: str = "JSON value") -> Dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -31,7 +31,42 @@ def _json_object(value: Any) -> Dict[str, Any]:
         decoded = json.loads(value)
         if isinstance(decoded, dict):
             return decoded
-    raise RetrievalValidationError("retrieval_policy must be a JSON object")
+    raise RetrievalValidationError(f"{field} must be a JSON object")
+
+
+def _normalized_entity(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split()).strip()
+
+
+def structured_entity_values(
+    object_literal: Any, qualifiers: Any
+) -> set[str]:
+    """Extract governed entity labels from structured fields, never prose."""
+    allowed_keys = {
+        "known_name",
+        "canonical_name",
+        "canonical_value",
+        "name",
+        "subject",
+    }
+    values: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if str(key) in allowed_keys and isinstance(child, str):
+                    normalized = _normalized_entity(child)
+                    if normalized:
+                        values.add(normalized)
+                if isinstance(child, (Mapping, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(_json_object(object_literal, "object_literal"))
+    walk(_json_object(qualifiers, "qualifiers"))
+    return values
 
 
 def _score(value: Any, field: str) -> float:
@@ -113,6 +148,7 @@ async def build_memory_packet(
     max_tokens: int = 500,
     max_sensitivity: str = "medium",
     explicit_recall: bool = False,
+    entity_hints: Sequence[str] = (),
     request_id: str | None = None,
     answer_id: str | uuid.UUID | None = None,
     thread_id: str | uuid.UUID | None = None,
@@ -137,6 +173,13 @@ async def build_memory_packet(
     max_sensitivity = str(max_sensitivity or "medium").strip().lower()
     if max_sensitivity not in SENSITIVITY_RANK:
         raise RetrievalValidationError("invalid max_sensitivity")
+    normalized_entity_hints: set[str] = set()
+    for value in entity_hints:
+        normalized = _normalized_entity(value)
+        if normalized:
+            normalized_entity_hints.add(normalized)
+    if len(normalized_entity_hints) > 8:
+        raise RetrievalValidationError("entity_hints must contain at most 8 values")
 
     candidates = _candidate_map(candidate_hits)
     candidate_ids = list(candidates)
@@ -173,7 +216,7 @@ async def build_memory_packet(
             claim_id = uuid.UUID(str(row["claim_id"]))
             status = str(row["status"])
             sensitivity = str(row["sensitivity"])
-            policy = _json_object(row["retrieval_policy"])
+            policy = _json_object(row["retrieval_policy"], "retrieval_policy")
             reasons: list[str] = []
 
             if status not in RETRIEVABLE_STATUSES:
@@ -203,6 +246,13 @@ async def build_memory_packet(
             if bool(policy.get("requires_explicit")) and not explicit_recall:
                 reasons.append("requires_explicit")
 
+            if normalized_entity_hints:
+                claim_entities = structured_entity_values(
+                    row["object_literal"], row["qualifiers"]
+                )
+                if not normalized_entity_hints.intersection(claim_entities):
+                    reasons.append("entity")
+
             semantic = candidates[claim_id]
             confidence = _as_float(row["confidence"])
             importance = _as_float(row["importance"])
@@ -231,7 +281,7 @@ async def build_memory_packet(
                     "final_score": final_score,
                     "reason_codes": reasons,
                     "surface": surface,
-                    "qualifiers": _json_object(row["qualifiers"]),
+                    "qualifiers": _json_object(row["qualifiers"], "qualifiers"),
                     "token_estimate": _token_estimate(text),
                 }
             )
@@ -308,6 +358,7 @@ async def build_memory_packet(
                     "max_claims": int(max_claims),
                     "max_sensitivity": max_sensitivity,
                     "explicit_recall": bool(explicit_recall),
+                    "entity_hints": sorted(normalized_entity_hints),
                 },
                 sort_keys=True,
             ),

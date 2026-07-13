@@ -4,13 +4,24 @@ from __future__ import annotations
 from rag_engine.memory_v1_shadow import classify_shadow_context
 
 
-def expect(message: str, turn_intent: str, *, domain: str, intent: str) -> None:
+def expect(
+    message: str,
+    turn_intent: str,
+    *,
+    domain: str,
+    intent: str,
+    entity_hints: list[str] | None = None,
+) -> None:
     result = classify_shadow_context(message, turn_intent)
     if not result["eligible"]:
         raise AssertionError(f"expected eligible context: {result}")
     if result["domain"] != domain or result["intent"] != intent:
         raise AssertionError(
             f"expected {domain}/{intent}, got {result['domain']}/{result['intent']}"
+        )
+    if entity_hints is not None and result["entity_hints"] != entity_hints:
+        raise AssertionError(
+            f"expected entity hints {entity_hints}, got {result['entity_hints']}"
         )
 
 
@@ -38,18 +49,21 @@ def main() -> int:
         "SPECIFIC_RECALL",
         domain="pet_loss",
         intent="personal_recall",
+        entity_hints=[],
     )
     expect(
         "What happened to Neko?",
         "SPECIFIC_RECALL",
         domain="pet_loss",
         intent="personal_recall",
+        entity_hints=["neko"],
     )
     expect(
         "What happened to Dahlia?",
         "SPECIFIC_RECALL",
         domain="pet_loss",
         intent="personal_recall",
+        entity_hints=["dahlia"],
     )
     expect(
         "Was it Nemo or Neko?",
