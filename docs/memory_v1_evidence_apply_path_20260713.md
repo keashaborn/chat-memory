@@ -1,7 +1,7 @@
 # Memory V1 controlled evidence apply path
 
-Status: implemented and tested in the isolated Memory V1 branch. Production
-schema installation and the 164-row apply remain separately unauthorized.
+Status: deployed and applied on 2026-07-13. The batch is immutable and exact
+replay is read-only.
 
 ## Locked production batch
 
@@ -27,7 +27,9 @@ and fails closed.
 `ops/manifests/memory_v1_evidence_apply_20260713.json` is the sole production
 authorization manifest. It locks the owner, source snapshot, artifact manifest,
 reviewed report, plan fingerprint, exact counts, batch identity, and allowed
-writes. It currently contains `"apply_authorized": false`.
+writes. Authorization commit `63627e9` changed only `apply_authorized` to true.
+The authorized manifest SHA-256 is
+`0a67fdf84723609b999b95e88c4d2437bda19163fb9a7f0cc36d715d0f954f57`.
 
 An apply requires all three controls:
 
@@ -37,6 +39,23 @@ An apply requires all three controls:
 
 Changing the manifest changes its SHA-256. The committed batch records that
 exact authorization-manifest hash.
+
+## Production result
+
+The pre-apply restore point is
+`/home/ubuntu/brains/snapshots/memory_pre_reviewed_evidence_apply_20260713T213746Z.dump`
+(72,484,006 bytes, mode `600`, 909 restore-catalog entries, SHA-256
+`d82d2eaf0905773e4571ed5c7a519bc9d64ba03764c1f3e3f5a0e642b040291c`).
+
+Batch `15064e5d-8cd3-5611-9cbf-db177d24a3a0` committed 164 inserts and zero
+reuses. Evidence increased from 9 to 173. Candidates remained 7, claims 6,
+preferences 0, projection outbox 6, and lifecycle events 0. All 164 rows are
+active; 152 are high sensitivity and 12 restricted. Retrieval, prompt use, and
+candidate creation remain disabled on every row.
+
+The exact replay returned `verified_replay` with zero writes. A different actor
+UUID saw zero batch headers and zero batch rows. Brains remained active and
+Qdrant `memory_claim_v1` remained green with six points.
 
 ## Transaction
 
