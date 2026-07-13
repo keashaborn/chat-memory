@@ -47,6 +47,15 @@ trap cleanup EXIT
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_lifecycle.sql
 
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch.sql
+
+# Re-applying must preserve insert-only grants, forced RLS, and audit guards.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch.sql
+
 # Re-applying the lifecycle migration must preserve grants, triggers, and ownership.
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
@@ -59,6 +68,10 @@ trap cleanup EXIT
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_evidence_lifecycle.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_evidence_ingest_batch.sql
 
 "${compose[@]}" build brains
 "${compose[@]}" run --rm --no-deps \
@@ -90,6 +103,11 @@ trap cleanup EXIT
 "${compose[@]}" run --rm --no-deps \
   -e PYTHONPATH=/app \
   brains python scripts/memory_v1_evidence_persistence_test.py
+
+"${compose[@]}" run --rm --no-deps \
+  -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
+  -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_evidence_apply_integration.py
 
 "${compose[@]}" run --rm --no-deps \
   -e PYTHONPATH=/app \
@@ -127,6 +145,10 @@ if {
 fi
 
 # RLS test data was rolled back, so the guarded rollback must now succeed.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_evidence_ingest_batch_rollback.sql
+
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_lifecycle_rollback.sql

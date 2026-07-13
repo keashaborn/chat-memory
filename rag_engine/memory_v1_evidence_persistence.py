@@ -605,6 +605,11 @@ def _input_fingerprint(plans: Sequence[EvidenceSpanPlan]) -> str:
     return _sha256_text(_stable_json(locked))
 
 
+def evidence_plan_fingerprint(plans: Sequence[EvidenceSpanPlan]) -> str:
+    """Return the reviewed, deterministic fingerprint for an evidence plan."""
+    return _input_fingerprint(plans)
+
+
 def evidence_persistence_dry_run_report(
     decisions: Sequence[EvidencePersistenceDecision],
     *,
@@ -700,9 +705,9 @@ def evidence_persistence_dry_run_report(
             "identity_constraint": (
                 "UNIQUE(owner_user_id, source_system, external_id)"
             ),
-            "known_schema_gap": (
-                "brains_app currently has UPDATE and DELETE on memory.evidence; "
-                "a future apply path requires narrower database enforcement"
+            "database_boundary": (
+                "memory.evidence is SELECT/INSERT-only for brains_app; "
+                "redaction and deletion require the audited lifecycle function"
             ),
         },
         "deduplication_contract": {

@@ -1,0 +1,37 @@
+{
+  "manifest_version": "memory_v1_evidence_apply_authorization_20260713_v1",
+  "batch_id": "15064e5d-8cd3-5611-9cbf-db177d24a3a0",
+  "batch_key": "reviewed_evidence_20260713_164_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "plan_version": "memory_v1_evidence_persistence_20260713_v1",
+  "apply_authorized": false,
+  "reviewed_report_sha256": "d122028cc07abc8d3d122ba9779f04514ec75c6be1996cf2256854189c1f642a",
+  "reviewed_input_fingerprint_sha256": "201a828c35b6d1717c5b36061960cb32a8732bfa39ca59fe19e3c1d1ab404fad",
+  "artifact_manifest_sha256": "f1f97c5a172f0c33ed2655233932b489dd9fb2156070d176da0b3cd9534fb856",
+  "source_snapshot": {
+    "last_created_at": "2026-07-13T11:24:55.273202Z",
+    "last_source_id": "084366e0-e4a3-43ea-9ee3-91931a1d5dfd",
+    "row_count": 140,
+    "sha256": "dd7f3c9983e47aa7e9d214ef7ec8e6463dd3fbda6248c778271144afb46c5c33"
+  },
+  "expected": {
+    "evidence_rows": 164,
+    "atomic_review_spans": 102,
+    "compound_review_spans": 62
+  },
+  "controls": {
+    "allowed_writes": [
+      "memory.evidence:INSERT",
+      "memory.evidence_ingest_batch:INSERT",
+      "memory.evidence_ingest_batch_row:INSERT"
+    ],
+    "candidate_writes": 0,
+    "claim_writes": 0,
+    "evidence_updates": 0,
+    "evidence_deletes": 0,
+    "preference_writes": 0,
+    "projection_outbox_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_injection": false
+  }
+}

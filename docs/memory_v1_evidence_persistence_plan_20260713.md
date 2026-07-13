@@ -1,6 +1,7 @@
 # Memory V1 reviewed-span evidence persistence plan
 
-Status: dry-run design only. No apply path is authorized or implemented.
+Status: reviewed dry run. A separately controlled apply path is designed but
+remains unauthorized.
 
 ## Scope
 
@@ -79,12 +80,10 @@ not independent corroboration.
 
 ## Security boundary
 
-`memory.evidence` has forced RLS using transaction-local `app.user_id` and a
-unique `(owner_user_id, source_system, external_id)` identity. The live
-`brains_app` role also has `UPDATE` and `DELETE`, so append-only behavior is not
-currently enforced by database privilege. Before any apply path exists, use a
-narrow insert/select-only persistence boundary or an equally strict database
-function and add an audited redaction/deletion mechanism separately.
+`memory.evidence` has forced RLS using transaction-local `app.user_id`, a unique
+`(owner_user_id, source_system, external_id)` identity, and SELECT/INSERT-only
+grants for `brains_app`. Direct UPDATE and DELETE are denied. Redaction and
+logical deletion use the separately audited lifecycle function.
 
 The dry-run command opens read-only transactions and has no apply flag, evidence
 insert, candidate insert, claim promotion, preference mutation, Qdrant write, or
