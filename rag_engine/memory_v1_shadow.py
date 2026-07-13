@@ -57,7 +57,7 @@ def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
         "parent",
         "deedee",
     )
-    pet_terms = ("pet", "dog", "cat", "helsing")
+    pet_terms = ("pet", "dog", "cat", "neko", "nemo", "dahlia", "helsing")
     caregiving_terms = (
         "caregiving",
         "caregiver",
@@ -71,14 +71,16 @@ def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
     )
 
     domain: Optional[str] = None
-    if _contains(text, name_terms):
+    if _contains(text, pet_terms) and (
+        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    ):
+        domain = "pet_loss"
+    elif _contains(text, name_terms):
         domain = "name_correction"
     elif _contains(text, family_terms) and (
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
     ):
         domain = "family_death"
-    elif _contains(text, pet_terms) and _contains(text, LOSS_TERMS):
-        domain = "pet_loss"
     elif _contains(text, caregiving_terms):
         domain = "life_context"
 

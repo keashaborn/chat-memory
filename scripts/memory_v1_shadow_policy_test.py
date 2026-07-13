@@ -40,6 +40,24 @@ def main() -> int:
         intent="personal_recall",
     )
     expect(
+        "What happened to Neko?",
+        "SPECIFIC_RECALL",
+        domain="pet_loss",
+        intent="personal_recall",
+    )
+    expect(
+        "What happened to Dahlia?",
+        "SPECIFIC_RECALL",
+        domain="pet_loss",
+        intent="personal_recall",
+    )
+    expect(
+        "Was it Nemo or Neko?",
+        "SPECIFIC_RECALL",
+        domain="name_correction",
+        intent="personal_recall",
+    )
+    expect(
         "I am struggling with caregiving for my wife.",
         "GENERAL",
         domain="life_context",
