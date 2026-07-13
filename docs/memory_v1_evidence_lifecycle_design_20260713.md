@@ -1,9 +1,11 @@
 # Memory V1 evidence lifecycle design
 
-Status: isolated implementation; not applied to production
+Status: deployed to production on 2026-07-13
 Server: seebx backend
 Schema: `memory`
 Migration: `ops/sql/20260713_memory_v1_evidence_lifecycle.sql`
+Production commit: `b2d7473077ac5919b117b678f623d5898c11106e`
+Pre-deployment backup: `memory_pre_evidence_lifecycle_20260713T193119Z.dump`
 
 ## Scope
 
@@ -138,4 +140,7 @@ Before production deployment:
 6. Verify tombstoned evidence cannot be reinserted, promoted, or retrieved.
 7. Take a production backup and record pre/post schema and row-count checks.
 
-No production migration is authorized by this design step.
+Production deployment was explicitly approved after the isolated suite and a
+restored production-clone rehearsal passed. Post-deployment verification found
+9 active evidence rows, 7 candidates, 6 claims, 6 projection-outbox rows,
+0 lifecycle events, and 6 green Qdrant claim points.
