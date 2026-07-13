@@ -24,6 +24,14 @@ trap cleanup EXIT
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_artifacts.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_artifacts.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260712_memory_v1_projection_outbox_owner_index.sql
 
 "${compose[@]}" exec -T postgres \
@@ -85,6 +93,10 @@ if {
 fi
 
 # RLS test data was rolled back, so the guarded rollback must now succeed.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_artifacts_rollback.sql
+
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260712_memory_v1_foundation_rollback.sql
