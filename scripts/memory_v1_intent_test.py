@@ -50,6 +50,13 @@ def main() -> int:
         specialized=True,
     )
     expect(
+        "What do you actually remember about my music preferences?",
+        "GENERAL",
+        memory_intent="preference_recall",
+        domains=["music"],
+        specialized=True,
+    )
+    expect(
         "If you had a guess, what do you think my favorite artist would be?",
         "SPECIFIC_RECALL",
         memory_intent="preference_recall",
