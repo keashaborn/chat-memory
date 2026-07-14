@@ -12,6 +12,14 @@ ownership, durable memory, or rollout allowlists:
    anchor.
 4. Historical project records could answer current planning or status turns.
 
+The first production inspect-only probe then exposed a fifth contributor: the
+retired `vantage_card` durable-personal selector could still inject its legacy
+prompt block whenever the governed selector correctly skipped a declarative
+turn. The obsolete selector, preview, prompt formatter, and injection-signal
+writer were removed from `rag_engine/vantage_router.py`. Existing legacy rows
+are retained as inactive historical data; they are no longer read by this
+answer path.
+
 ## Selector rules
 
 - Governed personal retrieval requires an explicit recall/normalization cue or
@@ -37,6 +45,8 @@ ownership, durable memory, or rollout allowlists:
 - Prompt activation remains allowlisted to the existing primary account.
   Universal authenticated shadow tracing remains inspect-only for other
   accounts.
+- The answer path no longer reads or injects legacy durable personal cards
+  from `vantage_card.card_head`.
 
 ## Deterministic gates
 
