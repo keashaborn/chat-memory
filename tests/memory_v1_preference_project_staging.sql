@@ -608,10 +608,7 @@ INSERT INTO memory.project_knowledge_revision(
   'f7000000-0000-4000-8000-000000000001',
   1,
   'Memory ownership is the authenticated Supabase user UUID.',
-  encode(public.digest(
-    'Memory ownership is the authenticated Supabase user UUID.',
-    'sha256'
-  ), 'hex'),
+  repeat('c', 64),
   'ratified',
   'user_ratified',
   '{"source":"review"}'::jsonb,

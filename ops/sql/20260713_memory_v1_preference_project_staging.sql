@@ -419,22 +419,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS project_revision_owner_accepted_review_uq
     owner_user_id, project_id, accepted_review_id
   );
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'memory.project_knowledge_revision'::regclass
-      AND conname = 'project_revision_content_hash_ck'
-  ) THEN
-    ALTER TABLE memory.project_knowledge_revision
-      ADD CONSTRAINT project_revision_content_hash_ck
-      CHECK (
-        content_sha256 = encode(public.digest(canonical_text, 'sha256'), 'hex')
-      );
-  END IF;
-END
-$$;
-
 CREATE TABLE IF NOT EXISTS memory.project_knowledge_revision_evidence (
   owner_user_id uuid NOT NULL,
   project_id uuid NOT NULL,
@@ -843,11 +827,14 @@ BEGIN
      OR head_row.knowledge_key <> candidate_row.knowledge_key
      OR head_row.knowledge_kind <> candidate_row.knowledge_kind
      OR NEW.canonical_text <> candidate_row.canonical_text
+     OR NEW.content_sha256 <> candidate_row.candidate_hash
      OR NEW.document_state <> candidate_row.document_state
      OR NEW.authority_level <> candidate_row.authority_level
      OR NEW.authority_source <> candidate_row.authority_source
      OR NEW.effective_from IS DISTINCT FROM candidate_row.effective_at
-     OR NEW.sensitivity <> candidate_row.sensitivity THEN
+     OR NEW.effective_to IS DISTINCT FROM candidate_row.expires_at
+     OR NEW.sensitivity <> candidate_row.sensitivity
+     OR NEW.metadata <> candidate_row.metadata THEN
     RAISE EXCEPTION 'project revision does not exactly match its accepted candidate'
       USING ERRCODE = '23514';
   END IF;

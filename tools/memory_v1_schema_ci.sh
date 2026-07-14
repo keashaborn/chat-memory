@@ -86,6 +86,19 @@ trap cleanup EXIT
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_preference_project_staging.sql
 
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_review_apply.sql
+
+# Re-applying must preserve function ownership, forced RLS, and narrow grants.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_review_apply.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_review_apply.sql
+
 "${compose[@]}" build brains
 "${compose[@]}" run --rm --no-deps \
   -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
@@ -158,6 +171,10 @@ if {
 fi
 
 # RLS test data was rolled back, so the guarded rollback must now succeed.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260713_memory_v1_review_apply_rollback.sql
+
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_preference_project_staging_rollback.sql

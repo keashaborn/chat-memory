@@ -72,9 +72,9 @@ rewrite or split decision, reject self-reference, and enforce deterministic
 ordinals.
 
 Project revision guards require an `accept` review, exact candidate/head key and
-kind alignment, exact text/authority/state/effective-time/sensitivity equality,
-a database-computed SHA-256, single-use accepted reviews, and a same-head,
-gapless revision chain. Evidence lifecycle audit rows count
+kind alignment, exact text/hash/authority/state/effective-time/sensitivity
+equality, single-use accepted reviews, and a same-head, gapless revision chain.
+Evidence lifecycle audit rows count
 preference-candidate, project-candidate, and durable project-revision links
 separately.
 
