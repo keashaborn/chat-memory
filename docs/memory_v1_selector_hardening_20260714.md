@@ -87,6 +87,8 @@ artifacts are modified by this change.
   traces and the primary actor saw zero of the second actor's fresh traces.
   The second actor saw `0 claims / 0 preferences / 0 project records`; the
   primary actor saw only its own `6 / 3 / 5` rows.
-- The second actor has no recent non-test retrieval traces. Prompt influence
-  therefore remains primary-owner-only until ordinary use from another active
-  account supplies a real-use trace sample.
+- A non-admin authenticated account later supplied 18 synthetic ordinary-use
+  turns across three threads, including five recall turns in a fresh thread.
+  Reciprocal trace RLS and all eight Qdrant points used by those answers were
+  owner-correct. This completes the second-account ordinary-trace gate. Prompt
+  rollout remains primary-owner-only pending a separate explicit decision.
