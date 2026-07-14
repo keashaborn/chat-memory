@@ -479,7 +479,11 @@ async def process_job(
         for key, value in staged.items()
         if key.endswith("_candidate_ids") and isinstance(value, list)
     )
-    status = "review_required" if candidate_count or staged["project_deferred"] else "completed"
+    status = "review_required" if (
+        candidate_count
+        or staged["project_deferred"]
+        or staged["validation_rejections"]
+    ) else "completed"
     await finish_job(
         conn,
         owner=owner,
