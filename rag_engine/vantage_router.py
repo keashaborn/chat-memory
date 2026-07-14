@@ -21,7 +21,7 @@ from .retriever_unified import retrieve_personal_memory, unified_retrieve
 from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
-from .memory_v1_shadow import run_memory_v1_shadow
+from .memory_v1_shadow import run_memory_v1_runtime
 from .memory_v1_intent import (
     apply_legacy_personal_memory_gate,
     classify_legacy_personal_memory_access,
@@ -2146,16 +2146,17 @@ def vantage_query(req: Request, payload: VantageQuery):
             model=os.getenv("EMBED_MODEL", "text-embedding-3-large"),
         )
 
-        # Measurement only: this packet is traced and summarized for diagnostics,
-        # but never added to memory_chunks, system_prompt, or model messages.
-        turn_plan["memory_v1_shadow"] = run_memory_v1_shadow(
+        governed_runtime = run_memory_v1_runtime(
             payload.user_id,
             query=payload.message,
             turn_intent=turn_intent,
             request_id=req_request_id,
             thread_id=payload.thread_id,
             embedding_provider=query_embedding.get,
+            expose_to_answer_model=not bool(getattr(payload, "inspect_only", False)),
         )
+        turn_plan["memory_v1_shadow"] = governed_runtime["audit"]
+        governed_memory_prompt_block = governed_runtime["prompt_block"]
         # Owner-scoped runtime packet. Only the audit object enters response
         # metadata; the content block remains internal to prompt construction.
         specialized_runtime = run_preference_project_runtime(
@@ -2614,6 +2615,11 @@ def vantage_query(req: Request, payload: VantageQuery):
         durable_personal_cards_block = _format_durable_personal_cards_block_v0(
             personal_card_selection_preview
         )
+        if governed_memory_prompt_block:
+            personal_card_selection_preview[
+                "prompt_block_suppressed_by"
+            ] = "memory_v1_governed"
+            durable_personal_cards_block = ""
 
         system_prompt = build_system_prompt(
             payload.user_id,
@@ -2626,6 +2632,13 @@ def vantage_query(req: Request, payload: VantageQuery):
         )
         if durable_personal_cards_block:
             system_prompt = system_prompt.rstrip() + "\n\n" + durable_personal_cards_block + "\n"
+        if governed_memory_prompt_block:
+            system_prompt = (
+                system_prompt.rstrip()
+                + "\n\n"
+                + governed_memory_prompt_block
+                + "\n"
+            )
         if specialized_memory_prompt_block:
             system_prompt = (
                 system_prompt.rstrip()

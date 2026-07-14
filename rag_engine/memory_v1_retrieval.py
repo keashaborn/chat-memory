@@ -152,6 +152,8 @@ async def build_memory_packet(
     request_id: str | None = None,
     answer_id: str | uuid.UUID | None = None,
     thread_id: str | uuid.UUID | None = None,
+    runtime_activation: bool = False,
+    expose_to_answer_model: bool = False,
 ) -> Dict[str, Any]:
     try:
         actor = actor_uuid(actor_user_id)
@@ -327,6 +329,12 @@ async def build_memory_packet(
                 if reason not in {"claim_budget", "token_budget"}:
                     rejected_counts[reason] += 1
 
+        retrieval_activation = bool(runtime_activation and selected)
+        prompt_injection = retrieval_activation
+        answer_model_exposure = bool(
+            retrieval_activation and expose_to_answer_model
+        )
+
         trace_id = uuid.uuid4()
         await conn.execute(
             """
@@ -359,6 +367,9 @@ async def build_memory_packet(
                     "max_sensitivity": max_sensitivity,
                     "explicit_recall": bool(explicit_recall),
                     "entity_hints": sorted(normalized_entity_hints),
+                    "prompt_injection": prompt_injection,
+                    "answer_model_exposure": answer_model_exposure,
+                    "retrieval_activation": retrieval_activation,
                 },
                 sort_keys=True,
             ),
@@ -421,4 +432,7 @@ async def build_memory_packet(
             "visible_candidate_count": len(visible_ids),
             "rejected_counts": dict(sorted(rejected_counts.items())),
             "token_estimate": tokens_used,
+            "prompt_injection": prompt_injection,
+            "answer_model_exposure": answer_model_exposure,
+            "retrieval_activation": retrieval_activation,
         }
