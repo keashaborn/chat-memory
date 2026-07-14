@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import inspect
 
-from rag_engine.memory_v1_intent import classify_memory_intent
+from rag_engine.memory_v1_intent import (
+    apply_legacy_personal_memory_gate,
+    classify_legacy_personal_memory_access,
+    classify_memory_intent,
+    resolve_legacy_personal_memory_mode,
+)
 
 
 def expect(
@@ -45,6 +50,20 @@ def main() -> int:
         specialized=True,
     )
     expect(
+        "If you had a guess, what do you think my favorite artist would be?",
+        "SPECIFIC_RECALL",
+        memory_intent="preference_recall",
+        domains=["music"],
+        specialized=True,
+    )
+    expect(
+        "I've got this song stuck in my head, but I'm not really sure who sings it. It kind of goes: I've been around for you. I've been up and down for you, but I just can't get any release. Do you know what song that is and who sang it?",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+    )
+    expect(
         "Explain the physics of musical harmonics.",
         "GENERAL",
         memory_intent="none",
@@ -71,6 +90,34 @@ def main() -> int:
         memory_intent="project_recall",
         domains=["project_history"],
         specialized=True,
+    )
+    expect(
+        "So far, I don't have Internet access integrated into the app. Do you think that would be a good thing to integrate?",
+        "GENERAL",
+        memory_intent="project_planning",
+        domains=["project"],
+        specialized=True,
+    )
+    expect(
+        "I am worried about the app or website cost if ChatGPT usage grows, so I may need to build a cost structure.",
+        "TECH",
+        memory_intent="project_planning",
+        domains=["project_history"],
+        specialized=True,
+    )
+    expect(
+        "Can you recommend a guitar practice app?",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+    )
+    expect(
+        "Do you think the apple is ripe?",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
     )
     expect(
         "How can Fractal Monism say reality is one while distinctions still matter?",
@@ -113,6 +160,76 @@ def main() -> int:
         raise AssertionError("memory-intent classification is not deterministic")
     if "vantage_id" in str(first).casefold() or "response_mode" in str(first).casefold():
         raise AssertionError("persona or response mode leaked into memory intent")
+
+    song_gate = classify_legacy_personal_memory_access(
+        "I've got this song stuck in my head, but I'm not really sure who sings it. I've been around for you. I've been up and down for you, but I just can't get any release. Do you know what song that is and who sang it?",
+        request_classification="GENERAL",
+        mode="on",
+    )
+    if song_gate["allowed"] or song_gate["reason"] != "song_identification_uses_live_context_only":
+        raise AssertionError(song_gate)
+
+    favorite_gate = classify_legacy_personal_memory_access(
+        "Guess what my favorite artist would be.",
+        request_classification="SPECIFIC_RECALL",
+        mode="specific_recall_only",
+    )
+    if favorite_gate["allowed"] or favorite_gate["reason"] != "curated_memory_route_required":
+        raise AssertionError(favorite_gate)
+
+    claim_gate = classify_legacy_personal_memory_access(
+        "What happened with my mom?",
+        request_classification="SPECIFIC_RECALL",
+        mode="specific_recall_only",
+    )
+    if not claim_gate["allowed"]:
+        raise AssertionError(claim_gate)
+
+    general_gate = classify_legacy_personal_memory_access(
+        "What should I cook tonight?",
+        request_classification="GENERAL",
+        mode="specific_recall_only",
+    )
+    if general_gate["allowed"] or general_gate["reason"] != "not_narrow_personal_recall":
+        raise AssertionError(general_gate)
+
+    actor = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+    if resolve_legacy_personal_memory_mode(
+        actor,
+        default_mode="on",
+        safe_user_ids=actor,
+    ) != "specific_recall_only":
+        raise AssertionError("safe-user override failed")
+    if resolve_legacy_personal_memory_mode(
+        actor,
+        default_mode="on",
+        safe_user_ids=actor,
+        off_user_ids=actor,
+    ) != "off":
+        raise AssertionError("off-user override must win")
+    if resolve_legacy_personal_memory_mode(
+        actor,
+        default_mode="invalid",
+    ) != "off":
+        raise AssertionError("invalid legacy mode did not fail closed")
+
+    gated_plan, gate_audit = apply_legacy_personal_memory_gate(
+        {
+            "k_personal": 10,
+            "k_corpus": 5,
+            "personal_archive_enabled": True,
+            "corpus_enabled": True,
+        },
+        song_gate,
+    )
+    if gated_plan["k_personal"] != 0 or gated_plan["personal_archive_enabled"]:
+        raise AssertionError(gated_plan)
+    if gated_plan["k_corpus"] != 0 or gated_plan["corpus_enabled"]:
+        raise AssertionError(gated_plan)
+    if gate_audit["requested_k_personal"] != 10 or gate_audit["effective_k_personal"] != 0:
+        raise AssertionError(gate_audit)
+    if gate_audit["requested_k_corpus"] != 5 or gate_audit["effective_k_corpus"] != 0:
+        raise AssertionError(gate_audit)
 
     print("memory_v1_intent: PASS")
     return 0

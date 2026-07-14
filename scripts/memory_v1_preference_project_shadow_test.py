@@ -7,6 +7,7 @@ import uuid
 
 from rag_engine.memory_v1_preference_project_shadow import (
     VERSION,
+    _empty_result,
     _trace_metadata,
     run_preference_project_shadow,
 )
@@ -38,7 +39,7 @@ def main() -> int:
         os.environ.update(original)
 
     intent_plan = {
-        "version": "memory_intent_adapter_v1",
+        "version": "memory_intent_adapter_v2",
         "request_classification": "GENERAL",
         "reason_codes": ["explicit_music_recommendation"],
         "candidate_entities": [],
@@ -78,6 +79,33 @@ def main() -> int:
         raise AssertionError("shadow metadata reported model exposure")
     if metadata["retrieval_activation"]:
         raise AssertionError("shadow metadata reported retrieval activation")
+
+    skipped_plan = {
+        "version": "memory_intent_adapter_v2",
+        "request_classification": "GENERAL",
+        "memory_intent": "none",
+        "domains": [],
+        "project_key": None,
+        "reason_codes": ["no_governed_memory_need"],
+        "candidate_entities": [],
+        "direct_relevance": False,
+    }
+    skipped_metadata = _trace_metadata(
+        skipped_plan,
+        _empty_result(skipped_plan),
+        decision_status="skipped",
+        evaluation_elapsed_ms=12.3456,
+        skip_reason="no_specialized_memory_need",
+    )
+    if skipped_metadata["decision_status"] != "skipped":
+        raise AssertionError(skipped_metadata)
+    if skipped_metadata["evaluation_elapsed_ms"] != 12.346:
+        raise AssertionError(skipped_metadata)
+    if skipped_metadata["skip_reason"] != "no_specialized_memory_need":
+        raise AssertionError(skipped_metadata)
+    skipped_encoded = json.dumps(skipped_metadata, sort_keys=True)
+    if "query" in skipped_encoded or "canonical_text" in skipped_encoded:
+        raise AssertionError("skipped-turn content leaked into diagnostic metadata")
 
     print("memory_v1_preference_project_shadow: PASS")
     return 0
