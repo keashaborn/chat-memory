@@ -29,11 +29,10 @@ from .memory_v1_intent import (
 from .memory_v1_preference_project_shadow import run_preference_project_runtime
 from .query_embedding_cache import QueryEmbeddingCache
 
-# Reuse the exact behavior of the current /rag/query path where it matters:
-from .rag_router import (
+# Current Vantage query helpers. Kept separate from retired RAG endpoints.
+from .vantage_query_support import (
     build_meta_explanation,
     is_pure_reentry_greeting,
-    score_personal_hit,  # NOTE: this is the rag_router version (matches current prod behavior)
 )
 
 from .vantage_engine import normalize_limits, extract_sd_features, derive_params, decide, build_overlay_text
@@ -2525,18 +2524,6 @@ def vantage_query(req: Request, payload: VantageQuery):
 
         personal_hits = [_tag(h, "personal") for h in (personal_hits or [])]
         corpus_hits = [_tag(h, "corpus") for h in (corpus_hits or [])]
-
-        # Rescore personal hits to match rag_router behavior (best-effort)
-        scored_personal: List[Dict[str, Any]] = []
-        for h in personal_hits:
-            try:
-                s = score_personal_hit(payload.message, h)
-                h2 = dict(h)
-                h2["score"] = float(s)
-                scored_personal.append(h2)
-            except Exception:
-                scored_personal.append(h)
-        personal_hits = scored_personal
 
         if recall_mode:
             # Specific recall needs answer-bearing archive context.

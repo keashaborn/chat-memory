@@ -49,7 +49,13 @@ def main() -> int:
         schema = json.load(response)
     paths = set((schema.get("paths") or {}).keys())
 
-    retired_paths = {"/rag/query", "/rag/feedback", "/retrieve", "/vantage/feedback"}
+    retired_paths = {
+        "/rag/query",
+        "/rag/feedback",
+        "/retrieve",
+        "/vantage/feedback",
+        "/memory_feedback",
+    }
     assert retired_paths.isdisjoint(paths), retired_paths & paths
     assert "/vantage/query" in paths
 
@@ -59,6 +65,14 @@ def main() -> int:
         ("/rag/feedback", {"user_id": random_owner, "message": "route retirement probe"}),
         ("/retrieve", {"query": "route retirement probe"}),
         ("/vantage/feedback", {"user_id": random_owner, "message": "route retirement probe"}),
+        (
+            "/memory_feedback",
+            {
+                "user_id": random_owner,
+                "memory_id": "00000000-0000-0000-0000-000000000000",
+                "signal": "neutral",
+            },
+        ),
     )
     for path, body in probes:
         assert request_status("POST", path, token, body) == 404, path
@@ -76,6 +90,16 @@ def main() -> int:
     app_source = (ROOT / "app.py").read_text(encoding="utf-8")
     assert "include_router(vantage_router, prefix=\"/vantage\")" in app_source
     assert "include_router(rag_router" not in app_source
+    assert not (ROOT / "rag_engine" / "rag_router.py").exists()
+    assert not (ROOT / "rag_engine" / "retriever.py").exists()
+
+    support_source = (ROOT / "rag_engine" / "vantage_query_support.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def build_meta_explanation(" in support_source
+    assert "def is_pure_reentry_greeting(" in support_source
+    assert "from .vantage_query_support import" in vantage_source
+    assert "score_personal_hit(" not in vantage_source
 
     print("legacy_rag_route_retirement_test: PASS")
     return 0
