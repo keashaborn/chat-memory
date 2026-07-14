@@ -41,6 +41,11 @@ def _uuid_values(raw: str) -> set[str]:
 
 
 def _allowlisted(actor: uuid.UUID) -> bool:
+    # This broadens audit-only evaluation only. The caller must already have
+    # verified the actor/owner binding, and answer influence remains controlled
+    # by the separate governed activation flag and per-user activation list.
+    if os.getenv("MEMORY_V1_SHADOW_ALL_AUTHENTICATED", "0").strip() == "1":
+        return True
     return str(actor) in _uuid_values(os.getenv("MEMORY_V1_SHADOW_USER_IDS", ""))
 
 

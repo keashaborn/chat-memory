@@ -6,6 +6,7 @@ import uuid
 
 from rag_engine.memory_v1_shadow import (
     _activation_allowlisted,
+    _allowlisted,
     _format_prompt_block,
     classify_shadow_context,
 )
@@ -106,11 +107,17 @@ def main() -> int:
     original = dict(os.environ)
     try:
         actor = uuid.uuid4()
+        shadow_only_actor = uuid.uuid4()
         os.environ["MEMORY_V1_SHADOW_USER_IDS"] = str(actor)
         os.environ["MEMORY_V1_GOVERNED_ACTIVE"] = "1"
         os.environ["MEMORY_V1_GOVERNED_ACTIVE_USER_IDS"] = str(actor)
         if not _activation_allowlisted(actor):
             raise AssertionError("owner-scoped governed activation failed")
+        os.environ["MEMORY_V1_SHADOW_ALL_AUTHENTICATED"] = "1"
+        if not _allowlisted(shadow_only_actor):
+            raise AssertionError("universal authenticated shadow failed")
+        if _activation_allowlisted(shadow_only_actor):
+            raise AssertionError("universal shadow widened governed activation")
         os.environ["MEMORY_V1_GOVERNED_ACTIVE"] = "0"
         if _activation_allowlisted(actor):
             raise AssertionError("governed master flag failed closed")

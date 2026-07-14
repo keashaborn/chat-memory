@@ -8,6 +8,7 @@ import uuid
 from rag_engine.memory_v1_preference_project_shadow import (
     VERSION,
     _activation_allowlisted,
+    _allowlisted,
     _empty_result,
     _format_prompt_block,
     _trace_metadata,
@@ -38,11 +39,17 @@ def main() -> int:
             raise AssertionError(skipped)
 
         actor = uuid.uuid4()
+        shadow_only_actor = uuid.uuid4()
         os.environ["MEMORY_V1_SHADOW_USER_IDS"] = str(actor)
         os.environ["MEMORY_V1_SPECIALIZED_ACTIVE"] = "1"
         os.environ["MEMORY_V1_SPECIALIZED_ACTIVE_USER_IDS"] = str(actor)
         if not _activation_allowlisted(actor):
             raise AssertionError("owner-scoped activation allowlist failed")
+        os.environ["MEMORY_V1_SHADOW_ALL_AUTHENTICATED"] = "1"
+        if not _allowlisted(shadow_only_actor):
+            raise AssertionError("universal authenticated shadow failed")
+        if _activation_allowlisted(shadow_only_actor):
+            raise AssertionError("universal shadow widened specialized activation")
         os.environ["MEMORY_V1_SPECIALIZED_ACTIVE"] = "0"
         if _activation_allowlisted(actor):
             raise AssertionError("master activation flag failed closed")
