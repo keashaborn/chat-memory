@@ -15,7 +15,6 @@ from openai import OpenAI
 from pydantic import BaseModel
 from rag_engine.rag_router import router as rag_router
 from rag_engine.vantage_router import router as vantage_router
-from rag_engine.forms_router import router as forms_router
 from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
 from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutrition_log_router
@@ -42,7 +41,6 @@ from scripts.review_promotion_plan import build_personal_event_promotion_preview
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(rag_router, prefix="/rag")
 app.include_router(vantage_router, prefix="/vantage")
-app.include_router(forms_router, prefix="/forms")
 app.include_router(telemetry_router)
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")
@@ -1010,14 +1008,6 @@ async def retrieve(body: RetrieveReq):
         "results": results,
     }
 
-# ---------- retrieve_memory ----------
-class MemoryReq(BaseModel):
-    query: str
-    top_k: Optional[int] = 5
-    score_threshold: Optional[float] = 0.0
-    user_id: Optional[str] = None
-    vantage_id: Optional[str] = "default"
-
 # NEW: feedback signal model
 class FeedbackSignal(BaseModel):
     user_id: str
@@ -1027,57 +1017,6 @@ class FeedbackSignal(BaseModel):
 
 class GravityReq(BaseModel):
     user_id: str
-
-@app.post("/retrieve_memory")
-async def retrieve_memory(body: MemoryReq):
-    """
-    Retrieve personal/episodic memory from the memory_raw collection.
-    Filters:
-      - collection: memory_raw
-      - payload.source == "frontend"
-      - optional: payload.user_id == supplied user_id
-    """
-    q = (body.query or "").strip()
-    if not q:
-        return {"status":"bad_request","detail":"missing query","results":[]}
-    if not client:
-        return {"status":"error","detail":"OPENAI_API_KEY missing","results":[]}
-
-    # Embed the query
-    emb = client.embeddings.create(model=EMBED_MODEL, input=q)
-    vec = emb.data[0].embedding
-
-    # Build filters for memory_raw
-    must_conditions = []
-    if body.user_id:
-        uid_alias = (body.user_id or "").strip()
-        vid = (getattr(body, "vantage_id", None) or "default").strip() or "default"
-        uid, _alias_uid = await resolve_canonical_user_id(vid, uid_alias)
-        must_conditions.append(
-            qmodels.FieldCondition(
-                key="user_id",
-                match=qmodels.MatchValue(value=uid)
-            )
-        )
-
-    qry_filter = qmodels.Filter(must=must_conditions) if must_conditions else None
-
-    # Search memory_raw
-    hits = get_qdrant().search(
-        collection_name="memory_raw",
-        query_vector=vec,
-        limit=int(body.top_k or 5),
-        with_payload=True,
-        score_threshold=float(body.score_threshold or 0.0),
-        query_filter=qry_filter,
-    )
-
-    results = [
-        {"collection":"memory_raw","id":h.id,"score":float(h.score),"payload":h.payload}
-        for h in (hits or [])
-    ]
-    return {"status":"ok","top_k":int(body.top_k or 5),"results":results}
-
 
 # NEW: feedback endpoint
 @app.post("/memory_feedback")
