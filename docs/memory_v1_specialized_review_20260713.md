@@ -90,10 +90,10 @@ version, route, target, decision/action compatibility, canonical-draft count,
 and exact 72/72 coverage. It has no database dependency, model call, Qdrant
 client, apply argument, or mutation path.
 
-The review authority remains
-`codex_assisted_review_pending_user_ratification`. Ratification approves the
-review classifications as design input only; it does not authorize extraction,
-candidate insertion, or promotion.
+The user ratified the complete 72-unit classification on 2026-07-13 as
+`user_ratified_design_input`. This authority is limited to schema and workflow
+design. It does not authorize extraction, candidate insertion, review-event
+persistence, promotion, retrieval, or prompt use.
 
 ## Next design input
 
