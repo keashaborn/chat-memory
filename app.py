@@ -13,7 +13,6 @@ from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from pydantic import BaseModel
-from rag_engine.rag_router import router as rag_router
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
@@ -39,7 +38,6 @@ from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
 app = FastAPI(title="Brains API", version="1.0.0")
-app.include_router(rag_router, prefix="/rag")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(telemetry_router)
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
@@ -311,38 +309,6 @@ def get_qdrant():
                 https=False,
             )
     return qdrant_client
-
-def current_default_collection() -> str:
-    """
-    Use the runtime env value if present; otherwise fall back to the
-    import-time DEFAULT_COLLECTION. This lets us switch datasets via env
-    or alias without redeploying code.
-    """
-    return (os.getenv("RETRIEVAL_COLLECTION") or DEFAULT_COLLECTION).strip()
-
-# Collections that should NEVER be used as knowledge corpus
-IGNORED_COLLECTIONS = {"memory_raw"}
-
-
-def get_corpus_collections() -> List[str]:
-    """
-    Return all Qdrant collections that are valid knowledge sources.
-    Currently: everything except memory_raw.
-    """
-    cols_resp = get_qdrant().get_collections()
-    collections = getattr(cols_resp, "collections", [])
-
-    names: List[str] = []
-    for c in collections:
-        # qdrant_client >=1.7 usually gives objects with .name
-        name = getattr(c, "name", None)
-        if not name:
-            continue
-        if name in IGNORED_COLLECTIONS:
-            continue
-        names.append(name)
-
-    return names
 
 def _vb_source_normalize(source: Optional[str]) -> str:
     """
@@ -686,18 +652,6 @@ async def log_chat(req: Request):
 
     return {"status": "ok", "id": rec_id, "request_id": request_id}
 
-# ---------- retrieval ----------
-# Use env defaults already defined above:
-#   DEFAULT_COLLECTION, EMBED_MODEL, QDRANT_URL
-# and the lazy client helper we added earlier:
-#   get_qdrant()
-
-class RetrieveReq(BaseModel):
-    query: str
-    top_k: Optional[int] = 5
-    score_threshold: Optional[float] = 0.0
-    collection: Optional[str] = None  # if set and != "ALL", restrict to that one
-
 @app.post("/threads/new")
 async def threads_new(body: NewThreadReq, req: Request):
     user_id_alias = (body.user_id or "").strip() or "anon"
@@ -927,86 +881,6 @@ async def threads_delete(thread_id: str, req: Request):
 
     return {"status": "ok", "thread_id": str(tid), "deleted": True}
 
-
-@app.post("/retrieve")
-async def retrieve(body: RetrieveReq):
-    q = (body.query or "").strip()
-    if not q:
-        return {"status": "bad_request", "detail": "missing query", "results": []}
-    if not client:
-        return {"status": "error", "detail": "OPENAI_API_KEY missing", "results": []}
-
-    # 1) Embed the query once
-    emb = client.embeddings.create(model=EMBED_MODEL, input=q)
-    vec = emb.data[0].embedding
-
-    # 2) Decide which collections to search:
-    #    - if body.collection is set and not "ALL" → just that collection
-    #    - otherwise → all corpus collections except memory_raw
-    if body.collection and body.collection != "ALL":
-        collections = [body.collection]
-    else:
-        collections = get_corpus_collections()
-
-    # 3) Global retrieval parameters
-    per_coll_limit = int(body.top_k or int(os.getenv("RETRIEVE_TOP_K", "8")))
-    thr_env = os.getenv("RETRIEVE_THRESHOLD")
-    thr = float(body.score_threshold) if body.score_threshold is not None else (
-        float(thr_env) if thr_env is not None else 0.30
-    )
-
-    all_hits: List[Dict[str, Any]] = []
-
-    qdrant = get_qdrant()
-
-    for coll in collections:
-        # Detect named vector set (if collection was created with named vectors)
-        vector_name = None
-        try:
-            info = qdrant.get_collection(coll)
-            vectors_cfg = getattr(info.config.params, "vectors", None)
-            if isinstance(vectors_cfg, dict) and vectors_cfg:
-                # use the first named vector
-                vector_name = next(iter(vectors_cfg.keys()))
-        except Exception as e:
-            # non-fatal: proceed with default unnamed vector for this collection
-            print(f"get_collection error for {coll}:", e)
-
-        qvec = qmodels.NamedVector(name=vector_name, vector=vec) if vector_name else vec
-
-        try:
-            hits = qdrant.search(
-                collection_name=coll,
-                query_vector=qvec,
-                limit=per_coll_limit,
-                with_payload=True,
-                score_threshold=thr,
-                query_filter=None,  # no payload filter yet
-            )
-        except Exception as e:
-            print(f"qdrant search error for {coll}:", e)
-            continue
-
-        for h in (hits or []):
-            all_hits.append(
-                {
-                    "collection": coll,
-                    "id": h.id,
-                    "score": float(h.score),
-                    "payload": h.payload,
-                }
-            )
-
-    # 4) Merge & sort all hits across all collections, then keep global top_k
-    all_hits.sort(key=lambda x: x["score"], reverse=True)
-    global_top_k = int(body.top_k or int(os.getenv("RETRIEVE_TOP_K", "8")))
-    results = all_hits[:global_top_k]
-
-    return {
-        "status": "ok",
-        "top_k": global_top_k,
-        "results": results,
-    }
 
 # NEW: feedback signal model
 class FeedbackSignal(BaseModel):

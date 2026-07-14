@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 import os
 import re
-import requests
 import asyncio
 import asyncpg
 import uuid
@@ -35,8 +34,6 @@ from .rag_router import (
     build_meta_explanation,
     is_pure_reentry_greeting,
     score_personal_hit,  # NOTE: this is the rag_router version (matches current prod behavior)
-    classify_feedback_nl,
-    extract_tag_from_message,
 )
 
 from .vantage_engine import normalize_limits, extract_sd_features, derive_params, decide, build_overlay_text
@@ -47,18 +44,6 @@ router = APIRouter()
 # ---------- RAG policy (per-vantage corpus selection) ----------
 class RagPolicyUpsertReq(BaseModel):
     policy: Dict[str, Any] = {}
-
-# ---------- Vantage feedback payload ----------
-# Required for OpenAPI generation; used by /vantage/feedback.
-# Fields are limited to what the handler actually reads.
-from typing import Optional
-
-class VantageFeedbackPayload(BaseModel):
-    user_id: Optional[str] = None
-    thread_id: Optional[str] = None
-    vantage_id: Optional[str] = "default"
-    answer_id: Optional[str] = None
-    message: Optional[str] = None
 
 
 def _csv_env(name: str) -> List[str]:
@@ -2819,84 +2804,3 @@ def vantage_query(req: Request, payload: VantageQuery):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/feedback", include_in_schema=False)
-def vantage_feedback(payload: VantageFeedbackPayload):
-    if os.getenv("ENABLE_VANTAGE_ENDPOINTS", "0") != "1":
-        raise HTTPException(status_code=404, detail="not found")
-
-    user_id = (payload.user_id or "").strip() or "anon"
-    fb_text = (payload.message or "").strip()
-    if not fb_text:
-        return {"status": "empty"}
-
-    key = _vantage_key(user_id, payload.thread_id, payload.vantage_id)
-    last = None
-
-    # Prefer durable trace lookup when answer_id is provided
-    if payload.answer_id and _UUID_RE.match(str(payload.answer_id)):
-        try:
-            dsn = os.getenv("POSTGRES_DSN") or ""
-            if dsn.startswith("postgres://"):
-                dsn = "postgresql://" + dsn[len("postgres://"):]
-            async def _fetch():
-                conn = await asyncpg.connect(dsn)
-                try:
-                    return await conn.fetchrow(
-                        "select answer_text, memory_ids from public.vantage_answer_trace "
-                        "where answer_id=$1::uuid and user_id=$2",
-                        payload.answer_id,
-                        user_id,
-                    )
-                finally:
-                    await conn.close()
-            if dsn:
-                r = asyncio.run(_fetch())
-                if r:
-                    last = {"answer": r["answer_text"], "memory_ids": list(r["memory_ids"] or [])}
-        except Exception as e:
-            print(f"[vantage_feedback] trace lookup failed: {e}")
-
-    if last is None:
-        last = _last_vantage_result.get(key)
-
-    if not last and key[1]:
-        last = _last_vantage_result.get(_vantage_key(user_id, None, payload.vantage_id))
-    if not last:
-        last = _last_vantage_result.get(_vantage_key(user_id, None, None))
-    if not last:
-        return {"status": "no_last_answer"}
-
-    memory_ids = last.get("memory_ids") or []
-
-    try:
-        signal = classify_feedback_nl(last_answer=last.get("answer", ""), user_message=fb_text)
-        tag = extract_tag_from_message(fb_text)
-    except Exception as e:
-        return {"status": "error", "detail": f"classifier_failed: {e}"}
-
-    if signal == "neutral" and not tag:
-        return {"status": "neutral"}
-
-    updated = 0
-    if memory_ids:
-        for mid in memory_ids:
-            out = {"user_id": user_id, "memory_id": mid, "signal": signal}
-            if tag:
-                out["tag"] = tag
-            try:
-                r = requests.post("http://127.0.0.1:8088/memory_feedback", json=out, timeout=3.0)
-                if r.ok:
-                    updated += 1
-            except Exception as e:
-                print(f"[vantage_feedback] error sending feedback for id={mid}: {e}")
-
-    # Always refresh style card (even if no memory_ids were reinforced)
-    try:
-        from .persona_loader import quick_persona_refresh
-        quick_persona_refresh(user_id)
-    except Exception as e:
-        print(f"[vantage_feedback] quick_persona_refresh error for user {user_id}: {e}")
-
-    return {"status": "ok", "signal": signal, "tag": tag, "updated": updated, "note": ("no_memory_ids" if not memory_ids else None)}
