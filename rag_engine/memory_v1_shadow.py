@@ -16,7 +16,7 @@ from .openai_client import embed_text
 from .qdrant_compat import make_qdrant_client
 
 
-VERSION = "memory_v1_governed_runtime_v2"
+VERSION = "memory_v1_governed_runtime_v3"
 
 
 def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
@@ -54,10 +54,20 @@ def _activation_allowlisted(actor: uuid.UUID) -> bool:
     )
 
 
+def _render_claim_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if "died_or_lost" in text:
+        text = text.replace(
+            "died_or_lost",
+            "unresolved; the record supports a pet loss but does not establish whether the pet died or was otherwise lost",
+        )
+    return text
+
+
 def _format_prompt_block(packet: Dict[str, Any]) -> str:
     records: list[Dict[str, str]] = []
     for claim in packet.get("claims") or []:
-        text = str(claim.get("text") or "").strip()
+        text = _render_claim_text(claim.get("text"))
         status = str(claim.get("status") or "").strip()
         use_instruction = str(claim.get("use_instruction") or "").strip()
         if text and status and use_instruction:
