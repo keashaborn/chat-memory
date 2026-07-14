@@ -14,6 +14,11 @@ from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from .vb_tagging import infer_vb_tags
+from .raw_memory_ownership import (
+    RawMemoryOwnershipError,
+    assert_raw_points_owner,
+    canonical_owner_user_id,
+)
 
 # --- ENV / CONFIG ---
 
@@ -494,6 +499,12 @@ def retrieve_personal_memory(
     if not q:
         return []
 
+    try:
+        owner_user_id = canonical_owner_user_id(user_id)
+    except RawMemoryOwnershipError as exc:
+        print(f"[retrieve_personal_memory] rejected owner: {exc}")
+        return []
+
     # Use the request-scoped vector when supplied; direct callers retain the
     # legacy behavior of creating their own embedding.
     vec = _resolve_query_vector(q, query_vector)
@@ -506,15 +517,14 @@ def retrieve_personal_memory(
     # 1b) Infer query tags for this personal-memory search
     query_tags = set(infer_query_tags(q))
 
-    # 2) Filter by user_id if provided
-    must = []
-    if user_id:
-        must.append(
-            qmodels.FieldCondition(
-                key="user_id",
-                match=qmodels.MatchValue(value=user_id)
-            )
+    # Canonical ownership is mandatory. A missing owner can never broaden this
+    # search into an unscoped query.
+    must = [
+        qmodels.FieldCondition(
+            key="owner_user_id",
+            match=qmodels.MatchValue(value=owner_user_id),
         )
+    ]
 
     # Namespace filter:
     # Current product direction treats Resse/Riley/Morgan as standard interface modes,
@@ -562,6 +572,15 @@ def retrieve_personal_memory(
         )
     except Exception as e:
         print(f"Search failed for memory_raw: {e}")
+        return []
+
+    # Qdrant payload filtering is not an authorization boundary by itself.
+    # Re-check every returned point and reject the complete result set on any
+    # missing or conflicting canonical/legacy owner field.
+    try:
+        assert_raw_points_owner(hits or [], owner_user_id)
+    except RawMemoryOwnershipError as exc:
+        print(f"[retrieve_personal_memory] owner validation failed: {exc}")
         return []
 
     results: List[Dict[str, Any]] = []

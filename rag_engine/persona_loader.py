@@ -1,7 +1,6 @@
 # rag_engine/persona_loader.py
 #
-# Persona loading and lightweight daytime persona consolidation
-# for VerbalSage / Brains.
+# Persona loading for VerbalSage / Brains.
 #
 # Responsibilities:
 # - Define BASE_PERSONA (static Fractal Monism seed).
@@ -10,15 +9,11 @@
 #     * style
 #     * preference
 # - Build the system persona block for a given user_id.
-# - Provide quick_persona_refresh(user_id) to synthesize/update a
-#   minimal style card from recent chat behavior.
 
 from __future__ import annotations
 
 from typing import List, Dict, Any, Optional
 import os
-import uuid
-import datetime
 import asyncio
 import threading
 import asyncpg
@@ -26,7 +21,10 @@ import asyncpg
 from qdrant_client import QdrantClient
 from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
-from openai import OpenAI
+from .raw_memory_ownership import (
+    assert_raw_points_owner,
+    canonical_owner_user_id,
+)
 
 
 # ------------------------------------------------------------------------
@@ -42,15 +40,12 @@ Adapt your style through reinforcement over time.
 
 
 # ------------------------------------------------------------------------
-# CONFIG / CLIENTS (Qdrant + OpenAI)
+# CONFIG / CLIENTS (Qdrant)
 # ------------------------------------------------------------------------
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-large")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 _qdrant_client: Optional[QdrantClient] = None
-_openai_client: Optional[OpenAI] = None
 
 
 def get_qdrant() -> QdrantClient:
@@ -74,16 +69,6 @@ def get_qdrant() -> QdrantClient:
     return _qdrant_client
 
 
-def get_openai() -> Optional[OpenAI]:
-    """Return a singleton OpenAI client, or None if no API key is set."""
-    global _openai_client
-    if _openai_client is None:
-        if not OPENAI_API_KEY:
-            return None
-        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    return _openai_client
-
-
 # ------------------------------------------------------------------------
 # Helpers to load and score persona-related cards
 # ------------------------------------------------------------------------
@@ -97,10 +82,11 @@ def _load_persona_points(user_id: str, vantage_id: str | None = None):
     - ALSO allow legacy points with missing payload.vantage_id (back-compat)
     """
     try:
+        owner_user_id = canonical_owner_user_id(user_id)
         vid = (vantage_id or "").strip() or "default"
 
         must = [
-            qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=user_id)),
+            qmodels.FieldCondition(key="owner_user_id", match=qmodels.MatchValue(value=owner_user_id)),
             qmodels.FieldCondition(key="source", match=qmodels.MatchValue(value="memory_card")),
         ]
 
@@ -119,6 +105,7 @@ def _load_persona_points(user_id: str, vantage_id: str | None = None):
                 with_payload=True,
                 with_vectors=False,
             )
+            assert_raw_points_owner(points or [], owner_user_id)
             # Hard-enforce namespace regardless of server-side 'should' semantics
             out = []
             for pt in (points or []):
@@ -137,6 +124,7 @@ def _load_persona_points(user_id: str, vantage_id: str | None = None):
             with_payload=True,
             with_vectors=False,
         )
+        assert_raw_points_owner(points or [], owner_user_id)
         out = []
         for pt in (points or []):
             payload = getattr(pt, "payload", {}) or {}
@@ -569,139 +557,3 @@ def build_persona_block(user_id: str, vantage_id: str | None = None) -> str:
 
     persona_block = "\n\n".join(seg.strip() for seg in pieces if seg and seg.strip())
     return persona_block
-
-
-# ------------------------------------------------------------------------
-# QUICK PERSONA REFRESH (simple daytime consolidation)
-# ------------------------------------------------------------------------
-
-def quick_persona_refresh(user_id: str, limit: int = 100) -> Dict[str, Any]:
-    """
-    Look at last `limit` raw chat messages for this user.
-    Extract obvious, surface-level style preferences.
-    Update or create a 'style' memory_card.
-    """
-
-    qdrant = get_qdrant()
-    openai_client = get_openai()
-    if openai_client is None:
-        return {"status": "no_openai_client"}
-
-    # 1) scroll memory_raw for this user
-    try:
-        points, _ = qdrant.scroll(
-            collection_name="memory_raw",
-            scroll_filter=qmodels.Filter(
-                must=[
-                    qmodels.FieldCondition(
-                        key="user_id",
-                        match=qmodels.MatchValue(value=user_id)
-                    )
-                ]
-            ),
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
-    except Exception as e:
-        print(f"[quick_persona_refresh] Qdrant scroll error for user {user_id}: {e}")
-        return {"status": "qdrant_error", "detail": str(e)}
-
-    texts = [
-        (p.payload.get("text") or "").lower().strip()
-        for p in points
-        if p.payload and p.payload.get("text")
-    ]
-
-    # 2) very simple preference detection
-    wants_short = any("too long" in t or "shorter" in t for t in texts)
-    hates_bullets = any("no bullet" in t or "no lists" in t for t in texts)
-    wants_concrete = any("more concrete" in t for t in texts)
-    wants_philosophy = any("more philosophy" in t for t in texts)
-    less_philosophy = any("less philosophy" in t for t in texts)
-
-    preference_lines: List[str] = []
-
-    if wants_short:
-        preference_lines.append("Prefers short, dense responses.")
-    if hates_bullets:
-        preference_lines.append("Dislikes bullet points and lists; prefers flowing paragraphs.")
-    if wants_concrete:
-        preference_lines.append("Prefers concrete examples and applications.")
-    if wants_philosophy:
-        preference_lines.append("Prefers more philosophical framing.")
-    if less_philosophy:
-        preference_lines.append("Prefers minimal philosophical framing.")
-
-    if not preference_lines:
-        # Self-heal: if the deterministic style card is missing, recreate a baseline style card.
-        baseline = "Prefers short, dense responses. Dislikes bullet points and lists; prefers flowing paragraphs. Prefers concrete examples and applications."
-        try:
-            card_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}|style|__singleton__"))
-            existing = qdrant.retrieve(collection_name="memory_raw", ids=[card_id], with_payload=False, with_vectors=False)
-        except Exception:
-            existing = []
-
-        if not existing:
-            text_block = baseline
-            card = {
-                "user_id": user_id,
-                "text": text_block,
-                "source": "memory_card",
-                "tags": ["summary", "card", "style"],
-                "kind": "style",
-                "base_importance": 0.7,
-                "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "topic_key": "__singleton__",
-                "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
-            }
-            try:
-                emb = openai_client.embeddings.create(model=EMBED_MODEL, input=text_block)
-                vec = emb.data[0].embedding
-                point = qmodels.PointStruct(id=card_id, payload=card, vector=vec)
-                qdrant.upsert(collection_name="memory_raw", points=[point])
-                return {"status": "recreated_baseline", "card_id": card_id}
-            except Exception as e:
-                print(f"[quick_persona_refresh] baseline recreate failed for user {user_id}: {e}")
-                return {"status": "no_changes"}
-        return {"status": "no_changes"}
-    # 3) Build/update the style card payload
-    text_block = " ".join(preference_lines)
-
-    card = {
-        "user_id": user_id,
-        "text": text_block,
-        "source": "memory_card",
-        "tags": ["summary", "card", "style"],
-        "kind": "style",
-        "base_importance": 0.7,
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
-        "topic_key": "__singleton__",
-    }
-
-    # 4) Embed it and upsert (deterministic id so we overwrite instead of duplicating)
-    try:
-        emb = openai_client.embeddings.create(model=EMBED_MODEL, input=text_block)
-        vec = emb.data[0].embedding
-    except Exception as e:
-        print(f"[quick_persona_refresh] OpenAI embedding error for user {user_id}: {e}")
-        return {"status": "openai_error", "detail": str(e)}
-
-    # deterministic UUID based on user_id|style|__singleton__
-    card_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}|style|__singleton__"))
-
-    point = qmodels.PointStruct(
-        id=card_id,
-        payload=card,
-        vector=vec,
-    )
-
-    try:
-        qdrant.upsert(collection_name="memory_raw", points=[point])
-    except Exception as e:
-        print(f"[quick_persona_refresh] Qdrant upsert error for user {user_id}: {e}")
-        return {"status": "qdrant_upsert_error", "detail": str(e)}
-
-    return {"status": "updated", "card": card}
