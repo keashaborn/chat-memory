@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Memory V1 governance every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=memory-v1-governance.service
+
+[Install]
+WantedBy=timers.target
