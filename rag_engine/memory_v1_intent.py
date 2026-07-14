@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v2"
+VERSION = "memory_intent_adapter_v3"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -58,6 +58,8 @@ PREFERENCE_RECALL_TERMS = (
     "my taste",
     "my preference",
     "my preferences",
+    "music preference",
+    "music preferences",
     "i prefer",
     "do i prefer",
     "what kind of music",
