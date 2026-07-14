@@ -27,7 +27,7 @@ from .memory_v1_intent import (
     classify_legacy_personal_memory_access,
     resolve_legacy_personal_memory_mode,
 )
-from .memory_v1_preference_project_shadow import run_preference_project_shadow
+from .memory_v1_preference_project_shadow import run_preference_project_runtime
 from .query_embedding_cache import QueryEmbeddingCache
 
 # Reuse the exact behavior of the current /rag/query path where it matters:
@@ -2156,15 +2156,18 @@ def vantage_query(req: Request, payload: VantageQuery):
             thread_id=payload.thread_id,
             embedding_provider=query_embedding.get,
         )
-        # Measurement only: preference/project selections are written to an
-        # owner-scoped diagnostic trace and never enter prompts or model input.
-        turn_plan["memory_v1_preference_project_shadow"] = run_preference_project_shadow(
+        # Owner-scoped runtime packet. Only the audit object enters response
+        # metadata; the content block remains internal to prompt construction.
+        specialized_runtime = run_preference_project_runtime(
             payload.user_id,
             query=payload.message,
             request_classification=turn_intent,
             request_id=req_request_id,
             thread_id=payload.thread_id,
+            expose_to_answer_model=not bool(getattr(payload, "inspect_only", False)),
         )
+        turn_plan["memory_v1_preference_project_shadow"] = specialized_runtime["audit"]
+        specialized_memory_prompt_block = specialized_runtime["prompt_block"]
 
 
 
@@ -2623,6 +2626,13 @@ def vantage_query(req: Request, payload: VantageQuery):
         )
         if durable_personal_cards_block:
             system_prompt = system_prompt.rstrip() + "\n\n" + durable_personal_cards_block + "\n"
+        if specialized_memory_prompt_block:
+            system_prompt = (
+                system_prompt.rstrip()
+                + "\n\n"
+                + specialized_memory_prompt_block
+                + "\n"
+            )
 
         meta = build_meta_explanation(payload.user_id, payload.message, memory_chunks) or {}
         model_id = normalize_chat_model(payload.model or os.getenv("VANTAGE_MODEL") or "gpt-5.2")
