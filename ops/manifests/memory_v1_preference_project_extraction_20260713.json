@@ -1,0 +1,165 @@
+{
+  "manifest_version": "memory_v1_preference_project_extraction_20260713_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "batch_id": "15064e5d-8cd3-5611-9cbf-db177d24a3a0",
+  "source_review": {
+    "mode": "specialized_candidate_review_packets_no_writes",
+    "review_version": "memory_v1_specialized_review_20260713_v1",
+    "report_sha256": "0ec58b9a3db4e18c6716da5b48b22307add381244bda8eaf619a87e99bc03841",
+    "review_file_sha256": "d0dd37e3b4bf17adcda0195cbf93b878c01e938b1361a5c0e3a79216a37479b8",
+    "reviewed_input_sha256": "ca6d7c12bb1d0605df96b413f13ab5820ab94ab6775f383c84d78262a966f16a"
+  },
+  "project_registration": {
+    "project_key": "verbal-sage",
+    "display_name": "Verbal Sage",
+    "metadata": {
+      "memory_schema": "memory_v1",
+      "registration_source": "reviewed_project_knowledge_extraction"
+    }
+  },
+  "expected": {
+    "selected_review_units": 8,
+    "preference_candidates": 3,
+    "preference_evidence_links": 3,
+    "project_candidates": 5,
+    "project_evidence_links": 5,
+    "deferred_project_units": 2,
+    "existing_preference_candidates": 0,
+    "existing_project_candidates": 0,
+    "existing_project_spaces": 0,
+    "existing_preference_reviews": 0,
+    "existing_project_reviews": 0,
+    "existing_durable_preferences": 0,
+    "existing_durable_project_heads": 0
+  },
+  "controls": {
+    "apply_authorized": false,
+    "database_transaction": "read_only",
+    "candidate_writes": 0,
+    "review_writes": 0,
+    "durable_preference_writes": 0,
+    "durable_project_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_injection": false,
+    "network_model_calls": false,
+    "full_evidence_text_in_report": false,
+    "human_review_required_before_persistence": true
+  },
+  "mappings": [
+    {
+      "evidence_id": "54babaa0-3d98-5a64-bc66-61ffc52e195d",
+      "target": "preference",
+      "preference_class": "response",
+      "preference_domain": "memory_surfacing",
+      "preference_key": "personal_memory.jerry_deedee.out_of_context_surfacing",
+      "value_attributes": {
+        "behavior": "surface_only_when_directly_relevant",
+        "people": [
+          "Jerry",
+          "DeeDee"
+        ]
+      },
+      "polarity": "avoid",
+      "scope": {
+        "people": [
+          "Jerry",
+          "DeeDee"
+        ]
+      },
+      "explicit": true,
+      "stability": "stable",
+      "surface_policy": "never_surface_as_content",
+      "extraction_confidence": 0.95
+    },
+    {
+      "evidence_id": "32fbdc1c-f307-5c38-b05e-0f2732afabe7",
+      "target": "preference",
+      "preference_class": "life",
+      "preference_domain": "music",
+      "preference_key": "music.prominent_vocals_and_metaphorical_lyrics",
+      "value_attributes": {
+        "metaphorical_lyrics": "ideal",
+        "prominent_vocals": true
+      },
+      "polarity": "prefer",
+      "scope": {
+        "context": "music_recommendation"
+      },
+      "explicit": true,
+      "stability": "stable",
+      "surface_policy": "mention_when_relevant",
+      "extraction_confidence": 0.95,
+      "overlap_group": "music.lyrical_meaning"
+    },
+    {
+      "evidence_id": "84286958-6e38-5e10-bea6-0c89e6de02da",
+      "target": "preference",
+      "preference_class": "life",
+      "preference_domain": "music",
+      "preference_key": "music.concrete_surface_with_underlying_meaning",
+      "value_attributes": {
+        "concrete_surface_subject": true,
+        "different_underlying_meaning": true
+      },
+      "polarity": "prefer",
+      "scope": {
+        "context": "music_recommendation"
+      },
+      "explicit": true,
+      "stability": "stable",
+      "surface_policy": "mention_when_relevant",
+      "extraction_confidence": 0.9,
+      "overlap_group": "music.lyrical_meaning"
+    },
+    {
+      "evidence_id": "b6258952-14b4-5845-be12-0904dd251b0d",
+      "target": "project_knowledge",
+      "knowledge_kind": "roadmap",
+      "knowledge_key": "memory.fractal_monism_feedback_loop",
+      "document_state": "proposed",
+      "authority_level": "user_reported",
+      "effective_at_source": null,
+      "extraction_confidence": 0.95
+    },
+    {
+      "evidence_id": "91eec756-73d9-5769-8e44-35a41775fe79",
+      "target": "project_knowledge",
+      "knowledge_kind": "status",
+      "knowledge_key": "fractal_monism.dataset_ai_feedback_history",
+      "document_state": "historical",
+      "authority_level": "user_reported",
+      "effective_at_source": "evidence_observed_at",
+      "extraction_confidence": 0.9
+    },
+    {
+      "evidence_id": "c0d30709-3520-53cd-bba6-3bd77aaaa66e",
+      "target": "project_knowledge",
+      "knowledge_kind": "status",
+      "knowledge_key": "memory_system.hybrid_legacy_and_cards_2026_07_02",
+      "document_state": "historical",
+      "authority_level": "user_reported",
+      "effective_at_source": "evidence_observed_at",
+      "extraction_confidence": 0.95
+    },
+    {
+      "evidence_id": "cfd72bb1-ea53-56c2-b776-0424b259e8a4",
+      "target": "project_knowledge",
+      "knowledge_kind": "status",
+      "knowledge_key": "website.ai_assisted_development_history",
+      "document_state": "historical",
+      "authority_level": "user_reported",
+      "effective_at_source": "evidence_observed_at",
+      "extraction_confidence": 0.9
+    },
+    {
+      "evidence_id": "09159c9a-559b-5aa0-8210-a17079d6d81b",
+      "target": "project_knowledge",
+      "knowledge_kind": "requirement",
+      "knowledge_key": "behavior_change.ab_design_background_evaluation",
+      "document_state": "proposed",
+      "authority_level": "user_reported",
+      "effective_at_source": null,
+      "extraction_confidence": 0.95
+    }
+  ]
+}
