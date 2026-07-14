@@ -158,6 +158,11 @@ trap cleanup EXIT
 "${compose[@]}" run --rm --no-deps \
   -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
   -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_preference_project_apply_integration.py
+
+"${compose[@]}" run --rm --no-deps \
+  -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
+  -e PYTHONPATH=/app \
   brains python scripts/memory_v1_projection_integration.py
 
 "${compose[@]}" exec -T postgres \
