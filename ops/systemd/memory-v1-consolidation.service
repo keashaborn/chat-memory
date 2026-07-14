@@ -1,0 +1,26 @@
+[Unit]
+Description=Memory V1 owner-scoped consolidation batch
+After=network-online.target brains.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/chat-memory
+EnvironmentFile=/opt/chat-memory/.env
+ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_consolidation_worker.py --batch-size 5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

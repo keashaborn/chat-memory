@@ -1379,7 +1379,11 @@ def _strip_recency_debug(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             h.pop("_recency_bonus", None)
     return hits
 
-def _fetch_thread_context_block(thread_id: str | None, mix: Dict[str, Any] | None) -> str:
+def _fetch_thread_context_block(
+    owner_user_id: str,
+    thread_id: str | None,
+    mix: Dict[str, Any] | None,
+) -> str:
     if not thread_id:
         return ""
 
@@ -1404,14 +1408,19 @@ def _fetch_thread_context_block(thread_id: str | None, mix: Dict[str, Any] | Non
     async def _q() -> list[dict]:
         conn = await asyncpg.connect(dsn)
         try:
+            await conn.execute(
+                "SELECT set_config('app.user_id', $1, false)",
+                owner_user_id,
+            )
             rows = await conn.fetch(
                 """
                 SELECT source, text
                 FROM chat_log
-                WHERE thread_id=$1
+                WHERE owner_user_id=$1 AND thread_id=$2
                 ORDER BY created_at DESC
-                LIMIT $2
+                LIMIT $3
                 """,
+                owner_user_id,
                 tid,
                 max_msgs,
             )
@@ -1444,7 +1453,12 @@ def _fetch_thread_context_block(thread_id: str | None, mix: Dict[str, Any] | Non
 
 
 
-def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | None, current_message: str | None = None) -> List[Dict[str, str]]:
+def _fetch_thread_context_messages(
+    owner_user_id: str,
+    thread_id: str | None,
+    mix: Dict[str, Any] | None,
+    current_message: str | None = None,
+) -> List[Dict[str, str]]:
     """
     Fetch recent chat_log messages for thread_id and return OpenAI message dicts:
       [{"role":"user"|"assistant","content":"..."}]
@@ -1474,14 +1488,19 @@ def _fetch_thread_context_messages(thread_id: str | None, mix: Dict[str, Any] | 
     async def _q() -> list[dict]:
         conn = await asyncpg.connect(dsn)
         try:
+            await conn.execute(
+                "SELECT set_config('app.user_id', $1, false)",
+                owner_user_id,
+            )
             rows = await conn.fetch(
                 """
                 SELECT source, text
                 FROM chat_log
-                WHERE thread_id=$1
+                WHERE owner_user_id=$1 AND thread_id=$2
                 ORDER BY created_at DESC
-                LIMIT $2
+                LIMIT $3
                 """,
+                owner_user_id,
                 tid,
                 max_msgs,
             )
@@ -1621,7 +1640,12 @@ def vantage_query(req: Request, payload: VantageQuery):
             thread_mix["conversation"] = 0.0
         else:
             thread_mix = mix
-        thread_messages = _fetch_thread_context_messages(payload.thread_id, thread_mix, current_message=payload.message)
+        thread_messages = _fetch_thread_context_messages(
+            payload.user_id,
+            payload.thread_id,
+            thread_mix,
+            current_message=payload.message,
+        )
 
         # debug-only: thread context stats (counts only; no transcript leakage)
         conv_mix = 0.0

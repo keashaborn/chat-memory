@@ -286,15 +286,20 @@ async def fetch_manifest_sources_readonly(
     ids = [entry.source_id for entry in entries]
 
     async with conn.transaction(readonly=True):
+        await conn.execute(
+            "SELECT set_config('app.user_id', $1, true)",
+            str(owner),
+        )
         rows = await conn.fetch(
             """
-            SELECT id, user_id, source, text, created_at, thread_id, vantage_id, request_id
+            SELECT id, owner_user_id, source, text, created_at,
+                   thread_id, vantage_id, request_id
             FROM public.chat_log
-            WHERE user_id=$1
+            WHERE owner_user_id=$1
               AND id = ANY($2::uuid[])
             ORDER BY created_at, id
             """,
-            str(owner),
+            owner,
             ids,
         )
 
@@ -302,7 +307,7 @@ async def fetch_manifest_sources_readonly(
     for row in rows:
         source_id = uuid.UUID(str(row["id"]))
         try:
-            owner_user_id = actor_uuid(row["user_id"])
+            owner_user_id = actor_uuid(row["owner_user_id"])
         except Exception as exc:
             raise ArtifactSourceConflict(
                 f"source row {source_id} has an invalid owner UUID"

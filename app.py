@@ -32,6 +32,12 @@ class NewThreadReq(BaseModel):
 from rag_engine.voice_realtime_router import router as voice_realtime_router
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.raw_memory_ownership import (
+    RawMemoryOwnershipError,
+    assert_raw_payload_owner,
+    assert_raw_points_owner,
+    owned_raw_payload,
+)
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -145,6 +151,18 @@ def parse_uuid(s: str) -> Optional[uuid.UUID]:
         return None
 
 
+async def _set_connection_actor(
+    conn: asyncpg.Connection,
+    owner_user_id: str | uuid.UUID,
+) -> str:
+    owner = parse_uuid(str(owner_user_id))
+    if owner is None:
+        raise ValueError("owner_user_id must be a UUID")
+    canonical = str(owner)
+    await conn.execute("SELECT set_config('app.user_id', $1, false)", canonical)
+    return canonical
+
+
 # ---------- actor / owner enforcement ----------
 def _actor_user_id(req: Request) -> Optional[str]:
     raw = (req.headers.get("x-vs-actor-user-id") or "").strip()
@@ -171,23 +189,29 @@ async def _require_actor_for_user(req: Request, requested_user_id: str, vantage_
     """
     Service token proves trusted infrastructure.
     x-vs-actor-user-id identifies the authenticated user resolved by the frontend.
-    This helper canonicalizes both actor and requested user and requires equality.
-    Returns (response_or_none, canonical_requested_user_id).
+    Memory ownership is the exact authenticated Supabase UUID. Legacy Vantage
+    aliases are not owners and are never resolved here.
     """
     actor = _actor_user_id(req)
     if not actor:
         return _actor_missing_response(), None
 
-    requested_alias = (requested_user_id or "").strip() or "anon"
-    vid = (vantage_id or "default").strip() or "default"
+    actor_uuid = parse_uuid(actor)
+    requested_uuid = parse_uuid(requested_user_id)
+    if actor_uuid is None:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_actor_user_id"},
+            status_code=400,
+        ), None
+    if requested_uuid is None:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_owner_user_id"},
+            status_code=400,
+        ), None
+    if actor_uuid != requested_uuid:
+        return _owner_mismatch_response(), str(requested_uuid)
 
-    requested_uid, _ = await resolve_canonical_user_id(vid, requested_alias)
-    actor_uid, _ = await resolve_canonical_user_id(vid, actor)
-
-    if str(actor_uid) != str(requested_uid):
-        return _owner_mismatch_response(), requested_uid
-
-    return None, requested_uid
+    return None, str(requested_uuid)
 
 
 async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
@@ -199,28 +223,31 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
     if not actor:
         return _actor_missing_response(), None
 
+    actor_uuid = parse_uuid(actor)
+    if actor_uuid is None:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_actor_user_id"},
+            status_code=400,
+        ), None
+
     conn = await asyncpg.connect(DSN)
     try:
-        row = await conn.fetchrow(
-            "SELECT user_id FROM threads WHERE id=$1",
+        await _set_connection_actor(conn, actor_uuid)
+        found = await conn.fetchval(
+            "SELECT 1 FROM threads WHERE id=$1 AND owner_user_id=$2",
             thread_id,
+            actor_uuid,
         )
     finally:
         await conn.close()
 
-    if not row:
+    if not found:
         return JSONResponse(
             {"status": "not_found", "detail": "thread_not_found"},
             status_code=404,
         ), None
 
-    owner_uid = str(row["user_id"])
-    actor_uid, _ = await resolve_canonical_user_id("default", actor)
-
-    if str(actor_uid) != owner_uid:
-        return _owner_mismatch_response(), actor_uid
-
-    return None, actor_uid
+    return None, str(actor_uuid)
 
 
 # single global qdrant client
@@ -235,9 +262,6 @@ DEFAULT_COLLECTION = os.environ.get("RETRIEVAL_COLLECTION", "fm_canon_v1")
 EMBED_MODEL       = os.environ.get("EMBED_MODEL", "text-embedding-3-large")
 QDRANT_URL        = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
 
-
-async def db():
-    return await asyncpg.connect(DSN)
 
 def _sha(s: str) -> str:
     return hashlib.sha256((s or "").encode()).hexdigest()[:16]
@@ -481,9 +505,8 @@ async def log_chat(req: Request):
 
         created = datetime.utcnow().isoformat() + "Z"
 
-        card_payload = {
+        card_payload = owned_raw_payload(user_id, {
             "text": f"The user's preferred name is {full_name}.",
-            "user_id": user_id,
             "user_id_alias": user_id_alias,
             "source": "memory_card",
             "tags": ["summary", "card", "user_identity"],
@@ -491,7 +514,7 @@ async def log_chat(req: Request):
             "topic_key": "__singleton__", "base_importance": 0.9,
             "created_at": created,
             "updated_at": created,
-        }
+        })
 
         try:
             emb = client.embeddings.create(model=EMBED_MODEL, input=card_payload["text"])
@@ -519,63 +542,47 @@ async def log_chat(req: Request):
     conn = None
     try:
         conn = await asyncpg.connect(DSN)
-
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS chat_log(
-            id uuid PRIMARY KEY,
-            user_id text,
-            source text,
-            text text,
-            tags text[],
-            created_at timestamptz DEFAULT now()
-            )
-        """)
-
-        # Ensure thread_id column exists (safe even if already added)
-        await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS thread_id uuid")
-        await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS vantage_id text")
-        await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS user_id_alias text")
-        await conn.execute("ALTER TABLE chat_log ADD COLUMN IF NOT EXISTS request_id text")
+        await _set_connection_actor(conn, user_id)
 
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.
         if thread_id:
-            owner = await conn.fetchval("SELECT user_id FROM threads WHERE id=$1", thread_id)
+            thread_row = await conn.fetchrow(
+                "SELECT owner_user_id FROM threads WHERE id=$1 AND owner_user_id=$2",
+                thread_id,
+                user_id,
+            )
 
-            if owner is None:
+            if thread_row is None:
                 # Create the thread with the provided id so the transcript is attached.
                 await conn.execute(
-                    "INSERT INTO threads(id, user_id, title) VALUES($1, $2, $3)",
-                    thread_id, user_id, "New chat"
+                    "INSERT INTO threads(id, owner_user_id, user_id, title) VALUES($1, $2, $3, $4)",
+                    thread_id, user_id, user_id, "New chat"
                 )
-            elif str(owner) != str(user_id):
-                # Safety: never attach messages to another user's thread id.
-                # Self-heal: if stored owner is an alias for this user, rewrite thread owner to canonical.
-                owner_canon, _ = await resolve_canonical_user_id(vantage_id, str(owner))
-                if str(owner_canon) == str(user_id):
-                    await conn.execute(
-                        "UPDATE threads SET user_id=$1, updated_at=now() WHERE id=$2",
-                        user_id, thread_id
-                    )
-                else:
-                    thread_id = None
+            elif str(thread_row["owner_user_id"] or "") != str(user_id):
+                # Never attach a message to an unowned, legacy, or foreign thread.
+                thread_id = None
 
         await conn.execute(
             "INSERT INTO chat_log("
-            "id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
-            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-            rec_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
+            "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
+            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
         )
 
         # Touch thread timestamp so list ordering works
         if thread_id:
             await conn.execute(
-                "UPDATE threads SET updated_at=now() WHERE id=$1 AND user_id=$2",
+                "UPDATE threads SET updated_at=now() WHERE id=$1 AND owner_user_id=$2",
                 thread_id, user_id
             )
 
     except Exception as e:
         print("pg error:", e)
+        return JSONResponse(
+            {"status": "unavailable", "detail": "transcript_write_failed"},
+            status_code=503,
+        )
     finally:
         if conn:
             await conn.close()
@@ -586,9 +593,8 @@ async def log_chat(req: Request):
             emb = client.embeddings.create(model=EMBED_MODEL, input=text)
             vec = emb.data[0].embedding
 
-            payload = {
+            payload = owned_raw_payload(user_id, {
                 "text": text,
-                "user_id": user_id,
                 "request_id": request_id,
                 "user_id_alias": user_id_alias,
                 "source": source,
@@ -597,7 +603,7 @@ async def log_chat(req: Request):
                 "vantage_id": vantage_id,
                 "created_at": created,
                 "updated_at": created,
-            }
+            })
 
             qpoint = qmodels.PointStruct(id=rec_id, vector=vec, payload=payload)
             get_qdrant().upsert(collection_name="memory_raw", points=[qpoint])
@@ -621,9 +627,10 @@ async def threads_new(body: NewThreadReq, req: Request):
 
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, user_id)
         row = await conn.fetchrow(
-            "INSERT INTO threads(user_id, title) VALUES ($1,$2) RETURNING id, title, updated_at",
-            user_id, title
+            "INSERT INTO threads(owner_user_id, user_id, title) VALUES ($1,$2,$3) RETURNING id, title, updated_at",
+            user_id, user_id, title
         )
         return {"thread_id": str(row["id"]), "title": row["title"], "updated_at": row["updated_at"].isoformat()}
     finally:
@@ -638,8 +645,9 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
         return actor_err
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, user_id)
         rows = await conn.fetch(
-            "SELECT id, title, updated_at FROM threads WHERE user_id=$1 AND archived=false ORDER BY updated_at DESC",
+            "SELECT id, title, updated_at FROM threads WHERE owner_user_id=$1 AND archived=false ORDER BY updated_at DESC",
             user_id
         )
         return [{"thread_id": str(r["id"]), "title": r["title"], "updated_at": r["updated_at"].isoformat()} for r in rows]
@@ -658,14 +666,16 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
 
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, _actor_uid)
         rows = await conn.fetch(
             """
             SELECT id, source, text, created_at
             FROM chat_log
-            WHERE thread_id=$1
+            WHERE owner_user_id=$1 AND thread_id=$2
             ORDER BY created_at ASC
-            LIMIT $2
+            LIMIT $3
             """,
+            _actor_uid,
             tid,
             limit,
         )
@@ -700,13 +710,15 @@ async def threads_truncate_from_message(thread_id: str, message_id: str, req: Re
 
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, _actor_uid)
         async with conn.transaction():
             target = await conn.fetchrow(
                 """
                 SELECT id, source, created_at
                 FROM chat_log
-                WHERE thread_id=$1 AND id=$2
+                WHERE owner_user_id=$1 AND thread_id=$2 AND id=$3
                 """,
+                _actor_uid,
                 tid,
                 mid,
             )
@@ -726,15 +738,18 @@ async def threads_truncate_from_message(thread_id: str, message_id: str, req: Re
             result = await conn.execute(
                 """
                 DELETE FROM chat_log
-                WHERE thread_id=$1
-                  AND created_at >= $2
+                WHERE owner_user_id=$1
+                  AND thread_id=$2
+                  AND created_at >= $3
                 """,
+                _actor_uid,
                 tid,
                 target["created_at"],
             )
 
             await conn.execute(
-                "UPDATE threads SET updated_at=now() WHERE id=$1",
+                "UPDATE threads SET updated_at=now() WHERE owner_user_id=$1 AND id=$2",
+                _actor_uid,
                 tid,
             )
 
@@ -773,9 +788,10 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
 
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, _actor_uid)
         await conn.execute(
-            "UPDATE threads SET title=$1, updated_at=now() WHERE id=$2",
-            title, tid
+            "UPDATE threads SET title=$1, updated_at=now() WHERE owner_user_id=$2 AND id=$3",
+            title, _actor_uid, tid
         )
         return {"status": "ok", "thread_id": str(tid), "title": title}
     finally:
@@ -793,9 +809,10 @@ async def threads_archive(thread_id: str, req: Request):
 
     conn = await asyncpg.connect(DSN)
     try:
+        await _set_connection_actor(conn, _actor_uid)
         await conn.execute(
-            "UPDATE threads SET archived=true, updated_at=now() WHERE id=$1",
-            tid
+            "UPDATE threads SET archived=true, updated_at=now() WHERE owner_user_id=$1 AND id=$2",
+            _actor_uid, tid
         )
         return {"status": "ok", "thread_id": str(tid), "archived": True}
     finally:
@@ -813,8 +830,17 @@ async def threads_delete(thread_id: str, req: Request):
 
     conn = await asyncpg.connect(DSN)
     try:
-        await conn.execute("DELETE FROM chat_log WHERE thread_id=$1", tid)
-        await conn.execute("DELETE FROM threads WHERE id=$1", tid)
+        await _set_connection_actor(conn, _actor_uid)
+        await conn.execute(
+            "DELETE FROM chat_log WHERE thread_id=$1 AND owner_user_id=$2",
+            tid,
+            _actor_uid,
+        )
+        await conn.execute(
+            "DELETE FROM threads WHERE id=$1 AND owner_user_id=$2",
+            tid,
+            _actor_uid,
+        )
     finally:
         await conn.close()
 
@@ -825,6 +851,10 @@ async def threads_delete(thread_id: str, req: Request):
             points_selector=qmodels.FilterSelector(
                 filter=qmodels.Filter(
                     must=[
+                        qmodels.FieldCondition(
+                            key="owner_user_id",
+                            match=qmodels.MatchValue(value=_actor_uid),
+                        ),
                         qmodels.FieldCondition(
                             key="thread_id",
                             match=qmodels.MatchValue(value=str(tid))
@@ -861,34 +891,6 @@ CARD_KINDS_DEFAULT = [
     "persona_profile",
     "preference_profile",
 ]
-# ---------- identity canonicalization (alias -> canonical) ----------
-async def resolve_canonical_user_id(vantage_id: str, alias_user_id: str) -> tuple[str, str]:
-    """
-    Returns (canonical_user_id, alias_user_id). Falls back to alias if lookup fails.
-    Source of truth: Postgres table vantage_identity.user_alias.
-    """
-    vid = (vantage_id or "default").strip() or "default"
-    alias = (alias_user_id or "").strip() or "anon"
-    canon = alias
-
-    try:
-        conn = await asyncpg.connect(DSN)
-        try:
-            row = await conn.fetchrow(
-                "select canonical_user_id from vantage_identity.user_alias where vantage_id=$1 and alias_user_id=$2",
-                vid, alias
-            )
-        finally:
-            await conn.close()
-
-        if row and row["canonical_user_id"]:
-            canon = str(row["canonical_user_id"])
-    except Exception as e:
-        print(f"[identity] user_alias lookup failed vid={vid} alias={alias}: {e}")
-
-    return canon, alias
-
-
 @app.get("/cards/{user_id}")
 async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
     """
@@ -909,7 +911,7 @@ async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optiona
 
     flt = qmodels.Filter(
         must=[
-            qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=uid)),
+            qmodels.FieldCondition(key="owner_user_id", match=qmodels.MatchValue(value=uid)),
             qmodels.FieldCondition(key="kind", match=qmodels.MatchAny(any=klist)),
         ]
     )
@@ -921,6 +923,7 @@ async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optiona
         with_payload=True,
         with_vectors=False,
     )
+    assert_raw_points_owner(points or [], uid)
 
     items = []
     for p in (points or []):
@@ -1081,6 +1084,8 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
         with_vectors=False,
     )
     old = (existing[0].payload or {}) if existing else {}
+    if old:
+        assert_raw_payload_owner(old, uid)
     old_updated_at = (old.get("updated_at") or "")
     if req.if_match_updated_at and old_updated_at and req.if_match_updated_at != old_updated_at:
         return JSONResponse(
@@ -1096,8 +1101,7 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
     now = datetime.utcnow().isoformat() + "Z"
     created = old.get("created_at") or now
 
-    payload = {
-        "user_id": uid,
+    payload = owned_raw_payload(uid, {
         "vantage_id": vid,
         "kind": kind,
         "topic_key": topic_key,
@@ -1107,12 +1111,12 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
         "created_at": created,
         "updated_at": now,
         "text": (req.text if req.text is not None else (old.get("text") or "")),
-    }
+    })
 
     # Merge extra fields (non-destructive to identity fields)
     extra = req.payload or {}
     for k, v in extra.items():
-        if k in ("user_id", "kind", "topic_key", "source", "created_at"):
+        if k in ("owner_user_id", "user_id", "kind", "topic_key", "source", "created_at"):
             continue
         payload[k] = v
 
@@ -1159,8 +1163,10 @@ async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str
         return {"status": "ok", "note": "not_found"}
 
     payload = res[0].payload or {}
-    if (payload.get("user_id") or "").strip() != uid:
-        return JSONResponse({"status":"bad_request","detail":"user_mismatch"}, status_code=400)
+    try:
+        assert_raw_payload_owner(payload, uid)
+    except RawMemoryOwnershipError:
+        return JSONResponse({"status":"forbidden","detail":"owner_mismatch"}, status_code=403)
 
 
     # Lock singleton cards (system-managed). Edit/update via POST; rebuild via daemon endpoints.
@@ -1183,6 +1189,27 @@ async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str
 
     return {"status": "ok", "deleted": card_id}
 
+async def _has_governed_memory(conn: asyncpg.Connection, owner_user_id: str) -> bool:
+    async with conn.transaction(readonly=True):
+        await conn.execute(
+            "SELECT set_config('app.user_id', $1, true)",
+            owner_user_id,
+        )
+        return bool(
+            await conn.fetchval(
+                """
+                SELECT
+                  EXISTS(SELECT 1 FROM memory.evidence WHERE owner_user_id=$1)
+                  OR EXISTS(SELECT 1 FROM memory.claim WHERE owner_user_id=$1)
+                  OR EXISTS(SELECT 1 FROM memory.preference WHERE owner_user_id=$1)
+                  OR EXISTS(SELECT 1 FROM memory.project_space WHERE owner_user_id=$1)
+                  OR EXISTS(SELECT 1 FROM memory.consolidation_job WHERE owner_user_id=$1)
+                """,
+                owner_user_id,
+            )
+        )
+
+
 # ---------- security/privacy: delete all user data ----------
 @app.delete("/user/{user_id}/data")
 async def delete_all_user_data(user_id: str, req: Request):
@@ -1196,8 +1223,17 @@ async def delete_all_user_data(user_id: str, req: Request):
     try:
         conn = await asyncpg.connect(DSN)
         try:
-            pg_chat = await conn.execute("DELETE FROM chat_log WHERE user_id=$1", uid)
-            pg_threads = await conn.execute("DELETE FROM threads WHERE user_id=$1", uid)
+            await _set_connection_actor(conn, uid)
+            if await _has_governed_memory(conn, uid):
+                return JSONResponse(
+                    {
+                        "status": "conflict",
+                        "detail": "governed_account_erasure_required",
+                    },
+                    status_code=409,
+                )
+            pg_chat = await conn.execute("DELETE FROM chat_log WHERE owner_user_id=$1", uid)
+            pg_threads = await conn.execute("DELETE FROM threads WHERE owner_user_id=$1", uid)
         finally:
             await conn.close()
     except Exception as e:
@@ -1212,7 +1248,7 @@ async def delete_all_user_data(user_id: str, req: Request):
                 filter=qmodels.Filter(
                     must=[
                         qmodels.FieldCondition(
-                            key="user_id",
+                            key="owner_user_id",
                             match=qmodels.MatchValue(value=uid)
                         )
                     ]
@@ -1257,14 +1293,50 @@ async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60)
     try:
         conn = await asyncpg.connect(DSN)
         try:
+            await _set_connection_actor(conn, uid)
             rows = await conn.fetch(
-                "SELECT id FROM chat_log WHERE user_id=$1 AND created_at >= $2",
+                "SELECT id FROM chat_log WHERE owner_user_id=$1 AND created_at >= $2",
                 uid, cutoff
             )
             ids = [str(r["id"]) for r in (rows or [])]
 
+            if ids:
+                async with conn.transaction(readonly=True):
+                    await conn.execute(
+                        "SELECT set_config('app.user_id', $1, true)",
+                        uid,
+                    )
+                    governed = await conn.fetchval(
+                        """
+                        SELECT
+                          EXISTS(
+                            SELECT 1 FROM memory.consolidation_job
+                            WHERE owner_user_id=$1
+                              AND source_system='public.chat_log'
+                              AND source_external_id=ANY($2::text[])
+                          )
+                          OR EXISTS(
+                            SELECT 1 FROM memory.evidence
+                            WHERE owner_user_id=$1
+                              AND source_system='public.chat_log'
+                              AND external_id=ANY($3::text[])
+                          )
+                        """,
+                        uid,
+                        ids,
+                        [f"chat_log:{record_id}" for record_id in ids],
+                    )
+                if governed:
+                    return JSONResponse(
+                        {
+                            "status": "conflict",
+                            "detail": "governed_recent_erasure_required",
+                        },
+                        status_code=409,
+                    )
+
             pg_del = await conn.execute(
-                "DELETE FROM chat_log WHERE user_id=$1 AND created_at >= $2",
+                "DELETE FROM chat_log WHERE owner_user_id=$1 AND created_at >= $2",
                 uid, cutoff
             )
         finally:
@@ -1280,6 +1352,13 @@ async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60)
         batch_size = 256
         for i in range(0, len(ids), batch_size):
             batch = ids[i:i+batch_size]
+            existing = qdrant.retrieve(
+                collection_name="memory_raw",
+                ids=batch,
+                with_payload=True,
+                with_vectors=False,
+            )
+            assert_raw_points_owner(existing or [], uid)
             qdrant.delete(
                 collection_name="memory_raw",
                 points_selector=qmodels.PointIdsList(points=batch),
@@ -1318,12 +1397,13 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
     try:
         conn = await asyncpg.connect(DSN)
         try:
+            await _set_connection_actor(conn, uid)
             threads = await conn.fetch(
-                "SELECT id, title, created_at, updated_at, archived FROM threads WHERE user_id=$1 ORDER BY updated_at DESC",
+                "SELECT id, title, created_at, updated_at, archived FROM threads WHERE owner_user_id=$1 ORDER BY updated_at DESC",
                 uid
             )
             messages = await conn.fetch(
-                "SELECT id, thread_id, source, text, tags, created_at FROM chat_log WHERE user_id=$1 ORDER BY created_at ASC LIMIT $2",
+                "SELECT id, thread_id, source, text, tags, created_at FROM chat_log WHERE owner_user_id=$1 ORDER BY created_at ASC LIMIT $2",
                 uid, limit
             )
         finally:
@@ -1341,7 +1421,7 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
         qdrant = get_qdrant()
         flt = qmodels.Filter(
             must=[
-                qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=uid)),
+                qmodels.FieldCondition(key="owner_user_id", match=qmodels.MatchValue(value=uid)),
                 qmodels.FieldCondition(key="kind", match=qmodels.MatchAny(any=card_kinds)),
             ]
         )
@@ -1352,6 +1432,7 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
             with_payload=True,
             with_vectors=False,
         )
+        assert_raw_points_owner(points or [], uid)
         for p in (points or []):
             cards.append({"id": str(p.id), "payload": (p.payload or {})})
     except Exception as e:
