@@ -8,109 +8,19 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import asyncpg
 
 from .memory_v1_projection import ClaimVectorIndex
+from .memory_v1_intent import classify_memory_intent
 from .memory_v1_retrieval import build_memory_packet
 from .memory_v1_store import actor_uuid
 from .openai_client import embed_text
 from .qdrant_compat import make_qdrant_client
 
 
-SKIPPED_TURN_INTENTS = {"TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"}
-LOSS_TERMS = ("died", "dying", "death", "dead", "passed away", "loss", "lost")
-EVENT_RECALL_TERMS = (
-    "what happened",
-    "remember what happened",
-    "what was it that happened",
-    "remind me what happened",
-)
-
-
-def _contains(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
-
-
 def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
-    text = " ".join(str(message or "").casefold().split())
-    intent_key = str(turn_intent or "GENERAL").strip().upper() or "GENERAL"
-    if not text:
-        return {"eligible": False, "reason": "empty_query"}
-    if intent_key in SKIPPED_TURN_INTENTS:
-        return {
-            "eligible": False,
-            "reason": f"turn_intent:{intent_key.lower()}",
-        }
-
-    name_terms = (
-        "neko",
-        "nemo",
-        "correct name",
-        "correct spelling",
-        "spell the name",
-        "name correction",
-        "name should be",
+    plan = classify_memory_intent(
+        message,
+        request_classification=turn_intent,
     )
-    family_terms = (
-        "mother",
-        "mom",
-        "mum",
-        "father",
-        "dad",
-        "parent",
-        "deedee",
-    )
-    pet_terms = ("pet", "dog", "cat", "neko", "nemo", "dahlia", "helsing")
-    caregiving_terms = (
-        "caregiving",
-        "caregiver",
-        "caretaking",
-        "caretaker",
-        "psychotic break",
-        "care burden",
-        "caring for my wife",
-        "caring for my spouse",
-        "monika",
-    )
-
-    domain: Optional[str] = None
-    if _contains(text, pet_terms) and (
-        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
-    ):
-        domain = "pet_loss"
-    elif _contains(text, name_terms):
-        domain = "name_correction"
-    elif _contains(text, family_terms) and (
-        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
-    ):
-        domain = "family_death"
-    elif _contains(text, caregiving_terms):
-        domain = "life_context"
-
-    if domain is None:
-        return {"eligible": False, "reason": "unclassified_domain"}
-
-    entity_hints = []
-    if domain == "pet_loss":
-        if "neko" in text or "nemo" in text:
-            entity_hints = ["neko"]
-        elif "dahlia" in text:
-            entity_hints = ["dahlia"]
-        elif "helsing" in text:
-            entity_hints = ["helsing"]
-
-    if intent_key in {"SPECIFIC_RECALL", "PROFILE_SUMMARY"}:
-        retrieval_intent = "personal_recall"
-    elif domain == "life_context":
-        retrieval_intent = "relevant_support"
-    else:
-        retrieval_intent = "personal_recall"
-
-    return {
-        "eligible": True,
-        "reason": "classified",
-        "domain": domain,
-        "intent": retrieval_intent,
-        "explicit_recall": intent_key == "SPECIFIC_RECALL",
-        "entity_hints": entity_hints,
-    }
+    return dict(plan["claim_context"])
 
 
 def _allowlisted(actor: uuid.UUID) -> bool:
