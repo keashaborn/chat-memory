@@ -130,6 +130,13 @@ def main() -> int:
         specialized=True,
     )
     expect(
+        "Could we add APIs to the Verbal Sage app that connect to expert nutrition and weightlifting guidance databases so the system can keep learning?",
+        "GENERAL",
+        memory_intent="project_planning",
+        domains=["project"],
+        specialized=True,
+    )
+    expect(
         "What do you know about my pets?",
         "PROFILE_SUMMARY",
         memory_intent="personal_recall",

@@ -39,7 +39,7 @@ CASES = (
     },
     {
         "case_id": "api_data_source_key_anchor",
-        "message": "Are there APIs that would connect us to online data sources of expert nutrition and weightlifting exercise guidance? I would love to add that. It would be useful if the system learned from trainers and users.",
+        "message": "Could we add APIs to the Verbal Sage app that connect to expert nutrition and weightlifting guidance databases so the system can keep learning?",
         "expected_status": "ok",
         "expected_fragments": (),
         "expect_activation": False,
