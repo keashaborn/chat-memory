@@ -31,6 +31,20 @@ CASES = (
         "expect_activation": True,
     },
     {
+        "case_id": "adaptive_learning_current_only",
+        "message": "Can you tell me more about adaptive learning, and how that would fit into a memory system?",
+        "expected_status": "ok",
+        "expected_fragments": (),
+        "expect_activation": False,
+    },
+    {
+        "case_id": "api_data_source_key_anchor",
+        "message": "Are there APIs that would connect us to expert nutrition and weightlifting guidance databases so the system can keep learning?",
+        "expected_status": "ok",
+        "expected_fragments": (),
+        "expect_activation": False,
+    },
+    {
         "case_id": "unrelated_turn",
         "message": "How do I stop popups when my Mac restarts?",
         "expected_status": "skipped",

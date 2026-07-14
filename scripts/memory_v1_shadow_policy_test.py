@@ -19,6 +19,7 @@ def expect(
     domain: str,
     intent: str,
     entity_hints: list[str] | None = None,
+    explicit_recall: bool | None = None,
 ) -> None:
     result = classify_shadow_context(message, turn_intent)
     if not result["eligible"]:
@@ -31,6 +32,17 @@ def expect(
         raise AssertionError(
             f"expected entity hints {entity_hints}, got {result['entity_hints']}"
         )
+    if explicit_recall is not None and result["explicit_recall"] != explicit_recall:
+        raise AssertionError(
+            f"expected explicit_recall={explicit_recall}, got {result['explicit_recall']}"
+        )
+
+
+def expect_suppressed(message: str, turn_intent: str, reason: str) -> None:
+    result = classify_shadow_context(message, turn_intent)
+    expected = {"eligible": False, "reason": reason}
+    if result != expected:
+        raise AssertionError(f"{message!r}: {result} != {expected}")
 
 
 def main() -> int:
@@ -58,6 +70,15 @@ def main() -> int:
         domain="pet_loss",
         intent="personal_recall",
         entity_hints=[],
+        explicit_recall=True,
+    )
+    expect(
+        "What do you know about my pets?",
+        "PROFILE_SUMMARY",
+        domain="pet_loss",
+        intent="personal_recall",
+        entity_hints=[],
+        explicit_recall=True,
     )
     expect(
         "What happened to Neko?",
@@ -84,6 +105,34 @@ def main() -> int:
         "GENERAL",
         domain="life_context",
         intent="relevant_support",
+    )
+    expect(
+        "The voice-to-text error should be corrected: my cat's name is Neko, not Nemo.",
+        "GENERAL",
+        domain="name_correction",
+        intent="personal_recall",
+        explicit_recall=True,
+    )
+
+    expect_suppressed(
+        "My mother died back in March. She was about 87 years old.",
+        "GENERAL",
+        "information_providing_turn",
+    )
+    expect_suppressed(
+        "After Neko died, I got a white male Maine coon cat.",
+        "GENERAL",
+        "information_providing_turn",
+    )
+    expect_suppressed(
+        "I married Monika in my early 30s. She had a three year old son named Justin.",
+        "GENERAL",
+        "unclassified_domain",
+    )
+    expect_suppressed(
+        "After I was nine, we moved from Green Bay to Dykesville and lived on the beach.",
+        "GENERAL",
+        "unclassified_domain",
     )
 
     technical = classify_shadow_context(
