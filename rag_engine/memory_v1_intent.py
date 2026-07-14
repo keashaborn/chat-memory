@@ -429,12 +429,27 @@ def classify_legacy_personal_memory_access(
         message,
         request_classification=classification,
     )
-    if intent_plan["routes"]["specialized"]:
+    if intent_plan["memory_intent"] in {
+        "preference_recall",
+        "recommendation",
+        *PROJECT_INTENTS,
+    }:
         return {
             "version": VERSION,
             "allowed": False,
             "mode": normalized_mode,
             "reason": "curated_memory_route_required",
+            "suppress_corpus": False,
+        }
+    if (
+        intent_plan["memory_intent"] == "personal_recall"
+        or intent_plan["routes"]["governed_claims"]
+    ):
+        return {
+            "version": VERSION,
+            "allowed": True,
+            "mode": normalized_mode,
+            "reason": "narrow_personal_recall_not_yet_replaced",
             "suppress_corpus": False,
         }
     if classification != "SPECIFIC_RECALL":
