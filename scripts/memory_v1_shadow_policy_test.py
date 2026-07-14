@@ -128,6 +128,14 @@ def main() -> int:
                     "use_instruction": "normalize_memory_without_unprompted_discussion",
                     "evidence_refs": ["22222222-2222-4222-8222-222222222222"],
                     "score": 0.9,
+                },
+                {
+                    "claim_id": "33333333-3333-4333-8333-333333333333",
+                    "text": "User experienced a pet loss involving Helsing; event: died_or_lost.",
+                    "status": "supported",
+                    "use_instruction": "answer_directly_if_relevant",
+                    "evidence_refs": ["44444444-4444-4444-8444-444444444444"],
+                    "score": 0.8,
                 }
             ]
         }
@@ -140,9 +148,15 @@ def main() -> int:
         raise AssertionError("claim text was not JSON-quoted")
     if "Terms joined by _or_ are unresolved alternatives" not in block:
         raise AssertionError("ambiguity-preservation policy is missing")
+    if "died_or_lost" in block:
+        raise AssertionError("internal unresolved-event label reached the prompt")
+    if "does not establish whether the pet died or was otherwise lost" not in block:
+        raise AssertionError("unresolved event was not rendered explicitly")
     for forbidden in (
         "11111111-1111-4111-8111-111111111111",
         "22222222-2222-4222-8222-222222222222",
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444",
         '"score"',
     ):
         if forbidden in block:
