@@ -4,7 +4,7 @@
   "project_id": "08cd6a8a-5599-43d5-8d5c-b59401df8ccc",
   "project_key": "verbal-sage",
   "dry_run_authorized": true,
-  "apply_authorized": false,
+  "apply_authorized": true,
   "review_manifest_sha256": "3c847d0e3321bdfb80416abf4a25c9752d3ae842ddb17bd11b7d17f0c9caa946",
   "review_apply_report_sha256": "7e3e7aff89cd7e31b5733ff373b8ccd4115c32f27ae10fbd4134b79827393ff7",
   "review_replay_report_sha256": "fa2385dc171afb11bd4d9ce45c5a2826962e7da1f0a9f543f8a79c242c49070e",
