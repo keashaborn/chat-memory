@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
+import uuid
+from datetime import datetime, timezone
+
 from pydantic import ValidationError
 
 from rag_engine.memory_v1_consolidation import (
@@ -15,6 +19,7 @@ from rag_engine.memory_v1_consolidation import (
     _key_identity,
     _validate_candidate,
     looks_like_artifact,
+    persist_extraction,
 )
 from scripts.memory_v1_consolidation_worker import checkpointed_extraction
 
@@ -205,6 +210,23 @@ def main() -> int:
         ),
         RuntimeError,
     )
+    invalid_preference = preference(preference_class="none")
+    rejected = asyncio.run(
+        persist_extraction(
+            None,
+            actor_user_id=uuid.UUID("557ea042-cb82-48f8-9429-472e96c957ef"),
+            evidence_id=uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            extraction=ExtractionResult(
+                contains_quoted_or_pasted_content=False,
+                candidates=[invalid_preference],
+            ),
+            source_text="A transient creative request.",
+            observed_at=datetime.now(timezone.utc),
+        )
+    )
+    assert rejected["validation_rejections"] == [
+        {"lane": "preference", "reason": "preference_class is required"}
+    ]
     print("memory_v1_consolidation_unit_test: PASS")
     return 0
 

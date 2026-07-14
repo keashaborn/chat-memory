@@ -568,6 +568,7 @@ async def persist_extraction(
         "project_candidate_ids": [],
         "project_deferred": 0,
         "auto_applied_claim_ids": [],
+        "validation_rejections": [],
     }
 
     for candidate in extraction.candidates:
@@ -584,7 +585,13 @@ async def persist_extraction(
                 updates["knowledge_key"] = canonical_knowledge_key
             if updates:
                 candidate = candidate.model_copy(update=updates)
-        _validate_candidate(candidate)
+        try:
+            _validate_candidate(candidate)
+        except ConsolidationError as exc:
+            result["validation_rejections"].append(
+                {"lane": candidate.lane, "reason": str(exc)}
+            )
+            continue
         if candidate.lane == "claim":
             eligible = _explicit_correction_eligible(candidate, source_text)
             proposal, eligible, conflict_comparison = await _claim_conflict_gate(
