@@ -15,8 +15,6 @@ from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from .vb_tagging import infer_vb_tags
 
-from .gravity import load_gravity_profile, compute_misalignment
-
 # --- ENV / CONFIG ---
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -508,18 +506,6 @@ def retrieve_personal_memory(
     # 1b) Infer query tags for this personal-memory search
     query_tags = set(infer_query_tags(q))
 
-    # --- Legacy gravity containment ---
-    # Global gravity_profile is allowed only for default Vantage unless explicitly enabled.
-    use_global_gravity = (
-        vid == "default"
-        or os.getenv("VANTAGE_LEGACY_GRAVITY_FALLBACK", "0").strip().lower() in ("1", "true", "yes", "on")
-    )
-    gravity_weights = load_gravity_profile(user_id) if (user_id and use_global_gravity) else {}
-    misalignment = 0.0
-    if gravity_weights:
-        misalignment = compute_misalignment(list(query_tags), gravity_weights)
-    print(f"[gravity] user_id={user_id} vid={vid} legacy_gravity={use_global_gravity} misalignment={misalignment:.3f} tags={list(query_tags)}")
-
     # 2) Filter by user_id if provided
     must = []
     if user_id:
@@ -700,20 +686,7 @@ def retrieve_personal_memory(
             if intent_tag in query_tags and intent_tag in payload_tags:
                 tag_bonus += 0.05
 
-        # ---------- gravity alignment ----------
-        gravity_bonus = 0.0
-        if gravity_weights:
-            for t in payload_tags:
-                w = gravity_weights.get(t)
-                if w:
-                    gravity_bonus += 0.08 * w
-
-            if misalignment > 0.5:
-                gravity_bonus *= 0.3
-            elif misalignment > 0.2:
-                gravity_bonus *= 0.6
-
-        final_score = base_score + tag_bonus + gravity_bonus
+        final_score = base_score + tag_bonus
 
         results.append(
             {

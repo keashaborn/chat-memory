@@ -17,8 +17,6 @@ from .openai_client import complete_chat, complete_chat_messages, normalize_chat
 from .prompt_builder import build_system_prompt
 from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve
-from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
-from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_runtime
 from .memory_v1_intent import (
@@ -40,11 +38,7 @@ from .vantage_engine import normalize_limits, extract_sd_features, derive_params
 router = APIRouter()
 
 
-# ---------- RAG policy (per-vantage corpus selection) ----------
-class RagPolicyUpsertReq(BaseModel):
-    policy: Dict[str, Any] = {}
-
-
+# ---------- RAG policy (internal per-vantage corpus selection) ----------
 def _csv_env(name: str) -> List[str]:
     raw = (os.getenv(name) or "").strip()
     if not raw:
@@ -74,87 +68,6 @@ async def _rag_policy_get(vantage_id: str) -> Dict[str, Any]:
         except Exception:
             pol = {}
     return dict(pol) if isinstance(pol, dict) else {}
-
-async def _rag_policy_upsert(vantage_id: str, policy: Dict[str, Any]) -> Dict[str, Any]:
-    vid = (vantage_id or "default").strip() or "default"
-    dsn = os.environ["POSTGRES_DSN"]
-    payload_json = json.dumps(policy or {}, ensure_ascii=False)
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute(
-            """
-            INSERT INTO vantage_identity.rag_policy(vantage_id, policy)
-            VALUES ($1, $2::jsonb)
-            ON CONFLICT (vantage_id)
-            DO UPDATE SET policy=EXCLUDED.policy, updated_at=now()
-            """,
-            vid,
-            payload_json,
-        )
-        row = await conn.fetchrow(
-            "SELECT policy, created_at, updated_at FROM vantage_identity.rag_policy WHERE vantage_id=$1",
-            vid,
-        )
-    finally:
-        await conn.close()
-
-    pol = (row["policy"] if row else {}) or {}
-    if isinstance(pol, str):
-        try:
-            pol = json.loads(pol)
-        except Exception:
-            pol = {}
-    return {
-        "policy": dict(pol) if isinstance(pol, dict) else {},
-        "created_at": (row["created_at"].isoformat() if row and row["created_at"] else None),
-        "updated_at": (row["updated_at"].isoformat() if row and row["updated_at"] else None),
-    }
-
-@router.get("/rag_policy")
-async def rag_policy_get(vantage_id: str = "default"):
-    """
-    Get per-vantage RAG policy.
-    - env_* are the process defaults from .env
-    - db_policy is the stored override for this vantage_id
-    - effective_policy is what retrieval should use (db overrides env)
-    """
-    vid = (vantage_id or "default").strip() or "default"
-
-    env_primary = _csv_env("RAG_CORPUS_PRIMARY")
-    env_fallback = _csv_env("RAG_CORPUS_FALLBACK")
-
-    db_policy = await _rag_policy_get(vid)
-
-    effective = {
-        "corpus_primary": db_policy.get("corpus_primary") or env_primary,
-        "corpus_fallback": db_policy.get("corpus_fallback") or env_fallback,
-    }
-
-    # passthrough extras (e.g., topic_overrides, deny_collections, allow_collections, etc.)
-    for k, v in (db_policy or {}).items():
-        if k not in effective:
-            effective[k] = v
-
-    return {
-        "status": "ok",
-        "vantage_id": vid,
-        "env": {"corpus_primary": env_primary, "corpus_fallback": env_fallback},
-        "db_policy": db_policy,
-        "effective_policy": effective,
-    }
-
-@router.post("/rag_policy")
-async def rag_policy_upsert(body: RagPolicyUpsertReq, vantage_id: str = "default"):
-    """
-    Upsert per-vantage RAG policy JSON into Postgres.
-    """
-    vid = (vantage_id or "default").strip() or "default"
-    pol = body.policy or {}
-    if not isinstance(pol, dict):
-        raise HTTPException(status_code=400, detail="policy must be a JSON object")
-    res = await _rag_policy_upsert(vid, pol)
-    return {"status": "ok", "vantage_id": vid, **res}
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -2165,8 +2078,6 @@ def vantage_query(req: Request, payload: VantageQuery):
         ritual_bypass_enabled = (os.getenv("VANTAGE_RITUAL_BYPASS", "0").strip().lower() in ("1","true","yes","on"))
         greeting_bypass_enabled = (os.getenv("VANTAGE_GREETING_BYPASS", "0").strip().lower() in ("1","true","yes","on"))
         enforce_clarify_shape = (os.getenv("VANTAGE_ENFORCE_CLARIFY_SHAPE", "0").strip().lower() in ("1","true","yes","on"))
-        reentry_prefix_enabled = (os.getenv("VANTAGE_REENTRY_PREFIX", "0").strip().lower() in ("1","true","yes","on"))
-
         # -----------------------------
         try:
             pr = payload.pragmatics or {}
@@ -2678,16 +2589,6 @@ def vantage_query(req: Request, payload: VantageQuery):
                 "pragmatics_path": "normal_path",
             })
 
-        reentry_prefix = ""
-        if rc != "CLARIFY":
-            try:
-                temporal = (meta or {}).get("temporal") or {}
-                query_tags = (meta or {}).get("query_tags") or []
-                if reentry_prefix_enabled and should_add_reentry_line(temporal, payload.message, query_tags=query_tags):
-                    reentry_prefix = build_reentry_line(temporal)
-            except Exception as e:
-                print(f"[temporal] reentry policy error: {e}")
-
         if bool(getattr(payload, "inspect_only", False)):
             return VantageResponse(
                 answer="",
@@ -2702,8 +2603,6 @@ def vantage_query(req: Request, payload: VantageQuery):
         msgs.append({"role": "user", "content": payload.message})
         answer = complete_chat_messages(msgs, model=model_id)
 
-        if reentry_prefix:
-            answer = reentry_prefix + answer
         if rc == "CLARIFY":
             if enforce_clarify_shape:
                 answer = _enforce_clarify_shape(answer, mq)

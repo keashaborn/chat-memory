@@ -3,9 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-import requests
-
-from .gravity import compute_misalignment, load_gravity_profile
 from .retriever_unified import infer_query_tags
 
 
@@ -101,35 +98,6 @@ def build_meta_explanation(
     else:
         format_shift = "aligned_or_unknown"
 
-    gravity_weights = load_gravity_profile(user_id) if user_id else {}
-    misalignment = 0.0
-    misalignment_label = "no_gravity"
-    if gravity_weights:
-        misalignment = compute_misalignment(sorted(query_tags), gravity_weights)
-        if misalignment < 0.15:
-            misalignment_label = "aligned"
-        elif misalignment < 0.40:
-            misalignment_label = "mild_escape"
-        elif misalignment < 0.70:
-            misalignment_label = "strong_escape"
-        else:
-            misalignment_label = "disconnected"
-
-    temporal: Dict[str, Any] = {
-        "seconds_since_last_user_message": None,
-        "bucket": "unknown",
-    }
-    try:
-        response = requests.get(f"http://127.0.0.1:8088/temporal/{user_id}", timeout=1.0)
-        if response.ok:
-            body = response.json() or {}
-            temporal["seconds_since_last_user_message"] = body.get(
-                "seconds_since_last_user_message"
-            )
-            temporal["bucket"] = body.get("bucket") or "unknown"
-    except Exception as exc:
-        print(f"[temporal] error fetching temporal info: {exc}")
-
     return {
         "query_tags": sorted(query_tags),
         "feedback_summary": {"positive": total_pos, "negative": total_neg},
@@ -140,9 +108,4 @@ def build_meta_explanation(
             "current_request_format": current_format,
             "format_shift": format_shift,
         },
-        "gravity": {
-            "misalignment": misalignment,
-            "label": misalignment_label,
-        },
-        "temporal": temporal,
     }
