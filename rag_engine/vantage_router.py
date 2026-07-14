@@ -22,6 +22,7 @@ from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_shadow
+from .memory_v1_preference_project_shadow import run_preference_project_shadow
 from .query_embedding_cache import QueryEmbeddingCache
 
 # Reuse the exact behavior of the current /rag/query path where it matters:
@@ -2124,6 +2125,15 @@ def vantage_query(req: Request, payload: VantageQuery):
             request_id=req_request_id,
             thread_id=payload.thread_id,
             embedding_provider=query_embedding.get,
+        )
+        # Measurement only: preference/project selections are written to an
+        # owner-scoped diagnostic trace and never enter prompts or model input.
+        turn_plan["memory_v1_preference_project_shadow"] = run_preference_project_shadow(
+            payload.user_id,
+            query=payload.message,
+            request_classification=turn_intent,
+            request_id=req_request_id,
+            thread_id=payload.thread_id,
         )
 
 

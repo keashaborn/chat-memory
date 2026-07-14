@@ -145,6 +145,14 @@ trap cleanup EXIT
 
 "${compose[@]}" run --rm --no-deps \
   -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_intent_test.py
+
+"${compose[@]}" run --rm --no-deps \
+  -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_preference_project_shadow_test.py
+
+"${compose[@]}" run --rm --no-deps \
+  -e PYTHONPATH=/app \
   brains python scripts/query_embedding_cache_test.py
 
 "${compose[@]}" run --rm --no-deps \
