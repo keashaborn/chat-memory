@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v3"
+VERSION = "memory_intent_adapter_v4"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -40,7 +40,30 @@ CAREGIVING_TERMS = (
     "care burden",
     "caring for my wife",
     "caring for my spouse",
-    "monika",
+)
+SUPPORT_NEED_TERMS = (
+    "struggling",
+    "difficult",
+    "hard lately",
+    "overwhelmed",
+    "burned out",
+    "burnt out",
+    "need support",
+    "need help",
+    "help me",
+    "how do i cope",
+    "care burden",
+)
+NORMALIZATION_TERMS = (
+    "correct",
+    "correction",
+    "should be",
+    "not nemo",
+    "spellcheck",
+    "spell check",
+    "voice-to-text",
+    "voice to text",
+    "transcription error",
 )
 MUSIC_TERMS = ("music", "song", "songs", "artist", "artists", "lyrics", "playlist")
 RECOMMENDATION_TERMS = (
@@ -125,6 +148,13 @@ PROJECT_PLANNING_TERMS = (
     "integration",
     "add to the app",
     "include in the app",
+    "thinking about",
+    "considering",
+    "fit into",
+    "would fit",
+    "could we",
+    "how could",
+    "add that",
 )
 PROJECT_STATUS_TERMS = (
     "status",
@@ -176,6 +206,36 @@ PERSONAL_SONG_RECALL_TERMS = (
     "remind me what song",
 )
 LEGACY_PERSONAL_MEMORY_MODES = {"on", "specific_recall_only", "off"}
+PERSONAL_RECALL_CUE_RE = re.compile(
+    r"\b(?:do you remember|what do you (?:know|remember)|do you know (?:anything )?about|"
+    r"what (?:happened|was|is|did)|which (?:pet|dog|cat|name)|was it|"
+    r"remind me|tell me what|more particularly do you know)\b"
+)
+PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
+BROAD_PET_RECALL_RE = re.compile(
+    r"\b(?:what do you (?:know|remember) about my (?:current )?pets|"
+    r"do you know (?:anything )?about my (?:current )?pets|"
+    r"tell me (?:what you know )?about my (?:current )?pets)\b"
+)
+BROAD_FAMILY_RECALL_RE = re.compile(
+    r"\b(?:what do you (?:know|remember) about my (?:mother|mom|mum|father|dad)|"
+    r"do you know (?:anything )?about my (?:mother|mom|mum|father|dad)|"
+    r"more particularly do you know (?:anything )?about my (?:mother|mom|mum|father|dad))\b"
+)
+NAME_RECALL_RE = re.compile(
+    r"\b(?:was it nemo or neko|nemo or neko|"
+    r"what was (?:the )?(?:correct )?(?:spelling|name)|"
+    r"how (?:is|was) (?:my |the )?(?:pet(?:'s|’s)? )?name spell)\b"
+)
+NAMED_PERSONAL_TERMS = (
+    "neko",
+    "nemo",
+    "dahlia",
+    "helsing",
+    "deedee",
+    "dee dee",
+    "jerry",
+)
 
 
 def _normalized(value: Any) -> str:
@@ -235,13 +295,15 @@ def _candidate_entities(text: str) -> list[str]:
     return entities
 
 
-def _project_domain(text: str) -> str:
+def _project_domain(text: str, project_intent: str) -> str:
     if "ab design" in text or "a/b design" in text or "intervention" in text:
         return "behavior_change"
-    if "website" in text or "dataset" in text or "history" in text:
-        return "project_history"
     if "memory" in text or "retrieval" in text or "qdrant" in text:
         return "memory_architecture"
+    if project_intent == "project_recall" and (
+        "website" in text or "dataset" in text or "history" in text
+    ):
+        return "project_history"
     return "project"
 
 
@@ -257,6 +319,13 @@ def _project_intent(text: str) -> str:
     return "project_recall"
 
 
+def _looks_like_personal_recall(text: str) -> bool:
+    has_anchor = bool(PERSONAL_ANCHOR_RE.search(text)) or _contains(
+        text, NAMED_PERSONAL_TERMS
+    )
+    return bool(has_anchor and PERSONAL_RECALL_CUE_RE.search(text))
+
+
 def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     if request_classification in {"TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"}:
         return {
@@ -264,21 +333,37 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             "reason": f"turn_intent:{request_classification.lower()}",
         }
 
+    recall_requested = _looks_like_personal_recall(text)
+    normalization_requested = _contains(text, NAME_TERMS) and _contains(
+        text, NORMALIZATION_TERMS
+    )
+    name_recall_requested = recall_requested and bool(NAME_RECALL_RE.search(text))
+    broad_pet_recall = bool(BROAD_PET_RECALL_RE.search(text))
+    broad_family_recall = bool(BROAD_FAMILY_RECALL_RE.search(text))
+    pet_event = _contains(text, PET_TERMS) and (
+        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    )
+    family_event = _contains(text, FAMILY_TERMS) and (
+        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    )
+    caregiving_context = _contains(text, CAREGIVING_TERMS)
+    support_requested = caregiving_context and (
+        recall_requested or _contains(text, SUPPORT_NEED_TERMS)
+    )
+
     domain = None
-    if _contains(text, PET_TERMS) and (
-        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
-    ):
-        domain = "pet_loss"
-    elif _contains(text, NAME_TERMS):
+    if normalization_requested or name_recall_requested:
         domain = "name_correction"
-    elif _contains(text, FAMILY_TERMS) and (
-        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
-    ):
+    elif (pet_event and recall_requested) or broad_pet_recall:
+        domain = "pet_loss"
+    elif (family_event and recall_requested) or broad_family_recall:
         domain = "family_death"
-    elif _contains(text, CAREGIVING_TERMS):
+    elif support_requested:
         domain = "life_context"
 
     if domain is None:
+        if pet_event or family_event or normalization_requested or caregiving_context:
+            return {"eligible": False, "reason": "information_providing_turn"}
         return {"eligible": False, "reason": "unclassified_domain"}
 
     entity_hints: list[str] = []
@@ -295,7 +380,13 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         "reason": "classified",
         "domain": domain,
         "intent": "relevant_support" if domain == "life_context" else "personal_recall",
-        "explicit_recall": request_classification == "SPECIFIC_RECALL",
+        "explicit_recall": bool(
+            request_classification == "SPECIFIC_RECALL"
+            or recall_requested
+            or normalization_requested
+            or broad_pet_recall
+            or broad_family_recall
+        ),
         "entity_hints": entity_hints,
     }
 
@@ -351,7 +442,7 @@ def classify_memory_intent(
         project_classification = classification == "MEMORY_ARCHITECTURE"
         if has_project_signal or project_classification:
             memory_intent = _project_intent(text)
-            domains = [_project_domain(text)]
+            domains = [_project_domain(text, memory_intent)]
             project_key = PROJECT_KEY
             reasons.append("explicit_project_context")
         elif claim.get("eligible"):

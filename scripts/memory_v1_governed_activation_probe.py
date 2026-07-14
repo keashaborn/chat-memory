@@ -14,37 +14,84 @@ CASES = (
     {
         "case_id": "mother",
         "message": "What happened with my mom?",
-        "expected_fragment": "User's mother DeeDee died",
+        "expected_fragments": ("User's mother DeeDee died",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
     },
     {
         "case_id": "neko_loss",
         "message": "What happened to Neko?",
-        "expected_fragment": "User's cat Neko was put to sleep",
+        "expected_fragments": ("User's cat Neko was put to sleep",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
     },
     {
         "case_id": "dahlia_loss",
         "message": "What happened to Dahlia?",
-        "expected_fragment": "German shepherd Dahlia was put to sleep at age 12",
+        "expected_fragments": ("German shepherd Dahlia was put to sleep at age 12",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
     },
     {
         "case_id": "helsing_loss",
         "message": "What happened to Helsing?",
-        "expected_fragment": "pet loss involving Helsing",
+        "expected_fragments": ("pet loss involving Helsing",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
     },
     {
         "case_id": "name_correction",
         "message": "Was it Nemo or Neko?",
-        "expected_fragment": "pet name should be Neko, not Nemo",
+        "expected_fragments": ("pet name should be Neko, not Nemo",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
     },
     {
         "case_id": "caregiving",
         "message": "I am struggling with caregiving for my wife.",
-        "expected_fragment": "caretaking/life-context burden involving Monika",
+        "expected_fragments": ("caretaking/life-context burden involving Monika",),
+        "expected_selected_count": 1,
+        "expect_activation": True,
+    },
+    {
+        "case_id": "broad_pet_recall",
+        "message": "What do you know about my pets?",
+        "expected_fragments": (
+            "User's cat Neko was put to sleep",
+            "German shepherd Dahlia was put to sleep at age 12",
+            "pet loss involving Helsing",
+        ),
+        "expected_selected_count": 3,
+        "expect_activation": True,
+    },
+    {
+        "case_id": "mother_information",
+        "message": "My mother DeeDee died about five months ago.",
+        "expected_fragments": (),
+        "expected_selected_count": 0,
+        "expect_activation": False,
+    },
+    {
+        "case_id": "neko_information",
+        "message": "I had to put my cat Neko to sleep about two years ago.",
+        "expected_fragments": (),
+        "expected_selected_count": 0,
+        "expect_activation": False,
+    },
+    {
+        "case_id": "monika_information",
+        "message": "I married Monika in my early 30s and her son is Justin.",
+        "expected_fragments": (),
+        "expected_selected_count": 0,
+        "expect_activation": False,
     },
 )
 UNRELATED = {
     "case_id": "unrelated",
     "message": "How do I stop popups when my Mac restarts?",
+    "expected_fragments": (),
+    "expected_selected_count": 0,
+    "expect_activation": False,
 }
 
 
@@ -91,7 +138,7 @@ def main() -> int:
         )
         audit = plan.get("memory_v1_shadow", {})
         prompt = str(body.get("system_prompt") or "")
-        active = case is not UNRELATED
+        active = bool(case["expect_activation"])
         expected_status = "ok" if active else "skipped"
         if body.get("answer") != "":
             raise AssertionError(f"{case['case_id']}: inspect-only returned an answer")
@@ -108,12 +155,13 @@ def main() -> int:
         if "[DURABLE PERSONAL CARDS - POLICY FILTERED]" in prompt:
             raise AssertionError(f"{case['case_id']}: legacy durable block remained")
         if active:
-            if audit.get("selected_count") != 1:
+            if audit.get("selected_count") != case["expected_selected_count"]:
                 raise AssertionError(f"{case['case_id']}: {audit}")
-            if case["expected_fragment"] not in prompt:
-                raise AssertionError(
-                    f"{case['case_id']}: expected governed text missing"
-                )
+            for fragment in case["expected_fragments"]:
+                if fragment not in prompt:
+                    raise AssertionError(
+                        f"{case['case_id']}: expected governed text missing: {fragment!r}"
+                    )
         if "claim_id" in prompt or "evidence_refs" in prompt:
             raise AssertionError(f"{case['case_id']}: internal metadata leaked")
         reports.append(

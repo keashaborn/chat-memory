@@ -66,6 +66,7 @@ def project_record(
     kind: str,
     text: str,
     document_state: str,
+    authority: str = "user_reported",
 ) -> dict[str, object]:
     return {
         "project_id": "08cd6a8a-5599-43d5-8d5c-b59401df8ccc",
@@ -78,7 +79,7 @@ def project_record(
         "canonical_text": text,
         "content_sha256": content_hash,
         "document_state": document_state,
-        "authority_level": "user_reported",
+        "authority_level": authority,
         "effective_from": None,
         "effective_to": None,
         "sensitivity": "high",
@@ -275,6 +276,41 @@ def main() -> int:
     )
     if zero_budget["selected_content_count"] != 0:
         raise AssertionError("zero token budget selected content")
+
+    authority_low = project_record(
+        "aaaaaaaa-1111-4111-8111-111111111111",
+        "aaaaaaaa-2222-4222-8222-222222222222",
+        "memory.architecture.alpha",
+        "a" * 64,
+        kind="architecture",
+        text="Memory architecture baseline.",
+        document_state="ratified",
+        authority="user_reported",
+    )
+    authority_high = project_record(
+        "bbbbbbbb-1111-4111-8111-111111111111",
+        "bbbbbbbb-2222-4222-8222-222222222222",
+        "memory.architecture.beta",
+        "b" * 64,
+        kind="architecture",
+        text="Memory architecture baseline.",
+        document_state="ratified",
+        authority="approved_spec",
+    )
+    authority_result = evaluate_specialized_memory(
+        preferences=[],
+        project_records=[authority_low, authority_high],
+        query="Review the memory architecture baseline.",
+        memory_intent="project_status",
+        domains=["memory_architecture"],
+        project_key="verbal-sage",
+        direct_relevance=True,
+        max_project_records=1,
+        as_of="2026-07-14T12:00:00Z",
+    )
+    selected_authority = authority_result["selected_project_records"]
+    if [item["authority_level"] for item in selected_authority] != ["approved_spec"]:
+        raise AssertionError(f"authority precedence failed: {selected_authority}")
 
     print("memory_v1_preference_project_retrieval: PASS")
     return 0

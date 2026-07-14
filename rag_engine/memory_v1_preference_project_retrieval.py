@@ -26,6 +26,48 @@ PROJECT_MEMORY_INTENTS = {
     "project_decision",
 }
 CURRENT_PROJECT_STATES = {"working", "proposed", "ratified"}
+PROJECT_MIN_SCORE = 4
+GENERIC_PROJECT_KEY_TOKENS = {
+    "app",
+    "backend",
+    "frontend",
+    "memory",
+    "project",
+    "status",
+    "system",
+    "website",
+}
+HISTORICAL_QUERY_TERMS = (
+    "history",
+    "historical",
+    "legacy",
+    "old system",
+    "used to",
+    "before",
+    "how was",
+    "how did",
+    "source date",
+)
+AUTHORITY_RANK = {
+    "external_reference": 1,
+    "user_reported": 2,
+    "system_observed": 3,
+    "user_ratified": 4,
+    "approved_spec": 5,
+}
+DOCUMENT_STATE_RANK = {
+    "historical": 1,
+    "proposed": 2,
+    "working": 3,
+    "ratified": 4,
+}
+PROJECT_INTENT_KINDS = {
+    "project_planning": {"architecture", "constraint", "decision", "requirement", "roadmap"},
+    "project_decision": {"architecture", "constraint", "decision", "requirement"},
+    "project_status": {"architecture", "constraint", "decision", "status"},
+    "project_recall": {"architecture", "constraint", "decision", "requirement", "roadmap", "status"},
+}
+STATUS_DIRECTION_TERMS = {"direction", "future", "goal", "roadmap"}
 EXPECTED_RLS_TABLES = {
     "user_preference",
     "preference_revision",
@@ -192,12 +234,32 @@ def _preference_chain_is_current(record: Mapping[str, Any]) -> bool:
     )
 
 
-def _project_score(query_tokens: set[str], record: Mapping[str, Any]) -> int:
+def _project_match(
+    query_tokens: set[str], record: Mapping[str, Any]
+) -> tuple[int, int, int, set[str]]:
     key_tokens = _tokens(str(record.get("knowledge_key") or "").replace("_", " ").replace(".", " "))
     text_tokens = _tokens(record.get("canonical_text"))
-    return 3 * len(query_tokens.intersection(key_tokens)) + len(
-        query_tokens.intersection(text_tokens)
-    )
+    matched_key_tokens = query_tokens.intersection(key_tokens)
+    text_overlap = len(query_tokens.intersection(text_tokens))
+    key_overlap = len(matched_key_tokens)
+    score = 3 * key_overlap + text_overlap
+    return score, key_overlap, text_overlap, matched_key_tokens
+
+
+def _history_requested(query: str) -> bool:
+    normalized = _normalized_text(query)
+    return any(term in normalized for term in HISTORICAL_QUERY_TERMS)
+
+
+def _project_kind_allowed(
+    memory_intent: str, query_tokens: set[str], knowledge_kind: str
+) -> bool:
+    allowed = set(PROJECT_INTENT_KINDS.get(memory_intent, set()))
+    if memory_intent == "project_status" and query_tokens.intersection(
+        STATUS_DIRECTION_TERMS
+    ):
+        allowed.add("roadmap")
+    return knowledge_kind in allowed
 
 
 def _preference_result(record: Mapping[str, Any]) -> Dict[str, Any]:
@@ -367,9 +429,10 @@ def evaluate_specialized_memory(
         selected_preferences.append(item)
         tokens_used += item["token_estimate"]
 
-    scored_projects: list[tuple[int, Mapping[str, Any]]] = []
+    scored_projects: list[tuple[int, int, int, Mapping[str, Any]]] = []
     if memory_intent in PROJECT_MEMORY_INTENTS and project_key:
         query_tokens = _tokens(query)
+        historical_requested = _history_requested(query)
         for record in project_records:
             reasons: list[str] = []
             if str(record.get("project_key") or "") != str(project_key):
@@ -381,34 +444,65 @@ def evaluate_specialized_memory(
             if int(record.get("relation_count") or 0) > 0:
                 reasons.append("relations_require_later_contract")
             state = str(record.get("document_state") or "")
+            authority = str(record.get("authority_level") or "")
+            knowledge_kind = str(record.get("knowledge_kind") or "")
             if state == "superseded":
                 reasons.append("superseded")
+            if state not in DOCUMENT_STATE_RANK:
+                reasons.append("document_state")
+            if state == "historical" and not historical_requested:
+                reasons.append("historical_not_requested")
             if memory_intent in {"project_planning", "project_decision"} and state not in CURRENT_PROJECT_STATES:
                 reasons.append("historical_not_current")
+            if authority not in AUTHORITY_RANK:
+                reasons.append("authority")
+            if not _project_kind_allowed(memory_intent, query_tokens, knowledge_kind):
+                reasons.append("project_kind")
+            if not direct_relevance:
+                reasons.append("not_directly_relevant")
             effective_from = _parse_time(record.get("effective_from"), "effective_from")
             effective_to = _parse_time(record.get("effective_to"), "effective_to")
             if effective_from and evaluation_time < effective_from:
                 reasons.append("not_yet_effective")
             if effective_to and evaluation_time >= effective_to:
                 reasons.append("no_longer_effective")
+            score, key_overlap, _, matched_key_tokens = _project_match(
+                query_tokens, record
+            )
+            if key_overlap == 0:
+                reasons.append("project_key_anchor")
+            elif key_overlap == 1 and matched_key_tokens.issubset(
+                GENERIC_PROJECT_KEY_TOKENS
+            ):
+                reasons.append("project_generic_key_anchor")
+            if score < PROJECT_MIN_SCORE:
+                reasons.append("project_min_score")
             if reasons:
                 rejected.update(reasons)
                 continue
-            score = _project_score(query_tokens, record)
-            if score <= 0:
-                rejected["project_topic"] += 1
-                continue
-            scored_projects.append((score, record))
+            scored_projects.append(
+                (
+                    score,
+                    DOCUMENT_STATE_RANK[state],
+                    AUTHORITY_RANK[authority],
+                    record,
+                )
+            )
     elif project_records:
         rejected["project_intent"] += len(project_records)
 
     selected_projects: list[Dict[str, Any]] = []
     if scored_projects:
         scored_projects.sort(
-            key=lambda value: (-value[0], str(value[1].get("knowledge_key") or ""))
+            key=lambda value: (
+                -value[0],
+                -value[1],
+                -value[2],
+                str(value[3].get("knowledge_key") or ""),
+            )
         )
         relative_floor = max(2, math.ceil(scored_projects[0][0] * 0.65))
-        for score, record in scored_projects:
+        for score, _, _, record in scored_projects:
             if score < relative_floor:
                 rejected["project_relative_score"] += 1
                 continue

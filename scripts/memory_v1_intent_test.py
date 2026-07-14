@@ -18,6 +18,7 @@ def expect(
     memory_intent: str,
     domains: list[str],
     specialized: bool,
+    governed: bool | None = None,
 ) -> None:
     result = classify_memory_intent(
         message,
@@ -28,6 +29,8 @@ def expect(
     if result["domains"] != domains:
         raise AssertionError(f"{message!r}: {result}")
     if bool(result["routes"]["specialized"]) != specialized:
+        raise AssertionError(f"{message!r}: {result}")
+    if governed is not None and bool(result["routes"]["governed_claims"]) != governed:
         raise AssertionError(f"{message!r}: {result}")
 
 
@@ -109,8 +112,54 @@ def main() -> int:
         "I am worried about the app or website cost if ChatGPT usage grows, so I may need to build a cost structure.",
         "TECH",
         memory_intent="project_planning",
-        domains=["project_history"],
+        domains=["project"],
         specialized=True,
+    )
+    expect(
+        "Can you tell me more about adaptive learning, and how that would fit into a memory system?",
+        "GENERAL",
+        memory_intent="project_planning",
+        domains=["memory_architecture"],
+        specialized=True,
+    )
+    expect(
+        "I'm thinking about turning the website that I'm creating into an Apple app.",
+        "GENERAL",
+        memory_intent="project_planning",
+        domains=["project"],
+        specialized=True,
+    )
+    expect(
+        "What do you know about my pets?",
+        "PROFILE_SUMMARY",
+        memory_intent="personal_recall",
+        domains=["pet_loss"],
+        specialized=False,
+        governed=True,
+    )
+    expect(
+        "My mother died back in March. She was about 87 years old.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
+    expect(
+        "After Neko died, I got a white male Maine coon cat.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
+    expect(
+        "I married Monika in my early 30s. She had a three year old son named Justin.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
     )
     expect(
         "Can you recommend a guitar practice app?",
