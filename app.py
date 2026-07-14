@@ -1991,16 +1991,14 @@ def _profile_to_registry_row(profile: Dict[str, Any], default_id: str | None) ->
 
 
 @app.post("/vantages/sync")
-async def vantages_sync(req: VantageSyncReq):
+async def vantages_sync(req: VantageSyncReq, request: Request):
     """
     Mirror Supabase Vantage presets into Brains/Postgres.
 
     Supabase remains the account/settings source.
     This table gives Brains background jobs a local registry of saved vantages.
     """
-    user_id = (req.user_id or "").strip()
-    if not user_id:
-        return JSONResponse({"status": "bad_request", "detail": "missing user_id"}, status_code=400)
+    user_id = require_actor_matches_owner(request, req.user_id)
 
     default_id = (req.defaultId or "").strip() or None
     active = req.active if isinstance(req.active, dict) else {}
@@ -2146,13 +2144,11 @@ async def vantages_sync(req: VantageSyncReq):
 
 
 @app.get("/vantages/{user_id}")
-async def vantages_list(user_id: str):
+async def vantages_list(user_id: str, req: Request):
     """
     List mirrored Vantage registry rows for a user.
     """
-    uid = (user_id or "").strip()
-    if not uid:
-        return JSONResponse({"status": "bad_request", "detail": "missing user_id"}, status_code=400)
+    uid = require_actor_matches_owner(req, user_id)
 
     conn = await asyncpg.connect(DSN)
     try:
