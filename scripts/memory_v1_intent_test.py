@@ -179,11 +179,25 @@ def main() -> int:
 
     claim_gate = classify_legacy_personal_memory_access(
         "What happened with my mom?",
-        request_classification="SPECIFIC_RECALL",
+        request_classification="GENERAL",
         mode="specific_recall_only",
     )
-    if not claim_gate["allowed"]:
+    if (
+        not claim_gate["allowed"]
+        or claim_gate["reason"] != "narrow_personal_recall_not_yet_replaced"
+    ):
         raise AssertionError(claim_gate)
+
+    named_claim_gate = classify_legacy_personal_memory_access(
+        "What happened to DeeDee?",
+        request_classification="GENERAL",
+        mode="specific_recall_only",
+    )
+    if (
+        not named_claim_gate["allowed"]
+        or named_claim_gate["reason"] != "narrow_personal_recall_not_yet_replaced"
+    ):
+        raise AssertionError(named_claim_gate)
 
     general_gate = classify_legacy_personal_memory_access(
         "What should I cook tonight?",
