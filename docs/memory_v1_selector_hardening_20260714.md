@@ -62,3 +62,31 @@ answer path.
 
 No claims, evidence, preferences, project records, reviews, or source
 artifacts are modified by this change.
+
+## Production verification
+
+- Selector hardening deployed at backend commit `40c84d2`; the obsolete
+  durable-card selector was retired at `09402a7`. The verified production head
+  after reusable probe commits is `cdcdca1`.
+- Restore points are
+  `/home/ubuntu/brains/snapshots/memory_v1_selector_hardening_20260714T211002Z`
+  and
+  `/home/ubuntu/brains/snapshots/memory_v1_legacy_selector_retirement_20260714T211836Z`.
+- Eleven governed inspect-only cases passed. Broad pet recall selected exactly
+  Neko, Dahlia, and Helsing. Three information-providing cases and the
+  unrelated control selected zero and injected no prompt block.
+- Five specialized inspect-only cases passed. The music and current roadmap
+  cases selected their expected records. Adaptive learning, the unrelated API
+  project case, and the general control selected zero.
+- A second existing actor produced fresh governed and specialized traces with
+  zero selections, zero prompt injection, and zero answer-model exposure. The
+  trace IDs are `ba9b0ae0-0e1e-47e2-be7c-cc155525d7cf` and
+  `027de4be-c8c9-4c4a-934a-5caf287cce58`. An actor/body owner mismatch returned
+  HTTP 403.
+- Under forced RLS, the second actor saw zero of the primary actor's fresh
+  traces and the primary actor saw zero of the second actor's fresh traces.
+  The second actor saw `0 claims / 0 preferences / 0 project records`; the
+  primary actor saw only its own `6 / 3 / 5` rows.
+- The second actor has no recent non-test retrieval traces. Prompt influence
+  therefore remains primary-owner-only until ordinary use from another active
+  account supplies a real-use trace sample.
