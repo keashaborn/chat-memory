@@ -22,6 +22,11 @@ from .vb_desire_profile import load_latest_vb_desire_profile, vb_desire_bias_map
 from .temporal_policy import should_add_reentry_line, build_reentry_line
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_shadow
+from .memory_v1_intent import (
+    apply_legacy_personal_memory_gate,
+    classify_legacy_personal_memory_access,
+    resolve_legacy_personal_memory_mode,
+)
 from .memory_v1_preference_project_shadow import run_preference_project_shadow
 from .query_embedding_cache import QueryEmbeddingCache
 
@@ -2101,6 +2106,30 @@ def vantage_query(req: Request, payload: VantageQuery):
         thr_f = retrieval_plan["threshold"]
         personal_thr_f = float(retrieval_plan["personal_threshold"])
 
+        legacy_personal_mode = resolve_legacy_personal_memory_mode(
+            payload.user_id,
+            default_mode=os.getenv("VANTAGE_LEGACY_PERSONAL_MEMORY_MODE", "on"),
+            safe_user_ids=os.getenv(
+                "VANTAGE_LEGACY_PERSONAL_MEMORY_SAFE_USER_IDS",
+                "",
+            ),
+            off_user_ids=os.getenv(
+                "VANTAGE_LEGACY_PERSONAL_MEMORY_OFF_USER_IDS",
+                "",
+            ),
+        )
+        legacy_personal_access = classify_legacy_personal_memory_access(
+            payload.message,
+            request_classification=turn_intent,
+            mode=legacy_personal_mode,
+        )
+        retrieval_plan, legacy_personal_audit = apply_legacy_personal_memory_gate(
+            retrieval_plan,
+            legacy_personal_access,
+        )
+        k_personal = int(retrieval_plan["k_personal"])
+        k_corpus = int(retrieval_plan["k_corpus"])
+
         turn_plan = _build_turn_plan_v0(
             turn_intent=turn_intent,
             mix=mix,
@@ -2110,6 +2139,7 @@ def vantage_query(req: Request, payload: VantageQuery):
             retrieval_plan=retrieval_plan,
             thread_stats=thread_stats,
         )
+        turn_plan["legacy_personal_memory"] = legacy_personal_audit
 
         query_embedding = QueryEmbeddingCache(
             payload.message,

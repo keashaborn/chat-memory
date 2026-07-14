@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v1"
+VERSION = "memory_intent_adapter_v2"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -62,6 +63,10 @@ PREFERENCE_RECALL_TERMS = (
     "what kind of music",
     "what music do i",
     "remember what music",
+    "my favorite artist",
+    "my favorite singer",
+    "favorite artist would be",
+    "favorite singer would be",
 )
 PROJECT_SIGNALS = (
     "verbal sage",
@@ -90,6 +95,9 @@ PROJECT_SIGNALS = (
     "roadmap",
     "project",
 )
+PROJECT_APP_RE = re.compile(
+    r"\b(?:(?:my|the|our|this|that)\s+app|app\s+or\s+website|website\s+or\s+app)\b"
+)
 PROJECT_DECISION_TERMS = (
     "decision",
     "decide",
@@ -111,6 +119,10 @@ PROJECT_PLANNING_TERMS = (
     "build",
     "should we",
     "need to do",
+    "integrate",
+    "integration",
+    "add to the app",
+    "include in the app",
 )
 PROJECT_STATUS_TERMS = (
     "status",
@@ -141,6 +153,27 @@ PROJECT_RECALL_TERMS = (
     "legacy",
     "old system",
 )
+SONG_IDENTIFICATION_TERMS = (
+    "what song",
+    "which song",
+    "who sings",
+    "who sang",
+    "name that song",
+    "name of the song",
+    "song is this",
+    "song stuck in my head",
+)
+PERSONAL_SONG_RECALL_TERMS = (
+    "what song did i",
+    "which song did i",
+    "song i said",
+    "song i told you",
+    "my favorite song",
+    "what songs do i",
+    "remember what song",
+    "remind me what song",
+)
+LEGACY_PERSONAL_MEMORY_MODES = {"on", "specific_recall_only", "off"}
 
 
 def _normalized(value: Any) -> str:
@@ -149,6 +182,46 @@ def _normalized(value: Any) -> str:
 
 def _contains(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
+
+
+def _looks_like_song_identification(text: str) -> bool:
+    return _contains(text, SONG_IDENTIFICATION_TERMS) and not _contains(
+        text,
+        PERSONAL_SONG_RECALL_TERMS,
+    )
+
+
+def _csv_values(raw: Any) -> set[str]:
+    return {
+        item.strip().casefold()
+        for item in str(raw or "").split(",")
+        if item.strip()
+    }
+
+
+def resolve_legacy_personal_memory_mode(
+    actor_user_id: str,
+    *,
+    default_mode: str,
+    safe_user_ids: str = "",
+    off_user_ids: str = "",
+) -> str:
+    """Resolve the reversible legacy-memory migration mode for one owner."""
+    actor = str(actor_user_id or "").strip().casefold()
+    if actor and actor in _csv_values(off_user_ids):
+        return "off"
+    if actor and actor in _csv_values(safe_user_ids):
+        return "specific_recall_only"
+
+    raw_mode = str(default_mode or "on").strip().casefold().replace("-", "_")
+    aliases = {
+        "enabled": "on",
+        "safe": "specific_recall_only",
+        "specific_recall": "specific_recall_only",
+        "disabled": "off",
+    }
+    mode = aliases.get(raw_mode, raw_mode)
+    return mode if mode in LEGACY_PERSONAL_MEMORY_MODES else "off"
 
 
 def _candidate_entities(text: str) -> list[str]:
@@ -270,7 +343,9 @@ def classify_memory_intent(
         domains = ["music"]
         reasons.append("explicit_music_preference_recall")
     else:
-        has_project_signal = _contains(text, PROJECT_SIGNALS)
+        has_project_signal = _contains(text, PROJECT_SIGNALS) or bool(
+            PROJECT_APP_RE.search(text)
+        )
         project_classification = classification == "MEMORY_ARCHITECTURE"
         if has_project_signal or project_classification:
             memory_intent = _project_intent(text)
@@ -307,3 +382,97 @@ def classify_memory_intent(
         "claim_context": claim,
         "reason_codes": reasons or ["no_governed_memory_need"],
     }
+
+
+def classify_legacy_personal_memory_access(
+    message: str,
+    *,
+    request_classification: str,
+    mode: str,
+) -> Dict[str, Any]:
+    """Gate the legacy raw-vector archive during the Memory V1 migration."""
+    text = _normalized(message)
+    classification = (
+        str(request_classification or "GENERAL").strip().upper() or "GENERAL"
+    )
+    normalized_mode = resolve_legacy_personal_memory_mode(
+        "",
+        default_mode=mode,
+    )
+
+    if _looks_like_song_identification(text):
+        return {
+            "version": VERSION,
+            "allowed": False,
+            "mode": normalized_mode,
+            "reason": "song_identification_uses_live_context_only",
+            "suppress_corpus": True,
+        }
+    if normalized_mode == "off":
+        return {
+            "version": VERSION,
+            "allowed": False,
+            "mode": normalized_mode,
+            "reason": "legacy_personal_memory_disabled",
+            "suppress_corpus": False,
+        }
+    if normalized_mode == "on":
+        return {
+            "version": VERSION,
+            "allowed": True,
+            "mode": normalized_mode,
+            "reason": "legacy_personal_memory_enabled",
+            "suppress_corpus": False,
+        }
+
+    intent_plan = classify_memory_intent(
+        message,
+        request_classification=classification,
+    )
+    if intent_plan["routes"]["specialized"]:
+        return {
+            "version": VERSION,
+            "allowed": False,
+            "mode": normalized_mode,
+            "reason": "curated_memory_route_required",
+            "suppress_corpus": False,
+        }
+    if classification != "SPECIFIC_RECALL":
+        return {
+            "version": VERSION,
+            "allowed": False,
+            "mode": normalized_mode,
+            "reason": "not_narrow_personal_recall",
+            "suppress_corpus": False,
+        }
+    return {
+        "version": VERSION,
+        "allowed": True,
+        "mode": normalized_mode,
+        "reason": "narrow_personal_recall_not_yet_replaced",
+        "suppress_corpus": False,
+    }
+
+
+def apply_legacy_personal_memory_gate(
+    retrieval_plan: Dict[str, Any],
+    access: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Apply a legacy access decision to an already-computed retrieval plan."""
+    updated = dict(retrieval_plan or {})
+    requested = int(updated.get("k_personal") or 0)
+    requested_corpus = int(updated.get("k_corpus") or 0)
+    if not bool(access.get("allowed")):
+        updated["k_personal"] = 0
+        updated["personal_archive_enabled"] = False
+    if bool(access.get("suppress_corpus")):
+        updated["k_corpus"] = 0
+        updated["corpus_enabled"] = False
+    audit = {
+        **dict(access or {}),
+        "requested_k_personal": requested,
+        "effective_k_personal": int(updated.get("k_personal") or 0),
+        "requested_k_corpus": requested_corpus,
+        "effective_k_corpus": int(updated.get("k_corpus") or 0),
+    }
+    return updated, audit
