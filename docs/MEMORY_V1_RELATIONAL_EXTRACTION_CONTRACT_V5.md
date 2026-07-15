@@ -221,8 +221,17 @@ retaining the existing personal-memory predicates. Required families include:
   `project.current_state`, and `project.constraint`;
 - `preference.life` and `preference.response`.
 
-Exact names and data types are frozen in a separate predicate-registry phase.
-No V5 extractor is activated before that registry is reviewed.
+Exact names, subject types, object contracts, cardinality, temporal semantics,
+modalities, projection classes, sensitivity floors, surface policies, and
+manual-review rules are frozen in
+`specs/memory_v1_predicate_registry_v5.json`. The proposed registry contains
+25 extraction-enabled V5 predicates. All 19 predicates currently installed in
+production are retained as read-only cutover compatibility entries but cannot
+be emitted by V5. Unknown predicates defer and cannot expand the registry.
+
+The observation persistence boundary is frozen in
+`docs/MEMORY_V1_OBSERVATION_PERSISTENCE_DESIGN_V5.md`. Neither design is
+runtime-active, and no V5 extractor is activated before both are reviewed.
 
 ## 8. Temporal contract
 
@@ -408,11 +417,14 @@ is not copied into general telemetry.
 - retrieval traces and projection outbox;
 - `memory_claim_v1` as a derived owner-filtered index.
 
+### Designed, not implemented
+
+- dedicated immutable observation persistence, claim-observation provenance,
+  and candidate-observation review bindings;
+- V5 predicate registry and literal typing.
+
 ### Requires design before implementation
 
-- an explicit persisted observation/assertion layer or a strict upgrade of the
-  current candidate layer to serve that role;
-- V5 predicate registry and literal typing;
 - temporal precision/range representation;
 - entity-resolution proposals and review;
 - typed salience signal events;

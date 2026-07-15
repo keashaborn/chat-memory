@@ -144,17 +144,30 @@ Known limitations: deterministic narrow extraction, multi-event memories need sp
 The reviewed V4 newest-25 evaluation is now bound to:
 
 - `docs/MEMORY_V1_RELATIONAL_EXTRACTION_CONTRACT_V5.md`;
+- `docs/MEMORY_V1_OBSERVATION_PERSISTENCE_DESIGN_V5.md`;
+- `docs/MEMORY_V1_PREDICATE_REGISTRY_V5.md`;
+- `specs/memory_v1_predicate_registry_v5.json`;
 - `specs/memory_v1_relational_extraction_v5.schema.json`;
 - `evals/memory_v1_relational_extraction_v5_cases.jsonl`.
 
 Source manifest SHA-256:
 `8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649`.
 
+Predicate registry canonical SHA-256:
+`4d626433109c89c18d5ea374e173ca6785de6f9c20ecc05fef9f6447bfc671f4`.
+
 V5 proposes an evidence -> atomic observation -> entity/relationship resolution
 -> governed claim -> policy -> projection flow. It preserves intent-specific
 store permissions, technical/FM personal-memory suppression, typed surface
 policy, owner-scoped retrieval, small budgets, compression, semantic dedupe,
 prompt auditability, answer-use attribution, and isolated legacy fallback.
+
+The observation boundary is now decided: immutable evidence-backed
+observations require a dedicated owner-scoped store. The mutable
+`memory.candidate` table remains hash-locked review/apply workflow state. The
+proposed registry enables exactly 25 typed V5 predicates, keeps the 19 current
+production predicates readable as non-emittable cutover compatibility, and
+defers every unknown predicate.
 
 This is a specification checkpoint only. V4 remains the consolidation extractor,
 main-account consolidation remains disabled, and no V5 schema, extraction,
