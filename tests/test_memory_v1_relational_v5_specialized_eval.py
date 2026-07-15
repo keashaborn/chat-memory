@@ -32,6 +32,7 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     validate_entity_graph_pass,
     validate_project_knowledge_pass,
 )
+from scripts.memory_v1_relational_v5_specialized_replay import replay_model_packet
 
 
 SOURCE = "I prefer concise answers. My application needs export."
@@ -309,6 +310,65 @@ def run(fake_client, *, registry: dict | None = None):
 
 
 class SpecializedV5OrchestrationTest(unittest.TestCase):
+    def test_saved_model_packet_replay_applies_only_sibling_role_ordering(self) -> None:
+        text = "I have three sisters, Cindy one year older Lori and Heidi."
+        graph = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
+        model_packet = {
+            "entity_mentions": [
+                item.model_dump(mode="json") for item in graph.entity_mentions
+            ],
+            "observations": [
+                item.model_dump(mode="json")
+                for item in graph.relationship_observations
+            ],
+            "comparison_hints": [],
+            "deferrals": [],
+            "packet_findings": [],
+        }
+        source_sha256 = sha256_text(text)
+        source = {
+            "job_id": "11111111-1111-4111-8111-111111111111",
+            "source_external_id": SOURCE_ID,
+            "source_sha256": source_sha256,
+            "source_recorded_at": OBSERVED_AT,
+        }
+        result = replay_model_packet(
+            saved_row={
+                "case_id": "synthetic-siblings",
+                "source_external_id": SOURCE_ID,
+                "source_sha256": source_sha256,
+                "model_packet": model_packet,
+            },
+            case={
+                "case_id": "synthetic-siblings",
+                "expected": {
+                    "outcome": "extract",
+                    "required_projection_classes": ["direct_claim"],
+                    "required_entity_roles": [
+                        "family:sister:1",
+                        "family:sister:2",
+                        "family:sister:3",
+                    ],
+                    "required_predicate_families": ["relationship.sibling_of"],
+                    "required_temporal_features": ["open_state_validity"],
+                    "required_comparison_relations": [],
+                    "required_deferrals": [],
+                    "forbidden_projection_classes": [],
+                    "forbidden_predicates": [],
+                    "require_manual_review": True,
+                },
+            },
+            manifest_source=source,
+            live_source={"source_external_id": SOURCE_ID, "text": text},
+            registry=checked_in_registry(),
+        )
+        self.assertTrue(result["evaluation"]["passed"])
+        self.assertEqual(len(result["role_changes"]), 3)
+        self.assertEqual(
+            [item["after"] for item in result["role_changes"]],
+            ["family:sister:1", "family:sister:2", "family:sister:3"],
+        )
+
     def test_repeated_sibling_roles_are_numbered_by_exact_source_order(self) -> None:
         text = "I have three sisters, Cindy one year older Lori and Heidi."
         packet = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
