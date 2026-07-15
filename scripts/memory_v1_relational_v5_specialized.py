@@ -91,6 +91,9 @@ project.requirement, a speculative possibility as project.proposed_feature, and
 a directly described implemented/present state as project.current_state. One
 source may support more than one of these atomic observations. Project text
 literals always use approximate=false; uncertainty belongs in modality.
+Use state_validity for a project.current_state that is stated as true now. The
+server will anchor its open validity interval to the source observation time so
+later evidence can close or supersede it without erasing the original evidence.
 Questions about external platforms, policies, or coding ability do not alone
 create a project entity, observation, or project-scope deferral. If the same
 record directly states what the user's app currently is or does, extract that

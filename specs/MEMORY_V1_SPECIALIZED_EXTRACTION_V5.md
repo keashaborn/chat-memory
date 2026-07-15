@@ -133,10 +133,17 @@ deferrals to temporal content, requires the graph pass to declare all later
 content entities, requires exact short spans, and distinguishes project
 requirements, proposals, current state, and pure external questions.
 
-Case `v5-08` remains under contract review. Its source directly states that the
-memory project is partially complete, while the checked-in expected result
-forbids project knowledge and requires only `transient_state`. Do not tune the
-extractor to suppress this direct temporally scoped project statement or revise
-the expected result merely to improve the score. Resolve the intended memory
-policy first, record the rationale, then rerun the affected cases under a new
-explicit external-evaluation authorization.
+Case `v5-08` was resolved by explicit policy authorization. Its direct statement
+that the memory project is partially complete is a `project.current_state`
+observation with open `state_validity` anchored to source time, unresolved
+project scope, and manual review. Later evidence closes or supersedes the
+interval; it does not erase the original observation. The prior transient-only
+expected result is retired.
+
+The authorized rerun is restricted to the exact 16 failures from the first
+specialized evaluation. The checked-in subset manifest binds the source
+manifest hash, revised case-contract hash, baseline report hash, baseline
+evaluator commit, authorization scope, and manifest-ordered case IDs. The live
+runner rejects unknown, duplicate, reordered, added, or removed cases and still
+hashes all 25 manifest sources plus all `memory.*` relations and owner-filtered
+Qdrant state before and after the selected evaluation.

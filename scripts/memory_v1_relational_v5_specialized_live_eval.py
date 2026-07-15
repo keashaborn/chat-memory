@@ -55,6 +55,10 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--registry", default="specs/memory_v1_predicate_registry_v5.json"
     )
+    parser.add_argument(
+        "--selection",
+        help="Optional hash-locked subset selection manifest; default evaluates all cases",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument(
@@ -79,6 +83,61 @@ def _pass_schema_hashes() -> dict[str, str]:
 
 def _attempts(value: list[Any]) -> list[dict[str, Any]]:
     return [item.model_dump(mode="json") for item in value]
+
+
+def _valid_digest(value: Any, length: int) -> bool:
+    text = str(value)
+    return len(text) == length and all(
+        character in "0123456789abcdef" for character in text
+    )
+
+
+def _load_selection(
+    path: Path | None,
+    *,
+    cases: list[dict[str, Any]],
+    source_manifest_sha256: str,
+    case_contract_sha256: str,
+) -> tuple[dict[str, Any] | None, str | None, list[str]]:
+    all_ids = [str(item["case_id"]) for item in cases]
+    if path is None:
+        return None, None, all_ids
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    expected_keys = {
+        "authorization_scope",
+        "baseline_evaluator_commit",
+        "baseline_report_sha256",
+        "case_contract_sha256",
+        "case_ids",
+        "selection_version",
+        "source_manifest_sha256",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise RuntimeError("subset selection keys do not match the V1 contract")
+    if payload["selection_version"] != "memory_v1_relational_specialized_rerun_v1":
+        raise RuntimeError("subset selection version mismatch")
+    if payload["authorization_scope"] != "failed_cases_only_store_false_zero_write":
+        raise RuntimeError("subset authorization scope mismatch")
+    if payload["source_manifest_sha256"] != source_manifest_sha256:
+        raise RuntimeError("subset source manifest hash mismatch")
+    if payload["case_contract_sha256"] != case_contract_sha256:
+        raise RuntimeError("subset case contract hash mismatch")
+    if not _valid_digest(payload["baseline_evaluator_commit"], 40):
+        raise RuntimeError("subset baseline evaluator commit is invalid")
+    if not _valid_digest(payload["baseline_report_sha256"], 64):
+        raise RuntimeError("subset baseline report hash is invalid")
+    case_ids = payload["case_ids"]
+    if not isinstance(case_ids, list) or any(not isinstance(item, str) for item in case_ids):
+        raise RuntimeError("subset case_ids must be a string list")
+    if len(case_ids) != 16 or len(set(case_ids)) != len(case_ids):
+        raise RuntimeError("authorized failed-case subset must contain 16 unique cases")
+    unknown = sorted(set(case_ids) - set(all_ids))
+    if unknown:
+        raise RuntimeError(f"subset contains unknown cases:{','.join(unknown)}")
+    manifest_order = [case_id for case_id in all_ids if case_id in set(case_ids)]
+    if case_ids != manifest_order:
+        raise RuntimeError("subset cases must retain manifest order")
+    return payload, sha256_bytes(path.read_bytes()), case_ids
 
 
 def _repository_commit() -> str:
@@ -133,12 +192,19 @@ async def _snapshot(
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest, manifest_sha256 = load_manifest(Path(args.manifest))
-    cases = load_jsonl(Path(args.cases))
+    cases_path = Path(args.cases)
+    cases = load_jsonl(cases_path)
     registry_path = Path(args.registry)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     validate_inputs(manifest, manifest_sha256, cases, registry)
     if manifest_sha256 != EXPECTED_MANIFEST_SHA256:
         raise RuntimeError("specialized live runner manifest hash mismatch")
+    selection, selection_sha256, selected_case_ids = _load_selection(
+        Path(args.selection) if args.selection else None,
+        cases=cases,
+        source_manifest_sha256=manifest_sha256,
+        case_contract_sha256=sha256_bytes(cases_path.read_bytes()),
+    )
     evaluator_commit = _repository_commit()
 
     dsn = os.getenv("POSTGRES_DSN", "").strip()
@@ -153,6 +219,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         owner=owner,
         manifest=manifest,
     )
+    all_rows = list(zip(cases, manifest["sources"], sources, strict=True))
+    selected_set = set(selected_case_ids)
+    selected_rows = [row for row in all_rows if row[0]["case_id"] in selected_set]
+    if [row[0]["case_id"] for row in selected_rows] != selected_case_ids:
+        raise RuntimeError("subset selection did not resolve exactly")
 
     if args.preflight_only:
         after, _ = await _snapshot(
@@ -171,7 +242,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "registry_runtime_active": False,
             "manifest_sha256": manifest_sha256,
             "owner_user_id": str(owner),
-            "source_count": len(sources),
+            "manifest_source_count": len(sources),
+            "source_count": len(selected_rows),
+            "evaluated_case_ids": selected_case_ids,
+            "selection": selection,
+            "selection_sha256": selection_sha256,
             "external_model_calls": 0,
             "pass_schema_sha256": _pass_schema_hashes(),
             "registry_sha256": sha256_bytes(registry_path.read_bytes()),
@@ -189,9 +264,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         or "gpt-5.2"
     ).strip()
     reports: list[dict[str, Any]] = []
-    for ordinal, (case, manifest_source, live_source) in enumerate(
-        zip(cases, manifest["sources"], sources, strict=True), 1
-    ):
+    for case, manifest_source, live_source in selected_rows:
+        ordinal = int(case["ordinal"])
         text = str(live_source["text"] or "")
         row: dict[str, Any] = {
             "case_id": case["case_id"],
@@ -274,6 +348,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "model": model,
         "store": False,
         "source_count": len(reports),
+        "manifest_source_count": len(sources),
+        "evaluated_case_ids": selected_case_ids,
+        "selection": selection,
+        "selection_sha256": selection_sha256,
         "model_call_count": len(attempts),
         "repair_call_count": sum(
             int(attempt["attempt"] == "repair") for attempt in attempts

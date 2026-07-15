@@ -268,6 +268,8 @@ class SpecializedV5Test(unittest.TestCase):
         self.assertIn("identity.name_canonical", TEMPORAL_CONTENT_INSTRUCTIONS)
         self.assertIn("project.requirement", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         self.assertIn("approximate=false", PROJECT_KNOWLEDGE_INSTRUCTIONS)
+        self.assertIn("state_validity", PROJECT_KNOWLEDGE_INSTRUCTIONS)
+        self.assertIn("supersede", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         combined = "\n".join(
             (
                 ENTITY_GRAPH_INSTRUCTIONS,
