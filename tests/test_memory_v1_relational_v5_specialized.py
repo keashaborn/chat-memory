@@ -14,7 +14,6 @@ from scripts.memory_v1_relational_v5_specialized import (
     PROJECT_KNOWLEDGE_INSTRUCTIONS,
     TEMPORAL_CONTENT_INSTRUCTIONS,
     EntityGraphPassPacket,
-    ProjectEntityProposal,
     ProjectKnowledgePassPacket,
     ProjectObservationProposal,
     TemporalContentPassPacket,
@@ -130,13 +129,6 @@ class SpecializedV5Test(unittest.TestCase):
             packet_findings=[],
         )
         project = ProjectKnowledgePassPacket(
-            project_entity=ProjectEntityProposal(
-                mention_kind="role_only",
-                name_text=None,
-                source_spans=[span("my application")],
-                extraction_confidence=0.9,
-                reason_codes=["unresolved_project_mention"],
-            ),
             observations=[
                 ProjectObservationProposal.model_validate(
                     {
@@ -166,7 +158,7 @@ class SpecializedV5Test(unittest.TestCase):
         )
         return graph, content, project
 
-    def test_assembler_namespaces_observations_and_project_entity(self) -> None:
+    def test_assembler_namespaces_observations_and_server_project_entity(self) -> None:
         graph, content, project = self.packets()
         packet = assemble_specialized_packet(graph, content, project)
         self.assertIsInstance(packet, ModelPacket)
@@ -175,7 +167,12 @@ class SpecializedV5Test(unittest.TestCase):
             ["o01", "o02", "o03"],
         )
         self.assertEqual(packet.entity_mentions[-1].entity_ref, "e03")
+        self.assertEqual(packet.entity_mentions[-1].mention_kind, "anonymous")
         self.assertEqual(packet.entity_mentions[-1].relationship_role, "project:unresolved")
+        self.assertEqual(
+            packet.entity_mentions[-1].reason_codes,
+            ["server_assigned_unresolved_project_entity"],
+        )
         self.assertEqual(packet.observations[-1].subject_entity_ref, "e03")
 
     def test_assembler_preserves_python_datetime_for_strict_packet(self) -> None:
@@ -227,11 +224,13 @@ class SpecializedV5Test(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unresolved entity refs"):
             assemble_specialized_packet(graph, content, project)
 
-    def test_project_observation_requires_project_entity(self) -> None:
+    def test_empty_project_pass_creates_no_project_entity(self) -> None:
         graph, content, project = self.packets()
-        project.project_entity = None
-        with self.assertRaisesRegex(ValueError, "require a project entity"):
-            assemble_specialized_packet(graph, content, project)
+        project.observations = []
+        packet = assemble_specialized_packet(graph, content, project)
+        self.assertFalse(
+            any(item.entity_type == "project" for item in packet.entity_mentions)
+        )
 
     def test_execution_plan_is_zero_write_and_server_authoritative(self) -> None:
         plan = execution_plan()
@@ -259,6 +258,10 @@ class SpecializedV5Test(unittest.TestCase):
                 "salience",
             ):
                 self.assertNotIn(forbidden, schema)
+        self.assertNotIn(
+            "project_entity",
+            ProjectKnowledgePassPacket.model_json_schema()["properties"],
+        )
 
     def test_instructions_have_disjoint_lane_ownership(self) -> None:
         self.assertIn("only the source-local entity graph", ENTITY_GRAPH_INSTRUCTIONS)
@@ -267,6 +270,7 @@ class SpecializedV5Test(unittest.TestCase):
         self.assertIn("question_only", TEMPORAL_CONTENT_INSTRUCTIONS)
         self.assertIn("identity.name_canonical", TEMPORAL_CONTENT_INSTRUCTIONS)
         self.assertIn("project.requirement", PROJECT_KNOWLEDGE_INSTRUCTIONS)
+        self.assertIn("server will", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         self.assertIn("approximate=false", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         self.assertIn("state_validity", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         self.assertIn("supersede", PROJECT_KNOWLEDGE_INSTRUCTIONS)

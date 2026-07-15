@@ -24,7 +24,8 @@ predicate registry.
 3. `project_knowledge`
    - Owns only `project.current_state`, `project.requirement`,
      `project.proposed_feature`, and `project.constraint`.
-   - May propose one unresolved project entity but cannot bind a trusted project.
+   - Emits source-local project observations but cannot create, name, or bind a
+     project entity.
 
 ## Server authority
 
@@ -33,14 +34,17 @@ The model never receives or authors:
 - `owner_user_id`;
 - source identity or evidence identity;
 - trusted `project_id` or project binding;
+- a project entity or project name;
 - durable entity, observation, claim, or revision IDs;
 - approval/review state;
 - scalar or multidimensional salience;
 - persistence or retrieval activation.
 
-The server injects the source envelope, validates exact spans, assigns the
-unresolved project reference, namespaces observation references, validates
-predicate/object/temporal contracts, and constructs the existing V5 packet.
+The server injects the source envelope, validates exact spans, creates one
+anonymous `project:unresolved` entity from the first accepted project
+observation, assigns its source-local reference, namespaces observation
+references, validates predicate/object/temporal contracts, and constructs the
+existing V5 packet.
 
 The API orchestration is dependency-injected and zero-write. It hashes owner
 identity into `safety_identifier`, hashes source identity into non-reversible
@@ -68,7 +72,8 @@ OpenAI client and records zero external calls. Reports are create-only mode 0600
 - Project entities cannot originate in the entity-graph pass.
 - Graph predicates cannot originate in temporal content.
 - Project predicates cannot originate in temporal content.
-- Project observations require an unresolved project entity proposal.
+- Accepted project observations cause the server to create exactly one
+  anonymous unresolved project entity; no model project entity is accepted.
 - Observation references are renumbered by the server in pass order.
 - Comparison hints may reference only accepted temporal-content observations.
 - Existing V5 limits remain 24 entities, 32 observations, 32 comparison hints,
@@ -180,3 +185,27 @@ and the six owner-filtered Qdrant points hashed to
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No relation changed. No staging, persistence, retrieval activation, or further
 external rerun is authorized by this result.
+
+## Offline correction after the failed-16 rerun
+
+The next revision removes project-entity authorship from the model schema. The
+server derives one anonymous `project:unresolved` entity from the first accepted
+project observation and never treats model output as a trusted project binding.
+This removes a repeated failure mode in which valid project observations were
+discarded only because the same response omitted a redundant entity proposal.
+
+The graph-pass validator now rejects malformed self entities before dependent
+passes run. A self mention requires `mention_kind=self_reference`,
+`relationship_role=user:self`, and direct grounding in a first-person singular
+source span. The enrichment layer derives current/deceased pet roles only from
+accepted owner-pet relationships and death observations; an unrelated animal
+death cannot become a user pet.
+
+The project-pass validator now treats a project-scope deferral without an
+atomic project observation as repairable invalid output and rejects global
+question/context deferrals that belong to temporal content. Bounded repair
+instructions include exact-span recovery guidance. Pass instructions now make
+context-dependent recall questions, embedded occupation statements, current
+website/app state, planned veterinary procedures, and mixed question-plus-state
+turns explicit. These changes remain zero-write and runtime-inactive. No new
+external model evaluation is authorized by the offline revision.

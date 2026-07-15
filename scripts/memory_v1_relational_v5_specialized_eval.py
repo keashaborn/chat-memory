@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Callable, Literal, TypeVar
 
 from pydantic import BaseModel
@@ -127,6 +128,24 @@ def _source_input(
 
 
 def _repair_instructions(instructions: str, reasons: list[str]) -> str:
+    targeted: list[str] = []
+    if any(".span[" in item for item in reasons):
+        targeted.append(
+            "For every span error, recopy the shortest sufficient quote exactly "
+            "from inside <record> and recompute Python Unicode start/end offsets. "
+            "Do not paraphrase, normalize punctuation, or reuse a composite quote."
+        )
+    if any("self_entity" in item for item in reasons):
+        targeted.append(
+            "A self entity must use user:self, self_reference, and a source span "
+            "containing I, me, my, mine, or myself. Remove false self entities."
+        )
+    if "project_scope_deferral_without_observation" in reasons:
+        targeted.append(
+            "Project scope uncertainty never replaces a directly supported atomic "
+            "project observation. Extract the supported project.* observation or "
+            "remove the unsupported project-scope deferral."
+        )
     return (
         instructions
         + "\n\nSERVER VALIDATION REPAIR REQUEST\n"
@@ -135,6 +154,7 @@ def _repair_instructions(instructions: str, reasons: list[str]) -> str:
         + "dropping unrelated valid output. Expected evaluation labels are not "
         + "available to this request.\n"
         + stable_json(reasons)
+        + ("\n" + "\n".join(targeted) if targeted else "")
     )
 
 
@@ -290,6 +310,18 @@ def validate_entity_graph_pass(
     for item in packet.entity_mentions:
         if item.entity_type == "project":
             reasons.append(f"project_entity_in_graph:{item.entity_ref}")
+        if item.entity_type == "self":
+            if item.relationship_role != "user:self":
+                reasons.append(f"self_entity_role:{item.entity_ref}:user:self_required")
+            if item.mention_kind != "self_reference":
+                reasons.append(
+                    f"self_entity_mention_kind:{item.entity_ref}:self_reference_required"
+                )
+            quotes = " ".join(span.quote for span in item.source_spans)
+            if not re.search(r"(?<![\w])(?:i|me|my|mine|myself)(?![\w])", quotes, re.I):
+                reasons.append(
+                    f"self_entity_grounding:{item.entity_ref}:first_person_span_required"
+                )
         reasons.extend(_span_reasons(f"entity:{item.entity_ref}", item.source_spans, text))
     observation_refs = [item.observation_ref for item in packet.relationship_observations]
     reasons.extend(_duplicate_reasons(observation_refs, "observation_ref"))
@@ -380,20 +412,22 @@ def validate_project_knowledge_pass(
     reasons: list[str] = []
     refs = [item.observation_ref for item in packet.observations]
     reasons.extend(_duplicate_reasons(refs, "observation_ref"))
-    if packet.observations and packet.project_entity is None:
-        reasons.append("project_observations_without_project_entity")
-    if not packet.observations and packet.project_entity is not None:
-        reasons.append("project_entity_without_project_observation")
-    if packet.project_entity is not None:
-        reasons.extend(
-            _span_reasons("project_entity", packet.project_entity.source_spans, text)
-        )
     for item in packet.observations:
         reasons.extend(
             _span_reasons(f"observation:{item.observation_ref}", item.source_spans, text)
         )
     for index, item in enumerate(packet.deferrals):
         reasons.extend(_span_reasons(f"deferral:{index}", item.source_spans, text))
+        if item.reason_code != "project_scope_unresolved":
+            reasons.append(
+                f"non_project_deferral_in_project_pass:{index}:{item.reason_code}"
+            )
+    if any(
+        item.reason_code == "project_scope_unresolved"
+        and item.memory_shape == "project_knowledge"
+        for item in packet.deferrals
+    ) and not packet.observations:
+        reasons.append("project_scope_deferral_without_observation")
     reasons.extend(
         _registry_observation_reasons(
             list(packet.observations),

@@ -12,6 +12,7 @@ from scripts.memory_v1_relational_v5_live_eval import (
     evaluate_case,
     normalize_canonical_relationship_direction,
     normalize_explicit_project_requirement,
+    normalize_pet_relationship_roles,
     outcome,
     packet_integrity_reasons,
     packet_quality,
@@ -252,6 +253,65 @@ class V5LiveEvalTest(unittest.TestCase):
         )
         self.assertEqual(observations[0]["subject_entity_ref"], "e01")
         self.assertEqual(observations[0]["object"]["entity_ref"], "e02")
+
+    def test_pet_roles_derive_from_accepted_relationships_and_death(self) -> None:
+        entities = {
+            "e01": {"entity_type": "self", "relationship_role": "user:self"},
+            "e02": {"entity_type": "animal", "relationship_role": None},
+            "e03": {"entity_type": "animal", "relationship_role": None},
+            "e04": {"entity_type": "animal", "relationship_role": None},
+            "e05": {"entity_type": "animal", "relationship_role": None},
+        }
+        observations = [
+            {
+                "predicate": "relationship.has_pet",
+                "subject_entity_ref": "e01",
+                "object": {"kind": "entity", "entity_ref": "e02"},
+                "polarity": "affirmed",
+                "temporal": {"semantic": "state_validity"},
+            },
+            {
+                "predicate": "relationship.has_pet",
+                "subject_entity_ref": "e01",
+                "object": {"kind": "entity", "entity_ref": "e03"},
+                "polarity": "affirmed",
+                "temporal": {"semantic": "state_validity"},
+            },
+            {
+                "predicate": "relationship.has_pet",
+                "subject_entity_ref": "e01",
+                "object": {"kind": "entity", "entity_ref": "e04"},
+                "polarity": "affirmed",
+                "temporal": {"semantic": "state_validity"},
+            },
+            {
+                "predicate": "life_event.died",
+                "subject_entity_ref": "e04",
+                "object": {
+                    "kind": "literal",
+                    "datatype": "boolean",
+                    "value": True,
+                },
+                "polarity": "affirmed",
+                "temporal": {"semantic": "occurrence"},
+            },
+            {
+                "predicate": "life_event.died",
+                "subject_entity_ref": "e05",
+                "object": {
+                    "kind": "literal",
+                    "datatype": "boolean",
+                    "value": True,
+                },
+                "polarity": "affirmed",
+                "temporal": {"semantic": "occurrence"},
+            },
+        ]
+        self.assertTrue(normalize_pet_relationship_roles(entities, observations))
+        self.assertEqual(entities["e02"]["relationship_role"], "pet:current:1")
+        self.assertEqual(entities["e03"]["relationship_role"], "pet:current:2")
+        self.assertEqual(entities["e04"]["relationship_role"], "pet:deceased")
+        self.assertIsNone(entities["e05"]["relationship_role"])
 
     def test_registry_supports_owner_relationships_and_planned_health(self) -> None:
         rows = {item["predicate"]: item for item in self.registry["predicates"]}

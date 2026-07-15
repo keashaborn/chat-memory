@@ -510,6 +510,67 @@ def normalize_canonical_relationship_direction(
     return changed
 
 
+def normalize_pet_relationship_roles(
+    entities: dict[str, dict[str, Any]], observations: list[dict[str, Any]]
+) -> bool:
+    """Derive canonical pet roles only from accepted governed observations."""
+    died: set[str] = set()
+    owned: set[str] = set()
+    current: list[str] = []
+    for item in observations:
+        subject_ref = str(item["subject_entity_ref"])
+        if (
+            item["predicate"] == "life_event.died"
+            and item["polarity"] == "affirmed"
+            and entities.get(subject_ref, {}).get("entity_type") == "animal"
+        ):
+            died.add(subject_ref)
+        if (
+            item["predicate"] == "relationship.has_pet"
+            and item["polarity"] == "affirmed"
+            and item["object"]["kind"] == "entity"
+        ):
+            target_ref = str(item["object"]["entity_ref"])
+            if (
+                entities.get(subject_ref, {}).get("entity_type") == "self"
+                and entities.get(target_ref, {}).get("entity_type") == "animal"
+            ):
+                owned.add(target_ref)
+                if (
+                    item["temporal"]["semantic"] == "state_validity"
+                    and target_ref not in current
+                ):
+                    current.append(target_ref)
+
+    changed = False
+    deceased = {
+        ref
+        for ref in died
+        if ref in owned
+        or str(entities[ref].get("relationship_role") or "").startswith("pet:")
+    }
+    for ref in sorted(deceased):
+        entity = entities[ref]
+        if entity.get("relationship_role") != "pet:corrected_name_subject" and entity.get(
+            "relationship_role"
+        ) != "pet:deceased":
+            entity["relationship_role"] = "pet:deceased"
+            changed = True
+    ordinal = 0
+    for ref in current:
+        if ref in deceased:
+            continue
+        entity = entities[ref]
+        if entity.get("relationship_role") == "pet:corrected_name_subject":
+            continue
+        ordinal += 1
+        role = f"pet:current:{ordinal}"
+        if entity.get("relationship_role") != role:
+            entity["relationship_role"] = role
+            changed = True
+    return changed
+
+
 def validate_reason_codes(values: list[str], field: str) -> None:
     if len(values) != len(set(values)):
         raise ValueError(f"{field} contains duplicate reason codes")
@@ -804,6 +865,7 @@ def enrich_packet(
         except Exception as exc:
             rejections.append({"kind": "observation", "ref": ref, "reason": str(exc)})
     observation_refs = {item["observation_ref"] for item in observations}
+    normalized_pet_roles = normalize_pet_relationship_roles(entities, observations)
     comparisons: list[dict[str, Any]] = []
     for hint in raw["comparison_hints"]:
         hint["reason_codes"], changed = sanitize_reason_codes(
@@ -905,6 +967,8 @@ def enrich_packet(
         packet_findings.append("explicit_project_requirement_normalized")
     if normalized_relationship_direction:
         packet_findings.append("canonical_relationship_direction_normalized")
+    if normalized_pet_roles:
+        packet_findings.append("pet_relationship_roles_normalized")
     packet = {
         "contract_version": CONTRACT_VERSION,
         "source_envelope": {

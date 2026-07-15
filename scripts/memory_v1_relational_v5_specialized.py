@@ -36,15 +36,24 @@ ENTITY_GRAPH_INSTRUCTIONS = """
 Extract only the source-local entity graph. Return self, people, animals,
 organizations, places, objects, and concepts plus atomic relationship.has_pet,
 relationship.parent_of, relationship.sibling_of, and residence.lives_at
-observations. Project entities belong only to the project pass. Never extract
-project knowledge, attributes, health content, preferences, or corrections.
+observations. Project entities are server-owned and must not originate in this
+pass. Never extract project knowledge, attributes, health content, preferences,
+or corrections.
+Scan declarative clauses even when they are embedded in a long question.
 Declare every entity needed as the subject or entity-object of a later content
 pass even when no graph relationship is present. In particular, declare
-user:self for first-person occupation/profile facts and declare an explicitly
-corrected pet-name subject as an animal with role pet:corrected_name_subject.
+user:self for first-person occupation/profile facts and a concept entity for a
+directly stated occupation such as personal trainer. A self entity must be
+grounded in I, me, my, mine, or myself, use mention_kind=self_reference, and use
+relationship_role=user:self; we, you, they, and they're are not self mentions.
+Declare an explicitly corrected pet-name subject as an animal with role
+pet:corrected_name_subject.
 Every referenced entity must be declared in this packet. Use parent -> self,
 self -> sibling, and person/animal -> place directions exactly. Do not infer
 names, places, relationships, dates, owner identity, or durable IDs.
+For animals directly identified as the user's current or former pets, emit
+user:self -> animal relationship.has_pet edges. Use pet:current:N in source
+order for current pets and pet:deceased for a pet explicitly reported dead.
 Every source span must copy a short exact substring from the record; never
 paraphrase, normalize punctuation, or manufacture a long composite quote.
 If the source has no eligible entity or graph content, return empty entity and
@@ -64,10 +73,12 @@ or salience.
 This pass owns global question and ambiguity deferrals. Add question_only for a
 question even when a directly stated fact elsewhere in the record is extracted.
 Add context_missing when approval, endorsement, or a question depends on unseen
-prior content. Add transient_state for a question that only says a temporary
-decision/state has not been considered yet. Add ambiguous_transcription for a
-suspicious proper noun, credential, API, or voice transcription without
-discarding a separate well-supported fact.
+prior content. Questions such as "are you saying/thinking..." and "what do you
+know/remember about my..." depend on unseen conversational or memory context and
+require context_missing in addition to question_only. Add transient_state for a
+question that only says a temporary decision/state has not been considered yet.
+Add ambiguous_transcription for a suspicious proper noun, credential, API, or
+voice transcription without discarding a separate well-supported fact.
 An explicit statement that the user became or is a personal trainer is
 occupation.works_as even when they say it is not current paid work; represent
 the occupation as a concept entity from the supplied catalog and separately
@@ -75,22 +86,34 @@ defer an uncertain credential transcription. An explicit pet-name correction
 is identity.name_canonical with corrective modality and correction projection;
 add both corrects and supersedes comparison hints against an owner-scoped prior
 name lookup. Copy short exact source substrings for every span.
+An explicitly planned veterinary procedure such as spaying or neutering is a
+planned health.user_reported_observation with planned_time, not project scope or
+a completed event. Preserve negation: "not deaf" must not become an affirmed
+deaf observation.
 If the source has no compatible content, return empty observations and hints.
 """.strip()
 
 
 PROJECT_KNOWLEDGE_INSTRUCTIONS = """
 Extract only project knowledge: current state, requirements, proposed features,
-and constraints. Return at most one unresolved project entity proposal. A
-question can coexist with a directly stated current project state. Do not emit
-personal facts, preferences, health content, owner identity, trusted project
-binding, durable IDs, approval, or salience. Project scope remains unresolved
-for deterministic server review.
+and constraints. Do not create, name, or bind a project entity; the server will
+create one anonymous project:unresolved entity from the first accepted project
+observation. A question can coexist with directly stated current project state.
+Do not emit personal facts, preferences, health content, owner identity,
+trusted project binding, durable IDs, approval, or salience. Project scope
+remains unresolved for deterministic server review.
 Classify a directly endorsed capability the app should have as
 project.requirement, a speculative possibility as project.proposed_feature, and
 a directly described implemented/present state as project.current_state. One
 source may support more than one of these atomic observations. Project text
 literals always use approximate=false; uncertainty belongs in modality.
+"I am creating a website" is current state. "I am thinking about turning that
+website into an app" is a separate proposed feature. A statement that an app is
+mainly for a particular function or that a new system is partially complete is
+current state, even when the same turn asks for advice. Generic background such
+as "we have systems running" and questions about third-party APIs do not become
+project state unless an explicit product, site, app, memory system, or project
+referent is directly tied to the stated condition.
 Use state_validity for a project.current_state that is stated as true now. The
 server will anchor its open validity interval to the source observation time so
 later evidence can close or supersede it without erasing the original evidence.
@@ -98,8 +121,9 @@ Questions about external platforms, policies, or coding ability do not alone
 create a project entity, observation, or project-scope deferral. If the same
 record directly states what the user's app currently is or does, extract that
 state while the temporal pass owns question_only. Copy short exact source
-substrings for every span.
-If the source has no project knowledge, return no project entity and no observations.
+substrings for every span. A project_scope_unresolved deferral cannot substitute
+for an atomic project observation.
+If the source has no project knowledge, return no observations.
 """.strip()
 
 
@@ -115,14 +139,6 @@ class TemporalContentPassPacket(StrictModel):
     comparison_hints: list[ComparisonHint] = Field(max_length=32)
     deferrals: list[Deferral] = Field(max_length=24)
     packet_findings: list[str] = Field(max_length=16)
-
-
-class ProjectEntityProposal(StrictModel):
-    mention_kind: Literal["named", "role_only", "anonymous"]
-    name_text: str | None
-    source_spans: list[SpanOffsets] = Field(min_length=1, max_length=8)
-    extraction_confidence: float = Field(ge=0.0, le=1.0)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
 
 
 class ProjectObservationProposal(StrictModel):
@@ -153,7 +169,6 @@ class ProjectObservationProposal(StrictModel):
 
 
 class ProjectKnowledgePassPacket(StrictModel):
-    project_entity: ProjectEntityProposal | None
     observations: list[ProjectObservationProposal] = Field(max_length=24)
     deferrals: list[Deferral] = Field(max_length=16)
     packet_findings: list[str] = Field(max_length=16)
@@ -243,29 +258,26 @@ def assemble_specialized_packet(
 
     project_ref: str | None = None
     if project_knowledge.observations:
-        if project_knowledge.project_entity is None:
-            raise ValueError("project observations require a project entity proposal")
         if len(mentions) >= 24:
             raise ValueError("specialized packet exceeds the V5 entity budget")
         project_ref = _next_entity_ref(known_entities)
-        proposal = project_knowledge.project_entity
+        first_observation = project_knowledge.observations[0]
         mentions.append(
             {
                 "entity_ref": project_ref,
                 "entity_type": "project",
-                "mention_kind": proposal.mention_kind,
-                "name_text": proposal.name_text,
+                "mention_kind": "anonymous",
+                "name_text": None,
                 "relationship_role": "project:unresolved",
                 "source_spans": [
-                    item.model_dump(mode="python") for item in proposal.source_spans
+                    item.model_dump(mode="python")
+                    for item in first_observation.source_spans
                 ],
-                "extraction_confidence": proposal.extraction_confidence,
-                "reason_codes": proposal.reason_codes,
+                "extraction_confidence": first_observation.extraction_confidence,
+                "reason_codes": ["server_assigned_unresolved_project_entity"],
             }
         )
         known_entities.add(project_ref)
-    elif project_knowledge.project_entity is not None:
-        raise ValueError("project entity proposal without an atomic project observation")
 
     observations: list[dict[str, Any]] = []
     ref_maps: dict[str, dict[str, str]] = {

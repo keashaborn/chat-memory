@@ -14,7 +14,6 @@ from scripts.memory_v1_relational_v5_live_eval import (
 )
 from scripts.memory_v1_relational_v5_specialized import (
     EntityGraphPassPacket,
-    ProjectEntityProposal,
     ProjectKnowledgePassPacket,
     ProjectObservationProposal,
     TemporalContentPassPacket,
@@ -22,6 +21,8 @@ from scripts.memory_v1_relational_v5_specialized import (
 from scripts.memory_v1_relational_v5_specialized_eval import (
     SpecializedExtractionError,
     run_specialized_zero_write,
+    validate_entity_graph_pass,
+    validate_project_knowledge_pass,
 )
 
 
@@ -117,13 +118,6 @@ def content_packet() -> TemporalContentPassPacket:
 
 def project_packet(*, sensitivity: str = "medium") -> ProjectKnowledgePassPacket:
     return ProjectKnowledgePassPacket(
-        project_entity=ProjectEntityProposal(
-            mention_kind="role_only",
-            name_text=None,
-            source_spans=[span("My application")],
-            extraction_confidence=0.9,
-            reason_codes=["unresolved_project_mention"],
-        ),
         observations=[
             ProjectObservationProposal.model_validate(
                 {
@@ -222,6 +216,55 @@ def run(fake_client, *, registry: dict | None = None):
 
 
 class SpecializedV5OrchestrationTest(unittest.TestCase):
+    def test_graph_validator_rejects_noncanonical_self_before_assembly(self) -> None:
+        packet = graph_packet()
+        packet.entity_mentions[0].relationship_role = None
+        reasons = validate_entity_graph_pass(packet, SOURCE)
+        self.assertIn("self_entity_role:e01:user:self_required", reasons)
+
+        packet.entity_mentions[0].relationship_role = "user:self"
+        packet.entity_mentions[0].source_spans = [
+            packet.entity_mentions[0].source_spans[0].model_copy(
+                update=span("application")
+            )
+        ]
+        reasons = validate_entity_graph_pass(packet, SOURCE)
+        self.assertIn(
+            "self_entity_grounding:e01:first_person_span_required",
+            reasons,
+        )
+
+    def test_project_scope_deferral_without_observation_forces_repair(self) -> None:
+        packet = ProjectKnowledgePassPacket.model_validate(
+            {
+                "observations": [],
+                "deferrals": [
+                    {
+                        "reason_code": "project_scope_unresolved",
+                        "memory_shape": "project_knowledge",
+                        "source_spans": [span("My application")],
+                        "sensitivity": "medium",
+                    }
+                ],
+                "packet_findings": [],
+            }
+        )
+        self.assertIn(
+            "project_scope_deferral_without_observation",
+            validate_project_knowledge_pass(packet, SOURCE),
+        )
+
+        payload = packet.model_dump(mode="python")
+        payload["deferrals"][0]["reason_code"] = "question_only"
+        payload["deferrals"][0]["memory_shape"] = "none"
+        reasons = validate_project_knowledge_pass(
+            ProjectKnowledgePassPacket.model_validate(payload), SOURCE
+        )
+        self.assertIn(
+            "non_project_deferral_in_project_pass:0:question_only",
+            reasons,
+        )
+
     def test_three_pass_order_store_false_and_owner_not_exposed(self) -> None:
         fake_client, responses = client(
             [
