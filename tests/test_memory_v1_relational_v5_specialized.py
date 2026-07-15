@@ -232,6 +232,28 @@ class SpecializedV5Test(unittest.TestCase):
             any(item.entity_type == "project" for item in packet.entity_mentions)
         )
 
+    def test_assembler_prunes_entity_mentions_unreferenced_by_observations(self) -> None:
+        graph = EntityGraphPassPacket(
+            entity_mentions=[
+                entity("e01", "self", "user:self"),
+                entity("e02", "concept", "topic:unresolved"),
+            ],
+            relationship_observations=[],
+            deferrals=[],
+            packet_findings=[],
+        )
+        packet = assemble_specialized_packet(
+            graph,
+            TemporalContentPassPacket(
+                observations=[], comparison_hints=[], deferrals=[], packet_findings=[]
+            ),
+            ProjectKnowledgePassPacket(
+                observations=[], deferrals=[], packet_findings=[]
+            ),
+        )
+        self.assertEqual(packet.entity_mentions, [])
+        self.assertIn("orphan_entity_mentions_pruned", packet.packet_findings)
+
     def test_execution_plan_is_zero_write_and_server_authoritative(self) -> None:
         plan = execution_plan()
         self.assertEqual(

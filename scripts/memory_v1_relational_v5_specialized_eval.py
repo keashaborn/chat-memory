@@ -3,15 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime
 from typing import Any, Callable, Literal, TypeVar
 
 from pydantic import BaseModel
 
 from scripts.memory_v1_consolidation_packet_eval import stable_json
 from scripts.memory_v1_relational_v5_live_eval import (
+    ComparisonHint,
+    Deferral,
+    EntityMention,
     ModelPacket,
+    Observation,
     SENSITIVITY_RANK,
+    SpanOffsets,
     StrictModel,
+    Temporal,
     enforce_temporal_authority,
     sha256_text,
     source_span,
@@ -35,6 +42,22 @@ PIPELINE_VERSION = "memory_v1_relational_specialized_v5"
 PassName = Literal["entity_graph", "temporal_content", "project_knowledge"]
 AttemptName = Literal["initial", "repair"]
 PacketT = TypeVar("PacketT", bound=BaseModel)
+
+EXPLICIT_PET_NAME_RE = re.compile(
+    r"\bmy\s+(?:(?:first|current|former|late)\s+)?"
+    r"(?:cat|dog|pet)[\'’]s\s+name\s+(?:is|was)\s+"
+    r"(?P<name>[\w][\w\'’\-]{0,63})\b",
+    re.IGNORECASE,
+)
+CORRECTION_MARKER_RE = re.compile(
+    r"\b(?:correction|correct\s+that|voice[\s-]+to[\s-]+text\s+error|"
+    r"transcription\s+error|spell(?:ing)?\s+error)\b",
+    re.IGNORECASE,
+)
+UNCERTAINTY_RE = re.compile(
+    r"\b(?:i\s+think|i\s+believe|maybe|possibly|probably|not\s+sure)\b",
+    re.IGNORECASE,
+)
 
 
 class PassAttemptAudit(StrictModel):
@@ -239,6 +262,285 @@ def _span_reasons(prefix: str, spans: list[Any], text: str) -> list[str]:
 def _duplicate_reasons(values: list[str], label: str) -> list[str]:
     duplicates = sorted({value for value in values if values.count(value) > 1})
     return [f"duplicate_{label}:{value}" for value in duplicates]
+
+
+def _append_server_finding(packet: Any, finding: str) -> None:
+    values = [value for value in packet.packet_findings if value != finding]
+    packet.packet_findings = values[:15] + [finding]
+
+
+def normalize_redundant_source_spans(packet: PacketT, text: str) -> PacketT:
+    """Prune only invalid spans that are redundant with valid spans on one item."""
+    normalized = packet.model_copy(deep=True)
+    items: list[Any] = []
+    if isinstance(normalized, EntityGraphPassPacket):
+        items.extend(normalized.entity_mentions)
+        items.extend(normalized.relationship_observations)
+    else:
+        items.extend(normalized.observations)
+    items.extend(normalized.deferrals)
+    pruned = 0
+    for item in items:
+        valid: list[Any] = []
+        invalid: list[Any] = []
+        allow_repeated = getattr(item, "entity_type", None) == "self"
+        for span in item.source_spans:
+            value = span.model_dump(mode="json")
+            try:
+                source_span(value, text, allow_repeated=allow_repeated)
+                valid.append(span)
+            except Exception:
+                invalid.append(span)
+        if valid and invalid:
+            item.source_spans = valid
+            pruned += len(invalid)
+    if pruned:
+        _append_server_finding(normalized, "redundant_invalid_source_spans_pruned")
+    return normalized
+
+
+def normalize_explicit_pet_name_correction_graph(
+    packet: EntityGraphPassPacket, text: str
+) -> dict[str, Any] | None:
+    match = EXPLICIT_PET_NAME_RE.search(text)
+    if match is None or CORRECTION_MARKER_RE.search(text) is None:
+        return None
+    name = match.group("name")
+    entity = next(
+        (
+            item
+            for item in packet.entity_mentions
+            if item.entity_type == "animal"
+            and (
+                item.relationship_role == "pet:corrected_name_subject"
+                or str(item.name_text or "").casefold() == name.casefold()
+            )
+        ),
+        None,
+    )
+    span = SpanOffsets(start=match.start(), end=match.end(), quote=match.group(0))
+    if entity is None:
+        if len(packet.entity_mentions) >= 24:
+            return None
+        existing = {item.entity_ref for item in packet.entity_mentions}
+        entity_ref = next(
+            (f"e{ordinal:02d}" for ordinal in range(1, 100) if f"e{ordinal:02d}" not in existing),
+            None,
+        )
+        if entity_ref is None:
+            return None
+        entity = EntityMention(
+            entity_ref=entity_ref,
+            entity_type="animal",
+            mention_kind="named",
+            name_text=name,
+            relationship_role="pet:corrected_name_subject",
+            source_spans=[span],
+            extraction_confidence=0.99,
+            reason_codes=["server_detected_explicit_pet_name_correction"],
+        )
+        packet.entity_mentions.append(entity)
+    else:
+        entity.relationship_role = "pet:corrected_name_subject"
+    _append_server_finding(packet, "explicit_pet_name_correction_subject_normalized")
+    return {
+        "entity_ref": entity.entity_ref,
+        "name": name,
+        "span": span,
+    }
+
+
+def normalize_explicit_pet_name_correction_content(
+    packet: TemporalContentPassPacket,
+    correction: dict[str, Any] | None,
+) -> TemporalContentPassPacket:
+    if correction is None:
+        return packet
+    entity_ref = str(correction["entity_ref"])
+    name = str(correction["name"])
+    existing = next(
+        (
+            item
+            for item in packet.observations
+            if item.predicate == "identity.name_canonical"
+            and item.subject_entity_ref == entity_ref
+            and item.object.kind == "literal"
+            and str(item.object.value).casefold() == name.casefold()
+        ),
+        None,
+    )
+    if existing is None and len(packet.observations) < 32:
+        used = {item.observation_ref for item in packet.observations}
+        observation_ref = next(
+            (f"o{ordinal:02d}" for ordinal in range(1, 100) if f"o{ordinal:02d}" not in used),
+            None,
+        )
+        if observation_ref is not None:
+            existing = Observation.model_validate(
+                {
+                    "observation_ref": observation_ref,
+                    "subject_entity_ref": entity_ref,
+                    "predicate": "identity.name_canonical",
+                    "object": {
+                        "kind": "literal",
+                        "datatype": "text",
+                        "value": name,
+                        "unit": None,
+                        "approximate": False,
+                    },
+                    "polarity": "affirmed",
+                    "modality": "corrective",
+                    "projection_class": "correction",
+                    "surface_policy": "normalization_only",
+                    "temporal": {
+                        "semantic": "observation_time",
+                        "shape": "none",
+                        "basis": "none",
+                        "source_form": "none",
+                        "certainty": "unknown",
+                        "precision": "unknown",
+                        "instant": None,
+                        "calendar_range": None,
+                        "instant_range": None,
+                        "relative_offset": None,
+                        "recurrence": None,
+                        "anchored_to_source_time": False,
+                        "reason_codes": ["explicit_correction_observed"],
+                    },
+                    "sensitivity": "medium",
+                    "extraction_confidence": 0.99,
+                    "source_spans": [correction["span"]],
+                    "reason_codes": ["server_detected_explicit_pet_name_correction"],
+                }
+            )
+            packet.observations.append(existing)
+    if existing is None:
+        return packet
+    packet.deferrals = [
+        item
+        for item in packet.deferrals
+        if not (
+            item.memory_shape == "correction"
+            and item.reason_code in {"question_only", "context_missing"}
+        )
+    ]
+    relations = {
+        item.relation_type
+        for item in packet.comparison_hints
+        if item.observation_ref == existing.observation_ref
+    }
+    for relation in ("corrects", "supersedes"):
+        if relation not in relations and len(packet.comparison_hints) < 32:
+            packet.comparison_hints.append(
+                ComparisonHint(
+                    observation_ref=existing.observation_ref,
+                    relation_type=relation,
+                    target_lookup_key="owner_scoped_prior_name_claim",
+                    reason_codes=["owner_scoped_target_resolution_required"],
+                )
+            )
+    _append_server_finding(packet, "explicit_pet_name_correction_normalized")
+    return packet
+
+
+def normalize_uncertain_credential_deferral(
+    packet: TemporalContentPassPacket,
+    graph: EntityGraphPassPacket,
+    text: str,
+) -> TemporalContentPassPacket:
+    if not any(item.predicate == "occupation.works_as" for item in packet.observations):
+        return packet
+    if any(item.reason_code == "ambiguous_transcription" for item in packet.deferrals):
+        return packet
+    for entity in graph.entity_mentions:
+        if entity.entity_type != "organization":
+            continue
+        for raw_span in entity.source_spans:
+            try:
+                trusted = source_span(raw_span.model_dump(mode="json"), text)
+            except Exception:
+                continue
+            start = int(trusted["start"])
+            window_start = max(0, start - 64)
+            matches = list(UNCERTAINTY_RE.finditer(text[window_start:start]))
+            if not matches:
+                continue
+            match = matches[-1]
+            cue_start = window_start + match.start()
+            cue_end = window_start + match.end()
+            gap = text[cue_end:start]
+            if len(gap) > 48 or re.search(r"[.!?]", gap):
+                continue
+            end = int(trusted["end"])
+            packet.deferrals.append(
+                Deferral(
+                    reason_code="ambiguous_transcription",
+                    memory_shape="direct_claim",
+                    source_spans=[
+                        SpanOffsets(start=cue_start, end=end, quote=text[cue_start:end])
+                    ],
+                    sensitivity="medium",
+                )
+            )
+            _append_server_finding(
+                packet, "uncertain_credential_deferral_server_added"
+            )
+            return packet
+    return packet
+
+
+def normalize_project_current_state_temporal(
+    packet: ProjectKnowledgePassPacket, source_recorded_at: str
+) -> ProjectKnowledgePassPacket:
+    changed = False
+    for item in packet.observations:
+        if item.predicate != "project.current_state":
+            continue
+        current = item.temporal
+        server_anchorable = current.semantic == "state_validity" and (
+            current.source_form == "implicit_source_time"
+            or (
+                current.source_form == "none"
+                and (
+                    current.shape == "none"
+                    or (
+                        current.shape == "open_interval"
+                        and current.basis == "none"
+                        and current.instant_range is None
+                    )
+                )
+            )
+        )
+        if not server_anchorable:
+            continue
+        temporal = {
+            "semantic": "state_validity",
+            "shape": "none",
+            "basis": "none",
+            "source_form": "none",
+            "certainty": "unknown",
+            "precision": "unknown",
+            "instant": None,
+            "calendar_range": None,
+            "instant_range": None,
+            "relative_offset": None,
+            "recurrence": None,
+            "anchored_to_source_time": False,
+            "reason_codes": ["server_anchored_project_current_state"],
+        }
+        enforce_temporal_authority(temporal, source_recorded_at)
+        temporal["instant_range"]["lower"] = datetime.fromisoformat(
+            str(temporal["instant_range"]["lower"]).replace("Z", "+00:00")
+        )
+        normalized = Temporal.model_validate(temporal)
+        if item.temporal != normalized:
+            item.temporal = normalized
+            changed = True
+    if changed:
+        _append_server_finding(
+            packet, "project_current_state_temporal_server_anchored"
+        )
+    return packet
 
 
 def _registry_observation_reasons(
@@ -547,6 +849,7 @@ async def _run_pass(
     packet_type: type[PacketT],
     catalog: list[dict[str, Any]] | None,
     validator: Callable[[PacketT], list[str]],
+    normalizer: Callable[[PacketT], PacketT],
     attempts: list[PassAttemptAudit],
 ) -> PacketT:
     try:
@@ -566,6 +869,7 @@ async def _run_pass(
     except _ResponseContractError as exc:
         attempts.append(exc.audit)
         raise SpecializedExtractionError(str(exc), attempts) from exc
+    initial = normalizer(initial)
     initial_reasons = validator(initial)
     initial_audit.validation_reasons = initial_reasons
     initial_audit.quality = [len(initial_reasons)]
@@ -591,6 +895,7 @@ async def _run_pass(
     except _ResponseContractError as exc:
         attempts.append(exc.audit)
         raise SpecializedExtractionError(str(exc), attempts) from exc
+    repaired = normalizer(repaired)
     repaired_reasons = validator(repaired)
     repaired_audit.validation_reasons = repaired_reasons
     repaired_audit.quality = [len(repaired_reasons)]
@@ -667,9 +972,17 @@ async def run_specialized_zero_write(
             registry=registry,
             source_recorded_at=source_recorded_at,
         ),
+        normalizer=lambda packet: normalize_redundant_source_spans(packet, text),
         attempts=attempts,
     )
+    correction = normalize_explicit_pet_name_correction_graph(graph, text)
     catalog = entity_catalog(graph)
+
+    def normalize_content(packet: TemporalContentPassPacket) -> TemporalContentPassPacket:
+        packet = normalize_redundant_source_spans(packet, text)
+        packet = normalize_explicit_pet_name_correction_content(packet, correction)
+        return normalize_uncertain_credential_deferral(packet, graph, text)
+
     content = await _run_pass(
         client,
         model=model,
@@ -690,8 +1003,14 @@ async def run_specialized_zero_write(
             registry=registry,
             source_recorded_at=source_recorded_at,
         ),
+        normalizer=normalize_content,
         attempts=attempts,
     )
+
+    def normalize_project(packet: ProjectKnowledgePassPacket) -> ProjectKnowledgePassPacket:
+        packet = normalize_redundant_source_spans(packet, text)
+        return normalize_project_current_state_temporal(packet, source_recorded_at)
+
     project = await _run_pass(
         client,
         model=model,
@@ -711,6 +1030,7 @@ async def run_specialized_zero_write(
             registry=registry,
             source_recorded_at=source_recorded_at,
         ),
+        normalizer=normalize_project,
         attempts=attempts,
     )
     try:

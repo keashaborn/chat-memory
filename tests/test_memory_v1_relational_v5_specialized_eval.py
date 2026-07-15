@@ -4,12 +4,14 @@ import asyncio
 import inspect
 import json
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.memory_v1_relational_v5_live_eval import (
     EntityMention,
     Observation,
+    Temporal,
     sha256_text,
 )
 from scripts.memory_v1_relational_v5_specialized import (
@@ -20,6 +22,11 @@ from scripts.memory_v1_relational_v5_specialized import (
 )
 from scripts.memory_v1_relational_v5_specialized_eval import (
     SpecializedExtractionError,
+    normalize_explicit_pet_name_correction_content,
+    normalize_explicit_pet_name_correction_graph,
+    normalize_project_current_state_temporal,
+    normalize_redundant_source_spans,
+    normalize_uncertain_credential_deferral,
     run_specialized_zero_write,
     validate_entity_graph_pass,
     validate_project_knowledge_pass,
@@ -216,6 +223,300 @@ def run(fake_client, *, registry: dict | None = None):
 
 
 class SpecializedV5OrchestrationTest(unittest.TestCase):
+    def test_redundant_invalid_span_is_pruned_only_when_valid_span_remains(self) -> None:
+        packet = graph_packet()
+        packet.entity_mentions[0].source_spans.append(
+            packet.entity_mentions[0].source_spans[0].model_copy(
+                update={"start": 0, "end": 9, "quote": "not there"}
+            )
+        )
+        normalized = normalize_redundant_source_spans(packet, SOURCE)
+        self.assertEqual(len(normalized.entity_mentions[0].source_spans), 1)
+        self.assertIn(
+            "redundant_invalid_source_spans_pruned", normalized.packet_findings
+        )
+
+        packet.entity_mentions[0].source_spans = [
+            packet.entity_mentions[0].source_spans[0].model_copy(
+                update={"start": 0, "end": 9, "quote": "not there"}
+            )
+        ]
+        normalized = normalize_redundant_source_spans(packet, SOURCE)
+        self.assertEqual(len(normalized.entity_mentions[0].source_spans), 1)
+        self.assertNotIn(
+            "redundant_invalid_source_spans_pruned", normalized.packet_findings
+        )
+
+    def test_self_contained_pet_name_correction_is_server_normalized(self) -> None:
+        text = (
+            "this one correction they're my first cat's name was neko There was a "
+            "voice to text error so can you correct that?"
+        )
+        graph = EntityGraphPassPacket(
+            entity_mentions=[],
+            relationship_observations=[],
+            deferrals=[],
+            packet_findings=[],
+        )
+        correction = normalize_explicit_pet_name_correction_graph(graph, text)
+        self.assertIsNotNone(correction)
+        self.assertEqual(
+            graph.entity_mentions[0].relationship_role,
+            "pet:corrected_name_subject",
+        )
+        content = TemporalContentPassPacket.model_validate(
+            {
+                "observations": [],
+                "comparison_hints": [],
+                "deferrals": [
+                    {
+                        "reason_code": "context_missing",
+                        "memory_shape": "correction",
+                        "source_spans": [
+                            {
+                                "start": 5,
+                                "end": 19,
+                                "quote": "one correction",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    },
+                    {
+                        "reason_code": "question_only",
+                        "memory_shape": "correction",
+                        "source_spans": [
+                            {
+                                "start": text.index("can you"),
+                                "end": len(text),
+                                "quote": "can you correct that?",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    },
+                ],
+                "packet_findings": [],
+            }
+        )
+        normalized = normalize_explicit_pet_name_correction_content(
+            content, correction
+        )
+        self.assertEqual(
+            [item.predicate for item in normalized.observations],
+            ["identity.name_canonical"],
+        )
+        self.assertEqual(normalized.deferrals, [])
+        self.assertEqual(
+            {item.relation_type for item in normalized.comparison_hints},
+            {"corrects", "supersedes"},
+        )
+
+    def test_explicit_pet_name_correction_runs_through_all_three_passes(self) -> None:
+        text = (
+            "this one correction they're my first cat's name was neko There was a "
+            "voice to text error so can you correct that?"
+        )
+        correction_start = text.index("one correction")
+        question_start = text.index("can you")
+        graph = EntityGraphPassPacket(
+            entity_mentions=[],
+            relationship_observations=[],
+            deferrals=[],
+            packet_findings=[],
+        )
+        content = TemporalContentPassPacket.model_validate(
+            {
+                "observations": [],
+                "comparison_hints": [],
+                "deferrals": [
+                    {
+                        "reason_code": "context_missing",
+                        "memory_shape": "correction",
+                        "source_spans": [
+                            {
+                                "start": correction_start,
+                                "end": correction_start + len("one correction"),
+                                "quote": "one correction",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    },
+                    {
+                        "reason_code": "question_only",
+                        "memory_shape": "correction",
+                        "source_spans": [
+                            {
+                                "start": question_start,
+                                "end": len(text),
+                                "quote": "can you correct that?",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    },
+                ],
+                "packet_findings": [],
+            }
+        )
+        project = ProjectKnowledgePassPacket(
+            observations=[], deferrals=[], packet_findings=[]
+        )
+        fake_client, responses = client(
+            [response(graph), response(content), response(project)]
+        )
+        result = asyncio.run(
+            run_specialized_zero_write(
+                fake_client,
+                model="gpt-synthetic",
+                owner_user_id=OWNER,
+                source_external_id=SOURCE_ID,
+                source_recorded_at=OBSERVED_AT,
+                text=text,
+                registry=checked_in_registry(),
+            )
+        )
+        self.assertEqual(len(responses.calls), 3)
+        self.assertEqual(
+            [item.predicate for item in result.packet.observations],
+            ["identity.name_canonical"],
+        )
+        self.assertEqual(result.packet.deferrals, [])
+        self.assertEqual(
+            {item.relation_type for item in result.packet.comparison_hints},
+            {"corrects", "supersedes"},
+        )
+        self.assertEqual(
+            result.packet.entity_mentions[0].relationship_role,
+            "pet:corrected_name_subject",
+        )
+
+    def test_uncertain_credential_gets_review_deferral_without_losing_occupation(self) -> None:
+        text = "I became a personal trainer I think through Example Academy."
+        self_span = {"start": 0, "end": 1, "quote": "I"}
+        concept_start = text.index("personal trainer")
+        organization_start = text.index("Example Academy")
+        graph = EntityGraphPassPacket.model_validate(
+            {
+                "entity_mentions": [
+                    {
+                        "entity_ref": "e01",
+                        "entity_type": "self",
+                        "mention_kind": "self_reference",
+                        "name_text": None,
+                        "relationship_role": "user:self",
+                        "source_spans": [self_span],
+                        "extraction_confidence": 0.99,
+                        "reason_codes": ["direct_entity_mention"],
+                    },
+                    {
+                        "entity_ref": "e02",
+                        "entity_type": "concept",
+                        "mention_kind": "named",
+                        "name_text": "personal trainer",
+                        "relationship_role": None,
+                        "source_spans": [
+                            {
+                                "start": concept_start,
+                                "end": concept_start + len("personal trainer"),
+                                "quote": "personal trainer",
+                            }
+                        ],
+                        "extraction_confidence": 0.9,
+                        "reason_codes": ["direct_entity_mention"],
+                    },
+                    {
+                        "entity_ref": "e03",
+                        "entity_type": "organization",
+                        "mention_kind": "named",
+                        "name_text": "Example Academy",
+                        "relationship_role": None,
+                        "source_spans": [
+                            {
+                                "start": organization_start,
+                                "end": organization_start + len("Example Academy"),
+                                "quote": "Example Academy",
+                            }
+                        ],
+                        "extraction_confidence": 0.7,
+                        "reason_codes": ["direct_entity_mention"],
+                    },
+                ],
+                "relationship_observations": [],
+                "deferrals": [],
+                "packet_findings": [],
+            }
+        )
+        observation = content_packet().observations[0]
+        observation.predicate = "occupation.works_as"
+        observation.object = observation.object.model_copy(
+            update={"kind": "entity", "entity_ref": "e02"}
+        )
+        content = TemporalContentPassPacket(
+            observations=[observation],
+            comparison_hints=[],
+            deferrals=[],
+            packet_findings=[],
+        )
+        normalized = normalize_uncertain_credential_deferral(content, graph, text)
+        self.assertEqual(normalized.observations[0].predicate, "occupation.works_as")
+        self.assertEqual(
+            [item.reason_code for item in normalized.deferrals],
+            ["ambiguous_transcription"],
+        )
+
+    def test_project_current_state_temporal_is_server_authoritative(self) -> None:
+        packet = project_packet()
+        packet.observations[0].predicate = "project.current_state"
+        packet.observations[0].temporal = packet.observations[0].temporal.model_copy(
+            update={
+                "semantic": "state_validity",
+                "shape": "bounded_interval",
+                "basis": "instant",
+                "source_form": "implicit_source_time",
+                "instant_range": {
+                    "lower": "2026-01-01T00:00:00Z",
+                    "upper": "2026-02-01T00:00:00Z",
+                    "bounds": "[)",
+                },
+            }
+        )
+        normalized = normalize_project_current_state_temporal(packet, OBSERVED_AT)
+        value = normalized.observations[0].temporal
+        self.assertEqual(value.shape, "open_interval")
+        self.assertEqual(value.instant_range.lower.isoformat(), "2026-07-15T12:00:00+00:00")
+        self.assertIsNone(value.instant_range.upper)
+        self.assertTrue(value.anchored_to_source_time)
+
+    def test_project_current_state_preserves_explicit_temporal_evidence(self) -> None:
+        packet = project_packet()
+        packet.observations[0].predicate = "project.current_state"
+        explicit = Temporal.model_validate(
+            {
+                "semantic": "state_validity",
+                "shape": "bounded_interval",
+                "basis": "instant",
+                "source_form": "absolute",
+                "certainty": "bounded",
+                "precision": "exact",
+                "instant": None,
+                "calendar_range": None,
+                "instant_range": {
+                    "lower": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    "upper": datetime(2026, 2, 1, tzinfo=timezone.utc),
+                    "bounds": "[)",
+                },
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": False,
+                "reason_codes": ["explicit_project_interval"],
+            }
+        )
+        packet.observations[0].temporal = explicit
+        normalized = normalize_project_current_state_temporal(packet, OBSERVED_AT)
+        self.assertEqual(normalized.observations[0].temporal, explicit)
+        self.assertNotIn(
+            "project_current_state_temporal_server_anchored",
+            normalized.packet_findings,
+        )
+
     def test_graph_validator_rejects_noncanonical_self_before_assembly(self) -> None:
         packet = graph_packet()
         packet.entity_mentions[0].relationship_role = None

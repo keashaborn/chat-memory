@@ -248,3 +248,25 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No staging, persistence, retrieval activation, or additional external rerun is
 authorized by this result.
+
+## Offline correction after the failed-10 evaluation
+
+The next revision keeps all five changes server-bounded and runtime-inactive.
+Entity mentions not referenced by an accepted observation are removed before
+assembly, preventing question-only concepts from creating manual-review work.
+An invalid source span may be pruned only when the same entity, observation, or
+deferral retains at least one independently valid exact span; the packet records
+that normalization. A sole invalid evidence span still fails closed.
+
+An uncertain qualifier immediately attached to an organization or credential
+adds `ambiguous_transcription` without deleting a separately supported
+occupation observation. A self-contained, explicitly marked pet-name correction
+can deterministically create its source-local animal subject, canonical-name
+observation, and unresolved owner-scoped `corrects`/`supersedes` comparisons;
+question/context deferrals shaped as that same correction are removed.
+
+`project.current_state` temporal materialization is server-authoritative. The
+model supplies the predicate and exact evidence span; the server constructs the
+open state-validity interval from the trusted source timestamp. The remaining
+five-case selection is preflight-only and rejects any external model call. A
+new external evaluation requires a separately authorized selection manifest.

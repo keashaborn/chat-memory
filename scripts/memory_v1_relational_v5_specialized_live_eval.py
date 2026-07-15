@@ -117,11 +117,17 @@ def _load_selection(
     selection_counts = {
         "memory_v1_relational_specialized_rerun_v1": 16,
         "memory_v1_relational_specialized_rerun_v2": 10,
+        "memory_v1_relational_specialized_rerun_v3": 5,
     }
     selection_version = payload["selection_version"]
     if selection_version not in selection_counts:
         raise RuntimeError("subset selection version mismatch")
-    if payload["authorization_scope"] != "failed_cases_only_store_false_zero_write":
+    expected_scope = (
+        "remaining_failed_cases_preflight_only_zero_call"
+        if selection_version == "memory_v1_relational_specialized_rerun_v3"
+        else "failed_cases_only_store_false_zero_write"
+    )
+    if payload["authorization_scope"] != expected_scope:
         raise RuntimeError("subset authorization scope mismatch")
     if payload["source_manifest_sha256"] != source_manifest_sha256:
         raise RuntimeError("subset source manifest hash mismatch")
@@ -147,6 +153,21 @@ def _load_selection(
     if case_ids != manifest_order:
         raise RuntimeError("subset cases must retain manifest order")
     return payload, sha256_bytes(path.read_bytes()), case_ids
+
+
+def _enforce_selection_mode(
+    selection: dict[str, Any] | None, *, preflight_only: bool
+) -> None:
+    if (
+        selection is not None
+        and selection["authorization_scope"]
+        == "remaining_failed_cases_preflight_only_zero_call"
+        and not preflight_only
+    ):
+        raise RuntimeError(
+            "remaining-five selection is preflight-only; external calls require "
+            "a separately authorized manifest"
+        )
 
 
 def _repository_commit() -> str:
@@ -214,6 +235,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         source_manifest_sha256=manifest_sha256,
         case_contract_sha256=sha256_bytes(cases_path.read_bytes()),
     )
+    _enforce_selection_mode(selection, preflight_only=args.preflight_only)
     evaluator_commit = _repository_commit()
 
     dsn = os.getenv("POSTGRES_DSN", "").strip()

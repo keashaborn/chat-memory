@@ -56,6 +56,7 @@ user:self -> animal relationship.has_pet edges. Use pet:current:N in source
 order for current pets and pet:deceased for a pet explicitly reported dead.
 Every source span must copy a short exact substring from the record; never
 paraphrase, normalize punctuation, or manufacture a long composite quote.
+Use one sufficient exact span instead of adding redundant paraphrased spans.
 If the source has no eligible entity or graph content, return empty entity and
 observation lists.
 """.strip()
@@ -79,13 +80,18 @@ require context_missing in addition to question_only. Add transient_state for a
 question that only says a temporary decision/state has not been considered yet.
 Add ambiguous_transcription for a suspicious proper noun, credential, API, or
 voice transcription without discarding a separate well-supported fact.
+An uncertain qualifier immediately governing a credential or organization,
+such as "I think through [organization]", requires ambiguous_transcription.
 An explicit statement that the user became or is a personal trainer is
 occupation.works_as even when they say it is not current paid work; represent
 the occupation as a concept entity from the supplied catalog and separately
 defer an uncertain credential transcription. An explicit pet-name correction
 is identity.name_canonical with corrective modality and correction projection;
 add both corrects and supersedes comparison hints against an owner-scoped prior
-name lookup. Copy short exact source substrings for every span.
+name lookup. A self-contained command such as "can you correct that?" does not
+become question_only or context_missing when the corrected pet and canonical
+name are directly stated in the same record. Copy short exact source substrings
+for every span.
 An explicitly planned veterinary procedure such as spaying or neutering is a
 planned health.user_reported_observation with planned_time, not project scope or
 a completed event. Preserve negation: "not deaf" must not become an affirmed
@@ -117,6 +123,8 @@ referent is directly tied to the stated condition.
 Use state_validity for a project.current_state that is stated as true now. The
 server will anchor its open validity interval to the source observation time so
 later evidence can close or supersede it without erasing the original evidence.
+Return that model temporal value with semantic=state_validity and shape/basis/
+source_form=none; the server, not the model, constructs the trusted interval.
 Questions about external platforms, policies, or coding ability do not alone
 create a project entity, observation, or project-scope deferral. If the same
 record directly states what the user's app currently is or does, extract that
@@ -339,6 +347,18 @@ def assemble_specialized_packet(
     )
     if len(findings) > 32:
         raise ValueError("specialized packet exceeds the V5 finding budget")
+
+    referenced_entities: set[str] = set()
+    for item in observations:
+        referenced_entities.add(str(item["subject_entity_ref"]))
+        if item["object"]["kind"] == "entity":
+            referenced_entities.add(str(item["object"]["entity_ref"]))
+    retained_mentions = [
+        item for item in mentions if item["entity_ref"] in referenced_entities
+    ]
+    if len(retained_mentions) != len(mentions):
+        mentions = retained_mentions
+        findings = sorted(set(findings + ["orphan_entity_mentions_pruned"]))
 
     return ModelPacket.model_validate(
         {

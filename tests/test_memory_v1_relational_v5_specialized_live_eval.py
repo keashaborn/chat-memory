@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.memory_v1_relational_v5_specialized_live_eval import (
+    _enforce_selection_mode,
     _load_selection,
     _pass_schema_hashes,
     _repository_commit,
@@ -182,6 +183,30 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
                     source_manifest_sha256="a" * 64,
                     case_contract_sha256="b" * 64,
                 )
+
+    def test_checked_in_remaining5_selection_is_preflight_only(self) -> None:
+        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+        cases = [
+            json.loads(line)
+            for line in cases_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        selection, digest, case_ids = _load_selection(
+            Path("evals/memory_v1_relational_v5_remaining5_preflight_20260715.json"),
+            cases=cases,
+            source_manifest_sha256=(
+                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+            ),
+            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(len(digest or ""), 64)
+        self.assertEqual(
+            case_ids,
+            ["v5-03", "v5-04", "v5-10", "v5-15", "v5-25"],
+        )
+        _enforce_selection_mode(selection, preflight_only=True)
+        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
+            _enforce_selection_mode(selection, preflight_only=False)
 
     def test_v5_08_contract_is_temporal_project_current_state(self) -> None:
         cases = [
