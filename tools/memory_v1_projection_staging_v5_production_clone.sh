@@ -16,6 +16,8 @@ target_test=tests/memory_v1_projection_targets_v5.sql
 projection_migration=ops/sql/20260715_memory_v1_projection_staging_v5.sql
 projection_rollback=ops/sql/20260715_memory_v1_projection_staging_v5_rollback.sql
 projection_test=tests/memory_v1_projection_staging_v5.sql
+apply_migration=ops/sql/20260715_memory_v1_projection_apply_v5.sql
+apply_rollback=ops/sql/20260715_memory_v1_projection_apply_v5_rollback.sql
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
@@ -65,6 +67,8 @@ run_sql < "$target_migration"
 run_sql < "$target_test"
 run_sql < "$projection_migration"
 run_sql < "$projection_migration"
+run_sql < "$apply_migration"
+run_sql < "$apply_migration"
 
 if [[ "${PROJECTION_SKIP_SECURITY_TEST:-0}" != '1' ]]; then
   run_sql < "$projection_test"
@@ -74,6 +78,7 @@ fi
   pg_dump -U sage -d memory --schema-only --schema=memory \
   --no-owner --no-privileges >/dev/null
 
+run_sql < "$apply_rollback"
 run_sql < "$projection_rollback"
 run_sql < "$target_rollback"
 run_sql < "$writer_rollback"
@@ -100,6 +105,8 @@ remaining_objects=$(scalar_sql "
          'projection_plan_relation', 'projection_review',
          'projection_apply_event', 'preference_revision_observation',
          'project_knowledge_revision_observation',
+         'claim_relation_v5', 'preference_relation_v5',
+         'project_knowledge_relation_v5', 'projection_dispatch_v5',
          'preference_head_v5', 'preference_revision_v5',
          'project_knowledge_head_v5', 'project_knowledge_revision_v5',
          'relational_stage_batch', 'relational_operation_request'

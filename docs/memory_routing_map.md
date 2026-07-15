@@ -239,10 +239,22 @@ migration therefore fails closed when those targets are absent, and this phase
 does not copy the obsolete candidate pipeline into V5. Clean repository
 reconstruction of that prerequisite remains an explicit integration blocker.
 
+The controlled V5 projection review/apply boundary is now executable and
+runtime-inactive. Its four application APIs require the restricted writer
+context, active owner-scoped evidence, semantic advisory locks, optimistic
+revision locks, and the latest hash-locked authorization for manual items. One
+transaction writes exactly one typed lane result plus observation provenance,
+an immutable apply event, and an immutable dispatch event. A PostgreSQL 16
+production-schema clone applied claim, response-preference, and project lanes;
+same-request and same-manifest replay returned zero writes and preserved an
+exact durable-state fingerprint. Wrong manifests, reused request IDs, missing
+review, direct table access, and cross-owner access were rejected. Guarded
+rollback removed every apply object. Production remains unchanged.
+
 V4 remains the active consolidation extractor, main-account consolidation
 remains disabled, and no V5 extraction, projection, Qdrant, retrieval, prompt,
 or legacy-cutover behavior is active. Before activating the V5 writer, legacy
 direct `brains_app` mutation grants on durable pre-V5 tables must be audited and
-revoked. The next boundary is controlled, transactionally verified projection
-preflight/review/apply functions. Production installation and retrieval
-activation remain deferred.
+revoked. The next boundary is review of a production installation plan for the
+clone-verified V5 projection stack. Live extraction, durable apply, retrieval
+activation, and legacy cutover remain deferred.

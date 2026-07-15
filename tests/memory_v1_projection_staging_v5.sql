@@ -31,7 +31,11 @@ BEGIN
     'projection_review',
     'projection_apply_event',
     'preference_revision_observation',
-    'project_knowledge_revision_observation'
+    'project_knowledge_revision_observation',
+    'claim_relation_v5',
+    'preference_relation_v5',
+    'project_knowledge_relation_v5',
+    'projection_dispatch_v5'
   ]
   LOOP
     IF NOT EXISTS (
@@ -80,6 +84,26 @@ BEGIN
       RAISE EXCEPTION 'memory.% writer grants are not insert-only', relation_name;
     END IF;
   END LOOP;
+
+  IF NOT has_function_privilege(
+       'brains_app',
+       'memory.preflight_projection_review_v5(uuid,text,memory.projection_review_decision_v5,text,text,text,jsonb)',
+       'EXECUTE'
+     ) OR NOT has_function_privilege(
+       'brains_app',
+       'memory.review_projection_v5(uuid,text,memory.projection_review_decision_v5,text,text,text,jsonb,text)',
+       'EXECUTE'
+     ) OR NOT has_function_privilege(
+       'brains_app',
+       'memory.preflight_projection_apply_v5(uuid,text,uuid)',
+       'EXECUTE'
+     ) OR NOT has_function_privilege(
+       'brains_app',
+       'memory.apply_projection_v5(uuid,uuid,text,uuid,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'projection review/apply API grants are incomplete';
+  END IF;
 
   IF EXISTS (
     SELECT 1
@@ -686,8 +710,8 @@ jsonb_build_object(
     'materialization', 'link_only', 'source_observation_id', NULL
   ),
   'review', jsonb_build_object(
-    'state', 'auto_apply_eligible', 'authorization_required', false,
-    'reason_codes', '[]'::jsonb
+    'state', 'manual_review_required', 'authorization_required', true,
+    'reason_codes', '["project_policy_requires_review"]'::jsonb
   ),
   'relations', '[]'::jsonb,
   'payload', jsonb_build_object(
@@ -789,7 +813,7 @@ INSERT INTO memory.projection_plan_item(
     'affirmed', 'asserted',
     '{"project_id":"a5555555-1111-4111-8111-111111111111","knowledge_kind":"requirement","knowledge_key":"memory.account_isolation"}',
     :'project_semantic_sha', 'create', NULL, '[]', 'link_only', NULL,
-    'auto_apply_eligible', false, '[]'
+    'manual_review_required', true, '["project_policy_requires_review"]'
   );
 
 INSERT INTO memory.projection_claim_payload(
@@ -907,7 +931,309 @@ $isolation$;
 RESET SESSION AUTHORIZATION;
 SET SESSION AUTHORIZATION brains_app;
 SELECT pg_temp.assert_application_read_denied();
+SELECT set_config(
+  'app.user_id', '11111111-1111-4111-8111-111111111111', true
+);
+
+CREATE TEMP TABLE projection_test_manifest (
+  manifest_name text PRIMARY KEY,
+  manifest_sha256 text NOT NULL,
+  review_id uuid
+);
+CREATE TEMP TABLE projection_test_review_result (
+  result_name text PRIMARY KEY,
+  review_id uuid NOT NULL,
+  outcome text NOT NULL,
+  rows_written integer NOT NULL,
+  result jsonb NOT NULL
+);
+CREATE TEMP TABLE projection_test_apply_result (
+  result_name text PRIMARY KEY,
+  apply_event_id uuid NOT NULL,
+  outcome text NOT NULL,
+  lane memory.projection_lane_v5 NOT NULL,
+  aggregate_id uuid NOT NULL,
+  revision_id uuid NOT NULL,
+  revision_number integer NOT NULL,
+  rows_written integer NOT NULL,
+  result jsonb NOT NULL
+);
+
+DO $manual_gate$
+DECLARE
+  denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM 1 FROM memory.preflight_projection_apply_v5(
+      'a6666666-1111-4111-8111-111111111111', 'p03', NULL
+    );
+  EXCEPTION WHEN check_violation THEN
+    denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'manual projection apply was not review-gated';
+  END IF;
+END
+$manual_gate$;
+
+INSERT INTO projection_test_manifest(manifest_name, manifest_sha256)
+SELECT 'project_review', authorization_manifest_sha256
+FROM memory.preflight_projection_review_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p03', 'authorized',
+  'user', '11111111-1111-4111-8111-111111111111',
+  'Reviewed project requirement.', '["project_policy_requires_review"]'
+);
+
+INSERT INTO projection_test_review_result
+SELECT 'project_review_apply', reviewed.*
+FROM memory.review_projection_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p03', 'authorized',
+  'user', '11111111-1111-4111-8111-111111111111',
+  'Reviewed project requirement.', '["project_policy_requires_review"]',
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'project_review')
+) AS reviewed;
+UPDATE projection_test_manifest SET review_id = (
+  SELECT review_id FROM projection_test_review_result
+  WHERE result_name = 'project_review_apply'
+) WHERE manifest_name = 'project_review';
+
+INSERT INTO projection_test_review_result
+SELECT 'project_review_replay', reviewed.*
+FROM memory.review_projection_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p03', 'authorized',
+  'user', '11111111-1111-4111-8111-111111111111',
+  'Reviewed project requirement.', '["project_policy_requires_review"]',
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'project_review')
+) AS reviewed;
+
+INSERT INTO projection_test_manifest(manifest_name, manifest_sha256)
+SELECT 'claim_apply', apply_manifest_sha256
+FROM memory.preflight_projection_apply_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p01', NULL
+);
+INSERT INTO projection_test_manifest(manifest_name, manifest_sha256)
+SELECT 'preference_apply', apply_manifest_sha256
+FROM memory.preflight_projection_apply_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p02', NULL
+);
+INSERT INTO projection_test_manifest(manifest_name, manifest_sha256, review_id)
+SELECT 'project_apply', apply_manifest_sha256,
+  (SELECT review_id FROM projection_test_manifest
+   WHERE manifest_name = 'project_review')
+FROM memory.preflight_projection_apply_v5(
+  'a6666666-1111-4111-8111-111111111111', 'p03',
+  (SELECT review_id FROM projection_test_manifest
+   WHERE manifest_name = 'project_review')
+);
+
+DO $wrong_manifest$
+DECLARE
+  denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM 1 FROM memory.apply_projection_v5(
+      'a7777777-1111-4111-8111-111111111100',
+      'a6666666-1111-4111-8111-111111111111', 'p02', NULL,
+      repeat('f', 64)
+    );
+  EXCEPTION WHEN check_violation THEN
+    denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'projection apply accepted a wrong manifest';
+  END IF;
+END
+$wrong_manifest$;
+
+INSERT INTO projection_test_apply_result
+SELECT 'claim_apply', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111111',
+  'a6666666-1111-4111-8111-111111111111', 'p01', NULL,
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'claim_apply')
+) AS applied;
+INSERT INTO projection_test_apply_result
+SELECT 'preference_apply', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111112',
+  'a6666666-1111-4111-8111-111111111111', 'p02', NULL,
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'preference_apply')
+) AS applied;
+INSERT INTO projection_test_apply_result
+SELECT 'project_apply', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111113',
+  'a6666666-1111-4111-8111-111111111111', 'p03',
+  (SELECT review_id FROM projection_test_manifest
+   WHERE manifest_name = 'project_apply'),
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'project_apply')
+) AS applied;
+
+DO $request_mismatch$
+DECLARE
+  denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM 1 FROM memory.apply_projection_v5(
+      'a7777777-1111-4111-8111-111111111111',
+      'a6666666-1111-4111-8111-111111111111', 'p02', NULL,
+      (SELECT manifest_sha256 FROM projection_test_manifest
+       WHERE manifest_name = 'preference_apply')
+    );
+  EXCEPTION WHEN check_violation THEN
+    denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'request_id replay accepted a different projection';
+  END IF;
+END
+$request_mismatch$;
+
 RESET SESSION AUTHORIZATION;
+
+DO $applied_state$
+BEGIN
+  IF (SELECT count(*) FROM memory.projection_review) <> 1
+     OR (SELECT count(*) FROM memory.projection_apply_event) <> 3
+     OR (SELECT count(*) FROM memory.projection_dispatch_v5) <> 3
+     OR (SELECT count(*) FROM memory.claim) <> 1
+     OR (SELECT count(*) FROM memory.claim_revision) <> 1
+     OR (SELECT count(*) FROM memory.claim_observation) <> 1
+     OR (SELECT count(*) FROM memory.preference_head_v5) <> 1
+     OR (SELECT count(*) FROM memory.preference_revision_v5) <> 1
+     OR (SELECT count(*) FROM memory.preference_revision_observation) <> 1
+     OR (SELECT count(*) FROM memory.project_knowledge_head_v5) <> 1
+     OR (SELECT count(*) FROM memory.project_knowledge_revision_v5) <> 1
+     OR (SELECT count(*) FROM memory.project_knowledge_revision_observation) <> 1
+     OR EXISTS (
+       SELECT 1 FROM projection_test_review_result
+       WHERE (result_name = 'project_review_apply'
+              AND (outcome <> 'applied' OR rows_written <> 1))
+          OR (result_name = 'project_review_replay'
+              AND (outcome <> 'replayed' OR rows_written <> 0))
+     )
+     OR (SELECT count(*) FROM projection_test_apply_result
+         WHERE outcome = 'applied' AND rows_written > 0) <> 3 THEN
+    RAISE EXCEPTION 'controlled projection apply state is incorrect';
+  END IF;
+END
+$applied_state$;
+
+CREATE TEMP TABLE projection_replay_snapshot AS
+SELECT memory.v5_digest_text(memory.v5_canonical_json_text(
+  jsonb_build_object(
+    'claim', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY claim_id)
+              FROM memory.claim AS stored),
+    'claim_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                       FROM memory.claim_revision AS stored),
+    'claim_observation', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY claim_id)
+                          FROM memory.claim_observation AS stored),
+    'preference_head', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY preference_id)
+                        FROM memory.preference_head_v5 AS stored),
+    'preference_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                            FROM memory.preference_revision_v5 AS stored),
+    'project_head', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY knowledge_id)
+                     FROM memory.project_knowledge_head_v5 AS stored),
+    'project_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                         FROM memory.project_knowledge_revision_v5 AS stored),
+    'apply_event', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY event_id)
+                    FROM memory.projection_apply_event AS stored),
+    'dispatch', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY dispatch_id)
+                 FROM memory.projection_dispatch_v5 AS stored)
+  )
+)) AS fingerprint;
+
+SET SESSION AUTHORIZATION brains_app;
+SELECT set_config(
+  'app.user_id', '11111111-1111-4111-8111-111111111111', true
+);
+INSERT INTO projection_test_apply_result
+SELECT 'claim_exact_replay', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111111',
+  'a6666666-1111-4111-8111-111111111111', 'p01', NULL,
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'claim_apply')
+) AS applied;
+INSERT INTO projection_test_apply_result
+SELECT 'preference_manifest_replay', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111122',
+  'a6666666-1111-4111-8111-111111111111', 'p02', NULL,
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'preference_apply')
+) AS applied;
+INSERT INTO projection_test_apply_result
+SELECT 'project_exact_replay', applied.*
+FROM memory.apply_projection_v5(
+  'a7777777-1111-4111-8111-111111111113',
+  'a6666666-1111-4111-8111-111111111111', 'p03',
+  (SELECT review_id FROM projection_test_manifest
+   WHERE manifest_name = 'project_apply'),
+  (SELECT manifest_sha256 FROM projection_test_manifest
+   WHERE manifest_name = 'project_apply')
+) AS applied;
+
+SELECT set_config(
+  'app.user_id', '22222222-2222-4222-8222-222222222222', true
+);
+DO $api_isolation$
+DECLARE
+  denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM 1 FROM memory.preflight_projection_apply_v5(
+      'a6666666-1111-4111-8111-111111111111', 'p01', NULL
+    );
+  EXCEPTION WHEN no_data_found THEN
+    denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'owner B reached owner A projection API';
+  END IF;
+END
+$api_isolation$;
+RESET SESSION AUTHORIZATION;
+
+DO $zero_write_replay$
+DECLARE
+  after_fingerprint text;
+BEGIN
+  SELECT memory.v5_digest_text(memory.v5_canonical_json_text(
+    jsonb_build_object(
+      'claim', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY claim_id)
+                FROM memory.claim AS stored),
+      'claim_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                         FROM memory.claim_revision AS stored),
+      'claim_observation', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY claim_id)
+                            FROM memory.claim_observation AS stored),
+      'preference_head', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY preference_id)
+                          FROM memory.preference_head_v5 AS stored),
+      'preference_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                              FROM memory.preference_revision_v5 AS stored),
+      'project_head', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY knowledge_id)
+                       FROM memory.project_knowledge_head_v5 AS stored),
+      'project_revision', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY revision_id)
+                           FROM memory.project_knowledge_revision_v5 AS stored),
+      'apply_event', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY event_id)
+                      FROM memory.projection_apply_event AS stored),
+      'dispatch', (SELECT jsonb_agg(to_jsonb(stored) ORDER BY dispatch_id)
+                   FROM memory.projection_dispatch_v5 AS stored)
+    )
+  )) INTO after_fingerprint;
+  IF after_fingerprint <> (SELECT fingerprint FROM projection_replay_snapshot)
+     OR (SELECT count(*) FROM projection_test_apply_result
+         WHERE result_name LIKE '%replay'
+           AND outcome = 'replayed' AND rows_written = 0) <> 3 THEN
+    RAISE EXCEPTION 'projection replay was not zero-write';
+  END IF;
+END
+$zero_write_replay$;
 
 ROLLBACK;
 
@@ -923,10 +1249,14 @@ BEGIN
      OR EXISTS (SELECT 1 FROM memory.projection_review)
      OR EXISTS (SELECT 1 FROM memory.projection_apply_event)
      OR EXISTS (SELECT 1 FROM memory.preference_revision_observation)
-     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision_observation) THEN
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision_observation)
+     OR EXISTS (SELECT 1 FROM memory.claim_relation_v5)
+     OR EXISTS (SELECT 1 FROM memory.preference_relation_v5)
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_relation_v5)
+     OR EXISTS (SELECT 1 FROM memory.projection_dispatch_v5) THEN
     RAISE EXCEPTION 'projection security suite left rows behind';
   END IF;
 END
 $empty$;
 
-SELECT 'memory_v1_projection_staging_v5: PASS' AS result;
+SELECT 'memory_v1_projection_apply_v5: PASS' AS result;

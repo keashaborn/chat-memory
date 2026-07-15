@@ -333,8 +333,8 @@ Required changes before V5 activation:
 - Install the clone-verified shared plan/review/apply ledger and typed lane
   payloads only after a separate production review.
 - Install preference/project observation provenance links with that migration.
-- Add controlled transactionally verified projection preflight/review/apply
-  functions.
+- Install the clone-verified controlled projection review/apply functions only
+  after a separate production review.
 - Stop V4 from creating durable lane candidates directly.
 - Revoke legacy direct durable-table mutation grants from `brains_app`.
 - Keep older preference/project candidate tables readable only for controlled
@@ -355,9 +355,9 @@ packet tampering, and forbidden scalar fields.
 
 ## Activation boundary
 
-The staging migration and security suite are executable and pass on a disposable
-PostgreSQL 16 production-schema clone. They are not installed in production and
-start no worker. The next phase is controlled, transactionally verified
-projection preflight/review/apply functions. Production installation, durable
-apply, serving projection, retrieval, and prompts remain separately reviewed
-boundaries.
+The staging and controlled review/apply migrations pass on a disposable
+PostgreSQL 16 production-schema clone. The suite applies all three lanes and
+proves hash-locked review replay and apply replay are zero-write by comparing a
+full durable-state fingerprint. They are not installed in production and start
+no worker. Production installation, live candidate generation, serving
+projection, retrieval, and prompts remain separately reviewed boundaries.

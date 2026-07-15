@@ -9,6 +9,8 @@ retrieval, prompt, timer, or production database behavior is changed.
 
 - `ops/sql/20260715_memory_v1_projection_staging_v5.sql`
 - `ops/sql/20260715_memory_v1_projection_staging_v5_rollback.sql`
+- `ops/sql/20260715_memory_v1_projection_apply_v5.sql`
+- `ops/sql/20260715_memory_v1_projection_apply_v5_rollback.sql`
 - `tests/memory_v1_projection_staging_v5.sql`
 - `tools/memory_v1_projection_staging_v5_production_clone.sh`
 
@@ -78,9 +80,24 @@ Update and delete are denied by privilege and by append-only triggers.
 `brains_app` is not a member of the writer role and has no direct table or
 internal-helper access.
 
-This migration deliberately stages plans and provenance only. It creates no
-public or application apply API and writes no claim, preference, project
-revision, vector, outbox, retrieval, or prompt record.
+The staging migration deliberately stages plans and provenance only. The
+separate projection-apply migration adds four `brains_app` APIs:
+
+```text
+preflight_projection_review_v5
+review_projection_v5
+preflight_projection_apply_v5
+apply_projection_v5
+```
+
+The APIs run as the restricted writer, require a transaction-local actor,
+revalidate active evidence, lock the owner/semantic target, enforce optimistic
+revision numbers, and permit manual items only through the latest hash-locked
+authorization. One transaction writes the typed durable target, observation
+links, one apply event, and one immutable dispatch event. Exact request or
+apply-manifest replay returns the prior result with `rows_written = 0` before
+target mutation. No vector, legacy outbox, retrieval, prompt, timer, or worker
+path is activated.
 
 ## Clone security suite
 
@@ -90,24 +107,27 @@ then:
 
 1. Applies the V5 relational staging and writer prerequisites twice.
 2. Runs both prerequisite security suites.
-3. Applies the projection migration twice.
+3. Applies the projection staging and apply migrations twice.
 4. Runs one rolled-back synthetic packet containing a claim, response
-   preference, and exact-project-scoped requirement.
+   preference, and manually reviewed exact-project-scoped requirement.
 5. Tests canonical hashes against Python contract vectors.
 6. Tests forced RLS, exact policy roles, direct application denial, missing
    actor denial, cross-owner denial, duplicate replay, append-only denial,
-   typed-payload completeness, and zero durable writes.
-7. Proves all fixture and projection tables are empty after rollback.
-8. Runs the guarded projection, writer, and relational rollbacks.
-9. Proves the baseline predicate count and absence of all V5 objects.
-10. Removes the container and volume.
+   typed-payload completeness, missing review, wrong manifests, and request-ID
+   payload mismatch.
+7. Applies all three durable lanes and proves exact review/apply replay returns
+   zero writes and leaves a full durable-state fingerprint unchanged.
+8. Proves all fixture and projection tables are empty after rollback.
+9. Runs the guarded apply, projection, target, writer, and relational rollbacks.
+10. Proves the baseline predicate count and absence of all V5 objects.
+11. Removes the container and volume.
 
 Verified result on 2026-07-15:
 
 ```text
 memory_v1_relational_staging_v5: PASS
 memory_v1_relational_writer_v5: PASS
-memory_v1_projection_staging_v5: PASS
+memory_v1_projection_apply_v5: PASS
 memory_v1_projection_staging_v5_production_clone: PASS
 ```
 
@@ -116,15 +136,13 @@ Qdrant collection, retrieval path, or prompt contributor changed.
 
 ## Guarded rollback
 
-The rollback must run as `sage` and refuses to proceed if any projection or
-provenance table contains a row. It removes only objects introduced by this
-migration and revokes only its durable-target read grants. It is a clone and
-pre-activation rollback, not a deletion mechanism for live projection data.
+The apply rollback must run as `sage` and refuses to proceed if any review,
+apply, relation, or dispatch row exists. The staging rollback retains its own
+empty-table guard. These are clone and pre-activation rollbacks, not deletion
+mechanisms for live projection data.
 
 ## Next boundary
 
-Design controlled preflight/review/apply functions that lock the exact plan,
-revalidate active evidence and owner-scoped targets, write exactly one typed
-durable revision plus observation links, and record an idempotent apply event.
-That phase remains separate and must not activate retrieval or production
-installation.
+Review the clone-verified apply boundary and its production installation plan.
+Production installation, V5 extraction scheduling, serving projection,
+retrieval activation, and legacy cutover remain separate decisions.
