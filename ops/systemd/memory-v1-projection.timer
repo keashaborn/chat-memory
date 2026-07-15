@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Memory V1 claim projection every two minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=memory-v1-projection.service
+
+[Install]
+WantedBy=timers.target

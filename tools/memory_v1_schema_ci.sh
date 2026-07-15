@@ -45,6 +45,15 @@ trap cleanup EXIT
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260715_memory_v1_projection_leases.sql
+
+# Re-applying must preserve lease constraints and ready-work indexes.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260715_memory_v1_projection_leases.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_lifecycle.sql
 
 # Re-applying the lifecycle migration must preserve grants, triggers, and ownership.
@@ -105,6 +114,10 @@ trap cleanup EXIT
   brains python scripts/memory_v1_pet_review_test.py
 
 "${compose[@]}" run --rm --no-deps \
+  -e PYTHONPATH=/app \
+  brains python scripts/memory_v1_projection_worker_test.py
+
+"${compose[@]}" run --rm --no-deps \
   -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
   -e PYTHONPATH=/app \
   brains python scripts/memory_v1_projection_integration.py
@@ -135,6 +148,10 @@ fi
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_artifacts_rollback.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260715_memory_v1_projection_leases_rollback.sql
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \

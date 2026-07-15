@@ -627,6 +627,9 @@ async def _queue_claim_projection(
                       attempts=0,
                       available_at=now(),
                       last_error=NULL,
+                      lease_token=NULL,
+                      lease_expires_at=NULL,
+                      worker_id=NULL,
                       updated_at=now()
         """,
         actor,

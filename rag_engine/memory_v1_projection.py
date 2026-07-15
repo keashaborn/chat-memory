@@ -31,6 +31,9 @@ class ProjectionJob:
     operation: str
     payload: Dict[str, Any]
     attempts: int
+    lease_token: uuid.UUID
+    worker_id: str
+    lease_expires_at: datetime
 
 
 def _json_object(value: Any, field: str) -> Dict[str, Any]:
@@ -246,6 +249,8 @@ async def claim_projection_jobs(
     conn: asyncpg.Connection,
     actor_user_id: str | uuid.UUID,
     *,
+    worker_id: str,
+    lease_seconds: int = 600,
     limit: int = 25,
     max_attempts: int = 8,
 ) -> list[ProjectionJob]:
@@ -257,6 +262,11 @@ async def claim_projection_jobs(
         raise ProjectionError("limit must be between 1 and 100")
     if not 1 <= int(max_attempts) <= 50:
         raise ProjectionError("max_attempts must be between 1 and 50")
+    worker = " ".join(str(worker_id or "").split()).strip()
+    if not worker or len(worker) > 200:
+        raise ProjectionError("worker_id must contain between 1 and 200 characters")
+    if not 30 <= int(lease_seconds) <= 3600:
+        raise ProjectionError("lease_seconds must be between 30 and 3600")
     async with conn.transaction():
         await _set_actor(conn, actor)
         rows = await conn.fetch(
@@ -266,10 +276,21 @@ async def claim_projection_jobs(
               FROM memory.projection_outbox
               WHERE owner_user_id=$1
                 AND aggregate_type='claim'
-                AND status IN ('pending', 'error')
                 AND attempts < $3
-                AND available_at <= clock_timestamp()
-              ORDER BY available_at, created_at, outbox_id
+                AND (
+                  (status IN ('pending', 'error')
+                   AND available_at <= clock_timestamp())
+                  OR
+                  (status = 'processing'
+                   AND lease_expires_at <= clock_timestamp())
+                )
+              ORDER BY
+                CASE
+                  WHEN status = 'processing' THEN lease_expires_at
+                  ELSE available_at
+                END,
+                created_at,
+                outbox_id
               LIMIT $2
               FOR UPDATE SKIP LOCKED
             )
@@ -277,16 +298,23 @@ async def claim_projection_jobs(
             SET status='processing'::memory.outbox_status,
                 attempts=outbox.attempts + 1,
                 last_error=NULL,
+                lease_token=gen_random_uuid(),
+                lease_expires_at=clock_timestamp() + make_interval(secs => $5),
+                worker_id=$4,
                 updated_at=clock_timestamp()
             FROM picked
             WHERE outbox.owner_user_id=$1
               AND outbox.outbox_id=picked.outbox_id
             RETURNING outbox.outbox_id, outbox.aggregate_id,
-                      outbox.operation, outbox.payload, outbox.attempts
+                      outbox.operation, outbox.payload, outbox.attempts,
+                      outbox.lease_token, outbox.worker_id,
+                      outbox.lease_expires_at
             """,
             actor,
             int(limit),
             int(max_attempts),
+            worker,
+            int(lease_seconds),
         )
     return [
         ProjectionJob(
@@ -295,6 +323,9 @@ async def claim_projection_jobs(
             operation=str(row["operation"]),
             payload=_json_object(row["payload"], "outbox payload"),
             attempts=int(row["attempts"]),
+            lease_token=uuid.UUID(str(row["lease_token"])),
+            worker_id=str(row["worker_id"]),
+            lease_expires_at=row["lease_expires_at"],
         )
         for row in rows
     ]
@@ -339,14 +370,19 @@ async def _finish_job(
                 UPDATE memory.projection_outbox
                 SET status='done'::memory.outbox_status,
                     last_error=NULL,
+                    lease_token=NULL,
+                    lease_expires_at=NULL,
+                    worker_id=NULL,
                     updated_at=clock_timestamp()
                 WHERE owner_user_id=$1 AND outbox_id=$2
                   AND status='processing'
                   AND payload=$3::jsonb
+                  AND lease_token=$4
                 """,
                 actor,
                 job.outbox_id,
                 json.dumps(job.payload, sort_keys=True),
+                job.lease_token,
             )
         else:
             delay_seconds = min(300, 2 ** min(job.attempts, 8))
@@ -354,19 +390,53 @@ async def _finish_job(
                 """
                 UPDATE memory.projection_outbox
                 SET status='error'::memory.outbox_status,
-                    last_error=left($4, 2000),
-                    available_at=clock_timestamp() + make_interval(secs => $5),
+                    last_error=left($5, 2000),
+                    available_at=clock_timestamp() + make_interval(secs => $6),
+                    lease_token=NULL,
+                    lease_expires_at=NULL,
+                    worker_id=NULL,
                     updated_at=clock_timestamp()
                 WHERE owner_user_id=$1 AND outbox_id=$2
                   AND status='processing'
                   AND payload=$3::jsonb
+                  AND lease_token=$4
                 """,
                 actor,
                 job.outbox_id,
                 json.dumps(job.payload, sort_keys=True),
+                job.lease_token,
                 error,
                 delay_seconds,
             )
+    return result == "UPDATE 1"
+
+
+async def _repair_after_stale_external_write(
+    conn: asyncpg.Connection,
+    actor: uuid.UUID,
+    job: ProjectionJob,
+) -> bool:
+    """Requeue the current payload if a stale worker wrote after a newer job finished."""
+    async with conn.transaction():
+        await _set_actor(conn, actor)
+        result = await conn.execute(
+            """
+            UPDATE memory.projection_outbox
+            SET status='pending'::memory.outbox_status,
+                attempts=0,
+                available_at=clock_timestamp(),
+                last_error='requeued after stale external projection write',
+                lease_token=NULL,
+                lease_expires_at=NULL,
+                worker_id=NULL,
+                updated_at=clock_timestamp()
+            WHERE owner_user_id=$1 AND outbox_id=$2
+              AND status='done'
+              AND lease_token IS NULL
+            """,
+            actor,
+            job.outbox_id,
+        )
     return result == "UPDATE 1"
 
 
@@ -387,12 +457,19 @@ async def process_owner_projection_outbox(
     *,
     index: ClaimVectorIndex,
     embedder: Callable[[str], Sequence[float] | Awaitable[Sequence[float]]],
+    worker_id: str,
+    lease_seconds: int = 600,
     limit: int = 25,
     max_attempts: int = 8,
 ) -> Dict[str, Any]:
     actor = actor_uuid(actor_user_id)
     jobs = await claim_projection_jobs(
-        conn, actor, limit=limit, max_attempts=max_attempts
+        conn,
+        actor,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        limit=limit,
+        max_attempts=max_attempts,
     )
     result = {"claimed": len(jobs), "upserted": 0, "deleted": 0, "errors": 0, "stale": 0}
     for job in jobs:
@@ -414,6 +491,10 @@ async def process_owner_projection_outbox(
             if await _finish_job(conn, actor, job):
                 result[action] += 1
             else:
+                # A newer lease may already have completed before this stale
+                # worker's external write. Requeue the newer payload so Qdrant
+                # converges instead of leaving the stale write as final state.
+                await _repair_after_stale_external_write(conn, actor, job)
                 result["stale"] += 1
         except Exception as exc:  # Worker records and retries individual failures.
             if await _finish_job(conn, actor, job, error=f"{type(exc).__name__}: {exc}"):

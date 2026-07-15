@@ -10,6 +10,8 @@ import asyncpg
 
 from rag_engine.memory_v1_projection import (
     ClaimVectorIndex,
+    _finish_job,
+    claim_projection_jobs,
     process_owner_projection_outbox,
 )
 from rag_engine.memory_v1_store import (
@@ -195,7 +197,10 @@ async def requeue(conn, actor: uuid.UUID, claim_id: str, revision: int) -> None:
                 status='pending'::memory.outbox_status,
                 attempts=0,
                 available_at=clock_timestamp(),
-                last_error=NULL
+                last_error=NULL,
+                lease_token=NULL,
+                lease_expires_at=NULL,
+                worker_id=NULL
             WHERE owner_user_id=$1 AND aggregate_id=$2
             """,
             actor,
@@ -217,6 +222,75 @@ async def main() -> int:
         claim_a = await create_claim(conn, ACTOR_A, "Neko")
         claim_b = await create_claim(conn, ACTOR_B, "Luna")
 
+        first_lease = await claim_projection_jobs(
+            conn,
+            ACTOR_A,
+            worker_id="projection-integration-crashed-worker",
+            lease_seconds=600,
+        )
+        if len(first_lease) != 1:
+            raise AssertionError("first worker did not claim exactly one job")
+        if await claim_projection_jobs(
+            conn,
+            ACTOR_A,
+            worker_id="projection-integration-blocked-worker",
+            lease_seconds=600,
+        ):
+            raise AssertionError("an unexpired lease was reclaimed")
+
+        async with conn.transaction():
+            await set_actor(conn, ACTOR_A)
+            await conn.execute(
+                """
+                UPDATE memory.projection_outbox
+                SET lease_expires_at=clock_timestamp() - interval '1 second'
+                WHERE owner_user_id=$1 AND outbox_id=$2
+                  AND lease_token=$3
+                """,
+                ACTOR_A,
+                first_lease[0].outbox_id,
+                first_lease[0].lease_token,
+            )
+
+        second_lease = await claim_projection_jobs(
+            conn,
+            ACTOR_A,
+            worker_id="projection-integration-recovery-worker",
+            lease_seconds=600,
+        )
+        if len(second_lease) != 1:
+            raise AssertionError("expired lease was not reclaimed")
+        if second_lease[0].lease_token == first_lease[0].lease_token:
+            raise AssertionError("reclaimed job reused the prior lease token")
+        if await _finish_job(conn, ACTOR_A, first_lease[0]):
+            raise AssertionError("stale worker completed another worker's lease")
+
+        async with conn.transaction():
+            await set_actor(conn, ACTOR_A)
+            lease_state = await conn.fetchrow(
+                """
+                SELECT status::text, lease_token, worker_id
+                FROM memory.projection_outbox
+                WHERE owner_user_id=$1 AND outbox_id=$2
+                """,
+                ACTOR_A,
+                second_lease[0].outbox_id,
+            )
+        if (
+            lease_state["status"] != "processing"
+            or lease_state["lease_token"] != second_lease[0].lease_token
+            or lease_state["worker_id"] != second_lease[0].worker_id
+        ):
+            raise AssertionError("stale completion changed the active lease")
+        if not await _finish_job(
+            conn,
+            ACTOR_A,
+            second_lease[0],
+            error="projection integration lease reset",
+        ):
+            raise AssertionError("active lease could not record a retryable error")
+        await requeue(conn, ACTOR_A, claim_a, 1)
+
         fake = FakeQdrant()
         index = ClaimVectorIndex(fake, collection_name="memory_claim_v1_test", vector_size=3)
         if not index.ensure_collection():
@@ -225,7 +299,11 @@ async def main() -> int:
             raise AssertionError("collection creation was not idempotent")
 
         projected_a = await process_owner_projection_outbox(
-            conn, ACTOR_A, index=index, embedder=embed
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=embed,
+            worker_id="projection-integration-owner-a",
         )
         if projected_a != {
             "claimed": 1,
@@ -239,7 +317,11 @@ async def main() -> int:
             raise AssertionError("processing actor A projected another owner's claim")
 
         projected_b = await process_owner_projection_outbox(
-            conn, ACTOR_B, index=index, embedder=embed
+            conn,
+            ACTOR_B,
+            index=index,
+            embedder=embed,
+            worker_id="projection-integration-owner-b",
         )
         if projected_b["upserted"] != 1 or set(fake.points) != {claim_a, claim_b}:
             raise AssertionError("actor B projection failed")
@@ -263,7 +345,11 @@ async def main() -> int:
             raise RuntimeError("deterministic embedding failure")
 
         failed = await process_owner_projection_outbox(
-            conn, ACTOR_A, index=index, embedder=fail_embed
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=fail_embed,
+            worker_id="projection-integration-failure",
         )
         if failed["errors"] != 1:
             raise AssertionError("projection failure was not recorded")
@@ -288,15 +374,84 @@ async def main() -> int:
             return embed(text)
 
         stale = await process_owner_projection_outbox(
-            conn, ACTOR_A, index=index, embedder=stale_embed
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=stale_embed,
+            worker_id="projection-integration-stale",
         )
         if stale["stale"] != 1:
             raise AssertionError("concurrent outbox refresh was overwritten")
         recovered = await process_owner_projection_outbox(
-            conn, ACTOR_A, index=index, embedder=embed
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=embed,
+            worker_id="projection-integration-recovered",
         )
         if recovered["upserted"] != 1:
             raise AssertionError("refreshed outbox job was not projected")
+
+        await requeue(conn, ACTOR_A, claim_a, 5)
+
+        async def expired_lease_race_embed(text: str):
+            async with conn.transaction():
+                await set_actor(conn, ACTOR_A)
+                await conn.execute(
+                    """
+                    UPDATE memory.projection_outbox
+                    SET lease_expires_at=clock_timestamp() - interval '1 second'
+                    WHERE owner_user_id=$1 AND aggregate_id=$2
+                      AND status='processing'
+                    """,
+                    ACTOR_A,
+                    uuid.UUID(claim_a),
+                )
+            newer = await claim_projection_jobs(
+                conn,
+                ACTOR_A,
+                worker_id="projection-integration-race-newer",
+                lease_seconds=600,
+            )
+            if len(newer) != 1 or not await _finish_job(conn, ACTOR_A, newer[0]):
+                raise AssertionError("newer lease did not finish during race test")
+            return embed(text)
+
+        raced = await process_owner_projection_outbox(
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=expired_lease_race_embed,
+            worker_id="projection-integration-race-stale",
+        )
+        if raced["stale"] != 1:
+            raise AssertionError("expired worker was not fenced from completion")
+        async with conn.transaction():
+            await set_actor(conn, ACTOR_A)
+            repair_state = await conn.fetchrow(
+                """
+                SELECT status::text, last_error
+                FROM memory.projection_outbox
+                WHERE owner_user_id=$1 AND aggregate_id=$2
+                """,
+                ACTOR_A,
+                uuid.UUID(claim_a),
+            )
+        if (
+            repair_state["status"] != "pending"
+            or repair_state["last_error"]
+            != "requeued after stale external projection write"
+        ):
+            raise AssertionError("stale external write was not queued for repair")
+        repaired = await process_owner_projection_outbox(
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=embed,
+            worker_id="projection-integration-race-repair",
+        )
+        if repaired["upserted"] != 1:
+            raise AssertionError("stale external write repair did not converge")
 
         async with conn.transaction():
             await set_actor(conn, ACTOR_A)
@@ -309,9 +464,13 @@ async def main() -> int:
                 ACTOR_A,
                 uuid.UUID(claim_a),
             )
-        await requeue(conn, ACTOR_A, claim_a, 5)
+        await requeue(conn, ACTOR_A, claim_a, 6)
         deleted = await process_owner_projection_outbox(
-            conn, ACTOR_A, index=index, embedder=embed
+            conn,
+            ACTOR_A,
+            index=index,
+            embedder=embed,
+            worker_id="projection-integration-delete",
         )
         if deleted["deleted"] != 1 or claim_a in fake.points:
             raise AssertionError("non-retrievable claim was not deleted from Qdrant")

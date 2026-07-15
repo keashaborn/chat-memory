@@ -5,8 +5,11 @@ import argparse
 import asyncio
 import json
 import os
+import socket
 import sys
+import uuid
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 
@@ -20,13 +23,19 @@ from rag_engine.memory_v1_projection import (
 )
 from rag_engine.openai_client import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
+from rag_engine.memory_v1_store import actor_uuid
+
+
+WORKER_VERSION = "memory_claim_projection_worker_v2"
+MAX_DRAIN_BATCHES_PER_OWNER = 100
+COUNTER_KEYS = ("claimed", "upserted", "deleted", "errors", "stale")
 
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Project one authenticated owner's Memory V1 claims to Qdrant."
+        description="Project explicitly allowlisted Memory V1 claim owners to Qdrant."
     )
-    parser.add_argument("--owner-user-id", required=True)
+    parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument(
         "--collection",
         default=os.environ.get("MEMORY_V1_COLLECTION", DEFAULT_COLLECTION),
@@ -34,13 +43,78 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--vector-size", type=int, default=DEFAULT_VECTOR_SIZE)
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--max-attempts", type=int, default=8)
+    parser.add_argument("--lease-seconds", type=int, default=600)
     parser.add_argument("--ensure-collection", action="store_true")
     parser.add_argument("--drain", action="store_true")
     return parser.parse_args()
 
 
+def _owners(args: argparse.Namespace) -> list[uuid.UUID]:
+    raw = list(args.owner_user_id)
+    raw.extend(
+        value.strip()
+        for value in os.getenv("MEMORY_V1_PROJECTION_OWNER_IDS", "").split(",")
+        if value.strip()
+    )
+    owners = sorted({actor_uuid(value) for value in raw}, key=str)
+    if not owners:
+        raise RuntimeError("no projection owner allowlist is configured")
+    return owners
+
+
+def _validate_limits(args: argparse.Namespace) -> None:
+    if not 1 <= int(args.limit) <= 100:
+        raise RuntimeError("limit must be between 1 and 100")
+    if not 1 <= int(args.max_attempts) <= 50:
+        raise RuntimeError("max-attempts must be between 1 and 50")
+    if not 30 <= int(args.lease_seconds) <= 3600:
+        raise RuntimeError("lease-seconds must be between 30 and 3600")
+    if int(args.vector_size) < 1:
+        raise RuntimeError("vector-size must be positive")
+
+
+async def _process_owner(
+    conn: asyncpg.Connection,
+    owner: uuid.UUID,
+    *,
+    index: ClaimVectorIndex,
+    embedder,
+    limit: int,
+    max_attempts: int,
+    worker_id: str,
+    lease_seconds: int,
+    drain: bool,
+) -> dict[str, Any]:
+    totals = {key: 0 for key in COUNTER_KEYS}
+    batches = 0
+    while True:
+        batch = await process_owner_projection_outbox(
+            conn,
+            owner,
+            index=index,
+            embedder=embedder,
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            limit=limit,
+            max_attempts=max_attempts,
+        )
+        batches += 1
+        for key in COUNTER_KEYS:
+            totals[key] += int(batch[key])
+        if not drain or batch["claimed"] == 0:
+            break
+        if batches >= MAX_DRAIN_BATCHES_PER_OWNER:
+            raise RuntimeError(
+                f"projection drain exceeded {MAX_DRAIN_BATCHES_PER_OWNER} "
+                f"batches for owner {owner}"
+            )
+    return {"batches": batches, **totals}
+
+
 async def main() -> int:
     args = arguments()
+    owners = _owners(args)
+    _validate_limits(args)
     dsn = os.environ.get("POSTGRES_DSN")
     qdrant_url = os.environ.get("QDRANT_URL")
     embed_model = os.environ.get("EMBED_MODEL", "text-embedding-3-large")
@@ -61,25 +135,25 @@ async def main() -> int:
         return embed_text(value, model=embed_model)
 
     conn = await asyncpg.connect(dsn, command_timeout=30)
-    totals = {"claimed": 0, "upserted": 0, "deleted": 0, "errors": 0, "stale": 0}
-    batches = 0
+    worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:12]}"
+    totals = {key: 0 for key in COUNTER_KEYS}
+    owner_results: dict[str, dict[str, Any]] = {}
     try:
-        while True:
-            batch = await process_owner_projection_outbox(
+        for owner in owners:
+            result = await _process_owner(
                 conn,
-                args.owner_user_id,
+                owner,
                 index=index,
                 embedder=embed,
                 limit=args.limit,
                 max_attempts=args.max_attempts,
+                worker_id=worker_id,
+                lease_seconds=args.lease_seconds,
+                drain=bool(args.drain),
             )
-            batches += 1
-            for key in totals:
-                totals[key] += int(batch[key])
-            if not args.drain or batch["claimed"] == 0:
-                break
-            if batches >= 100:
-                raise RuntimeError("projection drain exceeded 100 batches")
+            owner_results[str(owner)] = result
+            for key in COUNTER_KEYS:
+                totals[key] += int(result[key])
     finally:
         await conn.close()
         qdrant.close()
@@ -87,11 +161,11 @@ async def main() -> int:
     print(
         json.dumps(
             {
-                "version": "memory_claim_projection_worker_v1",
-                "owner_user_id": args.owner_user_id,
+                "version": WORKER_VERSION,
+                "owner_count": len(owners),
+                "owners": owner_results,
                 "collection": args.collection,
                 "collection_created": created,
-                "batches": batches,
                 **totals,
             },
             sort_keys=True,
