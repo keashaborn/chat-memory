@@ -1,6 +1,6 @@
 # Memory V1 Observation Projection Contract V5
 
-Status: proposed, executable contract tests only, runtime inactive.
+Status: frozen contract plus clone-verified staging migration; runtime inactive.
 
 Server boundary: seebx backend. This contract does not change Verbal Sage,
 RESSE, Resse-Train, production PostgreSQL, Qdrant, timers, retrieval, or prompts.
@@ -220,13 +220,16 @@ Manual authorization is required for:
 Deferred and rejected plans are non-writing states and cannot request apply
 authorization.
 
-## Future database shape
+## Implemented staging database shape
 
-The next migration should add these owner-scoped, forced-RLS structures:
+The runtime-inactive staging migration adds these owner-scoped, forced-RLS
+structures:
 
 ```text
 projection_plan
+projection_plan_item
 projection_plan_observation
+projection_plan_relation
 projection_claim_payload
 projection_preference_payload
 projection_project_payload
@@ -237,9 +240,9 @@ project_knowledge_revision_observation
 ```
 
 `claim_observation` already exists and remains the typed claim provenance link.
-All new foreign keys include `owner_user_id`. The three payload tables have real
-foreign keys to their lane-specific durable targets; no polymorphic target ID
-is accepted.
+All owner-scoped foreign keys include `owner_user_id`; the global predicate
+registry is the sole exception. The three payload tables have real foreign keys
+to their lane-specific durable targets; no polymorphic target ID is accepted.
 
 Indexes must lead with `owner_user_id`, including semantic identity, state,
 observation lookup, project scope, and apply-manifest lookup. RLS is forced.
@@ -303,8 +306,11 @@ Reusable current structures:
 
 Required changes before V5 activation:
 
-- Add the shared plan/review/apply ledger and typed lane payloads.
-- Add preference/project observation provenance links.
+- Install the clone-verified shared plan/review/apply ledger and typed lane
+  payloads only after a separate production review.
+- Install preference/project observation provenance links with that migration.
+- Add controlled transactionally verified projection preflight/review/apply
+  functions.
 - Stop V4 from creating durable lane candidates directly.
 - Revoke legacy direct durable-table mutation grants from `brains_app`.
 - Keep older preference/project candidate tables readable only for controlled
@@ -325,7 +331,9 @@ packet tampering, and forbidden scalar fields.
 
 ## Activation boundary
 
-This phase is design-only. It creates no database object and starts no worker.
-The next phase is an executable staging migration plus production-schema-clone
-security suite for the shared plan/review ledger and typed provenance links.
-Durable apply functions remain a later, separately reviewed phase.
+The staging migration and security suite are executable and pass on a disposable
+PostgreSQL 16 production-schema clone. They are not installed in production and
+start no worker. The next phase is controlled, transactionally verified
+projection preflight/review/apply functions. Production installation, durable
+apply, serving projection, retrieval, and prompts remain separately reviewed
+boundaries.

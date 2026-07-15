@@ -218,10 +218,31 @@ surface as content, and existing-target writes without a revision lock. The
 Adversarial tests cover cross-owner identity/replay, project scope, correction
 relations, temporal non-collapse, and life/response preference separation.
 
+V5 now also has an executable, runtime-inactive projection staging migration,
+guarded empty-only rollback, and PostgreSQL 16 production-schema-clone security
+suite. The migration creates one hash-locked plan/item ledger, three typed
+payload tables, typed observation/relation links, review/apply ledgers, and
+preference/project revision provenance links. It stages no durable revision and
+has no retrieval or prompt effect.
+
+The projection tables are maintenance-owned. The restricted `NOLOGIN` writer
+has only `SELECT` and `INSERT`; forced owner RLS, actor guards, append-only
+triggers, owner-prefixed foreign keys, and exact packet completeness checks are
+independent enforcement layers. `brains_app` has no direct access. A rolled-back
+three-lane packet and adversarial owner tests pass on a schema-only production
+clone, and guarded rollback returns the clone to its baseline. Production was
+read only and remains unchanged.
+
+The production durable preference/project tables are present, but their older
+migration commits are not ancestors of this isolated V5 branch. The projection
+migration therefore fails closed when those targets are absent, and this phase
+does not copy the obsolete candidate pipeline into V5. Clean repository
+reconstruction of that prerequisite remains an explicit integration blocker.
+
 V4 remains the active consolidation extractor, main-account consolidation
 remains disabled, and no V5 extraction, projection, Qdrant, retrieval, prompt,
 or legacy-cutover behavior is active. Before activating the V5 writer, legacy
 direct `brains_app` mutation grants on durable pre-V5 tables must be audited and
-revoked. The next boundary is an executable projection staging migration and a
-production-schema-clone security suite; durable projection apply functions are
-still deferred.
+revoked. The next boundary is controlled, transactionally verified projection
+preflight/review/apply functions. Production installation and retrieval
+activation remain deferred.
