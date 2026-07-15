@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from scripts.memory_v1_consolidation_packet_eval import (
     EXTRACTOR_VERSION,
+    LANE_TOTAL_KEYS,
     MANIFEST_VERSION,
     digest_rows,
     qdrant_signature,
@@ -78,6 +79,9 @@ class ManifestContractTest(unittest.TestCase):
         payload["unexpected"] = True
         with self.assertRaisesRegex(RuntimeError, "manifest keys"):
             validate_manifest(payload)
+
+    def test_lane_names_match_report_counter_contract(self) -> None:
+        self.assertEqual(LANE_TOTAL_KEYS["project_knowledge"], "project_candidates")
 
 
 class OutputAndDigestTest(unittest.TestCase):

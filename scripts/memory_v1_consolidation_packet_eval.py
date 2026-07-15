@@ -37,6 +37,11 @@ SOURCE_SYSTEM = "public.chat_log"
 SOURCE_TYPE = "frontend/chat:user"
 MAX_PACKET_SIZE = 30
 IDENTIFIER_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+LANE_TOTAL_KEYS = {
+    "claim": "claim_candidates",
+    "preference": "preference_candidates",
+    "project_knowledge": "project_candidates",
+}
 
 
 def stable_json(value: Any) -> str:
@@ -690,9 +695,7 @@ async def evaluate_packet(
             totals["validation_rejections"] += len(rejected)
             totals["sources_with_findings"] += int(bool(findings))
             for candidate in valid:
-                key = f"{candidate.lane}_candidates"
-                if key in totals:
-                    totals[key] += 1
+                totals[LANE_TOTAL_KEYS[candidate.lane]] += 1
             source_reports.append(
                 {
                     "job_id": manifest_source["job_id"],
