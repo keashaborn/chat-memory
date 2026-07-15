@@ -343,7 +343,7 @@ async def main() -> int:
             intent="personal_recall",
             domain="name_correction",
             candidate_hits=[
-                {"claim_id": nemo_result["claim_id"], "semantic_score": 0.99},
+                {"claim_id": nemo_result["claim_id"], "semantic_score": 0.19},
                 {"claim_id": neko_result["claim_id"], "semantic_score": 0.95},
             ],
             max_claims=4,
@@ -358,6 +358,10 @@ async def main() -> int:
             raise AssertionError("packet did not select only the active Neko claim")
         if packet["rejected_counts"].get("status:superseded") != 1:
             raise AssertionError("packet did not record the superseded rejection")
+        if packet["rejected_counts"].get("semantic_relevance") != 1:
+            raise AssertionError("packet did not reject a low-semantic candidate")
+        if packet["semantic_floor"] != 0.38:
+            raise AssertionError(f"semantic relevance floor changed: {packet}")
         if packet["claims"][0]["use_instruction"] != (
             "normalize_memory_without_unprompted_discussion"
         ):

@@ -60,6 +60,20 @@ def main() -> int:
         specialized=True,
     )
     expect(
+        "What do I find peaceful about being out in the woods?",
+        "SPECIFIC_RECALL",
+        memory_intent="preference_recall",
+        domains=["outdoors"],
+        specialized=True,
+    )
+    expect(
+        "Recommend an outdoor place where I could watch wildlife.",
+        "GENERAL",
+        memory_intent="recommendation",
+        domains=["outdoors"],
+        specialized=True,
+    )
+    expect(
         "If you had a guess, what do you think my favorite artist would be?",
         "SPECIFIC_RECALL",
         memory_intent="preference_recall",
@@ -145,6 +159,22 @@ def main() -> int:
         governed=True,
     )
     expect(
+        "When did I stop drinking alcohol?",
+        "SPECIFIC_RECALL",
+        memory_intent="personal_recall",
+        domains=["health_behavior"],
+        specialized=False,
+        governed=True,
+    )
+    expect(
+        "What do you remember about my farming, tractors, and cattle?",
+        "SPECIFIC_RECALL",
+        memory_intent="personal_recall",
+        domains=["life_context"],
+        specialized=False,
+        governed=True,
+    )
+    expect(
         "My mother died back in March. She was about 87 years old.",
         "GENERAL",
         memory_intent="none",
@@ -154,6 +184,30 @@ def main() -> int:
     )
     expect(
         "After Neko died, I got a white male Maine coon cat.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
+    expect(
+        "I stopped drinking alcohol at the end of June.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
+    expect(
+        "I spend a lot of time on tractors and do some farming.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
+    expect(
+        "I find watching creatures in the woods peaceful.",
         "GENERAL",
         memory_intent="none",
         domains=[],

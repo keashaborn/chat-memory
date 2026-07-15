@@ -16,6 +16,8 @@ from .memory_v1_store import InvalidActor, actor_uuid
 
 SENSITIVITY_RANK = {"low": 0, "medium": 1, "high": 2, "restricted": 3}
 RETRIEVABLE_STATUSES = {"supported", "uncertain", "disputed"}
+MIN_SEMANTIC_SCORE = 0.20
+RELATIVE_SEMANTIC_RATIO = 0.40
 
 
 class RetrievalValidationError(RuntimeError):
@@ -93,6 +95,13 @@ def _candidate_map(candidate_hits: Sequence[Mapping[str, Any]]) -> Dict[uuid.UUI
         semantic_score = _score(hit.get("semantic_score"), "semantic_score")
         out[claim_id] = max(out.get(claim_id, 0.0), semantic_score)
     return out
+
+
+def semantic_relevance_floor(scores: Sequence[float]) -> float:
+    values = [float(value) for value in scores]
+    if not values:
+        return MIN_SEMANTIC_SCORE
+    return max(MIN_SEMANTIC_SCORE, max(values) * RELATIVE_SEMANTIC_RATIO)
 
 
 def _query_hash(actor: uuid.UUID, query: str) -> str:
@@ -220,6 +229,9 @@ async def build_memory_packet(
             )
 
         visible_ids = {uuid.UUID(str(row["claim_id"])) for row in rows}
+        semantic_floor = semantic_relevance_floor(
+            [candidates[claim_id] for claim_id in visible_ids]
+        )
         rejected_counts: Counter[str] = Counter()
         if len(visible_ids) < len(candidate_ids):
             rejected_counts["not_visible"] += len(candidate_ids) - len(visible_ids)
@@ -231,9 +243,13 @@ async def build_memory_packet(
             sensitivity = str(row["sensitivity"])
             policy = _json_object(row["retrieval_policy"], "retrieval_policy")
             reasons: list[str] = []
+            semantic = candidates[claim_id]
             active_evidence_refs = [
                 str(evidence_id) for evidence_id in row["active_evidence_ids"]
             ]
+
+            if semantic < semantic_floor:
+                reasons.append("semantic_relevance")
 
             if status not in RETRIEVABLE_STATUSES:
                 reasons.append(f"status:{status}")
@@ -271,7 +287,6 @@ async def build_memory_packet(
                 if not normalized_entity_hints.intersection(claim_entities):
                     reasons.append("entity")
 
-            semantic = candidates[claim_id]
             confidence = _as_float(row["confidence"])
             importance = _as_float(row["importance"])
             salience = _as_float(row["salience"])
@@ -365,6 +380,7 @@ async def build_memory_packet(
                     "visible_candidate_count": len(visible_ids),
                     "max_claims": int(max_claims),
                     "max_sensitivity": max_sensitivity,
+                    "semantic_floor": round(semantic_floor, 6),
                     "explicit_recall": bool(explicit_recall),
                     "entity_hints": sorted(normalized_entity_hints),
                     "prompt_injection": prompt_injection,
@@ -430,6 +446,7 @@ async def build_memory_packet(
             "selected_count": len(packet_claims),
             "candidate_count": len(candidate_ids),
             "visible_candidate_count": len(visible_ids),
+            "semantic_floor": round(semantic_floor, 6),
             "rejected_counts": dict(sorted(rejected_counts.items())),
             "token_estimate": tokens_used,
             "prompt_injection": prompt_injection,

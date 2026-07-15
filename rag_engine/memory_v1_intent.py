@@ -41,6 +41,21 @@ CAREGIVING_TERMS = (
     "caring for my wife",
     "caring for my spouse",
 )
+ALCOHOL_TERMS = (
+    "alcohol",
+    "drinking",
+    "quit drinking",
+    "stopped drinking",
+    "sobriety",
+    "sober",
+)
+RURAL_LIFE_TERMS = (
+    "tractor",
+    "tractors",
+    "farm",
+    "farming",
+    "cattle",
+)
 SUPPORT_NEED_TERMS = (
     "struggling",
     "difficult",
@@ -66,6 +81,14 @@ NORMALIZATION_TERMS = (
     "transcription error",
 )
 MUSIC_TERMS = ("music", "song", "songs", "artist", "artists", "lyrics", "playlist")
+OUTDOORS_TERMS = (
+    "outdoors",
+    "woods",
+    "forest",
+    "nature",
+    "wildlife",
+    "creatures",
+)
 RECOMMENDATION_TERMS = (
     "recommend",
     "recommendation",
@@ -92,6 +115,12 @@ PREFERENCE_RECALL_TERMS = (
     "my favorite singer",
     "favorite artist would be",
     "favorite singer would be",
+    "what do i enjoy",
+    "do i enjoy",
+    "what do i find peaceful",
+    "do i find peaceful",
+    "my outdoor preference",
+    "my outdoor preferences",
 )
 PROJECT_SIGNALS = (
     "verbal sage",
@@ -208,7 +237,7 @@ PERSONAL_SONG_RECALL_TERMS = (
 LEGACY_PERSONAL_MEMORY_MODES = {"on", "specific_recall_only", "off"}
 PERSONAL_RECALL_CUE_RE = re.compile(
     r"\b(?:do you remember|what do you (?:know|remember)|do you know (?:anything )?about|"
-    r"what (?:happened|was|is|did)|which (?:pet|dog|cat|name)|was it|"
+    r"what (?:happened|was|is|did)|when did|which (?:pet|dog|cat|name)|was it|"
     r"remind me|tell me what|more particularly do you know)\b"
 )
 PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
@@ -347,6 +376,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
     )
     caregiving_context = _contains(text, CAREGIVING_TERMS)
+    alcohol_context = _contains(text, ALCOHOL_TERMS)
+    rural_life_context = _contains(text, RURAL_LIFE_TERMS)
     support_requested = caregiving_context and (
         recall_requested or _contains(text, SUPPORT_NEED_TERMS)
     )
@@ -360,9 +391,20 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         domain = "family_death"
     elif support_requested:
         domain = "life_context"
+    elif alcohol_context and recall_requested:
+        domain = "health_behavior"
+    elif rural_life_context and recall_requested:
+        domain = "life_context"
 
     if domain is None:
-        if pet_event or family_event or normalization_requested or caregiving_context:
+        if (
+            pet_event
+            or family_event
+            or normalization_requested
+            or caregiving_context
+            or alcohol_context
+            or rural_life_context
+        ):
             return {"eligible": False, "reason": "information_providing_turn"}
         return {"eligible": False, "reason": "unclassified_domain"}
 
@@ -379,7 +421,11 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         "eligible": True,
         "reason": "classified",
         "domain": domain,
-        "intent": "relevant_support" if domain == "life_context" else "personal_recall",
+        "intent": (
+            "relevant_support"
+            if domain == "life_context" and support_requested
+            else "personal_recall"
+        ),
         "explicit_recall": bool(
             request_classification == "SPECIFIC_RECALL"
             or recall_requested
@@ -427,14 +473,20 @@ def classify_memory_intent(
     project_key = None
     reasons: list[str] = []
 
-    if _contains(text, MUSIC_TERMS) and _contains(text, RECOMMENDATION_TERMS):
+    preference_domain = None
+    if _contains(text, MUSIC_TERMS):
+        preference_domain = "music"
+    elif _contains(text, OUTDOORS_TERMS):
+        preference_domain = "outdoors"
+
+    if preference_domain and _contains(text, RECOMMENDATION_TERMS):
         memory_intent = "recommendation"
-        domains = ["music"]
-        reasons.append("explicit_music_recommendation")
-    elif _contains(text, MUSIC_TERMS) and _contains(text, PREFERENCE_RECALL_TERMS):
+        domains = [preference_domain]
+        reasons.append(f"explicit_{preference_domain}_recommendation")
+    elif preference_domain and _contains(text, PREFERENCE_RECALL_TERMS):
         memory_intent = "preference_recall"
-        domains = ["music"]
-        reasons.append("explicit_music_preference_recall")
+        domains = [preference_domain]
+        reasons.append(f"explicit_{preference_domain}_preference_recall")
     else:
         has_project_signal = _contains(text, PROJECT_SIGNALS) or bool(
             PROJECT_APP_RE.search(text)

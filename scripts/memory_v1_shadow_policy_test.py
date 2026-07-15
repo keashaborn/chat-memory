@@ -107,6 +107,20 @@ def main() -> int:
         intent="relevant_support",
     )
     expect(
+        "When did I stop drinking alcohol?",
+        "SPECIFIC_RECALL",
+        domain="health_behavior",
+        intent="personal_recall",
+        explicit_recall=True,
+    )
+    expect(
+        "What do you remember about my farming, tractors, and cattle?",
+        "SPECIFIC_RECALL",
+        domain="life_context",
+        intent="personal_recall",
+        explicit_recall=True,
+    )
+    expect(
         "The voice-to-text error should be corrected: my cat's name is Neko, not Nemo.",
         "GENERAL",
         domain="name_correction",
@@ -121,6 +135,16 @@ def main() -> int:
     )
     expect_suppressed(
         "After Neko died, I got a white male Maine coon cat.",
+        "GENERAL",
+        "information_providing_turn",
+    )
+    expect_suppressed(
+        "I stopped drinking alcohol at the end of June.",
+        "GENERAL",
+        "information_providing_turn",
+    )
+    expect_suppressed(
+        "I spend a lot of time on tractors and do some farming.",
         "GENERAL",
         "information_providing_turn",
     )

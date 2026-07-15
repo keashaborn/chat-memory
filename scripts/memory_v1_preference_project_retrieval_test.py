@@ -122,6 +122,19 @@ PREFERENCES = [
         surface="mention_when_relevant",
     ),
     preference(
+        "6c85c736-c76a-4a62-8ff7-9f36ec99a31e",
+        "2cf568cb-71cb-4916-8a51-fdb0a950ac51",
+        "enjoys_watching_creatures_in_woods",
+        "d8dfc7a326eb8cf4970c27ead8bdfabdf7d668f75cac9ca284708cf6f4cc8f8e",
+        preference_class="life",
+        domain="outdoors",
+        value={
+            "canonical_text": "The user finds looking at creatures out in the woods peaceful."
+        },
+        scope={},
+        surface="mention_when_relevant",
+    ),
+    preference(
         "a02f4efc-24f1-4552-97fe-f86faacbb52f",
         "e940c0fb-bd1e-4aff-889b-ed2406367f69",
         "personal_memory.jerry_deedee.out_of_context_surfacing",
