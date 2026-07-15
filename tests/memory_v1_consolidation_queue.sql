@@ -28,6 +28,11 @@ BEGIN
   IF job IS NULL THEN
     RAISE EXCEPTION 'chat_log insert did not enqueue consolidation';
   END IF;
+  IF (SELECT pipeline_version FROM memory.consolidation_job
+      WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
+        AND job_id=job) <> '20260714_v2' THEN
+    RAISE EXCEPTION 'chat_log insert did not use extraction v2';
+  END IF;
 
   IF (SELECT count(*) FROM memory.consolidation_event
       WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
@@ -75,6 +80,19 @@ BEGIN
   END;
   IF NOT failed THEN
     RAISE EXCEPTION 'append-only consolidation event was mutable';
+  END IF;
+
+  failed := false;
+  BEGIN
+    UPDATE memory.consolidation_job
+    SET pipeline_version='20260714_v3'
+    WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
+      AND job_id=job;
+  EXCEPTION WHEN check_violation THEN
+    failed := true;
+  END;
+  IF NOT failed THEN
+    RAISE EXCEPTION 'immutable pipeline_version was mutable';
   END IF;
 END
 $block$;

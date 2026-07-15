@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 import asyncpg
@@ -19,13 +20,70 @@ from .memory_v1_store import (
 
 
 EXTRACTOR = "memory_v1_consolidation"
-EXTRACTOR_VERSION = "20260714_v1"
+EXTRACTOR_VERSION = "20260714_v2"
 CANDIDATE_NAMESPACE = uuid.UUID("0969b2be-1670-5bc7-b91b-f6b18d3fc327")
 PREDICATE_RE = re.compile(r"^[a-z][a-z0-9_.]{1,127}$")
 KEY_RE = re.compile(r"^[a-z][a-z0-9_.:-]{1,239}$")
 EXPLICIT_CORRECTION_RE = re.compile(
     r"\b(?:correction|correct spelling|should be|not .{1,80},? (?:it(?:'s| is)|the correct)|"
     r"i meant|spell(?:ed|ing)|actually,? (?:it(?:'s| is)|the))\b",
+    re.IGNORECASE,
+)
+RELATIVE_TIME_RE = re.compile(
+    r"\b(?:today|yesterday|tonight|tomorrow|lately|recently|right now|"
+    r"(?:about\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
+    r"(?:day|week|month|year)s?\s+ago|last\s+(?:night|week|month|year))\b",
+    re.IGNORECASE,
+)
+RELATIVE_DURATION_RE = re.compile(
+    r"\bfor\s+(?:about\s+)?(?:\d+|a|an|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten)(?:\s*(?:-|to)\s*\d+)?\s+"
+    r"(?:day|week|month|year)s?\b",
+    re.IGNORECASE,
+)
+RELATIVE_AGO_RE = re.compile(
+    r"\b(?P<about>about\s+)?(?P<count>a|an|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten|\d+)\s+(?P<unit>day|week|month|year)s?\s+ago\b",
+    re.IGNORECASE,
+)
+RELATIVE_BEFORE_TIMESTAMP_RE = re.compile(
+    r"\b(?P<about>about\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|"
+    r"nine|ten|\d+)\s+(?:day|week|month|year)s?\s+before\s+"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b",
+    re.IGNORECASE,
+)
+RELATIVE_COUNT = {
+    "a": 1,
+    "an": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+TRANSIENT_STATE_RE = re.compile(
+    r"\b(?:feel(?:ing|s)?|felt)\s+(?:kind of\s+|very\s+|really\s+)?"
+    r"(?:blocked|sad|anxious|angry|upset|tired|stressed|overwhelmed|lonely|"
+    r"frustrated|depressed|happy|excited)\b",
+    re.IGNORECASE,
+)
+TRANSIENT_REASON_RE = re.compile(
+    r"(?:^|[_.:-])(?:transient|temporary|current_mood|one_time|ephemeral)(?:$|[_.:-])",
+    re.IGNORECASE,
+)
+COMPOUND_REASON_RE = re.compile(
+    r"(?:^|[_.:-])(?:compound|multiple_facts|multiple_claims|needs_split)(?:$|[_.:-])",
+    re.IGNORECASE,
+)
+COMPOUND_ACTION_RE = re.compile(
+    r"(?:,\s*|\b(?:and|also)\s+)"
+    r"(?:spends?|uses?|does?|takes?|works?|farms?|raises?|drives?|builds?|"
+    r"creates?|writes?|reads?|plays?|dances?|[a-z]+ing)\b",
     re.IGNORECASE,
 )
 
@@ -126,6 +184,33 @@ speculation. Mark medical, mental-health, sexual, financial, legal, credential,
 or highly identifying material high/restricted. Use empty strings and `none`
 for fields that do not apply to a lane.
 
+Every candidate must contain exactly one independently reviewable assertion.
+Split introductions, lists, and sentences containing multiple facts or actions
+into separate candidates. Never join independent assertions with a semicolon.
+For example, using tractors, farming, and raising cattle are three claims, not
+one compound claim.
+
+The source timestamp is authoritative for relative dates. Convert expressions
+such as "two weeks ago" or "yesterday" to timezone-aware RFC3339 valid_from or
+valid_to values. The canonical_text and object_literal must contain the anchored
+date, never the relative phrase. Leave date fields empty only when the source
+does not state a date or relative time. Do not invent date precision.
+For an imprecise duration such as "has not worked for 15-20 years", preserve
+the duration and anchor it "as of" source_observed_at; set valid_from to
+source_observed_at rather than inventing an exact date when the activity ended.
+
+Prefer behavioral claims over stigmatizing or diagnostic identity labels. For
+example, "I quit alcohol two weeks ago" becomes one dated quit/stopped-use
+claim. Do not also produce an `is_alcoholic` true/false claim from that wording.
+
+Preference routing is strict:
+- response preferences control how the assistant communicates and may use only
+  silent_style_influence or never_surface_as_content.
+- life preferences describe what the user likes, avoids, or chooses in life and
+  may use only mention_when_relevant or explicit_recall_only.
+Liking jazz, foods, activities, places, or hobbies is a life preference, never a
+response preference and never silent style influence.
+
 For claims, use stable lowercase keys and predicates. Prefer subject_entity_key
 `user:self` for facts about the user. For preferences, use a stable domain/key.
 For project knowledge, project_key must be explicitly present in the record.
@@ -155,16 +240,23 @@ def extract_with_openai(
     model: str,
     owner_user_id: uuid.UUID,
     source_external_id: str,
+    source_observed_at: datetime,
     text: str,
 ) -> tuple[ExtractionResult, str]:
     if not model.strip():
         raise ConsolidationError("consolidation model is not configured")
+    if source_observed_at.tzinfo is None:
+        raise ConsolidationError("source_observed_at must be timezone-aware")
+    observed_at = source_observed_at.astimezone(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
     response = client.responses.parse(
         model=model.strip(),
         instructions=EXTRACTION_INSTRUCTIONS,
         input=(
             "UNTRUSTED SOURCE RECORD\n"
             f"source_external_id={source_external_id}\n"
+            f"source_observed_at={observed_at}\n"
             "<record>\n"
             f"{text}\n"
             "</record>"
@@ -186,6 +278,94 @@ def extract_with_openai(
     return parsed, str(response.id)
 
 
+def _parse_optional_rfc3339(value: str, field: str) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ConsolidationError(f"{field} must be RFC3339") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ConsolidationError(f"{field} must include a timezone")
+    return parsed
+
+
+def _shift_calendar_months(value: datetime, months: int) -> datetime:
+    month_index = value.year * 12 + value.month - 1 - months
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _anchored_relative_time(
+    text: str,
+    observed_at: datetime,
+) -> Optional[tuple[datetime, re.Match[str]]]:
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ConsolidationError("observed_at must be timezone-aware")
+    match = RELATIVE_AGO_RE.search(text)
+    if match is not None:
+        raw_count = match.group("count").casefold()
+        count = int(raw_count) if raw_count.isdigit() else RELATIVE_COUNT[raw_count]
+        unit = match.group("unit").casefold()
+        if unit == "day":
+            anchored = observed_at - timedelta(days=count)
+        elif unit == "week":
+            anchored = observed_at - timedelta(weeks=count)
+        elif unit == "month":
+            anchored = _shift_calendar_months(observed_at, count)
+        else:
+            anchored = _shift_calendar_months(observed_at, 12 * count)
+        return anchored, match
+    return None
+
+
+def _normalize_temporal_candidate(
+    candidate: ExtractedCandidate,
+    observed_at: datetime,
+) -> ExtractedCandidate:
+    if candidate.lane != "claim":
+        return candidate
+    claim_text = f"{candidate.canonical_text}\n{candidate.object_literal}"
+    anchored = _anchored_relative_time(claim_text, observed_at)
+    if anchored is None:
+        before_match = RELATIVE_BEFORE_TIMESTAMP_RE.search(claim_text)
+        if before_match is None:
+            return candidate
+        parsed_from = _parse_optional_rfc3339(candidate.valid_from, "valid_from")
+        if parsed_from is None:
+            return candidate
+        anchored_at, match = parsed_from, before_match
+        substitution_pattern = RELATIVE_BEFORE_TIMESTAMP_RE
+    else:
+        anchored_at, match = anchored
+        substitution_pattern = RELATIVE_AGO_RE
+    date_text = anchored_at.date().isoformat()
+    replacement = (
+        f"around {date_text}" if match.group("about") else f"on {date_text}"
+    )
+    canonical_text = substitution_pattern.sub(
+        replacement,
+        candidate.canonical_text,
+    )
+    object_literal = substitution_pattern.sub(
+        replacement,
+        candidate.object_literal,
+    )
+    return candidate.model_copy(
+        update={
+            "canonical_text": canonical_text,
+            "object_literal": object_literal,
+            "valid_from": anchored_at.astimezone(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        }
+    )
+
+
 def _validate_candidate(candidate: ExtractedCandidate) -> None:
     # All candidates are atomic. Longer endorsed or pasted material is an
     # artifact, not a single memory candidate.
@@ -194,6 +374,15 @@ def _validate_candidate(candidate: ExtractedCandidate) -> None:
         raise ConsolidationError("too many reason_codes")
     for code in candidate.reason_codes:
         _nonempty(code, "reason_code", 120)
+        if TRANSIENT_REASON_RE.search(code):
+            raise ConsolidationError("transient state is not durable memory")
+        if COMPOUND_REASON_RE.search(code):
+            raise ConsolidationError("compound candidate must be split")
+
+    valid_from = _parse_optional_rfc3339(candidate.valid_from, "valid_from")
+    valid_to = _parse_optional_rfc3339(candidate.valid_to, "valid_to")
+    if valid_from and valid_to and valid_to < valid_from:
+        raise ConsolidationError("valid_to precedes valid_from")
 
     if candidate.lane == "claim":
         for value, name, limit in (
@@ -205,6 +394,24 @@ def _validate_candidate(candidate: ExtractedCandidate) -> None:
             raise ConsolidationError("invalid subject_entity_key")
         if not PREDICATE_RE.fullmatch(candidate.predicate):
             raise ConsolidationError("invalid predicate")
+        claim_text = f"{candidate.canonical_text}\n{candidate.object_literal}"
+        if TRANSIENT_STATE_RE.search(claim_text):
+            raise ConsolidationError("transient state is not durable memory")
+        if RELATIVE_TIME_RE.search(claim_text):
+            raise ConsolidationError("relative time must be anchored")
+        if RELATIVE_BEFORE_TIMESTAMP_RE.search(claim_text):
+            raise ConsolidationError("relative time must be normalized")
+        if RELATIVE_DURATION_RE.search(claim_text) and not (valid_from or valid_to):
+            raise ConsolidationError("relative duration must be anchored")
+        if candidate.predicate in {
+            "alcoholic",
+            "is_alcoholic",
+            "health.is_alcoholic",
+            "health.alcoholic",
+        }:
+            raise ConsolidationError("alcohol use must be stored as a behavioral claim")
+        if ";" in claim_text or COMPOUND_ACTION_RE.search(claim_text):
+            raise ConsolidationError("compound candidate must be split")
         if candidate.subject_entity_key != "user:self":
             _nonempty(candidate.subject_entity_type, "subject_entity_type", 120)
             _nonempty(candidate.subject_canonical_name, "subject_canonical_name", 300)
@@ -221,6 +428,16 @@ def _validate_candidate(candidate: ExtractedCandidate) -> None:
             raise ConsolidationError("preference polarity/stability is required")
         if candidate.surface_policy == "none":
             raise ConsolidationError("preference surface_policy is required")
+        if candidate.preference_class == "response" and candidate.surface_policy not in {
+            "silent_style_influence",
+            "never_surface_as_content",
+        }:
+            raise ConsolidationError("response preference has invalid surface_policy")
+        if candidate.preference_class == "life" and candidate.surface_policy not in {
+            "mention_when_relevant",
+            "explicit_recall_only",
+        }:
+            raise ConsolidationError("life preference has invalid surface_policy")
     else:
         if not candidate.project_key or not candidate.knowledge_key:
             raise ConsolidationError("project keys are required")
@@ -237,8 +454,10 @@ def _validate_candidate(candidate: ExtractedCandidate) -> None:
 
 
 def _claim_proposal(candidate: ExtractedCandidate) -> dict[str, Any]:
-    valid_from = candidate.valid_from.strip() or None
-    valid_to = candidate.valid_to.strip() or None
+    parsed_from = _parse_optional_rfc3339(candidate.valid_from, "valid_from")
+    parsed_to = _parse_optional_rfc3339(candidate.valid_to, "valid_to")
+    valid_from = parsed_from.isoformat() if parsed_from else None
+    valid_to = parsed_to.isoformat() if parsed_to else None
     is_user_self = candidate.subject_entity_key == "user:self"
     return {
         "subject": {
@@ -572,6 +791,7 @@ async def persist_extraction(
     }
 
     for candidate in extraction.candidates:
+        candidate = _normalize_temporal_candidate(candidate, observed_at)
         if candidate.lane == "project_knowledge":
             updates: dict[str, str] = {}
             if (

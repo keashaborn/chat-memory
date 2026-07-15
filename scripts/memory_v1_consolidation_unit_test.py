@@ -17,6 +17,7 @@ from rag_engine.memory_v1_consolidation import (
     _explicit_correction_eligible,
     _project_key_is_explicit,
     _key_identity,
+    _normalize_temporal_candidate,
     _validate_candidate,
     looks_like_artifact,
     persist_extraction,
@@ -145,6 +146,137 @@ def main() -> int:
     response_preference = preference()
     _validate_candidate(response_preference)
     assert response_preference.surface_policy == "silent_style_influence"
+    life_preference = preference(
+        canonical_text="The user likes jazz.",
+        preference_class="life",
+        preference_domain="music",
+        preference_key="genre.jazz",
+        surface_policy="mention_when_relevant",
+    )
+    _validate_candidate(life_preference)
+    expect_error(
+        lambda: _validate_candidate(
+            life_preference.model_copy(update={"surface_policy": "silent_style_influence"})
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            claim(
+                canonical_text=(
+                    "The user has not worked in that field for 15-20 years as of "
+                    "2026-07-14."
+                ),
+                predicate="work.inactive_duration",
+                object_literal="15-20 years as of 2026-07-14",
+            )
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            claim(
+                canonical_text="The user reports they are not an alcoholic anymore.",
+                predicate="is_alcoholic",
+                object_literal="false",
+                sensitivity="high",
+            )
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            claim(
+                canonical_text=(
+                    "The user spends time using tractors, farming, and raising cattle."
+                ),
+                predicate="activity.ranch_work",
+                object_literal="using tractors, farming, and raising cattle",
+            )
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            response_preference.model_copy(update={"surface_policy": "mention_when_relevant"})
+        ),
+        ConsolidationError,
+    )
+
+    anchored = claim(
+        canonical_text="The user stopped drinking alcohol on 2026-06-30.",
+        predicate="health.alcohol_use.stopped",
+        object_literal="2026-06-30",
+        valid_from="2026-06-30T21:44:14Z",
+        sensitivity="high",
+    )
+    _validate_candidate(anchored)
+    anchored_proposal = _claim_proposal(anchored)
+    assert anchored_proposal["valid_from"] == "2026-06-30T21:44:14+00:00"
+    normalized = _normalize_temporal_candidate(
+        claim(
+            canonical_text="The user quit alcohol about two weeks ago.",
+            predicate="health.alcohol_use.stopped",
+            object_literal="quit about two weeks ago",
+            sensitivity="high",
+        ),
+        datetime(2026, 7, 14, 21, 44, 14, tzinfo=timezone.utc),
+    )
+    _validate_candidate(normalized)
+    assert normalized.valid_from == "2026-06-30T21:44:14Z"
+    assert "around 2026-06-30" in normalized.canonical_text
+    normalized_before = _normalize_temporal_candidate(
+        claim(
+            canonical_text=(
+                "The user quit alcohol about two weeks before "
+                "2026-07-14T21:44:14Z."
+            ),
+            predicate="health.alcohol_use.stopped",
+            object_literal="Quit alcohol around 2026-06-30.",
+            valid_from="2026-06-30T21:44:14Z",
+            sensitivity="high",
+        ),
+        datetime(2026, 7, 14, 21, 44, 14, tzinfo=timezone.utc),
+    )
+    _validate_candidate(normalized_before)
+    assert "two weeks before" not in normalized_before.canonical_text
+    expect_error(
+        lambda: _validate_candidate(
+            anchored.model_copy(
+                update={
+                    "canonical_text": "The user stopped drinking about two weeks ago.",
+                    "object_literal": "about two weeks ago",
+                }
+            )
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            anchored.model_copy(update={"valid_from": "2026-06-30T21:44:14"})
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            claim(
+                canonical_text="The user feels blocked lately.",
+                predicate="wellbeing.current_state",
+                object_literal="feeling blocked lately",
+            )
+        ),
+        ConsolidationError,
+    )
+    expect_error(
+        lambda: _validate_candidate(
+            claim(
+                canonical_text="The user farms; the user raises cattle.",
+                predicate="activity.farming",
+                object_literal="farms; raises cattle",
+            )
+        ),
+        ConsolidationError,
+    )
 
     project_candidate = project()
     _validate_candidate(project_candidate)

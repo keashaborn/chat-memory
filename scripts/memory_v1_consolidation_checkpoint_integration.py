@@ -72,6 +72,7 @@ async def main() -> int:
             model=model,
             owner_user_id=owner,
             source_external_id=str(source["id"]),
+            source_observed_at=source["created_at"],
             text=text,
         )
         if not await checkpoint_extraction(

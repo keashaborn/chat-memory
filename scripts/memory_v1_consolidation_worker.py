@@ -9,7 +9,7 @@ import os
 import socket
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import asyncpg
@@ -87,6 +87,7 @@ async def claim_job(
               SELECT job_id, status
               FROM memory.consolidation_job
               WHERE owner_user_id=$1
+                AND pipeline_version=$5
                 AND available_at <= clock_timestamp()
                 AND (
                   status IN ('pending', 'error')
@@ -107,13 +108,14 @@ async def claim_job(
             WHERE job.owner_user_id=$1 AND job.job_id=selected.job_id
             RETURNING job.job_id, job.source_system, job.source_external_id,
                       job.source_sha256, job.source_recorded_at, job.attempts,
-                      job.lease_token, job.result,
+                      job.pipeline_version, job.lease_token, job.result,
                       selected.status::text AS prior_status
             """,
             owner,
             lease_token,
             lease_seconds,
             worker_id,
+            EXTRACTOR_VERSION,
         )
         if row is None:
             return None
@@ -354,6 +356,8 @@ async def process_job(
     project_key: Optional[str],
     allow_auto_apply: bool,
 ) -> None:
+    if job.get("pipeline_version") != EXTRACTOR_VERSION:
+        raise RuntimeError("consolidation job pipeline mismatch")
     source = await source_record(
         conn,
         owner=owner,
@@ -419,6 +423,9 @@ async def process_job(
             model=model,
             owner_user_id=owner,
             source_external_id=str(source["id"]),
+            source_observed_at=(
+                source.get("created_at") or job["source_recorded_at"]
+            ),
             text=text,
         )
     else:
@@ -470,7 +477,7 @@ async def process_job(
         evidence_id=evidence_id,
         extraction=extraction,
         source_text=text,
-        observed_at=source.get("created_at") or datetime.utcnow(),
+        observed_at=source.get("created_at") or datetime.now(timezone.utc),
         configured_project_key=project_key,
         allow_auto_apply=allow_auto_apply,
     )
