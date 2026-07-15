@@ -137,7 +137,14 @@ def _normalize_timestamp(value: Any, field: str) -> Optional[str]:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ProposalValidationError(f"{field} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ProposalValidationError(f"{field} must include a timezone")
     return parsed.isoformat()
+
+
+def _timestamp_parameter(value: Any, field: str) -> Optional[datetime]:
+    normalized = _normalize_timestamp(value, field)
+    return datetime.fromisoformat(normalized) if normalized else None
 
 
 def normalize_proposal(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -682,6 +689,14 @@ async def apply_candidate(
         proposal = normalize_proposal(
             _json_object(candidate["proposal"], "candidate proposal")
         )
+        valid_from_parameter = _timestamp_parameter(
+            proposal["valid_from"],
+            "valid_from",
+        )
+        valid_to_parameter = _timestamp_parameter(
+            proposal["valid_to"],
+            "valid_to",
+        )
         key = canonical_claim_key(proposal)
         subject_id = await _get_or_create_entity(conn, actor, proposal["subject"])
         object_entity_id = None
@@ -761,8 +776,8 @@ async def apply_candidate(
                         proposal["importance"],
                         proposal["salience"],
                         proposal["sensitivity"],
-                        proposal["valid_from"],
-                        proposal["valid_to"],
+                        valid_from_parameter,
+                        valid_to_parameter,
                         proposal["evidence_stance"],
                         _stable_json(proposal["retrieval_policy"]),
                         _stable_json(proposal["metadata"]),

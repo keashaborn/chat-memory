@@ -24,6 +24,11 @@ from rag_engine.memory_v1_consolidation import (
     persist_extraction,
 )
 from scripts.memory_v1_consolidation_worker import checkpointed_extraction
+from rag_engine.memory_v1_store import (
+    ProposalValidationError,
+    _normalize_timestamp,
+    _timestamp_parameter,
+)
 
 
 EMPTY = {
@@ -121,6 +126,21 @@ def expect_error(fn, expected: type[Exception]) -> None:
 
 
 def main() -> int:
+    assert _normalize_timestamp(
+        "2026-06-30T21:44:14Z",
+        "valid_from",
+    ) == "2026-06-30T21:44:14+00:00"
+    timestamp_parameter = _timestamp_parameter(
+        "2026-06-30T21:44:14Z",
+        "valid_from",
+    )
+    assert timestamp_parameter is not None
+    assert timestamp_parameter.tzinfo is not None
+    expect_error(
+        lambda: _normalize_timestamp("2026-06-30T21:44:14", "valid_from"),
+        ProposalValidationError,
+    )
+
     ordinary = claim()
     _validate_candidate(ordinary)
     proposal = _claim_proposal(ordinary)

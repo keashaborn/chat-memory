@@ -25,7 +25,12 @@ ACTOR_A = uuid.UUID("11111111-1111-4111-8111-111111111111")
 ACTOR_B = uuid.UUID("22222222-2222-4222-8222-222222222222")
 
 
-def name_proposal(value: str, *, supersedes_claim_id: str | None = None) -> dict:
+def name_proposal(
+    value: str,
+    *,
+    supersedes_claim_id: str | None = None,
+    valid_from: str | None = None,
+) -> dict:
     proposal = {
         "subject": {
             "entity_key": "self",
@@ -54,6 +59,8 @@ def name_proposal(value: str, *, supersedes_claim_id: str | None = None) -> dict
     }
     if supersedes_claim_id:
         proposal["supersedes_claim_id"] = supersedes_claim_id
+    if valid_from:
+        proposal["valid_from"] = valid_from
     return proposal
 
 
@@ -116,7 +123,10 @@ async def main() -> int:
             conn,
             ACTOR_A,
             evidence_id=nemo_evidence,
-            proposal=name_proposal("Nemo"),
+            proposal=name_proposal(
+                "Nemo",
+                valid_from="2026-06-30T21:44:14.419131+00:00",
+            ),
             extractor="integration_manual_v1",
             extractor_version="v1",
         )
@@ -254,7 +264,7 @@ async def main() -> int:
         )
         rows = await conn.fetch(
             """
-            SELECT claim_id, status::text, canonical_text
+            SELECT claim_id, status::text, canonical_text, valid_from
             FROM memory.claim
             ORDER BY canonical_text
             """
@@ -266,6 +276,19 @@ async def main() -> int:
             raise AssertionError("Nemo claim was not superseded")
         if statuses[neko_result["claim_id"]] != "supported":
             raise AssertionError("Neko claim is not supported")
+        nemo_valid_from = next(
+            row["valid_from"]
+            for row in rows
+            if str(row["claim_id"]) == nemo_result["claim_id"]
+        )
+        if (
+            nemo_valid_from is None
+            or nemo_valid_from.isoformat()
+            != "2026-06-30T21:44:14.419131+00:00"
+        ):
+            raise AssertionError(
+                f"dated claim valid_from mismatch: {nemo_valid_from!r}"
+            )
 
         old_assessment_status = await conn.fetchval(
             """
