@@ -1,6 +1,6 @@
 {
   "contract_version": "memory_v1_projection_v5_production_recovery_plan_v1",
-  "plan_id": "memory-v1-projection-v5-production-recovery-20260715",
+  "plan_id": "memory-v1-projection-v5-production-recovery-owner-scoped-20260715",
   "created_on": "2026-07-15",
   "production_authorized": false,
   "source": {
@@ -52,8 +52,8 @@
       "ordinal": 3
     },
     {
-      "path": "tests/memory_v1_projection_staging_v5.sql",
-      "sha256": "57c17dce9cd3cd0d90901d519c6c8b2b9afc74af2c0ede86f4c15fc2b7245735",
+      "path": "tests/memory_v1_projection_staging_production_v5.sql",
+      "sha256": "df57d52c757a63b8865956d44af323eae8fdec40c2b78722c0639b6fc793d351",
       "ordinal": 4
     }
   ],

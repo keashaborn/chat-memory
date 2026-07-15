@@ -29,6 +29,15 @@ then adds owner-scoped test-only policies inside the same transaction. The role,
 policies, and synthetic rows all disappear at `ROLLBACK`. All four final-state
 suites passed against a disposable PostgreSQL 16 production-schema clone.
 
+The first authorized recovery then passed the first three production suites and
+stopped in the fourth. That suite compared its one synthetic claim and revision
+against global table counts; production already contained 25 claims and 45
+revisions. The fourth transaction rolled back, and baseline/V5-empty checks
+passed again. The production variant now scopes all apply-state counts and both
+replay fingerprints to synthetic owner
+`11111111-1111-4111-8111-111111111111`. All four suites passed again on the
+disposable PostgreSQL 16 production-schema clone.
+
 Recovery is controlled by:
 
 - `ops/manifests/memory_v1_projection_v5_production_recovery_plan_20260715.json`
