@@ -1,0 +1,154 @@
+{
+  "contract_version": "memory_v1_projection_v5_production_recovery_plan_v1",
+  "plan_id": "memory-v1-projection-v5-production-recovery-20260715",
+  "created_on": "2026-07-15",
+  "production_authorized": false,
+  "source": {
+    "branch": "memory_v1_extraction_v2",
+    "required_ancestor_commit": "6b7e9b01dbbbc6e0b8572b84b8a94a92318d5766"
+  },
+  "target": {
+    "server": "seebx",
+    "postgres_container": "brains-postgres-1",
+    "database": "memory",
+    "maintenance_role": "sage",
+    "application_role": "brains_app",
+    "postgres_major": 16
+  },
+  "authorization_policy": {
+    "contract_version": "memory_v1_projection_v5_production_recovery_authorization_v1",
+    "file_mode": "0600",
+    "maximum_validity_minutes": 30,
+    "environment_gate": "MEMORY_V1_PRODUCTION_RECOVERY=authorized"
+  },
+  "failed_install": {
+    "run_id": "20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744",
+    "authorization_id": "12682238-1432-47a5-9aee-ee27d6861744",
+    "original_plan_sha256": "f2cd20df40b67596981d9ad6e893d42c574f6fa2496d6c4fdb2b8788d0eff5ad",
+    "original_head_commit": "6b7e9b01dbbbc6e0b8572b84b8a94a92318d5766",
+    "status_file": "/home/ubuntu/brains/snapshots/memory_v1_projection_v5_install_20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744.status",
+    "expected_phase": "rolled_back_security_tests",
+    "expected_exit_code": 3,
+    "baseline_tables_file": "/home/ubuntu/brains/snapshots/memory_v1_projection_v5_baseline_tables_20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744.txt",
+    "baseline_counts_file": "/home/ubuntu/brains/snapshots/memory_v1_projection_v5_baseline_counts_20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744.tsv",
+    "backup_file": "/home/ubuntu/brains/snapshots/memory_pre_v5_projection_20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744.dump",
+    "backup_catalog": "/home/ubuntu/brains/snapshots/memory_pre_v5_projection_20260715T160437Z_12682238-1432-47a5-9aee-ee27d6861744.dump.catalog",
+    "backup_sha256": "c675ad4decd9242685bdb605cc4fdd2584617b0f63e88df5028525a89a2f4095"
+  },
+  "source_files": [
+    {
+      "path": "tests/memory_v1_relational_staging_final_state_v5.sql",
+      "sha256": "d7f137e84a61a27da68a087083e2bacb505c572effe7c9512ff650b560905557",
+      "ordinal": 1
+    },
+    {
+      "path": "tests/memory_v1_relational_writer_v5.sql",
+      "sha256": "93aba0cd1adb43fca78e4a52f06ca3282c1681716df3ac4e4f8b055ab7a32868",
+      "ordinal": 2
+    },
+    {
+      "path": "tests/memory_v1_projection_targets_v5.sql",
+      "sha256": "1589e5cbc7dc271ea754fd748fb38214c2c05f2631134842f5aa9bf192e0c86c",
+      "ordinal": 3
+    },
+    {
+      "path": "tests/memory_v1_projection_staging_v5.sql",
+      "sha256": "57c17dce9cd3cd0d90901d519c6c8b2b9afc74af2c0ede86f4c15fc2b7245735",
+      "ordinal": 4
+    }
+  ],
+  "required_installed_tables": [
+    "memory.predicate_registry_version",
+    "memory.predicate_registry_seed",
+    "memory.predicate_contract",
+    "memory.relational_stage_batch",
+    "memory.relational_operation_request",
+    "memory.entity_mention",
+    "memory.entity_resolution_plan",
+    "memory.entity_resolution_candidate",
+    "memory.entity_resolution_review",
+    "memory.entity_resolution_apply",
+    "memory.entity_alias_observation",
+    "memory.observation",
+    "memory.observation_temporal",
+    "memory.observation_entity_binding",
+    "memory.claim_observation",
+    "memory.candidate_observation",
+    "memory.preference_head_v5",
+    "memory.preference_revision_v5",
+    "memory.project_knowledge_head_v5",
+    "memory.project_knowledge_revision_v5",
+    "memory.projection_plan",
+    "memory.projection_plan_item",
+    "memory.projection_claim_payload",
+    "memory.projection_preference_payload",
+    "memory.projection_project_payload",
+    "memory.projection_plan_observation",
+    "memory.projection_plan_relation",
+    "memory.projection_review",
+    "memory.projection_apply_event",
+    "memory.preference_revision_observation",
+    "memory.project_knowledge_revision_observation",
+    "memory.claim_relation_v5",
+    "memory.preference_relation_v5",
+    "memory.project_knowledge_relation_v5",
+    "memory.projection_dispatch_v5"
+  ],
+  "required_empty_tables": [
+    "memory.relational_stage_batch",
+    "memory.relational_operation_request",
+    "memory.entity_mention",
+    "memory.entity_resolution_plan",
+    "memory.entity_resolution_candidate",
+    "memory.entity_resolution_review",
+    "memory.entity_resolution_apply",
+    "memory.entity_alias_observation",
+    "memory.observation",
+    "memory.observation_temporal",
+    "memory.observation_entity_binding",
+    "memory.claim_observation",
+    "memory.candidate_observation",
+    "memory.preference_head_v5",
+    "memory.preference_revision_v5",
+    "memory.project_knowledge_head_v5",
+    "memory.project_knowledge_revision_v5",
+    "memory.projection_plan",
+    "memory.projection_plan_item",
+    "memory.projection_claim_payload",
+    "memory.projection_preference_payload",
+    "memory.projection_project_payload",
+    "memory.projection_plan_observation",
+    "memory.projection_plan_relation",
+    "memory.projection_review",
+    "memory.projection_apply_event",
+    "memory.preference_revision_observation",
+    "memory.project_knowledge_revision_observation",
+    "memory.claim_relation_v5",
+    "memory.preference_relation_v5",
+    "memory.project_knowledge_relation_v5",
+    "memory.projection_dispatch_v5"
+  ],
+  "predicate_registry": {
+    "registry_version": "memory_predicate_registry_v5",
+    "registry_sha256": "4d626433109c89c18d5ea374e173ca6785de6f9c20ecc05fef9f6447bfc671f4",
+    "status": "proposed",
+    "runtime_active": false,
+    "expected_contract_rows": 44
+  },
+  "allowed_effects": [
+    "run_four_synthetic_security_suites_inside_rollback",
+    "write_recovery_preflight_log_and_report"
+  ],
+  "forbidden_effects": [
+    "install_or_modify_schema_or_functions",
+    "invoke_live_extraction",
+    "stage_live_projection_plan",
+    "invoke_live_durable_apply",
+    "write_qdrant_or_redis",
+    "change_retrieval_or_prompt_behavior",
+    "start_or_enable_worker_or_timer",
+    "restart_brains_or_verbal_sage",
+    "modify_user_memory_rows"
+  ],
+  "hard_stop": "before_live_extraction_or_durable_application"
+}
