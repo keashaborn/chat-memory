@@ -296,3 +296,28 @@ report, the unchanged 25-case contract, and exactly `v5-03`, `v5-04`, `v5-10`,
 `v5-15`, and `v5-25` in manifest order. Its authorization permits one
 `store=false`, zero-write external evaluation. It does not permit staging,
 persistence, projection, retrieval activation, or another external rerun.
+
+Commit `9a17a6e25f5500c7148b99b6a5f7ab06d1ab37b9` executed the authorized
+remaining-five evaluation with `gpt-5.2`, `store=false`, and selection SHA-256
+`ed52b4e04c5062fa2eebbe3ac63a209052e2121a09525e79b406fdf69d689686`.
+The run made 22 model calls, including seven bounded repairs. There were no
+refusals, incomplete responses, request errors, deterministic rejections, or
+integrity errors.
+
+Four cases passed: `v5-03`, `v5-04`, `v5-15`, and `v5-25`. The remaining
+`v5-10` packet extracted every required predicate, temporal feature, projection
+class, deferral, and family entity. It remained closed only because all three
+distinct named sisters used the generic role `family:sister` instead of the
+required source-order roles `family:sister:1`, `family:sister:2`, and
+`family:sister:3`.
+
+The mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-remaining5-authorized-live-20260715T230349Z.json`
+has SHA-256
+`2e719580e433b2154b05041d3f01d6fad5ddf6b6731857c4f1f16544b3abff3e`.
+The zero-write proof passed: all 47 database relations retained SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No relation changed. No additional external evaluation, staging, persistence,
+or retrieval activation is authorized by this result.
