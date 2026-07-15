@@ -281,6 +281,12 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--registry", default="specs/memory_v1_predicate_registry_v5.json")
     parser.add_argument("--output", required=True)
     parser.add_argument("--case-id", help="Evaluate one hash-locked case as a model/schema canary")
+    parser.add_argument(
+        "--exclude-case-id",
+        action="append",
+        default=[],
+        help="Exclude an already evaluated case; may be repeated",
+    )
     parser.add_argument("--collection", default=os.getenv("MEMORY_V1_COLLECTION", DEFAULT_COLLECTION))
     return parser.parse_args()
 
@@ -789,10 +795,20 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     instructions = EXTRACTION_INSTRUCTIONS + "\n\n" + registry_prompt(registry)
     reports: list[dict[str, Any]] = []
     selected = list(enumerate(zip(cases, manifest["sources"], sources, strict=True), 1))
+    known_case_ids = {item["case_id"] for item in cases}
+    unknown_exclusions = sorted(set(args.exclude_case_id) - known_case_ids)
+    if unknown_exclusions:
+        raise RuntimeError(f"unknown excluded case ids: {','.join(unknown_exclusions)}")
+    if args.case_id and args.exclude_case_id:
+        raise RuntimeError("--case-id and --exclude-case-id cannot be combined")
     if args.case_id:
         selected = [item for item in selected if item[1][0]["case_id"] == args.case_id]
         if len(selected) != 1:
             raise RuntimeError(f"unknown case id: {args.case_id}")
+    elif args.exclude_case_id:
+        selected = [
+            item for item in selected if item[1][0]["case_id"] not in set(args.exclude_case_id)
+        ]
     for ordinal, (case, manifest_source, live_source) in selected:
         text = str(live_source["text"] or "")
         row: dict[str, Any] = {
