@@ -7,8 +7,11 @@ from pathlib import Path
 
 from scripts.memory_v1_relational_v5_live_eval import (
     ModelPacket,
+    enforce_temporal_authority,
     enrich_packet,
     evaluate_case,
+    normalize_explicit_project_requirement,
+    outcome,
     source_span,
 )
 
@@ -158,6 +161,65 @@ class V5LiveEvalTest(unittest.TestCase):
         text = "I said I stayed"
         span = source_span({"start": 6, "end": 7, "quote": "I"}, text)
         self.assertEqual((span["start"], span["end"]), (7, 8))
+
+    def test_self_reference_can_recover_distant_repeated_exact_quote(self) -> None:
+        text = "I began here, and much later I stated another fact."
+        span = source_span(
+            {"start": 100, "end": 101, "quote": "I"},
+            text,
+            allow_repeated=True,
+        )
+        self.assertEqual(text[span["start"] : span["end"]], "I")
+
+    def test_source_wrapper_trailing_newline_is_removed(self) -> None:
+        span = source_span(
+            {"start": 0, "end": len(self.text) + 1, "quote": self.text + "\n"},
+            self.text,
+        )
+        self.assertEqual((span["start"], span["end"]), (0, len(self.text)))
+
+    def test_empty_open_state_interval_is_anchored_to_trusted_source(self) -> None:
+        temporal = temporal_observation()
+        temporal.update({"semantic": "state_validity", "shape": "open_interval"})
+        enforce_temporal_authority(temporal, self.source["source_recorded_at"])
+        self.assertEqual(temporal["basis"], "instant")
+        self.assertEqual(
+            temporal["instant_range"],
+            {"lower": "2026-07-14T17:20:49.923120Z", "upper": None, "bounds": "[)"},
+        )
+
+    def test_explicit_project_commitment_normalizes_one_proposal(self) -> None:
+        text = "I would love exact owner isolation. A graph could be useful."
+        observations = [
+            {
+                "predicate": "project.proposed_feature",
+                "modality": "proposed",
+                "source_spans": [{"start": 0, "end": 35, "quote": "I would love exact owner isolation."}],
+                "temporal": temporal_observation(),
+            },
+            {
+                "predicate": "project.proposed_feature",
+                "modality": "proposed",
+                "source_spans": [{"start": 36, "end": len(text), "quote": "A graph could be useful."}],
+                "temporal": temporal_observation(),
+            },
+        ]
+        self.assertTrue(normalize_explicit_project_requirement(observations, text))
+        self.assertEqual(observations[0]["predicate"], "project.requirement")
+        self.assertEqual(observations[0]["modality"], "endorsed")
+        self.assertEqual(observations[1]["predicate"], "project.proposed_feature")
+
+    def test_non_memory_project_scope_deferral_does_not_change_outcome(self) -> None:
+        packet = {
+            "observations": [],
+            "deferrals": [
+                {"reason_code": "question_only", "memory_shape": "none"},
+                {"reason_code": "project_scope_unresolved", "memory_shape": "none"},
+            ],
+        }
+        self.assertEqual(outcome(packet), "no_observation")
+        packet["deferrals"][1]["memory_shape"] = "project_knowledge"
+        self.assertEqual(outcome(packet), "defer_all")
 
     def test_correction_authority_adds_unresolved_relations_and_role(self) -> None:
         payload = self.correction_packet().model_dump(mode="json")

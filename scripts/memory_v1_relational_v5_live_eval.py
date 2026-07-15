@@ -258,17 +258,21 @@ Rules:
   project:unresolved and atomic project.* observations with
   exact_project_scope_only, then also add project_scope_unresolved. The server
   blocks persistence; do not erase the project-shaped observation. First-person
-  phrases such as "I want", "I would love", "would be cool", "ideal", "I am
-  creating", "I am thinking about turning", current missing features, costs,
-  constraints, and current implementation state are direct project proposals,
-  requirements, constraints, or current-state observations even when the turn
-  also asks for advice.
+  phrases such as "I want", "I do want", "I need", "I would love", "ideal",
+  or "must" state project.requirement with asserted/endorsed modality. Reserve
+  project.proposed_feature for speculative language such as "could", "might",
+  or "would be cool". "I am creating", "I am thinking about turning", current
+  missing features, costs, constraints, and current implementation state remain
+  direct project observations even when the turn also asks for advice.
 - Response preferences require a direct stable instruction about assistant
   behavior. Life preferences concern media, activities, food, places, etc.
 - Third-party health, mental health, allegations, intimate details, and precise
   locations are high/restricted, user-reported/uncertain, and manual-review.
 - Corrections use identity.name_canonical plus corrective modality and emit
-  unresolved corrects and supersedes comparison hints without target IDs.
+  unresolved corrects and supersedes comparison hints without target IDs. For
+  example, "my first cat's name was X; prior voice-to-text was wrong" requires
+  an animal with role pet:corrected_name_subject and a corrective canonical-name
+  observation; it is not context_missing or an unregistered predicate.
 - Use only predicates listed in the supplied registry. If none fits, do not
   invent one; add unregistered_predicate.
 - Every entity, observation, and deferral source span includes start, end, and
@@ -295,8 +299,10 @@ such as becoming a personal trainer even when the user says it is not current
 paid work; defer ambiguous credentialing or voice transcription separately.
 For uncertain third-party diagnoses use health.user_reported_uncertain_label;
 for directly reported symptoms/conditions use health.user_reported_observation,
-and add sensitive_manual_review. A malformed or suspiciously transcribed proper
-noun/API/credential phrase requires ambiguous_transcription instead of a guess.
+and add sensitive_manual_review. If both occur, emit separate observations for
+the uncertain label and the directly described symptoms. A malformed or
+suspiciously transcribed proper noun/API/credential phrase requires
+ambiguous_transcription instead of a guess, including in question-only turns.
 
 If a source only asks about nutrition/training/other structured data and states
 no new value, return question_only without structured_domain. For timeless
@@ -321,7 +327,12 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--cases", default="evals/memory_v1_relational_extraction_v5_cases.jsonl")
     parser.add_argument("--registry", default="specs/memory_v1_predicate_registry_v5.json")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--case-id", help="Evaluate one hash-locked case as a model/schema canary")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Evaluate a hash-locked case; may be repeated for an exact subset",
+    )
     parser.add_argument(
         "--exclude-case-id",
         action="append",
@@ -370,7 +381,9 @@ def registry_prompt(registry: dict[str, Any]) -> str:
     return "GOVERNED V5 REGISTRY\n" + stable_json({"predicates": rows, "object_contracts": contracts})
 
 
-def source_span(span: dict[str, Any], text: str) -> dict[str, Any]:
+def source_span(
+    span: dict[str, Any], text: str, *, allow_repeated: bool = False
+) -> dict[str, Any]:
     start = int(span["start"])
     end = int(span["end"])
     if "span_sha256" in span:
@@ -383,6 +396,8 @@ def source_span(span: dict[str, Any], text: str) -> dict[str, Any]:
     quote = str(span.get("quote") or "")
     if not quote:
         raise ValueError("source span quote is required")
+    if quote.endswith("\n") and not text.endswith("\n") and quote[:-1] in text:
+        quote = quote[:-1]
     if start < 0 or end <= start or end > len(text) or text[start:end] != quote:
         offsets: list[int] = []
         offset = text.find(quote)
@@ -393,7 +408,10 @@ def source_span(span: dict[str, Any], text: str) -> dict[str, Any]:
             start = offsets[0]
         elif offsets:
             ranked = sorted((abs(offset - start), offset) for offset in offsets)
-            if ranked[0][0] > 32 or (len(ranked) > 1 and ranked[0][0] == ranked[1][0]):
+            if not allow_repeated and (
+                ranked[0][0] > 32
+                or (len(ranked) > 1 and ranked[0][0] == ranked[1][0])
+            ):
                 raise ValueError("source span quote is not an exact unique source substring")
             start = ranked[0][1]
         else:
@@ -402,8 +420,53 @@ def source_span(span: dict[str, Any], text: str) -> dict[str, Any]:
     return {"start": start, "end": end, "span_sha256": sha256_text(text[start:end])}
 
 
-def normalize_spans(spans: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
-    return [source_span(span, text) for span in spans]
+def normalize_spans(
+    spans: list[dict[str, Any]], text: str, *, allow_repeated: bool = False
+) -> list[dict[str, Any]]:
+    return [source_span(span, text, allow_repeated=allow_repeated) for span in spans]
+
+
+PROJECT_REQUIREMENT_RE = re.compile(
+    r"\b(?:i\s+(?:do\s+)?want|i\s+(?:really\s+)?need|i\s+would\s+love|"
+    r"must|require(?:ment|s|d)?|ideal(?:\s+situation|\s+system)?)\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_explicit_project_requirement(
+    observations: list[dict[str, Any]], text: str
+) -> bool:
+    if any(item["predicate"] == "project.requirement" for item in observations):
+        return False
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for index, item in enumerate(observations):
+        if item["predicate"] != "project.proposed_feature":
+            continue
+        quotes = [str(span.get("quote") or "") for span in item["source_spans"]]
+        matching = [quote for quote in quotes if quote in text and PROJECT_REQUIREMENT_RE.search(quote)]
+        if matching:
+            candidates.append((min(len(quote) for quote in matching), index, item))
+    if not candidates:
+        return False
+    _, _, selected = min(candidates, key=lambda value: (value[0], value[1]))
+    selected["predicate"] = "project.requirement"
+    selected["modality"] = "endorsed"
+    selected["temporal"] = {
+        "semantic": "observation_time",
+        "shape": "none",
+        "basis": "none",
+        "source_form": "none",
+        "certainty": "unknown",
+        "precision": "unknown",
+        "instant": None,
+        "calendar_range": None,
+        "instant_range": None,
+        "relative_offset": None,
+        "recurrence": None,
+        "anchored_to_source_time": False,
+        "reason_codes": ["explicit_project_commitment"],
+    }
+    return True
 
 
 def validate_reason_codes(values: list[str], field: str) -> None:
@@ -447,7 +510,14 @@ def enforce_temporal_authority(
             }
         )
         return
-    if temporal["shape"] == "none" and temporal["semantic"] == "state_validity":
+    if temporal["semantic"] == "state_validity" and (
+        temporal["shape"] == "none"
+        or (
+            temporal["shape"] == "open_interval"
+            and temporal["basis"] == "none"
+            and temporal["instant_range"] is None
+        )
+    ):
         temporal.update(
             {
                 "shape": "open_interval",
@@ -604,7 +674,11 @@ def enrich_packet(
                 raise ValueError("named entity mention requires name_text")
             if mention["entity_type"] == "self" and mention["relationship_role"] != "user:self":
                 raise ValueError("self entity mention requires user:self relationship role")
-            mention["source_spans"] = normalize_spans(mention["source_spans"], text)
+            mention["source_spans"] = normalize_spans(
+                mention["source_spans"],
+                text,
+                allow_repeated=mention["entity_type"] == "self",
+            )
             mentions.append(mention)
         except Exception as exc:
             rejections.append({"kind": "entity_mention", "ref": mention["entity_ref"], "reason": str(exc)})
@@ -612,6 +686,9 @@ def enrich_packet(
     rules = {item["predicate"]: item for item in registry["predicates"]}
     observations: list[dict[str, Any]] = []
     deferred = list(raw["deferrals"])
+    normalized_project_requirement = normalize_explicit_project_requirement(
+        raw["observations"], text
+    )
     for observation in raw["observations"]:
         ref = observation["observation_ref"]
         try:
@@ -780,6 +857,8 @@ def enrich_packet(
         packet_findings.append("invalid_model_finding_normalized")
     if normalized_reason_codes:
         packet_findings.append("invalid_model_reason_code_normalized")
+    if normalized_project_requirement:
+        packet_findings.append("explicit_project_requirement_normalized")
     packet = {
         "contract_version": CONTRACT_VERSION,
         "source_envelope": {
@@ -803,7 +882,14 @@ def enrich_packet(
 
 def outcome(packet: dict[str, Any]) -> str:
     observations = packet["observations"]
-    deferrals = {item["reason_code"] for item in packet["deferrals"]}
+    deferrals = {
+        item["reason_code"]
+        for item in packet["deferrals"]
+        if not (
+            item["reason_code"] == "project_scope_unresolved"
+            and item["memory_shape"] == "none"
+        )
+    }
     if observations:
         if all(item["projection_class"] == "project_knowledge" for item in observations):
             return "conditional_project"
@@ -984,9 +1070,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.case_id and args.exclude_case_id:
         raise RuntimeError("--case-id and --exclude-case-id cannot be combined")
     if args.case_id:
-        selected = [item for item in selected if item[1][0]["case_id"] == args.case_id]
-        if len(selected) != 1:
-            raise RuntimeError(f"unknown case id: {args.case_id}")
+        unknown_cases = sorted(set(args.case_id) - known_case_ids)
+        if unknown_cases:
+            raise RuntimeError(f"unknown case ids: {','.join(unknown_cases)}")
+        selected_ids = set(args.case_id)
+        selected = [item for item in selected if item[1][0]["case_id"] in selected_ids]
+        if len(selected) != len(selected_ids):
+            raise RuntimeError("case selection did not resolve to an exact unique subset")
     elif args.exclude_case_id:
         selected = [
             item for item in selected if item[1][0]["case_id"] not in set(args.exclude_case_id)
