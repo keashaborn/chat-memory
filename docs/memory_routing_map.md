@@ -186,6 +186,26 @@ instants. Model entity mentions no longer contain durable IDs, keys, or
 resolution actions. A separate trusted owner-scoped resolver produces the
 hash-locked review packet.
 
-This is a specification checkpoint only. V4 remains the consolidation extractor,
-main-account consolidation remains disabled, and no V5 schema, extraction,
-candidate, Qdrant, retrieval, prompt, or legacy-cutover behavior is active.
+V5 now also has an executable, runtime-inactive relational staging migration and
+a separately verified controlled-writer design. The staging migration creates
+append-only mention, resolution, observation, temporal, and binding tables. The
+writer design adds a constrained `NOLOGIN` owner role plus five hash-locked APIs
+for packet staging, review preflight/apply, and resolution preflight/apply.
+
+The application role is not a member of the writer role and has no direct access
+to V5 owner tables. Every write API requires a `brains_app` session, a
+transaction-local actor, forced owner RLS, exact packet hashes, and a replay-safe
+manifest. Automatic non-self links recheck owner-local name/type uniqueness at
+apply time. Named entity creation requires manual approval. Role-only and
+anonymous creation remain blocked.
+
+Both PostgreSQL 16 reconstruction and a production-schema-only clone pass the
+full migration, adversarial transaction, replay, isolation, and rollback suites.
+No production schema or data was changed.
+
+V4 remains the active consolidation extractor, main-account consolidation
+remains disabled, and no V5 extraction, projection, Qdrant, retrieval, prompt,
+or legacy-cutover behavior is active. Before activating the V5 writer, legacy
+direct `brains_app` mutation grants on durable pre-V5 tables must be audited and
+revoked. The next design boundary is projection from applied observations into
+governed claim, preference, and project views with full provenance.
