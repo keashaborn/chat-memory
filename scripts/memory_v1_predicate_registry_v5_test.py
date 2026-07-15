@@ -195,8 +195,13 @@ def validate_object_contracts(contracts: Any) -> set[str]:
             if set(contract) != {"kind", "entity_types"}:
                 raise AssertionError(f"entity object contract keys mismatch: {name}")
             entity_types = require_unique_strings(contract["entity_types"], name)
-            if not entity_types <= ENTITY_TYPES or "self" in entity_types:
+            if not entity_types <= ENTITY_TYPES:
                 raise AssertionError(f"invalid object entity type: {name}")
+            if "self" in entity_types and (
+                name != "entity.person_or_self"
+                or entity_types != {"person", "self"}
+            ):
+                raise AssertionError(f"self object type is not narrowly governed: {name}")
         else:
             if set(contract) != {
                 "kind",

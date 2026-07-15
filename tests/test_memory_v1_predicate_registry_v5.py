@@ -86,6 +86,12 @@ class PredicateRegistryV5Test(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "missing from registry"):
                 validate_case_coverage(registry, cases)
 
+    def test_self_object_type_fails_outside_narrow_person_contract(self) -> None:
+        registry = copy.deepcopy(self.registry)
+        registry["object_contracts"]["entity.person"]["entity_types"].append("self")
+        with self.assertRaisesRegex(AssertionError, "self object type is not narrowly governed"):
+            validate_registry(registry)
+
 
 if __name__ == "__main__":
     unittest.main()

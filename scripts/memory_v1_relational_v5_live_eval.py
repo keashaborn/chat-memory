@@ -264,6 +264,10 @@ Rules:
   or "would be cool". "I am creating", "I am thinking about turning", current
   missing features, costs, constraints, and current implementation state remain
   direct project observations even when the turn also asks for advice.
+  If one source states committed requirements and separate speculative features,
+  emit both predicates from their separate clauses; do not collapse every clause
+  into requirements. "My application does not currently include feature X;
+  should it?" requires project.current_state plus question_only.
 - Response preferences require a direct stable instruction about assistant
   behavior. Life preferences concern media, activities, food, places, etc.
 - Third-party health, mental health, allegations, intimate details, and precise
@@ -293,6 +297,8 @@ atomic governed relationship edge. relationship.parent_of is parent -> self;
 relationship.sibling_of is self -> sibling; relationship.has_pet is self ->
 pet. A deceased pet remains pet:deceased and distinct from current pets. For a
 pet-name correction use pet:corrected_name_subject, not pet:current:N.
+Every residence.lives_at observation must reference an explicit place entity
+mention grounded in the same source; never emit an unresolved entity reference.
 
 Use occupation.works_as for a directly reported professional/vocational role
 such as becoming a personal trainer even when the user says it is not current
@@ -303,6 +309,9 @@ and add sensitive_manual_review. If both occur, emit separate observations for
 the uncertain label and the directly described symptoms. A malformed or
 suspiciously transcribed proper noun/API/credential phrase requires
 ambiguous_transcription instead of a guess, including in question-only turns.
+An explicitly planned health or veterinary procedure uses
+health.user_reported_observation with planned modality and planned_time. It is
+supportive context and must never be represented as a completed occurrence.
 
 If a source only asks about nutrition/training/other structured data and states
 no new value, return question_only without structured_domain. For timeless
@@ -467,6 +476,32 @@ def normalize_explicit_project_requirement(
         "reason_codes": ["explicit_project_commitment"],
     }
     return True
+
+
+def normalize_canonical_relationship_direction(
+    observations: list[dict[str, Any]], entities: dict[str, dict[str, Any]]
+) -> bool:
+    changed = False
+    for item in observations:
+        if item["predicate"] != "relationship.sibling_of":
+            continue
+        obj = item["object"]
+        if obj["kind"] != "entity":
+            continue
+        subject = entities.get(item["subject_entity_ref"])
+        target = entities.get(obj["entity_ref"])
+        if (
+            subject is not None
+            and target is not None
+            and subject["entity_type"] == "person"
+            and target["entity_type"] == "self"
+        ):
+            item["subject_entity_ref"], obj["entity_ref"] = (
+                obj["entity_ref"],
+                item["subject_entity_ref"],
+            )
+            changed = True
+    return changed
 
 
 def validate_reason_codes(values: list[str], field: str) -> None:
@@ -689,6 +724,9 @@ def enrich_packet(
     normalized_project_requirement = normalize_explicit_project_requirement(
         raw["observations"], text
     )
+    normalized_relationship_direction = normalize_canonical_relationship_direction(
+        raw["observations"], entities
+    )
     for observation in raw["observations"]:
         ref = observation["observation_ref"]
         try:
@@ -859,6 +897,8 @@ def enrich_packet(
         packet_findings.append("invalid_model_reason_code_normalized")
     if normalized_project_requirement:
         packet_findings.append("explicit_project_requirement_normalized")
+    if normalized_relationship_direction:
+        packet_findings.append("canonical_relationship_direction_normalized")
     packet = {
         "contract_version": CONTRACT_VERSION,
         "source_envelope": {
@@ -896,6 +936,12 @@ def outcome(packet: dict[str, Any]) -> str:
         if deferrals & {"ambiguous_transcription", "context_missing", "transient_state"}:
             return "mixed"
         return "extract"
+    if "transient_state" in deferrals and not deferrals - {
+        "question_only",
+        "transient_state",
+        "context_missing",
+    }:
+        return "no_observation"
     if deferrals - {"question_only", "transient_state"}:
         return "defer_all"
     return "no_observation"

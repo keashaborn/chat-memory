@@ -10,6 +10,7 @@ from scripts.memory_v1_relational_v5_live_eval import (
     enforce_temporal_authority,
     enrich_packet,
     evaluate_case,
+    normalize_canonical_relationship_direction,
     normalize_explicit_project_requirement,
     outcome,
     source_span,
@@ -220,6 +221,46 @@ class V5LiveEvalTest(unittest.TestCase):
         self.assertEqual(outcome(packet), "no_observation")
         packet["deferrals"][1]["memory_shape"] = "project_knowledge"
         self.assertEqual(outcome(packet), "defer_all")
+
+    def test_transient_question_ignores_non_authoritative_context_deferral(self) -> None:
+        packet = {
+            "observations": [],
+            "deferrals": [
+                {"reason_code": "question_only", "memory_shape": "none"},
+                {"reason_code": "transient_state", "memory_shape": "none"},
+                {"reason_code": "context_missing", "memory_shape": "none"},
+            ],
+        }
+        self.assertEqual(outcome(packet), "no_observation")
+
+    def test_sibling_direction_is_canonicalized_self_to_person(self) -> None:
+        entities = {
+            "e01": {"entity_type": "self"},
+            "e02": {"entity_type": "person"},
+        }
+        observations = [
+            {
+                "predicate": "relationship.sibling_of",
+                "subject_entity_ref": "e02",
+                "object": {"kind": "entity", "entity_ref": "e01"},
+            }
+        ]
+        self.assertTrue(
+            normalize_canonical_relationship_direction(observations, entities)
+        )
+        self.assertEqual(observations[0]["subject_entity_ref"], "e01")
+        self.assertEqual(observations[0]["object"]["entity_ref"], "e02")
+
+    def test_registry_supports_owner_relationships_and_planned_health(self) -> None:
+        rows = {item["predicate"]: item for item in self.registry["predicates"]}
+        parent_contract = self.registry["object_contracts"][
+            rows["relationship.parent_of"]["object_contract"]
+        ]
+        self.assertIn("self", parent_contract["entity_types"])
+        self.assertIn("self", rows["relationship.sibling_of"]["subject_entity_types"])
+        health = rows["health.user_reported_observation"]
+        self.assertIn("planned", health["modalities"])
+        self.assertIn("planned_time", health["temporal_semantics"])
 
     def test_correction_authority_adds_unresolved_relations_and_role(self) -> None:
         payload = self.correction_packet().model_dump(mode="json")

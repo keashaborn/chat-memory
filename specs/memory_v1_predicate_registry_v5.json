@@ -17,6 +17,10 @@
       "kind": "entity",
       "entity_types": ["person"]
     },
+    "entity.person_or_self": {
+      "kind": "entity",
+      "entity_types": ["person", "self"]
+    },
     "entity.place": {
       "kind": "entity",
       "entity_types": ["place"]
@@ -170,13 +174,13 @@
       "object_contract": "literal.health_text",
       "cardinality": "many",
       "relation_semantics": "property",
-      "temporal_semantics": ["observation_time", "state_validity"],
-      "modalities": ["negated", "reported_observation", "uncertain"],
+      "temporal_semantics": ["observation_time", "planned_time", "state_validity"],
+      "modalities": ["negated", "planned", "reported_observation", "uncertain"],
       "projection_classes": ["supportive_context"],
       "sensitivity_floor": "high",
       "surface_policies": ["explicit_recall_only", "mention_when_directly_relevant"],
       "manual_review_rules": ["health_content", "third_party_health_content"],
-      "description": "A health-related observation attributed to the user's report, not medical truth."
+      "description": "A health-related observation or not-yet-completed health plan attributed to the user's report, not medical truth."
     },
     {
       "predicate": "health.user_reported_uncertain_label",
@@ -447,7 +451,7 @@
     {
       "predicate": "relationship.parent_of",
       "subject_entity_types": ["person"],
-      "object_contract": "entity.person",
+      "object_contract": "entity.person_or_self",
       "cardinality": "many",
       "relation_semantics": "directed",
       "temporal_semantics": ["state_validity"],
@@ -460,7 +464,7 @@
     },
     {
       "predicate": "relationship.sibling_of",
-      "subject_entity_types": ["person"],
+      "subject_entity_types": ["person", "self"],
       "object_contract": "entity.person",
       "cardinality": "many",
       "relation_semantics": "symmetric",
