@@ -58,6 +58,9 @@ UNCERTAINTY_RE = re.compile(
     r"\b(?:i\s+think|i\s+believe|maybe|possibly|probably|not\s+sure)\b",
     re.IGNORECASE,
 )
+REPEATED_SIBLING_ROLE_RE = re.compile(
+    r"^(family:(?:sister|brother|sibling))(?::[1-9][0-9]*)?$"
+)
 
 
 class PassAttemptAudit(StrictModel):
@@ -297,6 +300,67 @@ def normalize_redundant_source_spans(packet: PacketT, text: str) -> PacketT:
     if pruned:
         _append_server_finding(normalized, "redundant_invalid_source_spans_pruned")
     return normalized
+
+
+def normalize_repeated_sibling_roles(
+    packet: EntityGraphPassPacket, text: str
+) -> EntityGraphPassPacket:
+    self_entity_refs = {
+        entity.entity_ref
+        for entity in packet.entity_mentions
+        if entity.entity_type == "self"
+        and entity.mention_kind == "self_reference"
+        and entity.relationship_role == "user:self"
+    }
+    linked_siblings = {
+        item.object.entity_ref
+        for item in packet.relationship_observations
+        if item.predicate == "relationship.sibling_of"
+        and item.subject_entity_ref in self_entity_refs
+        and item.object.kind == "entity"
+    }
+    groups: dict[str, list[Any]] = {}
+    for entity in packet.entity_mentions:
+        role = str(entity.relationship_role or "")
+        match = REPEATED_SIBLING_ROLE_RE.fullmatch(role)
+        if (
+            match is None
+            or entity.entity_type != "person"
+            or entity.entity_ref not in linked_siblings
+        ):
+            continue
+        groups.setdefault(match.group(1), []).append(entity)
+
+    changed = False
+    for base_role, entities in groups.items():
+        if len(entities) < 2:
+            continue
+        positioned: list[tuple[int, Any]] = []
+        for entity in entities:
+            starts: list[int] = []
+            for raw_span in entity.source_spans:
+                try:
+                    trusted = source_span(raw_span.model_dump(mode="json"), text)
+                except Exception:
+                    continue
+                starts.append(int(trusted["start"]))
+            if not starts:
+                positioned = []
+                break
+            positioned.append((min(starts), entity))
+        if len(positioned) != len(entities):
+            continue
+        source_positions = [start for start, _ in positioned]
+        if len(source_positions) != len(set(source_positions)):
+            continue
+        for ordinal, (_, entity) in enumerate(sorted(positioned), 1):
+            normalized_role = f"{base_role}:{ordinal}"
+            if entity.relationship_role != normalized_role:
+                entity.relationship_role = normalized_role
+                changed = True
+    if changed:
+        _append_server_finding(packet, "repeated_sibling_roles_source_ordered")
+    return packet
 
 
 def normalize_explicit_pet_name_correction_graph(
@@ -975,6 +1039,7 @@ async def run_specialized_zero_write(
         normalizer=lambda packet: normalize_redundant_source_spans(packet, text),
         attempts=attempts,
     )
+    graph = normalize_repeated_sibling_roles(graph, text)
     correction = normalize_explicit_pet_name_correction_graph(graph, text)
     catalog = entity_catalog(graph)
 

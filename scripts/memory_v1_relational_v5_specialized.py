@@ -48,6 +48,9 @@ grounded in I, me, my, mine, or myself, use mention_kind=self_reference, and use
 relationship_role=user:self; we, you, they, and they're are not self mentions.
 Declare an explicitly corrected pet-name subject as an animal with role
 pet:corrected_name_subject.
+For repeated same-type siblings, use family:sister:N, family:brother:N, or
+family:sibling:N in source order. The server revalidates that ordering from
+exact source spans.
 Every referenced entity must be declared in this packet. Use parent -> self,
 self -> sibling, and person/animal -> place directions exactly. Do not infer
 names, places, relationships, dates, owner identity, or durable IDs.

@@ -25,6 +25,7 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     normalize_explicit_pet_name_correction_content,
     normalize_explicit_pet_name_correction_graph,
     normalize_project_current_state_temporal,
+    normalize_repeated_sibling_roles,
     normalize_redundant_source_spans,
     normalize_uncertain_credential_deferral,
     run_specialized_zero_write,
@@ -83,6 +84,91 @@ def graph_packet(*, invalid_project: bool = False) -> EntityGraphPassPacket:
             self_entity(entity_type="project" if invalid_project else "self")
         ],
         relationship_observations=[],
+        deferrals=[],
+        packet_findings=[],
+    )
+
+
+def sibling_graph_packet(
+    source: str, names: list[str], *, shared_entity_span: bool = False
+) -> EntityGraphPassPacket:
+    mentions = [
+        EntityMention.model_validate(
+            {
+                "entity_ref": "e01",
+                "entity_type": "self",
+                "mention_kind": "self_reference",
+                "name_text": None,
+                "relationship_role": "user:self",
+                "source_spans": [
+                    {"start": source.index("I"), "end": source.index("I") + 1, "quote": "I"}
+                ],
+                "extraction_confidence": 0.99,
+                "reason_codes": ["grounded_self_reference"],
+            }
+        )
+    ]
+    observations: list[Observation] = []
+    shared_start = source.index("sisters") if "sisters" in source else -1
+    for ordinal, name in enumerate(names, 2):
+        name_start = source.index(name)
+        entity_span = (
+            {
+                "start": shared_start,
+                "end": shared_start + len("sisters"),
+                "quote": "sisters",
+            }
+            if shared_entity_span
+            else {
+                "start": name_start,
+                "end": name_start + len(name),
+                "quote": name,
+            }
+        )
+        mentions.append(
+            EntityMention.model_validate(
+                {
+                    "entity_ref": f"e{ordinal:02d}",
+                    "entity_type": "person",
+                    "mention_kind": "named",
+                    "name_text": name,
+                    "relationship_role": "family:sister",
+                    "source_spans": [entity_span],
+                    "extraction_confidence": 0.95,
+                    "reason_codes": ["named_sibling"],
+                }
+            )
+        )
+        state_temporal = temporal()
+        state_temporal["semantic"] = "state_validity"
+        observations.append(
+            Observation.model_validate(
+                {
+                    "observation_ref": f"o{ordinal - 1:02d}",
+                    "subject_entity_ref": "e01",
+                    "predicate": "relationship.sibling_of",
+                    "object": {"kind": "entity", "entity_ref": f"e{ordinal:02d}"},
+                    "polarity": "affirmed",
+                    "modality": "asserted",
+                    "projection_class": "direct_claim",
+                    "surface_policy": "direct_or_relevant",
+                    "temporal": state_temporal,
+                    "sensitivity": "medium",
+                    "extraction_confidence": 0.95,
+                    "source_spans": [
+                        {
+                            "start": name_start,
+                            "end": name_start + len(name),
+                            "quote": name,
+                        }
+                    ],
+                    "reason_codes": ["direct_sibling_relationship"],
+                }
+            )
+        )
+    return EntityGraphPassPacket(
+        entity_mentions=mentions,
+        relationship_observations=observations,
         deferrals=[],
         packet_findings=[],
     )
@@ -223,6 +309,85 @@ def run(fake_client, *, registry: dict | None = None):
 
 
 class SpecializedV5OrchestrationTest(unittest.TestCase):
+    def test_repeated_sibling_roles_are_numbered_by_exact_source_order(self) -> None:
+        text = "I have three sisters, Cindy one year older Lori and Heidi."
+        packet = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
+        normalized = normalize_repeated_sibling_roles(packet, text)
+        self.assertEqual(
+            [item.relationship_role for item in normalized.entity_mentions[1:]],
+            ["family:sister:1", "family:sister:2", "family:sister:3"],
+        )
+        self.assertIn(
+            "repeated_sibling_roles_source_ordered", normalized.packet_findings
+        )
+
+    def test_sibling_numbering_fails_closed_without_distinct_source_positions(self) -> None:
+        text = "I have three sisters, Cindy and Lori."
+        packet = sibling_graph_packet(
+            text, ["Cindy", "Lori"], shared_entity_span=True
+        )
+        normalized = normalize_repeated_sibling_roles(packet, text)
+        self.assertEqual(
+            [item.relationship_role for item in normalized.entity_mentions[1:]],
+            ["family:sister", "family:sister"],
+        )
+        self.assertNotIn(
+            "repeated_sibling_roles_source_ordered", normalized.packet_findings
+        )
+
+        single_text = "I have a sister, Cindy."
+        single = sibling_graph_packet(single_text, ["Cindy"])
+        normalize_repeated_sibling_roles(single, single_text)
+        self.assertEqual(single.entity_mentions[1].relationship_role, "family:sister")
+
+    def test_sibling_numbering_requires_user_self_relationships(self) -> None:
+        text = "I know sisters Cindy and Lori."
+        packet = sibling_graph_packet(text, ["Cindy", "Lori"])
+        packet.relationship_observations[0].subject_entity_ref = "e03"
+        packet.relationship_observations[1].subject_entity_ref = "e02"
+        normalized = normalize_repeated_sibling_roles(packet, text)
+        self.assertEqual(
+            [item.relationship_role for item in normalized.entity_mentions[1:]],
+            ["family:sister", "family:sister"],
+        )
+        self.assertNotIn(
+            "repeated_sibling_roles_source_ordered", normalized.packet_findings
+        )
+
+    def test_sibling_source_order_normalization_runs_in_three_pass_pipeline(self) -> None:
+        text = "I have three sisters, Cindy one year older Lori and Heidi."
+        graph = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
+        content = TemporalContentPassPacket(
+            observations=[], comparison_hints=[], deferrals=[], packet_findings=[]
+        )
+        project = ProjectKnowledgePassPacket(
+            observations=[], deferrals=[], packet_findings=[]
+        )
+        fake_client, responses = client(
+            [response(graph), response(content), response(project)]
+        )
+        result = asyncio.run(
+            run_specialized_zero_write(
+                fake_client,
+                model="gpt-synthetic",
+                owner_user_id=OWNER,
+                source_external_id=SOURCE_ID,
+                source_recorded_at=OBSERVED_AT,
+                text=text,
+                registry=checked_in_registry(),
+            )
+        )
+        self.assertEqual(len(responses.calls), 3)
+        sibling_roles = [
+            item.relationship_role
+            for item in result.packet.entity_mentions
+            if str(item.relationship_role or "").startswith("family:sister")
+        ]
+        self.assertEqual(
+            sibling_roles,
+            ["family:sister:1", "family:sister:2", "family:sister:3"],
+        )
+
     def test_redundant_invalid_span_is_pruned_only_when_valid_span_remains(self) -> None:
         packet = graph_packet()
         packet.entity_mentions[0].source_spans.append(

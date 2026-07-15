@@ -321,3 +321,19 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No relation changed. No additional external evaluation, staging, persistence,
 or retrieval activation is authorized by this result.
+
+## Offline repeated-sibling normalization
+
+Repeated same-type sibling roles are now normalized deterministically from
+validated source-local graph output. The rule applies only to named person
+entities that are objects of `relationship.sibling_of` observations from the
+validated `user:self` entity. At least two entities must share the same base
+role (`family:sister`, `family:brother`, or `family:sibling`), and each must
+have a distinct exact source position. The server then assigns `:1`, `:2`, and
+subsequent ordinals in source order, replacing any model-proposed ordinals.
+
+Single siblings, mixed sibling types, missing/invalid spans, tied source
+positions, and sibling relationships not rooted at `user:self` remain
+unchanged. The normalizer is zero-write and runtime-inactive. This offline
+change authorizes no external evaluation, staging, persistence, projection, or
+retrieval activation.
