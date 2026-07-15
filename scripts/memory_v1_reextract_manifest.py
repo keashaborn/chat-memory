@@ -103,7 +103,7 @@ async def verify_sources(
                 "source_external_id": str(source_id),
                 "source_sha256": actual,
                 "source_recorded_at": row["created_at"].isoformat(),
-                "v2_job_exists": bool(existing),
+                "pipeline_job_exists": bool(existing),
             }
         )
     return output
