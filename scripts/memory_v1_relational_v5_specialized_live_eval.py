@@ -118,15 +118,17 @@ def _load_selection(
         "memory_v1_relational_specialized_rerun_v1": 16,
         "memory_v1_relational_specialized_rerun_v2": 10,
         "memory_v1_relational_specialized_rerun_v3": 5,
+        "memory_v1_relational_specialized_rerun_v4": 5,
     }
     selection_version = payload["selection_version"]
     if selection_version not in selection_counts:
         raise RuntimeError("subset selection version mismatch")
-    expected_scope = (
-        "remaining_failed_cases_preflight_only_zero_call"
-        if selection_version == "memory_v1_relational_specialized_rerun_v3"
-        else "failed_cases_only_store_false_zero_write"
-    )
+    if selection_version == "memory_v1_relational_specialized_rerun_v3":
+        expected_scope = "remaining_failed_cases_preflight_only_zero_call"
+    elif selection_version == "memory_v1_relational_specialized_rerun_v4":
+        expected_scope = "remaining_failed_cases_store_false_zero_write"
+    else:
+        expected_scope = "failed_cases_only_store_false_zero_write"
     if payload["authorization_scope"] != expected_scope:
         raise RuntimeError("subset authorization scope mismatch")
     if payload["source_manifest_sha256"] != source_manifest_sha256:

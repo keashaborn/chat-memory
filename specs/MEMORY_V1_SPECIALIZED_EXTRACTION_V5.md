@@ -287,3 +287,12 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No relation changed. The exact-five manifest remains preflight-only; this result
 does not authorize an external rerun, staging, persistence, or retrieval use.
+
+## Authorized remaining-five external evaluation
+
+The separate version-4 selection binds the correction evaluator commit
+`c823dacbd34200f4841035e5cfea827eaa4df782`, the successful zero-call preflight
+report, the unchanged 25-case contract, and exactly `v5-03`, `v5-04`, `v5-10`,
+`v5-15`, and `v5-25` in manifest order. Its authorization permits one
+`store=false`, zero-write external evaluation. It does not permit staging,
+persistence, projection, retrieval activation, or another external rerun.
