@@ -1,0 +1,25 @@
+{
+  "schema_version": "memory_v1_review_manifest_v1",
+  "owner_user_id": "d839b4bc-0bd2-4f2d-aafe-0f3f75883db8",
+  "extractor": "memory_v1_consolidation",
+  "extractor_version": "20260714_v3",
+  "reviewer_ref": "codex:memory_v1_extraction_v3_d839b4bc_superseded_20260715",
+  "expected_counts": {
+    "claim_candidates": 5,
+    "preference_candidates": 2,
+    "project_candidates": 0
+  },
+  "predicate_registry": [],
+  "claim_candidates": [
+    {"candidate_id":"0c610933-4d98-44b8-b218-f54bd8884fcb","candidate_hash":"9c146d4cd971f5b653b3c20a798e5086602ee6d99c13c6f2d555afdcac58b159","decision":"reject","reason_codes":["superseded_extractor_version","noncanonical_predicate"],"rationale":"Superseded by V4 canonical name-correction extraction from the same hash-locked source."},
+    {"candidate_id":"1ec50c9b-f57b-4042-b5e5-7def439c98af","candidate_hash":"db2fcf98a567d98a645702eac6613d5fe1721112c930a1653525b98400029652","decision":"reject","reason_codes":["superseded_extractor_version","noncanonical_predicate"],"rationale":"Superseded by V4 canonical recurring-work extraction from the same hash-locked source."},
+    {"candidate_id":"480db75b-7bc5-4cb4-bbfa-22b1cc8c311a","candidate_hash":"f55d113844f58bf6226f534b5ea1928c24e0abdfafce978b6983747d64541249","decision":"reject","reason_codes":["superseded_extractor_version","noncanonical_predicate"],"rationale":"Superseded by V4 canonical animal-raising extraction from the same hash-locked source."},
+    {"candidate_id":"92c538ec-af3b-4609-8945-14831a6e9ba7","candidate_hash":"64d4a558d1b8b448c1f9ccdcc926af0a26d2f37c264a61ed9150c8bc615748a0","decision":"reject","reason_codes":["superseded_extractor_version"],"rationale":"Superseded by the complete V4 extraction from the same hash-locked source."},
+    {"candidate_id":"98806dc5-90d3-4768-a4da-60418d555727","candidate_hash":"5f496bd2ca35b33cab3580151befb845d76efc3876ab8c33cea3ed3cd2fc4790","decision":"reject","reason_codes":["superseded_extractor_version","noncanonical_predicate"],"rationale":"Superseded by V4 source-anchored alcohol cessation extraction using the governed predicate."}
+  ],
+  "preference_candidates": [
+    {"candidate_id":"a16ca22f-d13f-5557-a448-ffcb1333f0c3","candidate_hash":"4a0572d07d95d567aa9ff49fafbc487c2995b4a32ca8a0ef0816c64d834274e3","decision":"reject","reason_codes":["superseded_extractor_version","noncanonical_preference_domain"],"rationale":"Superseded by V4 life-preference extraction using the governed outdoors domain."},
+    {"candidate_id":"d83d7c3e-9587-5aca-a9ae-53e6cd898f02","candidate_hash":"a1c6051503c2e14c83c40766ce98bf6830c80eaeb83de52de4fa123528d6ae09","decision":"reject","reason_codes":["superseded_extractor_version"],"rationale":"Superseded by the complete V4 life-preference extraction from the same hash-locked source."}
+  ],
+  "project_candidates": []
+}
