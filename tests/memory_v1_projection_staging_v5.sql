@@ -861,9 +861,9 @@ BEGIN
      OR EXISTS (SELECT 1 FROM memory.projection_review)
      OR EXISTS (SELECT 1 FROM memory.projection_apply_event)
      OR EXISTS (SELECT 1 FROM memory.claim)
-     OR EXISTS (SELECT 1 FROM memory.user_preference)
-     OR EXISTS (SELECT 1 FROM memory.project_knowledge_head)
-     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision) THEN
+     OR EXISTS (SELECT 1 FROM memory.preference_head_v5)
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_head_v5)
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision_v5) THEN
     RAISE EXCEPTION 'valid projection plan produced unexpected rows';
   END IF;
 END

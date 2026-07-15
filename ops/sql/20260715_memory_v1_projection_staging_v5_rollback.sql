@@ -84,11 +84,11 @@ DROP TYPE IF EXISTS memory.projection_lane_v5;
 REVOKE SELECT ON
   memory.claim,
   memory.claim_revision,
-  memory.user_preference,
-  memory.preference_revision,
+  memory.preference_head_v5,
+  memory.preference_revision_v5,
   memory.project_space,
-  memory.project_knowledge_head,
-  memory.project_knowledge_revision
+  memory.project_knowledge_head_v5,
+  memory.project_knowledge_revision_v5
 FROM memory_v5_writer;
 
 COMMIT;

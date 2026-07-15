@@ -222,10 +222,14 @@ authorization.
 
 ## Implemented staging database shape
 
-The runtime-inactive staging migration adds these owner-scoped, forced-RLS
-structures:
+The runtime-inactive target and staging migrations add these owner-scoped,
+forced-RLS structures:
 
 ```text
+preference_head_v5
+preference_revision_v5
+project_knowledge_head_v5
+project_knowledge_revision_v5
 projection_plan
 projection_plan_item
 projection_plan_observation
@@ -238,6 +242,13 @@ projection_apply_event
 preference_revision_observation
 project_knowledge_revision_observation
 ```
+
+The V5 preference/project targets are deliberately separate from the older
+candidate-coupled durable tables. This preserves the seven reviewed legacy
+preferences and five reviewed legacy project revisions during re-extraction
+without importing their obsolete candidate/review foreign keys or incompatible
+polarity and knowledge-kind constraints. `memory.project_space` remains the
+trusted owner-scoped project registry.
 
 `claim_observation` already exists and remains the typed claim provenance link.
 All owner-scoped foreign keys include `owner_user_id`; the global predicate
@@ -300,9 +311,22 @@ Reusable current structures:
 
 - `memory.claim`, claim revisions/assessments/relations, and
   `memory.claim_observation`.
-- `memory.user_preference` and append-only preference revisions.
-- `memory.project_space`, project heads/revisions/relations.
+- `memory.project_space` as the trusted owner-scoped project registry.
 - `memory.projection_outbox` and owner-filtered Qdrant serving.
+
+Legacy cutover-only structures:
+
+- `memory.user_preference` and `memory.preference_revision`.
+- `memory.project_knowledge_head` and `memory.project_knowledge_revision`.
+- Their candidate/review/apply tables and evidence links.
+
+V5 durable targets:
+
+- `memory.preference_head_v5` and append-only
+  `memory.preference_revision_v5`.
+- `memory.project_knowledge_head_v5` and append-only
+  `memory.project_knowledge_revision_v5`.
+- Typed observation links created by the projection staging migration.
 
 Required changes before V5 activation:
 

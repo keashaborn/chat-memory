@@ -20,11 +20,11 @@ BEGIN
      OR to_regclass('memory.observation_entity_binding') IS NULL
      OR to_regclass('memory.claim') IS NULL
      OR to_regclass('memory.claim_revision') IS NULL
-     OR to_regclass('memory.user_preference') IS NULL
-     OR to_regclass('memory.preference_revision') IS NULL
+     OR to_regclass('memory.preference_head_v5') IS NULL
+     OR to_regclass('memory.preference_revision_v5') IS NULL
      OR to_regclass('memory.project_space') IS NULL
-     OR to_regclass('memory.project_knowledge_head') IS NULL
-     OR to_regclass('memory.project_knowledge_revision') IS NULL THEN
+     OR to_regclass('memory.project_knowledge_head_v5') IS NULL
+     OR to_regclass('memory.project_knowledge_revision_v5') IS NULL THEN
     RAISE EXCEPTION
       'V5 observation/writer and durable claim/preference/project schemas are required';
   END IF;
@@ -487,7 +487,7 @@ CREATE TABLE IF NOT EXISTS memory.projection_preference_payload (
     owner_user_id, plan_id, projection_ref, lane, target_action
   ) ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, target_preference_id)
-    REFERENCES memory.user_preference(owner_user_id, preference_id)
+    REFERENCES memory.preference_head_v5(owner_user_id, preference_id)
     ON DELETE RESTRICT,
   CHECK (lane = 'preference'),
   CHECK (preference_class IN ('life', 'response')),
@@ -544,7 +544,7 @@ CREATE TABLE IF NOT EXISTS memory.projection_project_payload (
     REFERENCES memory.project_space(owner_user_id, project_id)
     ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, project_id, target_knowledge_id)
-    REFERENCES memory.project_knowledge_head(
+    REFERENCES memory.project_knowledge_head_v5(
       owner_user_id, project_id, knowledge_id
     ) ON DELETE RESTRICT,
   CHECK (lane = 'project_knowledge'),
@@ -646,10 +646,10 @@ CREATE TABLE IF NOT EXISTS memory.projection_plan_relation (
   FOREIGN KEY (owner_user_id, target_claim_id)
     REFERENCES memory.claim(owner_user_id, claim_id) ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, target_preference_id)
-    REFERENCES memory.user_preference(owner_user_id, preference_id)
+    REFERENCES memory.preference_head_v5(owner_user_id, preference_id)
     ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, target_project_id, target_knowledge_id)
-    REFERENCES memory.project_knowledge_head(
+    REFERENCES memory.project_knowledge_head_v5(
       owner_user_id, project_id, knowledge_id
     ) ON DELETE RESTRICT,
   CHECK (parent_review_state = 'manual_review_required'),
@@ -761,11 +761,11 @@ CREATE TABLE IF NOT EXISTS memory.projection_apply_event (
     owner_user_id, claim_id, revision_number
   ) ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, resulting_preference_revision_id)
-    REFERENCES memory.preference_revision(owner_user_id, revision_id)
+    REFERENCES memory.preference_revision_v5(owner_user_id, revision_id)
     ON DELETE RESTRICT,
   FOREIGN KEY (
     owner_user_id, resulting_project_id, resulting_project_revision_id
-  ) REFERENCES memory.project_knowledge_revision(
+  ) REFERENCES memory.project_knowledge_revision_v5(
     owner_user_id, project_id, revision_id
   ) ON DELETE RESTRICT,
   CHECK (memory.v5_sha256_valid(apply_manifest_sha256)),
@@ -812,7 +812,7 @@ CREATE TABLE IF NOT EXISTS memory.preference_revision_observation (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (owner_user_id, revision_id, observation_id, stance),
   FOREIGN KEY (owner_user_id, revision_id)
-    REFERENCES memory.preference_revision(owner_user_id, revision_id)
+    REFERENCES memory.preference_revision_v5(owner_user_id, revision_id)
     ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, observation_id)
     REFERENCES memory.observation(owner_user_id, observation_id)
@@ -837,7 +837,7 @@ CREATE TABLE IF NOT EXISTS memory.project_knowledge_revision_observation (
     owner_user_id, project_id, revision_id, observation_id, stance
   ),
   FOREIGN KEY (owner_user_id, project_id, revision_id)
-    REFERENCES memory.project_knowledge_revision(
+    REFERENCES memory.project_knowledge_revision_v5(
       owner_user_id, project_id, revision_id
     ) ON DELETE RESTRICT,
   FOREIGN KEY (owner_user_id, observation_id)
@@ -1325,11 +1325,11 @@ TO memory_v5_writer;
 GRANT SELECT ON
   memory.claim,
   memory.claim_revision,
-  memory.user_preference,
-  memory.preference_revision,
+  memory.preference_head_v5,
+  memory.preference_revision_v5,
   memory.project_space,
-  memory.project_knowledge_head,
-  memory.project_knowledge_revision
+  memory.project_knowledge_head_v5,
+  memory.project_knowledge_revision_v5
 TO memory_v5_writer;
 
 REVOKE ALL ON FUNCTION memory.v5_canonical_json_text(jsonb)
