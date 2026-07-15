@@ -353,3 +353,34 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No external evaluation, staging, persistence, projection, or retrieval
 activation occurred.
+
+## Production visibility reconciliation and saved-packet replay
+
+The V5 production schema remained installed after recovery. A read through the
+application DSN initially appeared to show only the pre-V5 tables because
+PostgreSQL `information_schema.tables` exposes only objects visible to the
+current role. On the same PostgreSQL postmaster, the maintenance role sees 79
+`memory` tables, including all V5 objects; `brains_app` sees only its 46
+permitted tables. The V5 predicate registry contains all 44 contracts. This is
+the intended privilege boundary, not schema removal.
+
+Commit `efcd560ed4e381e802863beee42a70295620556a` added a hash-bound,
+owner-scoped replay path for archived `store=false` model packets and passed
+all 130 offline Memory V1 tests. It reloads the source under forced RLS,
+validates the saved report and source hashes, performs deterministic server
+normalization, reevaluates the locked case contract, and records before/after
+Postgres and Qdrant signatures. It constructs no model client and makes zero
+external model calls.
+
+The saved `v5-10` packet replay changed only the three repeated sibling roles
+from `family:sister` to `family:sister:1`, `family:sister:2`, and
+`family:sister:3`. The complete case contract then passed with no findings,
+deterministic rejections, or integrity errors. The mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-10-deterministic-sibling-replay-20260715T235705Z.json`
+has SHA-256
+`0d0452bd32fae4ce595742bb1e2b928793f333ef55eaf9fff53e039299e5b0d8`.
+
+The replay zero-write proof passed. All 47 database relations retained SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
