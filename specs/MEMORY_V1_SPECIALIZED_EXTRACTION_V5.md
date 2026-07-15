@@ -42,6 +42,13 @@ The server injects the source envelope, validates exact spans, assigns the
 unresolved project reference, namespaces observation references, validates
 predicate/object/temporal contracts, and constructs the existing V5 packet.
 
+The API orchestration is dependency-injected and zero-write. It hashes owner
+identity into `safety_identifier`, hashes source identity into non-reversible
+metadata, sends `store=false`, and never places the owner UUID or raw source ID
+in instructions, input, metadata, or audit output. Empty source text makes zero
+API calls. Each non-empty source runs the passes sequentially; only the temporal
+content pass receives the validated source-local entity catalog.
+
 ## Deterministic assembly invariants
 
 - Entity references must resolve to the validated entity-graph catalog.
@@ -63,6 +70,13 @@ contains deterministic error categories, never expected evaluation labels.
 The repaired pass is accepted only if deterministic rejection and integrity
 counts strictly improve. There is no third attempt.
 
+Completed status, parsed output, and output content are checked separately.
+Any refusal, incomplete response, missing parsed output, remaining validation
+error after the bounded repair, or assembly error fails the source closed. Audit
+rows retain response ID, pass, attempt, status, schema hash, validation reasons,
+quality, selection, model, and `store=false`; they exclude raw owner and source
+identifiers.
+
 ## Activation gate
 
 Before external live evaluation:
@@ -80,4 +94,3 @@ Before production staging:
 - repeatability and foreign-owner isolation runs must pass;
 - Postgres and Qdrant before/after hashes must remain identical;
 - staging/apply requires a separate production backup and authorization manifest.
-

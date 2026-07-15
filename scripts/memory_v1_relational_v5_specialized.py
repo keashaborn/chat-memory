@@ -40,6 +40,7 @@ project knowledge, attributes, health content, preferences, or corrections.
 Every referenced entity must be declared in this packet. Use parent -> self,
 self -> sibling, and person/animal -> place directions exactly. Do not infer
 names, places, relationships, dates, owner identity, or durable IDs.
+If the source has no graph content, return empty entity and observation lists.
 """.strip()
 
 
@@ -52,6 +53,7 @@ time distinctly. A planned personal or veterinary procedure is planned
 supportive context, never a completed event or structured-domain value. Do not
 invent dates, entity links, owner identity, project scope, durable IDs, approval,
 or salience.
+If the source has no compatible content, return empty observations and hints.
 """.strip()
 
 
@@ -62,6 +64,7 @@ question can coexist with a directly stated current project state. Do not emit
 personal facts, preferences, health content, owner identity, trusted project
 binding, durable IDs, approval, or salience. Project scope remains unresolved
 for deterministic server review.
+If the source has no project knowledge, return no project entity and no observations.
 """.strip()
 
 
