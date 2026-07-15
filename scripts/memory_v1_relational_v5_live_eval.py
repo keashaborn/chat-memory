@@ -57,6 +57,7 @@ class StrictModel(BaseModel):
 class SpanOffsets(StrictModel):
     start: int = Field(ge=0)
     end: int = Field(ge=1)
+    quote: str = Field(min_length=1, max_length=5000)
 
 
 class EntityMention(StrictModel):
@@ -258,8 +259,10 @@ Rules:
   unresolved corrects and supersedes comparison hints without target IDs.
 - Use only predicates listed in the supplied registry. If none fits, do not
   invent one; add unregistered_predicate.
-- start/end spans are Python Unicode character offsets into the exact source.
-  They must quote only supporting source content.
+- Every entity, observation, and deferral source span includes start, end, and
+  the exact verbatim quote from inside <record>. start/end are Python Unicode
+  character offsets into the exact source. Use globally unique sequential eNN
+  and oNN references. The server will reject or exact-match-recover bad offsets.
 - Relative or partial time remains explicit and precise: month expressions are
   calendar ranges, continuing states are open intervals, and planned events are
   not completed events. The trusted source time is supplied only as an anchor.
@@ -269,8 +272,16 @@ user:self; family:mother; family:father; family:sister:N in source order;
 pet:deceased; pet:current:N in source order; pet:corrected_name_subject;
 project:unresolved. Use a specific analogous role only when directly stated.
 
+If a source only asks about nutrition/training/other structured data and states
+no new value, return question_only without structured_domain. For timeless
+properties use observation_time with no guessed date; the server anchors it to
+the trusted source time. For a presently valid state use state_validity; the
+server creates the source-observation open interval. For an undated plan use
+planned_time without inventing a date. Context-free approval of unseen prior
+content requires both question_only when applicable and context_missing.
+
 For empty/non-memory input, return empty mentions/observations and the applicable
-deferral. Every reason code must be lowercase snake_case.
+deferral. Every reason code and packet finding must be lowercase snake_case.
 """.strip()
 
 
@@ -332,8 +343,26 @@ def registry_prompt(registry: dict[str, Any]) -> str:
 def source_span(span: dict[str, Any], text: str) -> dict[str, Any]:
     start = int(span["start"])
     end = int(span["end"])
-    if start < 0 or end <= start or end > len(text):
-        raise ValueError(f"invalid source span {start}:{end} for {len(text)} characters")
+    if "span_sha256" in span:
+        if start < 0 or end <= start or end > len(text):
+            raise ValueError(f"invalid trusted source span {start}:{end}")
+        actual = sha256_text(text[start:end])
+        if actual != span["span_sha256"]:
+            raise ValueError("trusted source span hash mismatch")
+        return {"start": start, "end": end, "span_sha256": actual}
+    quote = str(span.get("quote") or "")
+    if not quote:
+        raise ValueError("source span quote is required")
+    if start < 0 or end <= start or end > len(text) or text[start:end] != quote:
+        offsets: list[int] = []
+        offset = text.find(quote)
+        while offset >= 0:
+            offsets.append(offset)
+            offset = text.find(quote, offset + 1)
+        if len(offsets) != 1:
+            raise ValueError("source span quote is not an exact unique source substring")
+        start = offsets[0]
+        end = start + len(quote)
     return {"start": start, "end": end, "span_sha256": sha256_text(text[start:end])}
 
 
@@ -349,15 +378,58 @@ def validate_reason_codes(values: list[str], field: str) -> None:
         raise ValueError(f"{field} contains invalid reason codes")
 
 
+def sanitize_reason_codes(values: list[str], fallback: str) -> tuple[list[str], bool]:
+    output = sorted({value for value in values if REASON_CODE_RE.fullmatch(value)})
+    changed = len(output) != len(values)
+    if not output:
+        output = [fallback]
+        changed = True
+    return output, changed
+
+
 def enforce_temporal_authority(
     temporal: dict[str, Any], source_recorded_at: str
 ) -> None:
-    if temporal["source_form"] != "implicit_source_time":
-        return
     parsed = datetime.fromisoformat(source_recorded_at.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("trusted source timestamp is not timezone-aware")
     trusted = parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if temporal["shape"] == "none" and temporal["semantic"] == "observation_time":
+        temporal.update(
+            {
+                "shape": "instant",
+                "basis": "instant",
+                "source_form": "implicit_source_time",
+                "certainty": "exact",
+                "precision": "exact",
+                "instant": trusted,
+                "calendar_range": None,
+                "instant_range": None,
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": True,
+            }
+        )
+        return
+    if temporal["shape"] == "none" and temporal["semantic"] == "state_validity":
+        temporal.update(
+            {
+                "shape": "open_interval",
+                "basis": "instant",
+                "source_form": "implicit_source_time",
+                "certainty": "exact",
+                "precision": "exact",
+                "instant": None,
+                "calendar_range": None,
+                "instant_range": {"lower": trusted, "upper": None, "bounds": "[)"},
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": True,
+            }
+        )
+        return
+    if temporal["source_form"] != "implicit_source_time":
+        return
     temporal["anchored_to_source_time"] = True
     if temporal["shape"] == "instant" and temporal["basis"] == "instant":
         temporal["instant"] = trusted
@@ -426,7 +498,7 @@ def validate_temporal(temporal: dict[str, Any]) -> list[str]:
         if temporal[key] is not None
     ]
     if temporal["shape"] == "none":
-        if populated or temporal["basis"] != "none" or temporal["semantic"] != "none":
+        if populated or temporal["basis"] != "none":
             errors.append("temporal none shape is inconsistent")
     elif len(populated) != 1:
         errors.append("temporal must contain exactly one compatible value")
@@ -482,12 +554,16 @@ def enrich_packet(
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     raw = model_packet.model_dump(mode="json")
     rejections: list[dict[str, str]] = []
+    normalized_reason_codes = False
     mentions: list[dict[str, Any]] = []
     for mention in raw["entity_mentions"]:
         try:
             if any(item["entity_ref"] == mention["entity_ref"] for item in mentions):
                 raise ValueError("duplicate entity_ref")
-            validate_reason_codes(mention["reason_codes"], "entity mention")
+            mention["reason_codes"], changed = sanitize_reason_codes(
+                mention["reason_codes"], "model_reason_code_normalized"
+            )
+            normalized_reason_codes = normalized_reason_codes or changed
             if mention["mention_kind"] == "named" and not mention["name_text"]:
                 raise ValueError("named entity mention requires name_text")
             if mention["entity_type"] == "self" and mention["relationship_role"] != "user:self":
@@ -505,7 +581,10 @@ def enrich_packet(
         try:
             if any(item["observation_ref"] == ref for item in observations):
                 raise ValueError("duplicate observation_ref")
-            validate_reason_codes(observation["reason_codes"], "observation")
+            observation["reason_codes"], changed = sanitize_reason_codes(
+                observation["reason_codes"], "model_reason_code_normalized"
+            )
+            normalized_reason_codes = normalized_reason_codes or changed
             observation["source_spans"] = normalize_spans(observation["source_spans"], text)
             if observation["subject_entity_ref"] not in entities:
                 raise ValueError("subject_entity_ref is unresolved inside packet")
@@ -516,7 +595,11 @@ def enrich_packet(
                         "reason_code": "unregistered_predicate",
                         "memory_shape": observation["projection_class"],
                         "source_spans": [
-                            {"start": item["start"], "end": item["end"]}
+                            {
+                                "start": item["start"],
+                                "end": item["end"],
+                                "quote": text[item["start"] : item["end"]],
+                            }
                             for item in observation["source_spans"]
                         ],
                         "sensitivity": observation["sensitivity"],
@@ -566,7 +649,10 @@ def enrich_packet(
     observation_refs = {item["observation_ref"] for item in observations}
     comparisons: list[dict[str, Any]] = []
     for hint in raw["comparison_hints"]:
-        validate_reason_codes(hint["reason_codes"], "comparison hint")
+        hint["reason_codes"], changed = sanitize_reason_codes(
+            hint["reason_codes"], "model_reason_code_normalized"
+        )
+        normalized_reason_codes = normalized_reason_codes or changed
         if hint["observation_ref"] not in observation_refs:
             rejections.append(
                 {"kind": "comparison_hint", "ref": hint["observation_ref"], "reason": "observation_ref was rejected"}
@@ -599,7 +685,13 @@ def enrich_packet(
         for item in normalized_deferrals:
             if item["reason_code"] == "project_scope_unresolved":
                 item["review_required"] = True
-    validate_reason_codes(raw["packet_findings"], "packet findings")
+    packet_findings = sorted(
+        {value for value in raw["packet_findings"] if REASON_CODE_RE.fullmatch(value)}
+    )
+    if len(packet_findings) != len(raw["packet_findings"]):
+        packet_findings.append("invalid_model_finding_normalized")
+    if normalized_reason_codes:
+        packet_findings.append("invalid_model_reason_code_normalized")
     packet = {
         "contract_version": CONTRACT_VERSION,
         "source_envelope": {
@@ -614,7 +706,9 @@ def enrich_packet(
         "observations": observations,
         "comparison_hints": comparisons,
         "deferrals": normalized_deferrals,
-        "packet_findings": sorted(set(raw["packet_findings"] + (["deterministic_rejection"] if rejections else []))),
+        "packet_findings": sorted(
+            set(packet_findings + (["deterministic_rejection"] if rejections else []))
+        ),
     }
     return packet, rejections
 
@@ -818,6 +912,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "source_sha256": manifest_source["source_sha256"],
             "source_chars": len(text),
         }
+        model_packet: ModelPacket | None = None
+        response_id: str | None = None
         try:
             model_packet, response_id = await call_model(
                 client,
@@ -837,6 +933,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             row.update(
                 {
                     "model_response_id": response_id,
+                    "model_packet": model_packet.model_dump(mode="json"),
                     "packet": packet,
                     "deterministic_rejections": rejections,
                     "evaluation": evaluation,
@@ -846,11 +943,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             row.update(
                 {
                     "model_response_id": None,
+                    "model_packet": (
+                        model_packet.model_dump(mode="json")
+                        if model_packet is not None
+                        else None
+                    ),
                     "packet": None,
                     "deterministic_rejections": [],
                     "evaluation": {"passed": False, "findings": [f"extractor_error:{type(exc).__name__}:{exc}"]},
                 }
             )
+            row["model_response_id"] = response_id
         reports.append(row)
     qdrant = make_qdrant_client(url=qdrant_url, timeout=30.0)
     try:

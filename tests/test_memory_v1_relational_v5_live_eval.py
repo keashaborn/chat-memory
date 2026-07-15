@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
-from datetime import datetime
 from pathlib import Path
 
 from scripts.memory_v1_relational_v5_live_eval import (
@@ -16,18 +15,18 @@ from scripts.memory_v1_relational_v5_live_eval import (
 def temporal_observation() -> dict:
     return {
         "semantic": "observation_time",
-        "shape": "instant",
-        "basis": "instant",
-        "source_form": "implicit_source_time",
-        "certainty": "exact",
-        "precision": "exact",
-        "instant": datetime.fromisoformat("2001-01-01T00:00:00+00:00"),
+        "shape": "none",
+        "basis": "none",
+        "source_form": "none",
+        "certainty": "unknown",
+        "precision": "unknown",
+        "instant": None,
         "calendar_range": None,
         "instant_range": None,
         "relative_offset": None,
         "recurrence": None,
-        "anchored_to_source_time": True,
-        "reason_codes": ["anchored_to_evidence_observed_at"],
+        "anchored_to_source_time": False,
+        "reason_codes": [],
     }
 
 
@@ -55,7 +54,9 @@ class V5LiveEvalTest(unittest.TestCase):
                         "mention_kind": "named",
                         "name_text": "Koda",
                         "relationship_role": "pet:corrected_name_subject",
-                        "source_spans": [{"start": 0, "end": len(self.text)}],
+                        "source_spans": [
+                            {"start": 0, "end": len(self.text) + 4, "quote": self.text}
+                        ],
                         "extraction_confidence": 0.99,
                         "reason_codes": ["explicit_name_correction"],
                     }
@@ -79,7 +80,9 @@ class V5LiveEvalTest(unittest.TestCase):
                         "temporal": temporal_observation(),
                         "sensitivity": "medium",
                         "extraction_confidence": 0.99,
-                        "source_spans": [{"start": 0, "end": len(self.text)}],
+                        "source_spans": [
+                            {"start": 0, "end": len(self.text) + 4, "quote": self.text}
+                        ],
                         "reason_codes": ["explicit_name_correction"],
                     }
                 ],
@@ -136,6 +139,19 @@ class V5LiveEvalTest(unittest.TestCase):
         self.assertEqual(packet["observations"], [])
         self.assertTrue(any(item["reason_code"] == "unregistered_predicate" for item in packet["deferrals"]))
         self.assertTrue(any("not in the extraction-enabled" in item["reason"] for item in rejections))
+
+    def test_invalid_diagnostic_code_does_not_discard_semantic_packet(self) -> None:
+        payload = self.correction_packet().model_dump(mode="json")
+        payload["packet_findings"] = ["Not snake case"]
+        packet, rejections = enrich_packet(
+            ModelPacket.model_validate(payload),
+            source=self.source,
+            text=self.text,
+            registry=self.registry,
+        )
+        self.assertEqual(rejections, [])
+        self.assertEqual(len(packet["observations"]), 1)
+        self.assertIn("invalid_model_finding_normalized", packet["packet_findings"])
 
     def test_case_evaluator_detects_required_correction_semantics(self) -> None:
         packet, _ = enrich_packet(
