@@ -1,0 +1,43 @@
+{
+  "schema_version": "memory_v1_review_manifest_v1",
+  "owner_user_id": "557ea042-cb82-48f8-9429-472e96c957ef",
+  "extractor": "memory_v1_consolidation",
+  "extractor_version": "20260714_v3",
+  "reviewer_ref": "codex:memory_v1_extraction_v3_precision_review_20260714",
+  "expected_counts": {
+    "claim_candidates": 18,
+    "preference_candidates": 2,
+    "project_candidates": 0
+  },
+  "predicate_registry": [
+    {"predicate":"stopped_alcohol_use","object_kind":"literal","cardinality":"many","description":"User self-reported cessation of alcohol use with an anchored date"},
+    {"predicate":"spends_time_on","object_kind":"literal","cardinality":"many","description":"User self-reported recurring time spent using or working with an object"},
+    {"predicate":"does_activity","object_kind":"literal","cardinality":"many","description":"User self-reported recurring activity"},
+    {"predicate":"raises","object_kind":"literal","cardinality":"many","description":"User self-reported raising or husbandry of an animal type"}
+  ],
+  "claim_candidates": [
+    {"candidate_id":"1383c744-73aa-4693-b534-44ff497797fc","candidate_hash":"8379162d409907f8b07d58d8b5c2096d9348f5b191d6542ad04b6fce402280ea","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim 3d24af5a-6bfe-4f49-adfc-4898855b13d8."},
+    {"candidate_id":"1c01b017-efdb-444b-83d8-39bfe634e5b1","candidate_hash":"4d261b0317cc3019122136d4c5d6b6a9334ff4fd08cdcf5a75094a97fb064fcc","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by the durable child-name set claim 7696b006-c352-4aec-a3e3-796b760b6a05."},
+    {"candidate_id":"26ab7899-21f9-4129-87bb-cf92b9a82a87","candidate_hash":"ab2efe9a30d7334a771100555cdd161db2ba0db24b70ecec2856ff0fe2cf244f","decision":"reject","reason_codes":["later_evidence_conflicts","temporal_rewrite_required"],"rationale":"Later evidence says architecture has not been actively practiced for 15-20 years, so current work-location wording is misleading."},
+    {"candidate_id":"2c13a4f2-c44c-4932-852b-3fb91fe0971d","candidate_hash":"7f42c3322a130b2418bee30f0fddafc513f6f8929fe574dca78adfa1d06ad8ad","decision":"approve","reason_codes":["explicit","atomic","new_durable_activity"],"rationale":"Direct atomic ranch activity not covered by an existing durable claim."},
+    {"candidate_id":"39b45bca-a47a-4cda-b5d3-ed3baa7efc82","candidate_hash":"d92b153b2cfe8f73516880c32d2ea27808162267d2767fa6732ebc0499962539","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim 97d65bf0-597c-4945-9792-c882b3f5fc56."},
+    {"candidate_id":"3c173abb-0af8-4a63-a17d-75cabda9faa9","candidate_hash":"bcb1fb756f5b614698cf61336fa8d96059c6ac79343b41b5d6a9ffdf27a7f285","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim b474dd8c-85e7-485c-ac7b-279c03897edb."},
+    {"candidate_id":"3dee8688-d67a-4753-81ac-e0e5d0cd7a47","candidate_hash":"d656c2a9bd8572bd7cc9758ccf5e22e7a9e5c481938e16171f6d9ac77dd25bc4","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim ee01dce1-972e-4fa5-a32f-6a48cb97f185."},
+    {"candidate_id":"557bcec3-f3e7-44c3-811d-130782fd1c30","candidate_hash":"558c9ba6f9bdc5f5a24736c314079eabc4f818dd26d81134c324a026cd0122c9","decision":"reject","reason_codes":["later_evidence_qualifies","temporal_rewrite_required"],"rationale":"Architecture is stated as a profession but later evidence says it has not been actively practiced for 15-20 years; this present-tense wording is misleading."},
+    {"candidate_id":"57a9ad8d-e713-4d44-92e1-49a2e16d225d","candidate_hash":"3815359fef297e92f71c3236f0658bf12b06fb9213c48bde1a4e4f8b4e8ac33b","decision":"approve","reason_codes":["explicit","source_anchored_date","high_sensitivity","new_durable_event"],"rationale":"Direct self-report with source-authoritative approximate date 2026-06-30 and high-sensitivity handling."},
+    {"candidate_id":"642b38f6-9a88-438f-ab92-d078714f1fd9","candidate_hash":"c9cf83e362a50fa083f7fca336fddcd21c0140a272942567dccfc26584b0a685","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim f5d1861f-1554-483c-8e6f-4738cd0bcc16."},
+    {"candidate_id":"7384a1a5-ae74-46e6-9d9f-8fb264700b8a","candidate_hash":"8c11bedf3dfa9addb9faa5c0fb6726a4f4150031fbef51f2aa91d9d50c86fa61","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim 686b0b6f-2e51-495e-abc2-64c6b41d6932."},
+    {"candidate_id":"80e7734d-f374-4f61-8e1e-58621be6f4b0","candidate_hash":"5a5105bf7314dc92eb64a5c92c572133e0c7f9454b0b1ac88bf190732528c286","decision":"reject","reason_codes":["ambiguous_referent","rewrite_required"],"rationale":"The date is anchored, but 'that field' is not a durable named referent in the isolated source record."},
+    {"candidate_id":"87c40e56-2f85-458e-ae19-d2b32e3f1769","candidate_hash":"c26a6a3f8763d783c289d7c9318f1d2fd2a1e82a7071b55c5d29743f422b89f4","decision":"approve","reason_codes":["explicit","atomic","new_durable_activity"],"rationale":"Direct atomic tractor activity not covered by an existing durable claim."},
+    {"candidate_id":"a9aa55ae-6679-42bf-8225-9dff1feb997c","candidate_hash":"e4a61c322e0ef3d7c9e2b4507d86d5c13a2611f4982bcd8418cf3e495951da91","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by the durable child-name set claim 7696b006-c352-4aec-a3e3-796b760b6a05."},
+    {"candidate_id":"aecb32ca-9a15-45a1-a6af-2712528f84c7","candidate_hash":"730305f176924ae1369cc96157634917381eacb0958088658d1cd5ce59b6af3e","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim 00d3f592-05a9-49a4-9bab-d2d7f4a09919."},
+    {"candidate_id":"cb72975a-8965-4213-91de-8f6b76ca2e80","candidate_hash":"118f8c3b5dfe17923470f5761e4688a53e01308a989996351c63b0f80f0260dd","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by the durable child-name set claim 7696b006-c352-4aec-a3e3-796b760b6a05."},
+    {"candidate_id":"d08004a1-bf5c-45d9-b0ca-0c168a40224c","candidate_hash":"4df0f2dc294113c24c22fc987e50442888737eccb60656000bf0cd9add965999","decision":"reject","reason_codes":["subsumed_by_durable_claim"],"rationale":"Already covered by durable claim d5839aa4-2426-42a6-9b1a-8a65c026b9d4."},
+    {"candidate_id":"f3f29ec7-34e4-4bb6-a687-4c39366c1cfb","candidate_hash":"eaa7bb758ebdc8b4e25a16fe3bf7ccaf4484169a25b092749af82851e0b1e314","decision":"approve","reason_codes":["explicit","atomic","new_durable_activity"],"rationale":"Direct atomic farming activity not covered by an existing durable claim."}
+  ],
+  "preference_candidates": [
+    {"candidate_id":"3dc5143b-31ea-5b3a-8048-f77f205177fa","candidate_hash":"26b8e86d847fa75abac228c7951c44d749af07614870572ff0028387dd71b455","decision":"accept","reason_codes":["explicit_life_preference","correct_surface_policy"],"rationale":"Durable life preference; may be mentioned only when relevant and must not silently control response style."},
+    {"candidate_id":"9eec5587-7ce6-56ad-83fd-c82dac8de38b","candidate_hash":"103347f30458b07eee8dec05630e3ed301ad881ebc776054d1490e0aba289b43","decision":"accept","reason_codes":["explicit_life_preference","correct_surface_policy"],"rationale":"Explicit stable music preference correctly routed as life content with mention-when-relevant policy."}
+  ],
+  "project_candidates": []
+}

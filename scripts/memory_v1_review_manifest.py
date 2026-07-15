@@ -62,10 +62,31 @@ async def _preflight(
     claim_items = manifest.get("claim_candidates") or []
     preference_items = manifest.get("preference_candidates") or []
     project_items = manifest.get("project_candidates") or []
-    if project_items:
+    expected_counts = manifest.get("expected_counts") or {
+        "claim_candidates": 18,
+        "preference_candidates": 1,
+        "project_candidates": 0,
+    }
+    if set(expected_counts) != {
+        "claim_candidates",
+        "preference_candidates",
+        "project_candidates",
+    }:
+        raise RuntimeError("expected_counts does not match the review contract")
+    if project_items or expected_counts["project_candidates"] != 0:
         raise RuntimeError("this reviewed manifest must not contain project candidates")
-    if len(claim_items) != 18 or len(preference_items) != 1:
-        raise RuntimeError("expected exactly 18 claim and 1 preference candidates")
+    if (
+        len(claim_items) != expected_counts["claim_candidates"]
+        or len(preference_items) != expected_counts["preference_candidates"]
+    ):
+        raise RuntimeError("review candidate counts do not match expected_counts")
+    if any(item.get("decision") not in {"approve", "reject"} for item in claim_items):
+        raise RuntimeError("claim decisions must be approve or reject")
+    if any(
+        item.get("decision") not in {"accept", "rewrite", "reject", "defer", "split"}
+        for item in preference_items
+    ):
+        raise RuntimeError("invalid preference review decision")
 
     claim_rows = await conn.fetch(
         """
@@ -197,13 +218,20 @@ async def _preflight(
 
     approved = sum(item["decision"] == "approve" for item in claim_items)
     rejected = sum(item["decision"] == "reject" for item in claim_items)
+    preference_accepted = sum(
+        item["decision"] == "accept" for item in preference_items
+    )
+    preference_rejected = sum(
+        item["decision"] == "reject" for item in preference_items
+    )
     return {
         "owner_user_id": str(owner),
         "manifest_sha256": manifest_sha256,
         "claim_candidates": len(claim_items),
         "claim_approved": approved,
         "claim_rejected": rejected,
-        "preference_rejected": len(preference_items),
+        "preference_accepted": preference_accepted,
+        "preference_rejected": preference_rejected,
         "predicate_inserts_required": predicate_inserts,
         "status_changes_required": status_changes,
         "specialized_reviews_required": specialized_reviews,
