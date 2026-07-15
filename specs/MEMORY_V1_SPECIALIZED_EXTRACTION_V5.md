@@ -215,3 +215,36 @@ the ten cases that failed the authorized failed-16 run. It binds that run's
 evaluator commit and report hash, retains manifest order, and rejects the old
 16-case count under the new selection version. Its preflight remains zero-call;
 using it for an external evaluation requires separate authorization.
+
+## Authorized failed-10 live evaluation
+
+Commit `6f611c3aaabd7f3c96e1882b3189e595670654bb` evaluated the exact
+ten-case selection with `gpt-5.2`, `store=false`, and report mode 0600. Selection
+hash `8919ff4880a3575c728ec217ad8fe9267db4cb69b70d39c68cd0be0d29bf5432`
+bound `v5-01`, `v5-03`, `v5-04`, `v5-08`, `v5-10`, `v5-13`, `v5-14`,
+`v5-15`, `v5-22`, and `v5-25` in manifest order. The run made 37 calls,
+including nine bounded repairs. There were no refusals, incomplete responses,
+request errors, deterministic rejections, or final integrity errors.
+
+Five cases passed: `v5-01`, `v5-08`, `v5-13`, `v5-14`, and `v5-22`. Five
+cases remain closed:
+
+- `v5-03` produced the correct question/context deferrals but retained unused
+  self and concept entities, which incorrectly forced manual review;
+- `v5-04` extracted the occupation correctly but omitted the required
+  ambiguity deferral for the uncertain credential/organization phrase;
+- `v5-10` retained one redundant non-exact entity span after its bounded graph
+  repair;
+- `v5-15` treated an explicit pet-name correction as a context-dependent
+  question and emitted no corrective observation;
+- `v5-25` identified project content, but its project temporal value remained
+  invalid after the bounded repair.
+
+The report SHA-256 is
+`3b71ad68596a51b68f5102a2e518703bcb6848fdd2824ab602c69b9efab407c6`.
+The zero-write proof passed: all 47 database relations retained SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No staging, persistence, retrieval activation, or additional external rerun is
+authorized by this result.
