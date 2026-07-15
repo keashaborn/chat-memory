@@ -147,3 +147,36 @@ evaluator commit, authorization scope, and manifest-ordered case IDs. The live
 runner rejects unknown, duplicate, reordered, added, or removed cases and still
 hashes all 25 manifest sources plus all `memory.*` relations and owner-filtered
 Qdrant state before and after the selected evaluation.
+
+## Authorized failed-16 rerun
+
+Commit `b90bf1745847d6c607705c31a834d549d8c9a548` evaluated the exact
+16-case selection with `gpt-5.2`, `store=false`, and report mode 0600. Selection
+hash `ed6a17ccb97a31d5d497f51ecdb0f63caca50a12038c3983c8ad738bbfcbd2d7`
+bound the manifest-ordered cases. The run made 53 calls, including seven
+bounded repairs. There were no refusals, incomplete responses, or request
+errors. Six cases passed: `v5-02`, `v5-05`, `v5-18`, `v5-19`, `v5-20`, and
+`v5-23`. Ten cases failed. The report SHA-256 is
+`111eb78193c64631358a7e9c2a5155f2a535c2f7fccb066c96f5782b1a9c2ba1`.
+
+The prior typed datetime assembly defect did not recur. Remaining failures are
+closed-contract failures:
+
+- `v5-01` over-extracted an ambiguous/question span as project current state;
+- `v5-03` and `v5-14` omitted the required context-missing deferral;
+- `v5-04` suppressed the supported occupation observation with its ambiguous
+  transcription instead of producing a mixed result;
+- `v5-08` and `v5-25` suppressed project current-state content instead of
+  producing unresolved, manually reviewed project observations;
+- `v5-10` and `v5-22` remained invalid after one bounded exact-span repair;
+- `v5-13` and `v5-15` produced self entity mentions without the required
+  `user:self` relationship role; `v5-13` then rejected two observations whose
+  subject reference no longer resolved.
+
+The zero-write proof passed. Before and after the run, all 47 database
+relations hashed to
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`
+and the six owner-filtered Qdrant points hashed to
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No relation changed. No staging, persistence, retrieval activation, or further
+external rerun is authorized by this result.
