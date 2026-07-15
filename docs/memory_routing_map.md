@@ -138,3 +138,24 @@ Current test result: for the question Have I had any deaths in my family recentl
 Durable store mapping targets the existing vantage_card schema: card_head, card_revision, and card_link. All generated rows are still preview-only with write_intent=none_preview_only.
 
 Known limitations: deterministic narrow extraction, multi-event memories need split review, correction relevance is over-broad, no durable writes yet, no live card retrieval wired into vantage_query yet, and answer-use/outcome logging is still pending.
+
+## Proposed V5 relational extraction contract (not runtime-active)
+
+The reviewed V4 newest-25 evaluation is now bound to:
+
+- `docs/MEMORY_V1_RELATIONAL_EXTRACTION_CONTRACT_V5.md`;
+- `specs/memory_v1_relational_extraction_v5.schema.json`;
+- `evals/memory_v1_relational_extraction_v5_cases.jsonl`.
+
+Source manifest SHA-256:
+`8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649`.
+
+V5 proposes an evidence -> atomic observation -> entity/relationship resolution
+-> governed claim -> policy -> projection flow. It preserves intent-specific
+store permissions, technical/FM personal-memory suppression, typed surface
+policy, owner-scoped retrieval, small budgets, compression, semantic dedupe,
+prompt auditability, answer-use attribution, and isolated legacy fallback.
+
+This is a specification checkpoint only. V4 remains the consolidation extractor,
+main-account consolidation remains disabled, and no V5 schema, extraction,
+candidate, Qdrant, retrieval, prompt, or legacy-cutover behavior is active.
