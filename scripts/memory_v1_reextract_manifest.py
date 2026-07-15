@@ -14,7 +14,7 @@ from typing import Any
 import asyncpg
 
 
-PIPELINE_VERSION = "20260714_v3"
+PIPELINE_VERSION = "20260714_v4"
 
 
 def arguments() -> argparse.Namespace:

@@ -20,7 +20,7 @@ from .memory_v1_store import (
 
 
 EXTRACTOR = "memory_v1_consolidation"
-EXTRACTOR_VERSION = "20260714_v3"
+EXTRACTOR_VERSION = "20260714_v4"
 CANDIDATE_NAMESPACE = uuid.UUID("0969b2be-1670-5bc7-b91b-f6b18d3fc327")
 PREDICATE_RE = re.compile(r"^[a-z][a-z0-9_.]{1,127}$")
 KEY_RE = re.compile(r"^[a-z][a-z0-9_.:-]{1,239}$")
@@ -102,6 +102,30 @@ COMPOUND_ACTION_RE = re.compile(
     r"creates?|writes?|reads?|plays?|dances?|[a-z]+ing)\b",
     re.IGNORECASE,
 )
+ALCOHOL_OBJECT_RE = re.compile(r"\b(?:alcohol|drinking alcohol)\b", re.IGNORECASE)
+PREDICATE_ALIASES = {
+    "spends_time_doing": "spends_time_on",
+    "works_on": "spends_time_on",
+    "raises_animals": "raises",
+    "animal_husbandry": "raises",
+}
+OUTDOORS_DOMAIN_ALIASES = {
+    "forest",
+    "nature",
+    "outdoor",
+    "outdoors",
+    "wildlife",
+    "woods",
+}
+GENERIC_ENTITY_KEY_PARTS = {
+    "animal",
+    "entity",
+    "pet",
+    "self",
+    "unknown",
+    "unnamed",
+    "user",
+}
 
 
 class ConsolidationError(RuntimeError):
@@ -230,6 +254,16 @@ response preference and never silent style influence.
 For claims, use stable lowercase keys and predicates. Prefer subject_entity_key
 `user:self` for facts about the user. For preferences, use a stable domain/key.
 For project knowledge, project_key must be explicitly present in the record.
+
+Reuse these governed vocabulary entries when they fit:
+- stopped alcohol use: `stopped_alcohol_use`
+- recurring activity: `does_activity`
+- substantial time working with equipment or an object: `spends_time_on`
+- raising an animal type: `raises`
+- a corrected name: `name.canonical`; another stated name: `has_name`
+For life preferences involving nature, forests, woods, wildlife, lakes, or
+outdoor activities, use preference_domain `outdoors`, never `nature` or
+`wildlife`.
 """.strip()
 
 
@@ -434,6 +468,72 @@ def _normalize_sensitivity_candidate(
         candidate.predicate
     ):
         return candidate.model_copy(update={"sensitivity": "high"})
+    return candidate
+
+
+def _append_reason_code(candidate: ExtractedCandidate, code: str) -> list[str]:
+    return [*candidate.reason_codes, code] if code not in candidate.reason_codes else list(
+        candidate.reason_codes
+    )
+
+
+def _normalize_vocabulary_candidate(
+    candidate: ExtractedCandidate,
+) -> ExtractedCandidate:
+    if candidate.lane == "claim":
+        predicate = candidate.predicate
+        updates: dict[str, Any] = {}
+        reason_codes = list(candidate.reason_codes)
+        claim_text = f"{candidate.canonical_text}\n{candidate.object_literal}"
+        if predicate in {
+            "stopped_use",
+            "stopped_drinking",
+            "quit_alcohol",
+        } and ALCOHOL_OBJECT_RE.search(claim_text):
+            predicate = "stopped_alcohol_use"
+        elif predicate in PREDICATE_ALIASES:
+            predicate = PREDICATE_ALIASES[predicate]
+        elif predicate in {"name", "pet_name", "canonical_name"}:
+            predicate = "name.canonical" if candidate.correction else "has_name"
+        if predicate != candidate.predicate:
+            updates["predicate"] = predicate
+            reason_codes = _append_reason_code(
+                candidate,
+                "canonical_predicate_alias",
+            )
+
+        if predicate in {"name.canonical", "has_name"} and not (
+            candidate.subject_canonical_name or ""
+        ).strip():
+            key_parts = [
+                part
+                for part in re.split(r"[^a-z0-9]+", candidate.subject_entity_key.casefold())
+                if part and part not in GENERIC_ENTITY_KEY_PARTS
+            ]
+            if key_parts:
+                updates["subject_canonical_name"] = key_parts[-1].replace("_", " ").title()
+                reason_codes = [
+                    *reason_codes,
+                    "canonical_subject_name_fallback",
+                ]
+
+        if updates:
+            updates["reason_codes"] = reason_codes
+            return candidate.model_copy(update=updates)
+        return candidate
+
+    if candidate.lane == "preference":
+        domain = candidate.preference_domain.casefold().strip()
+        if domain in OUTDOORS_DOMAIN_ALIASES and domain != "outdoors":
+            return candidate.model_copy(
+                update={
+                    "preference_domain": "outdoors",
+                    "reason_codes": _append_reason_code(
+                        candidate,
+                        "canonical_preference_domain",
+                    ),
+                }
+            )
     return candidate
 
 
@@ -862,6 +962,7 @@ async def persist_extraction(
     }
 
     for candidate in extraction.candidates:
+        candidate = _normalize_vocabulary_candidate(candidate)
         candidate = _normalize_temporal_candidate(
             candidate,
             observed_at,

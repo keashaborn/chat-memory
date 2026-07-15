@@ -19,6 +19,7 @@ from rag_engine.memory_v1_consolidation import (
     _key_identity,
     _normalize_temporal_candidate,
     _normalize_sensitivity_candidate,
+    _normalize_vocabulary_candidate,
     _validate_candidate,
     looks_like_artifact,
     persist_extraction,
@@ -175,6 +176,17 @@ def main() -> int:
         surface_policy="mention_when_relevant",
     )
     _validate_candidate(life_preference)
+    outdoors_preference = _normalize_vocabulary_candidate(
+        preference(
+            canonical_text="The user finds watching herons beside the lake peaceful.",
+            preference_class="life",
+            preference_domain="nature",
+            preference_key="activity:watching_herons_by_lake",
+            surface_policy="mention_when_relevant",
+        )
+    )
+    assert outdoors_preference.preference_domain == "outdoors"
+    assert "canonical_preference_domain" in outdoors_preference.reason_codes
     expect_error(
         lambda: _validate_candidate(
             life_preference.model_copy(update={"surface_policy": "silent_style_influence"})
@@ -234,6 +246,43 @@ def main() -> int:
     _validate_candidate(anchored)
     anchored_proposal = _claim_proposal(anchored)
     assert anchored_proposal["valid_from"] == "2026-06-30T21:44:14+00:00"
+    alcohol_alias = _normalize_vocabulary_candidate(
+        claim(
+            canonical_text="On 2026-07-01, the user stopped drinking alcohol.",
+            predicate="stopped_use",
+            object_literal="alcohol",
+            valid_from="2026-07-01T00:00:00Z",
+            sensitivity="high",
+        )
+    )
+    assert alcohol_alias.predicate == "stopped_alcohol_use"
+    assert "canonical_predicate_alias" in alcohol_alias.reason_codes
+    assert _normalize_vocabulary_candidate(
+        claim(predicate="spends_time_doing")
+    ).predicate == "spends_time_on"
+    assert _normalize_vocabulary_candidate(
+        claim(predicate="raises_animals")
+    ).predicate == "raises"
+    assert _normalize_vocabulary_candidate(
+        claim(predicate="name", correction=True)
+    ).predicate == "name.canonical"
+    assert _normalize_vocabulary_candidate(
+        claim(predicate="name", correction=False)
+    ).predicate == "has_name"
+    pet_name = _normalize_vocabulary_candidate(
+        claim(
+            predicate="name",
+            correction=True,
+            subject_entity_key="user:pet:dog",
+            subject_entity_type="animal",
+            subject_canonical_name="",
+            object_literal="Koda",
+        )
+    )
+    assert pet_name.predicate == "name.canonical"
+    assert pet_name.subject_canonical_name == "Dog"
+    assert "canonical_subject_name_fallback" in pet_name.reason_codes
+    _validate_candidate(pet_name)
     normalized = _normalize_temporal_candidate(
         claim(
             canonical_text="The user quit alcohol about two weeks ago.",

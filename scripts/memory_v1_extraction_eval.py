@@ -19,6 +19,7 @@ from rag_engine.memory_v1_consolidation import (
     ExtractedCandidate,
     _normalize_sensitivity_candidate,
     _normalize_temporal_candidate,
+    _normalize_vocabulary_candidate,
     _validate_candidate,
     extract_with_openai,
 )
@@ -30,6 +31,7 @@ TRANSIENT_SOURCE = "b2b2f1c7-19da-4667-a93c-5eb7fe6aaa20"
 JAZZ_SOURCE = "8e22f07c-71cb-49b9-9ac9-e9898668eadb"
 ALCOHOL_SOURCE = "8e3e5fba-054c-4013-a317-3ca06ef53958"
 RANCH_SOURCE = "3cb6072d-70f4-455e-b2ec-0bd9cb24aa51"
+ONBOARDING_SOURCE = "f39b04b6-379f-4c6c-9bee-b2383d3c6c5e"
 
 
 def arguments() -> argparse.Namespace:
@@ -104,6 +106,78 @@ def policy_findings(
             if sum(term in blob for term in terms) > 1:
                 findings.append("ranch activities remain compound")
                 break
+    elif source_id == ONBOARDING_SOURCE:
+        if any(
+            term in blob
+            for _, blob in blobs
+            for term in ("blocked", "frustrated", "printer jam")
+        ):
+            findings.append("transient printer frustration survived validation")
+
+        required_claims = (
+            ("alcohol", "stopped_alcohol_use"),
+            ("combine", "spends_time_on"),
+            ("beekeep", "does_activity"),
+            ("llama", "raises"),
+            ("koda", "name.canonical"),
+        )
+        for term, predicate in required_claims:
+            matching = [
+                candidate
+                for candidate, blob in blobs
+                if candidate.lane == "claim" and term in blob
+            ]
+            if not matching:
+                findings.append(f"required onboarding claim is missing: {term}")
+            elif not any(candidate.predicate == predicate for candidate in matching):
+                findings.append(
+                    f"onboarding claim did not use {predicate}: {term}"
+                )
+
+        alcohol = [
+            candidate
+            for candidate, blob in blobs
+            if candidate.lane == "claim" and "alcohol" in blob
+        ]
+        if alcohol and not any(
+            candidate.valid_from.startswith("2026-07-01") for candidate in alcohol
+        ):
+            findings.append("onboarding alcohol-stop date was not anchored to 2026-07-01")
+
+        koda = [
+            candidate
+            for candidate, blob in blobs
+            if candidate.lane == "claim" and "koda" in blob
+        ]
+        if koda and not any(candidate.correction and candidate.explicit for candidate in koda):
+            findings.append("Koda correction was not marked explicit and corrective")
+
+        preference_rules = (
+            ("classical", "music"),
+            ("heron", "outdoors"),
+        )
+        for term, domain in preference_rules:
+            matching = [candidate for candidate, blob in blobs if term in blob]
+            if not matching:
+                findings.append(f"required life preference is missing: {term}")
+            elif not any(
+                candidate.lane == "preference"
+                and candidate.preference_class == "life"
+                and candidate.preference_domain == domain
+                and candidate.surface_policy
+                in {"mention_when_relevant", "explicit_recall_only"}
+                for candidate in matching
+            ):
+                findings.append(
+                    f"life preference did not use governed domain {domain}: {term}"
+                )
+
+        compound_terms = ("combine", "beekeep", "llama")
+        if any(
+            sum(term in blob for term in compound_terms) > 1
+            for _, blob in blobs
+        ):
+            findings.append("onboarding work and animal activities remain compound")
     return findings
 
 
@@ -139,7 +213,7 @@ async def main() -> int:
     args = arguments()
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     owner = uuid.UUID(manifest["owner_user_id"])
-    if manifest["pipeline_version"] != "20260714_v3":
+    if manifest["pipeline_version"] != "20260714_v4":
         raise RuntimeError("manifest pipeline mismatch")
     dsn = os.getenv("POSTGRES_DSN", "").strip()
     if not dsn:
@@ -161,7 +235,7 @@ async def main() -> int:
     report: dict[str, Any] = {
         "mode": "zero_write_extraction_eval",
         "owner_user_id": str(owner),
-        "pipeline_version": "20260714_v3",
+        "pipeline_version": "20260714_v4",
         "model": model,
         "sources": [],
         "finding_count": 0,
@@ -179,6 +253,7 @@ async def main() -> int:
         valid: list[ExtractedCandidate] = []
         rejected: list[dict[str, str]] = []
         for candidate in extraction.candidates:
+            candidate = _normalize_vocabulary_candidate(candidate)
             candidate = _normalize_temporal_candidate(
                 candidate,
                 source["created_at"],
