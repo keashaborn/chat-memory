@@ -118,7 +118,7 @@ def replay_model_packet(
     if not isinstance(raw_model_packet, dict):
         raise RuntimeError("saved model packet is absent")
 
-    model_packet = ModelPacket.model_validate(raw_model_packet)
+    model_packet = ModelPacket.model_validate_json(stable_json(raw_model_packet))
     original_roles = {
         item.entity_ref: item.relationship_role for item in model_packet.entity_mentions
     }
