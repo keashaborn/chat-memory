@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
 from scripts.memory_v1_relational_v5_live_eval import (
     EntityMention,
     ModelPacket,
     Observation,
+    Temporal,
 )
 from scripts.memory_v1_relational_v5_specialized import (
     ENTITY_GRAPH_INSTRUCTIONS,
@@ -176,6 +178,29 @@ class SpecializedV5Test(unittest.TestCase):
         self.assertEqual(packet.entity_mentions[-1].relationship_role, "project:unresolved")
         self.assertEqual(packet.observations[-1].subject_entity_ref, "e03")
 
+    def test_assembler_preserves_python_datetime_for_strict_packet(self) -> None:
+        graph, content, project = self.packets()
+        instant = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        content.observations[0].temporal = Temporal.model_validate(
+            {
+                "semantic": "observation_time",
+                "shape": "instant",
+                "basis": "instant",
+                "source_form": "implicit_source_time",
+                "certainty": "exact",
+                "precision": "exact",
+                "instant": instant,
+                "calendar_range": None,
+                "instant_range": None,
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": True,
+                "reason_codes": ["trusted_source_time"],
+            }
+        )
+        packet = assemble_specialized_packet(graph, content, project)
+        self.assertEqual(packet.observations[1].temporal.instant, instant)
+
     def test_entity_catalog_contains_no_authoritative_owner_fields(self) -> None:
         graph, _, _ = self.packets()
         catalog = entity_catalog(graph)
@@ -239,6 +264,10 @@ class SpecializedV5Test(unittest.TestCase):
         self.assertIn("only the source-local entity graph", ENTITY_GRAPH_INSTRUCTIONS)
         self.assertIn("non-project", TEMPORAL_CONTENT_INSTRUCTIONS)
         self.assertIn("only project knowledge", PROJECT_KNOWLEDGE_INSTRUCTIONS)
+        self.assertIn("question_only", TEMPORAL_CONTENT_INSTRUCTIONS)
+        self.assertIn("identity.name_canonical", TEMPORAL_CONTENT_INSTRUCTIONS)
+        self.assertIn("project.requirement", PROJECT_KNOWLEDGE_INSTRUCTIONS)
+        self.assertIn("approximate=false", PROJECT_KNOWLEDGE_INSTRUCTIONS)
         combined = "\n".join(
             (
                 ENTITY_GRAPH_INSTRUCTIONS,
@@ -252,4 +281,3 @@ class SpecializedV5Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

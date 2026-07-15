@@ -107,3 +107,36 @@ Before production staging:
 - repeatability and foreign-owner isolation runs must pass;
 - Postgres and Qdrant before/after hashes must remain identical;
 - staging/apply requires a separate production backup and authorization manifest.
+
+## First specialized live evaluation
+
+Commit `585f858305ffe31e88c9ead1b2726e2b8d131cef` evaluated the exact
+25-source manifest with `gpt-5.2`, `store=false`, and report mode 0600. The run
+made 81 calls, including eight bounded repairs. There were no refusals,
+incomplete responses, request errors, or final deterministic registry
+rejections. Nine cases passed and sixteen failed. Postgres and owner-filtered
+Qdrant signatures were unchanged.
+
+Failure review found:
+
+- six cases blocked by JSON-mode datetime strings crossing a strict
+  Pydantic-to-Pydantic assembly boundary;
+- two cases that remained invalid after their single pass-local repair;
+- question/context deferral, occupation/transcription, pet-name correction,
+  and project classification misses in the remaining cases;
+- one dangling project-scope deferral caught by final integrity validation.
+
+The assembler now uses Python-mode model dumps so timezone-aware `datetime` and
+`date` values retain their typed representation. A regression test exercises
+that boundary. Pass guidance now explicitly assigns global question/ambiguity
+deferrals to temporal content, requires the graph pass to declare all later
+content entities, requires exact short spans, and distinguishes project
+requirements, proposals, current state, and pure external questions.
+
+Case `v5-08` remains under contract review. Its source directly states that the
+memory project is partially complete, while the checked-in expected result
+forbids project knowledge and requires only `transient_state`. Do not tune the
+extractor to suppress this direct temporally scoped project statement or revise
+the expected result merely to improve the score. Resolve the intended memory
+policy first, record the rationale, then rerun the affected cases under a new
+explicit external-evaluation authorization.

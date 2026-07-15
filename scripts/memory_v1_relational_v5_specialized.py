@@ -33,14 +33,22 @@ PROJECT_PREDICATES = {
 
 
 ENTITY_GRAPH_INSTRUCTIONS = """
-Extract only the source-local entity graph. Return people, animals, places, and
-self references plus atomic relationship.has_pet, relationship.parent_of,
-relationship.sibling_of, and residence.lives_at observations. Never extract
+Extract only the source-local entity graph. Return self, people, animals,
+organizations, places, objects, and concepts plus atomic relationship.has_pet,
+relationship.parent_of, relationship.sibling_of, and residence.lives_at
+observations. Project entities belong only to the project pass. Never extract
 project knowledge, attributes, health content, preferences, or corrections.
+Declare every entity needed as the subject or entity-object of a later content
+pass even when no graph relationship is present. In particular, declare
+user:self for first-person occupation/profile facts and declare an explicitly
+corrected pet-name subject as an animal with role pet:corrected_name_subject.
 Every referenced entity must be declared in this packet. Use parent -> self,
 self -> sibling, and person/animal -> place directions exactly. Do not infer
 names, places, relationships, dates, owner identity, or durable IDs.
-If the source has no graph content, return empty entity and observation lists.
+Every source span must copy a short exact substring from the record; never
+paraphrase, normalize punctuation, or manufacture a long composite quote.
+If the source has no eligible entity or graph content, return empty entity and
+observation lists.
 """.strip()
 
 
@@ -53,6 +61,20 @@ time distinctly. A planned personal or veterinary procedure is planned
 supportive context, never a completed event or structured-domain value. Do not
 invent dates, entity links, owner identity, project scope, durable IDs, approval,
 or salience.
+This pass owns global question and ambiguity deferrals. Add question_only for a
+question even when a directly stated fact elsewhere in the record is extracted.
+Add context_missing when approval, endorsement, or a question depends on unseen
+prior content. Add transient_state for a question that only says a temporary
+decision/state has not been considered yet. Add ambiguous_transcription for a
+suspicious proper noun, credential, API, or voice transcription without
+discarding a separate well-supported fact.
+An explicit statement that the user became or is a personal trainer is
+occupation.works_as even when they say it is not current paid work; represent
+the occupation as a concept entity from the supplied catalog and separately
+defer an uncertain credential transcription. An explicit pet-name correction
+is identity.name_canonical with corrective modality and correction projection;
+add both corrects and supersedes comparison hints against an owner-scoped prior
+name lookup. Copy short exact source substrings for every span.
 If the source has no compatible content, return empty observations and hints.
 """.strip()
 
@@ -64,6 +86,16 @@ question can coexist with a directly stated current project state. Do not emit
 personal facts, preferences, health content, owner identity, trusted project
 binding, durable IDs, approval, or salience. Project scope remains unresolved
 for deterministic server review.
+Classify a directly endorsed capability the app should have as
+project.requirement, a speculative possibility as project.proposed_feature, and
+a directly described implemented/present state as project.current_state. One
+source may support more than one of these atomic observations. Project text
+literals always use approximate=false; uncertainty belongs in modality.
+Questions about external platforms, policies, or coding ability do not alone
+create a project entity, observation, or project-scope deferral. If the same
+record directly states what the user's app currently is or does, extract that
+state while the temporal pass owns question_only. Copy short exact source
+substrings for every span.
 If the source has no project knowledge, return no project entity and no observations.
 """.strip()
 
@@ -182,7 +214,7 @@ def assemble_specialized_packet(
     temporal_content: TemporalContentPassPacket,
     project_knowledge: ProjectKnowledgePassPacket,
 ) -> ModelPacket:
-    mentions = [item.model_dump(mode="json") for item in entity_graph.entity_mentions]
+    mentions = [item.model_dump(mode="python") for item in entity_graph.entity_mentions]
     mention_refs = [item["entity_ref"] for item in mentions]
     _require_unique(mention_refs, "entity_ref")
     known_entities = set(mention_refs)
@@ -222,7 +254,7 @@ def assemble_specialized_packet(
                 "name_text": proposal.name_text,
                 "relationship_role": "project:unresolved",
                 "source_spans": [
-                    item.model_dump(mode="json") for item in proposal.source_spans
+                    item.model_dump(mode="python") for item in proposal.source_spans
                 ],
                 "extraction_confidence": proposal.extraction_confidence,
                 "reason_codes": proposal.reason_codes,
@@ -251,17 +283,17 @@ def assemble_specialized_packet(
         observations.append(value)
 
     for item in graph_observations:
-        append_observation("entity_graph", item.model_dump(mode="json"))
+        append_observation("entity_graph", item.model_dump(mode="python"))
     for item in content_observations:
-        append_observation("temporal_content", item.model_dump(mode="json"))
+        append_observation("temporal_content", item.model_dump(mode="python"))
     for item in project_knowledge.observations:
-        value = item.model_dump(mode="json")
+        value = item.model_dump(mode="python")
         value["subject_entity_ref"] = project_ref
         append_observation("project_knowledge", value)
 
     comparisons: list[dict[str, Any]] = []
     for hint in temporal_content.comparison_hints:
-        value = hint.model_dump(mode="json")
+        value = hint.model_dump(mode="python")
         mapped = ref_maps["temporal_content"].get(value["observation_ref"])
         if mapped is None:
             raise ValueError("comparison hint references a non-content observation")
@@ -269,7 +301,7 @@ def assemble_specialized_packet(
         comparisons.append(value)
 
     deferrals = [
-        item.model_dump(mode="json")
+        item.model_dump(mode="python")
         for item in (
             entity_graph.deferrals
             + temporal_content.deferrals
