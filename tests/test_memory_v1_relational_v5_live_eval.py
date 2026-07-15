@@ -9,6 +9,7 @@ from scripts.memory_v1_relational_v5_live_eval import (
     ModelPacket,
     enrich_packet,
     evaluate_case,
+    source_span,
 )
 
 
@@ -152,6 +153,52 @@ class V5LiveEvalTest(unittest.TestCase):
         self.assertEqual(rejections, [])
         self.assertEqual(len(packet["observations"]), 1)
         self.assertIn("invalid_model_finding_normalized", packet["packet_findings"])
+
+    def test_nearest_exact_quote_recovers_repeated_short_span(self) -> None:
+        text = "I said I stayed"
+        span = source_span({"start": 6, "end": 7, "quote": "I"}, text)
+        self.assertEqual((span["start"], span["end"]), (7, 8))
+
+    def test_correction_authority_adds_unresolved_relations_and_role(self) -> None:
+        payload = self.correction_packet().model_dump(mode="json")
+        payload["entity_mentions"][0]["relationship_role"] = "pet:current:1"
+        payload["comparison_hints"] = payload["comparison_hints"][:1]
+        packet, rejections = enrich_packet(
+            ModelPacket.model_validate(payload),
+            source=self.source,
+            text=self.text,
+            registry=self.registry,
+        )
+        self.assertEqual(rejections, [])
+        self.assertEqual(
+            packet["entity_mentions"][0]["relationship_role"],
+            "pet:corrected_name_subject",
+        )
+        self.assertEqual(
+            {item["relation_type"] for item in packet["comparison_hints"]},
+            {"corrects", "supersedes"},
+        )
+        self.assertTrue(
+            all(item["target_claim_id"] is None for item in packet["comparison_hints"])
+        )
+
+    def test_high_sensitivity_observation_forces_manual_review_deferral(self) -> None:
+        payload = self.correction_packet().model_dump(mode="json")
+        payload["observations"][0]["sensitivity"] = "high"
+        packet, rejections = enrich_packet(
+            ModelPacket.model_validate(payload),
+            source=self.source,
+            text=self.text,
+            registry=self.registry,
+        )
+        self.assertEqual(rejections, [])
+        self.assertTrue(
+            any(
+                item["reason_code"] == "sensitive_manual_review"
+                and item["review_required"]
+                for item in packet["deferrals"]
+            )
+        )
 
     def test_case_evaluator_detects_required_correction_semantics(self) -> None:
         packet, _ = enrich_packet(
