@@ -337,3 +337,19 @@ positions, and sibling relationships not rooted at `user:self` remain
 unchanged. The normalizer is zero-write and runtime-inactive. This offline
 change authorizes no external evaluation, staging, persistence, projection, or
 retrieval activation.
+
+Commit `6e43a90150206ea4473b32d3545d30e8854b6794` passed all 129 offline
+Memory V1 tests. Its hash-locked five-case preflight selected `v5-03`, `v5-04`,
+`v5-10`, `v5-15`, and `v5-25` and made zero external model calls. The mode-0600
+report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-sibling-source-order-preflight-20260715T233109Z.json`
+has SHA-256
+`50847d1dbc71cb7d0cd7af6cc3d4765dfe0e5319a0ca4918157c69bb2f816431`.
+
+The preflight zero-write proof passed. All 47 database relations retained
+SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No external evaluation, staging, persistence, projection, or retrieval
+activation occurred.
