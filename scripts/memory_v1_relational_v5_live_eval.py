@@ -282,7 +282,9 @@ Rules:
 - Every entity, observation, and deferral source span includes start, end, and
   the exact verbatim quote from inside <record>. start/end are Python Unicode
   character offsets into the exact source. Use globally unique sequential eNN
-  and oNN references. The server will reject or exact-match-recover bad offsets.
+  and oNN references. Every referenced entity_ref and observation_ref must be
+  defined in the same packet. The server rejects or exact-match-recovers bad
+  offsets and rejects dangling references.
 - Relative or partial time remains explicit and precise: month expressions are
   calendar ranges, continuing states are open intervals, and planned events are
   not completed events. The trusted source time is supplied only as an anchor.
@@ -312,6 +314,8 @@ ambiguous_transcription instead of a guess, including in question-only turns.
 An explicitly planned health or veterinary procedure uses
 health.user_reported_observation with planned modality and planned_time. It is
 supportive context and must never be represented as a completed occurrence.
+Do not use structured_domain for a conversationally reported personal or
+veterinary plan unless it is an actual value owned by a structured app table.
 
 If a source only asks about nutrition/training/other structured data and states
 no new value, return question_only without structured_domain. For timeless
@@ -320,6 +324,8 @@ the trusted source time. For a presently valid state use state_validity; the
 server creates the source-observation open interval. For an undated plan use
 planned_time without inventing a date. Context-free approval of unseen prior
 content requires both question_only when applicable and context_missing.
+Relative temporal source_form requires relative basis and a relative_offset;
+calendar ranges use absolute or partial_absolute source_form, never relative.
 An advice question saying a decision or topic has not been considered "yet" is
 a transient_state deferral, not a durable fact. This differs from a direct
 statement that a project currently lacks a named implemented feature, which is
@@ -1019,6 +1025,53 @@ def evaluate_case(packet: dict[str, Any], expected: dict[str, Any], registry: di
     }
 
 
+def packet_integrity_reasons(
+    packet: dict[str, Any], rejections: list[dict[str, str]]
+) -> list[str]:
+    reasons = [
+        f"deterministic_rejection:{item['kind']}:{item['ref']}:{item['reason']}"
+        for item in rejections[:16]
+    ]
+    project_deferral = any(
+        item["reason_code"] == "project_scope_unresolved"
+        and item["memory_shape"] == "project_knowledge"
+        for item in packet["deferrals"]
+    )
+    project_observation = any(
+        item["projection_class"] == "project_knowledge"
+        for item in packet["observations"]
+    )
+    project_entity = any(
+        item["entity_type"] == "project" for item in packet["entity_mentions"]
+    )
+    if project_deferral and (not project_observation or not project_entity):
+        reasons.append("project_scope_deferral_without_project_entity_and_observation")
+    structured_deferral = any(
+        item["reason_code"] == "structured_domain" for item in packet["deferrals"]
+    )
+    animal_entity = any(
+        item["entity_type"] == "animal" for item in packet["entity_mentions"]
+    )
+    planned_health = any(
+        item["predicate"] == "health.user_reported_observation"
+        and item["modality"] == "planned"
+        and item["temporal"]["semantic"] == "planned_time"
+        for item in packet["observations"]
+    )
+    if structured_deferral and animal_entity and not planned_health:
+        reasons.append("recheck_conversational_veterinary_plan_routing")
+    return reasons
+
+
+def packet_quality(
+    packet: dict[str, Any], rejections: list[dict[str, str]]
+) -> tuple[int, int]:
+    return (
+        len(rejections),
+        len(packet_integrity_reasons(packet, rejections)),
+    )
+
+
 def validate_inputs(
     manifest: dict[str, Any],
     manifest_sha256: str,
@@ -1050,12 +1103,22 @@ async def call_model(
     source: dict[str, Any],
     text: str,
     instructions: str,
+    repair_reasons: list[str] | None = None,
 ) -> tuple[ModelPacket, str]:
     observed = source["source_recorded_at"]
+    effective_instructions = instructions
+    if repair_reasons:
+        effective_instructions += (
+            "\n\nSERVER VALIDATION REPAIR REQUEST\n"
+            "Return a complete replacement packet from the original source, not "
+            "a patch. Correct every issue below without dropping unrelated valid "
+            "observations. Do not invent entities, facts, dates, or project scope.\n"
+            + stable_json(repair_reasons)
+        )
     response = await asyncio.to_thread(
         client.responses.parse,
         model=model,
-        instructions=instructions,
+        instructions=effective_instructions,
         input=(
             "UNTRUSTED SOURCE RECORD\n"
             f"source_observed_at={observed}\n"
@@ -1067,7 +1130,11 @@ async def call_model(
         text_format=ModelPacket,
         store=False,
         safety_identifier=sha256_text(str(owner)),
-        metadata={"pipeline": CONTRACT_VERSION, "source_external_id": source["source_external_id"][:64]},
+        metadata={
+            "pipeline": CONTRACT_VERSION,
+            "source_external_id": source["source_external_id"][:64],
+            "attempt": "repair" if repair_reasons else "initial",
+        },
         max_output_tokens=16000,
     )
     parsed = getattr(response, "output_parsed", None)
@@ -1138,6 +1205,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         }
         model_packet: ModelPacket | None = None
         response_id: str | None = None
+        model_attempts: list[dict[str, Any]] = []
         try:
             model_packet, response_id = await call_model(
                 client,
@@ -1153,10 +1221,79 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 text=text,
                 registry=registry,
             )
+            repair_reasons = packet_integrity_reasons(packet, rejections)
+            model_attempts.append(
+                {
+                    "attempt": "initial",
+                    "model_response_id": response_id,
+                    "model_packet": model_packet.model_dump(mode="json"),
+                    "deterministic_rejections": rejections,
+                    "integrity_reasons": repair_reasons,
+                    "quality": list(packet_quality(packet, rejections)),
+                    "selected": True,
+                }
+            )
+            if repair_reasons:
+                try:
+                    repaired_model_packet, repaired_response_id = await call_model(
+                        client,
+                        model=model,
+                        owner=owner,
+                        source=manifest_source,
+                        text=text,
+                        instructions=instructions,
+                        repair_reasons=repair_reasons,
+                    )
+                    repaired_packet, repaired_rejections = enrich_packet(
+                        repaired_model_packet,
+                        source=manifest_source,
+                        text=text,
+                        registry=registry,
+                    )
+                    repaired_integrity = packet_integrity_reasons(
+                        repaired_packet, repaired_rejections
+                    )
+                    use_repair = packet_quality(
+                        repaired_packet, repaired_rejections
+                    ) < packet_quality(packet, rejections)
+                    model_attempts[0]["selected"] = not use_repair
+                    model_attempts.append(
+                        {
+                            "attempt": "repair",
+                            "model_response_id": repaired_response_id,
+                            "model_packet": repaired_model_packet.model_dump(mode="json"),
+                            "deterministic_rejections": repaired_rejections,
+                            "integrity_reasons": repaired_integrity,
+                            "quality": list(
+                                packet_quality(repaired_packet, repaired_rejections)
+                            ),
+                            "selected": use_repair,
+                        }
+                    )
+                    if use_repair:
+                        model_packet = repaired_model_packet
+                        response_id = repaired_response_id
+                        packet = repaired_packet
+                        rejections = repaired_rejections
+                except Exception as repair_exc:
+                    model_attempts.append(
+                        {
+                            "attempt": "repair",
+                            "model_response_id": None,
+                            "model_packet": None,
+                            "deterministic_rejections": [],
+                            "integrity_reasons": [
+                                f"repair_error:{type(repair_exc).__name__}:{repair_exc}"
+                            ],
+                            "quality": None,
+                            "selected": False,
+                        }
+                    )
             evaluation = evaluate_case(packet, case["expected"], registry)
             row.update(
                 {
                     "model_response_id": response_id,
+                    "model_attempts": model_attempts,
                     "model_packet": model_packet.model_dump(mode="json"),
                     "packet": packet,
                     "deterministic_rejections": rejections,
@@ -1167,6 +1304,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             row.update(
                 {
                     "model_response_id": None,
+                    "model_attempts": model_attempts,
                     "model_packet": (
                         model_packet.model_dump(mode="json")
                         if model_packet is not None
@@ -1202,7 +1340,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "model": model,
         "store": False,
         "source_count": len(reports),
-        "model_call_count": len(reports),
+        "model_call_count": sum(len(row.get("model_attempts", [])) for row in reports),
+        "repair_call_count": sum(
+            int(len(row.get("model_attempts", [])) > 1) for row in reports
+        ),
         "evaluated_case_ids": [row["case_id"] for row in reports],
         "passed_case_count": passed,
         "failed_case_count": len(reports) - passed,

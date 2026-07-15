@@ -13,6 +13,8 @@ from scripts.memory_v1_relational_v5_live_eval import (
     normalize_canonical_relationship_direction,
     normalize_explicit_project_requirement,
     outcome,
+    packet_integrity_reasons,
+    packet_quality,
     source_span,
 )
 
@@ -261,6 +263,46 @@ class V5LiveEvalTest(unittest.TestCase):
         health = rows["health.user_reported_observation"]
         self.assertIn("planned", health["modalities"])
         self.assertIn("planned_time", health["temporal_semantics"])
+
+    def test_integrity_repair_detects_dangling_project_deferral(self) -> None:
+        packet = {
+            "entity_mentions": [],
+            "observations": [],
+            "deferrals": [
+                {
+                    "reason_code": "project_scope_unresolved",
+                    "memory_shape": "project_knowledge",
+                }
+            ],
+        }
+        self.assertIn(
+            "project_scope_deferral_without_project_entity_and_observation",
+            packet_integrity_reasons(packet, []),
+        )
+
+    def test_integrity_repair_rechecks_animal_structured_domain(self) -> None:
+        packet = {
+            "entity_mentions": [{"entity_type": "animal"}],
+            "observations": [],
+            "deferrals": [
+                {"reason_code": "structured_domain", "memory_shape": "none"}
+            ],
+        }
+        self.assertIn(
+            "recheck_conversational_veterinary_plan_routing",
+            packet_integrity_reasons(packet, []),
+        )
+
+    def test_packet_quality_prefers_fewer_deterministic_rejections(self) -> None:
+        packet = {
+            "entity_mentions": [],
+            "observations": [],
+            "deferrals": [],
+        }
+        rejected = [
+            {"kind": "observation", "ref": "o01", "reason": "dangling reference"}
+        ]
+        self.assertLess(packet_quality(packet, []), packet_quality(packet, rejected))
 
     def test_correction_authority_adds_unresolved_relations_and_role(self) -> None:
         payload = self.correction_packet().model_dump(mode="json")
