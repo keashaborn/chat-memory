@@ -203,9 +203,25 @@ Both PostgreSQL 16 reconstruction and a production-schema-only clone pass the
 full migration, adversarial transaction, replay, isolation, and rollback suites.
 No production schema or data was changed.
 
+The V5 observation projection contract is now frozen in
+`docs/MEMORY_V1_PROJECTION_CONTRACT_V5.md`. It defines one owner-bound,
+hash-locked plan/review/apply workflow with typed claim, preference, and project
+payloads. Evidence and immutable observations remain canonical; the three
+durable lanes are governed materialized views. Semantic identity includes owner,
+relational proposition, polarity, modality, and typed lane scope, but not time.
+Typed observation temporal data remains authoritative.
+
+The projection schema rejects owner identity in the packet, scalar truth or
+salience fields, arbitrary dates, guessed projects, response preferences that
+surface as content, and existing-target writes without a revision lock. The
+25-case projection fixture remains bound one-for-one to the V5 source fixture.
+Adversarial tests cover cross-owner identity/replay, project scope, correction
+relations, temporal non-collapse, and life/response preference separation.
+
 V4 remains the active consolidation extractor, main-account consolidation
 remains disabled, and no V5 extraction, projection, Qdrant, retrieval, prompt,
 or legacy-cutover behavior is active. Before activating the V5 writer, legacy
 direct `brains_app` mutation grants on durable pre-V5 tables must be audited and
-revoked. The next design boundary is projection from applied observations into
-governed claim, preference, and project views with full provenance.
+revoked. The next boundary is an executable projection staging migration and a
+production-schema-clone security suite; durable projection apply functions are
+still deferred.
