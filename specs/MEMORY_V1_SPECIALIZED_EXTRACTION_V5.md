@@ -270,3 +270,20 @@ model supplies the predicate and exact evidence span; the server constructs the
 open state-validity interval from the trusted source timestamp. The remaining
 five-case selection is preflight-only and rejects any external model call. A
 new external evaluation requires a separately authorized selection manifest.
+
+Commit `c823dacbd34200f4841035e5cfea827eaa4df782` passed all 124 offline
+Memory V1 Python tests. Its exact-five preflight selected `v5-03`, `v5-04`,
+`v5-10`, `v5-15`, and `v5-25` with selection SHA-256
+`956c918cc33ac218655493ddf6a4bd8f2d56c29abd14897083e2dee96ef98dba`.
+It made zero external model calls. The mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-remaining5-offline-correction-preflight-20260715T225729Z.json`
+has SHA-256
+`df4a7dd472a452fc26c750f0b03a89c75bfacd7240e652f38ad5b14d2efd2a8e`.
+
+The preflight zero-write proof passed. All 47 database relations retained
+SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No relation changed. The exact-five manifest remains preflight-only; this result
+does not authorize an external rerun, staging, persistence, or retrieval use.
