@@ -209,3 +209,9 @@ context-dependent recall questions, embedded occupation statements, current
 website/app state, planned veterinary procedures, and mixed question-plus-state
 turns explicit. These changes remain zero-write and runtime-inactive. No new
 external model evaluation is authorized by the offline revision.
+
+The second rerun selection is a separate versioned manifest containing exactly
+the ten cases that failed the authorized failed-16 run. It binds that run's
+evaluator commit and report hash, retains manifest order, and rejects the old
+16-case count under the new selection version. Its preflight remains zero-call;
+using it for an external evaluation requires separate authorization.

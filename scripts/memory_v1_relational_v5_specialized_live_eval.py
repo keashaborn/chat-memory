@@ -114,7 +114,12 @@ def _load_selection(
     }
     if not isinstance(payload, dict) or set(payload) != expected_keys:
         raise RuntimeError("subset selection keys do not match the V1 contract")
-    if payload["selection_version"] != "memory_v1_relational_specialized_rerun_v1":
+    selection_counts = {
+        "memory_v1_relational_specialized_rerun_v1": 16,
+        "memory_v1_relational_specialized_rerun_v2": 10,
+    }
+    selection_version = payload["selection_version"]
+    if selection_version not in selection_counts:
         raise RuntimeError("subset selection version mismatch")
     if payload["authorization_scope"] != "failed_cases_only_store_false_zero_write":
         raise RuntimeError("subset authorization scope mismatch")
@@ -129,8 +134,12 @@ def _load_selection(
     case_ids = payload["case_ids"]
     if not isinstance(case_ids, list) or any(not isinstance(item, str) for item in case_ids):
         raise RuntimeError("subset case_ids must be a string list")
-    if len(case_ids) != 16 or len(set(case_ids)) != len(case_ids):
-        raise RuntimeError("authorized failed-case subset must contain 16 unique cases")
+    expected_count = selection_counts[selection_version]
+    if len(case_ids) != expected_count or len(set(case_ids)) != len(case_ids):
+        raise RuntimeError(
+            "authorized failed-case subset must contain "
+            f"{expected_count} unique cases"
+        )
     unknown = sorted(set(case_ids) - set(all_ids))
     if unknown:
         raise RuntimeError(f"subset contains unknown cases:{','.join(unknown)}")
