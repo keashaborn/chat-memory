@@ -16,7 +16,7 @@ from .openai_client import embed_text
 from .qdrant_compat import make_qdrant_client
 
 
-VERSION = "memory_v1_governed_runtime_v3"
+VERSION = "memory_v1_governed_runtime_v4"
 
 
 def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
@@ -56,6 +56,20 @@ def _activation_allowlisted(actor: uuid.UUID) -> bool:
         return False
     return str(actor) in _uuid_values(
         os.getenv("MEMORY_V1_GOVERNED_ACTIVE_USER_IDS", "")
+    )
+
+
+def _maximum_sensitivity(actor: uuid.UUID, context: Dict[str, Any]) -> str:
+    default = os.getenv("MEMORY_V1_SHADOW_MAX_SENSITIVITY", "medium")
+    if not bool(context.get("explicit_recall")):
+        return default
+    if str(actor) not in _uuid_values(
+        os.getenv("MEMORY_V1_GOVERNED_EXPLICIT_HIGH_USER_IDS", "")
+    ):
+        return default
+    return os.getenv(
+        "MEMORY_V1_GOVERNED_EXPLICIT_RECALL_MAX_SENSITIVITY",
+        "high",
     )
 
 
@@ -126,7 +140,7 @@ async def _packet(
             candidate_hits=candidate_hits,
             max_claims=int(os.getenv("MEMORY_V1_SHADOW_MAX_CLAIMS", "4") or 4),
             max_tokens=int(os.getenv("MEMORY_V1_SHADOW_MAX_TOKENS", "500") or 500),
-            max_sensitivity=os.getenv("MEMORY_V1_SHADOW_MAX_SENSITIVITY", "medium"),
+            max_sensitivity=_maximum_sensitivity(actor, context),
             explicit_recall=bool(context["explicit_recall"]),
             entity_hints=context["entity_hints"],
             request_id=request_id,

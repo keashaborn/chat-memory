@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v4"
+VERSION = "memory_intent_adapter_v5"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -52,9 +52,16 @@ ALCOHOL_TERMS = (
 RURAL_LIFE_TERMS = (
     "tractor",
     "tractors",
+    "combine",
+    "combines",
     "farm",
     "farming",
     "cattle",
+    "beekeeping",
+    "beekeeper",
+    "bees",
+    "llama",
+    "llamas",
 )
 SUPPORT_NEED_TERMS = (
     "struggling",
@@ -254,6 +261,9 @@ BROAD_FAMILY_RECALL_RE = re.compile(
 NAME_RECALL_RE = re.compile(
     r"\b(?:was it nemo or neko|nemo or neko|"
     r"what was (?:the )?(?:correct )?(?:spelling|name)|"
+    r"what (?:is|was) (?:the )?name of my (?:pet|dog|cat)|"
+    r"what (?:is|was) (?:my|the) (?:pet|dog|cat)(?:'s|’s)? name|"
+    r"do you remember (?:my|the) (?:pet|dog|cat)(?:'s|’s)? name|"
     r"how (?:is|was) (?:my |the )?(?:pet(?:'s|’s)? )?name spell)\b"
 )
 NAMED_PERSONAL_TERMS = (

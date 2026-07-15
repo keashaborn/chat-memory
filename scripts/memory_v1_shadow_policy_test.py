@@ -8,6 +8,7 @@ from rag_engine.memory_v1_shadow import (
     _activation_allowlisted,
     _allowlisted,
     _format_prompt_block,
+    _maximum_sensitivity,
     classify_shadow_context,
 )
 
@@ -114,6 +115,20 @@ def main() -> int:
         explicit_recall=True,
     )
     expect(
+        "What is the name of my dog?",
+        "SPECIFIC_RECALL",
+        domain="name_correction",
+        intent="personal_recall",
+        explicit_recall=True,
+    )
+    expect(
+        "What do you remember about the things I do with combines, bees, and llamas?",
+        "SPECIFIC_RECALL",
+        domain="life_context",
+        intent="personal_recall",
+        explicit_recall=True,
+    )
+    expect(
         "What do you remember about my farming, tractors, and cattle?",
         "SPECIFIC_RECALL",
         domain="life_context",
@@ -191,6 +206,20 @@ def main() -> int:
             raise AssertionError("universal authenticated shadow failed")
         if _activation_allowlisted(shadow_only_actor):
             raise AssertionError("universal shadow widened governed activation")
+        os.environ["MEMORY_V1_SHADOW_MAX_SENSITIVITY"] = "medium"
+        os.environ["MEMORY_V1_GOVERNED_EXPLICIT_HIGH_USER_IDS"] = str(actor)
+        os.environ[
+            "MEMORY_V1_GOVERNED_EXPLICIT_RECALL_MAX_SENSITIVITY"
+        ] = "high"
+        if _maximum_sensitivity(actor, {"explicit_recall": True}) != "high":
+            raise AssertionError("explicit high-sensitivity rollout failed")
+        if _maximum_sensitivity(actor, {"explicit_recall": False}) != "medium":
+            raise AssertionError("non-recall turn widened sensitivity")
+        if _maximum_sensitivity(
+            shadow_only_actor,
+            {"explicit_recall": True},
+        ) != "medium":
+            raise AssertionError("explicit sensitivity rollout widened to another owner")
         os.environ["MEMORY_V1_GOVERNED_ACTIVE"] = "0"
         if _activation_allowlisted(actor):
             raise AssertionError("governed master flag failed closed")

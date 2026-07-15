@@ -167,6 +167,22 @@ def main() -> int:
         governed=True,
     )
     expect(
+        "What is the name of my dog?",
+        "SPECIFIC_RECALL",
+        memory_intent="personal_recall",
+        domains=["name_correction"],
+        specialized=False,
+        governed=True,
+    )
+    expect(
+        "What do you remember about the things I do with combines, bees, and llamas?",
+        "SPECIFIC_RECALL",
+        memory_intent="personal_recall",
+        domains=["life_context"],
+        specialized=False,
+        governed=True,
+    )
+    expect(
         "What do you remember about my farming, tractors, and cattle?",
         "SPECIFIC_RECALL",
         memory_intent="personal_recall",
