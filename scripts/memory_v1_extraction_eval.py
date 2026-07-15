@@ -17,6 +17,7 @@ from openai import OpenAI
 from rag_engine.memory_v1_consolidation import (
     ConsolidationError,
     ExtractedCandidate,
+    _normalize_sensitivity_candidate,
     _normalize_temporal_candidate,
     _validate_candidate,
     extract_with_openai,
@@ -138,7 +139,7 @@ async def main() -> int:
     args = arguments()
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     owner = uuid.UUID(manifest["owner_user_id"])
-    if manifest["pipeline_version"] != "20260714_v2":
+    if manifest["pipeline_version"] != "20260714_v3":
         raise RuntimeError("manifest pipeline mismatch")
     dsn = os.getenv("POSTGRES_DSN", "").strip()
     if not dsn:
@@ -160,7 +161,7 @@ async def main() -> int:
     report: dict[str, Any] = {
         "mode": "zero_write_extraction_eval",
         "owner_user_id": str(owner),
-        "pipeline_version": "20260714_v2",
+        "pipeline_version": "20260714_v3",
         "model": model,
         "sources": [],
         "finding_count": 0,
@@ -181,7 +182,9 @@ async def main() -> int:
             candidate = _normalize_temporal_candidate(
                 candidate,
                 source["created_at"],
+                str(source["text"] or ""),
             )
+            candidate = _normalize_sensitivity_candidate(candidate)
             try:
                 _validate_candidate(candidate)
             except ConsolidationError as exc:

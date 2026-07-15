@@ -24,14 +24,14 @@ DECLARE
 BEGIN
   SELECT result.enqueued_count, result.existing_count
   INTO enqueued, existing
-  FROM memory.enqueue_consolidation_reextract('20260714_v2', sources) AS result;
+  FROM memory.enqueue_consolidation_reextract('20260714_v3', sources) AS result;
   IF enqueued <> 6 OR existing <> 0 THEN
     RAISE EXCEPTION 'first replay enqueue mismatch: %, %', enqueued, existing;
   END IF;
 
   SELECT result.enqueued_count, result.existing_count
   INTO enqueued, existing
-  FROM memory.enqueue_consolidation_reextract('20260714_v2', sources) AS result;
+  FROM memory.enqueue_consolidation_reextract('20260714_v3', sources) AS result;
   IF enqueued <> 0 OR existing <> 6 THEN
     RAISE EXCEPTION 'idempotent replay mismatch: %, %', enqueued, existing;
   END IF;
@@ -39,7 +39,7 @@ BEGIN
   IF (SELECT count(*)
       FROM memory.consolidation_job
       WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
-        AND pipeline_version='20260714_v2'
+        AND pipeline_version='20260714_v3'
         AND source_external_id IN (
           '2efbb10d-f07a-4936-beab-9e7155e433dd',
           '387c34d3-e4a3-4d47-845f-f6a349fb37ae',
@@ -66,7 +66,7 @@ BEGIN
   BEGIN
     PERFORM *
     FROM memory.enqueue_consolidation_reextract(
-      '20260714_v2',
+      '20260714_v3',
       '[{"source_external_id":"2efbb10d-f07a-4936-beab-9e7155e433dd","source_sha256":"2de0989137c018f67b3386726d5222c604dba2ffae4a302bc57f2e55fece4681"}]'::jsonb
     );
   EXCEPTION WHEN no_data_found THEN
@@ -78,7 +78,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM memory.consolidation_job
-    WHERE pipeline_version='20260714_v2'
+    WHERE pipeline_version='20260714_v3'
       AND source_external_id='2efbb10d-f07a-4936-beab-9e7155e433dd'
   ) THEN
     RAISE EXCEPTION 'cross-owner extraction-v2 job was visible';

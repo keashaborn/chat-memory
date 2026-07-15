@@ -20,7 +20,7 @@ from .memory_v1_store import (
 
 
 EXTRACTOR = "memory_v1_consolidation"
-EXTRACTOR_VERSION = "20260714_v2"
+EXTRACTOR_VERSION = "20260714_v3"
 CANDIDATE_NAMESPACE = uuid.UUID("0969b2be-1670-5bc7-b91b-f6b18d3fc327")
 PREDICATE_RE = re.compile(r"^[a-z][a-z0-9_.]{1,127}$")
 KEY_RE = re.compile(r"^[a-z][a-z0-9_.:-]{1,239}$")
@@ -49,7 +49,23 @@ RELATIVE_AGO_RE = re.compile(
 RELATIVE_BEFORE_TIMESTAMP_RE = re.compile(
     r"\b(?P<about>about\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|"
     r"nine|ten|\d+)\s+(?:day|week|month|year)s?\s+before\s+"
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b",
+    r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?\b",
+    re.IGNORECASE,
+)
+DATE_TOKEN_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?\b"
+)
+TEMPORAL_EVENT_PREDICATE_RE = re.compile(
+    r"(?:^|[_.])(?:stop(?:ped)?|quit|ceas(?:e|ed)|start(?:ed)?|began|begin|"
+    r"end(?:ed)?|born|died|moved)(?:$|[_.])",
+    re.IGNORECASE,
+)
+FINANCIAL_CLAIM_RE = re.compile(
+    r"\b(?:financial|wealth|wealthy|income|salary|debt|bank|net worth)\b",
+    re.IGNORECASE,
+)
+NAMED_RELATION_PREDICATE_RE = re.compile(
+    r"(?:^|[_.])(?:spouse|wife|husband|partner|child|children)(?:$|[_.])",
     re.IGNORECASE,
 )
 RELATIVE_COUNT = {
@@ -326,11 +342,51 @@ def _anchored_relative_time(
 def _normalize_temporal_candidate(
     candidate: ExtractedCandidate,
     observed_at: datetime,
+    source_text: str = "",
 ) -> ExtractedCandidate:
     if candidate.lane != "claim":
         return candidate
     claim_text = f"{candidate.canonical_text}\n{candidate.object_literal}"
     anchored = _anchored_relative_time(claim_text, observed_at)
+    source_anchored = _anchored_relative_time(source_text, observed_at)
+    if anchored is None and source_anchored is not None:
+        source_matches = list(RELATIVE_AGO_RE.finditer(source_text))
+        if len(source_matches) == 1 and (
+            candidate.valid_from.strip()
+            or candidate.valid_to.strip()
+            or TEMPORAL_EVENT_PREDICATE_RE.search(candidate.predicate)
+        ):
+            anchored = source_anchored
+            anchored_at, match = anchored
+            date_text = anchored_at.date().isoformat()
+            replacement = (
+                f"around {date_text}" if match.group("about") else f"on {date_text}"
+            )
+            canonical_text = RELATIVE_BEFORE_TIMESTAMP_RE.sub(
+                replacement,
+                candidate.canonical_text,
+            )
+            canonical_text = RELATIVE_AGO_RE.sub(replacement, canonical_text)
+            canonical_text = DATE_TOKEN_RE.sub(date_text, canonical_text)
+            object_literal = RELATIVE_BEFORE_TIMESTAMP_RE.sub(
+                replacement,
+                candidate.object_literal,
+            )
+            object_literal = RELATIVE_AGO_RE.sub(replacement, object_literal)
+            object_literal = DATE_TOKEN_RE.sub(date_text, object_literal)
+            if date_text not in canonical_text:
+                canonical_text = f"{canonical_text.rstrip('.')} {replacement}."
+            if date_text not in object_literal:
+                object_literal = f"{object_literal.rstrip('.')} {replacement}."
+            return candidate.model_copy(
+                update={
+                    "canonical_text": canonical_text,
+                    "object_literal": object_literal,
+                    "valid_from": anchored_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            )
     if anchored is None:
         before_match = RELATIVE_BEFORE_TIMESTAMP_RE.search(claim_text)
         if before_match is None:
@@ -364,6 +420,21 @@ def _normalize_temporal_candidate(
             ),
         }
     )
+
+
+def _normalize_sensitivity_candidate(
+    candidate: ExtractedCandidate,
+) -> ExtractedCandidate:
+    if candidate.lane != "claim" or candidate.sensitivity in {"high", "restricted"}:
+        return candidate
+    claim_text = (
+        f"{candidate.predicate} {candidate.canonical_text} {candidate.object_literal}"
+    )
+    if FINANCIAL_CLAIM_RE.search(claim_text) or NAMED_RELATION_PREDICATE_RE.search(
+        candidate.predicate
+    ):
+        return candidate.model_copy(update={"sensitivity": "high"})
+    return candidate
 
 
 def _validate_candidate(candidate: ExtractedCandidate) -> None:
@@ -791,7 +862,12 @@ async def persist_extraction(
     }
 
     for candidate in extraction.candidates:
-        candidate = _normalize_temporal_candidate(candidate, observed_at)
+        candidate = _normalize_temporal_candidate(
+            candidate,
+            observed_at,
+            source_text,
+        )
+        candidate = _normalize_sensitivity_candidate(candidate)
         if candidate.lane == "project_knowledge":
             updates: dict[str, str] = {}
             if (

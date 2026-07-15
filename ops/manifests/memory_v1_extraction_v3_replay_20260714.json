@@ -1,0 +1,32 @@
+{
+  "manifest_version": "memory_v1_reextract_v1",
+  "owner_user_id": "557ea042-cb82-48f8-9429-472e96c957ef",
+  "pipeline_version": "20260714_v3",
+  "reason": "supersede extraction v2 staging after source-authoritative temporal and sensitivity normalization",
+  "sources": [
+    {
+      "source_external_id": "2efbb10d-f07a-4936-beab-9e7155e433dd",
+      "source_sha256": "2de0989137c018f67b3386726d5222c604dba2ffae4a302bc57f2e55fece4681"
+    },
+    {
+      "source_external_id": "387c34d3-e4a3-4d47-845f-f6a349fb37ae",
+      "source_sha256": "2bb5304cb478a28bf754b5aeb7c8380dc158e2b8882113deef7acc8e16a3ac40"
+    },
+    {
+      "source_external_id": "b2b2f1c7-19da-4667-a93c-5eb7fe6aaa20",
+      "source_sha256": "b19c251bed3a6ef7c2e903a3eff2d863aee2ceda579a39653c86d7719d923e5a"
+    },
+    {
+      "source_external_id": "8e22f07c-71cb-49b9-9ac9-e9898668eadb",
+      "source_sha256": "2beca45164773ebeb06b4dd4dacf233b3382234f607e473aa395be06cc384ab0"
+    },
+    {
+      "source_external_id": "8e3e5fba-054c-4013-a317-3ca06ef53958",
+      "source_sha256": "0bdc0fa31eb8dcad80ce35a2ac92a9057ffb145e2f0147a141b6de5c6d1d6fbc"
+    },
+    {
+      "source_external_id": "3cb6072d-70f4-455e-b2ec-0bd9cb24aa51",
+      "source_sha256": "263ec864fee06043e98e9208d697dd913e2722cc61d5d806fcad3d524b6e5ff7"
+    }
+  ]
+}

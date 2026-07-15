@@ -30,8 +30,8 @@ BEGIN
   END IF;
   IF (SELECT pipeline_version FROM memory.consolidation_job
       WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
-        AND job_id=job) <> '20260714_v2' THEN
-    RAISE EXCEPTION 'chat_log insert did not use extraction v2';
+        AND job_id=job) <> '20260714_v3' THEN
+    RAISE EXCEPTION 'chat_log insert did not use extraction v3';
   END IF;
 
   IF (SELECT count(*) FROM memory.consolidation_event
@@ -85,7 +85,7 @@ BEGIN
   failed := false;
   BEGIN
     UPDATE memory.consolidation_job
-    SET pipeline_version='20260714_v3'
+    SET pipeline_version='20260714_v4'
     WHERE owner_user_id='557ea042-cb82-48f8-9429-472e96c957ef'
       AND job_id=job;
   EXCEPTION WHEN check_violation THEN

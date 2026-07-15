@@ -18,6 +18,7 @@ from rag_engine.memory_v1_consolidation import (
     _project_key_is_explicit,
     _key_identity,
     _normalize_temporal_candidate,
+    _normalize_sensitivity_candidate,
     _validate_candidate,
     looks_like_artifact,
     persist_extraction,
@@ -240,6 +241,41 @@ def main() -> int:
     )
     _validate_candidate(normalized_before)
     assert "two weeks before" not in normalized_before.canonical_text
+    source_corrected = _normalize_temporal_candidate(
+        claim(
+            canonical_text="The user quit alcohol around 2026-07-14.",
+            predicate="stopped_alcohol_use",
+            object_literal="Quit alcohol around 2026-07-14.",
+            valid_from="2026-07-14T21:44:14Z",
+            sensitivity="high",
+        ),
+        datetime(2026, 7, 14, 21, 44, 14, tzinfo=timezone.utc),
+        "I quit alcohol about two weeks ago.",
+    )
+    _validate_candidate(source_corrected)
+    assert source_corrected.valid_from == "2026-06-30T21:44:14Z"
+    assert "2026-07-14" not in source_corrected.canonical_text
+    assert "2026-06-30" in source_corrected.canonical_text
+    assert "two weeks" not in source_corrected.canonical_text
+
+    financial = _normalize_sensitivity_candidate(
+        claim(
+            canonical_text="The user is independently wealthy.",
+            predicate="financial_status",
+            object_literal="independently wealthy",
+            sensitivity="medium",
+        )
+    )
+    assert financial.sensitivity == "high"
+    named_child = _normalize_sensitivity_candidate(
+        claim(
+            canonical_text="The user has a child named David.",
+            predicate="has_child_named",
+            object_literal="David",
+            sensitivity="medium",
+        )
+    )
+    assert named_child.sensitivity == "high"
     expect_error(
         lambda: _validate_candidate(
             anchored.model_copy(
