@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -114,7 +115,7 @@ def content_packet() -> TemporalContentPassPacket:
     )
 
 
-def project_packet() -> ProjectKnowledgePassPacket:
+def project_packet(*, sensitivity: str = "medium") -> ProjectKnowledgePassPacket:
     return ProjectKnowledgePassPacket(
         project_entity=ProjectEntityProposal(
             mention_kind="role_only",
@@ -140,7 +141,7 @@ def project_packet() -> ProjectKnowledgePassPacket:
                     "projection_class": "project_knowledge",
                     "surface_policy": "exact_project_scope_only",
                     "temporal": temporal(),
-                    "sensitivity": "medium",
+                    "sensitivity": sensitivity,
                     "extraction_confidence": 0.9,
                     "source_spans": [span("My application needs export")],
                     "reason_codes": ["direct_project_requirement"],
@@ -200,7 +201,13 @@ def client(values: list[object]):
     return SimpleNamespace(responses=responses), responses
 
 
-def run(fake_client):
+def checked_in_registry() -> dict:
+    return json.loads(
+        Path("specs/memory_v1_predicate_registry_v5.json").read_text(encoding="utf-8")
+    )
+
+
+def run(fake_client, *, registry: dict | None = None):
     return asyncio.run(
         run_specialized_zero_write(
             fake_client,
@@ -209,6 +216,7 @@ def run(fake_client):
             source_external_id=SOURCE_ID,
             source_recorded_at=OBSERVED_AT,
             text=SOURCE,
+            registry=registry,
         )
     )
 
@@ -222,7 +230,7 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
                 response(project_packet(), response_id="resp_project"),
             ]
         )
-        result = run(fake_client)
+        result = run(fake_client, registry=checked_in_registry())
         self.assertEqual(len(responses.calls), 3)
         self.assertEqual(
             [item["metadata"]["pass"] for item in responses.calls],
@@ -232,6 +240,12 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         self.assertNotIn("ENTITY CATALOG", responses.calls[0]["input"])
         self.assertIn("SERVER-VALIDATED SOURCE-LOCAL ENTITY CATALOG", responses.calls[1]["input"])
         self.assertNotIn("ENTITY CATALOG", responses.calls[2]["input"])
+        self.assertIn("relationship.parent_of", responses.calls[0]["instructions"])
+        self.assertNotIn("preference.response", responses.calls[0]["instructions"])
+        self.assertIn("preference.response", responses.calls[1]["instructions"])
+        self.assertNotIn("project.requirement", responses.calls[1]["instructions"])
+        self.assertIn("project.requirement", responses.calls[2]["instructions"])
+        self.assertNotIn("preference.response", responses.calls[2]["instructions"])
         serialized_calls = repr(responses.calls)
         self.assertNotIn(OWNER, serialized_calls)
         self.assertNotIn(SOURCE_ID, serialized_calls)
@@ -298,6 +312,30 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         self.assertIn("project_entity_in_graph", repair_instructions)
         self.assertNotIn("case_id", repair_instructions)
         self.assertNotIn("expected outcome", repair_instructions)
+
+    def test_registry_violation_triggers_one_pass_local_repair(self) -> None:
+        fake_client, responses = client(
+            [
+                response(graph_packet()),
+                response(content_packet()),
+                response(project_packet(sensitivity="low"), response_id="resp_project_bad"),
+                response(project_packet(), response_id="resp_project_repaired"),
+            ]
+        )
+        result = run(fake_client, registry=checked_in_registry())
+        self.assertEqual(len(responses.calls), 4)
+        project_attempts = [
+            item for item in result.attempts if item.pass_name == "project_knowledge"
+        ]
+        self.assertEqual([item.selected for item in project_attempts], [False, True])
+        self.assertIn(
+            "registry:o01:sensitivity_floor",
+            project_attempts[0].validation_reasons,
+        )
+        self.assertIn(
+            "registry:o01:sensitivity_floor",
+            responses.calls[3]["instructions"],
+        )
 
     def test_no_improvement_stops_after_second_call(self) -> None:
         fake_client, responses = client(

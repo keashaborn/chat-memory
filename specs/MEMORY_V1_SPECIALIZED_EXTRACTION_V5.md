@@ -49,6 +49,19 @@ in instructions, input, metadata, or audit output. Empty source text makes zero
 API calls. Each non-empty source runs the passes sequentially; only the temporal
 content pass receives the validated source-local entity catalog.
 
+For live evaluation, each pass receives only its permitted subset of the
+proposed/runtime-inactive V5 predicate registry and the object contracts used by
+that subset. Registry subject type, modality, projection, surface policy,
+temporal semantics, sensitivity floor, and object shape are revalidated before
+pass selection. A registry violation therefore enters that pass's single
+bounded repair; it is not deferred until final packet assembly.
+
+The manifest-bound live wrapper requires the canonical 25-source manifest hash,
+revalidates each owner-scoped source against Postgres under `brains_app` and
+forced RLS, and takes complete `memory.*`, manifest-source, and owner-filtered
+Qdrant signatures before and after evaluation. Its preflight mode constructs no
+OpenAI client and records zero external calls. Reports are create-only mode 0600.
+
 ## Deterministic assembly invariants
 
 - Entity references must resolve to the validated entity-graph catalog.

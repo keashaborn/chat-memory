@@ -9,9 +9,13 @@ from pydantic import BaseModel
 from scripts.memory_v1_consolidation_packet_eval import stable_json
 from scripts.memory_v1_relational_v5_live_eval import (
     ModelPacket,
+    SENSITIVITY_RANK,
     StrictModel,
+    enforce_temporal_authority,
     sha256_text,
     source_span,
+    validate_object,
+    validate_temporal,
 )
 from scripts.memory_v1_relational_v5_specialized import (
     ENTITY_GRAPH_INSTRUCTIONS,
@@ -134,6 +138,73 @@ def _repair_instructions(instructions: str, reasons: list[str]) -> str:
     )
 
 
+def _registry_instructions(
+    registry: dict[str, Any] | None, pass_name: PassName
+) -> str:
+    if registry is None:
+        return ""
+    graph_predicates = {
+        "relationship.has_pet",
+        "relationship.parent_of",
+        "relationship.sibling_of",
+        "residence.lives_at",
+    }
+    project_predicates = {
+        "project.constraint",
+        "project.current_state",
+        "project.proposed_feature",
+        "project.requirement",
+    }
+    if pass_name == "entity_graph":
+        allowed = graph_predicates
+    elif pass_name == "project_knowledge":
+        allowed = project_predicates
+    else:
+        allowed = {
+            str(item["predicate"])
+            for item in registry.get("predicates", [])
+            if item.get("predicate") not in graph_predicates | project_predicates
+        }
+    rows = [
+        {
+            "predicate": item["predicate"],
+            "subject_entity_types": item["subject_entity_types"],
+            "object_contract": item["object_contract"],
+            "temporal_semantics": item["temporal_semantics"],
+            "modalities": item["modalities"],
+            "projection_classes": item["projection_classes"],
+            "sensitivity_floor": item["sensitivity_floor"],
+            "surface_policies": item["surface_policies"],
+            "description": item["description"],
+        }
+        for item in registry.get("predicates", [])
+        if item.get("predicate") in allowed
+    ]
+    contracts = registry.get("object_contracts", {})
+    required_contracts = {str(item["object_contract"]) for item in rows}
+    missing = sorted(required_contracts - set(contracts))
+    if missing:
+        raise RuntimeError(
+            f"registry contracts missing for {pass_name}:{','.join(missing)}"
+        )
+    governed = {
+        "registry_version": registry.get("registry_version"),
+        "pass": pass_name,
+        "predicates": rows,
+        "object_contracts": {
+            key: contracts[key] for key in sorted(required_contracts)
+        },
+    }
+    return "GOVERNED PREDICATE REGISTRY FOR THIS PASS\n" + stable_json(governed)
+
+
+def _pass_instructions(
+    base: str, registry: dict[str, Any] | None, pass_name: PassName
+) -> str:
+    governed = _registry_instructions(registry, pass_name)
+    return base if not governed else base + "\n\n" + governed
+
+
 def _span_reasons(prefix: str, spans: list[Any], text: str) -> list[str]:
     reasons: list[str] = []
     for index, span in enumerate(spans):
@@ -150,8 +221,67 @@ def _duplicate_reasons(values: list[str], label: str) -> list[str]:
     return [f"duplicate_{label}:{value}" for value in duplicates]
 
 
+def _registry_observation_reasons(
+    observations: list[Any],
+    *,
+    catalog: list[dict[str, Any]],
+    registry: dict[str, Any] | None,
+    source_recorded_at: str | None,
+    project_subject: bool = False,
+) -> list[str]:
+    if registry is None:
+        return []
+    if not source_recorded_at:
+        return ["registry_validation_missing_source_recorded_at"]
+    rules = {str(item["predicate"]): item for item in registry.get("predicates", [])}
+    entities = {str(item["entity_ref"]): item for item in catalog}
+    reasons: list[str] = []
+    for item in observations:
+        ref = str(item.observation_ref)
+        rule = rules.get(str(item.predicate))
+        if rule is None:
+            reasons.append(f"registry:{ref}:unregistered_predicate:{item.predicate}")
+            continue
+        subject_type = "project" if project_subject else None
+        if not project_subject:
+            subject = entities.get(str(item.subject_entity_ref))
+            subject_type = str(subject["entity_type"]) if subject is not None else None
+        if subject_type not in rule["subject_entity_types"]:
+            reasons.append(f"registry:{ref}:subject_entity_type")
+        if item.modality not in rule["modalities"]:
+            reasons.append(f"registry:{ref}:modality")
+        if item.projection_class not in rule["projection_classes"]:
+            reasons.append(f"registry:{ref}:projection_class")
+        if item.surface_policy not in rule["surface_policies"]:
+            reasons.append(f"registry:{ref}:surface_policy")
+        temporal = item.temporal.model_dump(mode="json")
+        if temporal["semantic"] not in rule["temporal_semantics"]:
+            reasons.append(f"registry:{ref}:temporal_semantic")
+        if SENSITIVITY_RANK[item.sensitivity] < SENSITIVITY_RANK[rule["sensitivity_floor"]]:
+            reasons.append(f"registry:{ref}:sensitivity_floor")
+        contract_key = str(rule["object_contract"])
+        contract = registry.get("object_contracts", {}).get(contract_key)
+        if contract is None:
+            reasons.append(f"registry:{ref}:missing_object_contract:{contract_key}")
+        else:
+            obj = item.object.model_dump(mode="json")
+            for error in validate_object(obj, contract, entities):
+                reasons.append(f"registry:{ref}:object:{error}")
+        try:
+            enforce_temporal_authority(temporal, source_recorded_at)
+            for error in validate_temporal(temporal):
+                reasons.append(f"registry:{ref}:temporal:{error}")
+        except Exception as exc:
+            reasons.append(f"registry:{ref}:temporal:{exc}")
+    return sorted(set(reasons))
+
+
 def validate_entity_graph_pass(
-    packet: EntityGraphPassPacket, text: str
+    packet: EntityGraphPassPacket,
+    text: str,
+    *,
+    registry: dict[str, Any] | None = None,
+    source_recorded_at: str | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     refs = [item.entity_ref for item in packet.entity_mentions]
@@ -184,6 +314,14 @@ def validate_entity_graph_pass(
         )
     for index, item in enumerate(packet.deferrals):
         reasons.extend(_span_reasons(f"deferral:{index}", item.source_spans, text))
+    reasons.extend(
+        _registry_observation_reasons(
+            list(packet.relationship_observations),
+            catalog=entity_catalog(packet),
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+        )
+    )
     return sorted(set(reasons))
 
 
@@ -191,6 +329,9 @@ def validate_temporal_content_pass(
     packet: TemporalContentPassPacket,
     text: str,
     catalog: list[dict[str, Any]],
+    *,
+    registry: dict[str, Any] | None = None,
+    source_recorded_at: str | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     known = {str(item["entity_ref"]) for item in catalog}
@@ -218,11 +359,23 @@ def validate_temporal_content_pass(
             reasons.append(f"comparison_ref_unresolved:{index}:{hint.observation_ref}")
     for index, item in enumerate(packet.deferrals):
         reasons.extend(_span_reasons(f"deferral:{index}", item.source_spans, text))
+    reasons.extend(
+        _registry_observation_reasons(
+            list(packet.observations),
+            catalog=catalog,
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+        )
+    )
     return sorted(set(reasons))
 
 
 def validate_project_knowledge_pass(
-    packet: ProjectKnowledgePassPacket, text: str
+    packet: ProjectKnowledgePassPacket,
+    text: str,
+    *,
+    registry: dict[str, Any] | None = None,
+    source_recorded_at: str | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     refs = [item.observation_ref for item in packet.observations]
@@ -241,6 +394,15 @@ def validate_project_knowledge_pass(
         )
     for index, item in enumerate(packet.deferrals):
         reasons.extend(_span_reasons(f"deferral:{index}", item.source_spans, text))
+    reasons.extend(
+        _registry_observation_reasons(
+            list(packet.observations),
+            catalog=[],
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+            project_subject=True,
+        )
+    )
     return sorted(set(reasons))
 
 
@@ -438,6 +600,7 @@ async def run_specialized_zero_write(
     source_external_id: str,
     source_recorded_at: str,
     text: str,
+    registry: dict[str, Any] | None = None,
 ) -> SpecializedRunResult:
     plan = execution_plan()
     if plan.max_calls_per_pass != 2 or plan.model_may_write:
@@ -455,14 +618,21 @@ async def run_specialized_zero_write(
         client,
         model=model,
         pass_name="entity_graph",
-        instructions=ENTITY_GRAPH_INSTRUCTIONS,
+        instructions=_pass_instructions(
+            ENTITY_GRAPH_INSTRUCTIONS, registry, "entity_graph"
+        ),
         text=text,
         source_recorded_at=source_recorded_at,
         source_token=source_token,
         safety_identifier=safety_identifier,
         packet_type=EntityGraphPassPacket,
         catalog=None,
-        validator=lambda packet: validate_entity_graph_pass(packet, text),
+        validator=lambda packet: validate_entity_graph_pass(
+            packet,
+            text,
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+        ),
         attempts=attempts,
     )
     catalog = entity_catalog(graph)
@@ -470,28 +640,43 @@ async def run_specialized_zero_write(
         client,
         model=model,
         pass_name="temporal_content",
-        instructions=TEMPORAL_CONTENT_INSTRUCTIONS,
+        instructions=_pass_instructions(
+            TEMPORAL_CONTENT_INSTRUCTIONS, registry, "temporal_content"
+        ),
         text=text,
         source_recorded_at=source_recorded_at,
         source_token=source_token,
         safety_identifier=safety_identifier,
         packet_type=TemporalContentPassPacket,
         catalog=catalog,
-        validator=lambda packet: validate_temporal_content_pass(packet, text, catalog),
+        validator=lambda packet: validate_temporal_content_pass(
+            packet,
+            text,
+            catalog,
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+        ),
         attempts=attempts,
     )
     project = await _run_pass(
         client,
         model=model,
         pass_name="project_knowledge",
-        instructions=PROJECT_KNOWLEDGE_INSTRUCTIONS,
+        instructions=_pass_instructions(
+            PROJECT_KNOWLEDGE_INSTRUCTIONS, registry, "project_knowledge"
+        ),
         text=text,
         source_recorded_at=source_recorded_at,
         source_token=source_token,
         safety_identifier=safety_identifier,
         packet_type=ProjectKnowledgePassPacket,
         catalog=None,
-        validator=lambda packet: validate_project_knowledge_pass(packet, text),
+        validator=lambda packet: validate_project_knowledge_pass(
+            packet,
+            text,
+            registry=registry,
+            source_recorded_at=source_recorded_at,
+        ),
         attempts=attempts,
     )
     try:
