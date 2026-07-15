@@ -125,14 +125,16 @@ An entity mention is a source-bound proposal, not a durable entity. It contains:
 
 - a packet-local reference;
 - entity type;
-- canonical-name proposal when stated;
+- mention kind and source name text when stated;
 - relationship role when only a role is stated;
 - source-span offsets and span hash;
-- resolution action: `link_existing`, `propose_new`, or `unresolved`;
 - extraction confidence and reason codes.
 
 Only the owner-scoped resolver may convert a mention into a durable entity ID.
-The model may not invent a durable entity key or link across accounts.
+The model may not emit a resolution action, durable entity ID or key, trusted
+project binding, or cross-account link. The server-generated, hash-locked
+resolution packet is defined in
+`specs/memory_v1_entity_resolution_review_v5.schema.json`.
 
 Role phrases do not justify importing a name from another source. For example,
 an unnamed father mention stays an unnamed father-role entity unless an
@@ -241,11 +243,13 @@ V5 separates event occurrence from state validity. A temporal object includes:
   `observation_time`;
 - shape: `none`, `instant`, `bounded_interval`, `open_interval`, or
   `recurring`;
-- lower and upper RFC3339 bounds when supported;
-- precision: `exact`, `minute`, `day`, `month`, `year`, `relative`, or
-  `unknown`;
-- whether a relative phrase was anchored to the trusted source timestamp;
-- whether either bound is inclusive;
+- basis: `instant`, `calendar`, `relative`, `recurring`, or `none`;
+- source form and certainty, separate from precision;
+- precision: `exact`, `minute`, `day`, `month`, `year`, or `unknown`;
+- exactly one compatible instant, calendar range, instant range, relative
+  offset, or recurrence value;
+- whether server policy anchored a partial or relative expression to the
+  trusted source timestamp;
 - uncertainty reason codes.
 
 Partial dates are intervals, not invented instants. “In March” in a source
@@ -254,10 +258,15 @@ precision. A continuing state described as beginning after that event uses an
 open-ended state-validity interval. The system must not store March 1 as the
 known event date merely to satisfy an RFC3339 field.
 
-Current `claim.valid_from` and `claim.valid_to` can hold exact bounds. V5 needs
-temporal precision and semantic qualifiers before month/year/relative cases can
-be promoted safely. A future schema phase may use a PostgreSQL range plus typed
-precision; this contract does not authorize that migration.
+Calendar ranges use `daterange`; timezone-aware windows use `tstzrange`; both
+are half-open. Relative is a source form, not a precision. Approximate relative
+offsets retain their structured offset and do not acquire guessed concrete
+bounds. Current `claim.valid_from` and `claim.valid_to` remain compatibility
+fields for verified instant values only.
+
+The exact normalization and persistence rules are frozen in
+`docs/MEMORY_V1_TEMPORAL_CONTRACT_V5.md`. This contract does not authorize the
+schema migration.
 
 ## 9. Epistemic modality and sensitive statements
 
@@ -421,12 +430,13 @@ is not copied into general telemetry.
 
 - dedicated immutable observation persistence, claim-observation provenance,
   and candidate-observation review bindings;
-- V5 predicate registry and literal typing.
+- V5 predicate registry and literal typing;
+- temporal interval, calendar, relative-offset, recurrence, and precision
+  representation;
+- owner-scoped entity-resolution proposals and hash-locked review.
 
 ### Requires design before implementation
 
-- temporal precision/range representation;
-- entity-resolution proposals and review;
 - typed salience signal events;
 - answer-attribution trace fields;
 - exact legacy-fallback exclusivity enforcement.

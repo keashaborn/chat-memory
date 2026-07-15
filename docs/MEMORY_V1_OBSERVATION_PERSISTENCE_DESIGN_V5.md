@@ -62,10 +62,7 @@ One row records one evidence-backed atomic interpretation.
 | `object_entity_id` / `object_literal` | exactly one; registry-validated |
 | `polarity` | `affirmed` or `negated` |
 | `modality` | V5 modality enum |
-| `temporal_semantic` | occurrence, state validity, planned time, or observation time |
-| `temporal_range` | nullable `tstzrange`; exact supported bounds only |
-| `temporal_precision` | exact, minute, day, month, year, relative, or unknown |
-| `relative_anchored` | true only when server anchored to trusted source time |
+| `temporal_value_hash` | exact hash of the one-to-one typed temporal row |
 | `source_char_start` / `source_char_end` | exact source span offsets |
 | `source_span_sha256` | hash of the selected span; no copied span text |
 | `projection_class` | one governed V5 class |
@@ -76,6 +73,13 @@ One row records one evidence-backed atomic interpretation.
 | `packet_sha256` | hash of the validated normalized packet |
 | `observation_sha256` | hash of the canonical owner-excluded semantic payload |
 | `recorded_at` | database timestamp |
+
+`memory.observation_temporal` holds semantic, shape, basis, source form,
+certainty, precision, and exactly one compatible instant, calendar range,
+instant range, relative offset, or recurrence value. Calendar values use
+`daterange`; timezone-aware windows use `tstzrange`; both use canonical `[)`
+bounds. Relative source form is not treated as precision. The complete contract
+is `docs/MEMORY_V1_TEMPORAL_CONTRACT_V5.md`.
 
 Required database constraints:
 
@@ -93,6 +97,11 @@ The observation hash excludes mutable workflow state, database IDs, owner, and
 timestamps. It includes subject identity, predicate, normalized object,
 polarity, modality, temporal semantics, source span hash, projection class,
 surface policy, and registry version.
+
+Durable subject and object IDs come only from the server-generated,
+owner-scoped resolution review defined in
+`docs/MEMORY_V1_ENTITY_RESOLUTION_REVIEW_CONTRACT_V5.md`. The model packet no
+longer contains durable entity IDs, model entity keys, or resolution actions.
 
 ### `memory.claim_observation`
 

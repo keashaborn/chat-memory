@@ -162,10 +162,9 @@
       "required": [
         "entity_ref",
         "entity_type",
-        "canonical_name",
+        "mention_kind",
+        "name_text",
         "relationship_role",
-        "resolution_action",
-        "existing_entity_id",
         "source_spans",
         "extraction_confidence",
         "reason_codes"
@@ -187,21 +186,19 @@
             "concept"
           ]
         },
-        "canonical_name": {
+        "mention_kind": {
+          "enum": [
+            "self_reference",
+            "named",
+            "role_only",
+            "anonymous"
+          ]
+        },
+        "name_text": {
           "$ref": "#/$defs/nullable_string"
         },
         "relationship_role": {
           "$ref": "#/$defs/nullable_string"
-        },
-        "resolution_action": {
-          "enum": [
-            "link_existing",
-            "propose_new",
-            "unresolved"
-          ]
-        },
-        "existing_entity_id": {
-          "$ref": "#/$defs/nullable_uuid"
         },
         "source_spans": {
           "type": "array",
@@ -279,12 +276,17 @@
       "required": [
         "semantic",
         "shape",
-        "lower",
-        "upper",
-        "lower_inclusive",
-        "upper_inclusive",
+        "basis",
+        "source_form",
+        "certainty",
         "precision",
+        "instant",
+        "calendar_range",
+        "instant_range",
+        "relative_offset",
+        "recurrence",
         "anchored_to_source_time",
+        "normalization_policy_version",
         "reason_codes"
       ],
       "properties": {
@@ -306,33 +308,31 @@
             "recurring"
           ]
         },
-        "lower": {
-          "oneOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "null"
-            }
+        "basis": {
+          "enum": [
+            "none",
+            "instant",
+            "calendar",
+            "relative",
+            "recurring"
           ]
         },
-        "upper": {
-          "oneOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "null"
-            }
+        "source_form": {
+          "enum": [
+            "none",
+            "absolute",
+            "partial_absolute",
+            "relative",
+            "implicit_source_time"
           ]
         },
-        "lower_inclusive": {
-          "type": "boolean"
-        },
-        "upper_inclusive": {
-          "type": "boolean"
+        "certainty": {
+          "enum": [
+            "exact",
+            "approximate",
+            "bounded",
+            "unknown"
+          ]
         },
         "precision": {
           "enum": [
@@ -341,12 +341,113 @@
             "day",
             "month",
             "year",
-            "relative",
             "unknown"
+          ]
+        },
+        "instant": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calendar_range": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["lower", "upper", "bounds"],
+              "properties": {
+                "lower": {
+                  "oneOf": [
+                    {"type": "string", "format": "date"},
+                    {"type": "null"}
+                  ]
+                },
+                "upper": {
+                  "oneOf": [
+                    {"type": "string", "format": "date"},
+                    {"type": "null"}
+                  ]
+                },
+                "bounds": {"const": "[)"}
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instant_range": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["lower", "upper", "bounds"],
+              "properties": {
+                "lower": {
+                  "oneOf": [
+                    {"type": "string", "format": "date-time"},
+                    {"type": "null"}
+                  ]
+                },
+                "upper": {
+                  "oneOf": [
+                    {"type": "string", "format": "date-time"},
+                    {"type": "null"}
+                  ]
+                },
+                "bounds": {"const": "[)"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
+        "relative_offset": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "direction",
+                "magnitude",
+                "unit",
+                "approximate",
+                "anchor_source"
+              ],
+              "properties": {
+                "direction": {"enum": ["past", "future"]},
+                "magnitude": {"type": "number", "exclusiveMinimum": 0},
+                "unit": {"enum": ["minute", "hour", "day", "week", "month", "year"]},
+                "approximate": {"type": "boolean"},
+                "anchor_source": {"const": "evidence_observed_at"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
+        "recurrence": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind"],
+              "properties": {
+                "kind": {"const": "unspecified_repeated"}
+              }
+            },
+            {"type": "null"}
           ]
         },
         "anchored_to_source_time": {
           "type": "boolean"
+        },
+        "normalization_policy_version": {
+          "const": "memory_temporal_normalization_v5"
         },
         "reason_codes": {
           "type": "array",
@@ -465,13 +566,14 @@
         },
         "surface_policy": {
           "enum": [
-            "answer_when_asked",
+            "direct_or_relevant",
             "mention_when_directly_relevant",
             "explicit_recall_only",
-            "silent_style_influence",
             "normalization_only",
-            "project_scope_only",
-            "never_surface_as_content"
+            "exact_project_scope_only",
+            "relevant_recommendation_or_explicit_recall",
+            "zero_token_control_only",
+            "never"
           ]
         },
         "temporal": {

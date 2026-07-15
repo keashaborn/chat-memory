@@ -58,6 +58,30 @@ class RelationalV5ContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "forbidden authoritative"):
             validate_schema(schema)
 
+    def test_model_entity_resolution_action_fails_closed(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["$defs"]["entity_mention"]["properties"]["resolution_action"] = {
+            "enum": ["link_existing"]
+        }
+        with self.assertRaisesRegex(AssertionError, "forbidden authoritative"):
+            validate_schema(schema)
+
+    def test_relative_as_precision_fails_closed(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["$defs"]["temporal"]["properties"]["precision"]["enum"].append(
+            "relative"
+        )
+        with self.assertRaisesRegex(AssertionError, "source form"):
+            validate_schema(schema)
+
+    def test_surface_policy_drift_fails_closed(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["$defs"]["observation"]["properties"]["surface_policy"]["enum"] = [
+            "legacy_policy"
+        ]
+        with self.assertRaisesRegex(AssertionError, "surface policies drifted"):
+            validate_schema(schema)
+
     def test_manifest_drift_fails_closed(self) -> None:
         manifest = {
             "manifest_version": "test",

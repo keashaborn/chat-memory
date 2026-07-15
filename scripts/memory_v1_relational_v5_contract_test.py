@@ -46,9 +46,22 @@ PROJECTION_CLASSES = {
     "project_knowledge",
     "never_surface",
 }
+SURFACE_POLICIES = {
+    "direct_or_relevant",
+    "normalization_only",
+    "mention_when_directly_relevant",
+    "explicit_recall_only",
+    "exact_project_scope_only",
+    "relevant_recommendation_or_explicit_recall",
+    "zero_token_control_only",
+    "never",
+}
 RAW_CONTENT_KEYS = {"text", "content", "raw_text", "query", "source_text"}
 FORBIDDEN_SCHEMA_PROPERTIES = {
     "owner_user_id",
+    "entity_key",
+    "existing_entity_id",
+    "resolution_action",
     "salience",
     "importance",
     "confidence",
@@ -142,6 +155,50 @@ def validate_schema(schema: dict[str, Any]) -> None:
     forbidden = sorted(property_names & FORBIDDEN_SCHEMA_PROPERTIES)
     if forbidden:
         raise AssertionError(f"forbidden authoritative model properties: {forbidden}")
+
+    mention = definitions.get("entity_mention", {})
+    mention_properties = set(mention.get("properties", {}))
+    if not {"mention_kind", "name_text", "relationship_role"} <= mention_properties:
+        raise AssertionError("entity mention extraction fields are incomplete")
+    if {"resolution_action", "existing_entity_id", "entity_key"} & mention_properties:
+        raise AssertionError("entity mention contains resolver-authoritative fields")
+
+    temporal = definitions.get("temporal", {})
+    temporal_properties = temporal.get("properties", {})
+    required_temporal = {
+        "semantic",
+        "shape",
+        "basis",
+        "source_form",
+        "certainty",
+        "precision",
+        "instant",
+        "calendar_range",
+        "instant_range",
+        "relative_offset",
+        "recurrence",
+        "anchored_to_source_time",
+        "normalization_policy_version",
+        "reason_codes",
+    }
+    if set(temporal.get("required", [])) != required_temporal:
+        raise AssertionError("temporal contract fields mismatch")
+    if set(temporal_properties) != required_temporal:
+        raise AssertionError("temporal properties mismatch")
+    precision = temporal_properties.get("precision", {}).get("enum", [])
+    if "relative" in precision:
+        raise AssertionError("relative must be source form, not temporal precision")
+    if temporal_properties.get("normalization_policy_version", {}).get("const") != (
+        "memory_temporal_normalization_v5"
+    ):
+        raise AssertionError("temporal normalization policy is not fixed")
+
+    observation = definitions.get("observation", {})
+    surface_policies = set(
+        observation.get("properties", {}).get("surface_policy", {}).get("enum", [])
+    )
+    if surface_policies != SURFACE_POLICIES:
+        raise AssertionError("model and predicate-registry surface policies drifted")
 
 
 def validate_cases(cases: list[dict[str, Any]]) -> None:
