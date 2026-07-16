@@ -148,6 +148,112 @@ class V5LiveEvalTest(unittest.TestCase):
         self.assertTrue(any(item["reason_code"] == "unregistered_predicate" for item in packet["deferrals"]))
         self.assertTrue(any("not in the extraction-enabled" in item["reason"] for item in rejections))
 
+    def test_source_contradiction_blocks_occupation_and_prunes_orphans(self) -> None:
+        text = (
+            "I became a personal trainer in education anyway I don’t actually "
+            "do it for a living I think through the national Association of "
+            "sports medicine."
+        )
+        concept_start = text.index("personal trainer")
+        occupation_span_end = concept_start + len("personal trainer")
+        uncertainty_start = text.index("I think")
+        source = {
+            "job_id": "fd4e7d6d-f072-42a4-806d-c9b8aa00ac93",
+            "source_external_id": "3f01173a-f51c-45b9-8afd-4429892a1cb2",
+            "source_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "source_recorded_at": "2026-07-14T17:15:20.384600+00:00",
+        }
+        model_packet = ModelPacket.model_validate(
+            {
+                "entity_mentions": [
+                    {
+                        "entity_ref": "e01",
+                        "entity_type": "self",
+                        "mention_kind": "self_reference",
+                        "name_text": None,
+                        "relationship_role": "user:self",
+                        "source_spans": [{"start": 0, "end": 1, "quote": "I"}],
+                        "extraction_confidence": 0.99,
+                        "reason_codes": ["direct_entity_mention"],
+                    },
+                    {
+                        "entity_ref": "e02",
+                        "entity_type": "concept",
+                        "mention_kind": "named",
+                        "name_text": "personal trainer",
+                        "relationship_role": None,
+                        "source_spans": [
+                            {
+                                "start": concept_start,
+                                "end": occupation_span_end,
+                                "quote": "personal trainer",
+                            }
+                        ],
+                        "extraction_confidence": 0.9,
+                        "reason_codes": ["direct_entity_mention"],
+                    },
+                ],
+                "observations": [
+                    {
+                        "observation_ref": "o01",
+                        "subject_entity_ref": "e01",
+                        "predicate": "occupation.works_as",
+                        "object": {"kind": "entity", "entity_ref": "e02"},
+                        "polarity": "affirmed",
+                        "modality": "asserted",
+                        "projection_class": "direct_claim",
+                        "surface_policy": "direct_or_relevant",
+                        "temporal": temporal_observation(),
+                        "sensitivity": "medium",
+                        "extraction_confidence": 0.9,
+                        "source_spans": [
+                            {
+                                "start": 0,
+                                "end": occupation_span_end,
+                                "quote": text[:occupation_span_end],
+                            }
+                        ],
+                        "reason_codes": ["explicit_occupation_statement"],
+                    }
+                ],
+                "comparison_hints": [],
+                "deferrals": [
+                    {
+                        "reason_code": "ambiguous_transcription",
+                        "memory_shape": "direct_claim",
+                        "source_spans": [
+                            {
+                                "start": uncertainty_start,
+                                "end": len(text) - 1,
+                                "quote": text[uncertainty_start:-1],
+                            }
+                        ],
+                        "sensitivity": "medium",
+                    }
+                ],
+                "packet_findings": [],
+            }
+        )
+        packet, rejections = enrich_packet(
+            model_packet,
+            source=source,
+            text=text,
+            registry=self.registry,
+        )
+        self.assertEqual(packet["observations"], [])
+        self.assertEqual(packet["entity_mentions"], [])
+        self.assertEqual(
+            {item["reason_code"] for item in packet["deferrals"]},
+            {"ambiguous_transcription", "source_contradicts_predicate"},
+        )
+        self.assertTrue(
+            any("predicate entailment deferred" in item["reason"] for item in rejections)
+        )
+        self.assertIn(
+            "predicate_entailment_v5_1_deferred_observation",
+            packet["packet_findings"],
+        )
+
     def test_invalid_diagnostic_code_does_not_discard_semantic_packet(self) -> None:
         payload = self.correction_packet().model_dump(mode="json")
         payload["packet_findings"] = ["Not snake case"]

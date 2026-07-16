@@ -9,6 +9,10 @@ from typing import Any, Callable, Literal, TypeVar
 from pydantic import BaseModel
 
 from scripts.memory_v1_consolidation_packet_eval import stable_json
+from scripts.memory_v1_predicate_entailment_v5_1 import (
+    POLICY_VERSION as PREDICATE_ENTAILMENT_POLICY_VERSION,
+    assess_observation_entailment,
+)
 from scripts.memory_v1_relational_v5_live_eval import (
     ComparisonHint,
     Deferral,
@@ -38,7 +42,7 @@ from scripts.memory_v1_relational_v5_specialized import (
 )
 
 
-PIPELINE_VERSION = "memory_v1_relational_specialized_v5"
+PIPELINE_VERSION = "memory_v1_relational_specialized_v5_1"
 PassName = Literal["entity_graph", "temporal_content", "project_knowledge"]
 AttemptName = Literal["initial", "repair"]
 PacketT = TypeVar("PacketT", bound=BaseModel)
@@ -788,6 +792,52 @@ def normalize_uncertain_credential_deferral(
     return packet
 
 
+def normalize_predicate_entailment_deferrals(
+    packet: TemporalContentPassPacket,
+    text: str,
+) -> TemporalContentPassPacket:
+    kept: list[Observation] = []
+    changed = False
+    for observation in packet.observations:
+        decision = assess_observation_entailment(
+            observation.model_dump(mode="json"), text
+        )
+        if decision.status == "accept":
+            kept.append(observation)
+            continue
+        changed = True
+        source_span_value = decision.source_span or {
+            "start": 0,
+            "end": len(text),
+            "quote": text,
+        }
+        already_deferred = any(
+            item.reason_code == decision.reason_code
+            and any(
+                span.start == int(source_span_value["start"])
+                and span.end == int(source_span_value["end"])
+                for span in item.source_spans
+            )
+            for item in packet.deferrals
+        )
+        if not already_deferred:
+            packet.deferrals.append(
+                Deferral(
+                    reason_code=decision.reason_code,
+                    memory_shape=observation.projection_class,
+                    source_spans=[SpanOffsets.model_validate(source_span_value)],
+                    sensitivity=observation.sensitivity,
+                )
+            )
+    if changed:
+        packet.observations = kept
+        _append_server_finding(
+            packet,
+            f"{PREDICATE_ENTAILMENT_POLICY_VERSION}_deferred_observation",
+        )
+    return packet
+
+
 def normalize_project_current_state_temporal(
     packet: ProjectKnowledgePassPacket, source_recorded_at: str
 ) -> ProjectKnowledgePassPacket:
@@ -1283,6 +1333,7 @@ async def run_specialized_zero_write(
         packet = normalize_redundant_source_spans(packet, text)
         packet = normalize_explicit_pet_name_correction_content(packet, correction)
         packet = normalize_uncertain_credential_deferral(packet, graph, text)
+        packet = normalize_predicate_entailment_deferrals(packet, text)
         return normalize_known_technical_question_deferrals(packet, text)
 
     content = await _run_pass(

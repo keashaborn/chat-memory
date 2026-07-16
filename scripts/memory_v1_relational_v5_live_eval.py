@@ -16,6 +16,9 @@ from typing import Any, Literal, Union
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
+from scripts.memory_v1_predicate_entailment_v5_1 import (
+    assess_observation_entailment,
+)
 from scripts.memory_v1_consolidation_packet_eval import (
     load_manifest,
     secure_write_json,
@@ -47,6 +50,8 @@ ALWAYS_REVIEW_DEFERRALS = {
     "sensitive_manual_review",
     "compound_requires_split",
     "entity_resolution_unresolved",
+    "source_contradicts_predicate",
+    "predicate_semantics_unresolved",
 }
 
 
@@ -206,6 +211,8 @@ class Deferral(StrictModel):
         "compound_requires_split",
         "entity_resolution_unresolved",
         "insufficient_evidence",
+        "source_contradicts_predicate",
+        "predicate_semantics_unresolved",
     ]
     memory_shape: Literal[
         "none",
@@ -302,9 +309,15 @@ pet-name correction use pet:corrected_name_subject, not pet:current:N.
 Every residence.lives_at observation must reference an explicit place entity
 mention grounded in the same source; never emit an unresolved entity reference.
 
-Use occupation.works_as for a directly reported professional/vocational role
-such as becoming a personal trainer even when the user says it is not current
-paid work; defer ambiguous credentialing or voice transcription separately.
+Use occupation.works_as only for an explicitly stated employment, work,
+practice, or current professional role. Training, education, qualification,
+certification, or becoming qualified is not employment. Use
+credential.reported only when the credential itself is explicit and otherwise
+defer. If the source disclaims doing a role for a living, never emit an
+affirmed occupation. Never choose a nearby registered predicate merely because
+the exact semantic predicate is unavailable; defer predicate_semantics_unresolved.
+The server independently checks these entailment rules against the complete
+source clause and rejects contradictory or lossy observations.
 For uncertain third-party diagnoses use health.user_reported_uncertain_label;
 for directly reported symptoms/conditions use health.user_reported_observation,
 and add sensitive_manual_review. If both occur, emit separate observations for
@@ -794,6 +807,7 @@ def enrich_packet(
     normalized_relationship_direction = normalize_canonical_relationship_direction(
         raw["observations"], entities
     )
+    predicate_entailment_deferred = False
     for observation in raw["observations"]:
         ref = observation["observation_ref"]
         try:
@@ -804,6 +818,29 @@ def enrich_packet(
             )
             normalized_reason_codes = normalized_reason_codes or changed
             observation["source_spans"] = normalize_spans(observation["source_spans"], text)
+            entailment = assess_observation_entailment(observation, text)
+            if entailment.status == "defer":
+                predicate_entailment_deferred = True
+                source_span_value = entailment.source_span
+                if source_span_value is None:
+                    source_span_value = {
+                        "start": 0,
+                        "end": len(text),
+                        "quote": text,
+                    }
+                deferred.append(
+                    {
+                        "reason_code": entailment.reason_code,
+                        "memory_shape": observation["projection_class"],
+                        "source_spans": [source_span_value],
+                        "sensitivity": observation["sensitivity"],
+                        "review_required": True,
+                    }
+                )
+                raise ValueError(
+                    "predicate entailment deferred:"
+                    f"{entailment.policy_version}:{entailment.reason_code}"
+                )
             if observation["subject_entity_ref"] not in entities:
                 raise ValueError("subject_entity_ref is unresolved inside packet")
             rule = rules.get(observation["predicate"])
@@ -969,6 +1006,19 @@ def enrich_packet(
         packet_findings.append("canonical_relationship_direction_normalized")
     if normalized_pet_roles:
         packet_findings.append("pet_relationship_roles_normalized")
+    if predicate_entailment_deferred:
+        referenced_entities = {
+            item["subject_entity_ref"] for item in observations
+        } | {
+            item["object"]["entity_ref"]
+            for item in observations
+            if item["object"]["kind"] == "entity"
+        }
+        mentions = [
+            item for item in mentions if item["entity_ref"] in referenced_entities
+        ]
+        packet_findings.append("predicate_entailment_v5_1_deferred_observation")
+        packet_findings.append("orphan_entity_mentions_pruned")
     packet = {
         "contract_version": CONTRACT_VERSION,
         "source_envelope": {

@@ -42,8 +42,11 @@ or corrections.
 Scan declarative clauses even when they are embedded in a long question.
 Declare every entity needed as the subject or entity-object of a later content
 pass even when no graph relationship is present. In particular, declare
-user:self for first-person occupation/profile facts and a concept entity for a
-directly stated occupation such as personal trainer. A self entity must be
+user:self for first-person occupation/profile facts and a concept entity only
+for an explicitly stated employment or current professional role. Training,
+education, qualification, or credential language alone uses a literal
+credential.reported observation and does not create an occupation concept.
+A self entity must be
 grounded in I, me, my, mine, or myself, use mention_kind=self_reference, and use
 relationship_role=user:self; we, you, they, and they're are not self mentions.
 Declare an explicitly corrected pet-name subject as an animal with role
@@ -92,10 +95,15 @@ capitalized; defer them only when the source itself supplies uncertainty or a
 genuinely malformed product/API phrase.
 An uncertain qualifier immediately governing a credential or organization,
 such as "I think through [organization]", requires ambiguous_transcription.
-An explicit statement that the user became or is a personal trainer is
-occupation.works_as even when they say it is not current paid work; represent
-the occupation as a concept entity from the supplied catalog and separately
-defer an uncertain credential transcription. An explicit pet-name correction
+Use occupation.works_as only when the source explicitly states employment,
+work, practice, or a current professional role. Training, education,
+qualification, certification, or becoming qualified is not employment. Use
+credential.reported only for an explicit credential report. A statement that
+the user does not do a role for a living must never become an affirmed
+occupation. If the exact semantics are ambiguous or the registry lacks the
+exact predicate, add predicate_semantics_unresolved; never substitute the
+nearest predicate. The server independently checks the complete source clause
+and removes contradictory or lossy observations. An explicit pet-name correction
 is identity.name_canonical with corrective modality and correction projection;
 add both corrects and supersedes comparison hints against an owner-scoped prior
 name lookup. A self-contained command such as "can you correct that?" does not

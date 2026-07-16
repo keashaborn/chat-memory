@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.memory_v1_relational_v5_live_eval import (
+    EntityObject,
     EntityMention,
     Observation,
     Temporal,
@@ -25,6 +26,7 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     normalize_explicit_pet_name_correction_content,
     normalize_explicit_pet_name_correction_graph,
     normalize_known_technical_question_deferrals,
+    normalize_predicate_entailment_deferrals,
     normalize_plural_sibling_residence,
     normalize_project_lane_deferrals,
     normalize_project_current_state_temporal,
@@ -676,8 +678,11 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
             "pet:corrected_name_subject",
         )
 
-    def test_uncertain_credential_gets_review_deferral_without_losing_occupation(self) -> None:
-        text = "I became a personal trainer I think through Example Academy."
+    def test_uncertain_credential_and_nonemployment_defer_occupation(self) -> None:
+        text = (
+            "I became a personal trainer through education, but I don't "
+            "actually do it for a living. I think through Example Academy."
+        )
         self_span = {"start": 0, "end": 1, "quote": "I"}
         concept_start = text.index("personal trainer")
         organization_start = text.index("Example Academy")
@@ -734,9 +739,7 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         )
         observation = content_packet().observations[0]
         observation.predicate = "occupation.works_as"
-        observation.object = observation.object.model_copy(
-            update={"kind": "entity", "entity_ref": "e02"}
-        )
+        observation.object = EntityObject(kind="entity", entity_ref="e02")
         content = TemporalContentPassPacket(
             observations=[observation],
             comparison_hints=[],
@@ -744,10 +747,15 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
             packet_findings=[],
         )
         normalized = normalize_uncertain_credential_deferral(content, graph, text)
-        self.assertEqual(normalized.observations[0].predicate, "occupation.works_as")
+        normalized = normalize_predicate_entailment_deferrals(normalized, text)
+        self.assertEqual(normalized.observations, [])
         self.assertEqual(
             [item.reason_code for item in normalized.deferrals],
-            ["ambiguous_transcription"],
+            ["ambiguous_transcription", "source_contradicts_predicate"],
+        )
+        self.assertIn(
+            "memory_v1_predicate_entailment_v5_1_deferred_observation",
+            normalized.packet_findings,
         )
 
     def test_known_technical_term_is_not_an_ambiguous_personal_memory(self) -> None:
