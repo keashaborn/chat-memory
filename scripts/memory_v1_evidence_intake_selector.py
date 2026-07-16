@@ -83,34 +83,33 @@ async def run_owner(
     limit: int,
     record_terminal: bool,
 ) -> dict[str, Any]:
-    async with conn.transaction():
-        before = await plan(conn, owner, selector_version, limit)
-        applied = 0
-        replayed = 0
-        if record_terminal:
-            for row in before:
-                if row["outcome"] not in {"empty", "skipped"}:
-                    continue
-                recorded = await conn.fetchrow(
-                    """
-                    SELECT *
-                    FROM memory.record_owner_evidence_intake_terminal_v1(
-                      $1,$2,$3,$4,$5
-                    )
-                    """,
-                    uuid.UUID(row["evidence_id"]),
-                    selector_version,
-                    row["evidence_content_sha256"],
-                    row["outcome"],
-                    row["reason_code"],
+    before = await plan(conn, owner, selector_version, limit)
+    applied = 0
+    replayed = 0
+    if record_terminal:
+        for row in before:
+            if row["outcome"] not in {"empty", "skipped"}:
+                continue
+            recorded = await conn.fetchrow(
+                """
+                SELECT *
+                FROM memory.record_owner_evidence_intake_terminal_v1(
+                  $1,$2,$3,$4,$5
                 )
-                if recorded["apply_outcome"] == "applied":
-                    applied += 1
-                elif recorded["apply_outcome"] == "replayed":
-                    replayed += 1
-                else:
-                    raise RuntimeError("unexpected terminal apply outcome")
-        after = await plan(conn, owner, selector_version, limit)
+                """,
+                uuid.UUID(row["evidence_id"]),
+                selector_version,
+                row["evidence_content_sha256"],
+                row["outcome"],
+                row["reason_code"],
+            )
+            if recorded["apply_outcome"] == "applied":
+                applied += 1
+            elif recorded["apply_outcome"] == "replayed":
+                replayed += 1
+            else:
+                raise RuntimeError("unexpected terminal apply outcome")
+    after = await plan(conn, owner, selector_version, limit)
 
     terminal_before = sum(
         row["outcome"] in {"empty", "skipped"} for row in before
@@ -182,16 +181,17 @@ async def main() -> int:
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("POSTGRES_DSN must authenticate as brains_app")
-        owner_reports = [
-            await run_owner(
-                conn,
-                owner,
-                args.selector_version,
-                args.limit,
-                args.record_terminal,
-            )
-            for owner in owners
-        ]
+        async with conn.transaction():
+            owner_reports = [
+                await run_owner(
+                    conn,
+                    owner,
+                    args.selector_version,
+                    args.limit,
+                    args.record_terminal,
+                )
+                for owner in owners
+            ]
     finally:
         await conn.close()
 
