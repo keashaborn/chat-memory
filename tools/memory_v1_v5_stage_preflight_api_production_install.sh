@@ -13,7 +13,7 @@ test_sql=tests/memory_v1_v5_stage_preflight_api.sql
 required_ancestor=7eaee9f58db7ded0612fd95f27fc10670801a148
 expected_migration_sha=918c9cda73fe10f8280e3bf7d2bd02bcc98335465657b19c54a1dfee2679c4b4
 expected_rollback_sha=be321ae7b35516f8beee1150ac76ec99ab150be84ef78e6f5d4563c95d4910b5
-expected_test_sha=d2844f4e329974f546e0d772ee80a20c2621728ac513dc6cd24f77a0e8e8d4c4
+expected_test_sha=d27c1535f4fd3993a4b47f91db00e2f64718372292d5ae4f08300a8c6f5d7435
 container=brains-postgres-1
 database=memory
 snapshot_dir=/home/ubuntu/brains/snapshots
@@ -124,6 +124,11 @@ baseline="$snapshot_dir/memory_v1_v5_stage_preflight_baseline_${run_id}.tsv"
 post="$snapshot_dir/memory_v1_v5_stage_preflight_post_${run_id}.tsv"
 capture_state "$baseline"
 qdrant_before=$(qdrant_signature)
+evidence_select_before=$(psql_scalar "
+  SELECT has_table_privilege(
+    'brains_app','memory.evidence','SELECT'
+  )::int
+")
 
 phase=function_install
 log="$snapshot_dir/memory_v1_v5_stage_preflight_install_${run_id}.log"
@@ -153,7 +158,9 @@ cmp -s "$baseline" "$post"
     'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)',
     'EXECUTE'
   )
-  AND NOT has_table_privilege('brains_app','memory.evidence','SELECT')
+  AND NOT has_table_privilege('brains_app','memory.evidence','INSERT')
+  AND NOT has_table_privilege('brains_app','memory.evidence','UPDATE')
+  AND NOT has_table_privilege('brains_app','memory.evidence','DELETE')
   AND NOT EXISTS (
     SELECT 1
     FROM pg_proc AS procedure
@@ -165,6 +172,12 @@ cmp -s "$baseline" "$post"
       AND acl.privilege_type='EXECUTE'
   )
 )::int")" == "1" ]]
+evidence_select_after=$(psql_scalar "
+  SELECT has_table_privilege(
+    'brains_app','memory.evidence','SELECT'
+  )::int
+")
+[[ "$evidence_select_after" == "$evidence_select_before" ]]
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
 
@@ -173,6 +186,8 @@ report="$snapshot_dir/memory_v1_v5_stage_preflight_${run_id}.json"
 BACKUP="$backup" CATALOG="$catalog" BASELINE="$baseline" POST="$post" \
 LOG="$log" REPORT="$report" QDRANT_BEFORE="$qdrant_before" \
 QDRANT_AFTER="$qdrant_after" HEAD="$(git -C "$repo_root" rev-parse HEAD)" \
+EVIDENCE_SELECT_BEFORE="$evidence_select_before" \
+EVIDENCE_SELECT_AFTER="$evidence_select_after" \
 python3 - <<'PY'
 import datetime as dt
 import json
@@ -193,7 +208,10 @@ value = {
     },
     "checks": {
         "read_only_preflight": True,
-        "function_only_access": True,
+        "runner_uses_function_only": True,
+        "new_direct_evidence_grants": False,
+        "legacy_evidence_select_before": bool(int(os.environ["EVIDENCE_SELECT_BEFORE"])),
+        "legacy_evidence_select_after": bool(int(os.environ["EVIDENCE_SELECT_AFTER"])),
         "cross_owner_hidden": True,
         "missing_actor_rejected": True,
         "memory_rows_unchanged": True,

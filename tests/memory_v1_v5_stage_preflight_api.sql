@@ -91,8 +91,10 @@ RESET SESSION AUTHORIZATION;
 
 DO $security$
 BEGIN
-  IF has_table_privilege('brains_app','memory.evidence','SELECT') THEN
-    RAISE EXCEPTION 'brains_app has direct evidence-table access';
+  IF has_table_privilege('brains_app','memory.evidence','INSERT')
+     OR has_table_privilege('brains_app','memory.evidence','UPDATE')
+     OR has_table_privilege('brains_app','memory.evidence','DELETE') THEN
+    RAISE EXCEPTION 'brains_app has direct evidence-table mutation access';
   END IF;
   IF NOT has_function_privilege(
     'brains_app',
