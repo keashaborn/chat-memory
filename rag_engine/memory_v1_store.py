@@ -298,59 +298,39 @@ async def record_evidence(
     if not isinstance(metadata, dict):
         raise ProposalValidationError("metadata must be an object")
 
-    content_hash = _sha256_text(content) if content is not None else None
-
-    async with conn.transaction():
-        await _set_actor(conn, actor)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO memory.evidence(
-              owner_user_id, kind, source_system, external_id, content,
-              content_sha256, observed_at, directness, source_reliability,
-              independence_key, sensitivity, metadata
+    try:
+        async with conn.transaction():
+            await _set_actor(conn, actor)
+            row = await conn.fetchrow(
+                """
+                SELECT evidence_id,outcome,content_sha256
+                FROM memory.record_owner_evidence_v1(
+                  $1::memory.evidence_kind,$2,$3,$4,$5,$6,$7,$8,
+                  $9::memory.sensitivity_level,$10::jsonb
+                )
+                """,
+                kind,
+                source_system,
+                external_id,
+                content,
+                observed_at,
+                directness,
+                source_reliability,
+                independence_key,
+                sensitivity,
+                _stable_json(metadata),
             )
-            VALUES(
-              $1, $2::memory.evidence_kind, $3, $4, $5,
-              $6, $7, $8, $9, $10, $11::memory.sensitivity_level, $12::jsonb
-            )
-            ON CONFLICT (owner_user_id, source_system, external_id) DO NOTHING
-            RETURNING evidence_id, content_sha256
-            """,
-            actor,
-            kind,
-            source_system,
-            external_id,
-            content,
-            content_hash,
-            observed_at,
-            directness,
-            source_reliability,
-            independence_key,
-            sensitivity,
-            _stable_json(metadata),
-        )
-        if row:
+            if row is None or row["outcome"] not in {"applied", "replayed"}:
+                raise EvidenceConflict("controlled evidence writer returned no result")
             return uuid.UUID(str(row["evidence_id"]))
-
-        existing = await conn.fetchrow(
-            """
-            SELECT evidence_id, content_sha256, status::text
-            FROM memory.evidence
-            WHERE owner_user_id=$1 AND source_system=$2 AND external_id=$3
-            """,
-            actor,
-            source_system,
-            external_id,
-        )
-        if not existing:
-            raise EvidenceConflict("evidence conflict could not be resolved")
-        if existing["status"] in {"redacted", "deleted"}:
-            raise EvidenceConflict(
-                "evidence external_id is tombstoned and cannot be reinserted"
-            )
-        if (existing["content_sha256"] or None) != content_hash:
-            raise EvidenceConflict("evidence external_id already exists with different content")
-        return uuid.UUID(str(existing["evidence_id"]))
+    except asyncpg.CheckViolationError as exc:
+        message = str(exc)
+        if (
+            "tombstoned and cannot be reinserted" in message
+            or "already exists with different content" in message
+        ):
+            raise EvidenceConflict(message) from exc
+        raise
 
 
 async def propose_candidate(
