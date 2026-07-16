@@ -5,11 +5,14 @@ compose=(docker compose -p memoryv1v5claimassessment -f docker-compose.ci.yml)
 migration=ops/sql/20260716_memory_v1_v5_claim_assessment.sql
 rollback=ops/sql/20260716_memory_v1_v5_claim_assessment_rollback.sql
 test_sql=tests/memory_v1_v5_claim_assessment.sql
+apply_script=tools/memory_v1_v5_initial_retraction_production_apply.sh
 backup=$(mktemp /tmp/memory-v1-v5-claim-assessment.XXXXXX.dump)
+apply_snapshot_dir=$(mktemp -d /tmp/memory-v1-v5-claim-assessment-apply.XXXXXX)
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
   rm -f "$backup"
+  rm -rf "$apply_snapshot_dir"
 }
 trap cleanup EXIT
 chmod 0600 "$backup"
@@ -97,6 +100,25 @@ run_sql <"$rollback"
     AND to_regprocedure(
       'memory.apply_claim_assessment_v5(uuid,uuid,uuid,text)'
     ) IS NULL
+  )::int") == 1 ]]
+
+run_sql <"$migration"
+MEMORY_V1_V5_INITIAL_RETRACTION_APPLY=authorized \
+MEMORY_V1_DB_CONTAINER=memoryv1v5claimassessment-postgres-1 \
+MEMORY_V1_SNAPSHOT_DIR="$apply_snapshot_dir" \
+MEMORY_V1_APPLY_LOCK_FILE="$apply_snapshot_dir/apply.lock" \
+bash "$apply_script"
+
+[[ $("${compose[@]}" exec -T postgres psql -X -A -t -U sage -d memory \
+  -c "SELECT (
+    (SELECT count(*) FROM memory.claim
+      WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+        AND claim_id='50ebf1af-b072-4bf9-badc-2df7585f12c6'::uuid
+        AND status='retracted' AND confidence=0)=1
+    AND
+    (SELECT count(*) FROM memory.claim_assessment_review_v5)=1
+    AND
+    (SELECT count(*) FROM memory.claim_assessment_apply_v5)=1
   )::int") == 1 ]]
 
 echo 'memory_v1_v5_claim_assessment_production_clone: PASS'
