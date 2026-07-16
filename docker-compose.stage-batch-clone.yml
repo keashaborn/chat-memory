@@ -1,0 +1,4 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${MEMORY_V1_STAGE_BATCH_CLONE_PORT:-55439}:5432"
