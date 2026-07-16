@@ -246,6 +246,7 @@ The zero-write proof passed: all 47 database relations retained SHA-256
 `437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
 and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+
 No staging, persistence, retrieval activation, or additional external rerun is
 authorized by this result.
 
@@ -384,3 +385,28 @@ The replay zero-write proof passed. All 47 database relations retained SHA-256
 `437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
 and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+
+## Full-contract preflight
+
+Commit `945769a9f53dacf8ff6b0955598fe078182734a5` added a preflight-only
+selection containing exactly `v5-01` through `v5-25` in manifest order. The
+selection is bound to the source manifest, case contract, prior evaluator
+commit, and successful saved-packet replay report. Generic preflight-only scope
+enforcement prevents this selection from entering an external-call path.
+
+All 131 offline Memory V1 tests passed. The full-contract preflight selected
+all 25 sources, made zero external model calls, and produced the mode-0600
+report
+`/home/ubuntu/memory-v1-reviews/v5-specialized-full25-preflight-20260716T000405Z.json`
+with SHA-256
+`ee61d625ec5e923ab127974d8c83d77e6c22c496cd5953cf96c0517f4576623d`.
+Its selection SHA-256 is
+`ccd0072fb1e3f3a9d2e2906c1f4be3bd7367cdf5b9b209bf6396f5bfbe3f5384`.
+
+The preflight zero-write proof passed. All 47 database relations retained
+SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+An external full-contract evaluation requires a separate manifest explicitly
+binding this preflight result; this preflight does not authorize it.
