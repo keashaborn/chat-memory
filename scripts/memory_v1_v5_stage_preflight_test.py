@@ -99,6 +99,28 @@ def main() -> None:
     )
     assert project["action"] == "defer"
 
+    ambiguous = resolve_mention(
+        mention("e09", "concept", "named", "unclear term"),
+        [],
+        [],
+        [{
+            "reason_code": "ambiguous_transcription",
+            "source_spans": [{"start": 0, "end": 1, "span_sha256": "a" * 64}],
+        }],
+    )
+    assert ambiguous["action"] == "defer"
+    assert ambiguous["review_reason_codes"] == ["ambiguous_transcription_defer"]
+
+    correction_target = resolve_mention(
+        mention("e10", "animal", "anonymous", None, "pet:corrected_name_subject"),
+        [observation("e10", correction=True)],
+        [],
+    )
+    assert correction_target["action"] == "defer"
+    assert correction_target["review_reason_codes"] == [
+        "correction_target_resolution_required"
+    ]
+
     print("memory_v1_v5_stage_preflight: PASS")
 
 

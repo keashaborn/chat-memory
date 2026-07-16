@@ -276,6 +276,14 @@ def _mention_observations(
     ]
 
 
+def _spans_overlap(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> bool:
+    return any(
+        first["start"] < second["end"] and second["start"] < first["end"]
+        for first in left
+        for second in right
+    )
+
+
 def _candidate_payload(
     candidate: dict[str, Any], *, same_name_count: int, mention: dict[str, Any]
 ) -> dict[str, Any]:
@@ -305,6 +313,7 @@ def resolve_mention(
     mention: dict[str, Any],
     observations: list[dict[str, Any]],
     candidates: list[dict[str, Any]],
+    deferrals: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     mention_hash = sha256_text(stable_json(mention))
     relevant = _mention_observations(mention, observations)
@@ -315,6 +324,14 @@ def resolve_mention(
         for item in relevant
     )
     role_unverified = bool(mention.get("relationship_role"))
+    blocking_deferrals = sorted(
+        {
+            item["reason_code"]
+            for item in (deferrals or [])
+            if item["reason_code"] in {"ambiguous_transcription", "mixed_authorship"}
+            and _spans_overlap(mention["source_spans"], item["source_spans"])
+        }
+    )
     candidate_set = [
         _candidate_payload(item, same_name_count=len(candidates), mention=mention)
         for item in sorted(candidates, key=lambda item: str(item["entity_id"]))
@@ -337,8 +354,14 @@ def resolve_mention(
             reasons = ["trusted_owner_self_binding"]
         else:
             reasons = ["trusted_owner_self_binding_unavailable"]
+    elif blocking_deferrals:
+        reasons = [f"{reason}_defer" for reason in blocking_deferrals]
     elif kind in {"role_only", "anonymous"}:
-        reasons = [f"{kind}_creation_blocked"]
+        reasons = (
+            ["correction_target_resolution_required"]
+            if corrective
+            else [f"{kind}_creation_blocked"]
+        )
     elif entity_type == "project":
         reasons = ["trusted_project_binding_required"]
     elif kind != "named" or not isinstance(name, str) or not name.strip():
@@ -507,6 +530,7 @@ async def main() -> int:
                         mention,
                         packet["observations"],
                         await _candidates(conn, owner, mention),
+                        packet["deferrals"],
                     )
                 )
     finally:
