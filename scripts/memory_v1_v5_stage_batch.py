@@ -416,6 +416,18 @@ async def verify_evidence(
         """
     ):
         raise StageBatchError("brains_app cannot execute the controlled stage API")
+    if not await conn.fetchval(
+        """
+        SELECT has_function_privilege(
+          session_user,
+          'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)',
+          'EXECUTE'
+        )
+        """
+    ):
+        raise StageBatchError(
+            "brains_app cannot execute the controlled stage preflight API"
+        )
     if await conn.fetchval(
         """
         SELECT has_table_privilege(
@@ -429,22 +441,23 @@ async def verify_evidence(
         for bundle in bundles:
             row = await conn.fetchrow(
                 """
-                SELECT source_system,external_id,content_sha256,observed_at,status::text
-                FROM memory.evidence
-                WHERE owner_user_id=$1 AND evidence_id=$2
+                SELECT evidence_id,verified
+                FROM memory.preflight_relational_stage_bundle_v5(
+                  $1::uuid,$2,$3,$4::timestamptz
+                )
                 """,
-                owner,
                 bundle["evidence_id"],
+                bundle["source"]["source_external_id"],
+                bundle["source"]["source_sha256"],
+                parse_utc(
+                    bundle["source"]["source_recorded_at"],
+                    "source_recorded_at",
+                ),
             )
-            source = bundle["source"]
             if (
                 row is None
-                or row["status"] != "active"
-                or row["source_system"] != "public.chat_log"
-                or row["external_id"] != source["source_external_id"]
-                or row["content_sha256"] != source["source_sha256"]
-                or row["observed_at"]
-                != parse_utc(source["source_recorded_at"], "source_recorded_at")
+                or row["evidence_id"] != bundle["evidence_id"]
+                or row["verified"] is not True
             ):
                 raise StageBatchError(
                     f"active owner-scoped evidence mismatch: {bundle['case_id']}"

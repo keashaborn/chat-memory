@@ -14,8 +14,14 @@ The `plan` command is read-only. It requires:
 - mode-0600 manifest and bundles under one non-peer-writable review root;
 - exact bundle, packet, schema, source, and row-budget hashes;
 - one owner across every bundle;
-- active canonical evidence matching each packet source under that owner; and
+- active canonical evidence matching each packet source under that owner,
+  verified through `memory.preflight_relational_stage_bundle_v5`; and
 - function-only access for `brains_app`.
+
+The preflight function returns only the requested evidence UUID and a verified
+flag. It is owned by the restricted writer role, exposes no content, grants no
+table access, and returns the same not-found error for absent and cross-owner
+evidence.
 
 The `apply` command additionally requires a mode-0600, 30-minute authorization
 bound to the plan SHA, owner, Git commit, bundle count, and total new-row
