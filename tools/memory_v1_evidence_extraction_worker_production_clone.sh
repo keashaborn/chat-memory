@@ -25,6 +25,8 @@ provider=scripts/memory_v1_relational_extraction_v5_provider.py
 provider_test=scripts/memory_v1_relational_extraction_v5_provider_test.py
 openai_provider=scripts/memory_v1_relational_extraction_v5_openai_provider.py
 openai_provider_test=scripts/memory_v1_relational_extraction_v5_openai_provider_test.py
+observable_provider=scripts/memory_v1_relational_extraction_v5_observable_provider.py
+observable_provider_test=scripts/memory_v1_relational_extraction_v5_observable_provider_test.py
 external_preflight=scripts/memory_v1_relational_extraction_v5_external_preflight.py
 external_preflight_test=scripts/memory_v1_relational_extraction_v5_external_preflight_test.py
 external_preflight_manifest=ops/manifests/memory_v1_relational_extraction_v5_external_preflight_20260716.json
@@ -118,6 +120,8 @@ for required in \
   "$provider_test" \
   "$openai_provider" \
   "$openai_provider_test" \
+  "$observable_provider" \
+  "$observable_provider_test" \
   "$external_preflight" \
   "$external_preflight_test" \
   "$external_preflight_manifest" \
@@ -238,6 +242,8 @@ PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$provider_test"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$openai_provider_test"
+PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$observable_provider_test"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$external_preflight_test"
 PYTHONPATH="$repo_root" \
