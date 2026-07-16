@@ -474,3 +474,29 @@ with SHA-256
 Postgres and Qdrant retained the same hashes above. This selection rejects an
 external-call path; confirming the two unavailable packets requires a separate
 authorization-bound version-2 selection.
+
+## Authorized final two-case confirmation
+
+Commit `9ccf76f6366c2294d16f67d2f898dca2d6a3c83c` bound the user's
+fresh informed authorization to exactly `v5-04` and `v5-15`, the successful
+two-case preflight, the revised case contract, and the unchanged owner-scoped
+source manifest. All 142 offline tests passed before execution.
+
+The one authorized `gpt-5.2`, `store=false` run made six calls: the three
+specialized passes for each record and no repair calls. Both cases passed with
+no findings. There were no refusals, incomplete responses, request errors,
+deterministic rejections, or integrity errors. `v5-04` retained the supported
+`occupation.works_as` observation while separately deferring the uncertain
+credential transcription. `v5-15` produced the corrective
+`identity.name_canonical` observation and its required correction semantics.
+
+The mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-unarchived2-authorized-live-20260716T014805Z.json`
+has SHA-256
+`ed12a63e9c4b7da0e792e31040414e0d8927340a244f0f5e60f00ba09d6da3c7`.
+The zero-write proof passed: all 47 Postgres relations retained SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+No database relation changed. No staging, persistence, projection, retrieval
+activation, or prompt integration occurred.
