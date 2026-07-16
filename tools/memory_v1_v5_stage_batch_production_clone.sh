@@ -119,9 +119,9 @@ MEMORY_V1_V5_STAGE_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
   --output "$report"
 
 [[ "$(jq -r '.database_rows_created' "$report")" == "9" ]]
-[[ "$(jq -r '[.applied[].outcome] | sort | join(\",\")' "$report")" \
+[[ "$(jq -r '[.applied[].outcome] | sort | join(",")' "$report")" \
     == "applied,applied" ]]
-[[ "$(jq -r '[.replayed[].outcome] | sort | join(\",\")' "$report")" \
+[[ "$(jq -r '[.replayed[].outcome] | sort | join(",")' "$report")" \
     == "replayed,replayed" ]]
 [[ "$(jq '[.replayed[].counts[]] | add' "$report")" == "0" ]]
 
