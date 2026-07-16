@@ -57,6 +57,7 @@ set -a
 source "$repo_root/.env"
 set +a
 probe_output=$(
+  PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
   "$repo_root/venv/bin/python" \
     "$repo_root/scripts/memory_v1_record_evidence_replay_probe.py" \
     --owner-user-id "$owner_user_id"
