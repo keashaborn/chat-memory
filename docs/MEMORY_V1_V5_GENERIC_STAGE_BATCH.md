@@ -21,10 +21,10 @@ The `plan` command is read-only. It requires:
 The preflight function returns only the requested evidence UUID and a verified
 flag. It is owned by the restricted writer role, exposes no content, grants no
 table access, and returns the same not-found error for absent and cross-owner
-evidence. Production currently retains a pre-existing owner-RLS-scoped
-`brains_app` evidence SELECT grant for legacy callers. This migration neither
-uses nor changes that grant; it must be revoked only after those callers move
-to controlled APIs.
+evidence. Production currently retains pre-existing owner-RLS-scoped
+`brains_app` evidence read/write grants for legacy ingestion callers. This
+migration neither uses nor changes those grants; they must be revoked only
+after those callers move to controlled APIs.
 
 The `apply` command additionally requires a mode-0600, 30-minute authorization
 bound to the plan SHA, owner, Git commit, bundle count, and total new-row
