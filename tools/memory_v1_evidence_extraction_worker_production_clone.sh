@@ -28,6 +28,9 @@ openai_provider_test=scripts/memory_v1_relational_extraction_v5_openai_provider_
 external_preflight=scripts/memory_v1_relational_extraction_v5_external_preflight.py
 external_preflight_test=scripts/memory_v1_relational_extraction_v5_external_preflight_test.py
 external_preflight_manifest=ops/manifests/memory_v1_relational_extraction_v5_external_preflight_20260716.json
+external_smoke=scripts/memory_v1_relational_extraction_v5_external_smoke.py
+external_smoke_test=scripts/memory_v1_relational_extraction_v5_external_smoke_test.py
+external_smoke_manifest=ops/manifests/memory_v1_relational_extraction_v5_external_smoke_20260716.json
 fixture=tests/fixtures/memory_v1_evidence_extraction_fixture_v1.json
 fixture_seed=tests/memory_v1_evidence_extraction_fixture_seed.sql
 backup=$(mktemp /tmp/memory-v1-evidence-extraction-worker.XXXXXX.dump)
@@ -118,6 +121,9 @@ for required in \
   "$external_preflight" \
   "$external_preflight_test" \
   "$external_preflight_manifest" \
+  "$external_smoke" \
+  "$external_smoke_test" \
+  "$external_smoke_manifest" \
   "$fixture" \
   "$fixture_seed"; do
   [[ -f "$repo_root/$required" ]]
@@ -234,6 +240,8 @@ PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$openai_provider_test"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$external_preflight_test"
+PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$external_smoke_test"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$worker_test"
 
