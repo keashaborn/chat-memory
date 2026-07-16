@@ -462,3 +462,15 @@ has SHA-256
 `e667056d086e262ed8082e7c7ec6e99359cf364bb0281a641d0f12d3bcb414cd`.
 The report made zero external calls and repeated the unchanged 47-relation and
 six-point Postgres/Qdrant proof above.
+
+Commit `4b5988bb17f74ca78e8ccbe05f9ac9e726750b7d` adds a new
+preflight-only selection containing exactly `v5-04` and `v5-15` in manifest
+order. It is bound to the revised case contract and offline reconciliation
+report. All 141 offline tests pass. The preflight made zero external calls and
+produced the mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-unarchived2-preflight-20260716T010357Z.json`
+with SHA-256
+`bec708d70bb98d1aa961424d18001b047e98939814fa90f2374b6df56a457313`.
+Postgres and Qdrant retained the same hashes above. This selection rejects an
+external-call path; confirming the two unavailable packets requires a separate
+authorization-bound version-2 selection.
