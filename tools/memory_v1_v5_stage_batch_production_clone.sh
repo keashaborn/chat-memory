@@ -12,6 +12,9 @@ compose=(
 )
 staging_migration=ops/sql/20260715_memory_v1_relational_staging_v5.sql
 writer_migration=ops/sql/20260715_memory_v1_relational_writer_v5.sql
+preflight_migration=ops/sql/20260716_memory_v1_v5_stage_preflight_api.sql
+preflight_rollback=ops/sql/20260716_memory_v1_v5_stage_preflight_api_rollback.sql
+preflight_test=tests/memory_v1_v5_stage_preflight_api.sql
 seed_sql=tests/memory_v1_v5_stage_batch_seed.sql
 runner=scripts/memory_v1_v5_stage_batch.py
 fixture=tests/memory_v1_v5_stage_batch_fixture.py
@@ -57,6 +60,9 @@ run_sql <"$staging_migration"
 run_sql <"$writer_migration"
 run_sql <"$staging_migration"
 run_sql <"$writer_migration"
+run_sql <"$preflight_migration"
+run_sql <"$preflight_migration"
+run_sql <"$preflight_test"
 run_sql <"$seed_sql"
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test"
@@ -154,6 +160,16 @@ MEMORY_V1_V5_STAGE_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
         AND evidence_id='aeeeeeee-1111-4111-8111-111111111111'::uuid
         AND mention_count=0 AND observation_count=0)=1
+  )::int")" == "1" ]]
+
+run_sql <"$preflight_rollback"
+[[ "$(scalar "
+  SELECT (
+    to_regprocedure(
+      'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)'
+    ) IS NULL
+    AND (SELECT count(*) FROM memory.relational_stage_batch
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
   )::int")" == "1" ]]
 
 echo "memory_v1_v5_stage_batch_production_clone: PASS"
