@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -130,6 +130,36 @@ class EntityObject(StrictModel):
     entity_ref: str = Field(pattern=r"^e[0-9]{2}$")
 
 
+class LifePreferenceValue(StrictModel):
+    domain: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    target: str = Field(min_length=1, max_length=500)
+    polarity: Literal["likes", "dislikes", "prefers", "avoids"]
+    context: str | None
+
+
+class ResponsePreferenceValue(StrictModel):
+    dimension: Literal[
+        "epistemic_style",
+        "format",
+        "initiative",
+        "reasoning_style",
+        "response_length",
+        "specificity",
+        "tone",
+        "voice",
+    ]
+    value: str = Field(min_length=1, max_length=500)
+
+
+LiteralValue = (
+    str
+    | float
+    | bool
+    | LifePreferenceValue
+    | ResponsePreferenceValue
+)
+
+
 class LiteralObject(StrictModel):
     kind: Literal["literal"]
     datatype: Literal[
@@ -142,7 +172,7 @@ class LiteralObject(StrictModel):
         "enum",
         "json",
     ]
-    value: Any
+    value: LiteralValue
     unit: str | None
     approximate: bool
 
@@ -458,6 +488,7 @@ class RelationalExtractionProvider(Protocol):
     provider_id: str
     provider_version: str
     external_model_calls: int
+    external_call_capability: bool
 
     def extract(self, source: TrustedExtractionSource) -> ProviderPacket:
         ...
@@ -467,6 +498,7 @@ class SyntheticFixtureProvider:
     provider_id = SYNTHETIC_PROVIDER_ID
     provider_version = SYNTHETIC_PROVIDER_VERSION
     external_model_calls = 0
+    external_call_capability = False
 
     def __init__(self, output: dict[str, Any] | ProviderPacket) -> None:
         raw = (
@@ -577,16 +609,32 @@ def validate_and_normalize(
     source: TrustedExtractionSource,
     registry: dict[str, Any],
     schema: dict[str, Any],
+    allowed_provider_versions: Mapping[str, str] | None = None,
+    max_external_model_calls: int = 0,
 ) -> ValidatedProviderResult:
     _validate_registry(registry)
-    if provider.provider_id != SYNTHETIC_PROVIDER_ID:
-        raise ValueError("non-synthetic extraction provider is disabled")
-    if provider.provider_version != SYNTHETIC_PROVIDER_VERSION:
-        raise ValueError("synthetic provider version mismatch")
-    if provider.external_model_calls != 0:
+    allowlist = (
+        {SYNTHETIC_PROVIDER_ID: SYNTHETIC_PROVIDER_VERSION}
+        if allowed_provider_versions is None
+        else dict(allowed_provider_versions)
+    )
+    if allowlist.get(provider.provider_id) != provider.provider_version:
+        raise ValueError("extraction provider/version is not enabled")
+    if not 0 <= max_external_model_calls <= 4:
+        raise ValueError("external model call budget must be between 0 and 4")
+    if provider.external_call_capability and max_external_model_calls == 0:
         raise ValueError("external model calls are disabled")
+    calls_before = int(provider.external_model_calls)
+    if calls_before < 0:
+        raise ValueError("provider external model call count is invalid")
 
     proposed = provider.extract(source)
+    calls_after = int(provider.external_model_calls)
+    external_model_calls = calls_after - calls_before
+    if external_model_calls < 0:
+        raise ValueError("provider external model call count regressed")
+    if external_model_calls > max_external_model_calls:
+        raise ValueError("provider exceeded the external model call budget")
     raw = proposed.model_dump(mode="json")
     _reject_server_owned_keys(raw)
     _validate_reason_code_tree(proposed)
@@ -745,7 +793,7 @@ def validate_and_normalize(
     return ValidatedProviderResult(
         provider_id=provider.provider_id,
         provider_version=provider.provider_version,
-        external_model_calls=0,
+        external_model_calls=external_model_calls,
         provider_output_sha256=canonical_sha256(raw),
         normalized_packet_sha256=canonical_sha256(normalized),
         normalized_packet=normalized,

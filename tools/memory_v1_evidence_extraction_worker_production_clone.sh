@@ -23,6 +23,8 @@ worker=scripts/memory_v1_evidence_extraction_fixture_worker.py
 worker_test=scripts/memory_v1_evidence_extraction_fixture_worker_test.py
 provider=scripts/memory_v1_relational_extraction_v5_provider.py
 provider_test=scripts/memory_v1_relational_extraction_v5_provider_test.py
+openai_provider=scripts/memory_v1_relational_extraction_v5_openai_provider.py
+openai_provider_test=scripts/memory_v1_relational_extraction_v5_openai_provider_test.py
 fixture=tests/fixtures/memory_v1_evidence_extraction_fixture_v1.json
 fixture_seed=tests/memory_v1_evidence_extraction_fixture_seed.sql
 backup=$(mktemp /tmp/memory-v1-evidence-extraction-worker.XXXXXX.dump)
@@ -108,6 +110,8 @@ for required in \
   "$worker_test" \
   "$provider" \
   "$provider_test" \
+  "$openai_provider" \
+  "$openai_provider_test" \
   "$fixture" \
   "$fixture_seed"; do
   [[ -f "$repo_root/$required" ]]
@@ -121,6 +125,15 @@ if rg -n '(^|[^a-zA-Z])(OpenAI|responses\.create|chat\.completions)' \
   "$repo_root/$provider" \
   "$repo_root/$provider_test"; then
   echo "evidence extraction worker database patch contains a model caller" >&2
+  exit 1
+fi
+
+if rg -n 'memory_v1_relational_extraction_v5_openai_provider' \
+  "$repo_root/$worker" \
+  "$repo_root/$worker_test" \
+  "$repo_root/$provider" \
+  "$repo_root/$provider_test"; then
+  echo "fixture worker path imports the disabled external provider" >&2
   exit 1
 fi
 
@@ -211,6 +224,8 @@ cmp -s "$before" "$rolled_back"
 run_sql <"$migration"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$provider_test"
+PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$openai_provider_test"
 PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$worker_test"
 
