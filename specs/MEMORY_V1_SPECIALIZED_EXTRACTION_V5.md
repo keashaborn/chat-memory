@@ -454,3 +454,11 @@ packet because the prior project pass failed closed. Their cross-lane failure
 is covered by three-pass regression tests, but confirming their model output
 requires a new separately authorized external evaluation. No staging,
 persistence, projection, retrieval activation, or prompt change occurred.
+
+Commit `c49d745f9f36797323263afdd37340a47ba9f0cf` contains this
+reconciliation. Its mode-0600 offline report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-full25-offline-reconciliation-20260716T010132Z.json`
+has SHA-256
+`e667056d086e262ed8082e7c7ec6e99359cf364bb0281a641d0f12d3bcb414cd`.
+The report made zero external calls and repeated the unchanged 47-relation and
+six-point Postgres/Qdrant proof above.
