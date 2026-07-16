@@ -58,3 +58,14 @@ inputs, restricted role attributes, read-only function volatility, and full
 rollback.
 
 Production installation and router integration remain separate boundaries.
+
+## Production reader installation
+
+The restricted reader API was installed with a fresh backup and zero-row/Qdrant
+verification. It is not called by the chat router.
+
+`rag_engine/memory_v1_v5_shadow_loader.py` and
+`scripts/memory_v1_v5_shadow_live_probe.py` provide the next read-only boundary:
+load explicitly supplied candidate IDs through the controlled API and verify
+the selector remains fail-closed. The probe does not discover candidates,
+persist traces, call Qdrant, or influence prompts.

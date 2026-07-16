@@ -66,6 +66,7 @@ def main() -> None:
     assert selected["prompt_injection"] is False
     assert selected["answer_model_exposure"] is False
     assert selected["retrieval_activation"] is False
+    assert selected["rejected_counts"] == {}
 
     candidate = record()
     candidate["status"] = "candidate"

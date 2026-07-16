@@ -312,7 +312,8 @@ def evaluate_v5_shadow_claims(
         )
 
     missing_records = set(candidates) - record_ids
-    rejected["not_visible"] += len(missing_records)
+    if missing_records:
+        rejected["not_visible"] += len(missing_records)
     eligible = [record for record in evaluated if not record["reason_codes"]]
     eligible.sort(
         key=lambda record: (
