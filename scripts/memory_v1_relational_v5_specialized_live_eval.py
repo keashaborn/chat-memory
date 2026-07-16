@@ -121,6 +121,8 @@ def _load_selection(
         "memory_v1_relational_specialized_rerun_v4": 5,
         "memory_v1_relational_specialized_full_v1": 25,
         "memory_v1_relational_specialized_full_v2": 25,
+        "memory_v1_relational_specialized_reconciliation_v1": 2,
+        "memory_v1_relational_specialized_reconciliation_v2": 2,
     }
     selection_version = payload["selection_version"]
     if selection_version not in selection_counts:
@@ -133,6 +135,10 @@ def _load_selection(
         expected_scope = "full_contract_preflight_only_zero_call"
     elif selection_version == "memory_v1_relational_specialized_full_v2":
         expected_scope = "full_contract_store_false_zero_write"
+    elif selection_version == "memory_v1_relational_specialized_reconciliation_v1":
+        expected_scope = "remaining_unarchived_cases_preflight_only_zero_call"
+    elif selection_version == "memory_v1_relational_specialized_reconciliation_v2":
+        expected_scope = "remaining_unarchived_cases_store_false_zero_write"
     else:
         expected_scope = "failed_cases_only_store_false_zero_write"
     if payload["authorization_scope"] != expected_scope:

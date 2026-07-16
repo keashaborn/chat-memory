@@ -234,6 +234,48 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
             "ee61d625ec5e923ab127974d8c83d77e6c22c496cd5953cf96c0517f4576623d",
         )
 
+    def test_checked_in_unarchived2_selection_is_preflight_only(self) -> None:
+        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+        cases = [
+            json.loads(line)
+            for line in cases_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        selection, digest, case_ids = _load_selection(
+            Path("evals/memory_v1_relational_v5_unarchived2_preflight_20260716.json"),
+            cases=cases,
+            source_manifest_sha256=(
+                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+            ),
+            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(len(digest or ""), 64)
+        self.assertEqual(case_ids, ["v5-04", "v5-15"])
+        _enforce_selection_mode(selection, preflight_only=True)
+        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
+            _enforce_selection_mode(selection, preflight_only=False)
+
+    def test_unarchived2_authorized_shape_requires_exact_scope_and_count(self) -> None:
+        cases, payload = self.selection_fixture()
+        payload.update(
+            {
+                "authorization_scope": "remaining_unarchived_cases_store_false_zero_write",
+                "case_ids": ["v5-04", "v5-15"],
+                "selection_version": "memory_v1_relational_specialized_reconciliation_v2",
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selection.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            selection, _, case_ids = _load_selection(
+                path,
+                cases=cases,
+                source_manifest_sha256="a" * 64,
+                case_contract_sha256="b" * 64,
+            )
+        self.assertEqual(case_ids, ["v5-04", "v5-15"])
+        _enforce_selection_mode(selection, preflight_only=False)
+
     def test_v5_08_contract_is_temporal_project_current_state(self) -> None:
         cases = [
             json.loads(line)
