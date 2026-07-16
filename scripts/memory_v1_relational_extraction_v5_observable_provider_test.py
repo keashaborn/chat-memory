@@ -64,6 +64,7 @@ class FakeOneCallProvider:
 def provider_packet(
     *,
     anchored_to_source_time: bool = False,
+    relationship_role: str | None = "user:self",
     source_quote: str = CONTENT,
 ) -> ProviderPacket:
     return ProviderPacket.model_validate(
@@ -74,7 +75,7 @@ def provider_packet(
                     "entity_type": "self",
                     "mention_kind": "self_reference",
                     "name_text": "Avery",
-                    "relationship_role": "user:self",
+                    "relationship_role": relationship_role,
                     "source_spans": [
                         {"start": 0, "end": 17, "quote": source_quote}
                     ],
@@ -215,6 +216,28 @@ def main() -> int:
     ]:
         raise AssertionError("temporal diagnostic flag was not retained")
     assert_sanitized(temporal)
+
+    combined_live_shape = run(
+        provider_packet(
+            anchored_to_source_time=True,
+            relationship_role=None,
+        ),
+        source=source,
+        registry=registry,
+        schema=schema,
+    )
+    if combined_live_shape.passed or combined_live_shape.rejection is None:
+        raise AssertionError("combined live smoke-v2 failure shape passed")
+    if combined_live_shape.rejection["code"] != "self_entity_role_mismatch":
+        raise AssertionError(
+            "combined live smoke-v2 rejection ordering changed: "
+            f"{combined_live_shape.rejection}"
+        )
+    if combined_live_shape.sanitized_provider_packet["entity_mentions"][0][
+        "relationship_role"
+    ] is not None:
+        raise AssertionError("combined failure lost the null role diagnostic")
+    assert_sanitized(combined_live_shape)
 
     span = run(
         provider_packet(source_quote="My name is Wrong."),
