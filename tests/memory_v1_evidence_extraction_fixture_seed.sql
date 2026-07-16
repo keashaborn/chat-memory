@@ -10,13 +10,13 @@ SELECT set_config(
 SELECT evidence_id,content_sha256
 FROM memory.record_owner_evidence_v1(
   'user_statement',
-  'fixture_worker_test',
-  'fixture-source-v1',
+  'public.chat_log',
+  'e3333333-3333-4333-8333-333333333333',
   'Synthetic fixture-only extraction source.',
   '2026-07-16T20:30:00Z',
   1,
   1,
-  'fixture-source-v1',
+  'e3333333-3333-4333-8333-333333333333',
   'low',
   '{"fixture_only":true}'::jsonb
 )

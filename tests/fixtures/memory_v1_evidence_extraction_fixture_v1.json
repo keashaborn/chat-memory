@@ -1,27 +1,33 @@
 {
-  "checkpoint": {
-    "contract_version": "memory_v1_relational_extraction_v5",
-    "entities": [],
-    "extraction_mode": "deterministic_fixture",
-    "manual_review_required": 0,
-    "model_calls": 0,
-    "observations": [],
-    "relationships": [],
-    "source_content_sha256": "e7a9aa3849aee9aed7c5914fe1ff9140f7b30d5ee3e5b92e0553c821a436d29f"
-  },
-  "contract_version": "memory_v1_evidence_extraction_fixture_v1",
+  "contract_version": "memory_v1_evidence_extraction_fixture_v2",
   "finish": {
-    "payload": {
-      "candidate_writes": 0,
-      "claim_writes": 0,
-      "contract_version": "memory_v1_evidence_extraction_fixture_result_v1",
-      "fixture_only": true,
-      "model_calls": 0,
-      "route": "relational_extraction",
-      "source_content_sha256": "e7a9aa3849aee9aed7c5914fe1ff9140f7b30d5ee3e5b92e0553c821a436d29f",
-      "staging_writes": 0
-    },
     "status": "review_required"
+  },
+  "provider": {
+    "output": {
+      "comparison_hints": [],
+      "deferrals": [
+        {
+          "memory_shape": "none",
+          "reason_code": "insufficient_evidence",
+          "sensitivity": "low",
+          "source_spans": [
+            {
+              "end": 41,
+              "quote": "Synthetic fixture-only extraction source.",
+              "start": 0
+            }
+          ]
+        }
+      ],
+      "entity_mentions": [],
+      "observations": [],
+      "packet_findings": [
+        "synthetic_fixture_only"
+      ]
+    },
+    "provider_id": "synthetic_fixture",
+    "provider_version": "v1"
   },
   "route": "relational_extraction",
   "source_content_sha256": "e7a9aa3849aee9aed7c5914fe1ff9140f7b30d5ee3e5b92e0553c821a436d29f"

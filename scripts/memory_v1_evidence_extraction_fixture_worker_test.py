@@ -5,22 +5,34 @@ import hashlib
 import json
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.memory_v1_evidence_extraction_fixture_worker import (
     canonical_owners,
+    extraction_checkpoint,
     load_fixture,
     operation_id,
     plan_report,
     validate_limits,
     worker_reference,
 )
+from scripts.memory_v1_relational_extraction_v5_provider import (
+    load_registry,
+    load_schema,
+)
 
 
 OWNER_A = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OWNER_B = "557ea042-cb82-48f8-9429-472e96c957ef"
 RUN_ID = "f1111111-1111-4111-8111-111111111111"
+REGISTRY_SHA256 = (
+    "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
+)
+SCHEMA_SHA256 = (
+    "c1d613b16795c181780d60219860f8068cee1369b069735db94887b0c1b8b377"
+)
 
 
 def args(**updates):
@@ -59,6 +71,8 @@ def main() -> int:
         raise AssertionError("fixture route changed")
     if fixture.finish_status != "review_required":
         raise AssertionError("fixture finish status changed")
+    if fixture.provider_id != "synthetic_fixture":
+        raise AssertionError("fixture provider is not synthetic")
 
     expect_error(
         lambda: load_fixture(str(fixture_path), "0" * 64),
@@ -123,12 +137,78 @@ def main() -> int:
         owners=owners,
         run_id=run_id,
         worker_id="fixture-worker-test",
+        registry_sha256=REGISTRY_SHA256,
+        schema_sha256=SCHEMA_SHA256,
     )
     if report["apply"] is not False or report["fixture_only"] is not True:
         raise AssertionError("plan report is not fail-closed")
-    for key in ("model_calls", "candidate_writes", "claim_writes", "staging_writes"):
+    for key in (
+        "model_calls",
+        "candidate_writes",
+        "claim_writes",
+        "staging_writes",
+        "qdrant_writes",
+    ):
         if report[key] != 0:
             raise AssertionError(f"plan report {key} is not zero")
+
+    registry = load_registry(
+        repo_root / "specs" / "memory_v1_predicate_registry_v5.json",
+        REGISTRY_SHA256,
+    )
+    schema = load_schema(
+        repo_root / "specs" / "memory_v1_relational_extraction_v5.schema.json",
+        SCHEMA_SHA256,
+    )
+    checkpoint, finish = extraction_checkpoint(
+        fixture=fixture,
+        job={
+            "job_id": uuid.UUID("e4444444-4444-4444-8444-444444444444"),
+            "evidence_id": uuid.UUID(
+                "e5555555-5555-4555-8555-555555555555"
+            ),
+            "evidence_source_system": "public.chat_log",
+            "evidence_external_id": "e3333333-3333-4333-8333-333333333333",
+            "evidence_content_sha256": fixture.source_content_sha256,
+            "evidence_content": "Synthetic fixture-only extraction source.",
+            "evidence_recorded_at": datetime(
+                2026,
+                7,
+                16,
+                20,
+                30,
+                tzinfo=timezone.utc,
+            ),
+        },
+        registry=registry,
+        schema=schema,
+    )
+    packet = checkpoint["normalized_packet"]
+    if packet["source_envelope"]["job_id"] != (
+        "e4444444-4444-4444-8444-444444444444"
+    ):
+        raise AssertionError("checkpoint is not bound to the claimed job")
+    if packet["source_envelope"]["source_external_id"] != (
+        "e3333333-3333-4333-8333-333333333333"
+    ):
+        raise AssertionError("checkpoint is not bound to the trusted source")
+    if packet["deferrals"][0]["review_required"] is not False:
+        raise AssertionError("insufficient-evidence deferral changed review policy")
+    if "quote" in json.dumps(packet, sort_keys=True):
+        raise AssertionError("normalized checkpoint retained raw span quotes")
+    if finish["normalized_packet_sha256"] != (
+        checkpoint["normalized_packet_sha256"]
+    ):
+        raise AssertionError("finish payload is not bound to checkpoint packet")
+    for key in (
+        "model_calls",
+        "candidate_writes",
+        "claim_writes",
+        "staging_writes",
+        "qdrant_writes",
+    ):
+        if finish[key] != 0:
+            raise AssertionError(f"finish payload {key} is not zero")
 
     print("memory_v1_evidence_extraction_fixture_worker_test: PASS")
     return 0

@@ -14,12 +14,37 @@ from typing import Any
 
 import asyncpg
 
+from scripts.memory_v1_relational_extraction_v5_provider import (
+    SYNTHETIC_PROVIDER_ID,
+    SYNTHETIC_PROVIDER_VERSION,
+    TrustedExtractionSource,
+    load_registry,
+    load_schema,
+    synthetic_provider,
+    validate_and_normalize,
+)
 
-WORKER_VERSION = "memory_v1_evidence_extraction_fixture_worker_v1"
-FIXTURE_CONTRACT = "memory_v1_evidence_extraction_fixture_v1"
-CHECKPOINT_CONTRACT = "memory_v1_relational_extraction_v5"
-FINISH_CONTRACT = "memory_v1_evidence_extraction_fixture_result_v1"
+WORKER_VERSION = "memory_v1_evidence_extraction_fixture_worker_v2"
+FIXTURE_CONTRACT = "memory_v1_evidence_extraction_fixture_v2"
+CHECKPOINT_CONTRACT = "memory_v1_evidence_extraction_checkpoint_v2"
+FINISH_CONTRACT = "memory_v1_evidence_extraction_fixture_result_v2"
 DISPOSABLE_DATABASE_COMMENT = "memory_v1_disposable_clone_worker_v1"
+EXPECTED_REGISTRY_SHA256 = (
+    "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
+)
+EXPECTED_SCHEMA_SHA256 = (
+    "c1d613b16795c181780d60219860f8068cee1369b069735db94887b0c1b8b377"
+)
+DEFAULT_REGISTRY = (
+    Path(__file__).resolve().parents[1]
+    / "specs"
+    / "memory_v1_predicate_registry_v5.json"
+)
+DEFAULT_SCHEMA = (
+    Path(__file__).resolve().parents[1]
+    / "specs"
+    / "memory_v1_relational_extraction_v5.schema.json"
+)
 SHA256_HEX = frozenset("0123456789abcdef")
 
 
@@ -28,9 +53,10 @@ class Fixture:
     file_sha256: str
     route: str
     source_content_sha256: str
-    checkpoint: dict[str, Any]
+    provider_id: str
+    provider_version: str
+    provider_output: dict[str, Any]
     finish_status: str
-    finish_payload: dict[str, Any]
 
 
 def arguments() -> argparse.Namespace:
@@ -42,6 +68,8 @@ def arguments() -> argparse.Namespace:
     )
     parser.add_argument("--fixture", required=True)
     parser.add_argument("--expected-fixture-sha256", required=True)
+    parser.add_argument("--registry", default=str(DEFAULT_REGISTRY))
+    parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument(
         "--route",
@@ -100,7 +128,7 @@ def load_fixture(path_value: str, expected_sha256: str) -> Fixture:
             "contract_version",
             "route",
             "source_content_sha256",
-            "checkpoint",
+            "provider",
             "finish",
         },
         "fixture",
@@ -113,73 +141,41 @@ def load_fixture(path_value: str, expected_sha256: str) -> Fixture:
     if not _is_sha256(source_sha256):
         raise RuntimeError("fixture source content SHA-256 is invalid")
 
-    checkpoint = _object(root["checkpoint"], "checkpoint")
+    provider = _object(root["provider"], "provider")
     _exact_keys(
-        checkpoint,
+        provider,
         {
-            "contract_version",
-            "source_content_sha256",
-            "extraction_mode",
-            "entities",
-            "observations",
-            "relationships",
-            "manual_review_required",
-            "model_calls",
+            "provider_id",
+            "provider_version",
+            "output",
         },
-        "checkpoint",
+        "provider",
     )
-    if checkpoint["contract_version"] != CHECKPOINT_CONTRACT:
-        raise RuntimeError("checkpoint contract version mismatch")
-    if checkpoint["source_content_sha256"] != source_sha256:
-        raise RuntimeError("checkpoint source hash is not bound to fixture")
-    if checkpoint["extraction_mode"] != "deterministic_fixture":
-        raise RuntimeError("checkpoint extraction mode is unsafe")
-    if checkpoint["model_calls"] != 0:
-        raise RuntimeError("fixture checkpoint declares model calls")
-    for key in ("entities", "observations", "relationships"):
-        if not isinstance(checkpoint[key], list):
-            raise RuntimeError(f"checkpoint {key} must be a list")
-    if not isinstance(checkpoint["manual_review_required"], int):
-        raise RuntimeError("checkpoint manual review count must be an integer")
+    if provider["provider_id"] != SYNTHETIC_PROVIDER_ID:
+        raise RuntimeError("fixture provider is not synthetic")
+    if provider["provider_version"] != SYNTHETIC_PROVIDER_VERSION:
+        raise RuntimeError("fixture provider version mismatch")
+    provider_output = _object(provider["output"], "provider output")
+    validated_provider = synthetic_provider(
+        provider_id=provider["provider_id"],
+        provider_version=provider["provider_version"],
+        output=provider_output,
+    )
+    provider_output = validated_provider.output_copy().model_dump(mode="json")
 
     finish = _object(root["finish"], "finish")
-    _exact_keys(finish, {"status", "payload"}, "finish")
+    _exact_keys(finish, {"status"}, "finish")
     if finish["status"] != "review_required":
         raise RuntimeError("fixture worker may only finish as review_required")
-    finish_payload = _object(finish["payload"], "finish payload")
-    _exact_keys(
-        finish_payload,
-        {
-            "contract_version",
-            "route",
-            "source_content_sha256",
-            "fixture_only",
-            "model_calls",
-            "candidate_writes",
-            "claim_writes",
-            "staging_writes",
-        },
-        "finish payload",
-    )
-    if finish_payload["contract_version"] != FINISH_CONTRACT:
-        raise RuntimeError("finish payload contract version mismatch")
-    if finish_payload["route"] != root["route"]:
-        raise RuntimeError("finish payload route is not bound to fixture")
-    if finish_payload["source_content_sha256"] != source_sha256:
-        raise RuntimeError("finish payload source hash is not bound to fixture")
-    if finish_payload["fixture_only"] is not True:
-        raise RuntimeError("finish payload is not fixture-only")
-    for key in ("model_calls", "candidate_writes", "claim_writes", "staging_writes"):
-        if finish_payload[key] != 0:
-            raise RuntimeError(f"finish payload {key} must be zero")
 
     return Fixture(
         file_sha256=actual_sha256,
         route=root["route"],
         source_content_sha256=source_sha256,
-        checkpoint=checkpoint,
+        provider_id=provider["provider_id"],
+        provider_version=provider["provider_version"],
+        provider_output=provider_output,
         finish_status=finish["status"],
-        finish_payload=finish_payload,
     )
 
 
@@ -227,6 +223,78 @@ def validate_limits(args: argparse.Namespace, fixture: Fixture) -> uuid.UUID:
 
 def operation_id(run_id: uuid.UUID, label: str) -> uuid.UUID:
     return uuid.uuid5(run_id, label)
+
+
+def extraction_checkpoint(
+    *,
+    fixture: Fixture,
+    job: dict[str, Any],
+    registry: dict[str, Any],
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    source = TrustedExtractionSource.create(
+        job_id=job["job_id"],
+        source_system=job["evidence_source_system"],
+        source_external_id=job["evidence_external_id"],
+        source_sha256=job["evidence_content_sha256"],
+        source_recorded_at=job["evidence_recorded_at"],
+        content=job["evidence_content"],
+    )
+    provider = synthetic_provider(
+        provider_id=fixture.provider_id,
+        provider_version=fixture.provider_version,
+        output=fixture.provider_output,
+    )
+    validated = validate_and_normalize(
+        provider,
+        source=source,
+        registry=registry,
+        schema=schema,
+    )
+    checkpoint = {
+        "contract_version": CHECKPOINT_CONTRACT,
+        "route": fixture.route,
+        "source_binding": {
+            "job_id": str(job["job_id"]),
+            "evidence_id": str(job["evidence_id"]),
+            "source_system": source.source_system,
+            "source_external_id": source.source_external_id,
+            "source_content_sha256": source.source_sha256,
+            "source_recorded_at": source.source_recorded_at,
+        },
+        "provider": {
+            "provider_id": validated.provider_id,
+            "provider_version": validated.provider_version,
+            "external_model_calls": validated.external_model_calls,
+            "provider_output_sha256": validated.provider_output_sha256,
+        },
+        "normalized_packet": validated.normalized_packet,
+        "normalized_packet_sha256": validated.normalized_packet_sha256,
+        "manual_review_required": validated.manual_review_required,
+        "write_counts": {
+            "candidate_writes": 0,
+            "claim_writes": 0,
+            "staging_writes": 0,
+            "qdrant_writes": 0,
+        },
+    }
+    finish_payload = {
+        "contract_version": FINISH_CONTRACT,
+        "route": fixture.route,
+        "source_content_sha256": source.source_sha256,
+        "fixture_only": True,
+        "provider_id": validated.provider_id,
+        "provider_version": validated.provider_version,
+        "provider_output_sha256": validated.provider_output_sha256,
+        "normalized_packet_sha256": validated.normalized_packet_sha256,
+        "manual_review_required": validated.manual_review_required,
+        "model_calls": 0,
+        "candidate_writes": 0,
+        "claim_writes": 0,
+        "staging_writes": 0,
+        "qdrant_writes": 0,
+    }
+    return checkpoint, finish_payload
 
 
 async def _set_actor(conn: asyncpg.Connection, owner: uuid.UUID) -> None:
@@ -428,6 +496,8 @@ async def process_owner(
     run_id: uuid.UUID,
     worker_id: str,
     fixture: Fixture,
+    registry: dict[str, Any],
+    schema: dict[str, Any],
     lease_seconds: int,
     max_attempts: int,
     max_jobs: int,
@@ -476,6 +546,12 @@ async def process_owner(
             )
             raise RuntimeError("claimed evidence does not match fixture binding")
 
+        checkpoint_payload, finish_payload = extraction_checkpoint(
+            fixture=fixture,
+            job=job,
+            registry=registry,
+            schema=schema,
+        )
         checkpoint_operation_id = operation_id(
             run_id,
             f"{job['job_id']}:checkpoint",
@@ -493,7 +569,7 @@ async def process_owner(
             checkpoint_operation_id=checkpoint_operation_id,
             job=job,
             worker_id=worker_id,
-            checkpoint=fixture.checkpoint,
+            checkpoint=checkpoint_payload,
             checkpoint_sequence=checkpoint_sequence,
             lease_seconds=lease_seconds,
         )
@@ -513,7 +589,7 @@ async def process_owner(
             job=job,
             worker_id=worker_id,
             status=fixture.finish_status,
-            payload=fixture.finish_payload,
+            payload=finish_payload,
         )
         if finished["apply_outcome"] == "applied":
             result["review_required"] += 1
@@ -527,7 +603,7 @@ async def process_owner(
                 checkpoint_operation_id=checkpoint_operation_id,
                 job=job,
                 worker_id=worker_id,
-                checkpoint=fixture.checkpoint,
+                checkpoint=checkpoint_payload,
                 checkpoint_sequence=checkpoint_sequence,
                 lease_seconds=lease_seconds,
             )
@@ -538,7 +614,7 @@ async def process_owner(
                 job=job,
                 worker_id=worker_id,
                 status=fixture.finish_status,
-                payload=fixture.finish_payload,
+                payload=finish_payload,
             )
             if checkpoint_replay["apply_outcome"] != "replayed":
                 raise RuntimeError("checkpoint replay wrote a second transition")
@@ -566,9 +642,11 @@ def plan_report(
     owners: list[uuid.UUID],
     run_id: uuid.UUID,
     worker_id: str,
+    registry_sha256: str,
+    schema_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "contract_version": "memory_v1_evidence_extraction_fixture_worker_report_v1",
+        "contract_version": "memory_v1_evidence_extraction_fixture_worker_report_v2",
         "worker_version": WORKER_VERSION,
         "apply": False,
         "fixture_only": True,
@@ -577,12 +655,17 @@ def plan_report(
         "route": fixture.route,
         "run_id": str(run_id),
         "worker_id": worker_id,
+        "provider_id": fixture.provider_id,
+        "provider_version": fixture.provider_version,
+        "predicate_registry_sha256": registry_sha256,
+        "extraction_schema_sha256": schema_sha256,
         "owners": [str(owner) for owner in owners],
         "owner_count": len(owners),
         "model_calls": 0,
         "candidate_writes": 0,
         "claim_writes": 0,
         "staging_writes": 0,
+        "qdrant_writes": 0,
     }
 
 
@@ -593,6 +676,10 @@ async def apply_fixture(
     owners: list[uuid.UUID],
     run_id: uuid.UUID,
     worker_id: str,
+    registry: dict[str, Any],
+    registry_sha256: str,
+    schema: dict[str, Any],
+    schema_sha256: str,
 ) -> dict[str, Any]:
     dsn = os.environ.get("POSTGRES_DSN")
     if not dsn:
@@ -608,6 +695,8 @@ async def apply_fixture(
                 run_id=run_id,
                 worker_id=worker_id,
                 fixture=fixture,
+                registry=registry,
+                schema=schema,
                 lease_seconds=int(args.lease_seconds),
                 max_attempts=int(args.max_attempts),
                 max_jobs=int(args.max_jobs),
@@ -621,6 +710,8 @@ async def apply_fixture(
             owners=owners,
             run_id=run_id,
             worker_id=worker_id,
+            registry_sha256=registry_sha256,
+            schema_sha256=schema_sha256,
         ),
         "apply": True,
         "disposable_clone_verified": True,
@@ -647,6 +738,10 @@ async def apply_fixture(
 def main() -> int:
     args = arguments()
     fixture = load_fixture(args.fixture, args.expected_fixture_sha256)
+    registry_path = Path(args.registry).resolve()
+    registry = load_registry(registry_path, EXPECTED_REGISTRY_SHA256)
+    schema_path = Path(args.schema).resolve()
+    schema = load_schema(schema_path, EXPECTED_SCHEMA_SHA256)
     owners = canonical_owners(args.owner_user_id)
     run_id = validate_limits(args, fixture)
     worker_id = worker_reference(args.worker_id)
@@ -658,6 +753,10 @@ def main() -> int:
                 owners=owners,
                 run_id=run_id,
                 worker_id=worker_id,
+                registry=registry,
+                registry_sha256=EXPECTED_REGISTRY_SHA256,
+                schema=schema,
+                schema_sha256=EXPECTED_SCHEMA_SHA256,
             )
         )
     else:
@@ -666,6 +765,8 @@ def main() -> int:
             owners=owners,
             run_id=run_id,
             worker_id=worker_id,
+            registry_sha256=EXPECTED_REGISTRY_SHA256,
+            schema_sha256=EXPECTED_SCHEMA_SHA256,
         )
     print(
         json.dumps(

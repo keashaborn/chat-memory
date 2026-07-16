@@ -21,6 +21,8 @@ rollback=ops/sql/20260716_memory_v1_evidence_extraction_worker_rollback.sql
 test_sql=tests/memory_v1_evidence_extraction_worker.sql
 worker=scripts/memory_v1_evidence_extraction_fixture_worker.py
 worker_test=scripts/memory_v1_evidence_extraction_fixture_worker_test.py
+provider=scripts/memory_v1_relational_extraction_v5_provider.py
+provider_test=scripts/memory_v1_relational_extraction_v5_provider_test.py
 fixture=tests/fixtures/memory_v1_evidence_extraction_fixture_v1.json
 fixture_seed=tests/memory_v1_evidence_extraction_fixture_seed.sql
 backup=$(mktemp /tmp/memory-v1-evidence-extraction-worker.XXXXXX.dump)
@@ -104,6 +106,8 @@ for required in \
   "$test_sql" \
   "$worker" \
   "$worker_test" \
+  "$provider" \
+  "$provider_test" \
   "$fixture" \
   "$fixture_seed"; do
   [[ -f "$repo_root/$required" ]]
@@ -113,7 +117,9 @@ if rg -n '(^|[^a-zA-Z])(OpenAI|responses\.create|chat\.completions)' \
   "$repo_root/$migration" \
   "$repo_root/$test_sql" \
   "$repo_root/$worker" \
-  "$repo_root/$worker_test"; then
+  "$repo_root/$worker_test" \
+  "$repo_root/$provider" \
+  "$repo_root/$provider_test"; then
   echo "evidence extraction worker database patch contains a model caller" >&2
   exit 1
 fi
@@ -204,6 +210,8 @@ cmp -s "$before" "$rolled_back"
 
 run_sql <"$migration"
 PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$provider_test"
+PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$worker_test"
 
 fixture_sha256=$(sha256sum "$repo_root/$fixture" | awk '{print $1}')
@@ -234,6 +242,7 @@ assert report["model_calls"] == 0
 assert report["candidate_writes"] == 0
 assert report["claim_writes"] == 0
 assert report["staging_writes"] == 0
+assert report["qdrant_writes"] == 0
 PY
 
 printf '%s\n' \
@@ -283,6 +292,7 @@ assert report["model_calls"] == 0
 assert report["candidate_writes"] == 0
 assert report["claim_writes"] == 0
 assert report["staging_writes"] == 0
+assert report["qdrant_writes"] == 0
 PY
 [[ "$(scalar "
   SELECT count(*)
