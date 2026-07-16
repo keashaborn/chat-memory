@@ -500,3 +500,17 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 No database relation changed. No staging, persistence, projection, retrieval
 activation, or prompt integration occurred.
+
+The hash-bound composite confirmation combines the 23 passing archived-packet
+replays with the two passing fresh confirmations. It verifies non-overlap,
+exact `v5-01` through `v5-25` coverage, the current case-contract hash, both
+component report hashes, all per-case pass results, and identical component
+Postgres/Qdrant signatures. It made no additional external calls. The
+mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-full25-composite-confirmation-20260716T015004Z.json`
+has SHA-256
+`46f6ad4476d3d287dd4835794acb2a2b2ceeed5e042e4008915e1657b2308c74`.
+This establishes complete 25-case contract coverage while preserving which 23
+results are deterministic archived replays and which two are fresh model
+confirmations; it does not misrepresent the evidence as one new 25-record model
+run.
