@@ -2,7 +2,7 @@
 Description=Run Memory V1 deferred reconciliation report-only scan hourly
 
 [Timer]
-OnBootSec=10min
+OnActiveSec=10min
 OnUnitActiveSec=1h
 RandomizedDelaySec=2min
 Persistent=true
