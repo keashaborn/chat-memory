@@ -33,6 +33,22 @@ SELECT * FROM memory.apply_entity_resolution_v5(
 SELECT 1 / ((:'self_replay_outcome'='replayed')::integer);
 SELECT 1 / ((:'self_replay_bindings_created'::integer=0)::integer);
 
+SELECT set_config(
+  'app.user_id','557ea042-cb82-48f8-9429-472e96c957ef',true
+);
+DO $isolation$
+BEGIN
+  BEGIN
+    PERFORM * FROM memory.preflight_entity_resolution_apply_v5(
+      'fc1859aa-f280-4aa1-b75a-ee882e969c87'::uuid,NULL
+    );
+    RAISE EXCEPTION 'cross-owner self-resolution preflight unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE 'P0002' THEN
+    NULL;
+  END;
+END
+$isolation$;
+
 RESET SESSION AUTHORIZATION;
 ROLLBACK;
 
