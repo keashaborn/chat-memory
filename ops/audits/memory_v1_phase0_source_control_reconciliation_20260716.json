@@ -1,0 +1,944 @@
+{
+  "audit_payload_sha256": "e60ef317eb5aa017def64c7346b75135781bd885c3f411f6f677f03859e62ec3",
+  "branches": [
+    {
+      "against_production": {
+        "left_only": 0,
+        "right_only": 0
+      },
+      "ancestor_of_production": true,
+      "ancestor_of_v5": false,
+      "branch": "catalog_exercise_holds_defaultlog_v0",
+      "head": "7484c4432cd9b920bc20024277776109584b70b7",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 24
+      },
+      "tip_date": "2026-07-16",
+      "tip_subject": "ops: add evidence extraction worker installer"
+    },
+    {
+      "against_production": {
+        "left_only": 255,
+        "right_only": 0
+      },
+      "ancestor_of_production": true,
+      "ancestor_of_v5": true,
+      "branch": "main",
+      "head": "b32167b93dd704300f95e5c1a5b2fb0cb49ecc81",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "tip_date": "2026-01-24",
+      "tip_subject": "auto: daily snapshot 2026-01-24Z"
+    },
+    {
+      "against_production": {
+        "left_only": 67,
+        "right_only": 0
+      },
+      "ancestor_of_production": true,
+      "ancestor_of_v5": true,
+      "branch": "memory_v1_evidence_ingest_audit_deploy",
+      "head": "78906f8729065eabf8204e303b4d20ad429bac9f",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "tip_date": "2026-07-13",
+      "tip_subject": "memory: add append-only evidence ingest audit"
+    },
+    {
+      "against_production": {
+        "left_only": 69,
+        "right_only": 0
+      },
+      "ancestor_of_production": true,
+      "ancestor_of_v5": true,
+      "branch": "memory_v1_evidence_lifecycle_deploy",
+      "head": "b2d7473077ac5919b117b678f623d5898c11106e",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "tip_date": "2026-07-13",
+      "tip_subject": "docs: normalize evidence lifecycle header"
+    },
+    {
+      "against_production": {
+        "left_only": 24,
+        "right_only": 125
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": true,
+      "branch": "memory_v1_extraction_v2",
+      "head": "9567ea8ff2f6a56402393a2923defd6706daa39b",
+      "patches_against_production": {
+        "missing_patch": 101,
+        "patch_equivalent": 24
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 0
+      },
+      "tip_date": "2026-07-16",
+      "tip_subject": "memory: record Phase 0 stabilization inventory"
+    },
+    {
+      "against_production": {
+        "left_only": 75,
+        "right_only": 39
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "memory_v1_foundation",
+      "head": "e16f3dd357f367eede3f81e4a386f3c9e0131706",
+      "patches_against_production": {
+        "missing_patch": 21,
+        "patch_equivalent": 18
+      },
+      "patches_against_v5": {
+        "missing_patch": 21,
+        "patch_equivalent": 18
+      },
+      "tip_date": "2026-07-14",
+      "tip_subject": "memory: harden selector relevance and freshness"
+    },
+    {
+      "against_production": {
+        "left_only": 36,
+        "right_only": 1
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "memory_v1_governance_scheduler",
+      "head": "ab40d4dde1f703c3447b50609b76e425be91422b",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 1
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 1
+      },
+      "tip_date": "2026-07-14",
+      "tip_subject": "memory: add governed consolidation scheduler"
+    },
+    {
+      "against_production": {
+        "left_only": 41,
+        "right_only": 5
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "memory_v1_owner_consolidation",
+      "head": "f83e1d2fc2453e2553c7a67519860ddebafdc872",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 5
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 5
+      },
+      "tip_date": "2026-07-14",
+      "tip_subject": "memory: quarantine malformed extraction candidates"
+    },
+    {
+      "against_production": {
+        "left_only": 0,
+        "right_only": 6
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "memory_v1_phase0_stabilization",
+      "head": "a466ae88d1c7f4e9fe4ef384c2d66221928cfd44",
+      "patches_against_production": {
+        "missing_patch": 6,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 6,
+        "patch_equivalent": 24
+      },
+      "tip_date": "2026-07-16",
+      "tip_subject": "memory: add Phase 0 source-control audit"
+    },
+    {
+      "against_production": {
+        "left_only": 47,
+        "right_only": 6
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "memory_v1_selector_legacy_retirement",
+      "head": "33f8e5c83093d507fe7a8eb24d8db466361a8e64",
+      "patches_against_production": {
+        "missing_patch": 0,
+        "patch_equivalent": 6
+      },
+      "patches_against_v5": {
+        "missing_patch": 0,
+        "patch_equivalent": 6
+      },
+      "tip_date": "2026-07-14",
+      "tip_subject": "docs: record ordinary secondary account audit"
+    },
+    {
+      "against_production": {
+        "left_only": 71,
+        "right_only": 1
+      },
+      "ancestor_of_production": false,
+      "ancestor_of_v5": false,
+      "branch": "resse_policy_v0_1",
+      "head": "5647fa64d8fdb647066cb500c8e6ed099a518b22",
+      "patches_against_production": {
+        "missing_patch": 1,
+        "patch_equivalent": 0
+      },
+      "patches_against_v5": {
+        "missing_patch": 1,
+        "patch_equivalent": 0
+      },
+      "tip_date": "2026-07-13",
+      "tip_subject": "docs: define RESSE runtime policy and eval contract"
+    }
+  ],
+  "captured_at": "2026-07-16T23:54:54.208163Z",
+  "classification": {
+    "already_integrated_by_patch": [
+      "memory_v1_evidence_ingest_audit_deploy",
+      "memory_v1_evidence_lifecycle_deploy",
+      "memory_v1_governance_scheduler",
+      "memory_v1_owner_consolidation",
+      "memory_v1_selector_legacy_retirement"
+    ],
+    "canonical_integration_base": "memory_v1_phase0_stabilization",
+    "foundation_status": "21_non_equivalent_patches_require_provenance_preservation_and_semantic_resolution",
+    "resse_status": "one_deliberately_separate_policy_commit_hold_for_runtime_boundary_review",
+    "v5_status": "101_non_equivalent_patches_to_integrate_after_backup"
+  },
+  "contract_version": "memory_v1_phase0_source_control_reconciliation_v1",
+  "effects": {
+    "database_writes": 0,
+    "git_mutations": 0,
+    "model_calls": 0,
+    "qdrant_writes": 0
+  },
+  "foundation_provenance": {
+    "path_count": 76,
+    "path_state_counts_against_v5": {
+      "different": 7,
+      "identical": 6,
+      "missing": 63
+    },
+    "paths": [
+      {
+        "path": "docs/memory_v1_candidate_extraction_review_plan_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_evidence_apply_path_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_evidence_persistence_plan_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_candidate_apply_20260714.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_durable_apply_20260714.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_durable_apply_dry_run_20260714.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_extraction_dry_run_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_retrieval_dry_run_20260714.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_review_apply_20260714.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_preference_project_schema_design_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_review_apply_design_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_review_apply_production_clone_rehearsal_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_review_apply_production_install_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "docs/memory_v1_specialized_review_20260713.md",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "evals/memory_v1_preference_project_retrieval_cases_20260714.jsonl",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "ops/manifests/memory_v1_candidate_review_20260713.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_evidence_apply_20260713.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_preference_project_apply_20260713.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_preference_project_durable_apply_20260714.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_preference_project_extraction_20260713.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_preference_project_retrieval_20260714.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/manifests/memory_v1_preference_project_review_20260714.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/reviews/memory_v1_specialized_review_20260713.json",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_evidence_ingest_batch.sql",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_evidence_ingest_batch_rollback.sql",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_preference_project_staging.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_preference_project_staging_rollback.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_review_apply.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "ops/sql/20260713_memory_v1_review_apply_rollback.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_atomic_spans.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_candidate_review.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_compound_spans.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_evidence_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_evidence_persistence.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_evidence_triage.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_intent.py",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_durable_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_extraction.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_retrieval.py",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_review.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/memory_v1_preference_project_shadow.py",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "rag_engine/memory_v1_shadow.py",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "rag_engine/memory_v1_specialized_review.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "rag_engine/vantage_router.py",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "scripts/memory_v1_atomic_span_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_atomic_span_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_candidate_review_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_candidate_review_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_compound_span_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_compound_span_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_apply_integration.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_persistence_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_persistence_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_source_snapshot.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_triage_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_evidence_triage_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_intent_test.py",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_apply_integration.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_durable_apply.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_durable_apply_integration.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_extraction_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_extraction_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_retrieval_dry_run.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_retrieval_test.py",
+        "production_state": "different",
+        "v5_state": "different"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_review.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_review_integration.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_preference_project_shadow_test.py",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "scripts/memory_v1_specialized_review.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "scripts/memory_v1_specialized_review_test.py",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "tests/memory_v1_evidence_ingest_batch.sql",
+        "production_state": "identical",
+        "v5_state": "identical"
+      },
+      {
+        "path": "tests/memory_v1_preference_project_staging.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "tests/memory_v1_review_apply.sql",
+        "production_state": "missing",
+        "v5_state": "missing"
+      },
+      {
+        "path": "tools/memory_v1_schema_ci.sh",
+        "production_state": "different",
+        "v5_state": "different"
+      }
+    ],
+    "unique_commits": [
+      {
+        "commit": "a23575d90cec401b067107deb19e9351949e8eef",
+        "date": "2026-07-13",
+        "subject": "memory: add read-only evidence triage"
+      },
+      {
+        "commit": "e4aa0f93a64c38f8e06f654e64702a321c0f48b5",
+        "date": "2026-07-13",
+        "subject": "memory: add read-only atomic span planning"
+      },
+      {
+        "commit": "0022521f1eb97d0f5c2bb12bea52841cb0cc8957",
+        "date": "2026-07-13",
+        "subject": "memory: resolve compound evidence spans"
+      },
+      {
+        "commit": "1699b8eed3468d016ece719396712ba3105d4a19",
+        "date": "2026-07-13",
+        "subject": "memory: add reviewed evidence dry-run planner"
+      },
+      {
+        "commit": "8b72e412f6b0e77023495ea8a8633c4e931e8fb7",
+        "date": "2026-07-13",
+        "subject": "memory: harden evidence review metadata"
+      },
+      {
+        "commit": "67af6c1b691af25e3e09b985c00d4c622af47e9a",
+        "date": "2026-07-13",
+        "subject": "memory: add controlled reviewed evidence apply path"
+      },
+      {
+        "commit": "63627e91ca3eb721064c6edf06b9dabf492f4455",
+        "date": "2026-07-13",
+        "subject": "memory: authorize reviewed evidence batch"
+      },
+      {
+        "commit": "fd97c00d0f37820e07868655ca0ab92b5594c55c",
+        "date": "2026-07-13",
+        "subject": "docs: record reviewed evidence apply"
+      },
+      {
+        "commit": "26e39dfe81071daaffc101de29be07610f131b56",
+        "date": "2026-07-13",
+        "subject": "memory: add separated candidate review planner"
+      },
+      {
+        "commit": "5cba5fdcc9cc406aacf278d875fe1a198b550026",
+        "date": "2026-07-13",
+        "subject": "memory: review specialized candidate units"
+      },
+      {
+        "commit": "9304c36e0ab6c0a7759010d0d53890e19698ad11",
+        "date": "2026-07-14",
+        "subject": "memory: add preference and project review schemas"
+      },
+      {
+        "commit": "81757812c379370408485113e41f71cd545deb55",
+        "date": "2026-07-14",
+        "subject": "memory: add controlled preference and project apply"
+      },
+      {
+        "commit": "c213038f4988aed0f33205afb8e25817ddde3c6f",
+        "date": "2026-07-14",
+        "subject": "docs: record review apply production clone rehearsal"
+      },
+      {
+        "commit": "e0d02c1c4d35f1ec463b103ad028a101c9867033",
+        "date": "2026-07-14",
+        "subject": "docs: record preference project schema install"
+      },
+      {
+        "commit": "93204678bafac7ba2540d5586a3d0b124739d186",
+        "date": "2026-07-14",
+        "subject": "memory: plan preference project candidate extraction"
+      },
+      {
+        "commit": "465d7c498a6fd6b6bbfc336beebb0b0ee2231436",
+        "date": "2026-07-14",
+        "subject": "memory: persist reviewed preference project candidates"
+      },
+      {
+        "commit": "1626823e3d75b860e2edbd94779099398f034571",
+        "date": "2026-07-14",
+        "subject": "memory: review preference project candidates"
+      },
+      {
+        "commit": "413d6ad0f7d251b3c2ef4ac6d70ac42bad7c825e",
+        "date": "2026-07-14",
+        "subject": "memory: dry run durable preference project apply"
+      },
+      {
+        "commit": "e08936a2e84f0d67f1d2baf4e11d9db08d6d92fa",
+        "date": "2026-07-14",
+        "subject": "memory: apply durable preference project records"
+      },
+      {
+        "commit": "74bf812879b0e9fa4e293c042f526d6f5e75aa9c",
+        "date": "2026-07-14",
+        "subject": "memory: add preference project shadow retrieval"
+      },
+      {
+        "commit": "cef6ba6c694cd79e07c75da468a8109d2d8d1ac0",
+        "date": "2026-07-14",
+        "subject": "memory: add specialized runtime shadow"
+      }
+    ],
+    "unique_patch_count": 21
+  },
+  "key_deltas": {
+    "production_patches_in_v5": {
+      "missing_patch": 0,
+      "patch_equivalent": 24
+    },
+    "production_to_phase0": {
+      "left_only": 0,
+      "right_only": 6
+    },
+    "production_to_v5": {
+      "left_only": 24,
+      "right_only": 125
+    },
+    "v5_patches_in_production": {
+      "missing_patch": 101,
+      "patch_equivalent": 24
+    },
+    "v5_to_phase0": {
+      "left_only": 125,
+      "right_only": 30
+    }
+  },
+  "merge_simulations": [
+    {
+      "ancestry_delta": {
+        "left_only": 30,
+        "right_only": 125
+      },
+      "conflict_files": [
+        "tools/memory_v1_evidence_extraction_worker_production_clone.sh"
+      ],
+      "conflict_marker_start_count": 8,
+      "diff_path_count": 214,
+      "diff_status_counts": {
+        "A": 199,
+        "D": 10,
+        "M": 5
+      },
+      "left": "memory_v1_phase0_stabilization",
+      "merge_base": "3a27d8e112c9c9561b0e892ab7a0b2f64c334cd3",
+      "overlap_header_count": 1,
+      "right": "memory_v1_extraction_v2"
+    },
+    {
+      "ancestry_delta": {
+        "left_only": 81,
+        "right_only": 39
+      },
+      "conflict_files": [
+        "app.py",
+        "docs/memory_v1_evidence_lifecycle_design_20260713.md",
+        "docs/memory_v1_selector_hardening_20260714.md",
+        "evals/memory_v1_preference_project_retrieval_cases_20260714.jsonl",
+        "rag_engine/memory_v1_artifacts.py",
+        "rag_engine/memory_v1_intent.py",
+        "rag_engine/memory_v1_retrieval.py",
+        "rag_engine/memory_v1_shadow.py",
+        "rag_engine/memory_v1_store.py",
+        "rag_engine/vantage_router.py",
+        "scripts/memory_v1_intent_test.py",
+        "scripts/memory_v1_preference_project_activation_probe.py",
+        "scripts/memory_v1_preference_project_retrieval_test.py",
+        "scripts/memory_v1_shadow_policy_test.py",
+        "tools/memory_v1_schema_ci.sh"
+      ],
+      "conflict_marker_start_count": 41,
+      "diff_path_count": 218,
+      "diff_status_counts": {
+        "A": 70,
+        "D": 127,
+        "M": 21
+      },
+      "left": "memory_v1_phase0_stabilization",
+      "merge_base": "783b40e485de72e3232e7652ecc4fbd96d16e7c6",
+      "overlap_header_count": 16,
+      "right": "memory_v1_foundation"
+    },
+    {
+      "ancestry_delta": {
+        "left_only": 176,
+        "right_only": 39
+      },
+      "conflict_files": [
+        "app.py",
+        "docs/memory_system_audit_ledger_20260712.md",
+        "docs/memory_v1_evidence_lifecycle_design_20260713.md",
+        "docs/memory_v1_selector_hardening_20260714.md",
+        "evals/memory_v1_preference_project_retrieval_cases_20260714.jsonl",
+        "rag_engine/memory_v1_artifacts.py",
+        "rag_engine/memory_v1_intent.py",
+        "rag_engine/memory_v1_retrieval.py",
+        "rag_engine/memory_v1_shadow.py",
+        "rag_engine/memory_v1_store.py",
+        "rag_engine/vantage_router.py",
+        "scripts/memory_v1_intent_test.py",
+        "scripts/memory_v1_preference_project_activation_probe.py",
+        "scripts/memory_v1_preference_project_retrieval_test.py",
+        "scripts/memory_v1_shadow_policy_test.py",
+        "tools/memory_v1_schema_ci.sh"
+      ],
+      "conflict_marker_start_count": 45,
+      "diff_path_count": 410,
+      "diff_status_counts": {
+        "A": 70,
+        "D": 316,
+        "M": 24
+      },
+      "left": "memory_v1_extraction_v2",
+      "merge_base": "783b40e485de72e3232e7652ecc4fbd96d16e7c6",
+      "overlap_header_count": 17,
+      "right": "memory_v1_foundation"
+    }
+  ],
+  "origin": {
+    "url": "git@github.com:keashaborn/chat-memory.git",
+    "verified_heads": {
+      "catalog_exercise_holds_defaultlog_v0": "2b7a3804f6355e87d44766c23a08f8b262c5518c",
+      "main": "b32167b93dd704300f95e5c1a5b2fb0cb49ecc81"
+    }
+  },
+  "production": {
+    "ahead_of_origin": 107,
+    "branch": "catalog_exercise_holds_defaultlog_v0",
+    "head": "7484c4432cd9b920bc20024277776109584b70b7",
+    "newest_unpushed": "7484c4432cd9b920bc20024277776109584b70b7\t2026-07-16\tops: add evidence extraction worker installer",
+    "oldest_unpushed": "d59461c9c489e8061857cf1dd845f2205c953bc9\t2026-07-09\tmemory: refine review planner action labels",
+    "origin_head": "2b7a3804f6355e87d44766c23a08f8b262c5518c"
+  },
+  "recommended_sequence": [
+    "push each clean local branch to a namespaced remote backup before integration",
+    "create a new integration branch and worktree from memory_v1_phase0_stabilization",
+    "merge memory_v1_extraction_v2 and resolve its sole conflict with the evolved V5 clone suite, then rerun clone tests",
+    "merge memory_v1_foundation only after classifying its missing provenance artifacts; retain schema/docs/manifests, archive retired experimental runtime files, and prefer reviewed V5 active runtime paths",
+    "keep resse_policy_v0_1 separate until the memory/RESSE runtime boundary review",
+    "stop before changing the production branch or activating retrieval"
+  ],
+  "repo": "/opt/chat-memory",
+  "status": "audit_complete_stop_before_merge_rebase_or_push",
+  "worktrees": [
+    {
+      "branch": "catalog_exercise_holds_defaultlog_v0",
+      "dirty_path_count": 0,
+      "head": "7484c4432cd9b920bc20024277776109584b70b7",
+      "path": "/opt/chat-memory"
+    },
+    {
+      "branch": "memory_v1_extraction_v2",
+      "dirty_path_count": 0,
+      "head": "9567ea8ff2f6a56402393a2923defd6706daa39b",
+      "path": "/home/ubuntu/chat-memory-extraction-v2"
+    },
+    {
+      "branch": "memory_v1_governance_scheduler",
+      "dirty_path_count": 0,
+      "head": "ab40d4dde1f703c3447b50609b76e425be91422b",
+      "path": "/home/ubuntu/chat-memory-governance-scheduler"
+    },
+    {
+      "branch": "memory_v1_evidence_ingest_audit_deploy",
+      "dirty_path_count": 0,
+      "head": "78906f8729065eabf8204e303b4d20ad429bac9f",
+      "path": "/home/ubuntu/chat-memory-ingest-audit-deploy"
+    },
+    {
+      "branch": "memory_v1_evidence_lifecycle_deploy",
+      "dirty_path_count": 0,
+      "head": "b2d7473077ac5919b117b678f623d5898c11106e",
+      "path": "/home/ubuntu/chat-memory-lifecycle-integration"
+    },
+    {
+      "branch": "memory_v1_foundation",
+      "dirty_path_count": 0,
+      "head": "e16f3dd357f367eede3f81e4a386f3c9e0131706",
+      "path": "/home/ubuntu/chat-memory-memory-v1"
+    },
+    {
+      "branch": "memory_v1_owner_consolidation",
+      "dirty_path_count": 0,
+      "head": "f83e1d2fc2453e2553c7a67519860ddebafdc872",
+      "path": "/home/ubuntu/chat-memory-owner-consolidation"
+    },
+    {
+      "branch": "memory_v1_phase0_stabilization",
+      "dirty_path_count": 0,
+      "head": "a466ae88d1c7f4e9fe4ef384c2d66221928cfd44",
+      "path": "/home/ubuntu/chat-memory-phase0"
+    },
+    {
+      "branch": "resse_policy_v0_1",
+      "dirty_path_count": 0,
+      "head": "5647fa64d8fdb647066cb500c8e6ed099a518b22",
+      "path": "/home/ubuntu/chat-memory-resse-policy-v0_1"
+    },
+    {
+      "branch": "memory_v1_selector_legacy_retirement",
+      "dirty_path_count": 0,
+      "head": "33f8e5c83093d507fe7a8eb24d8db466361a8e64",
+      "path": "/home/ubuntu/chat-memory-selector-hotfix"
+    }
+  ]
+}
