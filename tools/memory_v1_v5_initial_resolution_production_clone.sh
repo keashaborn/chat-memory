@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compose=(docker compose -p memoryv1v5initialresolution -f docker-compose.ci.yml)
-test_sql=tests/memory_v1_v5_initial_resolution_apply.sql
+project=${MEMORY_V1_V5_RESOLUTION_CLONE_PROJECT:-memoryv1v5initialresolution}
+compose=(docker compose -p "$project" -f docker-compose.ci.yml)
+test_sql=${MEMORY_V1_V5_RESOLUTION_TEST_SQL:-tests/memory_v1_v5_initial_resolution_apply.sql}
 backup=$(mktemp /tmp/memory-v1-initial-resolution.XXXXXX.dump)
 
 cleanup() {
