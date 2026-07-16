@@ -14,6 +14,7 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
     ProviderAdapterError,
     ResponsesResult,
     StaticResponsesTransport,
+    sdk_capability_report,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
     ProviderPacket,
@@ -174,6 +175,18 @@ def main() -> int:
         source_recorded_at="2026-07-16T20:30:00Z",
         content=CONTENT,
     )
+    capability = sdk_capability_report()
+    if capability != {
+        "supported": True,
+        "openai_version": "2.6.1",
+        "pydantic_version": "2.12.3",
+        "missing_parse_parameters": [],
+        "output_schema_sha256": capability["output_schema_sha256"],
+        "error_class": None,
+    }:
+        raise AssertionError(f"SDK capability changed: {capability}")
+    if len(capability["output_schema_sha256"]) != 64:
+        raise AssertionError("SDK capability schema fingerprint is invalid")
 
     static_transport = StaticResponsesTransport(
         result=ResponsesResult(

@@ -5,6 +5,7 @@ import importlib
 import inspect
 import re
 from dataclasses import dataclass
+from importlib.metadata import version
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -349,6 +350,41 @@ class OpenAIResponsesProvider:
                 "invalid_structured_output",
                 retryable=False,
             ) from exc
+
+
+def sdk_capability_report() -> dict[str, Any]:
+    try:
+        responses_module = importlib.import_module(
+            "openai.resources.responses.responses"
+        )
+        responses_type = responses_module.Responses
+        parameters = set(
+            inspect.signature(responses_type.parse).parameters
+        )
+        openai_version = version("openai")
+        pydantic_version = version("pydantic")
+    except Exception as exc:
+        return {
+            "supported": False,
+            "openai_version": None,
+            "pydantic_version": None,
+            "missing_parse_parameters": sorted(REQUIRED_PARSE_PARAMETERS),
+            "output_schema_sha256": canonical_sha256(
+                ProviderPacket.model_json_schema()
+            ),
+            "error_class": type(exc).__name__,
+        }
+    missing = sorted(REQUIRED_PARSE_PARAMETERS - parameters)
+    return {
+        "supported": not missing,
+        "openai_version": openai_version,
+        "pydantic_version": pydantic_version,
+        "missing_parse_parameters": missing,
+        "output_schema_sha256": canonical_sha256(
+            ProviderPacket.model_json_schema()
+        ),
+        "error_class": None,
+    }
 
 
 def _registry_contract(registry: dict[str, Any]) -> str:
