@@ -23,6 +23,7 @@ service=memory-v1-consolidation.service
 snapshot_dir=/home/ubuntu/brains/snapshots
 lock_file=/home/ubuntu/brains/.memory_v1_freeze_v4_capture.lock
 phase=initialization
+failed_phase=
 status_file=
 trigger_disabled_by_run=0
 timer_disabled_by_run=0
@@ -58,6 +59,7 @@ run_sql_file() {
 record_exit() {
   code=$?
   if [[ "$code" -ne 0 ]]; then
+    failed_phase=$phase
     if [[ "$trigger_disabled_by_run" -eq 1 ]]; then
       phase=automatic_trigger_rollback_after_failure
       run_sql_file "$rollback" \
@@ -69,8 +71,8 @@ record_exit() {
       sudo systemctl enable --now "$timer" >/dev/null 2>&1 || true
     fi
   fi
-  printf 'run_id=%s\nphase=%s\nexit_code=%s\ncompleted_at=%s\n' \
-    "$run_id" "$phase" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf 'run_id=%s\nphase=%s\nfailed_phase=%s\nexit_code=%s\ncompleted_at=%s\n' \
+    "$run_id" "$phase" "$failed_phase" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >"$status_file"
   chmod 0600 "$status_file"
 }
@@ -111,13 +113,17 @@ capture_state() {
 qdrant_metadata_signature() {
   {
     curl --fail --silent --show-error \
-      http://127.0.0.1:6333/collections/memory_raw
+      http://127.0.0.1:6333/collections/memory_raw |
+      jq -c '{result: {points_count: .result.points_count, config: .result.config, payload_schema: (.result.payload_schema | with_entries(.value = {data_type: .value.data_type}))}}'
     curl --fail --silent --show-error \
-      http://127.0.0.1:6333/collections/memory_raw/snapshots
+      http://127.0.0.1:6333/collections/memory_raw/snapshots |
+      jq -c '{result: (.result | sort_by(.name))}'
     curl --fail --silent --show-error \
-      http://127.0.0.1:6333/collections/memory_claim_v1
+      http://127.0.0.1:6333/collections/memory_claim_v1 |
+      jq -c '{result: {points_count: .result.points_count, config: .result.config, payload_schema: (.result.payload_schema | with_entries(.value = {data_type: .value.data_type}))}}'
     curl --fail --silent --show-error \
-      http://127.0.0.1:6333/collections/memory_claim_v1/snapshots
+      http://127.0.0.1:6333/collections/memory_claim_v1/snapshots |
+      jq -c '{result: (.result | sort_by(.name))}'
   } | jq -cS . | sha256sum | awk '{print $1}'
 }
 
