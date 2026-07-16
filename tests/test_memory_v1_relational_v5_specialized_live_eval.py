@@ -276,6 +276,33 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(case_ids, ["v5-04", "v5-15"])
         _enforce_selection_mode(selection, preflight_only=False)
 
+    def test_checked_in_unarchived2_authorization_matches_preflight(self) -> None:
+        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+        cases = [
+            json.loads(line)
+            for line in cases_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        selection, digest, case_ids = _load_selection(
+            Path("evals/memory_v1_relational_v5_unarchived2_authorized_20260716.json"),
+            cases=cases,
+            source_manifest_sha256=(
+                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+            ),
+            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(len(digest or ""), 64)
+        self.assertEqual(case_ids, ["v5-04", "v5-15"])
+        self.assertEqual(
+            selection["baseline_evaluator_commit"],
+            "4b5988bb17f74ca78e8ccbe05f9ac9e726750b7d",
+        )
+        self.assertEqual(
+            selection["baseline_report_sha256"],
+            "bec708d70bb98d1aa961424d18001b047e98939814fa90f2374b6df56a457313",
+        )
+        _enforce_selection_mode(selection, preflight_only=False)
+
     def test_v5_08_contract_is_temporal_project_current_state(self) -> None:
         cases = [
             json.loads(line)
