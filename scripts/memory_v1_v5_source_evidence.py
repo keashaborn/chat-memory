@@ -335,35 +335,42 @@ async def apply(args: argparse.Namespace) -> int:
                 outcome = "replayed"
             else:
                 for source in verified:
-                    existing = await conn.fetchrow(
-                        """SELECT evidence_id,content_sha256,status::text FROM memory.evidence
-                             WHERE owner_user_id=$1 AND source_system='public.chat_log'
-                               AND external_id=$2""",
-                        owner, source["source_external_id"],
-                    )
-                    operation = "reused" if existing else "inserted"
-                    if existing:
-                        evidence_id = existing["evidence_id"]
-                        reused += 1
-                    else:
-                        evidence_id = await conn.fetchval(
-                            """INSERT INTO memory.evidence(
-                                 owner_user_id,kind,source_system,external_id,content,
-                                 content_sha256,observed_at,directness,source_reliability,
-                                 independence_key,sensitivity,metadata)
-                               VALUES($1,'user_statement','public.chat_log',$2,$3,$4,$5,1,1,$6,
-                                      $7::memory.sensitivity_level,$8::jsonb)
-                               RETURNING evidence_id""",
-                            owner, source["source_external_id"], source["content"],
-                            source["source_sha256"], parse_time(source["source_recorded_at"]),
-                            f"public.chat_log:{source['source_external_id']}",
-                            source["sensitivity"], stable_json({
-                                "contract_version": PLAN_VERSION,
-                                "case_id": source["case_id"],
-                                "source_report_sha256": plan["source_report_sha256"],
-                            }),
+                    recorded = await conn.fetchrow(
+                        """
+                        SELECT evidence_id,outcome,content_sha256
+                        FROM memory.record_owner_evidence_v1(
+                          'user_statement'::memory.evidence_kind,$1,$2,$3,$4,1,1,$5,
+                          $6::memory.sensitivity_level,$7::jsonb
                         )
+                        """,
+                        "public.chat_log",
+                        source["source_external_id"],
+                        source["content"],
+                        parse_time(source["source_recorded_at"]),
+                        f"public.chat_log:{source['source_external_id']}",
+                        source["sensitivity"],
+                        stable_json({
+                            "contract_version": PLAN_VERSION,
+                            "case_id": source["case_id"],
+                            "source_report_sha256": plan["source_report_sha256"],
+                        }),
+                    )
+                    if (
+                        recorded is None
+                        or recorded["outcome"] not in {"applied", "replayed"}
+                        or recorded["content_sha256"] != source["source_sha256"]
+                    ):
+                        raise RuntimeError(
+                            f"controlled evidence result mismatch: {source['case_id']}"
+                        )
+                    evidence_id = recorded["evidence_id"]
+                    operation = (
+                        "inserted" if recorded["outcome"] == "applied" else "reused"
+                    )
+                    if operation == "inserted":
                         inserted += 1
+                    else:
+                        reused += 1
                     evidence_rows.append({
                         "evidence_id": str(evidence_id),
                         "external_id": source["source_external_id"],
