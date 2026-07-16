@@ -1,0 +1,203 @@
+{
+  "backlog": {
+    "classification": {
+      "20260714_v1": {
+        "active_owner_v5_eligible": 210,
+        "already_represented_by_evidence": 7,
+        "inactive_or_deleted_owner_review": 323
+      },
+      "20260714_v4": {
+        "active_owner_v5_eligible": 56
+      }
+    },
+    "pending_by_pipeline": {
+      "20260714_v1": 540,
+      "20260714_v4": 56
+    },
+    "pending_total": 596,
+    "total_jobs_all_statuses": 644
+  },
+  "captured_at": "2026-07-16T23:24:29Z",
+  "contract_version": "memory_v1_phase0_stabilization_inventory_v1",
+  "database": {
+    "application_role": {
+      "bypass_rls": false,
+      "login": true,
+      "name": "brains_app",
+      "superuser": false,
+      "without_actor_visible_memory_rows": 0
+    },
+    "automated_backup_timer_present": false,
+    "latest_manual_dump": {
+      "bytes": 76365973,
+      "created_at": "2026-07-16T20:15:22Z",
+      "path": "/home/ubuntu/brains/snapshots/memory_pre_evidence_extraction_worker_20260716T201503Z_6c793959c448.dump"
+    },
+    "production_clone_restore_test": {
+      "completed_on": "2026-07-16",
+      "result": "pass",
+      "suite": "tools/memory_v1_evidence_extraction_worker_production_clone.sh"
+    },
+    "row_counts": {
+      "candidate": 71,
+      "claim": 26,
+      "consolidation_job": 644,
+      "entity": 6,
+      "evidence": 210,
+      "evidence_extraction_job": 0,
+      "evidence_intake_terminal": 26,
+      "governance_job": 80,
+      "projection_outbox": 25
+    }
+  },
+  "effects": {
+    "database_writes": 0,
+    "git_production_writes": 0,
+    "prompt_influence_changes": 0,
+    "qdrant_writes": 0,
+    "service_or_timer_changes": 0
+  },
+  "gates": [
+    {
+      "gate": "freeze_uncontrolled_v4_growth",
+      "reason": "public.chat_log inserts still enqueue 20260714_v4 consolidation jobs",
+      "status": "open"
+    },
+    {
+      "gate": "hash_locked_backlog_manifest",
+      "reason": "the aggregate classification is reproducible but the 596 job-level rows are not yet snapshotted",
+      "status": "open"
+    },
+    {
+      "gate": "source_control_reconciliation",
+      "reason": "production is 107 commits ahead and the isolated branch also diverges from production",
+      "status": "open"
+    },
+    {
+      "gate": "migration_ledger_and_rollback_pairing",
+      "reason": "no database migration ledger exists and rollback coverage is incomplete",
+      "status": "open"
+    },
+    {
+      "gate": "fresh_qdrant_snapshot_and_restore_test",
+      "reason": "memory snapshots are stale and corpus collections have no snapshots",
+      "status": "open"
+    },
+    {
+      "gate": "close_brains_app_direct_mutation",
+      "reason": "brains_app still has direct DML on governed entity, claim, revision, candidate, projection, and trace tables",
+      "status": "open"
+    }
+  ],
+  "git": {
+    "automatic_sync_behavior": "push_occurs_only_after_the_tool_creates_a_new_commit",
+    "isolated_branch": "memory_v1_extraction_v2",
+    "isolated_head": "5b12741d14883cbc95fe9733ec44677c33c63fb8",
+    "isolated_unique_commits_from_merge_base": 124,
+    "merge_base": "3a27d8e112c9c9561b0e892ab7a0b2f64c334cd3",
+    "production_branch": "catalog_exercise_holds_defaultlog_v0",
+    "production_head": "7484c4432cd9b920bc20024277776109584b70b7",
+    "production_unique_commits_from_merge_base": 24,
+    "production_upstream_ahead": 107,
+    "production_upstream_behind": 0,
+    "worktree_count": 9
+  },
+  "migration_inventory": {
+    "database_ledger_present": false,
+    "forward_sql_files": 62,
+    "memory_forward_files_without_rollback": [
+      "20260714_memory_v1_consolidation_queue.sql",
+      "20260714_memory_v1_extraction_v2.sql",
+      "20260714_memory_v1_extraction_v3.sql",
+      "20260714_memory_v1_extraction_v3_predicates.sql",
+      "20260714_memory_v1_extraction_v4.sql",
+      "20260714_raw_memory_owner_enforce.sql",
+      "20260714_raw_memory_owner_prepare.sql"
+    ],
+    "rollback_sql_files": 16,
+    "unpaired_forward_sql_files": 46
+  },
+  "producer_inventory": {
+    "chat_log_trigger": {
+      "enabled": true,
+      "function": "memory.enqueue_chat_log_consolidation()",
+      "pipeline_version": "20260714_v4",
+      "trigger": "chat_log_enqueue_memory_v1_consolidation"
+    },
+    "consolidation_timer": {
+      "active": true,
+      "interval": "2 minutes",
+      "owner_allowlist_count": 2,
+      "result": "success"
+    },
+    "deferred_scan_timer": {
+      "active": true,
+      "mode": "report_only",
+      "result": "success"
+    },
+    "evidence_intake_timer": {
+      "active": true,
+      "interval": "2 minutes",
+      "owner_allowlist_count": 6,
+      "result": "success"
+    },
+    "governance_timer": {
+      "active": true,
+      "interval": "5 minutes",
+      "owner_allowlist_count": 1,
+      "result": "success"
+    },
+    "projection_timer": {
+      "active": true,
+      "interval": "2 minutes",
+      "owner_allowlist_count": 3,
+      "result": "success"
+    }
+  },
+  "qdrant": {
+    "collection_count": 21,
+    "corpus_collections": {
+      "count": 19,
+      "snapshot_count": 0
+    },
+    "embedding_model": "text-embedding-3-large",
+    "memory_claim_v1": {
+      "active_owner_count": 3,
+      "payload_indexes": [
+        "domains",
+        "intents",
+        "owner_user_id",
+        "sensitivity",
+        "status"
+      ],
+      "points": 25,
+      "snapshot_count": 3,
+      "snapshot_restore_tested": false
+    },
+    "memory_raw": {
+      "active_owner_points": 628,
+      "inactive_or_deleted_owner_points": 347,
+      "owner_count": 18,
+      "payload_indexes": [
+        "owner_user_id"
+      ],
+      "points": 975,
+      "snapshot_count": 2,
+      "snapshot_restore_tested": false
+    },
+    "vector_distance": "Cosine",
+    "vector_size": 3072
+  },
+  "security": {
+    "core_table_owner": "sage",
+    "core_tables_forced_rls": true,
+    "cross_role_memberships_detected": 0,
+    "direct_brains_app_mutation_open": true,
+    "memory_roles_with_bypass_rls": 0,
+    "public_memory_functions": [
+      "guard_evidence_insert_only",
+      "guard_lifecycle_event_append_only"
+    ]
+  },
+  "status": "phase0_gates_open_no_production_integration"
+}
