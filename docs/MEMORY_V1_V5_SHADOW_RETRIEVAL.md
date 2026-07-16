@@ -16,7 +16,8 @@ The V5 selector requires:
 - a V5 projection contract marker and `v5:` canonical key;
 - an authorized projection review and applied projection event;
 - status `supported`, `uncertain`, or `disputed`;
-- at least one active evidence record through an observation link;
+- active evidence grouped without loss into `supports`, `opposes`, `qualifies`,
+  and `context`;
 - observation provenance;
 - current temporal validity;
 - an allowed sensitivity level;
@@ -30,6 +31,9 @@ the matching trusted project key.
 Ranking remains multidimensional. Semantic relevance, importance, and salience
 are kept as separate components and compared lexicographically; V5 does not
 persist or expose a synthetic final score.
+
+Evidence stance also remains multidimensional. Supporting and contrary
+evidence are never collapsed into one confidence number.
 
 The shadow result hard-codes `prompt_injection=false`,
 `answer_model_exposure=false`, and `retrieval_activation=false`. A separate

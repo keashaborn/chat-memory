@@ -15,6 +15,7 @@ CONTENT_SURFACES = {
     "exact_project_scope_only",
 }
 NON_CONTENT_SURFACES = {"never", "zero_token_control_only"}
+EVIDENCE_STANCES = {"supports", "opposes", "qualifies", "context"}
 MIN_SEMANTIC_SCORE = 0.20
 RELATIVE_SEMANTIC_RATIO = 0.40
 
@@ -85,6 +86,17 @@ def _candidate_map(
         )
         candidates[claim_id] = max(candidates.get(claim_id, 0.0), semantic)
     return candidates
+
+
+def _evidence_by_stance(value: Any, field: str) -> dict[str, list[str]]:
+    if not isinstance(value, Mapping) or set(value) != EVIDENCE_STANCES:
+        raise V5ShadowRetrievalError(
+            f"{field} must contain exactly {sorted(EVIDENCE_STANCES)}"
+        )
+    return {
+        stance: sorted(_string_set(value[stance], f"{field}.{stance}"))
+        for stance in sorted(EVIDENCE_STANCES)
+    }
 
 
 def _semantic_floor(values: Sequence[float]) -> float:
@@ -219,10 +231,15 @@ def evaluate_v5_shadow_claims(
             raise V5ShadowRetrievalError("retrieval_policy must be an object")
         surface = str(policy.get("surface_policy") or "").strip().casefold()
         record_project = str(record.get("project_key") or "").strip() or None
-        active_evidence = _string_set(
-            record.get("active_evidence_ids"),
-            f"records[{index}].active_evidence_ids",
+        evidence_by_stance = _evidence_by_stance(
+            record.get("evidence_by_stance"),
+            f"records[{index}].evidence_by_stance",
         )
+        active_evidence = {
+            evidence_id
+            for evidence_ids in evidence_by_stance.values()
+            for evidence_id in evidence_ids
+        }
         observations = _string_set(
             record.get("observation_ids"),
             f"records[{index}].observation_ids",
@@ -251,6 +268,8 @@ def evaluate_v5_shadow_claims(
             reasons.append(f"status:{status or 'missing'}")
         if not active_evidence:
             reasons.append("no_active_evidence")
+        if status == "supported" and not evidence_by_stance["supports"]:
+            reasons.append("no_supporting_evidence")
         if not observations:
             reasons.append("no_observation_provenance")
         if SENSITIVITY_RANK[sensitivity] > SENSITIVITY_RANK[maximum_sensitivity]:
@@ -285,7 +304,7 @@ def evaluate_v5_shadow_claims(
                 "sensitivity": sensitivity,
                 "valid_from": valid_from,
                 "valid_to": valid_to,
-                "evidence_refs": sorted(active_evidence),
+                "evidence_by_stance": evidence_by_stance,
                 "observation_refs": sorted(observations),
                 "reason_codes": reasons,
                 "token_estimate": _token_estimate(canonical_text),
@@ -340,7 +359,7 @@ def evaluate_v5_shadow_claims(
             "valid_to": (
                 record["valid_to"].isoformat() if record["valid_to"] else None
             ),
-            "evidence_refs": record["evidence_refs"],
+            "evidence_by_stance": record["evidence_by_stance"],
             "observation_refs": record["observation_refs"],
         }
         for record in selected

@@ -34,7 +34,12 @@ def record() -> dict:
         },
         "projection_review_decision": "authorized",
         "projection_apply_outcome": "applied",
-        "active_evidence_ids": ["fca9e5dc-83c2-4456-8db8-1fe6102eb74d"],
+        "evidence_by_stance": {
+            "supports": ["fca9e5dc-83c2-4456-8db8-1fe6102eb74d"],
+            "opposes": [],
+            "qualifies": [],
+            "context": [],
+        },
         "observation_ids": ["9bf1e6b2-1840-4524-98dc-142567ebe013"],
         "project_key": None,
     }
@@ -69,8 +74,15 @@ def main() -> None:
     assert blocked["rejected_counts"]["status:candidate"] == 1
 
     no_evidence = record()
-    no_evidence["active_evidence_ids"] = []
+    no_evidence["evidence_by_stance"]["supports"] = []
     assert evaluate(no_evidence)["rejected_counts"]["no_active_evidence"] == 1
+
+    unsupported = record()
+    unsupported["evidence_by_stance"]["supports"] = []
+    unsupported["evidence_by_stance"]["opposes"] = [
+        "36e92633-08fd-441f-8d1d-27f16c2a3479"
+    ]
+    assert evaluate(unsupported)["rejected_counts"]["no_supporting_evidence"] == 1
 
     no_observation = record()
     no_observation["observation_ids"] = []
