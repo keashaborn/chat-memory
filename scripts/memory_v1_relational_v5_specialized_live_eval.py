@@ -119,6 +119,7 @@ def _load_selection(
         "memory_v1_relational_specialized_rerun_v2": 10,
         "memory_v1_relational_specialized_rerun_v3": 5,
         "memory_v1_relational_specialized_rerun_v4": 5,
+        "memory_v1_relational_specialized_full_v1": 25,
     }
     selection_version = payload["selection_version"]
     if selection_version not in selection_counts:
@@ -127,6 +128,8 @@ def _load_selection(
         expected_scope = "remaining_failed_cases_preflight_only_zero_call"
     elif selection_version == "memory_v1_relational_specialized_rerun_v4":
         expected_scope = "remaining_failed_cases_store_false_zero_write"
+    elif selection_version == "memory_v1_relational_specialized_full_v1":
+        expected_scope = "full_contract_preflight_only_zero_call"
     else:
         expected_scope = "failed_cases_only_store_false_zero_write"
     if payload["authorization_scope"] != expected_scope:
@@ -162,12 +165,13 @@ def _enforce_selection_mode(
 ) -> None:
     if (
         selection is not None
-        and selection["authorization_scope"]
-        == "remaining_failed_cases_preflight_only_zero_call"
+        and str(selection["authorization_scope"]).endswith(
+            "_preflight_only_zero_call"
+        )
         and not preflight_only
     ):
         raise RuntimeError(
-            "remaining-five selection is preflight-only; external calls require "
+            "selection is preflight-only; external calls require "
             "a separately authorized manifest"
         )
 

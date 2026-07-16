@@ -234,6 +234,31 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
         )
         _enforce_selection_mode(selection, preflight_only=False)
 
+    def test_checked_in_full25_selection_is_preflight_only(self) -> None:
+        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+        cases = [
+            json.loads(line)
+            for line in cases_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        selection, digest, case_ids = _load_selection(
+            Path("evals/memory_v1_relational_v5_full25_preflight_20260715.json"),
+            cases=cases,
+            source_manifest_sha256=(
+                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+            ),
+            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(len(digest or ""), 64)
+        self.assertEqual(case_ids, [item["case_id"] for item in cases])
+        self.assertEqual(
+            selection["authorization_scope"],
+            "full_contract_preflight_only_zero_call",
+        )
+        _enforce_selection_mode(selection, preflight_only=True)
+        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
+            _enforce_selection_mode(selection, preflight_only=False)
+
     def test_v5_08_contract_is_temporal_project_current_state(self) -> None:
         cases = [
             json.loads(line)
