@@ -1,7 +1,7 @@
 # Memory V1 V5 read-only shadow-retrieval contract
 
-Status: isolated implementation only. Not installed, indexed, runtime-active, or
-prompt-visible.
+Status: selector and read API are isolated and production-clone verified. They
+are not installed, indexed, runtime-active, or prompt-visible.
 
 Server boundary: seebx backend.
 
@@ -39,8 +39,22 @@ The shadow result hard-codes `prompt_injection=false`,
 `answer_model_exposure=false`, and `retrieval_activation=false`. A separate
 runtime gate is required before any prompt integration.
 
-## Next database boundary
+## Clone-verified read boundary
 
-A controlled read-only PostgreSQL function must load the candidate snapshots
-through forced owner RLS. `brains_app` must not receive direct access to V5
-staging, observation, resolution, or projection tables.
+The isolated read boundary consists of:
+
+- `ops/sql/20260716_memory_v1_v5_shadow_read_api.sql`;
+- `ops/sql/20260716_memory_v1_v5_shadow_read_api_rollback.sql`;
+- `tests/memory_v1_v5_shadow_read_api.sql`; and
+- `tools/memory_v1_v5_shadow_read_api_production_clone.sh`.
+
+It creates a separate restricted `memory_v5_reader` role and one controlled
+read-only function. `brains_app` receives function execution only, never direct
+access to V5 observation or projection tables.
+
+The production-clone suite proves idempotent migration, missing-actor denial,
+direct-table denial, cross-owner non-disclosure, bounded unique candidate
+inputs, restricted role attributes, read-only function volatility, and full
+rollback.
+
+Production installation and router integration remain separate boundaries.
