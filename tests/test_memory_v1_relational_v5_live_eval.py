@@ -236,6 +236,20 @@ class V5LiveEvalTest(unittest.TestCase):
         }
         self.assertEqual(outcome(packet), "no_observation")
 
+    def test_context_dependent_question_without_evidence_is_no_observation(self) -> None:
+        packet = {
+            "observations": [],
+            "deferrals": [
+                {"reason_code": "question_only", "memory_shape": "none"},
+                {"reason_code": "context_missing", "memory_shape": "none"},
+            ],
+        }
+        self.assertEqual(outcome(packet), "no_observation")
+        packet["deferrals"].append(
+            {"reason_code": "ambiguous_transcription", "memory_shape": "none"}
+        )
+        self.assertEqual(outcome(packet), "defer_all")
+
     def test_sibling_direction_is_canonicalized_self_to_person(self) -> None:
         entities = {
             "e01": {"entity_type": "self"},

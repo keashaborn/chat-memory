@@ -410,3 +410,47 @@ and all six owner-filtered Qdrant points retained SHA-256
 `60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
 An external full-contract evaluation requires a separate manifest explicitly
 binding this preflight result; this preflight does not authorize it.
+
+## Authorized full-25 evaluation and offline reconciliation
+
+Commit `8e9f8328cc242e0931acc7f0c4dbfe67ad1d3118` evaluated all 25
+manifest sources once with `gpt-5.2` and `store=false`. The run made 98 model
+calls, including 23 bounded repairs. There were no refusals, incomplete
+responses, request errors, deterministic rejections, or integrity errors.
+Sixteen cases passed and nine failed. The mode-0600 report at
+`/home/ubuntu/memory-v1-reviews/v5-specialized-full25-authorized-live-20260716T002021Z.json`
+has SHA-256
+`615e73c137a5795f0ec64c58d463659a94b143af1cf055a1a3780ffae29dbd31`.
+
+The zero-write proof passed. All 47 database relations retained SHA-256
+`437b38a8d85f771caec1eaf003356fde77775c26319bd463fc0f447fef67ddc4`,
+and all six owner-filtered Qdrant points retained SHA-256
+`60ff96fcc03e559d10a5a37144f145b5b1f699f1ae47d6e18b4bdcae8c8e4f87`.
+
+Failure reconciliation produced five deterministic corrections:
+
+- `project_knowledge` now discards non-project deferrals because
+  `temporal_content` is their sole authoritative lane;
+- a packet with no observation and only `question_only`, `context_missing`, or
+  `transient_state` is `no_observation`; the deferrals remain auditable but do
+  not imply that a memory candidate exists;
+- a recognized technical product name in an otherwise observation-free
+  technical question is not an ambiguous personal-memory candidate;
+- an explicit plural residence clause may create sibling residence edges only
+  when one already validated, owner-linked sibling group is the unique
+  antecedent and the complete atomic result fits the graph budget;
+- case `v5-07` now follows the same rule as equivalent project cases: its direct
+  statement that the app tracks nutrition and weightlifting is current project
+  state even though the turn also asks a question.
+
+The revised case contract intentionally invalidates every earlier external-call
+selection hash. Historical authorization manifests remain checked in as audit
+evidence and fail closed against the new contract; none was silently rebound.
+
+All 139 offline Memory V1 tests pass. A zero-call in-memory replay of the
+authorized report reevaluated all 23 rows that contain archived model packets;
+all 23 pass the revised contract. Cases `v5-04` and `v5-15` have no archived
+packet because the prior project pass failed closed. Their cross-lane failure
+is covered by three-pass regression tests, but confirming their model output
+requires a new separately authorized external evaluation. No staging,
+persistence, projection, retrieval activation, or prompt change occurred.

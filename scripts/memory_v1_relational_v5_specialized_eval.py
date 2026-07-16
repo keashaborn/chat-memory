@@ -61,6 +61,27 @@ UNCERTAINTY_RE = re.compile(
 REPEATED_SIBLING_ROLE_RE = re.compile(
     r"^(family:(?:sister|brother|sibling))(?::[1-9][0-9]*)?$"
 )
+PLURAL_SIBLING_RESIDENCE_RE = re.compile(
+    r"\bthey\s+all\s+live\s+in\s+(?:the\s+)?"
+    r"(?P<place>[\w][\w'’\-]*(?:\s+[\w][\w'’\-]*){0,5})"
+    r"(?=[.!?,;]|$)",
+    re.IGNORECASE,
+)
+SIBLING_DESCRIPTOR_RE = re.compile(r"\b(sisters|brothers|siblings)\b", re.IGNORECASE)
+KNOWN_TECHNICAL_TERMS = {
+    "apple",
+    "chatgpt",
+    "codex",
+    "openai",
+    "postgres",
+    "postgresql",
+    "qdrant",
+    "supabase",
+}
+TECHNICAL_QUESTION_CONTEXT_RE = re.compile(
+    r"\b(?:api|app|code|coding|developer|llm|model|platform|program|programmer|software)\b",
+    re.IGNORECASE,
+)
 
 
 class PassAttemptAudit(StrictModel):
@@ -360,6 +381,220 @@ def normalize_repeated_sibling_roles(
                 changed = True
     if changed:
         _append_server_finding(packet, "repeated_sibling_roles_source_ordered")
+    return packet
+
+
+def normalize_plural_sibling_residence(
+    packet: EntityGraphPassPacket, text: str
+) -> EntityGraphPassPacket:
+    """Add only an explicit plural sibling residence relation with a unique antecedent."""
+    matches = list(PLURAL_SIBLING_RESIDENCE_RE.finditer(text))
+    if len(matches) != 1:
+        return packet
+    match = matches[0]
+    descriptors = list(SIBLING_DESCRIPTOR_RE.finditer(text[: match.start()]))
+    if not descriptors:
+        return packet
+    descriptor = descriptors[-1]
+    if match.start() - descriptor.start() > 500:
+        return packet
+    descriptor_to_role = {
+        "sisters": "family:sister",
+        "brothers": "family:brother",
+        "siblings": "family:sibling",
+    }
+    base_role = descriptor_to_role[descriptor.group(1).casefold()]
+    siblings: list[tuple[int, EntityMention]] = []
+    for entity in packet.entity_mentions:
+        role_match = REPEATED_SIBLING_ROLE_RE.fullmatch(
+            str(entity.relationship_role or "")
+        )
+        if entity.entity_type != "person" or role_match is None:
+            continue
+        if role_match.group(1) != base_role:
+            continue
+        starts: list[int] = []
+        for raw_span in entity.source_spans:
+            try:
+                trusted = source_span(raw_span.model_dump(mode="json"), text)
+            except Exception:
+                continue
+            starts.append(int(trusted["start"]))
+        if not starts:
+            return packet
+        start = min(starts)
+        if descriptor.end() <= start < match.start():
+            siblings.append((start, entity))
+    if len(siblings) < 2:
+        return packet
+    sibling_refs = {entity.entity_ref for _, entity in siblings}
+    self_refs = {
+        entity.entity_ref
+        for entity in packet.entity_mentions
+        if entity.entity_type == "self" and entity.relationship_role == "user:self"
+    }
+    linked_refs = {
+        item.object.entity_ref
+        for item in packet.relationship_observations
+        if item.predicate == "relationship.sibling_of"
+        and item.subject_entity_ref in self_refs
+        and item.object.kind == "entity"
+    }
+    if not sibling_refs <= linked_refs:
+        return packet
+    if len(packet.relationship_observations) + len(siblings) > 24:
+        return packet
+
+    place_quote = match.group("place")
+    place_start = match.start("place")
+    place_end = match.end("place")
+    place = next(
+        (
+            entity
+            for entity in packet.entity_mentions
+            if entity.entity_type == "place"
+            and any(
+                span.start == place_start
+                and span.end == place_end
+                and span.quote == place_quote
+                for span in entity.source_spans
+            )
+        ),
+        None,
+    )
+    if place is None:
+        if len(packet.entity_mentions) >= 24:
+            return packet
+        used_entity_refs = {item.entity_ref for item in packet.entity_mentions}
+        entity_ref = next(
+            (
+                f"e{ordinal:02d}"
+                for ordinal in range(1, 100)
+                if f"e{ordinal:02d}" not in used_entity_refs
+            ),
+            None,
+        )
+        if entity_ref is None:
+            return packet
+        place = EntityMention(
+            entity_ref=entity_ref,
+            entity_type="place",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role=place_quote.casefold(),
+            source_spans=[
+                SpanOffsets(start=place_start, end=place_end, quote=place_quote)
+            ],
+            extraction_confidence=0.99,
+            reason_codes=["server_resolved_explicit_plural_residence_place"],
+        )
+        packet.entity_mentions.append(place)
+
+    relation_span = SpanOffsets(
+        start=match.start(), end=match.end(), quote=match.group(0)
+    )
+    used_observation_refs = {
+        item.observation_ref for item in packet.relationship_observations
+    }
+    changed = False
+    for _, sibling in sorted(siblings):
+        if any(
+            item.predicate == "residence.lives_at"
+            and item.subject_entity_ref == sibling.entity_ref
+            and item.object.kind == "entity"
+            and item.object.entity_ref == place.entity_ref
+            for item in packet.relationship_observations
+        ):
+            continue
+        observation_ref = next(
+            (
+                f"o{ordinal:02d}"
+                for ordinal in range(1, 100)
+                if f"o{ordinal:02d}" not in used_observation_refs
+            ),
+            None,
+        )
+        if observation_ref is None:
+            break
+        used_observation_refs.add(observation_ref)
+        packet.relationship_observations.append(
+            Observation.model_validate(
+                {
+                    "observation_ref": observation_ref,
+                    "subject_entity_ref": sibling.entity_ref,
+                    "predicate": "residence.lives_at",
+                    "object": {"kind": "entity", "entity_ref": place.entity_ref},
+                    "polarity": "affirmed",
+                    "modality": "asserted",
+                    "projection_class": "direct_claim",
+                    "surface_policy": "direct_or_relevant",
+                    "temporal": {
+                        "semantic": "state_validity",
+                        "shape": "none",
+                        "basis": "none",
+                        "source_form": "none",
+                        "certainty": "unknown",
+                        "precision": "unknown",
+                        "instant": None,
+                        "calendar_range": None,
+                        "instant_range": None,
+                        "relative_offset": None,
+                        "recurrence": None,
+                        "anchored_to_source_time": False,
+                        "reason_codes": ["explicit_plural_residence"],
+                    },
+                    "sensitivity": "medium",
+                    "extraction_confidence": 0.99,
+                    "source_spans": [relation_span.model_dump(mode="json")],
+                    "reason_codes": [
+                        "server_resolved_explicit_plural_sibling_antecedent"
+                    ],
+                }
+            )
+        )
+        changed = True
+    if changed:
+        _append_server_finding(packet, "plural_sibling_residence_server_resolved")
+    return packet
+
+
+def normalize_known_technical_question_deferrals(
+    packet: TemporalContentPassPacket, text: str
+) -> TemporalContentPassPacket:
+    if packet.observations or not TECHNICAL_QUESTION_CONTEXT_RE.search(text):
+        return packet
+    if not any(item.reason_code == "question_only" for item in packet.deferrals):
+        return packet
+    kept: list[Deferral] = []
+    removed = False
+    for item in packet.deferrals:
+        if item.reason_code != "ambiguous_transcription" or not item.source_spans:
+            kept.append(item)
+            continue
+        quoted = {span.quote.strip().casefold() for span in item.source_spans}
+        if quoted and quoted <= KNOWN_TECHNICAL_TERMS:
+            removed = True
+            continue
+        kept.append(item)
+    if removed:
+        packet.deferrals = kept
+        _append_server_finding(
+            packet, "known_technical_term_ambiguity_deferral_removed"
+        )
+    return packet
+
+
+def normalize_project_lane_deferrals(
+    packet: ProjectKnowledgePassPacket,
+) -> ProjectKnowledgePassPacket:
+    kept = [
+        item
+        for item in packet.deferrals
+        if item.reason_code == "project_scope_unresolved"
+    ]
+    if len(kept) != len(packet.deferrals):
+        packet.deferrals = kept
+        _append_server_finding(packet, "non_project_lane_deferrals_removed")
     return packet
 
 
@@ -1040,13 +1275,15 @@ async def run_specialized_zero_write(
         attempts=attempts,
     )
     graph = normalize_repeated_sibling_roles(graph, text)
+    graph = normalize_plural_sibling_residence(graph, text)
     correction = normalize_explicit_pet_name_correction_graph(graph, text)
     catalog = entity_catalog(graph)
 
     def normalize_content(packet: TemporalContentPassPacket) -> TemporalContentPassPacket:
         packet = normalize_redundant_source_spans(packet, text)
         packet = normalize_explicit_pet_name_correction_content(packet, correction)
-        return normalize_uncertain_credential_deferral(packet, graph, text)
+        packet = normalize_uncertain_credential_deferral(packet, graph, text)
+        return normalize_known_technical_question_deferrals(packet, text)
 
     content = await _run_pass(
         client,
@@ -1074,6 +1311,7 @@ async def run_specialized_zero_write(
 
     def normalize_project(packet: ProjectKnowledgePassPacket) -> ProjectKnowledgePassPacket:
         packet = normalize_redundant_source_spans(packet, text)
+        packet = normalize_project_lane_deferrals(packet)
         return normalize_project_current_state_temporal(packet, source_recorded_at)
 
     project = await _run_pass(

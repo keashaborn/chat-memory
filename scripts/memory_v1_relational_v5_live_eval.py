@@ -1006,13 +1006,7 @@ def outcome(packet: dict[str, Any]) -> str:
         if deferrals & {"ambiguous_transcription", "context_missing", "transient_state"}:
             return "mixed"
         return "extract"
-    if "transient_state" in deferrals and not deferrals - {
-        "question_only",
-        "transient_state",
-        "context_missing",
-    }:
-        return "no_observation"
-    if deferrals - {"question_only", "transient_state"}:
+    if deferrals - {"question_only", "transient_state", "context_missing"}:
         return "defer_all"
     return "no_observation"
 

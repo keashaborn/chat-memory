@@ -50,6 +50,28 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
         }
         return cases, payload
 
+    def assert_historical_selection_rejected(self, relative_path: str) -> dict:
+        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+        cases = [
+            json.loads(line)
+            for line in cases_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        selection_path = Path(relative_path)
+        selection = json.loads(selection_path.read_text(encoding="utf-8"))
+        current_sha256 = hashlib.sha256(cases_path.read_bytes()).hexdigest()
+        self.assertNotEqual(selection["case_contract_sha256"], current_sha256)
+        with self.assertRaisesRegex(RuntimeError, "case contract hash mismatch"):
+            _load_selection(
+                selection_path,
+                cases=cases,
+                source_manifest_sha256=(
+                    "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+                ),
+                case_contract_sha256=current_sha256,
+            )
+        return selection
+
     def test_pass_schema_hashes_are_complete_and_stable_shape(self) -> None:
         hashes = _pass_schema_hashes()
         self.assertEqual(
@@ -118,44 +140,26 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
                     case_contract_sha256="b" * 64,
                 )
 
-    def test_checked_in_failed16_selection_matches_revised_contract(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_failed16_rerun_20260715.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
-        )
-        self.assertIsNotNone(selection)
-        self.assertEqual(len(digest or ""), 64)
-        self.assertEqual(len(case_ids), 16)
+    def test_preflight_scope_cannot_authorize_external_calls(self) -> None:
+        selection = {
+            "authorization_scope": "full_contract_preflight_only_zero_call"
+        }
+        _enforce_selection_mode(selection, preflight_only=True)
+        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
+            _enforce_selection_mode(selection, preflight_only=False)
 
-    def test_checked_in_failed10_selection_matches_second_rerun_contract(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_failed10_rerun_20260715.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    def test_checked_in_failed16_selection_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_failed16_rerun_20260715.json"
         )
-        self.assertIsNotNone(selection)
-        self.assertEqual(len(digest or ""), 64)
+        self.assertEqual(len(selection["case_ids"]), 16)
+
+    def test_checked_in_failed10_selection_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_failed10_rerun_20260715.json"
+        )
         self.assertEqual(
-            case_ids,
+            selection["case_ids"],
             [
                 "v5-01",
                 "v5-03",
@@ -184,98 +188,43 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
                     case_contract_sha256="b" * 64,
                 )
 
-    def test_checked_in_remaining5_selection_is_preflight_only(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_remaining5_preflight_20260715.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    def test_checked_in_remaining5_preflight_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_remaining5_preflight_20260715.json"
         )
-        self.assertEqual(len(digest or ""), 64)
         self.assertEqual(
-            case_ids,
+            selection["case_ids"],
             ["v5-03", "v5-04", "v5-10", "v5-15", "v5-25"],
         )
-        _enforce_selection_mode(selection, preflight_only=True)
-        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
-            _enforce_selection_mode(selection, preflight_only=False)
 
-    def test_checked_in_remaining5_authorization_allows_store_false_run(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_remaining5_authorized_20260715.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    def test_checked_in_remaining5_authorization_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_remaining5_authorized_20260715.json"
         )
-        self.assertEqual(len(digest or ""), 64)
         self.assertEqual(
-            case_ids,
+            selection["case_ids"],
             ["v5-03", "v5-04", "v5-10", "v5-15", "v5-25"],
         )
         self.assertEqual(
             selection["authorization_scope"],
             "remaining_failed_cases_store_false_zero_write",
         )
-        _enforce_selection_mode(selection, preflight_only=False)
 
-    def test_checked_in_full25_selection_is_preflight_only(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_full25_preflight_20260715.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    def test_checked_in_full25_preflight_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_full25_preflight_20260715.json"
         )
-        self.assertEqual(len(digest or ""), 64)
-        self.assertEqual(case_ids, [item["case_id"] for item in cases])
+        self.assertEqual(len(selection["case_ids"]), 25)
         self.assertEqual(
             selection["authorization_scope"],
             "full_contract_preflight_only_zero_call",
         )
-        _enforce_selection_mode(selection, preflight_only=True)
-        with self.assertRaisesRegex(RuntimeError, "preflight-only"):
-            _enforce_selection_mode(selection, preflight_only=False)
 
-    def test_checked_in_full25_authorization_allows_store_false_run(self) -> None:
-        cases_path = Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
-        cases = [
-            json.loads(line)
-            for line in cases_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        selection, digest, case_ids = _load_selection(
-            Path("evals/memory_v1_relational_v5_full25_authorized_20260716.json"),
-            cases=cases,
-            source_manifest_sha256=(
-                "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
-            ),
-            case_contract_sha256=hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    def test_checked_in_full25_authorization_is_historical(self) -> None:
+        selection = self.assert_historical_selection_rejected(
+            "evals/memory_v1_relational_v5_full25_authorized_20260716.json"
         )
-        self.assertEqual(len(digest or ""), 64)
-        self.assertEqual(case_ids, [item["case_id"] for item in cases])
+        self.assertEqual(len(selection["case_ids"]), 25)
         self.assertEqual(
             selection["authorization_scope"],
             "full_contract_store_false_zero_write",
@@ -284,7 +233,6 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
             selection["baseline_report_sha256"],
             "ee61d625ec5e923ab127974d8c83d77e6c22c496cd5953cf96c0517f4576623d",
         )
-        _enforce_selection_mode(selection, preflight_only=False)
 
     def test_v5_08_contract_is_temporal_project_current_state(self) -> None:
         cases = [
@@ -299,6 +247,22 @@ class SpecializedV5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(expected["required_predicate_families"], ["project.current_state"])
         self.assertIn("open_state_validity", expected["required_temporal_features"])
         self.assertEqual(expected["required_deferrals"], ["project_scope_unresolved"])
+
+    def test_v5_07_declarative_app_state_is_not_discarded_by_its_question(self) -> None:
+        cases = [
+            json.loads(line)
+            for line in Path("evals/memory_v1_relational_extraction_v5_cases.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        ]
+        expected = next(item["expected"] for item in cases if item["case_id"] == "v5-07")
+        self.assertEqual(expected["outcome"], "conditional_project")
+        self.assertEqual(expected["required_predicate_families"], ["project.current_state"])
+        self.assertEqual(
+            expected["required_deferrals"],
+            ["project_scope_unresolved", "question_only"],
+        )
 
     @patch("scripts.memory_v1_relational_v5_specialized_live_eval.subprocess.run")
     def test_repository_commit_is_full_sha_on_clean_committed_tree(self, run_mock) -> None:

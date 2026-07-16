@@ -32,8 +32,11 @@ from scripts.memory_v1_relational_v5_live_eval import (
 from scripts.memory_v1_relational_v5_specialized import (
     GRAPH_PREDICATES,
     EntityGraphPassPacket,
+    TemporalContentPassPacket,
 )
 from scripts.memory_v1_relational_v5_specialized_eval import (
+    normalize_known_technical_question_deferrals,
+    normalize_plural_sibling_residence,
     normalize_repeated_sibling_roles,
 )
 
@@ -133,6 +136,7 @@ def replay_model_packet(
         packet_findings=list(model_packet.packet_findings),
     )
     graph = normalize_repeated_sibling_roles(graph, text)
+    graph = normalize_plural_sibling_residence(graph, text)
     normalized_roles = {
         item.entity_ref: item.relationship_role for item in graph.entity_mentions
     }
@@ -149,6 +153,46 @@ def replay_model_packet(
             )
             entity.relationship_role = normalized_role
     for finding in graph.packet_findings:
+        if finding not in model_packet.packet_findings:
+            model_packet.packet_findings.append(finding)
+    non_graph_observations = [
+        item.model_copy(deep=True)
+        for item in model_packet.observations
+        if item.predicate not in GRAPH_PREDICATES
+    ]
+    model_packet.entity_mentions = [
+        item.model_copy(deep=True) for item in graph.entity_mentions
+    ]
+    replayed_observations = [
+        item.model_copy(deep=True) for item in graph.relationship_observations
+    ]
+    content_ref_map: dict[str, str] = {}
+    for ordinal, item in enumerate(replayed_observations, 1):
+        item.observation_ref = f"o{ordinal:02d}"
+    for item in non_graph_observations:
+        old_ref = item.observation_ref
+        item.observation_ref = f"o{len(replayed_observations) + 1:02d}"
+        content_ref_map[old_ref] = item.observation_ref
+        replayed_observations.append(item)
+    model_packet.observations = replayed_observations
+    for item in model_packet.comparison_hints:
+        mapped = content_ref_map.get(item.observation_ref)
+        if mapped is None:
+            raise RuntimeError(
+                f"saved comparison hint is not owned by content:{item.observation_ref}"
+            )
+        item.observation_ref = mapped
+    content = TemporalContentPassPacket(
+        observations=non_graph_observations,
+        comparison_hints=[
+            item.model_copy(deep=True) for item in model_packet.comparison_hints
+        ],
+        deferrals=[item.model_copy(deep=True) for item in model_packet.deferrals],
+        packet_findings=list(model_packet.packet_findings),
+    )
+    content = normalize_known_technical_question_deferrals(content, text)
+    model_packet.deferrals = [item.model_copy(deep=True) for item in content.deferrals]
+    for finding in content.packet_findings:
         if finding not in model_packet.packet_findings:
             model_packet.packet_findings.append(finding)
 

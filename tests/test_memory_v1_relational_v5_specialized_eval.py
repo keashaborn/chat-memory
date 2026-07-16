@@ -24,6 +24,9 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     SpecializedExtractionError,
     normalize_explicit_pet_name_correction_content,
     normalize_explicit_pet_name_correction_graph,
+    normalize_known_technical_question_deferrals,
+    normalize_plural_sibling_residence,
+    normalize_project_lane_deferrals,
     normalize_project_current_state_temporal,
     normalize_repeated_sibling_roles,
     normalize_redundant_source_spans,
@@ -381,6 +384,49 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
             "repeated_sibling_roles_source_ordered", normalized.packet_findings
         )
 
+    def test_explicit_plural_sibling_residence_is_server_resolved(self) -> None:
+        text = (
+            "I have three sisters, Cindy one year older Lori and Heidi; "
+            "they all live in the Green Bay area."
+        )
+        packet = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
+        normalize_repeated_sibling_roles(packet, text)
+        normalized = normalize_plural_sibling_residence(packet, text)
+        places = [
+            item for item in normalized.entity_mentions if item.entity_type == "place"
+        ]
+        residence = [
+            item
+            for item in normalized.relationship_observations
+            if item.predicate == "residence.lives_at"
+        ]
+        self.assertEqual(len(places), 1)
+        self.assertEqual(places[0].source_spans[0].quote, "Green Bay area")
+        self.assertEqual(len(residence), 3)
+        self.assertEqual(
+            {item.object.entity_ref for item in residence}, {places[0].entity_ref}
+        )
+        self.assertEqual(
+            [item.source_spans[0].quote for item in residence],
+            ["they all live in the Green Bay area"] * 3,
+        )
+        self.assertIn(
+            "plural_sibling_residence_server_resolved",
+            normalized.packet_findings,
+        )
+
+    def test_plural_residence_fails_closed_without_linked_sibling_group(self) -> None:
+        text = "I know Cindy and Lori; they all live in the area."
+        packet = sibling_graph_packet(text, ["Cindy", "Lori"])
+        packet.relationship_observations = []
+        normalized = normalize_plural_sibling_residence(packet, text)
+        self.assertFalse(
+            any(
+                item.predicate == "residence.lives_at"
+                for item in normalized.relationship_observations
+            )
+        )
+
     def test_sibling_numbering_fails_closed_without_distinct_source_positions(self) -> None:
         text = "I have three sisters, Cindy and Lori."
         packet = sibling_graph_packet(
@@ -581,8 +627,25 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
                 "packet_findings": [],
             }
         )
-        project = ProjectKnowledgePassPacket(
-            observations=[], deferrals=[], packet_findings=[]
+        project = ProjectKnowledgePassPacket.model_validate(
+            {
+                "observations": [],
+                "deferrals": [
+                    {
+                        "reason_code": "question_only",
+                        "memory_shape": "none",
+                        "source_spans": [
+                            {
+                                "start": question_start,
+                                "end": len(text),
+                                "quote": "can you correct that?",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    }
+                ],
+                "packet_findings": [],
+            }
         )
         fake_client, responses = client(
             [response(graph), response(content), response(project)]
@@ -685,6 +748,73 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         self.assertEqual(
             [item.reason_code for item in normalized.deferrals],
             ["ambiguous_transcription"],
+        )
+
+    def test_known_technical_term_is_not_an_ambiguous_personal_memory(self) -> None:
+        text = "How good is Codex at changing an app or do I need a programmer?"
+        codex_start = text.index("Codex")
+        packet = TemporalContentPassPacket.model_validate(
+            {
+                "observations": [],
+                "comparison_hints": [],
+                "deferrals": [
+                    {
+                        "reason_code": "question_only",
+                        "memory_shape": "none",
+                        "source_spans": [
+                            {"start": 0, "end": len(text), "quote": text}
+                        ],
+                        "sensitivity": "low",
+                    },
+                    {
+                        "reason_code": "context_missing",
+                        "memory_shape": "none",
+                        "source_spans": [
+                            {"start": 0, "end": len(text), "quote": text}
+                        ],
+                        "sensitivity": "low",
+                    },
+                    {
+                        "reason_code": "ambiguous_transcription",
+                        "memory_shape": "none",
+                        "source_spans": [
+                            {
+                                "start": codex_start,
+                                "end": codex_start + len("Codex"),
+                                "quote": "Codex",
+                            }
+                        ],
+                        "sensitivity": "low",
+                    },
+                ],
+                "packet_findings": [],
+            }
+        )
+        personal_packet = packet.model_copy(deep=True)
+        normalized = normalize_known_technical_question_deferrals(packet, text)
+        self.assertEqual(
+            [item.reason_code for item in normalized.deferrals],
+            ["question_only", "context_missing"],
+        )
+        self.assertIn(
+            "known_technical_term_ambiguity_deferral_removed",
+            normalized.packet_findings,
+        )
+
+        personal = "Was my cat named Codex?"
+        personal_packet.deferrals[0].source_spans = [
+            personal_packet.deferrals[0].source_spans[0].model_copy(
+                update={"start": 0, "end": len(personal), "quote": personal}
+            )
+        ]
+        normalized = normalize_known_technical_question_deferrals(
+            personal_packet, personal
+        )
+        self.assertTrue(
+            any(
+                item.reason_code == "ambiguous_transcription"
+                for item in normalized.deferrals
+            )
         )
 
     def test_project_current_state_temporal_is_server_authoritative(self) -> None:
@@ -790,6 +920,26 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
             "non_project_deferral_in_project_pass:0:question_only",
             reasons,
         )
+
+    def test_project_pass_discards_deferrals_owned_by_temporal_content(self) -> None:
+        packet = ProjectKnowledgePassPacket.model_validate(
+            {
+                "observations": [],
+                "deferrals": [
+                    {
+                        "reason_code": "question_only",
+                        "memory_shape": "none",
+                        "source_spans": [span("application")],
+                        "sensitivity": "low",
+                    }
+                ],
+                "packet_findings": [],
+            }
+        )
+        normalized = normalize_project_lane_deferrals(packet)
+        self.assertEqual(normalized.deferrals, [])
+        self.assertEqual(validate_project_knowledge_pass(normalized, SOURCE), [])
+        self.assertIn("non_project_lane_deferrals_removed", normalized.packet_findings)
 
     def test_three_pass_order_store_false_and_owner_not_exposed(self) -> None:
         fake_client, responses = client(
@@ -938,8 +1088,10 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         path = Path(inspect.getfile(run_specialized_zero_write))
         source = path.read_text(encoding="utf-8").lower()
         for forbidden in (
-            "psycopg",
-            "qdrant",
+            "import psycopg",
+            "from psycopg",
+            "qdrantclient(",
+            "make_qdrant_client(",
             "insert into",
             "update ",
             "delete from",

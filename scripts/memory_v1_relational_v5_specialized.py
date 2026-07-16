@@ -51,6 +51,10 @@ pet:corrected_name_subject.
 For repeated same-type siblings, use family:sister:N, family:brother:N, or
 family:sibling:N in source order. The server revalidates that ordering from
 exact source spans.
+When a plural clause such as "they all live in the area" directly follows one
+repeated sibling group, declare the explicit place and emit one
+residence.lives_at edge for each sibling. Do not guess a plural antecedent when
+more than one group could apply.
 Every referenced entity must be declared in this packet. Use parent -> self,
 self -> sibling, and person/animal -> place directions exactly. Do not infer
 names, places, relationships, dates, owner identity, or durable IDs.
@@ -83,6 +87,9 @@ require context_missing in addition to question_only. Add transient_state for a
 question that only says a temporary decision/state has not been considered yet.
 Add ambiguous_transcription for a suspicious proper noun, credential, API, or
 voice transcription without discarding a separate well-supported fact.
+Known technical product names are not ambiguous merely because they are
+capitalized; defer them only when the source itself supplies uncertainty or a
+genuinely malformed product/API phrase.
 An uncertain qualifier immediately governing a credential or organization,
 such as "I think through [organization]", requires ambiguous_transcription.
 An explicit statement that the user became or is a personal trainer is
@@ -134,6 +141,9 @@ record directly states what the user's app currently is or does, extract that
 state while the temporal pass owns question_only. Copy short exact source
 substrings for every span. A project_scope_unresolved deferral cannot substitute
 for an atomic project observation.
+This pass may emit only project_scope_unresolved deferrals. The temporal-content
+pass exclusively owns question_only, context_missing, ambiguous_transcription,
+transient_state, and every other non-project deferral.
 If the source has no project knowledge, return no observations.
 """.strip()
 
