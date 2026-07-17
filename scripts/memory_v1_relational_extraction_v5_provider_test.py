@@ -219,6 +219,40 @@ def main() -> int:
         source_recorded_at="2026-07-16T12:01:00Z",
         content=SOURCE,
     )
+    offset_repair_output = valid_output()
+    offset_repair_output["observations"][0]["source_spans"][0]["end"] = 18
+    offset_repair = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=offset_repair_output,
+        ),
+        source=source,
+        registry=registry,
+        schema=schema,
+    )
+    repaired_span = offset_repair.normalized_packet["observations"][0][
+        "source_spans"
+    ][0]
+    if repaired_span["start"] != 0 or repaired_span["end"] != 17:
+        raise AssertionError("unique source quote did not repair offsets")
+    ambiguous_span_output = valid_output()
+    ambiguous_span_output["entity_mentions"][0]["source_spans"] = [
+        {"start": 0, "end": 2, "quote": " "}
+    ]
+    expect_error(
+        lambda: validate_and_normalize(
+            synthetic_provider(
+                provider_id="synthetic_fixture",
+                provider_version="v1",
+                output=ambiguous_span_output,
+            ),
+            source=source,
+            registry=registry,
+            schema=schema,
+        ),
+        "ambiguous source quote repair",
+    )
     provider = synthetic_provider(
         provider_id="synthetic_fixture",
         provider_version="v1",

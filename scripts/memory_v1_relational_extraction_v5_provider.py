@@ -1067,10 +1067,20 @@ def _normalize_spans(
     for item in spans:
         start = item["start"]
         end = item["end"]
-        if start < 0 or end <= start or end > len(text):
-            raise ValueError(f"source span is out of bounds: {start}:{end}")
-        if text[start:end] != item["quote"]:
-            raise ValueError(f"source span quote mismatch: {start}:{end}")
+        quote = item["quote"]
+        if (
+            start < 0
+            or end <= start
+            or end > len(text)
+            or text[start:end] != quote
+        ):
+            verified_start = text.find(quote)
+            if verified_start < 0:
+                raise ValueError(f"source span quote mismatch: {start}:{end}")
+            if text.find(quote, verified_start + 1) >= 0:
+                raise ValueError(f"source span quote is ambiguous: {start}:{end}")
+            start = verified_start
+            end = verified_start + len(quote)
         key = (start, end)
         if key in seen:
             raise ValueError(f"duplicate source span: {start}:{end}")
