@@ -63,6 +63,49 @@ BEGIN
 END
 $function$;
 
+CREATE OR REPLACE FUNCTION memory.guard_v5_observation_contract()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+  contract_kind text;
+  can_extract boolean;
+BEGIN
+  SELECT contract.object_kind, contract.extraction_allowed
+  INTO contract_kind, can_extract
+  FROM memory.predicate_contract AS contract
+  WHERE contract.predicate = NEW.predicate
+    AND contract.registry_version = NEW.predicate_registry_version;
+  IF NOT FOUND OR NOT can_extract THEN
+    RAISE EXCEPTION 'predicate is not extraction-enabled in V5: %', NEW.predicate
+      USING ERRCODE = '23514';
+  END IF;
+  IF (contract_kind = 'entity') <> (NEW.object_mention_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'predicate object kind mismatch for %', NEW.predicate
+      USING ERRCODE = '23514';
+  END IF;
+  IF NEW.predicate LIKE 'project.%' THEN
+    IF NEW.project_scope->>'state' <> 'resolved' THEN
+      RAISE EXCEPTION 'project predicate requires trusted resolved project scope'
+        USING ERRCODE = '23514';
+    END IF;
+    IF NEW.projection_class <> 'project_knowledge'
+       OR NEW.surface_policy <> 'exact_project_scope_only' THEN
+      RAISE EXCEPTION 'project predicate requires project-only projection policy'
+        USING ERRCODE = '23514';
+    END IF;
+  ELSIF NEW.project_scope->>'state' <> 'not_applicable' THEN
+    RAISE EXCEPTION 'non-project predicate cannot carry project scope'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END
+$function$;
+
+REVOKE SELECT ON memory.project_space FROM memory_v5_writer;
+
 DROP FUNCTION IF EXISTS memory.read_owner_project_components_v5(uuid);
 DROP FUNCTION IF EXISTS memory.apply_owner_project_component_v5(
   uuid,uuid,text,text,uuid,text[],jsonb

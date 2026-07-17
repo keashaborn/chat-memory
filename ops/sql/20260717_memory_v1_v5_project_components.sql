@@ -7,9 +7,11 @@ BEGIN
   END IF;
   IF to_regrole('brains_app') IS NULL
      OR to_regrole('memory_v5_extraction_maintainer') IS NULL
+     OR to_regrole('memory_v5_writer') IS NULL
      OR to_regclass('memory.project_space') IS NULL
      OR to_regprocedure('memory.current_actor_user_id()') IS NULL
      OR to_regprocedure('memory.guard_v5_extraction_append_only()') IS NULL
+     OR to_regprocedure('memory.guard_v5_observation_contract()') IS NULL
      OR to_regprocedure('memory.v5_project_scope_valid(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'V5 project component prerequisites are absent';
   END IF;
@@ -257,6 +259,85 @@ BEGIN
         AND binding_source = 'trusted_component_registry')
      ))
   );
+END
+$function$;
+
+CREATE OR REPLACE FUNCTION memory.guard_v5_observation_contract()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+  contract_kind text;
+  can_extract boolean;
+  subject_mention record;
+BEGIN
+  SELECT contract.object_kind, contract.extraction_allowed
+  INTO contract_kind, can_extract
+  FROM memory.predicate_contract AS contract
+  WHERE contract.predicate = NEW.predicate
+    AND contract.registry_version = NEW.predicate_registry_version;
+  IF NOT FOUND OR NOT can_extract THEN
+    RAISE EXCEPTION 'predicate is not extraction-enabled in V5: %', NEW.predicate
+      USING ERRCODE = '23514';
+  END IF;
+  IF (contract_kind = 'entity') <> (NEW.object_mention_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'predicate object kind mismatch for %', NEW.predicate
+      USING ERRCODE = '23514';
+  END IF;
+  IF NEW.predicate LIKE 'project.%' THEN
+    IF NEW.project_scope->>'state' <> 'resolved' THEN
+      RAISE EXCEPTION 'project predicate requires trusted resolved project scope'
+        USING ERRCODE = '23514';
+    END IF;
+    IF NEW.projection_class <> 'project_knowledge'
+       OR NEW.surface_policy <> 'exact_project_scope_only' THEN
+      RAISE EXCEPTION 'project predicate requires project-only projection policy'
+        USING ERRCODE = '23514';
+    END IF;
+    IF NEW.project_scope->>'component_key' IS NOT NULL THEN
+      SELECT mention.entity_type, mention.mention_kind, mention.name_text
+      INTO subject_mention
+      FROM memory.entity_mention AS mention
+      WHERE mention.owner_user_id = NEW.owner_user_id
+        AND mention.evidence_id = NEW.evidence_id
+        AND mention.mention_id = NEW.subject_mention_id;
+      IF NOT FOUND
+         OR subject_mention.entity_type <> 'project'
+         OR subject_mention.mention_kind <> 'named'
+         OR coalesce(btrim(subject_mention.name_text),'') = ''
+         OR NEW.project_scope->>'binding_source'
+              <> 'trusted_component_registry'
+         OR NOT EXISTS (
+           SELECT 1
+           FROM memory.project_space AS project
+           JOIN memory.project_component_v5 AS component
+             ON component.owner_user_id = project.owner_user_id
+            AND component.project_id = project.project_id
+           JOIN memory.project_component_alias_v5 AS alias
+             ON alias.owner_user_id = component.owner_user_id
+            AND alias.project_id = component.project_id
+            AND alias.component_id = component.component_id
+           WHERE project.owner_user_id = NEW.owner_user_id
+             AND project.project_key = NEW.project_scope->>'project_key'
+             AND component.component_key
+                   = NEW.project_scope->>'component_key'
+             AND alias.normalized_alias
+                   = memory.normalize_project_component_alias_v5(
+                     subject_mention.name_text
+                   )
+         ) THEN
+        RAISE EXCEPTION
+          'component project scope is absent from the owner registry'
+          USING ERRCODE = '23514';
+      END IF;
+    END IF;
+  ELSIF NEW.project_scope->>'state' <> 'not_applicable' THEN
+    RAISE EXCEPTION 'non-project predicate cannot carry project scope'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
 END
 $function$;
 
@@ -604,6 +685,11 @@ GRANT SELECT ON
   memory.project_component_alias_v5,
   memory.project_component_registration_event_v5
 TO memory_v5_extraction_maintainer;
+GRANT SELECT ON
+  memory.project_space,
+  memory.project_component_v5,
+  memory.project_component_alias_v5
+TO memory_v5_writer;
 GRANT INSERT ON
   memory.project_component_v5,
   memory.project_component_alias_v5,
@@ -633,5 +719,7 @@ GRANT EXECUTE ON FUNCTION memory.read_owner_project_components_v5(uuid)
   TO brains_app;
 GRANT EXECUTE ON FUNCTION memory.normalize_project_component_alias_v5(text)
   TO memory_v5_extraction_maintainer;
+GRANT EXECUTE ON FUNCTION memory.normalize_project_component_alias_v5(text)
+  TO memory_v5_writer;
 
 COMMIT;

@@ -26,6 +26,8 @@ reviews="$work/reviews"
 plan="$reviews/plan.json"
 authorization="$reviews/authorization.json"
 report="$reviews/apply-report.json"
+forged_plan="$reviews/forged-component-plan.json"
+forged_authorization="$reviews/forged-component-authorization.json"
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 
 cleanup() {
@@ -88,6 +90,11 @@ if POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   echo "cross-owner bundle unexpectedly passed plan validation" >&2
   exit 1
 fi
+POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$runner" plan \
+  --manifest "$reviews/forged-component-manifest.json" \
+  --review-root "$reviews" \
+  --output "$forged_plan"
 [[ "$(scalar "
   SELECT count(*) FROM memory.relational_stage_batch
   WHERE owner_user_id IN (
@@ -97,6 +104,37 @@ fi
 
 /opt/chat-memory/venv/bin/python "$fixture" authorize \
   --plan "$plan" --output "$authorization" --head "$head"
+/opt/chat-memory/venv/bin/python "$fixture" authorize \
+  --plan "$forged_plan" --output "$forged_authorization" --head "$head"
+
+if MEMORY_V1_V5_STAGE_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
+  PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$runner" apply \
+  --plan "$forged_plan" \
+  --authorization "$forged_authorization" \
+  --review-root "$reviews" \
+  --confirm STAGE_REVIEWED_OWNER_V5_PACKETS_ONLY \
+  --output "$reviews/forged-component-apply.json" >/dev/null 2>&1; then
+  echo "cross-owner component unexpectedly passed durable staging" >&2
+  exit 1
+fi
+[[ "$(scalar "
+  SELECT (
+    (SELECT count(*) FROM memory.relational_stage_batch
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111114'::uuid)=0
+    AND (SELECT count(*) FROM memory.relational_operation_request
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND target_key='aeeeeeee-1111-4111-8111-111111111114')=0
+    AND (SELECT count(*) FROM memory.entity_mention
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111114'::uuid)=0
+    AND (SELECT count(*) FROM memory.entity_resolution_plan
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111114'::uuid)=0
+    AND (SELECT count(*) FROM memory.observation
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111114'::uuid)=0
+  )::int")" == "1" ]]
 
 cp "$reviews/owner-a-name.json" "$reviews/owner-a-name.json.original"
 printf ' ' >>"$reviews/owner-a-name.json"
@@ -123,30 +161,30 @@ MEMORY_V1_V5_STAGE_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
   --confirm STAGE_REVIEWED_OWNER_V5_PACKETS_ONLY \
   --output "$report"
 
-[[ "$(jq -r '.database_rows_created' "$report")" == "9" ]]
+[[ "$(jq -r '.database_rows_created' "$report")" == "15" ]]
 [[ "$(jq -r '[.applied[].outcome] | sort | join(",")' "$report")" \
-    == "applied,applied" ]]
+    == "applied,applied,applied" ]]
 [[ "$(jq -r '[.replayed[].outcome] | sort | join(",")' "$report")" \
-    == "replayed,replayed" ]]
+    == "replayed,replayed,replayed" ]]
 [[ "$(jq '[.replayed[].counts[]] | add' "$report")" == "0" ]]
 
 [[ "$(scalar "
   SELECT (
     (SELECT count(*) FROM memory.relational_stage_batch
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=3
     AND (SELECT count(*) FROM memory.relational_operation_request
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
-        AND operation='stage_packet')=2
+        AND operation='stage_packet')=3
     AND (SELECT count(*) FROM memory.entity_mention
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=1
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
     AND (SELECT count(*) FROM memory.entity_resolution_plan
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=1
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
     AND (SELECT count(*) FROM memory.entity_resolution_candidate
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=1
     AND (SELECT count(*) FROM memory.observation
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=1
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
     AND (SELECT count(*) FROM memory.observation_temporal
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=1
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
     AND (SELECT count(*) FROM memory.entity_resolution_apply
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=0
     AND (SELECT count(*) FROM memory.observation_entity_binding
@@ -165,6 +203,26 @@ MEMORY_V1_V5_STAGE_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
         AND evidence_id='aeeeeeee-1111-4111-8111-111111111111'::uuid
         AND mention_count=0 AND observation_count=0)=1
+    AND (SELECT count(*) FROM memory.entity_mention
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111113'::uuid
+        AND entity_type='project'
+        AND mention_kind='named'
+        AND name_text='Memory V1')=1
+    AND (SELECT count(*) FROM memory.entity_resolution_plan
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111113'::uuid
+        AND action='defer'
+        AND decision_state='deferred')=1
+    AND (SELECT count(*) FROM memory.observation
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND evidence_id='aeeeeeee-1111-4111-8111-111111111113'::uuid
+        AND project_scope=jsonb_build_object(
+          'state','resolved',
+          'project_key','verbal-sage',
+          'component_key','memory-v1',
+          'binding_source','trusted_component_registry'
+        ))=1
   )::int")" == "1" ]]
 
 run_sql <"$preflight_rollback"
@@ -174,7 +232,7 @@ run_sql <"$preflight_rollback"
       'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)'
     ) IS NULL
     AND (SELECT count(*) FROM memory.relational_stage_batch
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=3
   )::int")" == "1" ]]
 
 echo "memory_v1_v5_stage_batch_production_clone: PASS"

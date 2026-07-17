@@ -280,6 +280,123 @@ def fact_bundle() -> dict[str, Any]:
     )
 
 
+def project_component_bundle(
+    *,
+    case_id: str,
+    evidence_id: str,
+    request_id: str,
+    source_id: str,
+    recorded_at: str,
+    component_name: str,
+    component_key: str,
+    content: str,
+) -> dict[str, Any]:
+    source_value = source(
+        case_id,
+        source_id,
+        digest(content),
+        recorded_at,
+    )
+    mention = {
+        "entity_ref": "e01",
+        "entity_type": "project",
+        "mention_kind": "named",
+        "name_text": component_name,
+        "relationship_role": None,
+        "source_spans": [
+            {
+                "start": 0,
+                "end": len(component_name),
+                "span_sha256": digest(component_name),
+            }
+        ],
+        "extraction_confidence": 1.0,
+        "reason_codes": ["explicit_registered_component"],
+    }
+    observation = {
+        "observation_ref": "o01",
+        "subject_entity_ref": "e01",
+        "predicate": "project.requirement",
+        "predicate_registry_status": "governed",
+        "object": {
+            "kind": "literal",
+            "datatype": "text",
+            "value": "preserve component scope",
+            "unit": None,
+            "approximate": False,
+        },
+        "polarity": "affirmed",
+        "modality": "asserted",
+        "projection_class": "project_knowledge",
+        "surface_policy": "exact_project_scope_only",
+        "temporal": {
+            "semantic": "observation_time",
+            "shape": "instant",
+            "basis": "instant",
+            "source_form": "implicit_source_time",
+            "certainty": "exact",
+            "precision": "minute",
+            "instant": recorded_at,
+            "calendar_range": None,
+            "instant_range": None,
+            "relative_offset": None,
+            "recurrence": None,
+            "anchored_to_source_time": True,
+            "normalization_policy_version": "memory_temporal_normalization_v5",
+            "reason_codes": ["observation_time_uses_source_timestamp"],
+        },
+        "project_scope": {
+            "state": "resolved",
+            "project_key": "verbal-sage",
+            "component_key": component_key,
+            "binding_source": "trusted_component_registry",
+        },
+        "sensitivity": "medium",
+        "extraction_confidence": 0.99,
+        "source_spans": [
+            {"start": 0, "end": len(content), "span_sha256": digest(content)}
+        ],
+        "reason_codes": ["explicit_component_requirement"],
+    }
+    extraction = {
+        "contract_version": "memory_v1_relational_extraction_v5",
+        "source_envelope": source_value,
+        "predicate_registry_version": "memory_predicate_registry_v5",
+        "entity_mentions": [mention],
+        "observations": [observation],
+        "comparison_hints": [],
+        "deferrals": [],
+        "packet_findings": ["synthetic_component_stage_test"],
+    }
+    candidate_set: list[dict[str, Any]] = []
+    decision = {
+        "entity_ref": "e01",
+        "mention_sha256": digest(stable_json(mention)),
+        "action": "defer",
+        "decision_state": "deferred",
+        "selected_entity_id": None,
+        "proposed_entity": None,
+        "candidate_set_sha256": digest(stable_json(candidate_set)),
+        "candidate_set": candidate_set,
+        "review_reason_codes": ["project_entity_resolution_deferred"],
+    }
+    decision["decision_sha256"] = digest(stable_json(decision))
+    return stage_bundle(
+        owner=OWNER_A,
+        case_id=case_id,
+        evidence_id=evidence_id,
+        request_id=request_id,
+        extraction=extraction,
+        resolution=resolution_packet(source_value, [decision]),
+        resolution_summary={
+            "auto_link_eligible": 0,
+            "manual_review_required": 0,
+            "deferred": 1,
+            "rejected": 0,
+        },
+    )
+
+
 def bundle_spec(path: Path, bundle_sha: str, counts: dict[str, int]) -> dict:
     return {
         "path": str(path),
@@ -309,6 +426,34 @@ def prepare(root: Path) -> None:
     )
     fact_path = root / "owner-a-name.json"
     fact_sha = secure_write(fact_path, fact_bundle())
+    component_path = root / "owner-a-memory-component.json"
+    component_sha = secure_write(
+        component_path,
+        project_component_bundle(
+            case_id="clone-owner-a-memory-component",
+            evidence_id="aeeeeeee-1111-4111-8111-111111111113",
+            request_id="10000000-0000-4000-8000-000000000003",
+            source_id="aaaaaaaa-0003-4000-8000-000000000003",
+            recorded_at="2026-07-16T12:02:00Z",
+            component_name="Memory V1",
+            component_key="memory-v1",
+            content="Memory V1 must preserve component scope.",
+        ),
+    )
+    forged_component_path = root / "owner-a-forged-component.json"
+    forged_component_sha = secure_write(
+        forged_component_path,
+        project_component_bundle(
+            case_id="clone-owner-a-forged-component",
+            evidence_id="aeeeeeee-1111-4111-8111-111111111114",
+            request_id="10000000-0000-4000-8000-000000000004",
+            source_id="aaaaaaaa-0004-4000-8000-000000000004",
+            recorded_at="2026-07-16T12:03:00Z",
+            component_name="Owner B Only",
+            component_key="owner-b-only",
+            content="Owner B Only must preserve component scope.",
+        ),
+    )
     other_path = root / "owner-b-empty.json"
     other_sha = secure_write(
         other_path,
@@ -351,9 +496,42 @@ def prepare(root: Path) -> None:
                     "temporals": 1,
                 },
             ),
+            bundle_spec(
+                component_path,
+                component_sha,
+                {
+                    "mentions": 1,
+                    "resolutions": 1,
+                    "candidates": 0,
+                    "observations": 1,
+                    "temporals": 1,
+                },
+            ),
         ],
     }
     secure_write(root / "manifest.json", manifest)
+    forged_component_manifest = {
+        "contract_version": "memory_v1_v5_stage_batch_manifest_v1",
+        "target_server": "seebx",
+        "owner_user_id": OWNER_A,
+        "bundles": [
+            bundle_spec(
+                forged_component_path,
+                forged_component_sha,
+                {
+                    "mentions": 1,
+                    "resolutions": 1,
+                    "candidates": 0,
+                    "observations": 1,
+                    "temporals": 1,
+                },
+            )
+        ],
+    }
+    secure_write(
+        root / "forged-component-manifest.json",
+        forged_component_manifest,
+    )
     cross_owner = {
         "contract_version": "memory_v1_v5_stage_batch_manifest_v1",
         "target_server": "seebx",
@@ -379,6 +557,9 @@ def prepare(root: Path) -> None:
                 "review_root": str(root),
                 "manifest": str(root / "manifest.json"),
                 "cross_owner_manifest": str(root / "cross-owner-manifest.json"),
+                "forged_component_manifest": str(
+                    root / "forged-component-manifest.json"
+                ),
             }
         )
     )
