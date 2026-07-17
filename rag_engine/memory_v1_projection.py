@@ -18,6 +18,12 @@ from .memory_v1_store import InvalidActor, actor_uuid
 DEFAULT_COLLECTION = "memory_claim_v1"
 DEFAULT_VECTOR_SIZE = 3072
 RETRIEVABLE_STATUSES = {"supported", "uncertain", "disputed"}
+SEARCH_PAYLOAD_FIELDS = [
+    "owner_user_id",
+    "claim_id",
+    "status",
+    "schema_version",
+]
 
 
 class ProjectionError(RuntimeError):
@@ -226,19 +232,41 @@ class ClaimVectorIndex:
                 ]
             ),
             limit=int(limit),
-            with_payload=False,
+            with_payload=SEARCH_PAYLOAD_FIELDS,
             with_vectors=False,
         )
-        return [
-            {
-                "claim_id": str(uuid.UUID(str(hit.id))),
-                # Cosine search is theoretically [-1, 1] and can slightly exceed
-                # its bounds numerically. Retrieval scoring accepts normalized
-                # relevance only, so clamp without changing rank order.
-                "semantic_score": max(0.0, min(1.0, float(hit.score))),
-            }
-            for hit in hits
-        ]
+        results: list[Dict[str, Any]] = []
+        seen: set[uuid.UUID] = set()
+        for hit in hits:
+            payload = getattr(hit, "payload", None)
+            if not isinstance(payload, Mapping):
+                raise ProjectionError("Qdrant claim hit omitted verification payload")
+            if str(payload.get("owner_user_id") or "") != str(actor):
+                raise ProjectionError("Qdrant returned a cross-owner claim hit")
+            claim_id = uuid.UUID(str(hit.id))
+            try:
+                payload_claim_id = uuid.UUID(str(payload.get("claim_id")))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ProjectionError("Qdrant claim payload has an invalid claim_id") from exc
+            if payload_claim_id != claim_id:
+                raise ProjectionError("Qdrant point ID and payload claim_id differ")
+            if str(payload.get("status") or "") not in RETRIEVABLE_STATUSES:
+                raise ProjectionError("Qdrant returned a non-retrievable claim hit")
+            if payload.get("schema_version") != "memory_claim_projection_v1":
+                raise ProjectionError("Qdrant claim hit has an invalid schema version")
+            if claim_id in seen:
+                raise ProjectionError("Qdrant returned a duplicate claim hit")
+            seen.add(claim_id)
+            results.append(
+                {
+                    "claim_id": str(claim_id),
+                    # Cosine search is theoretically [-1, 1] and can slightly exceed
+                    # its bounds numerically. Retrieval scoring accepts normalized
+                    # relevance only, so clamp without changing rank order.
+                    "semantic_score": max(0.0, min(1.0, float(hit.score))),
+                }
+            )
+        return results
 
 
 async def _set_actor(conn: asyncpg.Connection, actor: uuid.UUID) -> None:

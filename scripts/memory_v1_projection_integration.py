@@ -3,10 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import asyncpg
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from rag_engine.memory_v1_projection import (
     ClaimVectorIndex,
@@ -92,7 +98,12 @@ class FakeQdrant:
         with_payload,
         with_vectors,
     ):
-        if collection_name != self.collection or with_payload or with_vectors:
+        if (
+            collection_name != self.collection
+            or with_payload
+            != ["owner_user_id", "claim_id", "status", "schema_version"]
+            or with_vectors
+        ):
             raise AssertionError("invalid search request")
         owner = None
         statuses = set()
@@ -108,7 +119,13 @@ class FakeQdrant:
             if point.payload["status"] not in statuses:
                 continue
             score = sum(float(a) * float(b) for a, b in zip(query_vector, point.vector))
-            hits.append(SimpleNamespace(id=point.id, score=score))
+            hits.append(
+                SimpleNamespace(
+                    id=point.id,
+                    score=score,
+                    payload={field: point.payload[field] for field in with_payload},
+                )
+            )
         return sorted(hits, key=lambda hit: -hit.score)[:limit]
 
 

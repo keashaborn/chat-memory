@@ -74,3 +74,15 @@ The production probe uses the retracted occupational pilot claim as a negative
 control. The restricted reader must return zero rows, and the selector must
 record exactly one `not_visible` rejection. This validates that a retired pilot
 cannot re-enter retrieval through an explicitly supplied candidate ID.
+
+## Candidate discovery boundary
+
+`ClaimVectorIndex.search_claims` requests only owner, claim ID, status, and
+schema-version payload fields. It verifies the returned owner and point/payload
+claim IDs after the owner-filtered Qdrant search and fails closed on a mismatch.
+
+`rag_engine/memory_v1_v5_shadow_candidate.py` wraps those hits in a deterministic
+candidate envelope bound to the owner, collection, vector dimension, vector
+SHA-256, limit, rank, claim IDs, and scores. The envelope does not contain query
+text or claim prose and cannot write to Qdrant, Postgres, traces, or prompts.
+Router integration and live candidate tracing remain inactive.
