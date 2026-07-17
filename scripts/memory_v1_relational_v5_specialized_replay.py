@@ -39,6 +39,7 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     normalize_known_technical_question_deferrals,
     normalize_plural_sibling_residence,
     normalize_repeated_sibling_roles,
+    normalize_self_reference_name_text,
 )
 
 
@@ -136,6 +137,7 @@ def replay_model_packet(
         deferrals=[],
         packet_findings=list(model_packet.packet_findings),
     )
+    graph = normalize_self_reference_name_text(graph)
     graph = normalize_repeated_sibling_roles(graph, text)
     graph = normalize_plural_sibling_residence(graph, text)
     normalized_roles = {

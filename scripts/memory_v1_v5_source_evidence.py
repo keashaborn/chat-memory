@@ -25,6 +25,19 @@ LIVE_REPORT_MODE = "zero_write_relational_v5_specialized_live_evaluation"
 MATERIALIZED_REPORT_MODE = (
     "zero_write_relational_v5_specialized_materialized_evaluation"
 )
+LEGACY_MATERIALIZED_PIPELINES = {
+    "memory_v1_relational_specialized_v5",
+    "memory_v1_relational_specialized_v5_1",
+}
+CURRENT_MATERIALIZED_PIPELINE = "memory_v1_relational_specialized_v5_2"
+
+
+def _materialized_policy_version(pipeline_version: Any) -> str | None:
+    if pipeline_version == CURRENT_MATERIALIZED_PIPELINE:
+        return CURRENT_MATERIALIZED_PIPELINE
+    if pipeline_version in LEGACY_MATERIALIZED_PIPELINES:
+        return "memory_v1_relational_specialized_v5_1"
+    return None
 
 
 def arguments() -> argparse.Namespace:
@@ -115,8 +128,12 @@ def load_report_sources(
     ):
         raise RuntimeError("report is not a passed store=false zero-write evaluation")
     if mode == MATERIALIZED_REPORT_MODE:
-        if report.get("external_model_calls") != 0 or not _valid_digest(
+        if (
+            report.get("external_model_calls") != 0
+            or not _valid_digest(
             report.get("source_replay_report_sha256"), 64
+            )
+            or _materialized_policy_version(report.get("pipeline_version")) is None
         ):
             raise RuntimeError("materialized report provenance is invalid")
     if not case_ids or len(case_ids) != len(set(case_ids)):
@@ -136,7 +153,7 @@ def load_report_sources(
                 != report["source_replay_report_sha256"]
                 or not _valid_digest(provenance.get("materializer_commit"), 40)
                 or provenance.get("normalization_policy_version")
-                != "memory_v1_relational_specialized_v5_1"
+                != _materialized_policy_version(report.get("pipeline_version"))
             ):
                 raise RuntimeError("materialized source provenance is invalid")
         packet = source["packet"]

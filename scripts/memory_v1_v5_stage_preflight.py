@@ -17,6 +17,11 @@ LIVE_REPORT_MODE = "zero_write_relational_v5_specialized_live_evaluation"
 MATERIALIZED_REPORT_MODE = (
     "zero_write_relational_v5_specialized_materialized_evaluation"
 )
+LEGACY_MATERIALIZED_PIPELINES = {
+    "memory_v1_relational_specialized_v5",
+    "memory_v1_relational_specialized_v5_1",
+}
+CURRENT_MATERIALIZED_PIPELINE = "memory_v1_relational_specialized_v5_2"
 RESOLVER = "memory_v1_owner_exact_resolver"
 RESOLVER_VERSION = "v5.1"
 REQUEST_NAMESPACE = uuid.UUID("0f3cc8bb-167e-5f5d-91d7-d2f1889eed35")
@@ -57,6 +62,14 @@ RESOLUTION_KEYS = {
     "selected_entity_id", "proposed_entity", "candidate_set_sha256",
     "candidate_set", "review_reason_codes", "decision_sha256",
 }
+
+
+def _materialized_policy_version(pipeline_version: Any) -> str | None:
+    if pipeline_version == CURRENT_MATERIALIZED_PIPELINE:
+        return CURRENT_MATERIALIZED_PIPELINE
+    if pipeline_version in LEGACY_MATERIALIZED_PIPELINES:
+        return "memory_v1_relational_specialized_v5_1"
+    return None
 
 
 def arguments() -> argparse.Namespace:
@@ -584,7 +597,11 @@ def _load_case(report: dict[str, Any], case_id: str, owner: uuid.UUID) -> dict[s
         raise RuntimeError("source report zero-write proof did not pass")
     if mode == MATERIALIZED_REPORT_MODE:
         replay_sha = report.get("source_replay_report_sha256")
-        if report.get("external_model_calls") != 0 or not _sha256_valid(replay_sha):
+        if (
+            report.get("external_model_calls") != 0
+            or not _sha256_valid(replay_sha)
+            or _materialized_policy_version(report.get("pipeline_version")) is None
+        ):
             raise RuntimeError("materialized report provenance is invalid")
     matches = [item for item in report.get("sources", []) if item.get("case_id") == case_id]
     if len(matches) != 1:
@@ -599,7 +616,7 @@ def _load_case(report: dict[str, Any], case_id: str, owner: uuid.UUID) -> dict[s
             != report["source_replay_report_sha256"]
             or not _git_commit_valid(provenance.get("materializer_commit"))
             or provenance.get("normalization_policy_version")
-            != "memory_v1_relational_specialized_v5_1"
+            != _materialized_policy_version(report.get("pipeline_version"))
         ):
             raise RuntimeError("materialized source provenance is invalid")
     return source

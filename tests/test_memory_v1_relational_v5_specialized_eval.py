@@ -32,6 +32,7 @@ from scripts.memory_v1_relational_v5_specialized_eval import (
     normalize_project_current_state_temporal,
     normalize_repeated_sibling_roles,
     normalize_redundant_source_spans,
+    normalize_self_reference_name_text,
     normalize_uncertain_credential_deferral,
     run_specialized_zero_write,
     validate_entity_graph_pass,
@@ -315,6 +316,21 @@ def run(fake_client, *, registry: dict | None = None):
 
 
 class SpecializedV5OrchestrationTest(unittest.TestCase):
+    def test_self_reference_pronoun_is_not_stored_as_name_text(self) -> None:
+        entity = self_entity()
+        entity.name_text = "I"
+        packet = EntityGraphPassPacket(
+            entity_mentions=[entity],
+            relationship_observations=[],
+            deferrals=[],
+            packet_findings=[],
+        )
+        normalized = normalize_self_reference_name_text(packet)
+        self.assertIsNone(normalized.entity_mentions[0].name_text)
+        self.assertIn(
+            "self_reference_pronoun_name_removed", normalized.packet_findings
+        )
+
     def test_saved_model_packet_replay_applies_only_sibling_role_ordering(self) -> None:
         text = "I have three sisters, Cindy one year older Lori and Heidi."
         graph = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])

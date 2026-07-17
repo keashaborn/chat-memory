@@ -42,7 +42,7 @@ from scripts.memory_v1_relational_v5_specialized import (
 )
 
 
-PIPELINE_VERSION = "memory_v1_relational_specialized_v5_1"
+PIPELINE_VERSION = "memory_v1_relational_specialized_v5_2"
 PassName = Literal["entity_graph", "temporal_content", "project_knowledge"]
 AttemptName = Literal["initial", "repair"]
 PacketT = TypeVar("PacketT", bound=BaseModel)
@@ -82,6 +82,7 @@ KNOWN_TECHNICAL_TERMS = {
     "qdrant",
     "supabase",
 }
+FIRST_PERSON_SELF_NAME_TEXT = {"i", "me", "my", "mine", "myself"}
 TECHNICAL_QUESTION_CONTEXT_RE = re.compile(
     r"\b(?:api|app|code|coding|developer|llm|model|platform|program|programmer|software)\b",
     re.IGNORECASE,
@@ -325,6 +326,26 @@ def normalize_redundant_source_spans(packet: PacketT, text: str) -> PacketT:
     if pruned:
         _append_server_finding(normalized, "redundant_invalid_source_spans_pruned")
     return normalized
+
+
+def normalize_self_reference_name_text(
+    packet: EntityGraphPassPacket,
+) -> EntityGraphPassPacket:
+    """Remove only first-person pronouns incorrectly copied into self name_text."""
+    changed = False
+    for entity in packet.entity_mentions:
+        if (
+            entity.entity_type == "self"
+            and entity.mention_kind == "self_reference"
+            and entity.relationship_role == "user:self"
+            and str(entity.name_text or "").strip().casefold()
+            in FIRST_PERSON_SELF_NAME_TEXT
+        ):
+            entity.name_text = None
+            changed = True
+    if changed:
+        _append_server_finding(packet, "self_reference_pronoun_name_removed")
+    return packet
 
 
 def normalize_repeated_sibling_roles(
@@ -968,6 +989,10 @@ def validate_entity_graph_pass(
                 reasons.append(
                     f"self_entity_mention_kind:{item.entity_ref}:self_reference_required"
                 )
+            if item.name_text is not None:
+                reasons.append(
+                    f"self_entity_name_text:{item.entity_ref}:null_required"
+                )
             quotes = " ".join(span.quote for span in item.source_spans)
             if not re.search(r"(?<![\w])(?:i|me|my|mine|myself)(?![\w])", quotes, re.I):
                 reasons.append(
@@ -1321,7 +1346,9 @@ async def run_specialized_zero_write(
             registry=registry,
             source_recorded_at=source_recorded_at,
         ),
-        normalizer=lambda packet: normalize_redundant_source_spans(packet, text),
+        normalizer=lambda packet: normalize_self_reference_name_text(
+            normalize_redundant_source_spans(packet, text)
+        ),
         attempts=attempts,
     )
     graph = normalize_repeated_sibling_roles(graph, text)

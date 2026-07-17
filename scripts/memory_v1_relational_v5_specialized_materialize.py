@@ -17,7 +17,19 @@ from scripts.memory_v1_v5_stage_preflight import _validate_extraction_packet
 
 
 MODE = "zero_write_relational_v5_specialized_materialized_evaluation"
-NORMALIZATION_POLICY_VERSION = "memory_v1_relational_specialized_v5_1"
+LEGACY_PIPELINE_VERSIONS = {
+    "memory_v1_relational_specialized_v5",
+    "memory_v1_relational_specialized_v5_1",
+}
+CURRENT_PIPELINE_VERSION = "memory_v1_relational_specialized_v5_2"
+
+
+def normalization_policy_version(pipeline_version: Any) -> str:
+    if pipeline_version == CURRENT_PIPELINE_VERSION:
+        return CURRENT_PIPELINE_VERSION
+    if pipeline_version in LEGACY_PIPELINE_VERSIONS:
+        return "memory_v1_relational_specialized_v5_1"
+    raise RuntimeError("replay pipeline version is unsupported")
 
 
 def arguments() -> argparse.Namespace:
@@ -82,10 +94,12 @@ def build_materialized_report(
         or replay.get("source_sha256") != envelope.get("source_sha256")
     ):
         raise RuntimeError("replay source identity does not match extraction packet")
+    pipeline_version = replay_report.get("pipeline_version")
+    policy_version = normalization_policy_version(pipeline_version)
     provenance = {
         "source_replay_report_sha256": replay_report_sha256,
         "materializer_commit": materializer_commit,
-        "normalization_policy_version": NORMALIZATION_POLICY_VERSION,
+        "normalization_policy_version": policy_version,
     }
     source = {
         "case_id": replay["case_id"],
@@ -102,7 +116,7 @@ def build_materialized_report(
     }
     return {
         "mode": MODE,
-        "pipeline_version": replay_report["pipeline_version"],
+        "pipeline_version": pipeline_version,
         "evaluator_commit": replay_report["evaluator_commit"],
         "materializer_commit": materializer_commit,
         "manifest_sha256": replay_report["manifest_sha256"],

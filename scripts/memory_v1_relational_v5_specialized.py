@@ -48,7 +48,8 @@ education, qualification, or credential language alone uses a literal
 credential.reported observation and does not create an occupation concept.
 A self entity must be
 grounded in I, me, my, mine, or myself, use mention_kind=self_reference, and use
-relationship_role=user:self; we, you, they, and they're are not self mentions.
+relationship_role=user:self; its name_text must be null because a pronoun is not
+a name. We, you, they, and they're are not self mentions.
 Declare an explicitly corrected pet-name subject as an animal with role
 pet:corrected_name_subject.
 For repeated same-type siblings, use family:sister:N, family:brother:N, or

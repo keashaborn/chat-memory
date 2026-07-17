@@ -68,6 +68,12 @@ def replay_report() -> dict:
     }
 
 
+def current_replay_report() -> dict:
+    report = replay_report()
+    report["pipeline_version"] = "memory_v1_relational_specialized_v5_2"
+    return report
+
+
 class SpecializedMaterializeTest(unittest.TestCase):
     def test_materialized_report_is_accepted_by_evidence_and_stage_loaders(self) -> None:
         report = build_materialized_report(
@@ -84,6 +90,30 @@ class SpecializedMaterializeTest(unittest.TestCase):
         self.assertEqual(evidence[0]["source_external_id"], SOURCE_ID)
         selected = _load_case(report, "v5-13", uuid.UUID(OWNER))
         self.assertEqual(selected["packet"]["source_envelope"]["source_sha256"], SOURCE_SHA)
+
+    def test_current_normalization_policy_is_bound_to_pipeline(self) -> None:
+        report = build_materialized_report(
+            current_replay_report(),
+            replay_report_sha256=REPLAY_SHA,
+            materializer_commit=COMMIT,
+        )
+        provenance = report["sources"][0]["materialization_provenance"]
+        self.assertEqual(
+            provenance["normalization_policy_version"],
+            "memory_v1_relational_specialized_v5_2",
+        )
+        load_report_sources(report, owner=uuid.UUID(OWNER), case_ids=["v5-13"])
+        _load_case(report, "v5-13", uuid.UUID(OWNER))
+
+    def test_materialization_rejects_unknown_pipeline(self) -> None:
+        report = replay_report()
+        report["pipeline_version"] = "memory_v1_relational_specialized_unknown"
+        with self.assertRaisesRegex(RuntimeError, "pipeline version"):
+            build_materialized_report(
+                report,
+                replay_report_sha256=REPLAY_SHA,
+                materializer_commit=COMMIT,
+            )
 
     def test_materialization_rejects_unresolved_replay(self) -> None:
         report = replay_report()
