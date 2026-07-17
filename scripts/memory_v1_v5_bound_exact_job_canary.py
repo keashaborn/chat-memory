@@ -88,6 +88,8 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--registry", default=str(DEFAULT_REGISTRY))
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     parser.add_argument("--worker-id")
+    parser.add_argument("--expected-attempts", type=int, default=0)
+    parser.add_argument("--max-attempts", type=int, default=1)
     parser.add_argument("--lease-seconds", type=int, default=300)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--max-output-tokens", type=int, default=16000)
@@ -112,6 +114,10 @@ def validate_arguments(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("expected component key is invalid")
     if not 30 <= args.lease_seconds <= 3600:
         raise RuntimeError("lease-seconds must be between 30 and 3600")
+    if not 0 <= args.expected_attempts <= 2:
+        raise RuntimeError("expected-attempts must be between 0 and 2")
+    if args.max_attempts != args.expected_attempts + 1:
+        raise RuntimeError("max-attempts must equal expected-attempts plus one")
     if not 1.0 <= args.timeout_seconds <= 600.0:
         raise RuntimeError("timeout-seconds must be between 1 and 600")
     if not 1000 <= args.max_output_tokens <= 20000:
@@ -213,6 +219,7 @@ async def claim_exact_target(
     binding_event_id: uuid.UUID,
     worker_id: str,
     lease_seconds: int,
+    max_attempts: int,
 ) -> dict[str, Any]:
     async with conn.transaction():
         await set_actor(conn, owner)
@@ -220,7 +227,7 @@ async def claim_exact_target(
             """
             SELECT *
             FROM memory.claim_owner_bound_evidence_job_v5(
-              $1,$2,$3,$4,'relational_extraction',$5,$6,1
+              $1,$2,$3,$4,'relational_extraction',$5,$6,$7
             )
             """,
             operation_id,
@@ -229,6 +236,7 @@ async def claim_exact_target(
             binding_event_id,
             worker_id,
             lease_seconds,
+            max_attempts,
         )
     if row is None:
         raise RuntimeError("exact-job claim returned no row")
@@ -465,8 +473,11 @@ async def main() -> int:
                 )
             )
             return 0
-        if plan["status"] != "pending" or plan["attempts"] != 0:
-            raise RuntimeError("exact canary target is no longer pristine")
+        if (
+            plan["status"] != "pending"
+            or plan["attempts"] != args.expected_attempts
+        ):
+            raise RuntimeError("exact canary target state changed")
         claim_operation_id = uuid.uuid5(
             ids["run_id"],
             f"bound-exact-claim:{ids['owner']}:{ids['job_id']}",
@@ -480,6 +491,7 @@ async def main() -> int:
             binding_event_id=ids["binding_event_id"],
             worker_id=worker_id,
             lease_seconds=args.lease_seconds,
+            max_attempts=args.max_attempts,
         )
         if job["status"] != "processing" or job["apply_outcome"] != "applied":
             raise RuntimeError("exact canary claim did not enter processing")
@@ -509,7 +521,7 @@ async def main() -> int:
                 job=job,
                 worker_id=worker_id,
                 code=exc.code,
-                max_attempts=1,
+                max_attempts=args.max_attempts,
             )
             report = {
                 "job_sha256": sha256_text(str(job["job_id"])),

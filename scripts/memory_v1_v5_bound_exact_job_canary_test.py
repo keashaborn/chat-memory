@@ -120,6 +120,8 @@ def args(**overrides: object) -> SimpleNamespace:
         "expected_project_key": "verbal-sage",
         "expected_component_key": "memory-v1",
         "run_id": "33333333-3333-4333-8333-333333333333",
+        "expected_attempts": 0,
+        "max_attempts": 1,
         "lease_seconds": 300,
         "timeout_seconds": 120.0,
         "max_output_tokens": 16000,
@@ -164,6 +166,7 @@ async def async_checks() -> None:
         binding_event_id=BINDING,
         worker_id="exact-canary-test",
         lease_seconds=300,
+        max_attempts=1,
     )
     if claimed["status"] != "processing":
         raise AssertionError("exact claim did not preserve returned state")
@@ -203,6 +206,11 @@ async def async_checks() -> None:
 
 def main() -> int:
     validate_arguments(args())
+    expect_error(
+        lambda: validate_arguments(args(expected_attempts=1, max_attempts=1)),
+        "retry without incremented max attempts",
+    )
+    validate_arguments(args(expected_attempts=1, max_attempts=2))
     expect_error(
         lambda: validate_arguments(args(enable_external_call=True)),
         "dry-run external call capability",
