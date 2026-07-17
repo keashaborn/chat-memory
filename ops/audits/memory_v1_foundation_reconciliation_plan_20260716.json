@@ -1,0 +1,139 @@
+{
+  "active_use_audit": {
+    "active_tree_callers_of_missing_rag_engine_modules": 0,
+    "production_process_references": 0,
+    "systemd_references": 0
+  },
+  "archive_target_prefix": "archive/memory_v1_foundation/20260714/",
+  "captured_at": "2026-07-17T00:24:07Z",
+  "contract_version": "memory_v1_foundation_reconciliation_plan_v1",
+  "effects": {
+    "database_writes": 0,
+    "foundation_merge_changes": 0,
+    "model_calls": 0,
+    "production_changes": 0,
+    "qdrant_writes": 0
+  },
+  "foundation_head": "e16f3dd357f367eede3f81e4a386f3c9e0131706",
+  "integration_head": "4033c33ff528d494d1c9bfeaa8ab686b61ecf34c",
+  "merge_policy": {
+    "conflict_resolution": "keep_tested_integration_for_all_active_runtime_and_existing_files",
+    "foundation_only_nonruntime_provenance": "retain_in_canonical_docs_ops_and_tests_paths",
+    "foundation_only_runtime_and_manual_tooling": "move_to_archive_prefix_preserving_relative_path",
+    "schema_ci_follow_up": "retain_current_security_hardened_ci_then_add_separate_coverage_for_the_four_retained_preference_project_migrations_and_two_sql_tests"
+  },
+  "path_groups": {
+    "archive_nonruntime_foundation_tooling": [
+      "rag_engine/memory_v1_atomic_spans.py",
+      "rag_engine/memory_v1_candidate_review.py",
+      "rag_engine/memory_v1_compound_spans.py",
+      "rag_engine/memory_v1_evidence_apply.py",
+      "rag_engine/memory_v1_evidence_persistence.py",
+      "rag_engine/memory_v1_evidence_triage.py",
+      "rag_engine/memory_v1_preference_project_apply.py",
+      "rag_engine/memory_v1_preference_project_durable_apply.py",
+      "rag_engine/memory_v1_preference_project_extraction.py",
+      "rag_engine/memory_v1_preference_project_review.py",
+      "rag_engine/memory_v1_specialized_review.py",
+      "scripts/memory_v1_atomic_span_dry_run.py",
+      "scripts/memory_v1_atomic_span_test.py",
+      "scripts/memory_v1_candidate_review_dry_run.py",
+      "scripts/memory_v1_candidate_review_test.py",
+      "scripts/memory_v1_compound_span_dry_run.py",
+      "scripts/memory_v1_compound_span_test.py",
+      "scripts/memory_v1_evidence_apply.py",
+      "scripts/memory_v1_evidence_apply_integration.py",
+      "scripts/memory_v1_evidence_persistence_dry_run.py",
+      "scripts/memory_v1_evidence_persistence_test.py",
+      "scripts/memory_v1_evidence_source_snapshot.py",
+      "scripts/memory_v1_evidence_triage_dry_run.py",
+      "scripts/memory_v1_evidence_triage_test.py",
+      "scripts/memory_v1_preference_project_apply.py",
+      "scripts/memory_v1_preference_project_apply_integration.py",
+      "scripts/memory_v1_preference_project_durable_apply.py",
+      "scripts/memory_v1_preference_project_durable_apply_integration.py",
+      "scripts/memory_v1_preference_project_extraction_dry_run.py",
+      "scripts/memory_v1_preference_project_extraction_test.py",
+      "scripts/memory_v1_preference_project_retrieval_dry_run.py",
+      "scripts/memory_v1_preference_project_review.py",
+      "scripts/memory_v1_preference_project_review_integration.py",
+      "scripts/memory_v1_specialized_review.py",
+      "scripts/memory_v1_specialized_review_test.py"
+    ],
+    "keep_integration_identical": [
+      "ops/sql/20260713_memory_v1_evidence_ingest_batch.sql",
+      "ops/sql/20260713_memory_v1_evidence_ingest_batch_rollback.sql",
+      "rag_engine/memory_v1_preference_project_retrieval.py",
+      "rag_engine/memory_v1_preference_project_shadow.py",
+      "scripts/memory_v1_preference_project_shadow_test.py",
+      "tests/memory_v1_evidence_ingest_batch.sql"
+    ],
+    "keep_tested_integration_semantic": [
+      "evals/memory_v1_preference_project_retrieval_cases_20260714.jsonl",
+      "rag_engine/memory_v1_intent.py",
+      "rag_engine/memory_v1_shadow.py",
+      "rag_engine/vantage_router.py",
+      "scripts/memory_v1_intent_test.py",
+      "scripts/memory_v1_preference_project_retrieval_test.py",
+      "tools/memory_v1_schema_ci.sh"
+    ],
+    "retain_canonical_provenance": [
+      "docs/memory_v1_candidate_extraction_review_plan_20260713.md",
+      "docs/memory_v1_evidence_apply_path_20260713.md",
+      "docs/memory_v1_evidence_persistence_plan_20260713.md",
+      "docs/memory_v1_preference_project_candidate_apply_20260714.md",
+      "docs/memory_v1_preference_project_durable_apply_20260714.md",
+      "docs/memory_v1_preference_project_durable_apply_dry_run_20260714.md",
+      "docs/memory_v1_preference_project_extraction_dry_run_20260713.md",
+      "docs/memory_v1_preference_project_retrieval_dry_run_20260714.md",
+      "docs/memory_v1_preference_project_review_apply_20260714.md",
+      "docs/memory_v1_preference_project_schema_design_20260713.md",
+      "docs/memory_v1_review_apply_design_20260713.md",
+      "docs/memory_v1_review_apply_production_clone_rehearsal_20260713.md",
+      "docs/memory_v1_review_apply_production_install_20260713.md",
+      "docs/memory_v1_specialized_review_20260713.md",
+      "ops/manifests/memory_v1_candidate_review_20260713.json",
+      "ops/manifests/memory_v1_evidence_apply_20260713.json",
+      "ops/manifests/memory_v1_preference_project_apply_20260713.json",
+      "ops/manifests/memory_v1_preference_project_durable_apply_20260714.json",
+      "ops/manifests/memory_v1_preference_project_extraction_20260713.json",
+      "ops/manifests/memory_v1_preference_project_retrieval_20260714.json",
+      "ops/manifests/memory_v1_preference_project_review_20260714.json",
+      "ops/reviews/memory_v1_specialized_review_20260713.json",
+      "ops/sql/20260713_memory_v1_preference_project_staging.sql",
+      "ops/sql/20260713_memory_v1_preference_project_staging_rollback.sql",
+      "ops/sql/20260713_memory_v1_review_apply.sql",
+      "ops/sql/20260713_memory_v1_review_apply_rollback.sql",
+      "tests/memory_v1_preference_project_staging.sql",
+      "tests/memory_v1_review_apply.sql"
+    ]
+  },
+  "path_group_counts": {
+    "archive_nonruntime_foundation_tooling": 35,
+    "keep_integration_identical": 6,
+    "keep_tested_integration_semantic": 7,
+    "retain_canonical_provenance": 28,
+    "total": 76
+  },
+  "security_findings": [
+    {
+      "decision": "reject_foundation_variant_keep_integration",
+      "finding": "the foundation vantage_router thread-context query filters only by thread_id; the integration variant requires owner_user_id and sets the actor before querying",
+      "path": "rag_engine/vantage_router.py",
+      "severity": "critical_account_isolation"
+    },
+    {
+      "decision": "keep_integration_v5",
+      "finding": "the integration intent adapter is v5 and adds anchored dates, name recall, health behavior, rural life, and outdoor preference coverage absent from foundation v4",
+      "path": "rag_engine/memory_v1_intent.py",
+      "severity": "correctness"
+    },
+    {
+      "decision": "keep_integration_v4",
+      "finding": "the integration shadow runtime adds an explicit high-sensitivity owner allowlist absent from foundation v3",
+      "path": "rag_engine/memory_v1_shadow.py",
+      "severity": "privacy_boundary"
+    }
+  ],
+  "status": "reviewed_plan_stop_before_foundation_merge_or_file_moves"
+}
