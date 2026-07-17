@@ -1,0 +1,152 @@
+{
+  "archive_verification": {
+    "archived_foundation_blobs_checked": 42,
+    "archived_foundation_blob_mismatches": 0,
+    "archive_file_count_including_readme": 43,
+    "archive_import_markers": 0,
+    "archive_readme_sha256": "5af7e3c6dd6084b791e5ca1be71152e04989565449e4fbedf0b69b7d9bfb7db2",
+    "archive_root": "archive/memory_v1_foundation/20260714"
+  },
+  "captured_at": "2026-07-17T01:35:29Z",
+  "contract_version": "memory_v1_foundation_integration_audit_v1",
+  "deferred_cleanup": [
+    {
+      "action": "remove the disabled production units and archive the dependent in a separate reviewed cleanup",
+      "dependent": "tools/rebuild_gravity.py",
+      "imports": "rag_engine.gravity",
+      "service": "gravity-rebuild.service",
+      "service_state": "disabled_inactive",
+      "timer": "gravity-rebuild.timer",
+      "timer_state": "disabled_inactive"
+    }
+  ],
+  "effects": {
+    "database_writes": 0,
+    "deployment_changes": 0,
+    "external_model_calls": 0,
+    "integration_pushes": 0,
+    "production_branch_changes": 0,
+    "qdrant_writes": 0,
+    "systemd_changes": 0
+  },
+  "integration": {
+    "branch": "memory_v1_phase0_v5_integration",
+    "foundation_head": "e16f3dd357f367eede3f81e4a386f3c9e0131706",
+    "integration_baseline": "4033c33ff528d494d1c9bfeaa8ab686b61ecf34c",
+    "merge_commit": "9c9cd86485112ba8bdf0ca437a7e92140569fbfe",
+    "merge_parents": [
+      "f09a3557bd9c36786c445bddc6c0fc1bcab17a5a",
+      "e16f3dd357f367eede3f81e4a386f3c9e0131706"
+    ],
+    "tested_head": "be5a22c9d446b9093ad2f1a9ac0669c8f8494917",
+    "worktree": "/home/ubuntu/chat-memory-phase0-v5-integration",
+    "worktree_clean_before_audit": true
+  },
+  "merge_tree_proof": {
+    "added_paths_from_tested_baseline_to_merge": 73,
+    "deleted_paths_from_tested_baseline_to_merge": 0,
+    "modified_paths_from_tested_baseline_to_merge": 0,
+    "result": "all pre-existing tested integration blobs remained unchanged",
+    "seventy_three_additions_breakdown": {
+      "archive_files_including_readme": 43,
+      "canonical_foundation_provenance": 28,
+      "reconciliation_plan_and_checksum": 2
+    }
+  },
+  "production_after_tests": {
+    "concurrent_change": {
+      "commit_count_since_prior_audit_head": 1,
+      "current_head": "4de1d1c07bbe133051465589efb324a453e712c4",
+      "memory_integration_overlap": false,
+      "path": "rag_engine/lifeswitch_people_router.py",
+      "prior_audit_head": "7484c4432cd9b920bc20024277776109584b70b7",
+      "subject": "people: add secure relationship revoke endpoint"
+    },
+    "consolidation_job_pending": 596,
+    "consolidation_job_total": 644,
+    "consolidation_timer_active": false,
+    "consolidation_timer_enabled": false,
+    "memory_claim_rows": 26,
+    "memory_evidence_rows": 210,
+    "qdrant_memory_claim_v1_points": 25,
+    "qdrant_memory_raw_points": 975,
+    "v4_capture_trigger": "disabled",
+    "worktree_clean": true
+  },
+  "provenance_coverage": {
+    "historical_tests_modified": false,
+    "installed_contract": "tests/memory_v1_preference_project_installed_contract.sql",
+    "installed_contract_sha256": "c9756cc604d8ae11f34565b211d26c3d8331c03c662dec6c04e48e57cfad01f1",
+    "plan": "ops/audits/memory_v1_foundation_reconciliation_plan_20260716.json",
+    "plan_sha256": "50e81a4a10b3bd7bb97795e0aed52d5390e102c08b9bb079b27ee569bc6e7f18",
+    "production_clone_runner": "tools/memory_v1_preference_project_provenance_production_clone.sh",
+    "production_clone_runner_sha256": "a3b9b71513e1799db7700ecc4479b09b840dfc86a54dbc6b19d20695d1863bf5",
+    "result": "retained staging and review/apply migrations replay twice without row or schema drift; final installed RLS, grants, roles, idempotency columns, and function ACLs pass read-only assertions"
+  },
+  "reconciliation": {
+    "archive_nonruntime_foundation_tooling": 42,
+    "classified_paths": 83,
+    "keep_integration_identical": 6,
+    "keep_tested_integration_semantic": 7,
+    "retain_canonical_provenance": 28,
+    "security_decisions": [
+      "kept the owner-scoped integration vantage_router instead of the foundation thread-id-only query",
+      "kept the integration V5 intent adapter",
+      "kept the high-sensitivity owner allowlist in the integration shadow runtime",
+      "quarantined inactive foundation runtime and manual tools outside importable package paths"
+    ]
+  },
+  "test_adaptations": [
+    {
+      "finding": "the historical staging test predates later non-null review request idempotency columns",
+      "resolution": "preserve the historical test byte-for-byte and validate the current final state with a separate read-only installed contract"
+    },
+    {
+      "finding": "a no-privileges clone stripped prerequisite schema ACLs from security-definer function owners",
+      "resolution": "restore the production ACLs into the disposable clone; all referenced principals are explicitly recreated as locked roles"
+    },
+    {
+      "finding": "current production correctly denies brains_app direct evidence insertion expected by the older transactional fixture",
+      "resolution": "do not weaken the evidence writer boundary and do not rewrite the historical fixture"
+    }
+  ],
+  "tests": [
+    {
+      "external_model_calls": 0,
+      "name": "memory_v1_preference_project_provenance_production_clone",
+      "result": "pass",
+      "runner_sha256": "a3b9b71513e1799db7700ecc4479b09b840dfc86a54dbc6b19d20695d1863bf5",
+      "verifications": [
+        "staging migration replay twice",
+        "review/apply migration replay twice",
+        "installed final-state security contract",
+        "unchanged memory table row counts and row hashes",
+        "unchanged normalized schema"
+      ]
+    },
+    {
+      "external_model_calls": 0,
+      "name": "memory_v1_freeze_v4_capture_production_clone",
+      "result": "pass",
+      "runner_sha256": "92a96c6657e379b34828ef032b4c2dde505ba269ed48fc97c3702db4c22017b5",
+      "source_backup_trigger_state": "D"
+    },
+    {
+      "external_model_calls": 0,
+      "name": "memory_v1_evidence_extraction_worker_production_clone",
+      "result": "pass",
+      "runner_sha256": "ca8ba816416b2cff2281428b5db9f50d6eeb5ebc0045f843fa1b1dab123ac5f7",
+      "subtests": [
+        "database security and rollback",
+        "relational extraction V5 provider",
+        "OpenAI provider mock",
+        "observable provider",
+        "external smoke V2 offline",
+        "external preflight offline",
+        "external smoke offline",
+        "fixture worker replay and owner isolation"
+      ]
+    }
+  ],
+  "status": "foundation_reconciled_and_post_merge_clone_tested_stop_before_push_or_production"
+}
