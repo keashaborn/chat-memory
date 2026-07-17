@@ -345,7 +345,7 @@ def evaluate(
                 if not checks[key]
             ],
             "shadow_retrieval": [
-                "no_hash_locked_candidate_discovery_or_router_trace_gate"
+                "v5_shadow_trace_not_deployed_or_live_audited"
             ],
             "prompt_influence": [
                 "v5_registry_runtime_inactive",

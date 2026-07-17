@@ -17,9 +17,9 @@ or Resse-Train.
    privileges on shared V5 durable targets (`entity`, `claim`, and
    `claim_revision`).
 4. `shadow_retrieval` and `prompt_influence`: remain false. The restricted V5
-   reader, selector, and retracted-claim negative control exist; hash-locked
-   candidate discovery, router-side trace capture, cross-owner evaluation, and a
-   separate activation gate do not.
+   reader, selector, retracted-claim negative control, hash-locked candidate
+   discovery, and router-side zero-write trace pass isolated/clone tests. They
+   are not deployed or live-audited; a separate activation gate does not exist.
 
 The checker uses the local PostgreSQL container's maintenance role for one
 repeatable-read, read-only transaction. The application DSN is deliberately not
@@ -32,13 +32,12 @@ written with mode `0600`.
 ## Required sequence
 
 1. Run the gate against production and preserve its checksum.
-2. Build hash-locked, owner-filtered V5 candidate discovery without prompt
-   exposure or durable trace writes.
-3. Clone-test missing actor, cross-owner candidates, retracted claims, replay,
-   and negative-control turns.
-4. Add a bounded router-side shadow trace contract with zero prompt/model
-   exposure.
-5. Compare traces across at least two owners and negative-control turns.
+2. Deploy the disabled-by-default V5 shadow trace code without changing service
+   configuration.
+3. Re-run the retracted-claim negative control and governed-state readiness
+   gate against the deployed code.
+4. Enable zero-write shadow tracing for explicit test owners only.
+5. Compare live traces across at least two owners and negative-control turns.
 6. Replace legacy direct shared-target writes with controlled functions and
    revoke their table privileges.
 7. Refresh the governed-state baseline after each separately reviewed durable

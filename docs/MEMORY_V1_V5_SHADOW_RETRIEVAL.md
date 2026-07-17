@@ -86,3 +86,22 @@ candidate envelope bound to the owner, collection, vector dimension, vector
 SHA-256, limit, rank, claim IDs, and scores. The envelope does not contain query
 text or claim prose and cannot write to Qdrant, Postgres, traces, or prompts.
 Router integration and live candidate tracing remain inactive.
+
+## Router-side zero-write trace
+
+`rag_engine/memory_v1_v5_shadow_trace.py` composes candidate discovery, the
+restricted V5 reader, and the deterministic selector. It returns only owner and
+request hashes, candidate/selection hashes, counts, budgets, and rejection
+codes. Selected claim prose is discarded before the trace leaves the module.
+
+The router records this sanitized object under `memory_v1_v5_shadow` in the
+turn plan. `MEMORY_V1_V5_SHADOW` defaults off, has an independent authenticated
+owner allowlist, and never produces a prompt block. Technical, memory-system,
+and FM-conceptual turns are rejected before embedding, Qdrant, or Postgres
+access. Preference and project intents remain on their specialized routes.
+
+The production-clone trace suite changes the retracted occupational pilot to
+`supported` only inside a disposable database. The owning actor must select it
+through the restricted reader; a second actor supplying the same candidate ID
+must receive zero rows and one `not_visible` rejection. Both traces must remain
+zero-write and contain no selected prose.

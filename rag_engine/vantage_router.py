@@ -19,6 +19,7 @@ from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_runtime
+from .memory_v1_v5_shadow_trace import run_memory_v1_v5_shadow_trace
 from .memory_v1_intent import (
     apply_legacy_personal_memory_gate,
     classify_legacy_personal_memory_access,
@@ -1727,6 +1728,15 @@ def vantage_query(req: Request, payload: VantageQuery):
         query_embedding = QueryEmbeddingCache(
             payload.message,
             model=os.getenv("EMBED_MODEL", "text-embedding-3-large"),
+        )
+
+        turn_plan["memory_v1_v5_shadow"] = run_memory_v1_v5_shadow_trace(
+            payload.user_id,
+            query=payload.message,
+            request_classification=turn_intent,
+            request_id=req_request_id,
+            thread_id=payload.thread_id,
+            embedding_provider=query_embedding.get,
         )
 
         governed_runtime = run_memory_v1_runtime(
