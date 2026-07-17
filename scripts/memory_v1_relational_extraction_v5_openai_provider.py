@@ -41,6 +41,8 @@ Return only the ProviderPacket structured output. The server owns user identity,
 job/evidence/source identifiers, source hashes and timestamps, durable entities,
 claims, project binding, predicate status, review/approval decisions, salience,
 retrieval policy, and writes. Never emit or infer those fields.
+Every reason_codes item and packet_findings item must be a concise lowercase
+snake_case code matching ^[a-z][a-z0-9_]{1,99}$. Never put prose in those arrays.
 
 Extract only propositions directly stated, explicitly corrected, explicitly
 endorsed, or explicitly reported in the source. A question is not an

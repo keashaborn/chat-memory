@@ -9,9 +9,9 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol
+from typing import Annotated, Any, Literal, Mapping, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 CONTRACT_VERSION = "memory_v1_relational_extraction_v5"
@@ -21,7 +21,8 @@ SYNTHETIC_PROVIDER_ID = "synthetic_fixture"
 SYNTHETIC_PROVIDER_VERSION = "v1"
 SOURCE_SYSTEM = "public.chat_log"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,99}$")
+REASON_CODE_PATTERN = r"^[a-z][a-z0-9_]{1,99}$"
+REASON_CODE_RE = re.compile(REASON_CODE_PATTERN)
 PROJECT_PREDICATES = {
     "project.constraint",
     "project.current_state",
@@ -77,6 +78,7 @@ EntityType = Literal[
     "object",
     "concept",
 ]
+ReasonCode = Annotated[str, StringConstraints(pattern=REASON_CODE_PATTERN)]
 ProjectionClass = Literal[
     "direct_claim",
     "supportive_context",
@@ -113,7 +115,7 @@ class ProviderEntityMention(StrictModel):
     relationship_role: str | None
     source_spans: list[ProposedSourceSpan] = Field(min_length=1, max_length=8)
     extraction_confidence: float = Field(ge=0.0, le=1.0)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[ReasonCode] = Field(min_length=1, max_length=20)
 
 
 class NormalizedEntityMention(StrictModel):
@@ -124,7 +126,7 @@ class NormalizedEntityMention(StrictModel):
     relationship_role: str | None
     source_spans: list[NormalizedSourceSpan] = Field(min_length=1, max_length=8)
     extraction_confidence: float = Field(ge=0.0, le=1.0)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[ReasonCode] = Field(min_length=1, max_length=20)
 
 
 class EntityObject(StrictModel):
@@ -234,7 +236,7 @@ class ProviderTemporal(StrictModel):
     relative_offset: RelativeOffset | None
     recurrence: Recurrence | None
     anchored_to_source_time: bool
-    reason_codes: list[str] = Field(max_length=10)
+    reason_codes: list[ReasonCode] = Field(max_length=10)
 
 
 class NormalizedTemporal(ProviderTemporal):
@@ -285,7 +287,7 @@ class ProviderObservation(StrictModel):
     sensitivity: Sensitivity
     extraction_confidence: float = Field(ge=0.0, le=1.0)
     source_spans: list[ProposedSourceSpan] = Field(min_length=1, max_length=8)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[ReasonCode] = Field(min_length=1, max_length=20)
 
 
 class NormalizedObservation(StrictModel):
@@ -321,7 +323,7 @@ class NormalizedObservation(StrictModel):
     sensitivity: Sensitivity
     extraction_confidence: float = Field(ge=0.0, le=1.0)
     source_spans: list[NormalizedSourceSpan] = Field(min_length=1, max_length=8)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[ReasonCode] = Field(min_length=1, max_length=20)
 
 
 class ProviderComparisonHint(StrictModel):
@@ -335,7 +337,7 @@ class ProviderComparisonHint(StrictModel):
         "supersedes",
     ]
     target_lookup_key: str | None
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[ReasonCode] = Field(min_length=1, max_length=20)
 
 
 class NormalizedComparisonHint(ProviderComparisonHint):
@@ -407,7 +409,7 @@ class ProviderPacket(StrictModel):
     observations: list[ProviderObservation] = Field(max_length=32)
     comparison_hints: list[ProviderComparisonHint] = Field(max_length=32)
     deferrals: list[ProviderDeferral] = Field(max_length=32)
-    packet_findings: list[str] = Field(max_length=32)
+    packet_findings: list[ReasonCode] = Field(max_length=32)
 
 
 class SourceEnvelope(StrictModel):
@@ -426,7 +428,7 @@ class NormalizedPacket(StrictModel):
     observations: list[NormalizedObservation] = Field(max_length=32)
     comparison_hints: list[NormalizedComparisonHint] = Field(max_length=32)
     deferrals: list[NormalizedDeferral] = Field(max_length=32)
-    packet_findings: list[str] = Field(max_length=32)
+    packet_findings: list[ReasonCode] = Field(max_length=32)
 
 
 @dataclass(frozen=True)

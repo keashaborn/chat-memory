@@ -5,6 +5,8 @@ import copy
 from pathlib import Path
 
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
+    REASON_CODE_PATTERN,
     TrustedExtractionSource,
     TrustedProjectBinding,
     TrustedProjectComponent,
@@ -189,6 +191,18 @@ def component_output() -> dict:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
+    provider_schema = ProviderPacket.model_json_schema()
+    packet_finding_items = provider_schema["properties"]["packet_findings"]["items"]
+    if packet_finding_items.get("pattern") != REASON_CODE_PATTERN:
+        raise AssertionError("provider packet findings lost reason-code pattern")
+    prose_finding = valid_output()
+    prose_finding["packet_findings"] = [
+        "This is prose and must not enter the reason-code array."
+    ]
+    expect_error(
+        lambda: ProviderPacket.model_validate(prose_finding),
+        "provider packet finding prose",
+    )
     registry = load_registry(
         repo_root / "specs" / "memory_v1_predicate_registry_v5.json",
         REGISTRY_SHA256,
