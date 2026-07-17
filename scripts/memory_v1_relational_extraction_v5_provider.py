@@ -23,6 +23,7 @@ SOURCE_SYSTEM = "public.chat_log"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REASON_CODE_PATTERN = r"^[a-z][a-z0-9_]{1,99}$"
 REASON_CODE_RE = re.compile(REASON_CODE_PATTERN)
+TRUSTED_SPAN_DELTA_MIN_QUOTE_CHARS = 24
 PROJECT_PREDICATES = {
     "project.constraint",
     "project.current_state",
@@ -754,6 +755,7 @@ def validate_and_normalize(
     raw = proposed.model_dump(mode="json")
     _reject_server_owned_keys(raw)
     _validate_reason_code_tree(proposed)
+    trusted_span_deltas = _trusted_source_span_deltas(raw, source.content)
 
     mentions: list[dict[str, Any]] = []
     entity_refs: set[str] = set()
@@ -770,6 +772,7 @@ def validate_and_normalize(
         item["source_spans"] = _normalize_spans(
             item["source_spans"],
             source.content,
+            trusted_span_deltas,
         )
         mentions.append(item)
         entity_refs.add(ref)
@@ -793,10 +796,24 @@ def validate_and_normalize(
         rule = rules.get(item["predicate"])
         if rule is None:
             raise ValueError(f"unregistered predicate: {item['predicate']}")
+        if (
+            item["temporal"]["semantic"] == "none"
+            and "observation_time" in rule["temporal_semantics"]
+        ):
+            item["temporal"]["semantic"] = "observation_time"
+            if (
+                "server_observation_time_default"
+                not in item["temporal"]["reason_codes"]
+                and len(item["temporal"]["reason_codes"]) < 10
+            ):
+                item["temporal"]["reason_codes"].append(
+                    "server_observation_time_default"
+                )
         _validate_observation_registry(item, rule, registry, entity_types)
         item["source_spans"] = _normalize_spans(
             item["source_spans"],
             source.content,
+            trusted_span_deltas,
         )
         item["temporal"] = _normalize_temporal(
             item["temporal"],
@@ -873,6 +890,7 @@ def validate_and_normalize(
         item["source_spans"] = _normalize_spans(
             item["source_spans"],
             source.content,
+            trusted_span_deltas,
         )
         item["review_required"] = (
             item["reason_code"] in ALWAYS_REVIEW_DEFERRALS
@@ -1058,9 +1076,47 @@ def _validate_reason_code_tree(packet: ProviderPacket) -> None:
     _ensure_reason_codes(packet.packet_findings, "packet_findings")
 
 
+def _source_span_occurrences(text: str, quote: str) -> list[tuple[int, int]]:
+    occurrences: list[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        start = text.find(quote, cursor)
+        if start < 0:
+            return occurrences
+        occurrences.append((start, start + len(quote)))
+        cursor = start + 1
+
+
+def _trusted_source_span_deltas(
+    packet: dict[str, Any],
+    text: str,
+) -> set[tuple[int, int]]:
+    deltas: set[tuple[int, int]] = {(0, 0)}
+    span_groups = (
+        packet["entity_mentions"],
+        packet["observations"],
+        packet["deferrals"],
+    )
+    for group in span_groups:
+        for item in group:
+            for span in item["source_spans"]:
+                occurrences = _source_span_occurrences(text, span["quote"])
+                if (
+                    len(span["quote"]) >= TRUSTED_SPAN_DELTA_MIN_QUOTE_CHARS
+                    and len(occurrences) == 1
+                ):
+                    verified_start, verified_end = occurrences[0]
+                    start_delta = verified_start - span["start"]
+                    end_delta = verified_end - span["end"]
+                    if start_delta == end_delta:
+                        deltas.add((start_delta, end_delta))
+    return deltas
+
+
 def _normalize_spans(
     spans: list[dict[str, Any]],
     text: str,
+    trusted_deltas: set[tuple[int, int]],
 ) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     seen: set[tuple[int, int]] = set()
@@ -1074,13 +1130,26 @@ def _normalize_spans(
             or end > len(text)
             or text[start:end] != quote
         ):
-            verified_start = text.find(quote)
-            if verified_start < 0:
+            occurrences = _source_span_occurrences(text, quote)
+            if not occurrences:
                 raise ValueError(f"source span quote mismatch: {start}:{end}")
-            if text.find(quote, verified_start + 1) >= 0:
-                raise ValueError(f"source span quote is ambiguous: {start}:{end}")
-            start = verified_start
-            end = verified_start + len(quote)
+            if len(occurrences) == 1:
+                start, end = occurrences[0]
+            else:
+                verified = [
+                    candidate
+                    for candidate in occurrences
+                    if (
+                        candidate[0] - start,
+                        candidate[1] - end,
+                    )
+                    in trusted_deltas
+                ]
+                if len(verified) != 1:
+                    raise ValueError(
+                        f"source span quote is ambiguous: {start}:{end}"
+                    )
+                start, end = verified[0]
         key = (start, end)
         if key in seen:
             raise ValueError(f"duplicate source span: {start}:{end}")

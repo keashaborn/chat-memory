@@ -26,6 +26,7 @@ VALIDATOR_REJECTION_PREFIXES: tuple[tuple[str, str], ...] = (
     ),
     ("source span is out of bounds:", "source_span_out_of_bounds"),
     ("source span quote mismatch:", "source_span_quote_mismatch"),
+    ("source span quote is ambiguous:", "source_span_quote_ambiguous"),
     ("duplicate source span:", "duplicate_source_span"),
     ("duplicate entity_ref:", "duplicate_entity_ref"),
     ("named entity requires name_text:", "named_entity_missing_name_text"),

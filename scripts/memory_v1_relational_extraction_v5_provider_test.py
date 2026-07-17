@@ -12,6 +12,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedProjectComponent,
     load_registry,
     load_schema,
+    sha256_text,
     synthetic_provider,
     validate_and_normalize,
 )
@@ -219,6 +220,43 @@ def main() -> int:
         source_recorded_at="2026-07-16T12:01:00Z",
         content=SOURCE,
     )
+    shifted_source_text = (
+        "XXMy name is Avery in this exact synthetic record. Avery."
+    )
+    shifted_source = TrustedExtractionSource.create(
+        job_id="aaaaaaaa-0004-4000-8000-000000000004",
+        source_system="public.chat_log",
+        source_external_id="aaaaaaaa-0005-4000-8000-000000000005",
+        source_sha256=sha256_text(shifted_source_text),
+        source_recorded_at="2026-07-16T12:01:30Z",
+        content=shifted_source_text,
+    )
+    shifted_output = valid_output()
+    shifted_output["entity_mentions"][0]["source_spans"] = [
+        {
+            "start": 0,
+            "end": 48,
+            "quote": "My name is Avery in this exact synthetic record.",
+        }
+    ]
+    shifted_output["observations"][0]["source_spans"] = [
+        {"start": 11, "end": 16, "quote": "Avery"}
+    ]
+    shifted_result = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=shifted_output,
+        ),
+        source=shifted_source,
+        registry=registry,
+        schema=schema,
+    )
+    shifted_span = shifted_result.normalized_packet["observations"][0][
+        "source_spans"
+    ][0]
+    if shifted_span["start"] != 13 or shifted_span["end"] != 18:
+        raise AssertionError("packet-wide source offset delta was not applied")
     offset_repair_output = valid_output()
     offset_repair_output["observations"][0]["source_spans"][0]["end"] = 18
     offset_repair = validate_and_normalize(
@@ -299,6 +337,28 @@ def main() -> int:
         source_recorded_at="2026-07-16T12:02:00Z",
         content=PROJECT_SOURCE,
     )
+    temporal_default_output = project_output()
+    temporal_default_output["observations"][0]["temporal"]["semantic"] = "none"
+    temporal_default = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=temporal_default_output,
+        ),
+        source=project_source,
+        registry=registry,
+        schema=schema,
+    )
+    defaulted_temporal = temporal_default.normalized_packet["observations"][0][
+        "temporal"
+    ]
+    if (
+        defaulted_temporal["semantic"] != "observation_time"
+        or not defaulted_temporal["anchored_to_source_time"]
+        or "server_observation_time_default"
+        not in defaulted_temporal["reason_codes"]
+    ):
+        raise AssertionError("governed observation-time default was not applied")
     project_provider = synthetic_provider(
         provider_id="synthetic_fixture",
         provider_version="v1",
