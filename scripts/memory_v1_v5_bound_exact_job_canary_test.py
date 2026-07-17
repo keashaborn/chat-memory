@@ -211,6 +211,11 @@ def main() -> int:
         "retry without incremented max attempts",
     )
     validate_arguments(args(expected_attempts=1, max_attempts=2))
+    validate_arguments(args(expected_attempts=3, max_attempts=4))
+    expect_error(
+        lambda: validate_arguments(args(expected_attempts=4, max_attempts=5)),
+        "retry beyond reviewed canary ceiling",
+    )
     expect_error(
         lambda: validate_arguments(args(enable_external_call=True)),
         "dry-run external call capability",

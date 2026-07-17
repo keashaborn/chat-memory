@@ -170,7 +170,8 @@ git merge-base --is-ancestor "$required_commit" HEAD
 [[ "$(jq_manifest '.authorization.maximum_external_calls')" == 1 ]]
 [[ "$(jq_manifest '.authorization.maximum_http_retries')" == 0 ]]
 [[ "$expected_attempts:$max_attempts" == 1:2 \
-  || "$expected_attempts:$max_attempts" == 2:3 ]]
+  || "$expected_attempts:$max_attempts" == 2:3 \
+  || "$expected_attempts:$max_attempts" == 3:4 ]]
 
 preflight=$(scalar "
   SELECT jsonb_build_object(
