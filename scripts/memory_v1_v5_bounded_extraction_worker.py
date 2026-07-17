@@ -96,6 +96,22 @@ def stable_json(value: Any) -> str:
     )
 
 
+def project_binding_for_packet(
+    normalized_packet: dict[str, Any],
+    binding_event_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    resolved_project_scope = any(
+        observation.get("projection_class") == "project_knowledge"
+        and observation.get("project_scope", {}).get("state") == "resolved"
+        for observation in normalized_packet.get("observations", [])
+    )
+    if not resolved_project_scope:
+        return None
+    if binding_event_id is None:
+        raise RuntimeError("resolved project scope lost its trusted binding")
+    return binding_event_id
+
+
 def canonical_owners(values: list[str]) -> list[uuid.UUID]:
     if not values:
         raise RuntimeError("at least one explicit owner UUID is required")
@@ -416,6 +432,14 @@ async def process_job(
             PERSIST_NAMESPACE,
             f"persist:{job['job_id']}",
         )
+        packet_binding_event_id = project_binding_for_packet(
+            validated.normalized_packet,
+            (
+                uuid.UUID(str(context["binding_event_id"]))
+                if context["binding_event_id"] is not None
+                else None
+            ),
+        )
         persisted = await persist_packet(
             conn,
             owner=owner,
@@ -425,11 +449,7 @@ async def process_job(
             worker_id=worker_id,
             model_sha256=sha256_text(model),
             validated=validated,
-            binding_event_id=(
-                uuid.UUID(str(context["binding_event_id"]))
-                if context["binding_event_id"] is not None
-                else None
-            ),
+            binding_event_id=packet_binding_event_id,
         )
     except Exception as exc:
         calls = provider.external_model_calls if provider is not None else 0
@@ -442,7 +462,7 @@ async def process_job(
         "provider_output_sha256": validated.provider_output_sha256,
         "validator_packet_sha256": validated.normalized_packet_sha256,
         "packet_storage_sha256": str(persisted["packet_storage_sha256"]),
-        "project_binding_used": context["binding_event_id"] is not None,
+        "project_binding_used": packet_binding_event_id is not None,
         "counts": {
             "entity_mentions": len(validated.normalized_packet["entity_mentions"]),
             "observations": len(validated.normalized_packet["observations"]),

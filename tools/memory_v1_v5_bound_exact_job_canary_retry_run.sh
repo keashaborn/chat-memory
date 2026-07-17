@@ -328,7 +328,10 @@ elif [[ "$status" == skipped ]]; then
   [[ "$(jq -r '.skipped_events' <<<"$postflight")" == 1 ]]
   [[ "$(jq -r '.packets + .all_packets' <<<"$postflight")" == 0 ]]
   jq -e '.result.rejection_code | type=="string" and length>0' <<<"$runner_result" >/dev/null
-  jq -e '.result.sanitized_diagnostic.rejection.code | type=="string" and length>0' \
+  jq -e '.result.sanitized_diagnostic | type=="object"' \
+    <<<"$runner_result" >/dev/null
+  jq -e '(.result.sanitized_diagnostic.passed == true) or
+    (.result.sanitized_diagnostic.rejection.code | type=="string" and length>0)' \
     <<<"$runner_result" >/dev/null
 else
   printf 'unexpected canary terminal status: %s\n' "$status" >&2

@@ -35,6 +35,7 @@ from scripts.memory_v1_v5_bounded_extraction_worker import (
     ProcessingRejected,
     fail_job,
     persist_packet,
+    project_binding_for_packet,
     rejection_code,
     set_actor,
     sha256_text,
@@ -68,6 +69,28 @@ class ExactProcessingRejected(ProcessingRejected):
     ) -> None:
         super().__init__(code, external_model_calls)
         self.diagnostic = diagnostic
+
+
+def sanitized_runtime_diagnostic(
+    observable: Any | None,
+    exc: BaseException,
+) -> dict[str, Any]:
+    diagnostic = (
+        observable.audit_record()
+        if observable is not None
+        else {"passed": False, "rejection": None}
+    )
+    diagnostic["runtime_rejection"] = {
+        "category": (
+            "database_contract"
+            if isinstance(exc, asyncpg.PostgresError)
+            else "worker_runtime"
+        ),
+        "sqlstate": getattr(exc, "sqlstate", None),
+        "constraint_name": getattr(exc, "constraint_name", None),
+        "message_sha256": sha256_text(str(exc)),
+    }
+    return diagnostic
 
 
 def arguments() -> argparse.Namespace:
@@ -376,6 +399,10 @@ async def process_exact_target(
             PERSIST_NAMESPACE,
             f"persist:{job['job_id']}",
         )
+        packet_binding_event_id = project_binding_for_packet(
+            validated.normalized_packet,
+            expected_binding_event_id,
+        )
         persisted = await persist_packet(
             conn,
             owner=owner,
@@ -385,7 +412,7 @@ async def process_exact_target(
             worker_id=worker_id,
             model_sha256=sha256_text(model),
             validated=validated,
-            binding_event_id=expected_binding_event_id,
+            binding_event_id=packet_binding_event_id,
         )
     except ExactProcessingRejected:
         raise
@@ -394,7 +421,7 @@ async def process_exact_target(
         raise ExactProcessingRejected(
             rejection_code(exc),
             calls,
-            observable.audit_record() if observable is not None else None,
+            sanitized_runtime_diagnostic(observable, exc),
         ) from exc
     return (
         {
@@ -408,6 +435,7 @@ async def process_exact_target(
             "reviewed_binding_pinned": (
                 context["binding_event_id"] == expected_binding_event_id
             ),
+            "project_binding_used": packet_binding_event_id is not None,
             "counts": {
                 "entity_mentions": len(validated.normalized_packet["entity_mentions"]),
                 "observations": len(validated.normalized_packet["observations"]),

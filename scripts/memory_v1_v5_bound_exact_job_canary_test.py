@@ -16,6 +16,7 @@ from scripts.memory_v1_v5_bound_exact_job_canary import (
     claim_exact_target,
     plan_exact_target,
     read_pinned_context,
+    sanitized_runtime_diagnostic,
     validate_arguments,
 )
 
@@ -221,6 +222,16 @@ def main() -> int:
         lambda: validate_arguments(args(enable_external_call=True)),
         "dry-run external call capability",
     )
+    runtime_diagnostic = sanitized_runtime_diagnostic(
+        None,
+        RuntimeError("sensitive raw runtime detail"),
+    )
+    if (
+        runtime_diagnostic["runtime_rejection"]["category"]
+        != "worker_runtime"
+        or "sensitive raw runtime detail" in str(runtime_diagnostic)
+    ):
+        raise AssertionError("runtime diagnostic was not sanitized")
     expect_error(
         lambda: validate_arguments(
             args(apply=True, enable_external_call=True, model="gpt-test")

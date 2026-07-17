@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from types import SimpleNamespace
 
 from scripts.memory_v1_relational_extraction_v5_openai_provider import (
@@ -12,6 +13,7 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
 from scripts.memory_v1_v5_bounded_extraction_worker import (
     APPLY_ENABLE_TOKEN,
     canonical_owners,
+    project_binding_for_packet,
     read_context,
     rejection_code,
     sha256_text,
@@ -141,6 +143,32 @@ def main() -> int:
         "validator_rejected"
     ):
         raise AssertionError("validator error was not sanitized")
+
+    binding = uuid.UUID("aaaaaaaa-0012-4000-8000-000000000012")
+    unresolved_packet = {
+        "observations": [
+            {
+                "projection_class": "project_knowledge",
+                "project_scope": {"state": "unresolved"},
+            }
+        ]
+    }
+    if project_binding_for_packet(unresolved_packet, binding) is not None:
+        raise AssertionError("unused trusted project binding was retained")
+    resolved_packet = {
+        "observations": [
+            {
+                "projection_class": "project_knowledge",
+                "project_scope": {"state": "resolved"},
+            }
+        ]
+    }
+    if project_binding_for_packet(resolved_packet, binding) != binding:
+        raise AssertionError("resolved trusted project binding was omitted")
+    expect_error(
+        lambda: project_binding_for_packet(resolved_packet, None),
+        "resolved project scope without trusted binding",
+    )
 
     report = stable_json(
         {
