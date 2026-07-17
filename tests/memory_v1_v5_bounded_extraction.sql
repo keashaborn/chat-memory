@@ -109,6 +109,12 @@ INSERT INTO public.threads(
     'fa111111-1111-4111-8111-111111111111'
   ),
   (
+    'fa000000-0000-4000-8000-000000000003',
+    'fa111111-1111-4111-8111-111111111111',
+    'V5 owner A component fixture',clock_timestamp(),clock_timestamp(),false,
+    'fa111111-1111-4111-8111-111111111111'
+  ),
+  (
     'fb000000-0000-4000-8000-000000000001',
     'fb222222-2222-4222-8222-222222222222',
     'V5 owner B fixture',clock_timestamp(),clock_timestamp(),false,
@@ -126,7 +132,7 @@ INSERT INTO memory.project_space(
   (
     'fb000000-0000-4000-8000-000000000002',
     'fb222222-2222-4222-8222-222222222222',
-    'other-project','Other Project','{"test":true}'::jsonb
+    'verbal-sage','Verbal Sage','{"test":true}'::jsonb
   );
 
 SET SESSION AUTHORIZATION brains_app;
@@ -164,6 +170,54 @@ SELECT 1/((count(*)=1)::integer)
 FROM memory.current_project_thread_binding_v5
 WHERE thread_id='fa000000-0000-4000-8000-000000000001'
   AND project_key='verbal-sage';
+
+SELECT
+  binding_event_id,
+  project_key,
+  action,
+  apply_outcome
+FROM memory.apply_owner_project_thread_binding_v5(
+  'fa100000-0000-4000-8000-000000000003',
+  'fa000000-0000-4000-8000-000000000003',
+  'fa000000-0000-4000-8000-000000000002',
+  'bind','explicit_component_thread_binding'
+)
+\gset component_binding_
+SELECT
+  1/((:'component_binding_project_key'='verbal-sage')::integer),
+  1/((:'component_binding_apply_outcome'='applied')::integer);
+
+SELECT component_id,component_key,apply_outcome
+FROM memory.apply_owner_project_component_v5(
+  'fa100000-0000-4000-8000-000000000004',
+  'fa000000-0000-4000-8000-000000000002',
+  'memory-v1','Memory V1',NULL,
+  ARRAY['memory','memory system']::text[],
+  '{"test":true}'::jsonb
+)
+\gset component_
+SELECT
+  1/((:'component_component_key'='memory-v1')::integer),
+  1/((:'component_apply_outcome'='applied')::integer);
+
+SELECT set_config(
+  'app.user_id','fb222222-2222-4222-8222-222222222222',true
+);
+SELECT component_id,component_key,apply_outcome
+FROM memory.apply_owner_project_component_v5(
+  'fb100000-0000-4000-8000-000000000004',
+  'fb000000-0000-4000-8000-000000000002',
+  'owner-b-only','Owner B Only',NULL,
+  ARRAY['private component']::text[],
+  '{"test":true}'::jsonb
+)
+\gset owner_b_component_
+SELECT
+  1/((:'owner_b_component_component_key'='owner-b-only')::integer),
+  1/((:'owner_b_component_apply_outcome'='applied')::integer);
+SELECT set_config(
+  'app.user_id','fa111111-1111-4111-8111-111111111111',true
+);
 
 SELECT evidence_id,content_sha256
 FROM memory.record_owner_evidence_v1(
@@ -251,6 +305,7 @@ SELECT jsonb_build_object(
     ),
     'project_scope',jsonb_build_object(
       'state','resolved','project_key','verbal-sage',
+      'component_key',NULL,
       'binding_source','trusted_thread_binding'
     ),
     'sensitivity','medium','extraction_confidence',0.99,
@@ -337,6 +392,207 @@ WHERE job_id=:'claim_job_id'
   AND operation_id='fa400000-0000-4000-8000-000000000001'
   AND details->>'packet_storage_sha256'
       =:'persisted_packet_storage_sha256';
+
+SELECT evidence_id,content_sha256
+FROM memory.record_owner_evidence_v1(
+  'user_statement','public.chat_log',
+  'fa200000-0000-4000-8000-000000000003',
+  'Memory V1 must preserve component-aware project scope.',
+  '2026-07-17T12:05:00Z',1,1,
+  'public.chat_log:thread:fa000000-0000-4000-8000-000000000003',
+  'medium',
+  '{
+    "capture_version":"test",
+    "thread_id":"fa000000-0000-4000-8000-000000000003",
+    "semantic_processing":"pending"
+  }'::jsonb
+)
+\gset component_evidence_
+
+SELECT job_id
+FROM memory.enqueue_owner_evidence_extraction_v1(
+  :'component_evidence_evidence_id',
+  '20260717_v5_component_packet_test',
+  :'component_evidence_content_sha256',
+  'relational_extraction','eligible_unprocessed'
+)
+\gset component_queue_
+
+SELECT *
+FROM memory.claim_owner_evidence_extraction_job_v1(
+  'fa300000-0000-4000-8000-000000000003',
+  'relational_extraction','v5-bounded-test',300,1
+)
+\gset component_claim_
+
+SELECT
+  1/((thread_id='fa000000-0000-4000-8000-000000000003')::integer),
+  1/((project_id='fa000000-0000-4000-8000-000000000002')::integer),
+  1/((project_key='verbal-sage')::integer),
+  1/((binding_event_id=:'component_binding_binding_event_id')::integer)
+FROM memory.read_owner_evidence_extraction_context_v5(
+  :'component_claim_job_id',:'component_claim_lease_token',
+  'v5-bounded-test',:'component_claim_evidence_content_sha256'
+);
+
+SELECT jsonb_build_object(
+  'contract_version','memory_v1_relational_extraction_v5',
+  'source_envelope',jsonb_build_object(
+    'job_id',:'component_claim_job_id',
+    'source_system','public.chat_log',
+    'source_external_id','fa200000-0000-4000-8000-000000000003',
+    'source_sha256',:'component_claim_evidence_content_sha256',
+    'source_recorded_at',:'component_claim_evidence_recorded_at'
+  ),
+  'predicate_registry_version','memory_predicate_registry_v5',
+  'entity_mentions',jsonb_build_array(jsonb_build_object(
+    'entity_ref','e01','entity_type','project','mention_kind','named',
+    'name_text','Memory V1','relationship_role',NULL,
+    'source_spans',jsonb_build_array(jsonb_build_object(
+      'start',0,'end',9,'span_sha256',
+      encode(public.digest(convert_to('Memory V1','UTF8'),'sha256'),'hex')
+    )),
+    'extraction_confidence',1.0,
+    'reason_codes',jsonb_build_array('explicit_registered_component')
+  )),
+  'observations',jsonb_build_array(jsonb_build_object(
+    'observation_ref','o01','subject_entity_ref','e01',
+    'predicate','project.requirement','predicate_registry_status','governed',
+    'object',jsonb_build_object(
+      'kind','literal','datatype','text',
+      'value','preserve component-aware project scope','unit',NULL,
+      'approximate',false
+    ),
+    'polarity','affirmed','modality','asserted',
+    'projection_class','project_knowledge',
+    'surface_policy','exact_project_scope_only',
+    'temporal',jsonb_build_object(
+      'semantic','observation_time','shape','instant','basis','instant',
+      'source_form','implicit_source_time','certainty','exact',
+      'precision','minute','instant',:'component_claim_evidence_recorded_at',
+      'calendar_range',NULL,'instant_range',NULL,
+      'relative_offset',NULL,'recurrence',NULL,
+      'anchored_to_source_time',true,'reason_codes',jsonb_build_array(
+        'observation_time_uses_source_timestamp'
+      ),
+      'normalization_policy_version','memory_temporal_normalization_v5'
+    ),
+    'project_scope',jsonb_build_object(
+      'state','resolved','project_key','verbal-sage',
+      'component_key','memory-v1',
+      'binding_source','trusted_component_registry'
+    ),
+    'sensitivity','medium','extraction_confidence',0.99,
+    'source_spans',jsonb_build_array(jsonb_build_object(
+      'start',0,
+      'end',length('Memory V1 must preserve component-aware project scope.'),
+      'span_sha256',:'component_claim_evidence_content_sha256'
+    )),
+    'reason_codes',jsonb_build_array('explicit_component_requirement')
+  )),
+  'comparison_hints','[]'::jsonb,
+  'deferrals','[]'::jsonb,
+  'packet_findings',jsonb_build_array('synthetic_component_contract_test')
+) AS component_packet
+\gset
+
+SELECT jsonb_set(
+  :'component_packet'::jsonb,
+  '{entity_mentions,0,name_text}',
+  '"Unknown Component"'::jsonb
+) AS component_alias_mismatch_packet
+\gset
+SELECT pg_temp.assert_v5_call_denied(format(
+  $sql$
+    SELECT * FROM memory.persist_owner_evidence_extraction_packet_v5(
+      'fa400000-0000-4000-8000-000000000103',
+      'fa400000-0000-4000-8000-000000000104',%L,%L,
+      'v5-bounded-test',%L,'synthetic_fixture','v1',%L,%L,%L,
+      %L::jsonb,true,0,%L
+    )
+  $sql$,
+  :'component_claim_job_id',:'component_claim_lease_token',
+  :'component_claim_evidence_content_sha256',repeat('c',64),repeat('b',64),
+  repeat('e',64),:'component_alias_mismatch_packet',
+  :'component_binding_binding_event_id'
+));
+
+SELECT jsonb_set(
+  jsonb_set(
+    :'component_packet'::jsonb,
+    '{entity_mentions,0,name_text}',
+    '"Owner B Only"'::jsonb
+  ),
+  '{observations,0,project_scope,component_key}',
+  '"owner-b-only"'::jsonb
+) AS cross_owner_component_packet
+\gset
+SELECT pg_temp.assert_v5_call_denied(format(
+  $sql$
+    SELECT * FROM memory.persist_owner_evidence_extraction_packet_v5(
+      'fa400000-0000-4000-8000-000000000105',
+      'fa400000-0000-4000-8000-000000000106',%L,%L,
+      'v5-bounded-test',%L,'synthetic_fixture','v1',%L,%L,%L,
+      %L::jsonb,true,0,%L
+    )
+  $sql$,
+  :'component_claim_job_id',:'component_claim_lease_token',
+  :'component_claim_evidence_content_sha256',repeat('c',64),repeat('b',64),
+  repeat('e',64),:'cross_owner_component_packet',
+  :'component_binding_binding_event_id'
+));
+
+SELECT
+  packet_id,
+  validator_packet_sha256,
+  packet_storage_sha256,
+  status,
+  apply_outcome
+FROM memory.persist_owner_evidence_extraction_packet_v5(
+  'fa400000-0000-4000-8000-000000000003',
+  'fa400000-0000-4000-8000-000000000004',
+  :'component_claim_job_id',:'component_claim_lease_token',
+  'v5-bounded-test',:'component_claim_evidence_content_sha256',
+  'synthetic_fixture','v1',repeat('c',64),repeat('b',64),repeat('e',64),
+  :'component_packet'::jsonb,true,0,
+  :'component_binding_binding_event_id'
+)
+\gset component_persisted_
+SELECT
+  1/((:'component_persisted_status'='review_required')::integer),
+  1/((:'component_persisted_apply_outcome'='applied')::integer);
+
+SELECT
+  1/((packet_storage_sha256
+        =:'component_persisted_packet_storage_sha256')::integer),
+  1/((apply_outcome='replayed')::integer)
+FROM memory.persist_owner_evidence_extraction_packet_v5(
+  'fa400000-0000-4000-8000-000000000003',
+  'fa400000-0000-4000-8000-000000000004',
+  :'component_claim_job_id',:'component_claim_lease_token',
+  'v5-bounded-test',:'component_claim_evidence_content_sha256',
+  'synthetic_fixture','v1',repeat('c',64),repeat('b',64),repeat('e',64),
+  :'component_packet'::jsonb,true,0,
+  :'component_binding_binding_event_id'
+);
+
+SELECT 1/((count(*)=2)::integer)
+FROM memory.evidence_extraction_packet_v5;
+SELECT 1/((count(*)=1)::integer)
+FROM memory.evidence_extraction_packet_v5
+WHERE packet_id=:'component_persisted_packet_id'
+  AND normalized_packet#>>'{observations,0,project_scope,project_key}'
+      ='verbal-sage'
+  AND normalized_packet#>>'{observations,0,project_scope,component_key}'
+      ='memory-v1'
+  AND normalized_packet#>>'{observations,0,project_scope,binding_source}'
+      ='trusted_component_registry';
+SELECT 1/((count(*)=1)::integer)
+FROM memory.evidence_extraction_event
+WHERE job_id=:'component_claim_job_id'
+  AND operation_id='fa400000-0000-4000-8000-000000000003'
+  AND details->>'packet_storage_sha256'
+      =:'component_persisted_packet_storage_sha256';
 
 SELECT pg_temp.assert_v5_call_denied(
   'UPDATE memory.evidence_extraction_packet_v5 '

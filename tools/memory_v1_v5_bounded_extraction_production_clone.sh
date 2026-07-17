@@ -22,6 +22,8 @@ prerequisites=(
 )
 migration=ops/sql/20260717_memory_v1_v5_bounded_extraction.sql
 rollback=ops/sql/20260717_memory_v1_v5_bounded_extraction_rollback.sql
+component_migration=ops/sql/20260717_memory_v1_v5_project_components.sql
+component_rollback=ops/sql/20260717_memory_v1_v5_project_components_rollback.sql
 test_sql=tests/memory_v1_v5_bounded_extraction.sql
 provider_test=scripts/memory_v1_relational_extraction_v5_provider_test.py
 openai_provider_test=scripts/memory_v1_relational_extraction_v5_openai_provider_test.py
@@ -84,7 +86,8 @@ capture_state() {
 }
 
 for required in \
-  "${prerequisites[@]}" "$migration" "$rollback" "$test_sql" \
+  "${prerequisites[@]}" "$migration" "$rollback" \
+  "$component_migration" "$component_rollback" "$test_sql" \
   "$provider_test" "$openai_provider_test" "$worker" "$worker_test"; do
   [[ -f "$repo_root/$required" ]]
 done
@@ -116,6 +119,8 @@ done
 capture_state "$before"
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
+run_sql <"$repo_root/$component_migration"
+run_sql <"$repo_root/$component_migration"
 run_sql <"$repo_root/$test_sql"
 
 [[ "$(scalar "SELECT count(*) FROM memory.project_thread_binding_event")" == "0" ]]
@@ -149,8 +154,16 @@ assert report['write_counts']=={
 assert 'source' not in report
 PY
 
+run_sql <"$repo_root/$component_rollback"
 run_sql <"$repo_root/$rollback"
-[[ "$(scalar "SELECT (to_regclass('memory.project_thread_binding_event') IS NULL AND to_regclass('memory.evidence_extraction_packet_v5') IS NULL AND to_regrole('memory_v5_extraction_maintainer') IS NULL)::integer")" == "1" ]]
+[[ "$(scalar "SELECT (
+  to_regclass('memory.project_thread_binding_event') IS NULL
+  AND to_regclass('memory.evidence_extraction_packet_v5') IS NULL
+  AND to_regclass('memory.project_component_v5') IS NULL
+  AND to_regclass('memory.project_component_alias_v5') IS NULL
+  AND to_regclass('memory.project_component_registration_event_v5') IS NULL
+  AND to_regrole('memory_v5_extraction_maintainer') IS NULL
+)::integer")" == "1" ]]
 capture_state "$after"
 cmp -s "$before" "$after"
 

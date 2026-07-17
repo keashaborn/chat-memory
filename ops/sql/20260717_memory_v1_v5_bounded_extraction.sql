@@ -632,28 +632,13 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM jsonb_array_elements(p_normalized_packet->'observations') AS item
-    WHERE CASE
-      WHEN item->>'projection_class'='project_knowledge' THEN NOT (
-        (item#>>'{project_scope,state}' IS NOT DISTINCT FROM 'unresolved'
-         AND item#>>'{project_scope,binding_source}'
-             IS NOT DISTINCT FROM 'unresolved'
-         AND item#>'{project_scope,project_key}'
-             IS NOT DISTINCT FROM 'null'::jsonb)
-        OR
-        (item#>>'{project_scope,state}' IS NOT DISTINCT FROM 'resolved'
-         AND item#>>'{project_scope,binding_source}'
-             IS NOT DISTINCT FROM 'trusted_thread_binding'
-         AND coalesce(btrim(item#>>'{project_scope,project_key}'),'')<>'')
-      )
-      ELSE NOT (
-        item#>>'{project_scope,state}'
-          IS NOT DISTINCT FROM 'not_applicable'
-        AND item#>>'{project_scope,binding_source}'
-          IS NOT DISTINCT FROM 'not_applicable'
-        AND item#>'{project_scope,project_key}'
-          IS NOT DISTINCT FROM 'null'::jsonb
-      )
-    END
+    WHERE NOT memory.v5_project_scope_valid(item->'project_scope')
+       OR CASE
+         WHEN item->>'projection_class'='project_knowledge' THEN
+           item#>>'{project_scope,state}' NOT IN ('resolved','unresolved')
+         ELSE
+           item#>>'{project_scope,state}'<>'not_applicable'
+       END
   ) THEN
     RAISE EXCEPTION 'normalized V5 project scope is invalid'
       USING ERRCODE='23514';
@@ -680,6 +665,8 @@ BEGIN
           observation#>>'{project_scope,state}'='resolved'
           AND NOT (
             (
+              observation#>>'{project_scope,component_key}' IS NULL
+              AND
               subject.mention->>'mention_kind'='anonymous'
               AND subject.mention->>'relationship_role'
                 ='project:current_thread'
@@ -687,6 +674,8 @@ BEGIN
             )
             OR
             (
+              observation#>>'{project_scope,component_key}' IS NULL
+              AND
               subject.mention->>'mention_kind'='named'
               AND btrim(
                 regexp_replace(
@@ -700,6 +689,34 @@ BEGIN
                   '[^a-z0-9]+','-','g'
                 ),
                 '-'
+              )
+            )
+            OR
+            (
+              observation#>>'{project_scope,component_key}' IS NOT NULL
+              AND observation#>>'{project_scope,binding_source}'
+                    ='trusted_component_registry'
+              AND subject.mention->>'mention_kind'='named'
+              AND coalesce(btrim(subject.mention->>'name_text'),'')<>''
+              AND EXISTS (
+                SELECT 1
+                FROM memory.project_space AS project
+                JOIN memory.project_component_v5 AS component
+                  ON component.owner_user_id=project.owner_user_id
+                 AND component.project_id=project.project_id
+                JOIN memory.project_component_alias_v5 AS alias
+                  ON alias.owner_user_id=component.owner_user_id
+                 AND alias.project_id=component.project_id
+                 AND alias.component_id=component.component_id
+                WHERE project.owner_user_id=actor
+                  AND project.project_key
+                        =observation#>>'{project_scope,project_key}'
+                  AND component.component_key
+                        =observation#>>'{project_scope,component_key}'
+                  AND alias.normalized_alias
+                        =memory.normalize_project_component_alias_v5(
+                          subject.mention->>'name_text'
+                        )
               )
             )
           )
