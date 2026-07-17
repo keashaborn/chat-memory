@@ -172,7 +172,8 @@ preflight=$(scalar "
         AND project_key='$project_key'),
     'reviewed_retry_event',(SELECT count(*) FROM memory.evidence_extraction_event
       WHERE owner_user_id='$owner' AND job_id='$job_id'
-        AND event_type='queued' AND event_payload->>'queue_reason'='reviewed_retry'),
+        AND event_type='queued' AND actor_type='admin'
+        AND actor_ref='reviewed_retry'),
     'reserved_operations',(SELECT count(*) FROM memory.evidence_extraction_event
       WHERE owner_user_id='$owner'
         AND operation_id IN ('$claim_operation','$persist_operation','$failure_operation')),
