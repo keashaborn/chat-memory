@@ -12,6 +12,7 @@ compose=(
 )
 staging_migration=ops/sql/20260715_memory_v1_relational_staging_v5.sql
 writer_migration=ops/sql/20260715_memory_v1_relational_writer_v5.sql
+component_migration=ops/sql/20260717_memory_v1_v5_project_components.sql
 preflight_migration=ops/sql/20260716_memory_v1_v5_stage_preflight_api.sql
 preflight_rollback=ops/sql/20260716_memory_v1_v5_stage_preflight_api_rollback.sql
 preflight_test=tests/memory_v1_v5_stage_preflight_api.sql
@@ -54,6 +55,7 @@ printf '%s\n' \
   'CREATE ROLE memory_v5_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   'CREATE ROLE memory_v5_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   'CREATE ROLE memory_v5_trace_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
+  'CREATE ROLE memory_v5_extraction_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
@@ -61,6 +63,8 @@ run_sql <"$staging_migration"
 run_sql <"$writer_migration"
 run_sql <"$staging_migration"
 run_sql <"$writer_migration"
+run_sql <"$component_migration"
+run_sql <"$component_migration"
 run_sql <"$preflight_migration"
 run_sql <"$preflight_migration"
 run_sql <"$preflight_test"

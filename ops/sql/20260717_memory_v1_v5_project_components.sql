@@ -9,7 +9,8 @@ BEGIN
      OR to_regrole('memory_v5_extraction_maintainer') IS NULL
      OR to_regclass('memory.project_space') IS NULL
      OR to_regprocedure('memory.current_actor_user_id()') IS NULL
-     OR to_regprocedure('memory.guard_v5_extraction_append_only()') IS NULL THEN
+     OR to_regprocedure('memory.guard_v5_extraction_append_only()') IS NULL
+     OR to_regprocedure('memory.v5_project_scope_valid(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'V5 project component prerequisites are absent';
   END IF;
 END
@@ -171,6 +172,92 @@ AS $function$
     regexp_replace(lower(btrim(p_value)),'[^a-z0-9]+','-','g'),
     '-'
   )
+$function$;
+
+CREATE OR REPLACE FUNCTION memory.v5_project_scope_valid(value jsonb)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+STRICT
+SECURITY INVOKER
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+  key_count integer;
+  state text;
+  project_key text;
+  component_key text;
+  binding_source text;
+  has_component_key boolean;
+BEGIN
+  IF jsonb_typeof(value) <> 'object' THEN
+    RETURN false;
+  END IF;
+  SELECT count(*) INTO key_count FROM jsonb_object_keys(value);
+  state := value->>'state';
+  project_key := value->>'project_key';
+  component_key := value->>'component_key';
+  binding_source := value->>'binding_source';
+  has_component_key := value ? 'component_key';
+
+  IF key_count NOT IN (3,4)
+     OR NOT (value ?& ARRAY['state','project_key','binding_source'])
+     OR (key_count = 4 AND NOT has_component_key)
+     OR state NOT IN ('not_applicable','resolved','unresolved') THEN
+    RETURN false;
+  END IF;
+
+  IF NOT has_component_key THEN
+    RETURN binding_source IN (
+      'not_applicable','explicit_source_text',
+      'trusted_thread_binding','unresolved'
+    ) AND (
+      (state = 'not_applicable'
+       AND value->'project_key' = 'null'::jsonb
+       AND binding_source = 'not_applicable')
+      OR
+      (state = 'unresolved'
+       AND value->'project_key' = 'null'::jsonb
+       AND binding_source = 'unresolved')
+      OR
+      (state = 'resolved'
+       AND project_key IS NOT NULL
+       AND btrim(project_key) <> ''
+       AND length(project_key) <= 500
+       AND binding_source IN ('explicit_source_text','trusted_thread_binding'))
+    );
+  END IF;
+
+  RETURN binding_source IN (
+    'not_applicable','explicit_source_text','trusted_component_registry',
+    'trusted_thread_binding','unresolved'
+  ) AND (
+    (state = 'not_applicable'
+     AND value->'project_key' = 'null'::jsonb
+     AND value->'component_key' = 'null'::jsonb
+     AND binding_source = 'not_applicable')
+    OR
+    (state = 'unresolved'
+     AND value->'project_key' = 'null'::jsonb
+     AND value->'component_key' = 'null'::jsonb
+     AND binding_source = 'unresolved')
+    OR
+    (state = 'resolved'
+     AND project_key IS NOT NULL
+     AND btrim(project_key) <> ''
+     AND length(project_key) <= 500
+     AND (
+       (value->'component_key' = 'null'::jsonb
+        AND binding_source IN ('explicit_source_text','trusted_thread_binding'))
+       OR
+       (component_key IS NOT NULL
+        AND component_key ~ '^[a-z][a-z0-9-]{0,99}$'
+        AND component_key NOT LIKE '%--%'
+        AND right(component_key,1) <> '-'
+        AND binding_source = 'trusted_component_registry')
+     ))
+  );
+END
 $function$;
 
 CREATE OR REPLACE FUNCTION memory.apply_owner_project_component_v5(

@@ -76,6 +76,23 @@ BEGIN
 END
 $security$;
 
+SELECT
+  1 / (memory.v5_project_scope_valid(
+    '{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}'::jsonb
+  )::integer),
+  1 / (memory.v5_project_scope_valid(
+    '{"state":"not_applicable","project_key":null,"component_key":null,"binding_source":"not_applicable"}'::jsonb
+  )::integer),
+  1 / (memory.v5_project_scope_valid(
+    '{"state":"resolved","project_key":"verbal-sage","component_key":"memory-v1","binding_source":"trusted_component_registry"}'::jsonb
+  )::integer),
+  1 / ((NOT memory.v5_project_scope_valid(
+    '{"state":"resolved","project_key":"verbal-sage","component_key":"memory-v1","binding_source":"trusted_thread_binding"}'::jsonb
+  ))::integer),
+  1 / ((NOT memory.v5_project_scope_valid(
+    '{"state":"resolved","project_key":"verbal-sage","component_key":"unknown","binding_source":"trusted_component_registry","extra":true}'::jsonb
+  ))::integer);
+
 BEGIN;
 
 CREATE FUNCTION pg_temp.assert_component_call_denied(p_sql text)
