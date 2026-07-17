@@ -1,0 +1,59 @@
+{
+  "manifest_version": "memory_v1_v5_reviewed_retry_install_v1",
+  "authorization": {
+    "install_authorized": true,
+    "scope": "owner-scoped reviewed extraction retry infrastructure",
+    "required_commit": "f3871b7b5278ff23d67b38c412f8196400e479ff",
+    "stop_before": [
+      "durable_retry_apply",
+      "external_model_call",
+      "packet_persistence",
+      "packet_review",
+      "projection",
+      "retrieval_activation",
+      "prompt_influence"
+    ]
+  },
+  "source_files": [
+    {
+      "kind": "migration",
+      "path": "ops/sql/20260717_memory_v1_v5_reviewed_retry.sql",
+      "sha256": "f2a3d0708c1d60fd79c5a16899d8d53f6443f2523813334fdf7d8553b9243124"
+    },
+    {
+      "kind": "rollback",
+      "path": "ops/sql/20260717_memory_v1_v5_reviewed_retry_rollback.sql",
+      "sha256": "eb0b4643a8673aa6dec4cf77e335201361454c2277f3ec029b601cab0d97d69c"
+    },
+    {
+      "kind": "rollback_test",
+      "path": "tests/memory_v1_v5_reviewed_retry.sql",
+      "sha256": "da6a8d3758ce1a29b29421d7ab24a64951a3320312668a4982afe270583efb8d"
+    }
+  ],
+  "expected_persistent_changes": {
+    "roles_created": 1,
+    "functions_created": 1,
+    "trigger_functions_replaced": 1,
+    "tables_created": 0,
+    "memory_rows": 0,
+    "qdrant_rows": 0,
+    "configuration_changes": 0
+  },
+  "postconditions": {
+    "function_owner": "memory_extraction_retry_maintainer",
+    "role_login": false,
+    "role_superuser": false,
+    "role_bypass_rls": false,
+    "brains_app_execute": true,
+    "public_execute": false,
+    "target_job_status": "skipped",
+    "target_job_attempts": 1,
+    "target_packets": 0,
+    "rollback_test_rows": 0,
+    "other_memory_rows_unchanged": true,
+    "qdrant_unchanged": true,
+    "timers_restored": true,
+    "external_model_calls": 0
+  }
+}
