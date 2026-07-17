@@ -35,6 +35,7 @@ from scripts.memory_v1_relational_v5_specialized import (
     TemporalContentPassPacket,
 )
 from scripts.memory_v1_relational_v5_specialized_eval import (
+    PIPELINE_VERSION,
     normalize_known_technical_question_deferrals,
     normalize_plural_sibling_residence,
     normalize_repeated_sibling_roles,
@@ -211,8 +212,11 @@ def replay_model_packet(
         )
     return {
         "case_id": case["case_id"],
+        "ordinal": int(case["ordinal"]),
         "source_external_id": manifest_source["source_external_id"],
         "source_sha256": manifest_source["source_sha256"],
+        "model_packet": model_packet.model_dump(mode="json"),
+        "packet": packet,
         "role_changes": role_changes,
         "original_entity_roles": sorted(
             role for role in original_roles.values() if role is not None
@@ -282,10 +286,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
     return {
         "mode": MODE,
+        "pipeline_version": PIPELINE_VERSION,
         "evaluator_commit": repository_commit(),
         "manifest_sha256": manifest_sha256,
         "case_contract_sha256": sha256_bytes(cases_path.read_bytes()),
         "saved_report_sha256": args.saved_report_sha256,
+        "owner_user_id": str(owner),
         "external_model_calls": 0,
         "store": False,
         "replay": replay,

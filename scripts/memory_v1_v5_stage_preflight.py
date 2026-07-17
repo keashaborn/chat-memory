@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 VERSION = "memory_v1_v5_stage_preflight_v1"
+LIVE_REPORT_MODE = "zero_write_relational_v5_specialized_live_evaluation"
+MATERIALIZED_REPORT_MODE = (
+    "zero_write_relational_v5_specialized_materialized_evaluation"
+)
 RESOLVER = "memory_v1_owner_exact_resolver"
 RESOLVER_VERSION = "v5.1"
 REQUEST_NAMESPACE = uuid.UUID("0f3cc8bb-167e-5f5d-91d7-d2f1889eed35")
@@ -114,6 +118,12 @@ def _schema_hash(schema_path: Path) -> str:
 
 def _sha256_valid(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _git_commit_valid(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 40 and all(
         character in "0123456789abcdef" for character in value
     )
 
@@ -468,9 +478,10 @@ async def _candidates(
 
 
 def _load_case(report: dict[str, Any], case_id: str, owner: uuid.UUID) -> dict[str, Any]:
+    mode = report.get("mode")
     if (
         report.get("store") is not False
-        or report.get("mode") != "zero_write_relational_v5_specialized_live_evaluation"
+        or mode not in {LIVE_REPORT_MODE, MATERIALIZED_REPORT_MODE}
     ):
         raise RuntimeError("source report is not a store=false zero-write evaluation")
     if report.get("owner_user_id") != str(owner):
@@ -478,12 +489,26 @@ def _load_case(report: dict[str, Any], case_id: str, owner: uuid.UUID) -> dict[s
     proof = report.get("zero_write_proof") or {}
     if proof.get("passed") is not True:
         raise RuntimeError("source report zero-write proof did not pass")
+    if mode == MATERIALIZED_REPORT_MODE:
+        replay_sha = report.get("source_replay_report_sha256")
+        if report.get("external_model_calls") != 0 or not _sha256_valid(replay_sha):
+            raise RuntimeError("materialized report provenance is invalid")
     matches = [item for item in report.get("sources", []) if item.get("case_id") == case_id]
     if len(matches) != 1:
         raise RuntimeError("case ID does not select exactly one source")
     source = matches[0]
     if (source.get("evaluation") or {}).get("passed") is not True:
         raise RuntimeError("selected source did not pass evaluation")
+    if mode == MATERIALIZED_REPORT_MODE:
+        provenance = source.get("materialization_provenance") or {}
+        if (
+            provenance.get("source_replay_report_sha256")
+            != report["source_replay_report_sha256"]
+            or not _git_commit_valid(provenance.get("materializer_commit"))
+            or provenance.get("normalization_policy_version")
+            != "memory_v1_relational_specialized_v5_1"
+        ):
+            raise RuntimeError("materialized source provenance is invalid")
     return source
 
 

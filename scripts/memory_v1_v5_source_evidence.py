@@ -21,6 +21,10 @@ APPLY_VERSION = "memory_v1_v5_source_evidence_apply_v1"
 CONFIRMATION = "APPEND_ONLY_CANONICAL_EVIDENCE_NO_V5_STAGE"
 BATCH_NAMESPACE = uuid.UUID("4011ee0d-758c-50ef-a4c4-fbca0a844b78")
 SENSITIVITY_RANK = {"low": 0, "medium": 1, "high": 2, "restricted": 3}
+LIVE_REPORT_MODE = "zero_write_relational_v5_specialized_live_evaluation"
+MATERIALIZED_REPORT_MODE = (
+    "zero_write_relational_v5_specialized_materialized_evaluation"
+)
 
 
 def arguments() -> argparse.Namespace:
@@ -101,12 +105,20 @@ def max_sensitivity(packet: dict[str, Any]) -> str:
 def load_report_sources(
     report: dict[str, Any], *, owner: uuid.UUID, case_ids: list[str]
 ) -> list[dict[str, Any]]:
+    mode = report.get("mode")
+    if mode not in {LIVE_REPORT_MODE, MATERIALIZED_REPORT_MODE}:
+        raise RuntimeError("source report mode is not approved")
     if report.get("owner_user_id") != str(owner):
         raise RuntimeError("report owner mismatch")
     if report.get("store") is not False or not (report.get("zero_write_proof") or {}).get(
         "passed"
     ):
         raise RuntimeError("report is not a passed store=false zero-write evaluation")
+    if mode == MATERIALIZED_REPORT_MODE:
+        if report.get("external_model_calls") != 0 or not _valid_digest(
+            report.get("source_replay_report_sha256"), 64
+        ):
+            raise RuntimeError("materialized report provenance is invalid")
     if not case_ids or len(case_ids) != len(set(case_ids)):
         raise RuntimeError("case IDs must be a unique nonempty list")
     indexed = {item["case_id"]: item for item in report.get("sources", [])}
@@ -117,6 +129,16 @@ def load_report_sources(
         source = indexed[case_id]
         if (source.get("evaluation") or {}).get("passed") is not True:
             raise RuntimeError(f"case did not pass evaluation: {case_id}")
+        if mode == MATERIALIZED_REPORT_MODE:
+            provenance = source.get("materialization_provenance") or {}
+            if (
+                provenance.get("source_replay_report_sha256")
+                != report["source_replay_report_sha256"]
+                or not _valid_digest(provenance.get("materializer_commit"), 40)
+                or provenance.get("normalization_policy_version")
+                != "memory_v1_relational_specialized_v5_1"
+            ):
+                raise RuntimeError("materialized source provenance is invalid")
         packet = source["packet"]
         envelope = packet["source_envelope"]
         output.append(
@@ -129,6 +151,12 @@ def load_report_sources(
             }
         )
     return output
+
+
+def _valid_digest(value: Any, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def validate_authorization(

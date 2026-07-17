@@ -346,6 +346,7 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
             },
             case={
                 "case_id": "synthetic-siblings",
+                "ordinal": 1,
                 "expected": {
                     "outcome": "extract",
                     "required_projection_classes": ["direct_claim"],
@@ -372,6 +373,75 @@ class SpecializedV5OrchestrationTest(unittest.TestCase):
         self.assertEqual(
             [item["after"] for item in result["role_changes"]],
             ["family:sister:1", "family:sister:2", "family:sister:3"],
+        )
+        self.assertEqual(result["packet"]["source_envelope"]["source_sha256"], source_sha256)
+        self.assertEqual(len(result["model_packet"]["entity_mentions"]), 4)
+
+    def test_saved_model_packet_replay_materializes_plural_sibling_residence(self) -> None:
+        text = (
+            "I have three sisters, Cindy one year older Lori and Heidi; "
+            "they all live in the Green Bay area."
+        )
+        graph = sibling_graph_packet(text, ["Cindy", "Lori", "Heidi"])
+        model_packet = {
+            "entity_mentions": [
+                item.model_dump(mode="json") for item in graph.entity_mentions
+            ],
+            "observations": [
+                item.model_dump(mode="json") for item in graph.relationship_observations
+            ],
+            "comparison_hints": [],
+            "deferrals": [],
+            "packet_findings": [],
+        }
+        source_sha256 = sha256_text(text)
+        source = {
+            "job_id": "11111111-1111-4111-8111-111111111111",
+            "source_external_id": SOURCE_ID,
+            "source_sha256": source_sha256,
+            "source_recorded_at": OBSERVED_AT,
+        }
+        result = replay_model_packet(
+            saved_row={
+                "case_id": "synthetic-sibling-residence",
+                "source_external_id": SOURCE_ID,
+                "source_sha256": source_sha256,
+                "model_packet": model_packet,
+            },
+            case={
+                "case_id": "synthetic-sibling-residence",
+                "ordinal": 1,
+                "expected": {
+                    "outcome": "extract",
+                    "required_projection_classes": ["direct_claim"],
+                    "required_entity_roles": [
+                        "family:sister:1",
+                        "family:sister:2",
+                        "family:sister:3",
+                    ],
+                    "required_predicate_families": [
+                        "relationship.sibling_of",
+                        "residence.lives_at",
+                    ],
+                    "required_temporal_features": ["open_state_validity"],
+                    "required_comparison_relations": [],
+                    "required_deferrals": [],
+                    "forbidden_projection_classes": [],
+                    "forbidden_predicates": [],
+                    "require_manual_review": True,
+                },
+            },
+            manifest_source=source,
+            live_source={"source_external_id": SOURCE_ID, "text": text},
+            registry=checked_in_registry(),
+        )
+        self.assertTrue(result["evaluation"]["passed"])
+        self.assertEqual(
+            sum(
+                item["predicate"] == "residence.lives_at"
+                for item in result["packet"]["observations"]
+            ),
+            3,
         )
 
     def test_repeated_sibling_roles_are_numbered_by_exact_source_order(self) -> None:
