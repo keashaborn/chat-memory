@@ -12,6 +12,9 @@ compose=(
 )
 migration=ops/sql/20260717_memory_v1_temporal_contract_compat_v5.sql
 rollback=ops/sql/20260717_memory_v1_temporal_contract_compat_v5_rollback.sql
+staging_migration=ops/sql/20260715_memory_v1_relational_staging_v5.sql
+writer_migration=ops/sql/20260715_memory_v1_relational_writer_v5.sql
+preflight_migration=ops/sql/20260716_memory_v1_v5_stage_preflight_api.sql
 runner=scripts/memory_v1_v5_stage_batch.py
 fixture=tests/memory_v1_v5_stage_batch_fixture.py
 manifest=/home/ubuntu/memory-v1-reviews/v5-10-v5-13-stage-batch-manifest-d9596ee.json
@@ -77,6 +80,9 @@ printf '%s\n' \
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
 
+run_sql <"$staging_migration"
+run_sql <"$writer_migration"
+run_sql <"$preflight_migration"
 run_sql <"$migration"
 run_sql <"$migration"
 [[ "$(scalar "
