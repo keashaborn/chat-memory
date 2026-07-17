@@ -80,7 +80,7 @@
     },
     {
       "path": "tests/memory_v1_projection_staging_production_v5.sql",
-      "sha256": "3046d4d13e7df87f849033a3dc6f0beebd6c05326f7405de2b2200c95d718896",
+      "sha256": "705a203f3ed73dc6036b87fb7708b5b89ca8df457557b80132ad661e898e3702",
       "kind": "rolled_back_test",
       "ordinal": 4
     }

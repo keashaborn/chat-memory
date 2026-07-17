@@ -219,7 +219,7 @@ def validate_plan(plan: dict, repo_root: Path, *, require_git: bool = True) -> d
         "logical_rollback": [1],
         "rolled_back_test": list(range(1, 5)),
         "clone_only_test": [1],
-        "clone_rehearsal": list(range(1, 5)),
+        "clone_rehearsal": list(range(1, 6)),
         "recovery_plan": [1],
     }
     seen_paths: set[str] = set()

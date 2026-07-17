@@ -1442,21 +1442,36 @@ ROLLBACK;
 
 DO $empty$
 BEGIN
-  IF EXISTS (SELECT 1 FROM memory.projection_plan)
-     OR EXISTS (SELECT 1 FROM memory.projection_plan_item)
-     OR EXISTS (SELECT 1 FROM memory.projection_claim_payload)
-     OR EXISTS (SELECT 1 FROM memory.projection_preference_payload)
-     OR EXISTS (SELECT 1 FROM memory.projection_project_payload)
-     OR EXISTS (SELECT 1 FROM memory.projection_plan_observation)
-     OR EXISTS (SELECT 1 FROM memory.projection_plan_relation)
-     OR EXISTS (SELECT 1 FROM memory.projection_review)
-     OR EXISTS (SELECT 1 FROM memory.projection_apply_event)
-     OR EXISTS (SELECT 1 FROM memory.preference_revision_observation)
-     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision_observation)
-     OR EXISTS (SELECT 1 FROM memory.claim_relation_v5)
-     OR EXISTS (SELECT 1 FROM memory.preference_relation_v5)
-     OR EXISTS (SELECT 1 FROM memory.project_knowledge_relation_v5)
-     OR EXISTS (SELECT 1 FROM memory.projection_dispatch_v5) THEN
+  IF EXISTS (SELECT 1 FROM memory.projection_plan
+             WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_plan_item
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_claim_payload
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_preference_payload
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_project_payload
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_plan_observation
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_plan_relation
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_review
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_apply_event
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.preference_revision_observation
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_revision_observation
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.claim_relation_v5
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.preference_relation_v5
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.project_knowledge_relation_v5
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM memory.projection_dispatch_v5
+                WHERE owner_user_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222')) THEN
     RAISE EXCEPTION 'projection security suite left rows behind';
   END IF;
 END

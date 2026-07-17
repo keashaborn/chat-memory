@@ -151,7 +151,7 @@
     },
     {
       "path": "tests/memory_v1_projection_staging_production_v5.sql",
-      "sha256": "3046d4d13e7df87f849033a3dc6f0beebd6c05326f7405de2b2200c95d718896",
+      "sha256": "705a203f3ed73dc6036b87fb7708b5b89ca8df457557b80132ad661e898e3702",
       "kind": "rolled_back_test",
       "ordinal": 4
     },
@@ -178,6 +178,12 @@
       "sha256": "251dd790edff47b0ffe518d1af1c18a311a017f93b21af547b60ec438666362f",
       "kind": "clone_rehearsal",
       "ordinal": 4
+    },
+    {
+      "path": "tools/memory_v1_projection_staging_v5_full_data_clone.sh",
+      "sha256": "782c5b62c9c16d71f76be22d1acd12ffc102e72e54bfae4342afc08843286070",
+      "kind": "clone_rehearsal",
+      "ordinal": 5
     },
     {
       "path": "ops/manifests/memory_v1_v5_component_projection_recovery_plan_20260717.json",
