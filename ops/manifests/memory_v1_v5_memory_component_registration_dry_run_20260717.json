@@ -1,0 +1,51 @@
+{
+  "manifest_version": "memory_v1_v5_memory_component_registration_dry_run_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "project": {
+    "project_id": "08cd6a8a-5599-43d5-8d5c-b59401df8ccc",
+    "project_key": "verbal-sage",
+    "display_name": "Verbal Sage"
+  },
+  "operation_id": "9698390e-cfd7-4db6-9af0-df7afb016ffb",
+  "component": {
+    "component_key": "memory-v1",
+    "display_name": "Memory V1",
+    "parent_component_id": null,
+    "requested_aliases": [],
+    "normalized_aliases": [
+      "memory-v1"
+    ],
+    "metadata": {
+      "component_kind": "memory_architecture",
+      "registration_source": "controlled_registry_v1"
+    }
+  },
+  "test": {
+    "path": "tests/memory_v1_v5_memory_component_registration_dry_run.sql",
+    "sha256": "dd3716c845b73c6204ac9d7fa8902134a0e53e0b0576a6c899e9026547da273a"
+  },
+  "expected_in_transaction": {
+    "component_rows": 1,
+    "alias_rows": 1,
+    "registration_event_rows": 1,
+    "replay_writes": 0,
+    "foreign_owner_component_rows": 0
+  },
+  "controls": {
+    "production_writes": 0,
+    "clone_only": true,
+    "transaction_rollback_required": true,
+    "external_model_calls": 0,
+    "qdrant_reads": 0,
+    "qdrant_writes": 0,
+    "retrieval_activation": false,
+    "prompt_influence": false,
+    "excluded_components": [
+      "resse",
+      "vantage-fm",
+      "lifeswitch",
+      "lifeswitch-agent-architecture",
+      "vector-index"
+    ]
+  }
+}
