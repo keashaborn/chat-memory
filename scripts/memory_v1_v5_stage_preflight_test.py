@@ -44,6 +44,22 @@ def observation(entity_ref: str, *, sensitivity: str = "low", correction: bool =
     }
 
 
+def project_observation(entity_ref: str) -> dict:
+    return {
+        "subject_entity_ref": entity_ref,
+        "object": {"kind": "literal", "value": "x"},
+        "sensitivity": "medium",
+        "projection_class": "project_knowledge",
+        "modality": "asserted",
+        "project_scope": {
+            "state": "resolved",
+            "project_key": "verbal-sage",
+            "component_key": "memory-v1",
+            "binding_source": "trusted_component_registry",
+        },
+    }
+
+
 def main() -> None:
     self_result = resolve_mention(
         mention("e01", "self", "self_reference", None),
@@ -98,6 +114,32 @@ def main() -> None:
         mention("e08", "project", "named", "Verbal Sage"), [], []
     )
     assert project["action"] == "defer"
+
+    trusted_project = resolve_mention(
+        mention("e11", "project", "named", "Verbal Sage Memory V1/V5"),
+        [project_observation("e11")],
+        [],
+    )
+    assert trusted_project["action"] == "create_new"
+    assert trusted_project["decision_state"] == "manual_review_required"
+    assert trusted_project["proposed_entity"] == {
+        "entity_type": "project",
+        "identity_state": "named",
+        "canonical_name": "Verbal Sage Memory V1/V5",
+        "display_label": "Verbal Sage Memory V1/V5",
+        "creation_reason": "trusted_project_scope_new_entity",
+    }
+
+    trusted_existing_project = resolve_mention(
+        mention("e12", "project", "named", "Verbal Sage Memory V1/V5"),
+        [project_observation("e12")],
+        [candidate("project", 12)],
+    )
+    assert trusted_existing_project["action"] == "link_existing"
+    assert (
+        trusted_existing_project["decision_state"]
+        == "manual_review_required"
+    )
 
     ambiguous = resolve_mention(
         mention("e09", "concept", "named", "unclear term"),

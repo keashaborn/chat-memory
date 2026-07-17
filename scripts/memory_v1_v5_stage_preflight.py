@@ -23,7 +23,7 @@ LEGACY_MATERIALIZED_PIPELINES = {
 }
 CURRENT_MATERIALIZED_PIPELINE = "memory_v1_relational_specialized_v5_2"
 RESOLVER = "memory_v1_owner_exact_resolver"
-RESOLVER_VERSION = "v5.1"
+RESOLVER_VERSION = "v5.2"
 REQUEST_NAMESPACE = uuid.UUID("0f3cc8bb-167e-5f5d-91d7-d2f1889eed35")
 SENSITIVE_LEVELS = {"medium", "high", "restricted"}
 CORRECTION_CLASSES = {"correction"}
@@ -425,6 +425,38 @@ def _candidate_payload(
     }
 
 
+def _trusted_project_scope(
+    observations: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    project_observations = [
+        item
+        for item in observations
+        if item.get("projection_class") == "project_knowledge"
+    ]
+    if not project_observations:
+        return None
+    scopes = [item.get("project_scope") for item in project_observations]
+    if not all(
+        isinstance(scope, dict)
+        and scope.get("state") == "resolved"
+        and isinstance(scope.get("project_key"), str)
+        and bool(scope["project_key"].strip())
+        and scope.get("binding_source")
+        in {"trusted_component_registry", "trusted_thread_binding"}
+        for scope in scopes
+    ):
+        return None
+    identities = {
+        (
+            scope["project_key"],
+            scope.get("component_key"),
+            scope["binding_source"],
+        )
+        for scope in scopes
+    }
+    return scopes[0] if len(identities) == 1 else None
+
+
 def resolve_mention(
     mention: dict[str, Any],
     observations: list[dict[str, Any]],
@@ -479,7 +511,32 @@ def resolve_mention(
             else [f"{kind}_creation_blocked"]
         )
     elif entity_type == "project":
-        reasons = ["trusted_project_binding_required"]
+        trusted_project_scope = _trusted_project_scope(relevant)
+        if (
+            trusted_project_scope is None
+            or kind != "named"
+            or not isinstance(name, str)
+            or not name.strip()
+        ):
+            reasons = ["trusted_project_binding_required"]
+        elif len(candidates) > 1:
+            reasons = ["same_name_owner_ambiguity"]
+        elif len(candidates) == 1:
+            action = "link_existing"
+            state = "manual_review_required"
+            selected = str(candidates[0]["entity_id"])
+            reasons = ["trusted_project_scope_existing_entity_review"]
+        else:
+            action = "create_new"
+            state = "manual_review_required"
+            proposed = {
+                "entity_type": "project",
+                "identity_state": "named",
+                "canonical_name": name.strip(),
+                "display_label": name.strip(),
+                "creation_reason": "trusted_project_scope_new_entity",
+            }
+            reasons = ["trusted_project_scope_new_entity_review"]
     elif kind != "named" or not isinstance(name, str) or not name.strip():
         reasons = ["stable_named_identity_required"]
     elif len(candidates) > 1:
