@@ -1054,6 +1054,10 @@ END
 $isolation$;
 
 RESET SESSION AUTHORIZATION;
+-- The fixture membership above is only needed to seed writer-owned rows.
+-- Remove it before testing brains_app's direct production privileges so this
+-- assertion is valid whether the deployed login is INHERIT or NOINHERIT.
+REVOKE memory_v5_writer FROM brains_app;
 SET SESSION AUTHORIZATION brains_app;
 SELECT pg_temp.assert_application_read_denied();
 SELECT set_config(
@@ -1384,6 +1388,7 @@ BEGIN
 END
 $zero_write_replay$;
 
+GRANT memory_v5_writer TO brains_app;
 SET SESSION AUTHORIZATION brains_app;
 SET ROLE memory_v5_writer;
 SELECT set_config(

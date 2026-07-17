@@ -14,6 +14,7 @@ target_test=tests/memory_v1_projection_targets_v5.sql
 projection_migration=ops/sql/20260715_memory_v1_projection_staging_v5.sql
 projection_rollback=ops/sql/20260715_memory_v1_projection_staging_v5_rollback.sql
 projection_test=tests/memory_v1_projection_staging_v5.sql
+projection_production_test=tests/memory_v1_projection_staging_production_v5.sql
 apply_migration=ops/sql/20260715_memory_v1_projection_apply_v5.sql
 apply_rollback=ops/sql/20260715_memory_v1_projection_apply_v5_rollback.sql
 component_migration=ops/sql/20260717_memory_v1_v5_project_components.sql
@@ -37,7 +38,7 @@ scalar_sql() {
 "${compose[@]}" up -d --wait postgres
 
 printf '%s\n' \
-  'CREATE ROLE brains_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
+  'CREATE ROLE brains_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;' \
   'CREATE ROLE memory_evidence_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   'CREATE ROLE memory_review_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   'CREATE ROLE memory_v5_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
@@ -81,6 +82,7 @@ baseline_predicate_count=$(scalar_sql 'SELECT count(*) FROM memory.predicate')
 
 if [[ "${PROJECTION_SKIP_SECURITY_TEST:-0}" != '1' ]]; then
   run_sql < "$projection_test"
+  run_sql < "$projection_production_test"
 fi
 
 "${compose[@]}" exec -T postgres \

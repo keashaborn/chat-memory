@@ -21,6 +21,12 @@ PLAN_CONTRACT = "memory_v1_v5_component_projection_acl_recovery_plan_v1"
 AUTH_CONTRACT = (
     "memory_v1_v5_component_projection_acl_recovery_authorization_v1"
 )
+VERIFY_PLAN_CONTRACT = (
+    "memory_v1_v5_component_projection_acl_verification_plan_v1"
+)
+VERIFY_AUTH_CONTRACT = (
+    "memory_v1_v5_component_projection_acl_verification_authorization_v1"
+)
 ANCESTOR = "9174a41ed31cb7ce7c1f5766b499aa9c3c3bfaa3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 UNIT_RE = re.compile(r"^memory-v1-[a-z0-9-]+\.timer$")
@@ -235,6 +241,160 @@ def validate_plan(plan: dict, repo_root: Path) -> dict:
     }
 
 
+def validate_verification_plan(plan: dict, repo_root: Path) -> dict:
+    errors: list[str] = []
+    if plan.get("contract_version") != VERIFY_PLAN_CONTRACT:
+        errors.append("unexpected verification plan contract_version")
+    if plan.get("production_authorized") is not False:
+        errors.append("committed verification plan must remain unauthorized")
+    if plan.get("source") != {
+        "branch": "memory_v1_v5_component_scope",
+        "required_ancestor_commit": "ff9da469fc7cfdefd3ce968a6424fa3e026d34ce",
+    }:
+        errors.append("verification source contract mismatch")
+    if plan.get("target") != {
+        "server": "seebx",
+        "postgres_container": "brains-postgres-1",
+        "database": "memory",
+        "maintenance_role": "sage",
+        "application_role": "brains_app",
+        "postgres_major": 16,
+        "private_schema": "memory",
+    }:
+        errors.append("verification target contract mismatch")
+    if plan.get("authorization_policy") != {
+        "required": True,
+        "contract_version": VERIFY_AUTH_CONTRACT,
+        "file_mode": "0600",
+        "maximum_validity_minutes": 30,
+        "bind_plan_sha256": True,
+        "bind_exact_head_commit": True,
+        "environment_gate": (
+            "MEMORY_V1_COMPONENT_PROJECTION_ACL_VERIFY=authorized"
+        ),
+    }:
+        errors.append("verification authorization policy mismatch")
+    if plan.get("backup_policy") != {
+        "format": "postgres_custom",
+        "destination_directory": "/home/ubuntu/brains/snapshots",
+        "file_mode": "0600",
+        "require_nonzero_bytes": True,
+        "require_sha256": True,
+        "require_restore_catalog": True,
+        "must_complete_before_rollback_tests": True,
+        "minimum_free_space_multiplier": 2,
+    }:
+        errors.append("verification backup policy mismatch")
+    units = [
+        "memory-v1-projection.timer",
+        "memory-v1-governance.timer",
+        "memory-v1-evidence-intake-dispatcher.timer",
+        "memory-v1-v5-chat-capture.timer",
+        "memory-v1-deferred-reconciliation-scan.timer",
+    ]
+    if plan.get("maintenance_quiescence") != {
+        "temporary_only": True,
+        "restore_exact_active_state_on_exit": True,
+        "configuration_changes_allowed": False,
+        "units": units,
+    }:
+        errors.append("verification maintenance quiescence mismatch")
+    if plan.get("preconditions") != {
+        "component_schema_installed": True,
+        "component_tables_empty": True,
+        "component_projection_rows": 0,
+        "validator_execute_for_extraction_maintainer": True,
+        "brains_app_validator_access": False,
+        "all_component_tables_force_rls": True,
+        "component_tables_owned_by_sage": True,
+        "brains_app_component_table_privileges": [],
+        "required_roles_safe": True,
+        "timers_enabled_and_active": True,
+    }:
+        errors.append("verification preconditions mismatch")
+
+    source_files = plan.get("source_files")
+    ordinals: list[int] = []
+    verified_files: list[dict] = []
+    seen: set[str] = set()
+    root = repo_root.resolve()
+    if not isinstance(source_files, list):
+        errors.append("verification source_files must be a list")
+        source_files = []
+    for entry in source_files:
+        if not isinstance(entry, dict) or set(entry) != {
+            "path", "sha256", "kind", "ordinal"
+        }:
+            errors.append("verification source entry has invalid keys")
+            continue
+        relpath = entry["path"]
+        expected_sha = entry["sha256"]
+        if (
+            not isinstance(relpath, str)
+            or relpath in seen
+            or entry["kind"] != "rolled_back_test"
+            or not isinstance(entry["ordinal"], int)
+        ):
+            errors.append(f"invalid verification source entry: {relpath!r}")
+            continue
+        seen.add(relpath)
+        ordinals.append(entry["ordinal"])
+        candidate = (repo_root / relpath).resolve()
+        if root not in candidate.parents:
+            errors.append(f"verification source escapes repository: {relpath}")
+            continue
+        if not SHA256_RE.fullmatch(str(expected_sha)):
+            errors.append(f"invalid verification source hash: {relpath}")
+            continue
+        if not candidate.is_file():
+            errors.append(f"missing verification source: {relpath}")
+            continue
+        actual_sha = file_sha256(candidate)
+        if actual_sha != expected_sha:
+            errors.append(f"verification source hash mismatch: {relpath}")
+        verified_files.append({**entry, "actual_sha256": actual_sha})
+    if ordinals != [1, 2, 3, 4, 5]:
+        errors.append("verification test ordinals must be exactly 1 through 5")
+
+    required_forbidden = {
+        "apply_schema_or_privilege_changes",
+        "register_project_or_component_rows",
+        "invoke_live_extraction_or_projection_apply",
+        "write_qdrant_or_redis",
+        "activate_retrieval_or_prompt_influence",
+        "delete_redact_restore_or_modify_user_data",
+        "deploy_component_aware_runtime_code",
+    }
+    forbidden = plan.get("forbidden_effects")
+    if not isinstance(forbidden, list) or not required_forbidden.issubset(forbidden):
+        errors.append("verification forbidden boundary incomplete")
+    if plan.get("hard_stop") != (
+        "after_rollback_only_verification_before_component_registration_"
+        "runtime_deployment_retrieval_activation_or_prompt_influence"
+    ):
+        errors.append("verification hard stop mismatch")
+
+    try:
+        head = git(repo_root, "rev-parse", "HEAD")
+        git(
+            repo_root, "merge-base", "--is-ancestor",
+            "ff9da469fc7cfdefd3ce968a6424fa3e026d34ce", head,
+        )
+    except RecoveryError as exc:
+        errors.append(str(exc))
+        head = None
+    if errors:
+        raise RecoveryError("; ".join(errors))
+    return {
+        "contract_version": VERIFY_PLAN_CONTRACT,
+        "plan_id": plan["plan_id"],
+        "plan_sha256": canonical_sha256(plan),
+        "head_commit": head,
+        "verified_source_files": verified_files,
+        "repository_valid": True,
+    }
+
+
 def parse_utc(value: str, field: str) -> dt.datetime:
     try:
         parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -258,7 +418,8 @@ def validate_authorization(
     }
     if set(auth) != expected_keys:
         raise RecoveryError("authorization keys do not exactly match contract")
-    if auth["contract_version"] != AUTH_CONTRACT or auth["authorized"] is not True:
+    expected_contract = plan["authorization_policy"]["contract_version"]
+    if auth["contract_version"] != expected_contract or auth["authorized"] is not True:
         raise RecoveryError("authorization contract or flag mismatch")
     try:
         uuid.UUID(auth["authorization_id"])
@@ -307,6 +468,9 @@ def service_state(unit: str, operation: str) -> str:
 
 
 def production_preflight(plan: dict) -> dict:
+    expected_grant = bool(
+        plan["preconditions"]["validator_execute_for_extraction_maintainer"]
+    )
     sql = """
       SELECT jsonb_build_object(
         'current_user',current_user,
@@ -399,7 +563,7 @@ def production_preflight(plan: dict) -> dict:
         "component_schema_installed": metadata["schema_installed"] is True,
         "component_tables_empty": metadata["component_table_rows"] == 0,
         "component_projection_rows_zero": metadata["component_projection_rows"] == 0,
-        "validator_grant_absent": metadata["grant_present"] is False,
+        "validator_grant_state_matches": metadata["grant_present"] is expected_grant,
         "brains_app_validator_access_absent": metadata["brains_app_validator_access"] is False,
         "component_rls_and_owner_ok": metadata["component_rls_owner_ok"] is True,
         "brains_app_component_access_absent": metadata["brains_app_table_access"] is False,
@@ -414,7 +578,7 @@ def production_preflight(plan: dict) -> dict:
         "passwordless_sudo_ready": sudo_ready,
     }
     result = {
-        "contract_version": PLAN_CONTRACT,
+        "contract_version": plan["contract_version"],
         "checks": checks,
         "timer_states": timer_states,
         "database_size_bytes": metadata["database_size_bytes"],
@@ -439,7 +603,10 @@ def main() -> int:
     args = parser.parse_args()
     try:
         plan = load_json(args.manifest)
-        verification = validate_plan(plan, args.repo_root)
+        if plan.get("contract_version") == VERIFY_PLAN_CONTRACT:
+            verification = validate_verification_plan(plan, args.repo_root)
+        else:
+            verification = validate_plan(plan, args.repo_root)
         result: dict = {"plan": verification}
         if args.authorization:
             result["authorization"] = validate_authorization(
