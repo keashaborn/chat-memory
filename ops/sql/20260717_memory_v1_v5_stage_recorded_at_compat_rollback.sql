@@ -1,18 +1,5 @@
 BEGIN;
 
-DO $preflight$
-BEGIN
-  IF current_user<>'sage' THEN
-    RAISE EXCEPTION 'V5 stage preflight migration requires sage';
-  END IF;
-  IF to_regrole('memory_v5_writer') IS NULL
-     OR to_regprocedure('memory.require_v5_writer_context()') IS NULL
-     OR to_regclass('memory.evidence') IS NULL THEN
-    RAISE EXCEPTION 'V5 stage preflight prerequisites are absent';
-  END IF;
-END
-$preflight$;
-
 CREATE OR REPLACE FUNCTION memory.preflight_relational_stage_bundle_v5(
   p_evidence_id uuid,
   p_source_external_id text,
@@ -49,7 +36,7 @@ BEGIN
     AND evidence.source_system='public.chat_log'
     AND evidence.external_id=p_source_external_id
     AND evidence.content_sha256=p_source_sha256
-    AND evidence.recorded_at=p_source_recorded_at;
+    AND evidence.observed_at=p_source_recorded_at;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'owner-scoped stage evidence is unavailable'
       USING ERRCODE='P0002';
@@ -61,7 +48,6 @@ $function$;
 ALTER FUNCTION memory.preflight_relational_stage_bundle_v5(
   uuid,text,text,timestamptz
 ) OWNER TO memory_v5_writer;
-
 REVOKE ALL ON FUNCTION memory.preflight_relational_stage_bundle_v5(
   uuid,text,text,timestamptz
 ) FROM PUBLIC,brains_app;

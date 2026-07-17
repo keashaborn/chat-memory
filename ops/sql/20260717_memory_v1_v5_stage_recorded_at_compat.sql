@@ -2,13 +2,11 @@ BEGIN;
 
 DO $preflight$
 BEGIN
-  IF current_user<>'sage' THEN
-    RAISE EXCEPTION 'V5 stage preflight migration requires sage';
-  END IF;
-  IF to_regrole('memory_v5_writer') IS NULL
+  IF current_user<>'sage'
+     OR to_regrole('memory_v5_writer') IS NULL
      OR to_regprocedure('memory.require_v5_writer_context()') IS NULL
      OR to_regclass('memory.evidence') IS NULL THEN
-    RAISE EXCEPTION 'V5 stage preflight prerequisites are absent';
+    RAISE EXCEPTION 'V5 stage recorded-at compatibility prerequisites are absent';
   END IF;
 END
 $preflight$;

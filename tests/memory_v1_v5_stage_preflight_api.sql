@@ -4,7 +4,7 @@ BEGIN;
 
 INSERT INTO memory.evidence(
   evidence_id,owner_user_id,kind,source_system,external_id,
-  content,content_sha256,observed_at,sensitivity,status
+  content,content_sha256,observed_at,recorded_at,sensitivity,status
 ) VALUES
   (
     '3eeeeeee-3333-4333-8333-333333333333',
@@ -12,7 +12,7 @@ INSERT INTO memory.evidence(
     'user_statement','public.chat_log',
     '33333333-0001-4000-8000-000000000001',
     'Owner three evidence.',repeat('3',64),
-    '2026-07-16T13:00:00Z','low','active'
+    '2026-07-16T12:00:00Z','2026-07-16T13:00:00Z','low','active'
   ),
   (
     '4eeeeeee-4444-4444-8444-444444444444',
@@ -20,7 +20,7 @@ INSERT INTO memory.evidence(
     'user_statement','public.chat_log',
     '44444444-0001-4000-8000-000000000001',
     'Owner four evidence.',repeat('4',64),
-    '2026-07-16T13:01:00Z','low','active'
+    '2026-07-16T12:01:00Z','2026-07-16T13:01:00Z','low','active'
   );
 
 CREATE FUNCTION pg_temp.assert_missing_actor_denied()
@@ -71,6 +71,30 @@ BEGIN
 END
 $function$;
 
+CREATE FUNCTION pg_temp.assert_observed_at_not_source_recorded_at()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path=''
+AS $function$
+DECLARE
+  rejected boolean := false;
+BEGIN
+  BEGIN
+    PERFORM * FROM memory.preflight_relational_stage_bundle_v5(
+      '3eeeeeee-3333-4333-8333-333333333333',
+      '33333333-0001-4000-8000-000000000001',
+      repeat('3',64),'2026-07-16T12:00:00Z'
+    );
+  EXCEPTION WHEN no_data_found THEN
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'stage preflight accepted observed_at as source recorded_at';
+  END IF;
+END
+$function$;
+
 SET SESSION AUTHORIZATION brains_app;
 SELECT pg_temp.assert_missing_actor_denied();
 SELECT set_config(
@@ -85,6 +109,7 @@ SELECT 1 / ((
     repeat('3',64),'2026-07-16T13:00:00Z'
   )
 )::integer);
+SELECT pg_temp.assert_observed_at_not_source_recorded_at();
 SELECT pg_temp.assert_cross_owner_hidden();
 
 RESET SESSION AUTHORIZATION;
