@@ -1,0 +1,70 @@
+{
+  "manifest_version": "memory_v1_candidate_review_20260713_v1",
+  "plan_version": "memory_v1_candidate_extraction_review_20260713_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "evidence_batch": {
+    "batch_id": "15064e5d-8cd3-5611-9cbf-db177d24a3a0",
+    "batch_key": "reviewed_evidence_20260713_164_v1",
+    "evidence_plan_version": "memory_v1_evidence_persistence_20260713_v1",
+    "input_fingerprint_sha256": "201a828c35b6d1717c5b36061960cb32a8732bfa39ca59fe19e3c1d1ab404fad",
+    "reviewed_report_sha256": "d122028cc07abc8d3d122ba9779f04514ec75c6be1996cf2256854189c1f642a",
+    "authorization_manifest_sha256": "0a67fdf84723609b999b95e88c4d2437bda19163fb9a7f0cc36d715d0f954f57",
+    "expected_evidence_rows": 164,
+    "expected_operations": {
+      "inserted": 164
+    }
+  },
+  "expected": {
+    "candidate_targets": {
+      "claim": 122,
+      "preference": 18,
+      "project_knowledge": 24
+    },
+    "dispositions": {
+      "review_belief_span": 30,
+      "review_claim_span": 92,
+      "review_preference_span": 18,
+      "review_project_span": 24
+    },
+    "epistemic_roles": {
+      "mixed_user_assertion_and_belief": 3,
+      "project_assertion": 24,
+      "response_or_life_preference": 18,
+      "user_assertion": 89,
+      "user_belief_or_opinion": 30
+    },
+    "sensitivities": {
+      "high": 152,
+      "restricted": 12
+    },
+    "span_origins": {
+      "atomic": 102,
+      "compound_child": 62
+    },
+    "review_flags": {
+      "belief_not_external_fact": 30,
+      "canonical_rewrite_required": 28,
+      "context_subject_resolution_required": 3,
+      "high_stakes_health_belief_review_required": 8,
+      "mixed_assertion_belief_review_required": 3,
+      "sensitivity_review_required": 12,
+      "uncertainty_qualifier_required": 23,
+      "voice_transcription_review": 2
+    },
+    "existing_claim_candidates_for_batch": 0,
+    "existing_preferences_for_batch": 0
+  },
+  "controls": {
+    "apply_authorized": false,
+    "database_transaction": "read_only",
+    "candidate_writes": 0,
+    "claim_writes": 0,
+    "preference_writes": 0,
+    "project_knowledge_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_injection": false,
+    "network_model_calls": false,
+    "full_evidence_text_in_report": false,
+    "human_review_required": true
+  }
+}

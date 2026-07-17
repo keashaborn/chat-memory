@@ -1,0 +1,186 @@
+{
+  "manifest_version": "memory_v1_preference_project_review_authorization_20260714_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "project_id": "08cd6a8a-5599-43d5-8d5c-b59401df8ccc",
+  "project_key": "verbal-sage",
+  "review_authorized": true,
+  "candidate_apply_manifest_sha256": "c0187b7ba6b92a2b485eb910629451df37daeebe025f2e23ad54a99b58caab5d",
+  "candidate_apply_report_sha256": "6d97bd2a52eb66687fca42f22769876918a880c821f33b7a2dfca6e89523c967",
+  "reviewer_type": "user",
+  "reviewer_ref": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "expected": {
+    "preference_reviews": 3,
+    "project_reviews": 5,
+    "review_replacements": 0,
+    "durable_preferences": 0,
+    "durable_project_heads": 0,
+    "durable_preference_revisions": 0,
+    "durable_project_revisions": 0,
+    "preference_apply_events": 0,
+    "project_apply_events": 0
+  },
+  "preference_reviews": [
+    {
+      "candidate_id": "91cec4a9-a471-55a9-9097-1d45f29c2280",
+      "candidate_hash": "24efbe64e67f71721fca9525e083c795f68f00b3ad31c89e50a3968568ef1936",
+      "request_id": "1fe1f127-3111-5f35-966d-91d2d7cd8a16",
+      "decision": "accept",
+      "rationale": "The canonical preference preserves an explicit boundary against out-of-context use of named personal memories without erasing those memories.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "contextual_memory_surfacing_boundary",
+        "explicit_user_preference"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "008c6200-72fd-5dfa-9d9d-357b4017e95d",
+      "candidate_hash": "4d0058d0f766e0667c931f7ee4d1240993b9341bf72b3e2a405748688fae65ea",
+      "request_id": "8282cbd3-d8fe-5621-9a7d-78d3bd46a8f2",
+      "decision": "accept",
+      "rationale": "The canonical preference accurately captures vocal prominence and metaphorical lyrics as a distinct music-recommendation dimension.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "distinct_overlap_dimension",
+        "explicit_life_preference"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "5f52649c-2e12-59a4-bfe2-dcc6e36ffff8",
+      "candidate_hash": "75298919eff959f5d9b7e8c1e5780b096667aa1f9a4558fbd33b6340b02308e7",
+      "request_id": "bbd4143a-6eb1-53cc-9f0d-516a853ad81d",
+      "decision": "accept",
+      "rationale": "The canonical preference accurately captures concrete surface subject with different underlying meaning as distinct from vocal prominence or metaphorical wording.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "distinct_overlap_dimension",
+        "explicit_life_preference"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    }
+  ],
+  "project_reviews": [
+    {
+      "candidate_id": "6d12fe82-b902-5117-bc38-724176aa18f6",
+      "candidate_hash": "be6c2ed3d0c2a4211a3d8224a59163ab7c0cf8ff64c02138b9c7c2f2fffdf2f6",
+      "request_id": "1a18c7d8-f2f9-5308-b5db-d4025da88829",
+      "decision": "accept",
+      "rationale": "The canonical project roadmap preserves this as a long-term proposed direction rather than a completed capability.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "proposal_state_preserved",
+        "user_reported_project_direction"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "ed627de8-8042-50c1-b53f-698510087168",
+      "candidate_hash": "c3b0c48d30ab14c8087ca7a57a9e222fab0c5cfe42160e66de6115bc9a08e81b",
+      "request_id": "6d7bc1ec-a23d-5135-930d-1ba53d4779bd",
+      "decision": "accept",
+      "rationale": "The canonical project history retains the source-date context and does not assert possible AI consciousness as established fact.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "epistemic_qualification_preserved",
+        "historical_state_preserved"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "b32c57ee-cb63-5099-b707-4510055ff79b",
+      "candidate_hash": "28dd6905ade0d0f867e18f32481e71a8880d6561aeaae02904ec89630b27a907",
+      "request_id": "3a6937e1-2d8f-553f-8db6-13bb993d6210",
+      "decision": "accept",
+      "rationale": "The canonical project status is explicitly historical and time-bounded, so it does not overwrite the current architecture.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "effective_time_preserved",
+        "historical_state_preserved"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "d2803521-0d9d-559c-a267-104f8bf0c6cc",
+      "candidate_hash": "ef3aee64179670cc475c54329090bf363391465639d6106e1ea838ef81ff4bad",
+      "request_id": "86700351-75e8-5d0c-98e8-d999d64fa25f",
+      "decision": "accept",
+      "rationale": "The canonical project history records user-reported AI-assisted development while omitting the ambiguous programming-skill claim.",
+      "reason_codes": [
+        "ambiguous_clause_excluded",
+        "canonical_candidate_verified",
+        "historical_state_preserved"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    },
+    {
+      "candidate_id": "ca2a91b5-7ceb-5adf-aa71-7a884d8f47ba",
+      "candidate_hash": "e6652007bf9a4ce3e204e5122f8354c667d77a3222836a094209443c9b1f9ec2",
+      "request_id": "2f46651a-eb24-5707-8be8-13d4e4c58389",
+      "decision": "accept",
+      "rationale": "The canonical project requirement preserves AB design as a proposed background evaluation capability rather than a current implementation claim.",
+      "reason_codes": [
+        "canonical_candidate_verified",
+        "proposal_state_preserved",
+        "user_reported_project_requirement"
+      ],
+      "replacement_candidate_ids": [],
+      "metadata": {
+        "authorization_source": "user_instruction_continue_controlled_review_20260713",
+        "durable_apply_authorized": false,
+        "review_contract": "memory_v1_controlled_review_v1"
+      }
+    }
+  ],
+  "controls": {
+    "allowed_writes": [
+      "memory.preference_candidate_review:INSERT_VIA_CONTROLLED_FUNCTION",
+      "memory.project_knowledge_candidate_review:INSERT_VIA_CONTROLLED_FUNCTION"
+    ],
+    "review_records": 8,
+    "review_replacement_records": 0,
+    "candidate_writes": 0,
+    "durable_preference_writes": 0,
+    "durable_project_writes": 0,
+    "claim_writes": 0,
+    "evidence_writes": 0,
+    "projection_outbox_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_injection": false
+  }
+}
