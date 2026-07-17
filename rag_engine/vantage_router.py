@@ -20,6 +20,9 @@ from .retriever_unified import retrieve_personal_memory, unified_retrieve
 from .lifeswitch_auth import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_runtime
 from .memory_v1_v5_shadow_trace import run_memory_v1_v5_shadow_trace
+from .memory_v1_v5_shadow_trace_store import (
+    persist_memory_v1_v5_shadow_trace,
+)
 from .memory_v1_intent import (
     apply_legacy_personal_memory_gate,
     classify_legacy_personal_memory_access,
@@ -149,6 +152,44 @@ async def _write_vantage_answer_trace(
         sys.stderr.write(f"[vantage] write_answer_trace error: {e}\n")
         traceback.print_exc()
         sys.stderr.flush()
+
+
+def _persist_v5_shadow_trace_for_turn(
+    *,
+    actor_user_id: str,
+    turn_plan: Dict[str, Any],
+    query_embedding: QueryEmbeddingCache,
+) -> Dict[str, Any]:
+    trace = turn_plan.get("memory_v1_v5_shadow")
+    if not isinstance(trace, dict):
+        return {"status": "skipped", "reason": "trace_absent", "rows_written": 0}
+    existing = trace.get("persistence")
+    if isinstance(existing, dict):
+        return existing
+    if trace.get("persistable") is not True:
+        result = {
+            "status": "skipped",
+            "reason": "trace_not_persistable",
+            "rows_written": 0,
+        }
+        trace["persistence"] = result
+        return result
+    stats = query_embedding.stats()
+    result = persist_memory_v1_v5_shadow_trace(
+        actor_user_id,
+        trace,
+        embedding_provider_calls=int(stats.get("provider_calls") or 0),
+    )
+    trace["persistence"] = result
+    trace["trace_writes"] = int(result.get("rows_written") or 0)
+    if result.get("status") == "error":
+        import sys
+        sys.stderr.write(
+            "[vantage] V5 shadow trace persistence failed "
+            f"error_type={result.get('error_type', 'unknown')}\n"
+        )
+        sys.stderr.flush()
+    return result
 
 
 class VantageLimits(BaseModel):
@@ -1876,6 +1917,12 @@ def vantage_query(req: Request, payload: VantageQuery):
                     "pragmatics_path": "ritual_bypass_v0",
                 })
 
+            _persist_v5_shadow_trace_for_turn(
+                actor_user_id=payload.user_id,
+                turn_plan=turn_plan,
+                query_embedding=query_embedding,
+            )
+
             if bool(getattr(payload, "inspect_only", False)):
                 return VantageResponse(
                     answer="",
@@ -1954,6 +2001,12 @@ def vantage_query(req: Request, payload: VantageQuery):
                       "definition_overlay": payload.definition_overlay,
                     "pragmatics_path": "legacy_greeting_bypass",
                 })
+
+            _persist_v5_shadow_trace_for_turn(
+                actor_user_id=payload.user_id,
+                turn_plan=turn_plan,
+                query_embedding=query_embedding,
+            )
 
             if bool(getattr(payload, "inspect_only", False)):
                 return VantageResponse(
@@ -2249,6 +2302,12 @@ def vantage_query(req: Request, payload: VantageQuery):
             meta["vantage"]["thread_context"] = thread_stats
         except Exception:
             pass
+
+        _persist_v5_shadow_trace_for_turn(
+            actor_user_id=payload.user_id,
+            turn_plan=turn_plan,
+            query_embedding=query_embedding,
+        )
 
         if debug_on:
             turn_plan["query_embedding"] = query_embedding.stats()

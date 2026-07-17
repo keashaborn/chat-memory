@@ -67,6 +67,109 @@ def _sha256(value: Any) -> str:
     return hashlib.sha256(_stable_json(value)).hexdigest()
 
 
+def _text_sha256(value: Any) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+EMPTY_SET_SHA256 = _sha256([])
+
+
+def _configured_budget(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError) as exc:
+        raise V5ShadowTraceError(f"{name.casefold()} is invalid") from exc
+    if not minimum <= value <= maximum:
+        raise V5ShadowTraceError(f"{name.casefold()} is out of range")
+    return value
+
+
+def _configured_budgets() -> dict[str, int]:
+    return {
+        "candidate_limit": _configured_budget(
+            "MEMORY_V1_V5_SHADOW_CANDIDATE_LIMIT", 24, 1, 100
+        ),
+        "max_claims": _configured_budget(
+            "MEMORY_V1_V5_SHADOW_MAX_CLAIMS", 4, 1, 32
+        ),
+        "max_tokens": _configured_budget(
+            "MEMORY_V1_V5_SHADOW_MAX_TOKENS", 500, 1, 10000
+        ),
+    }
+
+
+def _trace_base(
+    actor: uuid.UUID,
+    *,
+    query: str,
+    request_id: Optional[str],
+    thread_id: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "version": VERSION,
+        "owner_user_id_sha256": _text_sha256(actor),
+        "request_id_sha256": _text_sha256(request_id),
+        "thread_id_sha256": _text_sha256(thread_id),
+        "query_sha256": _text_sha256(query),
+        "persistable": bool(str(request_id or "").strip()),
+    }
+
+
+def _nonselection_trace(
+    actor: uuid.UUID,
+    *,
+    query: str,
+    request_id: Optional[str],
+    thread_id: Optional[str],
+    status: str,
+    outcome_code: str,
+    budgets: Mapping[str, int],
+    max_sensitivity: str,
+) -> dict[str, Any]:
+    base = _trace_base(
+        actor,
+        query=query,
+        request_id=request_id,
+        thread_id=thread_id,
+    )
+    binding = {
+        **base,
+        "owner_user_id": str(actor),
+        "status": status,
+        "outcome_code": outcome_code,
+        "candidate_set_sha256": EMPTY_SET_SHA256,
+        "selection_set_sha256": EMPTY_SET_SHA256,
+    }
+    binding.pop("owner_user_id_sha256", None)
+    binding.pop("persistable", None)
+    return {
+        **base,
+        "status": status,
+        "outcome_code": outcome_code,
+        "request_binding_sha256": _sha256(binding),
+        "intent": None,
+        "domain": None,
+        "candidate_set_sha256": EMPTY_SET_SHA256,
+        "selection_set_sha256": EMPTY_SET_SHA256,
+        "candidate_count": 0,
+        "visible_candidate_count": 0,
+        "selected_count": 0,
+        "token_estimate": 0,
+        "rejected_counts": {},
+        "candidate_limit": int(budgets["candidate_limit"]),
+        "max_claims": int(budgets["max_claims"]),
+        "max_tokens": int(budgets["max_tokens"]),
+        "max_sensitivity": str(max_sensitivity),
+        "database_transaction": "none",
+        "database_writes": 0,
+        "qdrant_writes": 0,
+        "trace_writes": 0,
+        "prompt_injection": False,
+        "answer_model_exposure": False,
+        "retrieval_activation": False,
+    }
+
+
 def _uuid_values(raw: Any) -> set[str]:
     values: set[str] = set()
     for item in str(raw or "").split(","):
@@ -207,16 +310,14 @@ async def build_v5_shadow_trace(
     selection_sha256 = _sha256(
         sorted(str(claim["claim_id"]) for claim in result["claims"])
     )
-    query_sha256 = hashlib.sha256(str(query).encode("utf-8")).hexdigest()
+    query_sha256 = _text_sha256(query)
+    request_id_sha256 = _text_sha256(request_id)
+    thread_id_sha256 = _text_sha256(thread_id)
     binding = {
         "version": VERSION,
         "owner_user_id": str(actor),
-        "request_id_sha256": hashlib.sha256(
-            str(request_id or "").encode("utf-8")
-        ).hexdigest(),
-        "thread_id_sha256": hashlib.sha256(
-            str(thread_id or "").encode("utf-8")
-        ).hexdigest(),
+        "request_id_sha256": request_id_sha256,
+        "thread_id_sha256": thread_id_sha256,
         "query_sha256": query_sha256,
         "intent": str(context["intent"]),
         "domain": str(context["domain"]),
@@ -226,11 +327,13 @@ async def build_v5_shadow_trace(
     return {
         "version": VERSION,
         "status": "ok",
-        "owner_user_id_sha256": hashlib.sha256(
-            str(actor).encode("utf-8")
-        ).hexdigest(),
+        "outcome_code": "evaluated",
+        "owner_user_id_sha256": _text_sha256(actor),
+        "request_id_sha256": request_id_sha256,
+        "thread_id_sha256": thread_id_sha256,
         "request_binding_sha256": _sha256(binding),
         "query_sha256": query_sha256,
+        "persistable": bool(str(request_id or "").strip()),
         "intent": binding["intent"],
         "domain": binding["domain"],
         "candidate_set_sha256": candidate["candidate_set_sha256"],
@@ -240,6 +343,10 @@ async def build_v5_shadow_trace(
         "selected_count": result["selected_count"],
         "token_estimate": result["token_estimate"],
         "rejected_counts": result["rejected_counts"],
+        "candidate_limit": int(candidate_limit),
+        "max_claims": int(max_claims),
+        "max_tokens": int(max_tokens),
+        "max_sensitivity": str(max_sensitivity),
         "database_transaction": "read_only",
         "database_writes": 0,
         "qdrant_writes": 0,
@@ -289,21 +396,45 @@ def run_memory_v1_v5_shadow_trace(
             "status": "skipped",
             "reason": "actor_not_allowlisted",
         }
+    try:
+        budgets = _configured_budgets()
+    except Exception as exc:
+        return _nonselection_trace(
+            actor,
+            query=query,
+            request_id=request_id,
+            thread_id=thread_id,
+            status="error",
+            outcome_code=type(exc).__name__.casefold(),
+            budgets={"candidate_limit": 24, "max_claims": 4, "max_tokens": 500},
+            max_sensitivity="medium",
+        )
     context = classify_v5_shadow_context(query, request_classification)
+    max_sensitivity = _maximum_sensitivity(actor, context)
     if not context["eligible"]:
-        return {
-            "version": VERSION,
-            "status": "skipped",
-            "reason": context["reason"],
-        }
+        return _nonselection_trace(
+            actor,
+            query=query,
+            request_id=request_id,
+            thread_id=thread_id,
+            status="skipped",
+            outcome_code=str(context["reason"]),
+            budgets=budgets,
+            max_sensitivity=max_sensitivity,
+        )
     dsn = os.getenv("POSTGRES_DSN")
     qdrant_url = os.getenv("QDRANT_URL")
     if not dsn or not qdrant_url:
-        return {
-            "version": VERSION,
-            "status": "error",
-            "error_type": "missing_configuration",
-        }
+        return _nonselection_trace(
+            actor,
+            query=query,
+            request_id=request_id,
+            thread_id=thread_id,
+            status="error",
+            outcome_code="missing_configuration",
+            budgets=budgets,
+            max_sensitivity=max_sensitivity,
+        )
     client = None
     try:
         if query_vector is not None and embedding_provider is not None:
@@ -331,24 +462,23 @@ def run_memory_v1_v5_shadow_trace(
                 context=context,
                 request_id=request_id,
                 thread_id=thread_id,
-                candidate_limit=int(
-                    os.getenv("MEMORY_V1_V5_SHADOW_CANDIDATE_LIMIT", "24") or 24
-                ),
-                max_claims=int(
-                    os.getenv("MEMORY_V1_V5_SHADOW_MAX_CLAIMS", "4") or 4
-                ),
-                max_tokens=int(
-                    os.getenv("MEMORY_V1_V5_SHADOW_MAX_TOKENS", "500") or 500
-                ),
-                max_sensitivity=_maximum_sensitivity(actor, context),
+                candidate_limit=budgets["candidate_limit"],
+                max_claims=budgets["max_claims"],
+                max_tokens=budgets["max_tokens"],
+                max_sensitivity=max_sensitivity,
             )
         )
     except Exception as exc:
-        return {
-            "version": VERSION,
-            "status": "error",
-            "error_type": type(exc).__name__,
-        }
+        return _nonselection_trace(
+            actor,
+            query=query,
+            request_id=request_id,
+            thread_id=thread_id,
+            status="error",
+            outcome_code=type(exc).__name__.casefold(),
+            budgets=budgets,
+            max_sensitivity=max_sensitivity,
+        )
     finally:
         if client is not None:
             client.close()

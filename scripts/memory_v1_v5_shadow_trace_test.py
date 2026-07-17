@@ -132,6 +132,13 @@ def main() -> None:
     assert [str(value) for value in connection.requested] == [CLAIM]
     assert trace["selected_count"] == 1
     assert trace["visible_candidate_count"] == 1
+    assert trace["outcome_code"] == "evaluated"
+    assert trace["persistable"] is True
+    assert trace["request_id_sha256"]
+    assert trace["thread_id_sha256"]
+    assert trace["candidate_limit"] == 24
+    assert trace["max_claims"] == 4
+    assert trace["max_tokens"] == 500
     assert trace["database_transaction"] == "read_only"
     assert trace["database_writes"] == 0
     assert trace["qdrant_writes"] == 0
@@ -183,6 +190,44 @@ def main() -> None:
             "version": "memory_v1_v5_shadow_trace_v1",
             "status": "disabled",
         }
+
+        os.environ["MEMORY_V1_V5_SHADOW"] = "1"
+        os.environ["MEMORY_V1_V5_SHADOW_USER_IDS"] = OWNER
+        provider_called = False
+
+        def forbidden_provider():
+            nonlocal provider_called
+            provider_called = True
+            raise AssertionError("suppressed turn called the embedding provider")
+
+        skipped = run_memory_v1_v5_shadow_trace(
+            OWNER,
+            query="How do I add a PostgreSQL index?",
+            request_classification="TECH",
+            request_id="request-tech",
+            thread_id="thread-tech",
+            embedding_provider=forbidden_provider,
+        )
+        assert skipped["status"] == "skipped"
+        assert skipped["outcome_code"] == "turn_intent:tech"
+        assert skipped["persistable"] is True
+        assert skipped["candidate_count"] == 0
+        assert skipped["rejected_counts"] == {}
+        assert provider_called is False
+        assert "How do I add" not in json.dumps(skipped, sort_keys=True)
+
+        assert run_memory_v1_v5_shadow_trace(
+            OTHER,
+            query="What kind of work do I do?",
+            request_classification="SPECIFIC_RECALL",
+            request_id="request-other",
+            embedding_provider=forbidden_provider,
+        ) == {
+            "version": "memory_v1_v5_shadow_trace_v1",
+            "status": "skipped",
+            "reason": "actor_not_allowlisted",
+        }
+        assert provider_called is False
     finally:
         os.environ.clear()
         os.environ.update(original)
