@@ -91,7 +91,7 @@
   "source_files": [
     {
       "path": "ops/sql/20260717_memory_v1_v5_project_components.sql",
-      "sha256": "0cc6e5403dc20449bb1cd73a3a152d8385c7db2937413ef79d7dffc9710950fe",
+      "sha256": "2af75c7bc45785052c1e9567ea3047f5c61efa8077105d1bdad075e0fd8eb1c4",
       "kind": "migration",
       "ordinal": 1
     },
@@ -121,13 +121,13 @@
     },
     {
       "path": "ops/sql/20260717_memory_v1_v5_project_components_rollback.sql",
-      "sha256": "dbce3b1d10c94b5c6c1b8c87fcc801fa0a870cfecc749fa1257a19d798a32e17",
+      "sha256": "3cfd885638b59ac92aee1540749b7c0db8bfd73f0f3e019f632d45fffd8e1f01",
       "kind": "logical_rollback",
       "ordinal": 1
     },
     {
       "path": "tests/memory_v1_v5_project_components.sql",
-      "sha256": "bdcbf6323510ed5989d1ea1b3cb471d40d90a5499cb229ee89bf4c9f4be4d54c",
+      "sha256": "0fc36f5c1e07e625538ac860732ee094b408b877d30e5081cbb14a92704f2c78",
       "kind": "rolled_back_test",
       "ordinal": 1
     },
@@ -157,7 +157,7 @@
     },
     {
       "path": "tools/memory_v1_v5_project_components_production_clone.sh",
-      "sha256": "5bc9aae37d3904dbcf7ebfaa42a87e0f8b45b2b88603113604baf12ee575acd7",
+      "sha256": "3939347671effd1f0c3f7dd6a1d7adfb811e87c1afaacc7845ccb23defd86b48",
       "kind": "clone_rehearsal",
       "ordinal": 1
     },
@@ -181,7 +181,7 @@
     },
     {
       "path": "ops/manifests/memory_v1_v5_component_projection_recovery_plan_20260717.json",
-      "sha256": "e78dba6f2f543658c3912bbd3875d5d3dec4b835654b7174e6f456a45dc42b15",
+      "sha256": "d902342a36330a41d1cd71e1a306082b8ffcbcf5fa6f654e0681a01f3cc755d5",
       "kind": "recovery_plan",
       "ordinal": 1
     }

@@ -44,6 +44,15 @@ BEGIN
     END IF;
   END LOOP;
 
+  IF NOT has_function_privilege(
+    'memory_v5_extraction_maintainer',
+    'memory.v5_project_scope_valid(jsonb)'::regprocedure,
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION
+      'memory_v5_extraction_maintainer cannot validate project scope';
+  END IF;
+
   FOREACH table_oid IN ARRAY ARRAY[
     'memory.project_component_v5'::regclass,
     'memory.project_component_alias_v5'::regclass,

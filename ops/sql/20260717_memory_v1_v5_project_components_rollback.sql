@@ -68,6 +68,11 @@ BEGIN
 END
 $function$;
 
+-- Restore the pre-component validator ACL. The component migration grants this
+-- narrowly so the bounded extraction owner can validate project_scope values.
+REVOKE EXECUTE ON FUNCTION memory.v5_project_scope_valid(jsonb)
+  FROM memory_v5_extraction_maintainer;
+
 CREATE OR REPLACE FUNCTION memory.guard_v5_observation_contract()
 RETURNS trigger
 LANGUAGE plpgsql

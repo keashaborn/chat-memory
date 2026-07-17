@@ -13,6 +13,8 @@ compose=(
 
 migration=ops/sql/20260717_memory_v1_v5_project_components.sql
 rollback=ops/sql/20260717_memory_v1_v5_project_components_rollback.sql
+acl_compat=ops/sql/20260717_memory_v1_v5_project_scope_acl_compat.sql
+acl_compat_rollback=ops/sql/20260717_memory_v1_v5_project_scope_acl_compat_rollback.sql
 test_sql=tests/memory_v1_v5_project_components.sql
 
 backup=$(mktemp /tmp/memory-v1-v5-project-components.XXXXXX.dump)
@@ -66,7 +68,8 @@ capture_state() {
   ")
 }
 
-for required in "$migration" "$rollback" "$test_sql"; do
+for required in \
+  "$migration" "$rollback" "$acl_compat" "$acl_compat_rollback" "$test_sql"; do
   [[ -f "$repo_root/$required" ]]
 done
 
@@ -99,6 +102,18 @@ printf '%s\n' \
 capture_state "$before"
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
+[[ "$(scalar "SELECT has_function_privilege(
+  'memory_v5_extraction_maintainer',
+  'memory.v5_project_scope_valid(jsonb)','EXECUTE')::integer")" == "1" ]]
+run_sql <"$repo_root/$acl_compat_rollback"
+[[ "$(scalar "SELECT has_function_privilege(
+  'memory_v5_extraction_maintainer',
+  'memory.v5_project_scope_valid(jsonb)','EXECUTE')::integer")" == "0" ]]
+run_sql <"$repo_root/$acl_compat"
+run_sql <"$repo_root/$acl_compat"
+[[ "$(scalar "SELECT has_function_privilege(
+  'memory_v5_extraction_maintainer',
+  'memory.v5_project_scope_valid(jsonb)','EXECUTE')::integer")" == "1" ]]
 run_sql <"$repo_root/$test_sql"
 
 [[ "$(scalar 'SELECT count(*) FROM memory.project_component_v5')" == "0" ]]

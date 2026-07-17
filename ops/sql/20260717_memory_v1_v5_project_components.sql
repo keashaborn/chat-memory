@@ -758,5 +758,9 @@ GRANT EXECUTE ON FUNCTION memory.normalize_project_component_alias_v5(text)
   TO memory_v5_extraction_maintainer;
 GRANT EXECUTE ON FUNCTION memory.normalize_project_component_alias_v5(text)
   TO memory_v5_writer;
+REVOKE ALL ON FUNCTION memory.v5_project_scope_valid(jsonb)
+  FROM PUBLIC,brains_app;
+GRANT EXECUTE ON FUNCTION memory.v5_project_scope_valid(jsonb)
+  TO memory_v5_extraction_maintainer;
 
 COMMIT;

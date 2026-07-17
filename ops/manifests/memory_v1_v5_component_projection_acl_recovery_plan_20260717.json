@@ -1,0 +1,135 @@
+{
+  "contract_version": "memory_v1_v5_component_projection_acl_recovery_plan_v1",
+  "plan_id": "memory-v1-v5-component-projection-acl-recovery-20260717",
+  "created_on": "2026-07-17",
+  "production_authorized": false,
+  "source": {
+    "branch": "memory_v1_v5_component_scope",
+    "required_ancestor_commit": "9174a41ed31cb7ce7c1f5766b499aa9c3c3bfaa3"
+  },
+  "target": {
+    "server": "seebx",
+    "postgres_container": "brains-postgres-1",
+    "database": "memory",
+    "maintenance_role": "sage",
+    "application_role": "brains_app",
+    "postgres_major": 16,
+    "private_schema": "memory"
+  },
+  "authorization_policy": {
+    "required": true,
+    "contract_version": "memory_v1_v5_component_projection_acl_recovery_authorization_v1",
+    "file_mode": "0600",
+    "maximum_validity_minutes": 30,
+    "bind_plan_sha256": true,
+    "bind_exact_head_commit": true,
+    "environment_gate": "MEMORY_V1_COMPONENT_PROJECTION_ACL_RECOVERY=authorized"
+  },
+  "backup_policy": {
+    "format": "postgres_custom",
+    "destination_directory": "/home/ubuntu/brains/snapshots",
+    "file_mode": "0600",
+    "require_nonzero_bytes": true,
+    "require_sha256": true,
+    "require_restore_catalog": true,
+    "must_complete_before_first_schema_write": true,
+    "minimum_free_space_multiplier": 2
+  },
+  "maintenance_quiescence": {
+    "temporary_only": true,
+    "restore_exact_active_state_on_exit": true,
+    "configuration_changes_allowed": false,
+    "units": [
+      "memory-v1-projection.timer",
+      "memory-v1-governance.timer",
+      "memory-v1-evidence-intake-dispatcher.timer",
+      "memory-v1-v5-chat-capture.timer",
+      "memory-v1-deferred-reconciliation-scan.timer"
+    ]
+  },
+  "preconditions": {
+    "component_schema_installed": true,
+    "component_tables_empty": true,
+    "component_projection_rows": 0,
+    "validator_execute_for_extraction_maintainer": false,
+    "all_component_tables_force_rls": true,
+    "component_tables_owned_by_sage": true,
+    "brains_app_component_table_privileges": [],
+    "required_roles_safe": true,
+    "timers_enabled_and_active": true
+  },
+  "source_files": [
+    {
+      "path": "ops/sql/20260717_memory_v1_v5_project_scope_acl_compat.sql",
+      "sha256": "13cafc114d8740aca6f792d1756f9221673903a0443d93147eb168751d47c425",
+      "kind": "migration",
+      "ordinal": 1
+    },
+    {
+      "path": "ops/sql/20260717_memory_v1_v5_project_scope_acl_compat_rollback.sql",
+      "sha256": "1d131400e51ed2dd400fe5c635986b5a25c8fe6d1db3fb69d309a1681c748c16",
+      "kind": "logical_rollback",
+      "ordinal": 1
+    },
+    {
+      "path": "tests/memory_v1_v5_project_components.sql",
+      "sha256": "0fc36f5c1e07e625538ac860732ee094b408b877d30e5081cbb14a92704f2c78",
+      "kind": "rolled_back_test",
+      "ordinal": 1
+    },
+    {
+      "path": "tests/memory_v1_v5_bounded_extraction.sql",
+      "sha256": "057a0f595f6d8017d690d5a972547d2851f7fdc6bde846f48d47565b17656c23",
+      "kind": "rolled_back_test",
+      "ordinal": 2
+    },
+    {
+      "path": "tests/memory_v1_projection_targets_v5.sql",
+      "sha256": "8d204eb8f635981ce92936a67510f9d1da59952ca790bde26224db4013441ce5",
+      "kind": "rolled_back_test",
+      "ordinal": 3
+    },
+    {
+      "path": "tests/memory_v1_projection_staging_v5.sql",
+      "sha256": "8bfc60f5804f4baf117a7f30545d46a9501831270a21daf19e6ab0b01107ae53",
+      "kind": "rolled_back_test",
+      "ordinal": 4
+    },
+    {
+      "path": "tests/memory_v1_projection_staging_production_v5.sql",
+      "sha256": "73c8ddbbaa636a3c32a5f141e9feb2750bc70236c0158d827afb9c631d44b9d9",
+      "kind": "rolled_back_test",
+      "ordinal": 5
+    }
+  ],
+  "allowed_effects": [
+    "temporarily_stop_and_restore_exact_five_memory_v1_timers",
+    "create_fresh_custom_format_postgres_backup",
+    "grant_execute_on_memory_v5_project_scope_valid_to_memory_v5_extraction_maintainer",
+    "run_five_synthetic_security_suites_inside_rollback",
+    "write_mode_0600_preflight_backup_logs_status_and_report"
+  ],
+  "forbidden_effects": [
+    "apply_any_other_schema_or_privilege_change",
+    "change_systemd_enablement_or_unit_files",
+    "change_environment_or_configuration",
+    "restart_brains_or_verbal_sage",
+    "register_project_or_component_rows",
+    "invoke_live_extraction_or_projection_apply",
+    "write_qdrant_or_redis",
+    "activate_retrieval_or_prompt_influence",
+    "modify_supabase_auth_users",
+    "delete_redact_restore_or_modify_user_data",
+    "deploy_component_aware_runtime_code"
+  ],
+  "postconditions": {
+    "validator_execute_for_extraction_maintainer": true,
+    "component_tables_empty": true,
+    "component_projection_rows": 0,
+    "preexisting_memory_rows_unchanged": true,
+    "qdrant_memory_claim_v1_unchanged": true,
+    "timer_enablement_and_active_state_restored": true,
+    "runtime_activated": false
+  },
+  "hard_stop": "before_component_registration_runtime_deployment_retrieval_activation_or_prompt_influence"
+}
