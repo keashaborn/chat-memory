@@ -7,11 +7,12 @@ import json
 import os
 import subprocess
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "memory_v1_v5_activation_readiness_v1"
+VERSION = "memory_v1_v5_activation_readiness_v2"
 REGISTRY_VERSION = "memory_predicate_registry_v5"
 REQUIRED_APIS = {
     "stage_relational_packet_v5",
@@ -35,6 +36,10 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         default="ops/manifests/memory_v1_projection_v5_production_install_plan_20260715.json",
+    )
+    parser.add_argument(
+        "--state-baseline",
+        default="ops/manifests/memory_v1_v5_governed_state_baseline_20260717.json",
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--postgres-container", default="brains-postgres-1")
@@ -88,6 +93,34 @@ def _sql_text_array(values: list[str]) -> str:
     return "ARRAY[" + ",".join("'" + value.replace("'", "''") + "'" for value in values) + "]::text[]"
 
 
+def _state_baseline(value: dict[str, Any], tables: list[str]) -> dict[str, Any]:
+    if value.get("contract_version") != "memory_v1_v5_governed_state_baseline_v1":
+        raise RuntimeError("state baseline contract_version is invalid")
+    counts = value.get("exact_row_counts")
+    owner_counts = value.get("owner_row_counts")
+    if not isinstance(counts, dict) or set(counts) != set(tables):
+        raise RuntimeError("state baseline exact_row_counts does not match tracked tables")
+    if not all(isinstance(count, int) and count >= 0 for count in counts.values()):
+        raise RuntimeError("state baseline exact_row_counts contains an invalid count")
+    if not isinstance(owner_counts, dict):
+        raise RuntimeError("state baseline owner_row_counts must be an object")
+    for owner, count in owner_counts.items():
+        try:
+            uuid.UUID(owner)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise RuntimeError("state baseline contains an invalid owner UUID") from exc
+        if not isinstance(count, int) or count <= 0:
+            raise RuntimeError("state baseline owner_row_counts contains an invalid count")
+    if sum(counts.values()) != sum(owner_counts.values()):
+        raise RuntimeError("state baseline table and owner totals do not match")
+    return {
+        "contract_version": value["contract_version"],
+        "source_commit": value.get("source_commit"),
+        "exact_row_counts": counts,
+        "owner_row_counts": owner_counts,
+    }
+
+
 def _snapshot(
     *,
     tables: list[str],
@@ -102,6 +135,9 @@ def _snapshot(
     api_array = _sql_text_array(sorted(REQUIRED_APIS))
     count_pairs = ",".join(
         f"'{table}',(SELECT count(*) FROM memory.\"{table}\")" for table in tables
+    )
+    owner_union = " UNION ALL ".join(
+        f'SELECT owner_user_id FROM memory."{table}"' for table in tables
     )
     sql = f"""
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
@@ -152,12 +188,25 @@ WITH registry AS (
        WHERE grantee='brains_app' AND routine_schema='memory'
          AND privilege_type='EXECUTE' AND routine_name=ANY({api_array})
     ) AS api
+), owner_rows AS (
+  {owner_union}
+), owner_counts AS (
+  SELECT coalesce(
+           jsonb_object_agg(owner_user_id::text, row_count ORDER BY owner_user_id::text),
+           '{{}}'::jsonb
+         ) AS value
+    FROM (
+      SELECT owner_user_id, count(*) AS row_count
+        FROM owner_rows
+       GROUP BY owner_user_id
+    ) AS counts
 )
 SELECT jsonb_build_object(
   'registry', (SELECT to_jsonb(registry) FROM registry),
   'writer_role', (SELECT to_jsonb(writer_role) FROM writer_role),
   'relations', (SELECT value FROM relations),
   'exact_row_counts', jsonb_build_object({count_pairs}),
+  'owner_row_counts', (SELECT value FROM owner_counts),
   'brains_app_protected_table_grants', (SELECT value FROM protected_grants),
   'brains_app_shared_durable_write_grants', (SELECT value FROM shared_grants),
   'brains_app_controlled_apis', (SELECT value FROM controlled_apis)
@@ -187,18 +236,26 @@ ROLLBACK;
         "writer_role": value["writer_role"],
         "relations": value["relations"],
         "exact_row_counts": value["exact_row_counts"],
+        "owner_row_counts": value["owner_row_counts"],
         "brains_app_protected_table_grants": value["brains_app_protected_table_grants"],
         "brains_app_shared_durable_write_grants": value["brains_app_shared_durable_write_grants"],
         "brains_app_controlled_apis": value["brains_app_controlled_apis"],
     }
 
 
-def evaluate(snapshot: dict[str, Any], tables: list[str]) -> dict[str, Any]:
+def evaluate(
+    snapshot: dict[str, Any],
+    tables: list[str],
+    expected_state: dict[str, Any],
+) -> dict[str, Any]:
     expected = snapshot["expected_registry"]
     registry = snapshot["registry"] or {}
     role = snapshot["writer_role"] or {}
     relations = snapshot["relations"]
     counts = snapshot["exact_row_counts"]
+    owner_counts = snapshot["owner_row_counts"]
+    expected_counts = expected_state["exact_row_counts"]
+    expected_owner_counts = expected_state["owner_row_counts"]
 
     checks = {
         "all_expected_relations_exist": set(relations) == set(tables),
@@ -206,8 +263,10 @@ def evaluate(snapshot: dict[str, Any], tables: list[str]) -> dict[str, Any]:
             bool(value["relrowsecurity"]) and bool(value["relforcerowsecurity"])
             for value in relations.values()
         ) and set(relations) == set(tables),
-        "all_v5_owner_relations_empty": set(counts) == set(tables)
-        and all(value == 0 for value in counts.values()),
+        "tracked_row_totals_consistent": sum(counts.values())
+        == sum(owner_counts.values()),
+        "governed_v5_state_matches_baseline": counts == expected_counts
+        and owner_counts == expected_owner_counts,
         "registry_exact_and_inactive": bool(registry)
         and registry.get("registry_version") == expected["registry_version"]
         and registry.get("registry_sha256") == expected["registry_sha256"]
@@ -241,7 +300,11 @@ def evaluate(snapshot: dict[str, Any], tables: list[str]) -> dict[str, Any]:
             "all_controlled_apis_available",
         )
     )
-    shadow_stage_ready = schema_ready and checks["all_v5_owner_relations_empty"]
+    shadow_stage_ready = (
+        schema_ready
+        and checks["tracked_row_totals_consistent"]
+        and checks["governed_v5_state_matches_baseline"]
+    )
     durable_apply_ready = (
         shadow_stage_ready
         and checks["shared_durable_targets_have_no_direct_app_writes"]
@@ -258,7 +321,20 @@ def evaluate(snapshot: dict[str, Any], tables: list[str]) -> dict[str, Any]:
         "blockers": {
             "manual_shadow_stage": []
             if shadow_stage_ready
-            else [key for key, passed in checks.items() if not passed],
+            else [
+                key
+                for key in (
+                    "all_expected_relations_exist",
+                    "all_owner_relations_force_rls",
+                    "registry_exact_and_inactive",
+                    "writer_role_restricted",
+                    "brains_app_has_no_direct_v5_table_grants",
+                    "all_controlled_apis_available",
+                    "tracked_row_totals_consistent",
+                    "governed_v5_state_matches_baseline",
+                )
+                if not checks[key]
+            ],
             "durable_apply": []
             if durable_apply_ready
             else [
@@ -268,7 +344,9 @@ def evaluate(snapshot: dict[str, Any], tables: list[str]) -> dict[str, Any]:
                 )
                 if not checks[key]
             ],
-            "shadow_retrieval": ["no_v5_shadow_retrieval_adapter_or_trace_gate"],
+            "shadow_retrieval": [
+                "no_hash_locked_candidate_discovery_or_router_trace_gate"
+            ],
             "prompt_influence": [
                 "v5_registry_runtime_inactive",
                 "shadow_retrieval_and_cross_owner_trace_audit_not_complete",
@@ -296,10 +374,13 @@ def _timer_inventory() -> list[str]:
 def main() -> int:
     args = arguments()
     manifest_path = Path(args.manifest).resolve()
+    state_baseline_path = Path(args.state_baseline).resolve()
     output_path = Path(args.output).resolve()
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
     tables = _table_names(manifest)
+    state_baseline_bytes = state_baseline_path.read_bytes()
+    expected_state = _state_baseline(json.loads(state_baseline_bytes), tables)
     expected_registry = manifest["postinstall_requirements"]["predicate_registry"]
 
     snapshot = _snapshot(
@@ -310,7 +391,7 @@ def main() -> int:
         database=args.database,
     )
 
-    evaluation = evaluate(snapshot, tables)
+    evaluation = evaluate(snapshot, tables, expected_state)
     report = {
         "contract_version": VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -320,6 +401,12 @@ def main() -> int:
         "manifest": {
             "path": str(manifest_path),
             "sha256": _sha256_bytes(manifest_bytes),
+        },
+        "state_baseline": {
+            "path": str(state_baseline_path),
+            "sha256": _sha256_bytes(state_baseline_bytes),
+            "contract_version": expected_state["contract_version"],
+            "source_commit": expected_state["source_commit"],
         },
         "snapshot": snapshot,
         "evaluation": evaluation,
