@@ -18,13 +18,15 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
     OpenAIResponsesProvider,
     OpenAIResponsesTransport,
 )
+from scripts.memory_v1_relational_extraction_v5_observable_provider import (
+    validate_and_normalize_observable,
+)
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
     TrustedProjectBinding,
     TrustedProjectComponent,
     load_registry,
     load_schema,
-    validate_and_normalize,
 )
 from scripts.memory_v1_v5_bounded_extraction_worker import (
     EXPECTED_REGISTRY_SHA256,
@@ -55,6 +57,17 @@ DEFAULT_SCHEMA = (
     / "specs"
     / "memory_v1_relational_extraction_v5.schema.json"
 )
+
+
+class ExactProcessingRejected(ProcessingRejected):
+    def __init__(
+        self,
+        code: str,
+        external_model_calls: int,
+        diagnostic: dict[str, Any] | None,
+    ) -> None:
+        super().__init__(code, external_model_calls)
+        self.diagnostic = diagnostic
 
 
 def arguments() -> argparse.Namespace:
@@ -298,6 +311,7 @@ async def process_exact_target(
     max_output_tokens: int,
 ) -> tuple[dict[str, Any], int]:
     provider: OpenAIResponsesProvider | None = None
+    observable = None
     try:
         context, trusted_binding = await read_pinned_context(
             conn,
@@ -325,7 +339,7 @@ async def process_exact_target(
             max_output_tokens=max_output_tokens,
             timeout_seconds=timeout_seconds,
         )
-        validated = validate_and_normalize(
+        observable = validate_and_normalize_observable(
             provider,
             source=source,
             registry=registry,
@@ -336,6 +350,17 @@ async def process_exact_target(
             },
             max_external_model_calls=1,
         )
+        if not observable.passed:
+            if observable.rejection is None:
+                raise RuntimeError("observable rejection lost its code")
+            raise ExactProcessingRejected(
+                str(observable.rejection["code"]),
+                observable.external_model_calls,
+                observable.audit_record(),
+            )
+        validated = observable.validated_result
+        if validated is None:
+            raise RuntimeError("observable validation lost its result")
         if validated.external_model_calls != 1:
             raise RuntimeError("exact-job provider call count changed")
         packet_id = uuid.uuid5(PERSIST_NAMESPACE, f"packet:{job['job_id']}")
@@ -354,9 +379,15 @@ async def process_exact_target(
             validated=validated,
             binding_event_id=expected_binding_event_id,
         )
+    except ExactProcessingRejected:
+        raise
     except Exception as exc:
         calls = provider.external_model_calls if provider is not None else 0
-        raise ProcessingRejected(rejection_code(exc), calls) from exc
+        raise ExactProcessingRejected(
+            rejection_code(exc),
+            calls,
+            observable.audit_record() if observable is not None else None,
+        ) from exc
     return (
         {
             "job_sha256": sha256_text(str(job["job_id"])),
@@ -488,6 +519,9 @@ async def main() -> int:
                 "rejection_code": exc.code,
                 "external_model_calls": exc.external_model_calls,
             }
+            diagnostic = getattr(exc, "diagnostic", None)
+            if diagnostic is not None:
+                report["sanitized_diagnostic"] = diagnostic
             calls = exc.external_model_calls
         if calls > 1:
             raise RuntimeError("exact-job canary exceeded one external call")

@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+from scripts import (
+    memory_v1_relational_extraction_v5_observable_provider as observable_module,
+)
 from scripts.memory_v1_relational_extraction_v5_observable_provider import (
     validate_and_normalize_observable,
 )
@@ -16,6 +20,8 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
 from scripts.memory_v1_relational_extraction_v5_provider import (
     ProviderPacket,
     TrustedExtractionSource,
+    TrustedProjectBinding,
+    TrustedProjectComponent,
     canonical_json,
     load_registry,
     load_schema,
@@ -168,6 +174,55 @@ def assert_sanitized(outcome) -> None:
         raise AssertionError("sanitized provider packet was not retained")
 
 
+def assert_trusted_binding_forwarded(
+    *,
+    source: TrustedExtractionSource,
+    registry: dict[str, Any],
+    schema: dict[str, Any],
+) -> None:
+    component = TrustedProjectComponent.create(
+        component_id="aaaaaaaa-0013-4000-8000-000000000013",
+        component_key="memory-v1",
+        display_name="Memory V1",
+        parent_component_id=None,
+        aliases=["memory-v1"],
+    )
+    binding = TrustedProjectBinding.create(
+        thread_id="aaaaaaaa-0010-4000-8000-000000000010",
+        project_id="aaaaaaaa-0011-4000-8000-000000000011",
+        project_key="verbal-sage",
+        binding_event_id="aaaaaaaa-0012-4000-8000-000000000012",
+        components=[component],
+    )
+    original = observable_module.validate_and_normalize
+
+    def fake_validate(provider, **kwargs):
+        if kwargs.get("trusted_project_binding") is not binding:
+            raise AssertionError("observable boundary dropped trusted binding")
+        provider.extract(kwargs["source"])
+        return SimpleNamespace(
+            external_model_calls=1,
+            normalized_packet_sha256="a" * 64,
+            manual_review_required=False,
+        )
+
+    observable_module.validate_and_normalize = fake_validate
+    try:
+        outcome = validate_and_normalize_observable(
+            FakeOneCallProvider(packet=provider_packet()),
+            source=source,
+            registry=registry,
+            schema=schema,
+            trusted_project_binding=binding,
+            allowed_provider_versions=ALLOWED_PROVIDER,
+            max_external_model_calls=1,
+        )
+    finally:
+        observable_module.validate_and_normalize = original
+    if not outcome.passed:
+        raise AssertionError("trusted binding forwarding probe failed")
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     registry = load_registry(
@@ -185,6 +240,11 @@ def main() -> int:
         source_sha256=sha256_text(CONTENT),
         source_recorded_at=SOURCE_TIME,
         content=CONTENT,
+    )
+    assert_trusted_binding_forwarded(
+        source=source,
+        registry=registry,
+        schema=schema,
     )
 
     valid = run(

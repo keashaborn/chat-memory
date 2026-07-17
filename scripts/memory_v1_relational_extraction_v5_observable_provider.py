@@ -11,6 +11,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     ProviderPacket,
     RelationalExtractionProvider,
     TrustedExtractionSource,
+    TrustedProjectBinding,
     ValidatedProviderResult,
     canonical_sha256,
     sha256_text,
@@ -141,6 +142,7 @@ def validate_and_normalize_observable(
     source: TrustedExtractionSource,
     registry: dict[str, Any],
     schema: dict[str, Any],
+    trusted_project_binding: TrustedProjectBinding | None = None,
     allowed_provider_versions: Mapping[str, str],
     max_external_model_calls: int,
 ) -> ObservableValidationOutcome:
@@ -154,6 +156,7 @@ def validate_and_normalize_observable(
             source=source,
             registry=registry,
             schema=schema,
+            trusted_project_binding=trusted_project_binding,
             allowed_provider_versions=allowed_provider_versions,
             max_external_model_calls=max_external_model_calls,
         )
