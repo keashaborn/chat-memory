@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Executes the second hash-locked, owner-scoped,
-# store=false extraction canary and stops before packet review or persistence.
+# seebx backend only. Executes one approved hash-locked retry canary and stops
+# before packet review or downstream persistence.
 
 repo_root=$(git rev-parse --show-toplevel)
-manifest=ops/manifests/memory_v1_v5_bound_exact_job_canary_retry_authorized_20260717.json
-manifest_sha=70e938ca5d4191a90360567bd0245b5bab8f24fa66bacaa15f16f5e7f77b25c1
+manifest=${1:-ops/manifests/memory_v1_v5_bound_exact_job_canary_retry_authorized_20260717.json}
+case "$manifest" in
+  ops/manifests/memory_v1_v5_bound_exact_job_canary_retry_authorized_20260717.json)
+    manifest_sha=70e938ca5d4191a90360567bd0245b5bab8f24fa66bacaa15f16f5e7f77b25c1
+    ;;
+  ops/manifests/memory_v1_v5_bound_exact_job_canary_third_authorized_20260717.json)
+    manifest_sha=b6e4ea22be511049f7b734c2659a718f721e14a4ca5a56f6f5d1e2186f0a957d
+    ;;
+  *)
+    printf 'unapproved exact-canary manifest: %s\n' "$manifest" >&2
+    exit 1
+    ;;
+esac
 container=brains-postgres-1
 snapshot_dir=/home/ubuntu/brains/snapshots
 python=/opt/chat-memory/venv/bin/python
@@ -24,6 +35,7 @@ owner=$(jq_manifest '.target.owner_user_id')
 job_id=$(jq_manifest '.target.job_id')
 content_sha=$(jq_manifest '.target.evidence_content_sha256')
 binding_event=$(jq_manifest '.target.binding_event_id')
+retry_operation=$(jq_manifest '.target.reviewed_retry_operation_id // "f45ff77a-81b8-5d5a-9a40-b88399b3bbf6"')
 project_key=$(jq_manifest '.target.project_key')
 component_key=$(jq_manifest '.target.component_key')
 expected_attempts=$(jq_manifest '.target.expected_attempts')
@@ -157,8 +169,8 @@ git merge-base --is-ancestor "$required_commit" HEAD
 [[ "$(jq_manifest '.authorization.store')" == false ]]
 [[ "$(jq_manifest '.authorization.maximum_external_calls')" == 1 ]]
 [[ "$(jq_manifest '.authorization.maximum_http_retries')" == 0 ]]
-[[ "$expected_attempts" == 1 ]]
-[[ "$max_attempts" == 2 ]]
+[[ "$expected_attempts:$max_attempts" == 1:2 \
+  || "$expected_attempts:$max_attempts" == 2:3 ]]
 
 preflight=$(scalar "
   SELECT jsonb_build_object(
@@ -172,6 +184,7 @@ preflight=$(scalar "
         AND project_key='$project_key'),
     'reviewed_retry_event',(SELECT count(*) FROM memory.evidence_extraction_event
       WHERE owner_user_id='$owner' AND job_id='$job_id'
+        AND operation_id='$retry_operation'
         AND event_type='queued' AND actor_type='admin'
         AND actor_ref='reviewed_retry'),
     'reserved_operations',(SELECT count(*) FROM memory.evidence_extraction_event
