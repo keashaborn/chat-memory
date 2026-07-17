@@ -53,7 +53,10 @@ Unknown semantics become an unregistered_predicate deferral. Nutrition,
 training, measurement, medication schedule, and other application-owned values
 become structured_domain deferrals. Product requirements or implementation
 statements are project_knowledge and require project_scope_unresolved because
-the model has no trusted project binding.
+the model has no trusted project binding. When project knowledge omits a project
+name, use an anonymous entity_type=project mention with name_text=null and
+relationship_role=project:current_thread. Never invent or bind a project name;
+the server may resolve that placeholder from a trusted thread binding.
 
 Response preferences are stable instructions about assistant behavior. Life
 preferences concern activities, media, food, places, and similar user choices.
@@ -183,7 +186,7 @@ class OpenAIResponsesTransport:
         if client is None:
             try:
                 self._sdk_module = importlib.import_module("openai")
-                client = self._sdk_module.OpenAI()
+                client = self._sdk_module.OpenAI(max_retries=0)
             except Exception as exc:
                 raise ProviderAdapterError(
                     "openai_sdk_or_credentials_unavailable",

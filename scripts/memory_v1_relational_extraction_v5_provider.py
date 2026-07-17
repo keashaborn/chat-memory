@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -474,6 +475,38 @@ class TrustedExtractionSource:
 
 
 @dataclass(frozen=True)
+class TrustedProjectBinding:
+    thread_id: str
+    project_id: str
+    project_key: str
+    binding_event_id: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        thread_id: Any,
+        project_id: Any,
+        project_key: Any,
+        binding_event_id: Any,
+    ) -> "TrustedProjectBinding":
+        if not isinstance(project_key, str):
+            raise ValueError("project_key must be text")
+        canonical_key = project_key.strip()
+        if not canonical_key or len(canonical_key) > 500:
+            raise ValueError("project_key must contain 1 to 500 characters")
+        return cls(
+            thread_id=_uuid_text(thread_id, "thread_id"),
+            project_id=_uuid_text(project_id, "project_id"),
+            project_key=canonical_key,
+            binding_event_id=_uuid_text(
+                binding_event_id,
+                "binding_event_id",
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class ValidatedProviderResult:
     provider_id: str
     provider_version: str
@@ -609,6 +642,7 @@ def validate_and_normalize(
     source: TrustedExtractionSource,
     registry: dict[str, Any],
     schema: dict[str, Any],
+    trusted_project_binding: TrustedProjectBinding | None = None,
     allowed_provider_versions: Mapping[str, str] | None = None,
     max_external_model_calls: int = 0,
 ) -> ValidatedProviderResult:
@@ -642,6 +676,7 @@ def validate_and_normalize(
     mentions: list[dict[str, Any]] = []
     entity_refs: set[str] = set()
     entity_types: dict[str, str] = {}
+    entity_mentions_by_ref: dict[str, dict[str, Any]] = {}
     for item in raw["entity_mentions"]:
         ref = item["entity_ref"]
         if ref in entity_refs:
@@ -657,6 +692,7 @@ def validate_and_normalize(
         mentions.append(item)
         entity_refs.add(ref)
         entity_types[ref] = item["entity_type"]
+        entity_mentions_by_ref[ref] = item
 
     rules = {item["predicate"]: item for item in registry["predicates"]}
     observations: list[dict[str, Any]] = []
@@ -689,11 +725,26 @@ def validate_and_normalize(
             item["predicate"] in PROJECT_PREDICATES
             or item["projection_class"] == "project_knowledge"
         ):
-            item["project_scope"] = {
-                "state": "unresolved",
-                "project_key": None,
-                "binding_source": "unresolved",
-            }
+            subject_mention = entity_mentions_by_ref[
+                item["subject_entity_ref"]
+            ]
+            if trusted_project_binding is None or not (
+                _project_mention_matches_binding(
+                    subject_mention,
+                    trusted_project_binding,
+                )
+            ):
+                item["project_scope"] = {
+                    "state": "unresolved",
+                    "project_key": None,
+                    "binding_source": "unresolved",
+                }
+            else:
+                item["project_scope"] = {
+                    "state": "resolved",
+                    "project_key": trusted_project_binding.project_key,
+                    "binding_source": "trusted_thread_binding",
+                }
         else:
             item["project_scope"] = {
                 "state": "not_applicable",
@@ -713,8 +764,24 @@ def validate_and_normalize(
         item["target_claim_id"] = None
         comparisons.append(item)
 
+    project_observations = [
+        item
+        for item in observations
+        if item["projection_class"] == "project_knowledge"
+    ]
+    project_scope_resolved = bool(project_observations) and all(
+        item["project_scope"]["state"] == "resolved"
+        for item in project_observations
+    )
+
     deferrals: list[dict[str, Any]] = []
     for item in raw["deferrals"]:
+        if (
+            project_scope_resolved
+            and item["reason_code"] == "project_scope_unresolved"
+            and item["memory_shape"] == "project_knowledge"
+        ):
+            continue
         item["source_spans"] = _normalize_spans(
             item["source_spans"],
             source.content,
@@ -724,12 +791,7 @@ def validate_and_normalize(
         )
         deferrals.append(item)
 
-    project_observations = [
-        item
-        for item in observations
-        if item["projection_class"] == "project_knowledge"
-    ]
-    if project_observations and not any(
+    if not project_scope_resolved and project_observations and not any(
         item["reason_code"] == "project_scope_unresolved"
         for item in deferrals
     ):
@@ -806,6 +868,34 @@ def _uuid_text(value: Any, label: str) -> str:
         return str(uuid.UUID(str(value)))
     except (ValueError, TypeError, AttributeError) as exc:
         raise ValueError(f"{label} must be a UUID") from exc
+
+
+def _project_name_key(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value)
+    unaccented = "".join(
+        character
+        for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    return re.sub(r"[^a-z0-9]+", "-", unaccented.casefold()).strip("-")
+
+
+def _project_mention_matches_binding(
+    mention: dict[str, Any],
+    binding: TrustedProjectBinding,
+) -> bool:
+    if mention["entity_type"] != "project":
+        return False
+    if mention["mention_kind"] == "anonymous":
+        return (
+            mention["name_text"] is None
+            and mention["relationship_role"] == "project:current_thread"
+        )
+    if mention["mention_kind"] == "named" and mention["name_text"]:
+        return _project_name_key(mention["name_text"]) == _project_name_key(
+            binding.project_key
+        )
+    return False
 
 
 def _datetime_text(value: Any, label: str) -> str:

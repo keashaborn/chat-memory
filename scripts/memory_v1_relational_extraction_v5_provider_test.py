@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
+    TrustedProjectBinding,
     load_registry,
     load_schema,
     synthetic_provider,
@@ -22,6 +23,10 @@ SCHEMA_SHA256 = (
 SOURCE = "My name is Avery."
 SOURCE_SHA256 = (
     "3f55b194db3ae03b7100b9e8f572ab254f43bed87b151c3a5e0015163374d2aa"
+)
+PROJECT_SOURCE = "Verbal Sage must keep owner boundaries fail-closed."
+PROJECT_SOURCE_SHA256 = (
+    "9079a50293a8be146b295842466779da55f4fdedc649d7a3c041891e7ce0a21b"
 )
 
 
@@ -102,6 +107,62 @@ def valid_output() -> dict:
     }
 
 
+def project_output() -> dict:
+    return {
+        "entity_mentions": [
+            {
+                "entity_ref": "e01",
+                "entity_type": "project",
+                "mention_kind": "named",
+                "name_text": "Verbal Sage",
+                "relationship_role": None,
+                "source_spans": [
+                    {"start": 0, "end": 11, "quote": "Verbal Sage"}
+                ],
+                "extraction_confidence": 1.0,
+                "reason_codes": ["explicit_project_name"],
+            }
+        ],
+        "observations": [
+            {
+                "observation_ref": "o01",
+                "subject_entity_ref": "e01",
+                "predicate": "project.requirement",
+                "object": {
+                    "kind": "literal",
+                    "datatype": "text",
+                    "value": "keep owner boundaries fail-closed",
+                    "unit": None,
+                    "approximate": False,
+                },
+                "polarity": "affirmed",
+                "modality": "asserted",
+                "projection_class": "project_knowledge",
+                "surface_policy": "exact_project_scope_only",
+                "temporal": temporal_none(),
+                "sensitivity": "medium",
+                "extraction_confidence": 0.99,
+                "source_spans": [
+                    {"start": 0, "end": 51, "quote": PROJECT_SOURCE}
+                ],
+                "reason_codes": ["explicit_project_requirement"],
+            }
+        ],
+        "comparison_hints": [],
+        "deferrals": [
+        {
+            "reason_code": "project_scope_unresolved",
+            "memory_shape": "project_knowledge",
+            "source_spans": [
+                    {"start": 0, "end": 51, "quote": PROJECT_SOURCE}
+            ],
+            "sensitivity": "medium",
+        }
+        ],
+        "packet_findings": ["synthetic_project_contract_test"],
+    }
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     registry = load_registry(
@@ -157,6 +218,119 @@ def main() -> int:
         raise AssertionError("normalized packet retained provider span quotes")
     if "owner_user_id" in str(packet) or "vantage_id" in str(packet):
         raise AssertionError("normalized packet contains an ownership namespace")
+
+    project_source = TrustedExtractionSource.create(
+        job_id="aaaaaaaa-0020-4000-8000-000000000020",
+        source_system="public.chat_log",
+        source_external_id="aaaaaaaa-0021-4000-8000-000000000021",
+        source_sha256=PROJECT_SOURCE_SHA256,
+        source_recorded_at="2026-07-16T12:02:00Z",
+        content=PROJECT_SOURCE,
+    )
+    project_provider = synthetic_provider(
+        provider_id="synthetic_fixture",
+        provider_version="v1",
+        output=project_output(),
+    )
+    unresolved_project = validate_and_normalize(
+        project_provider,
+        source=project_source,
+        registry=registry,
+        schema=schema,
+    )
+    unresolved_observation = unresolved_project.normalized_packet[
+        "observations"
+    ][0]
+    if unresolved_observation["project_scope"]["state"] != "unresolved":
+        raise AssertionError("unbound project observation was not deferred")
+    if not any(
+        item["reason_code"] == "project_scope_unresolved"
+        for item in unresolved_project.normalized_packet["deferrals"]
+    ):
+        raise AssertionError("unbound project observation lost its deferral")
+
+    binding = TrustedProjectBinding.create(
+        thread_id="aaaaaaaa-0010-4000-8000-000000000010",
+        project_id="aaaaaaaa-0011-4000-8000-000000000011",
+        project_key="verbal-sage",
+        binding_event_id="aaaaaaaa-0012-4000-8000-000000000012",
+    )
+    bound_project = validate_and_normalize(
+        project_provider,
+        source=project_source,
+        registry=registry,
+        schema=schema,
+        trusted_project_binding=binding,
+    )
+    bound_observation = bound_project.normalized_packet["observations"][0]
+    if bound_observation["project_scope"] != {
+        "state": "resolved",
+        "project_key": "verbal-sage",
+        "binding_source": "trusted_thread_binding",
+    }:
+        raise AssertionError("trusted project binding was not injected")
+    if any(
+        item["reason_code"] == "project_scope_unresolved"
+        for item in bound_project.normalized_packet["deferrals"]
+    ):
+        raise AssertionError("resolved project retained unresolved deferral")
+
+    anonymous_output = copy.deepcopy(project_output())
+    anonymous_output["entity_mentions"][0].update(
+        {
+            "mention_kind": "anonymous",
+            "name_text": None,
+            "relationship_role": "project:current_thread",
+        }
+    )
+    anonymous_project = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=anonymous_output,
+        ),
+        source=project_source,
+        registry=registry,
+        schema=schema,
+        trusted_project_binding=binding,
+    )
+    if anonymous_project.normalized_packet["observations"][0][
+        "project_scope"
+    ]["state"] != "resolved":
+        raise AssertionError("trusted anonymous thread project was not resolved")
+
+    mismatched_output = copy.deepcopy(project_output())
+    mismatched_output["entity_mentions"][0]["name_text"] = "Other Project"
+    mismatched_project = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=mismatched_output,
+        ),
+        source=project_source,
+        registry=registry,
+        schema=schema,
+        trusted_project_binding=binding,
+    )
+    if mismatched_project.normalized_packet["observations"][0][
+        "project_scope"
+    ]["state"] != "unresolved":
+        raise AssertionError("mismatched named project used thread binding")
+    if not any(
+        item["reason_code"] == "project_scope_unresolved"
+        for item in mismatched_project.normalized_packet["deferrals"]
+    ):
+        raise AssertionError("mismatched named project lost review deferral")
+
+    expect_error(
+        lambda: TrustedProjectBinding.create(
+            thread_id=binding.thread_id,
+            project_id=binding.project_id,
+            project_key="   ",
+            binding_event_id=binding.binding_event_id,
+        ),
+        "empty trusted project key",
+    )
 
     malformed = valid_output()
     malformed["owner_user_id"] = "aaaaaaaa-0003-4000-8000-000000000003"

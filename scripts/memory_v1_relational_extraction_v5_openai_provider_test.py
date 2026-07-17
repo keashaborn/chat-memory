@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import scripts.memory_v1_relational_extraction_v5_openai_provider as adapter_module
 from scripts.memory_v1_relational_extraction_v5_openai_provider import (
     EXTERNAL_CALL_ENABLE_TOKEN,
     OPENAI_PROVIDER_ID,
@@ -124,6 +125,16 @@ class FakeResponses:
 class FakeClient:
     def __init__(self, responses: FakeResponses) -> None:
         self.responses = responses
+
+
+class FakeSDKModule:
+    def __init__(self, client: FakeClient) -> None:
+        self.client = client
+        self.client_kwargs: list[dict[str, Any]] = []
+
+    def OpenAI(self, **kwargs: Any) -> FakeClient:
+        self.client_kwargs.append(dict(kwargs))
+        return self.client
 
 
 class StatusError(RuntimeError):
@@ -274,6 +285,22 @@ def main() -> int:
     )
     if disabled_fake.calls:
         raise AssertionError("disabled transport reached the fake client")
+
+    sdk_fake_responses = FakeResponses(
+        response=response(parsed=provider_output())
+    )
+    sdk_fake = FakeSDKModule(FakeClient(sdk_fake_responses))
+    original_import_module = adapter_module.importlib.import_module
+    adapter_module.importlib.import_module = lambda name: sdk_fake
+    try:
+        sdk_transport = OpenAIResponsesTransport(
+            enable_token=EXTERNAL_CALL_ENABLE_TOKEN,
+        )
+        sdk_transport.preflight()
+    finally:
+        adapter_module.importlib.import_module = original_import_module
+    if sdk_fake.client_kwargs != [{"max_retries": 0}]:
+        raise AssertionError("OpenAI SDK client retries are not disabled")
 
     enabled_fake = FakeResponses(
         response=response(parsed=provider_output())
