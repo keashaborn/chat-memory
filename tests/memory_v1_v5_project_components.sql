@@ -3,6 +3,8 @@
 DO $security$
 DECLARE
   function_oid regprocedure;
+  table_oid regclass;
+  privilege_name text;
 BEGIN
   IF NOT EXISTS (
     SELECT 1
@@ -42,23 +44,22 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF has_table_privilege(
-       'brains_app','memory.project_component_v5','INSERT'
-     )
-     OR has_table_privilege(
-       'brains_app','memory.project_component_v5','UPDATE'
-     )
-     OR has_table_privilege(
-       'brains_app','memory.project_component_v5','DELETE'
-     )
-     OR has_table_privilege(
-       'brains_app','memory.project_component_alias_v5','INSERT'
-     )
-     OR has_table_privilege(
-       'brains_app','memory.project_component_registration_event_v5','INSERT'
-     ) THEN
-    RAISE EXCEPTION 'brains_app has direct project component mutation rights';
-  END IF;
+  FOREACH table_oid IN ARRAY ARRAY[
+    'memory.project_component_v5'::regclass,
+    'memory.project_component_alias_v5'::regclass,
+    'memory.project_component_registration_event_v5'::regclass
+  ]
+  LOOP
+    FOREACH privilege_name IN ARRAY ARRAY[
+      'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'
+    ]::text[]
+    LOOP
+      IF has_table_privilege('brains_app',table_oid,privilege_name) THEN
+        RAISE EXCEPTION
+          'brains_app has direct % privilege on %',privilege_name,table_oid;
+      END IF;
+    END LOOP;
+  END LOOP;
 
   IF (
     SELECT count(*)
@@ -208,9 +209,9 @@ FROM memory.apply_owner_project_component_v5(
 
 SELECT
   1 / ((SELECT count(*) = 3
-        FROM memory.project_component_v5)::integer),
-  1 / ((SELECT count(*) = 4
-        FROM memory.project_component_registration_event_v5)::integer);
+        FROM memory.read_owner_project_components_v5(
+          'ca000000-0000-4000-8000-000000000001'
+        ))::integer);
 
 SELECT pg_temp.assert_component_call_denied(
   $sql$SELECT * FROM memory.apply_owner_project_component_v5(
@@ -262,13 +263,17 @@ SELECT pg_temp.assert_component_call_denied(
 SELECT set_config(
   'app.user_id','cb222222-2222-4222-8222-222222222222',true
 );
-SELECT
-  1 / ((SELECT count(*) = 0
-        FROM memory.project_component_v5)::integer),
-  1 / ((SELECT count(*) = 0
-        FROM memory.project_component_alias_v5)::integer),
-  1 / ((SELECT count(*) = 0
-        FROM memory.project_component_registration_event_v5)::integer);
+
+SELECT pg_temp.assert_component_call_denied(
+  $sql$SELECT count(*) FROM memory.project_component_v5$sql$
+);
+SELECT pg_temp.assert_component_call_denied(
+  $sql$SELECT count(*) FROM memory.project_component_alias_v5$sql$
+);
+SELECT pg_temp.assert_component_call_denied(
+  $sql$SELECT count(*)
+       FROM memory.project_component_registration_event_v5$sql$
+);
 
 SELECT pg_temp.assert_component_call_denied(
   $sql$SELECT * FROM memory.read_owner_project_components_v5(
@@ -277,6 +282,15 @@ SELECT pg_temp.assert_component_call_denied(
 );
 
 RESET SESSION AUTHORIZATION;
+
+SELECT
+  1 / ((SELECT count(*) = 3
+        FROM memory.project_component_v5)::integer),
+  1 / ((SELECT count(*) >= 6
+        FROM memory.project_component_alias_v5)::integer),
+  1 / ((SELECT count(*) = 4
+        FROM memory.project_component_registration_event_v5)::integer);
+
 ROLLBACK;
 
 SELECT 1 / ((count(*) = 0)::integer)

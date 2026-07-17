@@ -1,0 +1,245 @@
+{
+  "contract_version": "memory_v1_v5_component_projection_install_plan_v1",
+  "plan_id": "memory-v1-v5-component-projection-install-20260717",
+  "created_on": "2026-07-17",
+  "production_authorized": false,
+  "source": {
+    "branch": "memory_v1_v5_component_scope",
+    "required_ancestor_commit": "1e6bca24a1cadc0af039e3b59eadd92517cbc7a9"
+  },
+  "target": {
+    "server": "seebx",
+    "postgres_container": "brains-postgres-1",
+    "database": "memory",
+    "maintenance_role": "sage",
+    "application_role": "brains_app",
+    "postgres_major": 16,
+    "private_schema": "memory"
+  },
+  "authorization_policy": {
+    "required": true,
+    "contract_version": "memory_v1_v5_component_projection_install_authorization_v1",
+    "file_mode": "0600",
+    "maximum_validity_minutes": 30,
+    "bind_plan_sha256": true,
+    "bind_exact_head_commit": true,
+    "environment_gate": "MEMORY_V1_COMPONENT_PROJECTION_INSTALL=authorized"
+  },
+  "backup_policy": {
+    "format": "postgres_custom",
+    "destination_directory": "/home/ubuntu/brains/snapshots",
+    "file_mode": "0600",
+    "require_nonzero_bytes": true,
+    "require_sha256": true,
+    "require_restore_catalog": true,
+    "must_complete_before_first_schema_write": true,
+    "minimum_free_space_multiplier": 2
+  },
+  "maintenance_quiescence": {
+    "temporary_only": true,
+    "restore_exact_active_state_on_exit": true,
+    "configuration_changes_allowed": false,
+    "units": [
+      "memory-v1-projection.timer",
+      "memory-v1-governance.timer",
+      "memory-v1-evidence-intake-dispatcher.timer",
+      "memory-v1-v5-chat-capture.timer",
+      "memory-v1-deferred-reconciliation-scan.timer"
+    ]
+  },
+  "preinstall_requirements": {
+    "required_extensions": [
+      "pgcrypto",
+      "unaccent"
+    ],
+    "required_tables": [
+      "memory.project_space",
+      "memory.project_knowledge_head_v5",
+      "memory.project_knowledge_revision_v5",
+      "memory.projection_plan",
+      "memory.projection_plan_item",
+      "memory.projection_project_payload",
+      "memory.observation",
+      "memory.entity_mention",
+      "memory.predicate_contract"
+    ],
+    "required_functions": [
+      "memory.current_actor_user_id()",
+      "memory.guard_v5_extraction_append_only()",
+      "memory.guard_v5_observation_contract()",
+      "memory.v5_project_scope_valid(jsonb)",
+      "memory.persist_owner_evidence_extraction_packet_v5(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,jsonb,boolean,integer,uuid)",
+      "memory.apply_projection_v5(uuid,uuid,text,uuid,text)"
+    ],
+    "required_roles": [
+      "brains_app",
+      "memory_v5_writer",
+      "memory_v5_extraction_maintainer"
+    ],
+    "required_absent_tables": [
+      "memory.project_component_v5",
+      "memory.project_component_alias_v5",
+      "memory.project_component_registration_event_v5"
+    ],
+    "required_absent_columns": [
+      "memory.project_knowledge_head_v5.component_key",
+      "memory.project_knowledge_head_v5.binding_source",
+      "memory.projection_project_payload.component_key",
+      "memory.projection_project_payload.binding_source"
+    ]
+  },
+  "source_files": [
+    {
+      "path": "ops/sql/20260717_memory_v1_v5_project_components.sql",
+      "sha256": "0cc6e5403dc20449bb1cd73a3a152d8385c7db2937413ef79d7dffc9710950fe",
+      "kind": "migration",
+      "ordinal": 1
+    },
+    {
+      "path": "ops/sql/20260717_memory_v1_v5_bounded_extraction.sql",
+      "sha256": "5eff3bfc49ddf40bc37ee8077069f44b8d78e5af11e37150bb2d75b4a0389310",
+      "kind": "migration",
+      "ordinal": 2
+    },
+    {
+      "path": "ops/sql/20260715_memory_v1_projection_targets_v5.sql",
+      "sha256": "fe80f2e859a2fbf9c06cd1dbf2b964f0a35fb9d2f419969101872204f0180640",
+      "kind": "migration",
+      "ordinal": 3
+    },
+    {
+      "path": "ops/sql/20260715_memory_v1_projection_staging_v5.sql",
+      "sha256": "f6043a717847524eb054c4831eb8882ab5112f60f9bd13573252ffc01b024f14",
+      "kind": "migration",
+      "ordinal": 4
+    },
+    {
+      "path": "ops/sql/20260715_memory_v1_projection_apply_v5.sql",
+      "sha256": "714d5fcb5bf50a278f011190be2dc68610b7e2f23ae811d0a3975f7f2dd1e636",
+      "kind": "migration",
+      "ordinal": 5
+    },
+    {
+      "path": "ops/sql/20260717_memory_v1_v5_project_components_rollback.sql",
+      "sha256": "dbce3b1d10c94b5c6c1b8c87fcc801fa0a870cfecc749fa1257a19d798a32e17",
+      "kind": "logical_rollback",
+      "ordinal": 1
+    },
+    {
+      "path": "tests/memory_v1_v5_project_components.sql",
+      "sha256": "bdcbf6323510ed5989d1ea1b3cb471d40d90a5499cb229ee89bf4c9f4be4d54c",
+      "kind": "rolled_back_test",
+      "ordinal": 1
+    },
+    {
+      "path": "tests/memory_v1_v5_bounded_extraction.sql",
+      "sha256": "057a0f595f6d8017d690d5a972547d2851f7fdc6bde846f48d47565b17656c23",
+      "kind": "rolled_back_test",
+      "ordinal": 2
+    },
+    {
+      "path": "tests/memory_v1_projection_targets_v5.sql",
+      "sha256": "8d204eb8f635981ce92936a67510f9d1da59952ca790bde26224db4013441ce5",
+      "kind": "rolled_back_test",
+      "ordinal": 3
+    },
+    {
+      "path": "tests/memory_v1_projection_staging_v5.sql",
+      "sha256": "8bfc60f5804f4baf117a7f30545d46a9501831270a21daf19e6ab0b01107ae53",
+      "kind": "rolled_back_test",
+      "ordinal": 4
+    },
+    {
+      "path": "tests/memory_v1_projection_staging_production_v5.sql",
+      "sha256": "73c8ddbbaa636a3c32a5f141e9feb2750bc70236c0158d827afb9c631d44b9d9",
+      "kind": "rolled_back_test",
+      "ordinal": 5
+    },
+    {
+      "path": "tools/memory_v1_v5_project_components_production_clone.sh",
+      "sha256": "5bc9aae37d3904dbcf7ebfaa42a87e0f8b45b2b88603113604baf12ee575acd7",
+      "kind": "clone_rehearsal",
+      "ordinal": 1
+    },
+    {
+      "path": "tools/memory_v1_v5_bounded_extraction_production_clone.sh",
+      "sha256": "8176daf7ec301eacad9bfc4d0accfa9805c09ed1da21695b5e95ab8a0eb70189",
+      "kind": "clone_rehearsal",
+      "ordinal": 2
+    },
+    {
+      "path": "tools/memory_v1_projection_staging_v5_production_clone.sh",
+      "sha256": "32e4c052aabed2b78f7d34ccbff198d569328993f9697b5b486ade198ed07af5",
+      "kind": "clone_rehearsal",
+      "ordinal": 3
+    },
+    {
+      "path": "tools/memory_v1_v5_stage_batch_production_clone.sh",
+      "sha256": "251dd790edff47b0ffe518d1af1c18a311a017f93b21af547b60ec438666362f",
+      "kind": "clone_rehearsal",
+      "ordinal": 4
+    },
+    {
+      "path": "ops/manifests/memory_v1_v5_component_projection_recovery_plan_20260717.json",
+      "sha256": "e78dba6f2f543658c3912bbd3875d5d3dec4b835654b7174e6f456a45dc42b15",
+      "kind": "recovery_plan",
+      "ordinal": 1
+    }
+  ],
+  "allowed_effects": [
+    "temporarily_stop_and_restore_exact_five_memory_v1_timers",
+    "create_fresh_custom_format_postgres_backup",
+    "install_hash_locked_additive_component_projection_schema_and_functions",
+    "run_five_synthetic_security_suites_inside_rollback",
+    "write_mode_0600_preflight_backup_logs_status_and_report"
+  ],
+  "forbidden_effects": [
+    "change_systemd_enablement_or_unit_files",
+    "change_environment_or_configuration",
+    "restart_brains_or_verbal_sage",
+    "register_project_or_component_rows",
+    "invoke_live_extraction_or_projection_apply",
+    "write_qdrant_or_redis",
+    "activate_retrieval_or_prompt_influence",
+    "modify_supabase_auth_users",
+    "delete_redact_or_restore_user_data",
+    "deploy_component_aware_runtime_code"
+  ],
+  "postinstall_requirements": {
+    "required_tables": [
+      "memory.project_component_v5",
+      "memory.project_component_alias_v5",
+      "memory.project_component_registration_event_v5"
+    ],
+    "required_columns": [
+      "memory.project_knowledge_head_v5.component_key",
+      "memory.project_knowledge_head_v5.binding_source",
+      "memory.projection_project_payload.component_key",
+      "memory.projection_project_payload.binding_source"
+    ],
+    "required_constraints": [
+      "memory.project_knowledge_head_v5.project_head_v5_component_fk",
+      "memory.projection_project_payload.projection_project_payload_component_fk"
+    ],
+    "required_functions": [
+      "memory.apply_owner_project_component_v5(uuid,uuid,text,text,uuid,text[],jsonb)",
+      "memory.read_owner_project_components_v5(uuid)",
+      "memory.normalize_project_component_alias_v5(text)"
+    ],
+    "required_empty_tables": [
+      "memory.project_component_v5",
+      "memory.project_component_alias_v5",
+      "memory.project_component_registration_event_v5"
+    ],
+    "all_component_tables_force_rls": true,
+    "component_tables_owned_by_sage": true,
+    "brains_app_component_table_privileges": [],
+    "public_component_table_privileges": [],
+    "preexisting_memory_rows_unchanged": true,
+    "qdrant_memory_claim_v1_unchanged": true,
+    "timer_enablement_and_active_state_restored": true,
+    "component_rows_created": 0,
+    "runtime_activated": false
+  },
+  "hard_stop": "before_component_registration_retrieval_activation_or_prompt_influence"
+}

@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# seebx backend only. Installs the hash-locked component/projection compatibility
+# stack, runs rollback-only security tests, and stops before component data,
+# retrieval activation, prompt influence, or runtime code deployment.
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 INSTALL_PLAN.json AUTHORIZATION.json" >&2
+  exit 2
+fi
+if [[ "${MEMORY_V1_COMPONENT_PROJECTION_INSTALL:-}" != "authorized" ]]; then
+  echo "MEMORY_V1_COMPONENT_PROJECTION_INSTALL=authorized is required" >&2
+  exit 1
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+plan=$(realpath "$1")
+authorization=$(realpath "$2")
+expected_plan="$repo_root/ops/manifests/memory_v1_v5_component_projection_install_plan_20260717.json"
+verifier="$repo_root/scripts/memory_v1_v5_component_projection_install_plan.py"
+container=brains-postgres-1
+database=memory
+database_role=sage
+snapshot_dir=/home/ubuntu/brains/snapshots
+lock_file=/home/ubuntu/brains/.memory_v1_v5_component_projection_install.lock
+phase=initialization
+status_file=
+units_quiesced=0
+unit_state_before=
+
+[[ "$plan" == "$expected_plan" ]] || {
+  echo "install plan must be the committed canonical plan" >&2
+  exit 1
+}
+if [[ "$authorization" == "$repo_root"/* ]]; then
+  echo "authorization file must be outside the Git worktree" >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+  echo "production install requires a clean Git worktree" >&2
+  exit 1
+fi
+
+python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" \
+  --authorization "$authorization" >/dev/null
+
+exec 9>"$lock_file"
+flock -n 9 || {
+  echo "another component/projection installation holds $lock_file" >&2
+  exit 1
+}
+umask 077
+
+auth_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["authorization_id"])' "$authorization")
+run_id="$(date -u +%Y%m%dT%H%M%SZ)_$auth_id"
+status_file="$snapshot_dir/memory_v1_v5_component_projection_${run_id}.status"
+unit_state_before="$snapshot_dir/memory_v1_v5_component_projection_units_before_${run_id}.tsv"
+
+restore_units() {
+  if [[ "$units_quiesced" -ne 1 || ! -s "$unit_state_before" ]]; then
+    return 0
+  fi
+  while IFS=$'\t' read -r unit enabled active; do
+    [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]] || return 1
+    if [[ "$active" == "active" ]]; then
+      sudo systemctl start "$unit"
+    fi
+    [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
+  done <"$unit_state_before"
+  units_quiesced=0
+}
+
+record_exit() {
+  code=$?
+  if [[ "$units_quiesced" -eq 1 ]]; then
+    phase_before_restore=$phase
+    phase=restore_timer_state_after_failure
+    restore_units || true
+    phase=$phase_before_restore
+  fi
+  if [[ -n "$status_file" ]]; then
+    {
+      printf 'run_id=%s\n' "$run_id"
+      printf 'phase=%s\n' "$phase"
+      printf 'exit_code=%s\n' "$code"
+      printf 'completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >"$status_file"
+    chmod 0600 "$status_file"
+  fi
+}
+trap record_exit EXIT
+
+psql_scalar() {
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U "$database_role" -d "$database" -c "$1"
+}
+
+run_sql_file() {
+  local file=$1
+  docker exec \
+    -e PGOPTIONS='-c lock_timeout=5s -c statement_timeout=180s' \
+    -i "$container" psql -X -v ON_ERROR_STOP=1 \
+    -U "$database_role" -d "$database" <"$repo_root/$file"
+}
+
+qdrant_signature() {
+  curl --fail --silent --show-error \
+    -H 'content-type: application/json' \
+    -d '{"limit":10000,"with_payload":true,"with_vector":true}' \
+    http://127.0.0.1:6333/collections/memory_claim_v1/points/scroll \
+    | jq -cS '.result.points | sort_by(.id)' \
+    | sha256sum | awk '{print $1}'
+}
+
+capture_memory_state() {
+  local table_list=$1
+  local output=$2
+  : >"$output"
+  while IFS= read -r table; do
+    [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]] || {
+      echo "unsafe memory table name: $table" >&2
+      return 1
+    }
+    state=$(psql_scalar "
+      SELECT count(*)::text || E'\\t' ||
+             encode(public.digest(coalesce(string_agg(row_json,E'\\n'
+               ORDER BY row_json),''),'sha256'),'hex')
+      FROM (
+        SELECT to_jsonb(table_row)::text AS row_json
+        FROM memory.\"$table\" AS table_row
+      ) AS rows
+    ")
+    printf '%s\t%s\n' "$table" "$state" >>"$output"
+  done <"$table_list"
+  chmod 0600 "$output"
+}
+
+phase=preflight
+preflight="$snapshot_dir/memory_v1_v5_component_projection_preflight_${run_id}.json"
+python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" \
+  --authorization "$authorization" --production-preflight --output "$preflight" \
+  >/dev/null
+chmod 0600 "$preflight"
+
+mapfile -t migrations < <(
+  python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" --list-kind migration
+)
+mapfile -t tests < <(
+  python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" --list-kind rolled_back_test
+)
+[[ ${#migrations[@]} -eq 5 ]] || { echo "expected five migrations" >&2; exit 1; }
+[[ ${#tests[@]} -eq 5 ]] || { echo "expected five rollback tests" >&2; exit 1; }
+
+phase=capture_timer_state
+: >"$unit_state_before"
+while IFS= read -r unit; do
+  [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]] || exit 1
+  printf '%s\t%s\t%s\n' "$unit" \
+    "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")" \
+    >>"$unit_state_before"
+done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["maintenance_quiescence"]["units"]))' "$plan")
+chmod 0600 "$unit_state_before"
+
+phase=quiesce_timers
+while IFS=$'\t' read -r unit _enabled _active; do
+  sudo systemctl stop "$unit"
+done <"$unit_state_before"
+units_quiesced=1
+while IFS=$'\t' read -r unit _enabled _active; do
+  service=${unit%.timer}.service
+  for _attempt in $(seq 1 30); do
+    systemctl is-active --quiet "$service" || break
+    sleep 1
+  done
+  systemctl is-active --quiet "$service" && {
+    echo "$service did not quiesce within 30 seconds" >&2
+    exit 1
+  }
+  [[ "$(systemctl is-active "$unit")" == "inactive" ]]
+done <"$unit_state_before"
+
+phase=baseline_capture
+baseline_tables="$snapshot_dir/memory_v1_v5_component_projection_tables_${run_id}.txt"
+baseline_state="$snapshot_dir/memory_v1_v5_component_projection_before_${run_id}.tsv"
+post_state="$snapshot_dir/memory_v1_v5_component_projection_after_${run_id}.tsv"
+psql_scalar "
+  SELECT table_name
+  FROM information_schema.tables
+  WHERE table_schema='memory' AND table_type='BASE TABLE'
+  ORDER BY table_name
+" >"$baseline_tables"
+chmod 0600 "$baseline_tables"
+capture_memory_state "$baseline_tables" "$baseline_state"
+qdrant_before=$(qdrant_signature)
+
+phase=backup
+backup_partial="$snapshot_dir/.memory_pre_v5_component_projection_${run_id}.dump.partial"
+backup="$snapshot_dir/memory_pre_v5_component_projection_${run_id}.dump"
+catalog="$backup.catalog"
+checksum="$backup.sha256"
+docker exec "$container" pg_dump -U "$database_role" -d "$database" \
+  -Fc --no-owner --no-privileges >"$backup_partial"
+[[ -s "$backup_partial" ]] || { echo "backup is empty" >&2; exit 1; }
+docker exec -i "$container" pg_restore -l <"$backup_partial" >"$catalog"
+[[ -s "$catalog" ]] || { echo "backup restore catalog is empty" >&2; exit 1; }
+mv "$backup_partial" "$backup"
+chmod 0600 "$backup" "$catalog"
+sha256sum "$backup" >"$checksum"
+chmod 0600 "$checksum"
+
+# Revalidate after backup and immediately before the first schema write.
+python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" \
+  --authorization "$authorization" >/dev/null
+
+phase=schema_install
+install_log="$snapshot_dir/memory_v1_v5_component_projection_${run_id}.log"
+: >"$install_log"
+for migration in "${migrations[@]}"; do
+  printf 'INSTALL %s\n' "$migration" >>"$install_log"
+  run_sql_file "$migration" >>"$install_log" 2>&1
+done
+chmod 0600 "$install_log"
+
+phase=rolled_back_security_tests
+for test_file in "${tests[@]}"; do
+  printf 'TEST %s\n' "$test_file" >>"$install_log"
+  run_sql_file "$test_file" >>"$install_log" 2>&1
+done
+
+phase=postflight
+capture_memory_state "$baseline_tables" "$post_state"
+cmp -s "$baseline_state" "$post_state" || {
+  diff -u "$baseline_state" "$post_state" >&2 || true
+  echo "preexisting memory rows changed" >&2
+  exit 1
+}
+qdrant_after=$(qdrant_signature)
+[[ "$qdrant_before" == "$qdrant_after" ]] || {
+  echo "Qdrant memory_claim_v1 changed during installation" >&2
+  exit 1
+}
+
+schema_ok=$(psql_scalar "
+  SELECT (
+    to_regclass('memory.project_component_v5') IS NOT NULL
+    AND to_regclass('memory.project_component_alias_v5') IS NOT NULL
+    AND to_regclass('memory.project_component_registration_event_v5') IS NOT NULL
+    AND to_regprocedure('memory.apply_owner_project_component_v5(uuid,uuid,text,text,uuid,text[],jsonb)') IS NOT NULL
+    AND to_regprocedure('memory.read_owner_project_components_v5(uuid)') IS NOT NULL
+    AND to_regprocedure('memory.normalize_project_component_alias_v5(text)') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='memory' AND table_name='project_knowledge_head_v5' AND column_name='component_key')
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='memory' AND table_name='project_knowledge_head_v5' AND column_name='binding_source')
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='memory' AND table_name='projection_project_payload' AND column_name='component_key')
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='memory' AND table_name='projection_project_payload' AND column_name='binding_source')
+    AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='memory.project_knowledge_head_v5'::regclass AND conname='project_head_v5_component_fk')
+    AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='memory.projection_project_payload'::regclass AND conname='projection_project_payload_component_fk')
+  )::integer;
+")
+[[ "$schema_ok" == "1" ]] || { echo "component/projection schema postflight failed" >&2; exit 1; }
+
+security_ok=$(psql_scalar "
+  SELECT (
+    (SELECT count(*)=3 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='memory'
+        AND c.relname IN ('project_component_v5','project_component_alias_v5','project_component_registration_event_v5')
+        AND c.relrowsecurity AND c.relforcerowsecurity
+        AND pg_get_userbyid(c.relowner)='sage')
+    AND (SELECT count(*)=0 FROM memory.project_component_v5)
+    AND (SELECT count(*)=0 FROM memory.project_component_alias_v5)
+    AND (SELECT count(*)=0 FROM memory.project_component_registration_event_v5)
+    AND NOT (SELECT bool_or(
+      has_table_privilege('brains_app','memory.'||name,'SELECT')
+      OR has_table_privilege('brains_app','memory.'||name,'INSERT')
+      OR has_table_privilege('brains_app','memory.'||name,'UPDATE')
+      OR has_table_privilege('brains_app','memory.'||name,'DELETE')
+      OR has_table_privilege('brains_app','memory.'||name,'TRUNCATE'))
+      FROM unnest(ARRAY['project_component_v5','project_component_alias_v5','project_component_registration_event_v5']) item(name))
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace,
+      LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl
+      WHERE n.nspname='memory'
+        AND c.relname IN ('project_component_v5','project_component_alias_v5','project_component_registration_event_v5')
+        AND acl.grantee=0)
+  )::integer;
+")
+[[ "$security_ok" == "1" ]] || { echo "component privilege/RLS postflight failed" >&2; exit 1; }
+
+phase=restore_timer_state
+restore_units
+unit_state_after="$snapshot_dir/memory_v1_v5_component_projection_units_after_${run_id}.tsv"
+: >"$unit_state_after"
+while IFS=$'\t' read -r unit _enabled _active; do
+  printf '%s\t%s\t%s\n' "$unit" \
+    "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")" \
+    >>"$unit_state_after"
+done <"$unit_state_before"
+chmod 0600 "$unit_state_after"
+cmp -s "$unit_state_before" "$unit_state_after" || {
+  diff -u "$unit_state_before" "$unit_state_after" >&2 || true
+  echo "timer state was not restored exactly" >&2
+  exit 1
+}
+
+phase=report
+report="$snapshot_dir/memory_v1_v5_component_projection_${run_id}.json"
+PLAN="$plan" AUTHORIZATION="$authorization" PREFLIGHT="$preflight" \
+  BACKUP="$backup" BACKUP_SHA="$checksum" CATALOG="$catalog" \
+  INSTALL_LOG="$install_log" BASELINE="$baseline_state" POST="$post_state" \
+  BASELINE_TABLES="$baseline_tables" \
+  UNIT_BEFORE="$unit_state_before" UNIT_AFTER="$unit_state_after" \
+  QDRANT_BEFORE="$qdrant_before" QDRANT_AFTER="$qdrant_after" REPORT="$report" \
+  python3 - <<'PY'
+import datetime as dt
+import json
+import os
+from pathlib import Path
+
+plan = json.loads(Path(os.environ["PLAN"]).read_text())
+authorization = json.loads(Path(os.environ["AUTHORIZATION"]).read_text())
+report = {
+    "contract_version": "memory_v1_v5_component_projection_install_report_v1",
+    "authorization_id": authorization["authorization_id"],
+    "plan_id": plan["plan_id"],
+    "plan_sha256": authorization["plan_sha256"],
+    "expected_head_commit": authorization["expected_head_commit"],
+    "completed_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+    "backup": {
+        "path": os.environ["BACKUP"],
+        "sha256_file": os.environ["BACKUP_SHA"],
+        "restore_catalog": os.environ["CATALOG"],
+    },
+    "evidence": {
+        "preflight": os.environ["PREFLIGHT"],
+        "install_log": os.environ["INSTALL_LOG"],
+        "preexisting_table_list": os.environ["BASELINE_TABLES"],
+        "memory_state_before": os.environ["BASELINE"],
+        "memory_state_after": os.environ["POST"],
+        "timer_state_before": os.environ["UNIT_BEFORE"],
+        "timer_state_after": os.environ["UNIT_AFTER"],
+        "qdrant_before_sha256": os.environ["QDRANT_BEFORE"],
+        "qdrant_after_sha256": os.environ["QDRANT_AFTER"],
+    },
+    "checks": {
+        "five_hash_locked_migrations_installed": True,
+        "five_security_suites_rolled_back": True,
+        "preexisting_memory_rows_unchanged": True,
+        "component_tables_empty": True,
+        "component_owner_rls_and_privileges_verified": True,
+        "qdrant_unchanged": True,
+        "timer_state_restored": True,
+        "component_registration_invoked": False,
+        "runtime_code_deployed": False,
+        "retrieval_or_prompt_influence_activated": False,
+    },
+    "hard_stop": plan["hard_stop"],
+}
+Path(os.environ["REPORT"]).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+PY
+chmod 0600 "$report"
+sha256sum "$report" >"$report.sha256"
+chmod 0600 "$report.sha256"
+
+phase=complete
+printf 'memory_v1_v5_component_projection_production_install: PASS\n'
+printf 'report=%s\n' "$report"
+printf 'backup=%s\n' "$backup"

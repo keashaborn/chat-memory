@@ -711,12 +711,6 @@ REVOKE ALL ON
   memory.project_component_registration_event_v5
 FROM PUBLIC,brains_app;
 
-GRANT SELECT ON
-  memory.project_component_v5,
-  memory.project_component_alias_v5,
-  memory.project_component_registration_event_v5
-TO brains_app;
-
 GRANT USAGE ON SCHEMA memory TO memory_v5_extraction_maintainer;
 GRANT EXECUTE ON FUNCTION memory.current_actor_user_id()
   TO memory_v5_extraction_maintainer;
