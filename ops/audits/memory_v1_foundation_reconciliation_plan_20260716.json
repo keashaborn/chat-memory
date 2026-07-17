@@ -1,8 +1,8 @@
 {
   "active_use_audit": {
-    "active_tree_callers_of_missing_rag_engine_modules": 0,
+    "active_tree_callers_of_missing_rag_engine_modules": 1,
     "production_process_references": 0,
-    "systemd_references": 0
+    "systemd_references": 1
   },
   "archive_target_prefix": "archive/memory_v1_foundation/20260714/",
   "captured_at": "2026-07-17T00:24:07Z",
@@ -24,6 +24,8 @@
   },
   "path_groups": {
     "archive_nonruntime_foundation_tooling": [
+      "app.py.bak_edit_truncate_20260708T210407Z",
+      "rag_engine/gravity.py",
       "rag_engine/memory_v1_atomic_spans.py",
       "rag_engine/memory_v1_candidate_review.py",
       "rag_engine/memory_v1_compound_spans.py",
@@ -35,6 +37,10 @@
       "rag_engine/memory_v1_preference_project_extraction.py",
       "rag_engine/memory_v1_preference_project_review.py",
       "rag_engine/memory_v1_specialized_review.py",
+      "rag_engine/rag_router.py",
+      "rag_engine/retriever.py",
+      "rag_engine/temporal_policy.py",
+      "rag_engine/vb_desire_profile.py",
       "scripts/memory_v1_atomic_span_dry_run.py",
       "scripts/memory_v1_atomic_span_test.py",
       "scripts/memory_v1_candidate_review_dry_run.py",
@@ -58,7 +64,8 @@
       "scripts/memory_v1_preference_project_review.py",
       "scripts/memory_v1_preference_project_review_integration.py",
       "scripts/memory_v1_specialized_review.py",
-      "scripts/memory_v1_specialized_review_test.py"
+      "scripts/memory_v1_specialized_review_test.py",
+      "scripts/vantage_registry_actor_auth_test.py"
     ],
     "keep_integration_identical": [
       "ops/sql/20260713_memory_v1_evidence_ingest_batch.sql",
@@ -109,11 +116,11 @@
     ]
   },
   "path_group_counts": {
-    "archive_nonruntime_foundation_tooling": 35,
+    "archive_nonruntime_foundation_tooling": 42,
     "keep_integration_identical": 6,
     "keep_tested_integration_semantic": 7,
     "retain_canonical_provenance": 28,
-    "total": 76
+    "total": 83
   },
   "security_findings": [
     {
@@ -133,6 +140,17 @@
       "finding": "the integration shadow runtime adds an explicit high-sensitivity owner allowlist absent from foundation v3",
       "path": "rag_engine/memory_v1_shadow.py",
       "severity": "privacy_boundary"
+    }
+  ],
+  "stale_dependents": [
+    {
+      "action": "archive_in_follow_up_and_remove_disabled_units_in_a_separate_production_cleanup",
+      "dependent": "tools/rebuild_gravity.py",
+      "imports": "rag_engine.gravity",
+      "systemd_service": "gravity-rebuild.service",
+      "systemd_service_state": "disabled_inactive",
+      "systemd_timer": "gravity-rebuild.timer",
+      "systemd_timer_state": "disabled_inactive"
     }
   ],
   "status": "reviewed_plan_stop_before_foundation_merge_or_file_moves"
