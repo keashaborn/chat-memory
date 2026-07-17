@@ -13,6 +13,9 @@ case "$manifest" in
   ops/manifests/memory_v1_v5_bound_exact_job_canary_third_authorized_20260717.json)
     manifest_sha=b6e4ea22be511049f7b734c2659a718f721e14a4ca5a56f6f5d1e2186f0a957d
     ;;
+  ops/manifests/memory_v1_v5_bound_exact_job_canary_fourth_authorized_20260717.json)
+    manifest_sha=bca148f1914752eb9b3ab8d9aa0058ed2f62d57a25785508f15e6e88599b8e9f
+    ;;
   *)
     printf 'unapproved exact-canary manifest: %s\n' "$manifest" >&2
     exit 1
