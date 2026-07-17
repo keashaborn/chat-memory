@@ -5,19 +5,31 @@ set -euo pipefail
 # resetting attempts, calling an external model, or creating a packet.
 
 repo_root=$(git rev-parse --show-toplevel)
-manifest=ops/manifests/memory_v1_v5_reviewed_retry_apply_20260717.json
-manifest_sha=b317e3c24793f2f0d9a053951c3408775a7e6ffc53279c3c956f684d682bcde2
-required_ancestor=8b5722b3c67eb0e3fdf0f1712f62a48c8094b410
+manifest=${1:-ops/manifests/memory_v1_v5_reviewed_retry_apply_20260717.json}
+case "$manifest" in
+  ops/manifests/memory_v1_v5_reviewed_retry_apply_20260717.json)
+    manifest_sha=b317e3c24793f2f0d9a053951c3408775a7e6ffc53279c3c956f684d682bcde2
+    ;;
+  ops/manifests/memory_v1_v5_reviewed_retry_second_apply_20260717.json)
+    manifest_sha=7d7cefc63efe3ae47d8d7869792f33273485eab56de94f195aab8841590b0d4f
+    ;;
+  *)
+    printf 'unapproved reviewed-retry manifest: %s\n' "$manifest" >&2
+    exit 1
+    ;;
+esac
 container=brains-postgres-1
 snapshot_dir=/home/ubuntu/brains/snapshots
-owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
-job_id=788d0258-7227-46e2-8382-d13e6a122722
-content_sha=ee09dea28fbb00b058a6f61ff1ef580320e37dc15f97f7d09bcc9bd43be35778
-binding_event=e8738381-c3be-4395-bfb2-75bfd42949e9
-prior_failure=a95e5e34-edb8-5296-be1b-ebe9e348aee0
-operation_id=f45ff77a-81b8-5d5a-9a40-b88399b3bbf6
-error_class=validator_rejected
-reason_code=diagnostic_observability_upgrade
+required_ancestor=$(jq -er '.authorization.required_commit' "$repo_root/$manifest")
+owner=$(jq -er '.target.owner_user_id' "$repo_root/$manifest")
+job_id=$(jq -er '.target.job_id' "$repo_root/$manifest")
+content_sha=$(jq -er '.target.evidence_content_sha256' "$repo_root/$manifest")
+binding_event=$(jq -er '.target.binding_event_id' "$repo_root/$manifest")
+prior_failure=$(jq -er '.target.prior_failure_operation_id' "$repo_root/$manifest")
+operation_id=$(jq -er '.operation.operation_id' "$repo_root/$manifest")
+error_class=$(jq -er '.target.expected_error_class' "$repo_root/$manifest")
+attempts=$(jq -er '.target.expected_attempts' "$repo_root/$manifest")
+reason_code=$(jq -er '.target.reason_code' "$repo_root/$manifest")
 units=(
   memory-v1-projection.timer
   memory-v1-governance.timer
@@ -150,12 +162,13 @@ preflight=$(scalar "
     'target_skipped',(SELECT count(*) FROM memory.evidence_extraction_job
       WHERE owner_user_id='$owner' AND job_id='$job_id'
         AND evidence_content_sha256='$content_sha'
-        AND status='skipped' AND attempts=1
+        AND status='skipped' AND attempts=$attempts
         AND split_part(coalesce(last_error,''),':',1)='$error_class'),
     'prior_failure',(SELECT count(*) FROM memory.evidence_extraction_event
       WHERE owner_user_id='$owner' AND job_id='$job_id'
         AND operation_id='$prior_failure' AND event_type='skipped'
-        AND details->>'error_class'='$error_class'),
+        AND details->>'error_class'='$error_class'
+        AND (details->>'attempt')::integer=$attempts),
     'binding',(SELECT count(*) FROM memory.current_project_thread_binding_v5
       WHERE owner_user_id='$owner' AND binding_event_id='$binding_event'),
     'operation_absent',(SELECT count(*)=0 FROM memory.evidence_extraction_event
@@ -217,18 +230,18 @@ SELECT set_config('app.user_id','$owner',true);
 SELECT status || E'\t' || attempts::text || E'\t' || apply_outcome
 FROM memory.requeue_owner_skipped_evidence_job_v5(
   '$operation_id','$job_id','$content_sha','$binding_event',
-  '$prior_failure','$error_class',1,'$reason_code'
+  '$prior_failure','$error_class',$attempts,'$reason_code'
 );
 COMMIT;
 SQL
 )
-[[ "$(tail -n 1 <<<"$apply_result")" == pending$'\t'1$'\t'applied ]]
+[[ "$(tail -n 1 <<<"$apply_result")" == pending$'\t'"$attempts"$'\t'applied ]]
 
 postflight=$(scalar "
   SELECT jsonb_build_object(
     'target_pending',(SELECT count(*) FROM memory.evidence_extraction_job
       WHERE owner_user_id='$owner' AND job_id='$job_id'
-        AND status='pending' AND attempts=1 AND last_error IS NULL),
+        AND status='pending' AND attempts=$attempts AND last_error IS NULL),
     'retry_events',(SELECT count(*) FROM memory.evidence_extraction_event
       WHERE owner_user_id='$owner' AND job_id='$job_id'
         AND operation_id='$operation_id' AND event_type='queued'
@@ -249,12 +262,12 @@ SELECT set_config('app.user_id','$owner',true);
 SELECT status || E'\t' || attempts::text || E'\t' || apply_outcome
 FROM memory.requeue_owner_skipped_evidence_job_v5(
   '$operation_id','$job_id','$content_sha','$binding_event',
-  '$prior_failure','$error_class',1,'$reason_code'
+  '$prior_failure','$error_class',$attempts,'$reason_code'
 );
 ROLLBACK;
 SQL
 )
-[[ "$(tail -n 1 <<<"$replay")" == pending$'\t'1$'\t'replayed ]]
+[[ "$(tail -n 1 <<<"$replay")" == pending$'\t'"$attempts"$'\t'replayed ]]
 
 capture_unchanged_tables "$after"
 capture_isolation_scope "$scope_after"
