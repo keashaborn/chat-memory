@@ -308,8 +308,10 @@ postflight=$(scalar "
         AND event_type='skipped'),
     'packets',(SELECT count(*) FROM memory.evidence_extraction_packet_v5
       WHERE owner_user_id='$owner' AND packet_id='$packet_id'
-        AND job_id='$job_id' AND evidence_content_sha256='$content_sha'
-        AND project_binding_event_id='$binding_event'),
+        AND job_id='$job_id' AND evidence_content_sha256='$content_sha'),
+    'packet_binding_event_id',(SELECT project_binding_event_id::text
+      FROM memory.evidence_extraction_packet_v5
+      WHERE owner_user_id='$owner' AND packet_id='$packet_id'),
     'packet_external_calls',coalesce((SELECT external_model_calls
       FROM memory.evidence_extraction_packet_v5
       WHERE owner_user_id='$owner' AND packet_id='$packet_id'),0),
@@ -327,6 +329,13 @@ if [[ "$status" == review_required ]]; then
   [[ "$(jq -r '.packets' <<<"$postflight")" == 1 ]]
   [[ "$(jq -r '.packet_external_calls' <<<"$postflight")" == 1 ]]
   [[ "$(jq -r '.all_packets' <<<"$postflight")" == 1 ]]
+  binding_used=$(jq -r '.result.project_binding_used' <<<"$runner_result")
+  packet_binding=$(jq -r '.packet_binding_event_id // ""' <<<"$postflight")
+  if [[ "$binding_used" == true ]]; then
+    [[ "$packet_binding" == "$binding_event" ]]
+  else
+    [[ "$binding_used" == false && -z "$packet_binding" ]]
+  fi
 elif [[ "$status" == skipped ]]; then
   [[ "$(jq -r '.review_events' <<<"$postflight")" == 0 ]]
   [[ "$(jq -r '.skipped_events' <<<"$postflight")" == 1 ]]
