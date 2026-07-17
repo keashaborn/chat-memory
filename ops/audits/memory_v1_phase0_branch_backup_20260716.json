@@ -1,0 +1,48 @@
+{
+  "completed_at": "2026-07-17T00:09:09Z",
+  "contract_version": "memory_v1_phase0_branch_backup_v1",
+  "effects": {
+    "backup_refs_created": 10,
+    "database_writes": 0,
+    "deployment_changes": 0,
+    "model_calls": 0,
+    "primary_refs_modified": 0,
+    "qdrant_writes": 0
+  },
+  "github_origin": "git@github.com:keashaborn/chat-memory.git",
+  "namespace": "refs/heads/backup/20260716/",
+  "phase0_audit_parent_commit": "562ec7acb2d5e324ac3d76773ad97290cb8f1320",
+  "primary_refs": {
+    "after": {
+      "catalog_exercise_holds_defaultlog_v0": "2b7a3804f6355e87d44766c23a08f8b262c5518c",
+      "main": "b32167b93dd704300f95e5c1a5b2fb0cb49ecc81"
+    },
+    "before": {
+      "catalog_exercise_holds_defaultlog_v0": "2b7a3804f6355e87d44766c23a08f8b262c5518c",
+      "main": "b32167b93dd704300f95e5c1a5b2fb0cb49ecc81"
+    }
+  },
+  "push": {
+    "atomic": true,
+    "backup_refs": {
+      "catalog_exercise_holds_defaultlog_v0": "7484c4432cd9b920bc20024277776109584b70b7",
+      "memory_v1_evidence_ingest_audit_deploy": "78906f8729065eabf8204e303b4d20ad429bac9f",
+      "memory_v1_evidence_lifecycle_deploy": "b2d7473077ac5919b117b678f623d5898c11106e",
+      "memory_v1_extraction_v2": "9567ea8ff2f6a56402393a2923defd6706daa39b",
+      "memory_v1_foundation": "e16f3dd357f367eede3f81e4a386f3c9e0131706",
+      "memory_v1_governance_scheduler": "ab40d4dde1f703c3447b50609b76e425be91422b",
+      "memory_v1_owner_consolidation": "f83e1d2fc2453e2553c7a67519860ddebafdc872",
+      "memory_v1_phase0_stabilization": "562ec7acb2d5e324ac3d76773ad97290cb8f1320",
+      "memory_v1_selector_legacy_retirement": "33f8e5c83093d507fe7a8eb24d8db466361a8e64",
+      "resse_policy_v0_1": "5647fa64d8fdb647066cb500c8e6ed099a518b22"
+    }
+  },
+  "status": "atomic_backup_push_verified",
+  "verification": {
+    "all_remote_backup_shas_match": true,
+    "all_worktrees_clean_before_push": true,
+    "backup_ref_count": 10,
+    "primary_refs_unchanged": true,
+    "worktree_count": 10
+  }
+}
