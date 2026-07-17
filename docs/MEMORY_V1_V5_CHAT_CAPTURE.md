@@ -42,6 +42,13 @@ turns without canonical evidence; the two synthetic test owners had complete
 evidence coverage. This backlog is preserved by capture first and processed by
 the V5 queue only after installation.
 
+The production-snapshot clone captured those 284 turns and then planned 470
+V5 extraction jobs: admin 439, LifeSwitch 20, Dr. Eric J Lund 6, and Kelly 5.
+The additional 186 rows are already-captured evidence that V4 consolidation
+status or ingest-audit bookkeeping had treated as complete even though no V5
+semantic result exists. No live extraction worker is enabled in this phase, so
+these records can be queued without model calls.
+
 ## Clone proof
 
 `tools/memory_v1_v5_chat_capture_production_clone.sh` restores a production

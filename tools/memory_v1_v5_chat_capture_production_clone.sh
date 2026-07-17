@@ -36,9 +36,23 @@ apply_report=$(mktemp /tmp/memory-v1-v5-chat-capture-apply.XXXXXX.json)
 replay_report=$(mktemp /tmp/memory-v1-v5-chat-capture-replay.XXXXXX.json)
 dispatch_report=$(mktemp /tmp/memory-v1-v5-chat-capture-dispatch.XXXXXX.json)
 dispatch_replay_report=$(mktemp /tmp/memory-v1-v5-chat-capture-dispatch-replay.XXXXXX.json)
+backlog_capture_report=$(mktemp /tmp/memory-v1-v5-chat-capture-backlog.XXXXXX.json)
+backlog_dispatch_report=$(mktemp /tmp/memory-v1-v5-chat-capture-backlog-dispatch.XXXXXX.json)
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 owner_a=a1111111-1111-4111-8111-111111111111
 owner_b=b2222222-2222-4222-8222-222222222222
+production_owners=(
+  1240822d-ac9a-4096-95aa-e2b24d36ef50
+  557ea042-cb82-48f8-9429-472e96c957ef
+  d839b4bc-0bd2-4f2d-aafe-0f3f75883db8
+  818b60b9-89bd-442a-998c-fc1924184dfc
+  5c9f624a-a66d-4183-babb-b3a0f0f4e733
+  673d64a3-c4ba-4d1c-89e3-e0c579022fad
+)
+production_owner_args=()
+for owner in "${production_owners[@]}"; do
+  production_owner_args+=(--owner-user-id "$owner")
+done
 
 temporary_files=(
   "$backup" "$before" "$after_dry" "$after_apply"
@@ -46,6 +60,7 @@ temporary_files=(
   "$before_dispatch_replay" "$after_dispatch_replay"
   "$dry_report" "$apply_report" "$replay_report"
   "$dispatch_report" "$dispatch_replay_report"
+  "$backlog_capture_report" "$backlog_dispatch_report"
 )
 
 cleanup() {
@@ -209,6 +224,46 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   --report-path "$dispatch_replay_report"
 capture_memory_state "$after_dispatch_replay" "''"
 cmp -s "$before_dispatch_replay" "$after_dispatch_replay"
+
+# Determine the bounded live backlog from the restored production snapshot.
+# These writes exist only inside the disposable clone. Dispatch remains dry-run.
+MEMORY_V1_V5_CHAT_CAPTURE_APPLY=enabled POSTGRES_DSN="$dsn" \
+PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$capture" \
+  "${production_owner_args[@]}" --limit 500 --apply \
+  --report-path "$backlog_capture_report"
+POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$dispatcher" \
+  "${production_owner_args[@]}" \
+  --selector-version 20260717_v2_backlog --limit 500 \
+  --report-path "$backlog_dispatch_report"
+BACKLOG_CAPTURE="$backlog_capture_report" \
+BACKLOG_DISPATCH="$backlog_dispatch_report" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+capture = json.loads(Path(os.environ["BACKLOG_CAPTURE"]).read_text())
+dispatch = json.loads(Path(os.environ["BACKLOG_DISPATCH"]).read_text())
+assert capture["apply"] is True
+assert capture["model_calls"] == 0
+assert dispatch["apply"] is False
+assert dispatch["model_calls"] == 0
+value = {
+    "production_snapshot_capture_rows": sum(
+        item["planned_count"] for item in capture["owners"]
+    ),
+    "production_snapshot_v5_queue_rows": sum(
+        item["before"]["rows"] for item in dispatch["owners"]
+    ),
+    "queue_outcomes": {
+        item["owner_user_id"]: item["before"]["outcomes"]
+        for item in dispatch["owners"]
+        if item["before"]["rows"]
+    },
+}
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+PY
 
 run_sql <"$compat_rollback"
 [[ "$(scalar "SELECT (pg_get_functiondef('memory.plan_owner_evidence_intake_v1(text,integer,uuid)'::regprocedure) NOT LIKE '%20260717_v2%')::int")" == "1" ]]
