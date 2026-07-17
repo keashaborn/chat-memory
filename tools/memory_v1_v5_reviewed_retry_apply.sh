@@ -16,6 +16,9 @@ case "$manifest" in
   ops/manifests/memory_v1_v5_reviewed_retry_third_apply_20260717.json)
     manifest_sha=9642fdecb1c671551f406444e13db357de40583a7b3f3ad3599e52ef71614936
     ;;
+  ops/manifests/memory_v1_v5_reviewed_retry_fourth_apply_20260717.json)
+    manifest_sha=947dfa0f5cfff9c895019098721d186f8ddca39135ebea77594ab009a1d0694f
+    ;;
   *)
     printf 'unapproved reviewed-retry manifest: %s\n' "$manifest" >&2
     exit 1
