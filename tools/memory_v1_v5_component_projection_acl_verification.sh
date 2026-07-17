@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Runs five hash-locked rollback-only suites after the ACL
+# seebx backend only. Runs four hash-locked production rollback suites after the ACL
 # recovery and proves zero persistent row/vector changes.
 
 if [[ $# -ne 2 ]]; then
@@ -139,7 +139,7 @@ chmod 0600 "$preflight"
 mapfile -t tests < <(
   python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" --list-kind rolled_back_test
 )
-[[ ${#tests[@]} -eq 5 ]] || { echo "expected five rollback tests" >&2; exit 1; }
+[[ ${#tests[@]} -eq 4 ]] || { echo "expected four production rollback tests" >&2; exit 1; }
 
 phase=capture_timer_state
 : >"$unit_state_before"
@@ -284,7 +284,7 @@ report={
   "qdrant_after":Path(os.environ["QDRANT_AFTER"]).read_text().strip(),
   "timer_before_sha256":sha(os.environ["UNIT_BEFORE"]),
   "timer_after_sha256":sha(os.environ["UNIT_AFTER"]),
-  "rollback_suites_passed":5,
+  "rollback_suites_passed":4,
   "persistent_database_writes":0,
   "component_rows_created":0,
   "qdrant_changed":False,

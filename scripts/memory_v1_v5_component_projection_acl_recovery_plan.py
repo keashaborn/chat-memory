@@ -161,7 +161,7 @@ def validate_plan(plan: dict, repo_root: Path) -> dict:
     expected_ordinals = {
         "migration": [1],
         "logical_rollback": [1],
-        "rolled_back_test": [1, 2, 3, 4, 5],
+        "rolled_back_test": [1, 2, 3, 4],
     }
     ordinals: dict[str, list[int]] = {}
     verified_files: list[dict] = []
@@ -353,8 +353,8 @@ def validate_verification_plan(plan: dict, repo_root: Path) -> dict:
         if actual_sha != expected_sha:
             errors.append(f"verification source hash mismatch: {relpath}")
         verified_files.append({**entry, "actual_sha256": actual_sha})
-    if ordinals != [1, 2, 3, 4, 5]:
-        errors.append("verification test ordinals must be exactly 1 through 5")
+    if ordinals != [1, 2, 3, 4]:
+        errors.append("verification test ordinals must be exactly 1 through 4")
 
     required_forbidden = {
         "apply_schema_or_privilege_changes",

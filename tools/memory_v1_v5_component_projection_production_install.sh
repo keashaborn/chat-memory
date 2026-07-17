@@ -150,7 +150,7 @@ mapfile -t tests < <(
   python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" --list-kind rolled_back_test
 )
 [[ ${#migrations[@]} -eq 5 ]] || { echo "expected five migrations" >&2; exit 1; }
-[[ ${#tests[@]} -eq 5 ]] || { echo "expected five rollback tests" >&2; exit 1; }
+[[ ${#tests[@]} -eq 4 ]] || { echo "expected four production rollback tests" >&2; exit 1; }
 
 phase=capture_timer_state
 : >"$unit_state_before"
@@ -343,7 +343,7 @@ report = {
     },
     "checks": {
         "five_hash_locked_migrations_installed": True,
-        "five_security_suites_rolled_back": True,
+        "four_production_security_suites_rolled_back": True,
         "preexisting_memory_rows_unchanged": True,
         "component_tables_empty": True,
         "component_owner_rls_and_privileges_verified": True,

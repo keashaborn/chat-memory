@@ -153,7 +153,7 @@ mapfile -t tests < <(
   python3 "$verifier" --manifest "$plan" --repo-root "$repo_root" --list-kind rolled_back_test
 )
 [[ ${#migrations[@]} -eq 1 ]] || { echo "expected one recovery migration" >&2; exit 1; }
-[[ ${#tests[@]} -eq 5 ]] || { echo "expected five rollback tests" >&2; exit 1; }
+[[ ${#tests[@]} -eq 4 ]] || { echo "expected four production rollback tests" >&2; exit 1; }
 
 phase=capture_timer_state
 : >"$unit_state_before"

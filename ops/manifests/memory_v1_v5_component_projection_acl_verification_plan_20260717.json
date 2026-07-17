@@ -79,22 +79,16 @@
       "ordinal": 3
     },
     {
-      "path": "tests/memory_v1_projection_staging_v5.sql",
-      "sha256": "86ec2949494e2f57be975dd66c56d64ce7add705aba37f5fccf4f29d4f355d94",
-      "kind": "rolled_back_test",
-      "ordinal": 4
-    },
-    {
       "path": "tests/memory_v1_projection_staging_production_v5.sql",
       "sha256": "3046d4d13e7df87f849033a3dc6f0beebd6c05326f7405de2b2200c95d718896",
       "kind": "rolled_back_test",
-      "ordinal": 5
+      "ordinal": 4
     }
   ],
   "allowed_effects": [
     "temporarily_stop_and_restore_exact_five_memory_v1_timers",
     "create_fresh_custom_format_postgres_backup",
-    "run_five_synthetic_security_suites_inside_rollback",
+    "run_four_production_security_suites_inside_rollback",
     "write_mode_0600_preflight_backup_logs_status_and_report"
   ],
   "forbidden_effects": [

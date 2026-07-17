@@ -217,7 +217,8 @@ def validate_plan(plan: dict, repo_root: Path, *, require_git: bool = True) -> d
     expected_ordinals = {
         "migration": list(range(1, 6)),
         "logical_rollback": [1],
-        "rolled_back_test": list(range(1, 6)),
+        "rolled_back_test": list(range(1, 5)),
+        "clone_only_test": [1],
         "clone_rehearsal": list(range(1, 5)),
         "recovery_plan": [1],
     }
@@ -550,7 +551,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--production-preflight", action="store_true")
     parser.add_argument(
         "--list-kind",
-        choices=("migration", "logical_rollback", "rolled_back_test", "clone_rehearsal", "recovery_plan"),
+        choices=("migration", "logical_rollback", "rolled_back_test", "clone_only_test", "clone_rehearsal", "recovery_plan"),
     )
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
