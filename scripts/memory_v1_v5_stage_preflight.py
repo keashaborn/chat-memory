@@ -141,6 +141,97 @@ def _spans_valid(value: Any) -> bool:
     )
 
 
+def _temporal_persistence_compatible(value: dict[str, Any]) -> bool:
+    if value.get("normalization_policy_version") != "memory_temporal_normalization_v5":
+        return False
+    semantic = value.get("semantic")
+    shape = value.get("shape")
+    basis = value.get("basis")
+    source_form = value.get("source_form")
+    certainty = value.get("certainty")
+    precision = value.get("precision")
+    anchored = value.get("anchored_to_source_time")
+    forms = {
+        "instant": value.get("instant"),
+        "calendar": value.get("calendar_range"),
+        "instant_range": value.get("instant_range"),
+        "relative": value.get("relative_offset"),
+        "recurring": value.get("recurrence"),
+    }
+    present = {key for key, item in forms.items() if item is not None}
+    if basis == "none":
+        return (
+            semantic in {"none", "occurrence", "state_validity", "planned_time"}
+            and shape == "none"
+            and source_form == "none"
+            and certainty == "unknown"
+            and precision == "unknown"
+            and not present
+            and anchored is False
+        )
+    if basis == "instant":
+        if (
+            semantic == "none"
+            or source_form not in {"absolute", "implicit_source_time"}
+            or precision not in {"exact", "minute"}
+            or anchored != (source_form == "implicit_source_time")
+        ):
+            return False
+        if shape == "instant":
+            return present == {"instant"}
+        if shape not in {"bounded_interval", "open_interval"} or present != {
+            "instant_range"
+        }:
+            return False
+        range_value = forms["instant_range"]
+        if not isinstance(range_value, dict) or range_value.get("bounds") != "[)":
+            return False
+        lower, upper = range_value.get("lower"), range_value.get("upper")
+        return (
+            lower is not None and upper is not None
+            if shape == "bounded_interval"
+            else (lower is None) != (upper is None)
+        )
+    if basis == "calendar":
+        if (
+            semantic == "none"
+            or shape not in {"instant", "bounded_interval", "open_interval"}
+            or source_form not in {"absolute", "partial_absolute"}
+            or precision not in {"day", "month", "year"}
+            or present != {"calendar"}
+            or anchored != (source_form == "partial_absolute")
+        ):
+            return False
+        range_value = forms["calendar"]
+        if not isinstance(range_value, dict) or range_value.get("bounds") != "[)":
+            return False
+        lower, upper = range_value.get("lower"), range_value.get("upper")
+        return (
+            lower is not None and upper is not None
+            if shape in {"instant", "bounded_interval"}
+            else (lower is None) != (upper is None)
+        )
+    if basis == "relative":
+        return (
+            semantic != "none"
+            and shape in {"instant", "open_interval"}
+            and source_form == "relative"
+            and precision in {"minute", "day", "month", "year", "unknown"}
+            and present == {"relative"}
+            and anchored is True
+        )
+    if basis == "recurring":
+        return (
+            semantic != "none"
+            and shape == "recurring"
+            and source_form == "none"
+            and precision == "unknown"
+            and present == {"recurring"}
+            and anchored is False
+        )
+    return False
+
+
 def _validate_extraction_packet(value: dict[str, Any]) -> None:
     if set(value) != EXTRACTION_KEYS:
         raise RuntimeError("extraction packet fields mismatch")
@@ -189,6 +280,8 @@ def _validate_extraction_packet(value: dict[str, Any]) -> None:
             observation["temporal"]
         ) != TEMPORAL_KEYS:
             raise RuntimeError("observation temporal fields mismatch")
+        if not _temporal_persistence_compatible(observation["temporal"]):
+            raise RuntimeError("observation temporal persistence matrix mismatch")
         if not _spans_valid(observation["source_spans"]):
             raise RuntimeError("observation spans are invalid")
     if not isinstance(value["deferrals"], list) or not isinstance(
