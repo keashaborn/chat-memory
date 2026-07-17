@@ -1,0 +1,12 @@
+[Unit]
+Description=Capture authenticated user chat into Memory V1 evidence every two minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=10s
+Persistent=true
+Unit=memory-v1-v5-chat-capture.service
+
+[Install]
+WantedBy=timers.target
