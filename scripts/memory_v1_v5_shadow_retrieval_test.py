@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from rag_engine.memory_v1_v5_shadow_retrieval import (
     V5ShadowRetrievalError,
@@ -73,6 +79,20 @@ def main() -> None:
     blocked = evaluate(candidate)
     assert blocked["selected_count"] == 0
     assert blocked["rejected_counts"]["status:candidate"] == 1
+
+    not_visible = evaluate_v5_shadow_claims(
+        OWNER,
+        query="What kind of work do I do?",
+        intent="profile_recall",
+        domain="profile",
+        allowed_predicate_prefixes=["occupation."],
+        candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+        records=[],
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+    assert not_visible["selected_count"] == 0
+    assert not_visible["visible_candidate_count"] == 0
+    assert not_visible["rejected_counts"] == {"not_visible": 1}
 
     no_evidence = record()
     no_evidence["evidence_by_stance"]["supports"] = []

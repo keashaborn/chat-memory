@@ -69,3 +69,8 @@ verification. It is not called by the chat router.
 load explicitly supplied candidate IDs through the controlled API and verify
 the selector remains fail-closed. The probe does not discover candidates,
 persist traces, call Qdrant, or influence prompts.
+
+The production probe uses the retracted occupational pilot claim as a negative
+control. The restricted reader must return zero rows, and the selector must
+record exactly one `not_visible` rejection. This validates that a retired pilot
+cannot re-enter retrieval through an explicitly supplied candidate ID.

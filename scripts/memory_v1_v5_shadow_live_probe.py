@@ -6,16 +6,21 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import asyncpg
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from rag_engine.memory_v1_v5_shadow_loader import load_v5_shadow_claims
 from rag_engine.memory_v1_v5_shadow_retrieval import evaluate_v5_shadow_claims
 
-VERSION = "memory_v1_v5_shadow_live_probe_v1"
+VERSION = "memory_v1_v5_shadow_live_probe_v2"
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 CLAIM = "50ebf1af-b072-4bf9-badc-2df7585f12c6"
 
@@ -49,7 +54,8 @@ def _secure_write(path: Path, value: dict) -> str:
 async def probe(dsn: str) -> dict:
     conn = await asyncpg.connect(dsn, command_timeout=30)
     try:
-        records = await load_v5_shadow_claims(conn, OWNER, [CLAIM])
+        async with conn.transaction(readonly=True):
+            records = await load_v5_shadow_claims(conn, OWNER, [CLAIM])
     finally:
         await conn.close()
     result = evaluate_v5_shadow_claims(
@@ -61,12 +67,14 @@ async def probe(dsn: str) -> dict:
         candidate_hits=[{"claim_id": CLAIM, "semantic_score": 1.0}],
         records=records,
     )
-    if len(records) != 1:
-        raise RuntimeError("expected exactly one owner-scoped V5 candidate record")
+    if records:
+        raise RuntimeError("retracted V5 claim was unexpectedly visible to reader")
     if result["selected_count"] != 0:
-        raise RuntimeError("candidate V5 claim was unexpectedly selected")
-    if result["rejected_counts"] != {"status:candidate": 1}:
-        raise RuntimeError("candidate V5 claim did not fail only at status")
+        raise RuntimeError("non-visible V5 claim was unexpectedly selected")
+    if result["visible_candidate_count"] != 0:
+        raise RuntimeError("retracted V5 claim was counted as visible")
+    if result["rejected_counts"] != {"not_visible": 1}:
+        raise RuntimeError("retracted V5 claim did not fail closed as not visible")
     if any(
         result[key]
         for key in (
@@ -78,7 +86,7 @@ async def probe(dsn: str) -> dict:
         raise RuntimeError("V5 shadow probe unexpectedly activated retrieval")
     return {
         "record_count": len(records),
-        "record_status": str(records[0]["status"]),
+        "expected_policy_outcome": "not_visible",
         "result": result,
     }
 
@@ -94,6 +102,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "server": "seebx",
         "mode": "read_only_zero_write",
+        "database_transaction": "read_only",
         "owner_user_id": OWNER,
         "claim_id": CLAIM,
         "probe": value,
