@@ -19,6 +19,9 @@ case "$manifest" in
   ops/manifests/memory_v1_v5_bound_exact_job_canary_fifth_authorized_20260717.json)
     manifest_sha=8c1f64e0d6d93e08c02a90f5beb145ebf949e1849e252e802ff86e6575f1ee8f
     ;;
+  ops/manifests/memory_v1_v5_bound_exact_job_canary_sixth_authorized_20260717.json)
+    manifest_sha=a56732955b16c41b3d278cfe96406b2b6906383aa540636f8d20f98bb13dc020
+    ;;
   *)
     printf 'unapproved exact-canary manifest: %s\n' "$manifest" >&2
     exit 1
@@ -178,7 +181,8 @@ git merge-base --is-ancestor "$required_commit" HEAD
 [[ "$expected_attempts:$max_attempts" == 1:2 \
   || "$expected_attempts:$max_attempts" == 2:3 \
   || "$expected_attempts:$max_attempts" == 3:4 \
-  || "$expected_attempts:$max_attempts" == 4:5 ]]
+  || "$expected_attempts:$max_attempts" == 4:5 \
+  || "$expected_attempts:$max_attempts" == 5:6 ]]
 
 preflight=$(scalar "
   SELECT jsonb_build_object(

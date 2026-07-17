@@ -5,21 +5,40 @@ set -euo pipefail
 # full production clone. All target claims and test changes are rolled back.
 
 repo_root=$(git rev-parse --show-toplevel)
-port=${MEMORY_V1_V5_RETRY5_CLAIM_CLONE_PORT:-55459}
+retry=${1:-5}
+case "$retry" in
+  5)
+    port=${MEMORY_V1_V5_RETRY5_CLAIM_CLONE_PORT:-55459}
+    migration=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry5.sql
+    rollback=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry5_rollback.sql
+    test_sql=tests/memory_v1_v5_bound_exact_job_claim_retry5.sql
+    before_function_sha=a694fc38a54422dea43f184f98a3576253b6a0083e47043d85d63c964813c312
+    after_function_sha=e67b5bbd08e9eb40283b29ee436f8aec6e3633439d65fb5897d2bc9ef9938b09
+    ;;
+  6)
+    port=${MEMORY_V1_V5_RETRY6_CLAIM_CLONE_PORT:-55460}
+    migration=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry6.sql
+    rollback=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry6_rollback.sql
+    test_sql=tests/memory_v1_v5_bound_exact_job_claim_retry6.sql
+    before_function_sha=e67b5bbd08e9eb40283b29ee436f8aec6e3633439d65fb5897d2bc9ef9938b09
+    after_function_sha=9768f3cf0d96dcc926a94a3f4d4260e6ada33eb45714851757e0604ce961ef6a
+    ;;
+  *)
+    printf 'unsupported retry ceiling: %s\n' "$retry" >&2
+    exit 1
+    ;;
+esac
 export MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port"
 compose=(
   docker compose
-  -p memoryv1v5retry5claimclone
+  -p "memoryv1v5retry${retry}claimclone"
   -f docker-compose.ci.yml
   -f docker-compose.stage-batch-clone.yml
 )
-migration=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry5.sql
-rollback=ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry5_rollback.sql
-test_sql=tests/memory_v1_v5_bound_exact_job_claim_retry5.sql
-backup=$(mktemp /tmp/memory-v1-v5-retry5-claim.XXXXXX.dump)
-tables=$(mktemp /tmp/memory-v1-v5-retry5-claim-tables.XXXXXX)
-before=$(mktemp /tmp/memory-v1-v5-retry5-claim-before.XXXXXX)
-after=$(mktemp /tmp/memory-v1-v5-retry5-claim-after.XXXXXX)
+backup=$(mktemp "/tmp/memory-v1-v5-retry${retry}-claim.XXXXXX.dump")
+tables=$(mktemp "/tmp/memory-v1-v5-retry${retry}-claim-tables.XXXXXX")
+before=$(mktemp "/tmp/memory-v1-v5-retry${retry}-claim-before.XXXXXX")
+after=$(mktemp "/tmp/memory-v1-v5-retry${retry}-claim-after.XXXXXX")
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
@@ -98,7 +117,7 @@ function_sha() {
   ),'UTF8'),'sha256'),'hex')"
 }
 
-[[ "$(function_sha)" == a694fc38a54422dea43f184f98a3576253b6a0083e47043d85d63c964813c312 ]]
+[[ "$(function_sha)" == "$before_function_sha" ]]
 scalar "SELECT table_schema || E'\\t' || table_name
   FROM information_schema.tables
   WHERE table_type='BASE TABLE' AND table_schema IN ('memory','public')
@@ -110,10 +129,10 @@ PGPASSWORD=clone_only_brains_password psql -X -v ON_ERROR_STOP=1 \
   -h 127.0.0.1 -p "$port" -U brains_app -d memory \
   -f "$repo_root/$test_sql" >/dev/null
 run_sql <"$repo_root/$rollback"
-[[ "$(function_sha)" == a694fc38a54422dea43f184f98a3576253b6a0083e47043d85d63c964813c312 ]]
+[[ "$(function_sha)" == "$before_function_sha" ]]
 run_sql <"$repo_root/$migration"
-[[ "$(function_sha)" == e67b5bbd08e9eb40283b29ee436f8aec6e3633439d65fb5897d2bc9ef9938b09 ]]
+[[ "$(function_sha)" == "$after_function_sha" ]]
 
 capture_state "$after"
 cmp -s "$before" "$after"
-printf '%s\n' 'memory_v1_v5_bound_exact_job_claim_retry5_production_clone: PASS'
+printf 'memory_v1_v5_bound_exact_job_claim_retry%s_production_clone: PASS\n' "$retry"

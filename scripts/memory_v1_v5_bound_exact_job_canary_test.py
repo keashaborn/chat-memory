@@ -214,8 +214,9 @@ def main() -> int:
     validate_arguments(args(expected_attempts=1, max_attempts=2))
     validate_arguments(args(expected_attempts=3, max_attempts=4))
     validate_arguments(args(expected_attempts=4, max_attempts=5))
+    validate_arguments(args(expected_attempts=5, max_attempts=6))
     expect_error(
-        lambda: validate_arguments(args(expected_attempts=5, max_attempts=6)),
+        lambda: validate_arguments(args(expected_attempts=6, max_attempts=7)),
         "retry beyond reviewed canary ceiling",
     )
     expect_error(

@@ -1,19 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Installs one hash-locked retry-five function change,
+# seebx backend only. Installs one hash-locked retry-ceiling function change,
 # runs rollback-only owner/isolation tests, and performs no extraction call.
 
 repo_root=$(git rev-parse --show-toplevel)
-manifest=ops/manifests/memory_v1_v5_bound_exact_job_claim_retry5_install_20260717.json
-manifest_sha=4e0cf4da2584b08bf5f9e34fe676fe8c07cec7af44797fe9ee49f55b555f7663
+manifest=${1:-ops/manifests/memory_v1_v5_bound_exact_job_claim_retry5_install_20260717.json}
+case "$manifest" in
+  ops/manifests/memory_v1_v5_bound_exact_job_claim_retry5_install_20260717.json)
+    manifest_sha=4e0cf4da2584b08bf5f9e34fe676fe8c07cec7af44797fe9ee49f55b555f7663
+    retry=5
+    prior_failure=8c56ea41-da2a-511b-b6d5-6f114fea240f
+    expected_attempts=4
+    expected_error_class=uncatalogued_validator_rejection
+    ;;
+  ops/manifests/memory_v1_v5_bound_exact_job_claim_retry6_install_20260717.json)
+    manifest_sha=d148e206ce205e508f5adfad4421b94983a7e4527b1969827b7fda12dc10309d
+    retry=6
+    prior_failure=4b5e4c81-7996-5836-a748-b61549f7404f
+    expected_attempts=5
+    expected_error_class=database_contract_rejected
+    ;;
+  *)
+    printf 'unapproved retry-ceiling install manifest: %s\n' "$manifest" >&2
+    exit 1
+    ;;
+esac
 container=brains-postgres-1
 snapshot_dir=/home/ubuntu/brains/snapshots
 function_signature='memory.claim_owner_bound_evidence_job_v5(uuid,uuid,text,uuid,text,text,integer,integer)'
 function_regprocedure='memory.claim_owner_bound_evidence_job_v5(uuid,uuid,text,uuid,text,text,integer,integer)'
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 job_id=788d0258-7227-46e2-8382-d13e6a122722
-prior_failure=8c56ea41-da2a-511b-b6d5-6f114fea240f
 units=(
   memory-v1-projection.timer
   memory-v1-governance.timer
@@ -35,15 +53,15 @@ after_function_sha=$(jq_manifest '.function.after_sha256')
 
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 execution_id=$(cat /proc/sys/kernel/random/uuid)
-backup="$snapshot_dir/memory_pre_v5_exact_claim_retry5_install_${stamp}_${execution_id}.dump"
-report="$snapshot_dir/memory_v1_v5_exact_claim_retry5_install_${stamp}_${execution_id}.json"
-lock=/run/lock/memory-v1-v5-exact-claim-retry5-install.lock
-tables=$(mktemp /tmp/memory-v1-v5-retry5-install-tables.XXXXXX)
-before=$(mktemp /tmp/memory-v1-v5-retry5-install-before.XXXXXX)
-after=$(mktemp /tmp/memory-v1-v5-retry5-install-after.XXXXXX)
-timer_state=$(mktemp /tmp/memory-v1-v5-retry5-install-timers.XXXXXX)
-qdrant_before=$(mktemp /tmp/memory-v1-v5-retry5-install-qdrant-before.XXXXXX)
-qdrant_after=$(mktemp /tmp/memory-v1-v5-retry5-install-qdrant-after.XXXXXX)
+backup="$snapshot_dir/memory_pre_v5_exact_claim_retry${retry}_install_${stamp}_${execution_id}.dump"
+report="$snapshot_dir/memory_v1_v5_exact_claim_retry${retry}_install_${stamp}_${execution_id}.json"
+lock="/run/lock/memory-v1-v5-exact-claim-retry${retry}-install.lock"
+tables=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-tables.XXXXXX")
+before=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-before.XXXXXX")
+after=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-after.XXXXXX")
+timer_state=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-timers.XXXXXX")
+qdrant_before=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-qdrant-before.XXXXXX")
+qdrant_after=$(mktemp "/tmp/memory-v1-v5-retry${retry}-install-qdrant-after.XXXXXX")
 quiesced=false
 
 scalar() {
@@ -121,11 +139,12 @@ git merge-base --is-ancestor "$required_commit" HEAD
 
 preflight=$(scalar "SELECT jsonb_build_object(
   'target_skipped',(SELECT count(*) FROM memory.evidence_extraction_job
-    WHERE owner_user_id='$owner' AND job_id='$job_id' AND status='skipped' AND attempts=4),
+    WHERE owner_user_id='$owner' AND job_id='$job_id'
+      AND status='skipped' AND attempts=$expected_attempts),
   'prior_failure',(SELECT count(*) FROM memory.evidence_extraction_event
     WHERE owner_user_id='$owner' AND job_id='$job_id' AND operation_id='$prior_failure'
-      AND event_type='skipped' AND details->>'error_class'='uncatalogued_validator_rejection'
-      AND (details->>'attempt')::integer=4),
+      AND event_type='skipped' AND details->>'error_class'='$expected_error_class'
+      AND (details->>'attempt')::integer=$expected_attempts),
   'packets',(SELECT count(*) FROM memory.evidence_extraction_packet_v5))::text")
 [[ "$(jq -r '.target_skipped + .prior_failure' <<<"$preflight")" == 2 ]]
 [[ "$(jq -r '.packets' <<<"$preflight")" == 0 ]]
@@ -175,11 +194,12 @@ cmp -s "$before" "$after"
 restore_timers
 
 jq -n --arg execution_id "$execution_id" \
+  --arg report_version "memory_v1_v5_exact_claim_retry${retry}_install_v1" \
   --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg commit "$(git rev-parse HEAD)" --arg manifest_sha256 "$manifest_sha" \
   --arg backup_path "$backup" --arg backup_sha256 "$backup_sha" \
   --arg function_sha256 "$after_function_sha" --arg qdrant_sha256 "$qdrant_after_sha" \
-  '{report_version:"memory_v1_v5_exact_claim_retry5_install_v1",status:"passed",
+  '{report_version:$report_version,status:"passed",
     execution_id:$execution_id,created_at:$created_at,commit:$commit,
     manifest_sha256:$manifest_sha256,backup:{path:$backup_path,sha256:$backup_sha256},
     function_sha256:$function_sha256,proofs:{rollback_test_passed:true,
@@ -188,4 +208,4 @@ jq -n --arg execution_id "$execution_id" \
       timers_restored:true,external_model_calls:0,packet_writes:0,candidate_writes:0,
       claim_writes:0,projection_writes:0,prompt_influence:false}}' >"$report"
 chmod 0600 "$report"
-printf 'memory_v1_v5_exact_claim_retry5_install: PASS\nbackup=%s\nreport=%s\n' "$backup" "$report"
+printf 'memory_v1_v5_exact_claim_retry%s_install: PASS\nbackup=%s\nreport=%s\n' "$retry" "$backup" "$report"

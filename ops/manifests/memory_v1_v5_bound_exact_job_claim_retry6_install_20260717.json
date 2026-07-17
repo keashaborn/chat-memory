@@ -1,0 +1,51 @@
+{
+  "manifest_version": "memory_v1_v5_bound_exact_job_claim_retry6_install_v1",
+  "authorization": {
+    "schema_install_authorized": true,
+    "authorized_at": "2026-07-17",
+    "canonical_text_sha256": "67f542ba6d8fd057de40b59420a25dbdfb4a6f780407442ada59d9595595e11f",
+    "scope": "extend only the exact-job fail-closed retry ceiling from five to six",
+    "required_commit": "666a15ef6d4ec4a091ce890b05f998950ac3cac4",
+    "stop_before": [
+      "reviewed_retry_apply",
+      "job_claim",
+      "external_model_call",
+      "packet_persistence",
+      "candidate_creation",
+      "claim_creation",
+      "projection",
+      "retrieval_activation",
+      "prompt_influence"
+    ]
+  },
+  "artifacts": {
+    "migration": {
+      "path": "ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry6.sql",
+      "sha256": "8cb696c13503a577bbffcfb0548151907855942de6bafe154cc183bec446bdf3"
+    },
+    "rollback": {
+      "path": "ops/sql/20260717_memory_v1_v5_bound_exact_job_claim_retry6_rollback.sql",
+      "sha256": "829ad02c9326626c37006644713bbfd9745ed6a88e3a78e33abfbfa0732118c7"
+    },
+    "rollback_test": {
+      "path": "tests/memory_v1_v5_bound_exact_job_claim_retry6.sql",
+      "sha256": "4c387df2fc06e84712646331ccc4110bd0a3ca3a7cc022c5a335ecd3642a01b0"
+    }
+  },
+  "function": {
+    "signature": "memory.claim_owner_bound_evidence_job_v5(uuid,uuid,text,uuid,text,text,integer,integer)",
+    "before_sha256": "e67b5bbd08e9eb40283b29ee436f8aec6e3633439d65fb5897d2bc9ef9938b09",
+    "after_sha256": "9768f3cf0d96dcc926a94a3f4d4260e6ada33eb45714851757e0604ce961ef6a",
+    "owner": "memory_extraction_worker_maintainer",
+    "security_definer": true,
+    "public_execute": false,
+    "brains_app_execute": true
+  },
+  "expected_persistent_changes": {
+    "functions_replaced": 1,
+    "memory_rows": 0,
+    "qdrant_rows": 0,
+    "external_model_calls": 0,
+    "prompt_influence": 0
+  }
+}

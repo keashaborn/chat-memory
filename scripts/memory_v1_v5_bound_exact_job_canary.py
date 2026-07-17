@@ -137,8 +137,8 @@ def validate_arguments(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("expected component key is invalid")
     if not 30 <= args.lease_seconds <= 3600:
         raise RuntimeError("lease-seconds must be between 30 and 3600")
-    if not 0 <= args.expected_attempts <= 4:
-        raise RuntimeError("expected-attempts must be between 0 and 4")
+    if not 0 <= args.expected_attempts <= 5:
+        raise RuntimeError("expected-attempts must be between 0 and 5")
     if args.max_attempts != args.expected_attempts + 1:
         raise RuntimeError("max-attempts must equal expected-attempts plus one")
     if not 1.0 <= args.timeout_seconds <= 600.0:
