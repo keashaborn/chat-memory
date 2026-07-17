@@ -466,6 +466,64 @@ async def list_relationships(
         await conn.close()
 
 
+@router.post("/relationships/{relationship_id}/revoke")
+async def revoke_relationship(
+    relationship_id: str,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    rid = _as_uuid(relationship_id, "relationship_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                update {SCHEMA}.relationship
+                   set status='revoked',
+                       updated_at=now()
+                 where relationship_id=$1::uuid
+                   and (requester_user_id=$2::uuid or addressee_user_id=$2::uuid)
+                   and status in ('pending', 'accepted')
+                returning
+                  relationship_id,
+                  requester_user_id,
+                  addressee_user_id,
+                  case
+                    when requester_user_id=$2::uuid then addressee_user_id
+                    else requester_user_id
+                  end as other_user_id,
+                  status,
+                  relationship_kind,
+                  label,
+                  notes,
+                  created_at,
+                  updated_at
+                """,
+                rid,
+                owner,
+            )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="active relationship not found")
+
+            await conn.execute(
+                f"""
+                update {SCHEMA}.relationship_permission
+                   set is_enabled=false,
+                       permission_level='none',
+                       updated_at=now()
+                 where relationship_id=$1::uuid
+                """,
+                rid,
+            )
+
+        return JSONResponse(_row_to_jsonable(row))
+    finally:
+        await conn.close()
+
+
 
 
 @router.get("/permissions/granted-to-me")
