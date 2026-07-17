@@ -1,0 +1,81 @@
+{
+  "captured_at": "2026-07-17T00:20:24Z",
+  "conflict_resolution": {
+    "conflict_count": 1,
+    "file": "tools/memory_v1_evidence_extraction_worker_production_clone.sh",
+    "resolution": "exact_evolved_v5_blob",
+    "resolved_blob": "57d7f1525c731bfddf660b14ea5c1492d3502e15"
+  },
+  "contract_version": "memory_v1_phase0_v5_integration_audit_v1",
+  "effects": {
+    "database_writes": 0,
+    "deployment_changes": 0,
+    "external_model_calls": 0,
+    "integration_pushes": 0,
+    "production_branch_changes": 0,
+    "qdrant_writes": 0
+  },
+  "integration": {
+    "branch": "memory_v1_phase0_v5_integration",
+    "head": "77a400144453c641c8682328c46d3397005ddb7a",
+    "parents": [
+      "c0de0664a706e2a2eb6e460ac259edfd81287599",
+      "9567ea8ff2f6a56402393a2923defd6706daa39b"
+    ],
+    "worktree": "/home/ubuntu/chat-memory-phase0-v5-integration",
+    "worktree_clean_after_tests": true
+  },
+  "production_after_tests": {
+    "consolidation_job_pending": 596,
+    "consolidation_job_total": 644,
+    "consolidation_timer_active": false,
+    "consolidation_timer_enabled": false,
+    "head": "7484c4432cd9b920bc20024277776109584b70b7",
+    "memory_claim_v1_points": 25,
+    "memory_raw_points": 975,
+    "v4_capture_trigger": "disabled",
+    "worktree_clean": true
+  },
+  "test_adaptations": [
+    {
+      "reason": "the production backup now correctly contains the disabled Phase 0 V4 trigger",
+      "result": "the disposable clone re-enables the trigger only inside the clone before testing forward and rollback behavior",
+      "runner": "tools/memory_v1_freeze_v4_capture_production_clone.sh",
+      "runner_sha256": "92a96c6657e379b34828ef032b4c2dde505ba269ed48fc97c3702db4c22017b5"
+    }
+  ],
+  "tests": [
+    {
+      "external_model_calls": 0,
+      "name": "memory_v1_freeze_v4_capture_production_clone",
+      "result": "pass",
+      "source_backup_trigger_state": "D"
+    },
+    {
+      "external_model_calls": 0,
+      "name": "memory_v1_evidence_extraction_worker_production_clone",
+      "result": "pass",
+      "subtests": [
+        "database_security_and_rollback",
+        "relational_extraction_v5_provider",
+        "openai_provider_mock",
+        "observable_provider",
+        "external_smoke_v2_offline",
+        "external_preflight_offline",
+        "external_smoke_offline",
+        "fixture_worker_replay_and_owner_isolation"
+      ]
+    }
+  ],
+  "transparent_preflight_stops": [
+    {
+      "cause": "clone restored an already-frozen production trigger while the old test expected an enabled baseline",
+      "suite": "memory_v1_freeze_v4_capture_production_clone"
+    },
+    {
+      "cause": "the V5 ancestry guard ran before the isolated merge had been committed",
+      "suite": "memory_v1_evidence_extraction_worker_production_clone"
+    }
+  ],
+  "status": "phase0_v5_integration_tested_stop_before_foundation_reconciliation_or_push"
+}
