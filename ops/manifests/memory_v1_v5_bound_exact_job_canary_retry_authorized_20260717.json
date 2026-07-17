@@ -1,0 +1,100 @@
+{
+  "manifest_version": "memory_v1_v5_bound_exact_job_canary_retry_authorized_v1",
+  "authorization": {
+    "external_call_authorized": true,
+    "authorized_at": "2026-07-17",
+    "canonical_text_sha256": "07a095461fa27d11f76916a893038f13152708ec6bfc4cb5071548b4f819626c",
+    "scope": "second one-record Memory V1 extraction canary over the reviewed retry target",
+    "store": false,
+    "maximum_external_calls": 1,
+    "maximum_http_retries": 0
+  },
+  "code": {
+    "required_commit": "f0b379aa15d1e2bee89025ca4043ce769677b52f",
+    "runner": {
+      "path": "scripts/memory_v1_v5_bound_exact_job_canary.py",
+      "sha256": "d67cafdc5f9158cb20b8a87803e99839034f695f0d38d191977ebe01e25a26cd"
+    },
+    "observable_provider": {
+      "path": "scripts/memory_v1_relational_extraction_v5_observable_provider.py",
+      "sha256": "45105f90ff9a8bf47d9ea3f9105225dd07a096ff6d6e8afdf7eeb0ca3ac0939b"
+    },
+    "openai_provider": {
+      "path": "scripts/memory_v1_relational_extraction_v5_openai_provider.py",
+      "sha256": "f404201e27c3e992345cb39a766a64334076019ccd9dd81fd961600444930207"
+    },
+    "provider_contract": {
+      "path": "scripts/memory_v1_relational_extraction_v5_provider.py",
+      "sha256": "39bb40c0f98ad4b3d0fdfe02f03ac27bdfc3fe830aa4a087e9aef309503db2a4"
+    },
+    "bounded_worker": {
+      "path": "scripts/memory_v1_v5_bounded_extraction_worker.py",
+      "sha256": "06ae9d94b2673dd246b2aa171f1b2c0fab338a0e81c90b29887d46c3162b28d9"
+    },
+    "predicate_registry": {
+      "path": "specs/memory_v1_predicate_registry_v5.json",
+      "sha256": "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
+    },
+    "extraction_schema": {
+      "path": "specs/memory_v1_relational_extraction_v5.schema.json",
+      "sha256": "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70"
+    }
+  },
+  "target": {
+    "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+    "job_id": "788d0258-7227-46e2-8382-d13e6a122722",
+    "evidence_content_sha256": "ee09dea28fbb00b058a6f61ff1ef580320e37dc15f97f7d09bcc9bd43be35778",
+    "binding_event_id": "e8738381-c3be-4395-bfb2-75bfd42949e9",
+    "project_key": "verbal-sage",
+    "component_key": "memory-v1",
+    "expected_attempts": 1,
+    "max_attempts": 2
+  },
+  "execution": {
+    "run_id": "7490c8e1-2f3c-46b8-9ff8-5138b6f80553",
+    "claim_operation_id": "bc310d3b-75b3-514f-9dab-04d17462ef28",
+    "packet_id": "863f41d1-752d-5d04-b4e8-5b7e3919f17e",
+    "persist_operation_id": "ceba62d9-575f-597d-939b-926db940b4da",
+    "failure_operation_id": "6e1d7956-07b9-5d9c-9859-ba8267943828",
+    "worker_id": "memory-v1-v5-bound-exact-canary-retry-20260717",
+    "model": "gpt-5.6-terra",
+    "lease_seconds": 300,
+    "timeout_seconds": 120,
+    "max_output_tokens": 16000
+  },
+  "expected_success": {
+    "target_job_status": "review_required",
+    "target_job_attempts": 2,
+    "claim_events": 1,
+    "review_required_events": 1,
+    "failure_events": 0,
+    "extraction_packets": 1,
+    "external_model_calls": 1,
+    "candidates": 0,
+    "claims": 0,
+    "staging": 0,
+    "qdrant": 0,
+    "projection": 0,
+    "prompt_influence": 0
+  },
+  "expected_sanitized_failure": {
+    "target_job_status": "skipped",
+    "target_job_attempts": 2,
+    "claim_events": 1,
+    "skipped_events": 1,
+    "extraction_packets": 0,
+    "maximum_external_model_calls": 1,
+    "sanitized_diagnostic_required": true
+  },
+  "stop_before": [
+    "packet_review_or_apply",
+    "candidate_creation",
+    "claim_creation",
+    "entity_resolution",
+    "projection",
+    "Qdrant_write",
+    "retrieval_activation",
+    "prompt_influence",
+    "third_external_call"
+  ]
+}
