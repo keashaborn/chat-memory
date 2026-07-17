@@ -38,6 +38,7 @@ GRANT USAGE ON SCHEMA memory TO brains_app,memory_v5_writer;
 SQL
 
 run_sql <"$migration"
+run_sql <tests/memory_v1_v5_shadow_trace_persistence_production_rollback.sql
 run_sql <"$migration"
 run_sql <"$test_sql"
 
