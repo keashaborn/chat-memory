@@ -1,0 +1,515 @@
+{
+  "registry_version": "memory_predicate_registry_v5",
+  "contract_version": "memory_v1_relational_extraction_v5",
+  "status": "proposed",
+  "runtime_active": false,
+  "unknown_predicate_action": "defer_unregistered_predicate",
+  "object_contracts": {
+    "entity.animal": {
+      "kind": "entity",
+      "entity_types": ["animal"]
+    },
+    "entity.concept": {
+      "kind": "entity",
+      "entity_types": ["concept"]
+    },
+    "entity.person": {
+      "kind": "entity",
+      "entity_types": ["person"]
+    },
+    "entity.person_or_self": {
+      "kind": "entity",
+      "entity_types": ["person", "self"]
+    },
+    "entity.place": {
+      "kind": "entity",
+      "entity_types": ["place"]
+    },
+    "literal.age_number": {
+      "kind": "literal",
+      "datatype": "number",
+      "value_schema": {"type": "number", "minimum": 0, "maximum": 200},
+      "allowed_units": ["day", "month", "year"],
+      "approximate_allowed": true
+    },
+    "literal.health_text": {
+      "kind": "literal",
+      "datatype": "text",
+      "value_schema": {"type": "string", "minLength": 1, "maxLength": 1000},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.name_text": {
+      "kind": "literal",
+      "datatype": "text",
+      "value_schema": {"type": "string", "minLength": 1, "maxLength": 200},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.pet_hearing_status": {
+      "kind": "literal",
+      "datatype": "enum",
+      "value_schema": {"enum": ["hearing", "hard_of_hearing", "deaf", "unknown"]},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.pet_sex": {
+      "kind": "literal",
+      "datatype": "enum",
+      "value_schema": {"enum": ["female", "male", "intersex", "unknown"]},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.pet_text": {
+      "kind": "literal",
+      "datatype": "text",
+      "value_schema": {"type": "string", "minLength": 1, "maxLength": 300},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.pet_weight": {
+      "kind": "literal",
+      "datatype": "number",
+      "value_schema": {"type": "number", "exclusiveMinimum": 0, "maximum": 2000},
+      "allowed_units": ["kg", "lb"],
+      "approximate_allowed": true
+    },
+    "literal.preference_life": {
+      "kind": "literal",
+      "datatype": "json",
+      "value_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "target", "polarity", "context"],
+        "properties": {
+          "domain": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"},
+          "target": {"type": "string", "minLength": 1, "maxLength": 500},
+          "polarity": {"enum": ["likes", "dislikes", "prefers", "avoids"]},
+          "context": {"type": ["string", "null"], "maxLength": 500}
+        }
+      },
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.preference_response": {
+      "kind": "literal",
+      "datatype": "json",
+      "value_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dimension", "value"],
+        "properties": {
+          "dimension": {
+            "enum": [
+              "epistemic_style",
+              "format",
+              "initiative",
+              "reasoning_style",
+              "response_length",
+              "specificity",
+              "tone",
+              "voice"
+            ]
+          },
+          "value": {"type": "string", "minLength": 1, "maxLength": 500}
+        }
+      },
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.project_text": {
+      "kind": "literal",
+      "datatype": "text",
+      "value_schema": {"type": "string", "minLength": 1, "maxLength": 2000},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.report_text": {
+      "kind": "literal",
+      "datatype": "text",
+      "value_schema": {"type": "string", "minLength": 1, "maxLength": 1000},
+      "allowed_units": [],
+      "approximate_allowed": false
+    },
+    "literal.true": {
+      "kind": "literal",
+      "datatype": "boolean",
+      "value_schema": {"const": true},
+      "allowed_units": [],
+      "approximate_allowed": false
+    }
+  },
+  "predicates": [
+    {
+      "predicate": "age.reported",
+      "subject_entity_types": ["animal", "person", "self"],
+      "object_contract": "literal.age_number",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time"],
+      "modalities": ["asserted", "reported_observation", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": ["third_party_personal_detail"],
+      "description": "Age as reported by the user at an observation time, with an explicit unit."
+    },
+    {
+      "predicate": "credential.reported",
+      "subject_entity_types": ["person", "self"],
+      "object_contract": "literal.report_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "occurrence"],
+      "modalities": ["asserted", "corrective", "reported_observation", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": ["credential_or_transcription_ambiguity"],
+      "description": "A credential explicitly reported by the user; not independently verified."
+    },
+    {
+      "predicate": "health.user_reported_observation",
+      "subject_entity_types": ["animal", "person", "self"],
+      "object_contract": "literal.health_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "planned_time", "state_validity"],
+      "modalities": ["negated", "planned", "reported_observation", "uncertain"],
+      "projection_classes": ["supportive_context"],
+      "sensitivity_floor": "high",
+      "surface_policies": ["explicit_recall_only", "mention_when_directly_relevant"],
+      "manual_review_rules": ["health_content", "third_party_health_content"],
+      "description": "A health-related observation or not-yet-completed health plan attributed to the user's report, not medical truth."
+    },
+    {
+      "predicate": "health.user_reported_uncertain_label",
+      "subject_entity_types": ["animal", "person", "self"],
+      "object_contract": "literal.health_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["reported_observation", "uncertain"],
+      "projection_classes": ["supportive_context"],
+      "sensitivity_floor": "high",
+      "surface_policies": ["explicit_recall_only"],
+      "manual_review_rules": ["health_content", "third_party_health_content"],
+      "description": "An explicitly uncertain health or diagnostic label reported by the user."
+    },
+    {
+      "predicate": "identity.name",
+      "subject_entity_types": ["animal", "concept", "object", "organization", "person", "place", "project", "self"],
+      "object_contract": "literal.name_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "A name explicitly stated for an entity."
+    },
+    {
+      "predicate": "identity.name_canonical",
+      "subject_entity_types": ["animal", "concept", "object", "organization", "person", "place", "project", "self"],
+      "object_contract": "literal.name_text",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "corrective"],
+      "projection_classes": ["correction", "direct_claim"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "normalization_only"],
+      "manual_review_rules": ["correction_target_resolution"],
+      "description": "The canonical name asserted through an explicit correction or normalization."
+    },
+    {
+      "predicate": "life_event.died",
+      "subject_entity_types": ["animal", "person"],
+      "object_contract": "literal.true",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["occurrence"],
+      "modalities": ["asserted", "reported_observation", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "high",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": ["third_party_sensitive_event"],
+      "description": "A death event reported for a person or animal, with occurrence time when supported."
+    },
+    {
+      "predicate": "occupation.works_as",
+      "subject_entity_types": ["person", "self"],
+      "object_contract": "entity.concept",
+      "cardinality": "many",
+      "relation_semantics": "directed",
+      "temporal_semantics": ["state_validity"],
+      "modalities": ["asserted", "negated", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": ["occupation_or_transcription_ambiguity"],
+      "description": "An occupation role explicitly stated for a person."
+    },
+    {
+      "predicate": "pet.breed",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_text",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time"],
+      "modalities": ["asserted", "corrective", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "A breed or mix explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.coat_color",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "corrective", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "A coat color explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.eye_color",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "corrective", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "An eye color explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.hearing_status",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_hearing_status",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "corrective", "reported_observation", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": [],
+      "description": "A hearing status explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.sex",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_sex",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time"],
+      "modalities": ["asserted", "corrective", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "Sex explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.species",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_text",
+      "cardinality": "one_active",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time"],
+      "modalities": ["asserted", "corrective", "uncertain"],
+      "projection_classes": ["direct_claim"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant"],
+      "manual_review_rules": [],
+      "description": "Species explicitly reported for an animal."
+    },
+    {
+      "predicate": "pet.weight_reported",
+      "subject_entity_types": ["animal"],
+      "object_contract": "literal.pet_weight",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time"],
+      "modalities": ["asserted", "reported_observation", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": [],
+      "description": "A weight reported for an animal with kg or lb as the explicit unit."
+    },
+    {
+      "predicate": "preference.life",
+      "subject_entity_types": ["self"],
+      "object_contract": "literal.preference_life",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "endorsed", "negated", "uncertain"],
+      "projection_classes": ["life_preference"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["relevant_recommendation_or_explicit_recall"],
+      "manual_review_rules": ["stable_preference_required"],
+      "description": "A stable non-response preference explicitly expressed by the user."
+    },
+    {
+      "predicate": "preference.response",
+      "subject_entity_types": ["self"],
+      "object_contract": "literal.preference_response",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "corrective", "endorsed"],
+      "projection_classes": ["response_preference"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["zero_token_control_only"],
+      "manual_review_rules": ["direct_stable_response_instruction_required"],
+      "description": "A stable direct instruction controlling response behavior; never prompt content."
+    },
+    {
+      "predicate": "project.constraint",
+      "subject_entity_types": ["project"],
+      "object_contract": "literal.project_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "endorsed", "uncertain"],
+      "projection_classes": ["project_knowledge"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["exact_project_scope_only"],
+      "manual_review_rules": ["trusted_project_scope_required"],
+      "description": "A constraint within an owner-registered project."
+    },
+    {
+      "predicate": "project.current_state",
+      "subject_entity_types": ["project"],
+      "object_contract": "literal.project_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "reported_observation", "uncertain"],
+      "projection_classes": ["project_knowledge"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["exact_project_scope_only"],
+      "manual_review_rules": ["trusted_project_scope_required"],
+      "description": "A current state assertion within an owner-registered project."
+    },
+    {
+      "predicate": "project.proposed_feature",
+      "subject_entity_types": ["project"],
+      "object_contract": "literal.project_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "planned_time"],
+      "modalities": ["endorsed", "planned", "proposed"],
+      "projection_classes": ["project_knowledge"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["exact_project_scope_only"],
+      "manual_review_rules": ["trusted_project_scope_required"],
+      "description": "A proposed or planned feature within an owner-registered project."
+    },
+    {
+      "predicate": "project.requirement",
+      "subject_entity_types": ["project"],
+      "object_contract": "literal.project_text",
+      "cardinality": "many",
+      "relation_semantics": "property",
+      "temporal_semantics": ["observation_time", "state_validity"],
+      "modalities": ["asserted", "endorsed"],
+      "projection_classes": ["project_knowledge"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["exact_project_scope_only"],
+      "manual_review_rules": ["trusted_project_scope_required"],
+      "description": "A requirement within an owner-registered project."
+    },
+    {
+      "predicate": "relationship.has_pet",
+      "subject_entity_types": ["person", "self"],
+      "object_contract": "entity.animal",
+      "cardinality": "many",
+      "relation_semantics": "directed",
+      "temporal_semantics": ["state_validity"],
+      "modalities": ["asserted", "negated", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "low",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": [],
+      "description": "A person-to-animal pet relationship."
+    },
+    {
+      "predicate": "relationship.parent_of",
+      "subject_entity_types": ["person"],
+      "object_contract": "entity.person_or_self",
+      "cardinality": "many",
+      "relation_semantics": "directed",
+      "temporal_semantics": ["state_validity"],
+      "modalities": ["asserted", "negated", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": ["entity_resolution_ambiguity"],
+      "description": "A directed parent-to-child relationship."
+    },
+    {
+      "predicate": "relationship.sibling_of",
+      "subject_entity_types": ["person", "self"],
+      "object_contract": "entity.person",
+      "cardinality": "many",
+      "relation_semantics": "symmetric",
+      "temporal_semantics": ["state_validity"],
+      "modalities": ["asserted", "negated", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": ["entity_resolution_ambiguity"],
+      "description": "A symmetric sibling relationship between two people."
+    },
+    {
+      "predicate": "residence.lives_at",
+      "subject_entity_types": ["animal", "person", "self"],
+      "object_contract": "entity.place",
+      "cardinality": "many",
+      "relation_semantics": "directed",
+      "temporal_semantics": ["state_validity"],
+      "modalities": ["asserted", "negated", "uncertain"],
+      "projection_classes": ["direct_claim", "supportive_context"],
+      "sensitivity_floor": "medium",
+      "surface_policies": ["direct_or_relevant", "mention_when_directly_relevant"],
+      "manual_review_rules": ["third_party_precise_location"],
+      "description": "A residence relationship to a place, with a validity interval when supported."
+    }
+  ],
+  "legacy_compatibility": [
+    {"predicate": "did_activity_in_past", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "does_activity", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "financial_status", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "goal", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "has_children_names", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": ["identity.name", "relationship.parent_of"]},
+    {"predicate": "has_name", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": ["identity.name"]},
+    {"predicate": "identity.preferred_name", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "life_context.active", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "name.canonical", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": ["identity.name_canonical"]},
+    {"predicate": "often_takes_walks", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "personal_event.occurred", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "project.current", "object_kind": "entity", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "raises", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "relationship.kind", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "spends_time_at", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "spends_time_on", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "spent_time_in", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "spouse_name", "object_kind": "literal", "cardinality": "one", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []},
+    {"predicate": "stopped_alcohol_use", "object_kind": "literal", "cardinality": "many", "extraction_allowed": false, "retrieval_compatible_during_cutover": true, "successor_predicates": []}
+  ]
+}

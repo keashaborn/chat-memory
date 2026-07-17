@@ -1,0 +1,12 @@
+{
+  "authorization_scope": "remaining_unarchived_cases_store_false_zero_write",
+  "baseline_evaluator_commit": "4b5988bb17f74ca78e8ccbe05f9ac9e726750b7d",
+  "baseline_report_sha256": "bec708d70bb98d1aa961424d18001b047e98939814fa90f2374b6df56a457313",
+  "case_contract_sha256": "57d1da0a8ff1fa09f109253dac98be56afa2a36f14d203202876a072d30bebcc",
+  "case_ids": [
+    "v5-04",
+    "v5-15"
+  ],
+  "selection_version": "memory_v1_relational_specialized_reconciliation_v2",
+  "source_manifest_sha256": "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+}

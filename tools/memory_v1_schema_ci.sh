@@ -12,7 +12,15 @@ trap cleanup EXIT
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  -c "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260712_memory_v1_foundation.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  -c "ALTER ROLE brains_app LOGIN PASSWORD 'ci_only_brains_password'"
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
@@ -61,6 +69,21 @@ trap cleanup EXIT
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_lifecycle.sql
 
+# Validate the legacy insert-only lifecycle boundary before the controlled
+# writer migration intentionally revokes direct evidence INSERT.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_evidence_lifecycle.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260716_memory_v1_record_evidence_api.sql
+
+# Re-applying must preserve the SECURITY DEFINER owner and execute boundary.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260716_memory_v1_record_evidence_api.sql
+
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_ingest_batch.sql
@@ -74,22 +97,34 @@ trap cleanup EXIT
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_rls.sql
 
-"${compose[@]}" exec -T postgres \
-  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
-  < tests/memory_v1_evidence_lifecycle.sql
-
+# The legacy batch-audit test creates its evidence fixture directly. Validate
+# that append-only surface before direct evidence INSERT is revoked.
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < tests/memory_v1_evidence_ingest_batch.sql
 
+# The RLS suite above validates the original insert-only contract. The
+# controlled writer becomes the sole evidence write path from this point.
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260716_memory_v1_revoke_direct_evidence_insert.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_record_evidence_api.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < tests/memory_v1_revoke_direct_evidence_insert.sql
+
 "${compose[@]}" build brains
 "${compose[@]}" run --rm --no-deps \
-  -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
+  -e POSTGRES_DSN=postgresql://brains_app:ci_only_brains_password@postgres:5432/memory \
   -e PYTHONPATH=/app \
   brains python scripts/memory_v1_store_integration.py
 
 "${compose[@]}" run --rm --no-deps \
-  -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
+  -e POSTGRES_DSN=postgresql://brains_app:ci_only_brains_password@postgres:5432/memory \
   -e PYTHONPATH=/app \
   brains python scripts/memory_v1_artifact_ingestion_test.py
 
@@ -118,7 +153,7 @@ trap cleanup EXIT
   brains python scripts/memory_v1_projection_worker_test.py
 
 "${compose[@]}" run --rm --no-deps \
-  -e POSTGRES_DSN=postgresql://sage:ci_only_postgres_password@postgres:5432/memory \
+  -e POSTGRES_DSN=postgresql://brains_app:ci_only_brains_password@postgres:5432/memory \
   -e PYTHONPATH=/app \
   brains python scripts/memory_v1_projection_integration.py
 
@@ -140,6 +175,14 @@ fi
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
   < ops/sql/20260713_memory_v1_evidence_ingest_batch_rollback.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260716_memory_v1_revoke_direct_evidence_insert_rollback.sql
+
+"${compose[@]}" exec -T postgres \
+  psql -X -v ON_ERROR_STOP=1 -U sage -d memory \
+  < ops/sql/20260716_memory_v1_record_evidence_api_rollback.sql
 
 "${compose[@]}" exec -T postgres \
   psql -X -v ON_ERROR_STOP=1 -U sage -d memory \

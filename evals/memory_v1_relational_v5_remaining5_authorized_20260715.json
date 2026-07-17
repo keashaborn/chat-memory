@@ -1,0 +1,15 @@
+{
+  "authorization_scope": "remaining_failed_cases_store_false_zero_write",
+  "baseline_evaluator_commit": "c823dacbd34200f4841035e5cfea827eaa4df782",
+  "baseline_report_sha256": "df4a7dd472a452fc26c750f0b03a89c75bfacd7240e652f38ad5b14d2efd2a8e",
+  "case_contract_sha256": "9562aa6e3b2e7c9ae9830643975242d23999a65ac6c1ce800416eaa2fd751841",
+  "case_ids": [
+    "v5-03",
+    "v5-04",
+    "v5-10",
+    "v5-15",
+    "v5-25"
+  ],
+  "selection_version": "memory_v1_relational_specialized_rerun_v4",
+  "source_manifest_sha256": "8d31688923f3a0bb82c019b98dc6a78a867129a44157e80efc65432b60d2b649"
+}

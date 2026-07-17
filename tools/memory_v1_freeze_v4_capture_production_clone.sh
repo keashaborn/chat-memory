@@ -88,6 +88,27 @@ printf '%s\n' \
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
 
+source_backup_trigger_state=$(scalar "
+  SELECT tgenabled
+  FROM pg_trigger
+  WHERE tgrelid='public.chat_log'::regclass
+    AND tgname='chat_log_enqueue_memory_v1_consolidation'
+    AND NOT tgisinternal
+")
+case "$source_backup_trigger_state" in
+  O)
+    ;;
+  D)
+    # Production is expected to be frozen after Phase 0 activation. Restore
+    # the enabled baseline only inside this disposable clone so both forward
+    # and rollback behavior remain testable.
+    run_sql <"$rollback"
+    ;;
+  *)
+    echo "unexpected source backup trigger state: $source_backup_trigger_state" >&2
+    exit 1
+    ;;
+esac
 [[ "$(scalar "SELECT tgenabled FROM pg_trigger WHERE tgrelid='public.chat_log'::regclass AND tgname='chat_log_enqueue_memory_v1_consolidation' AND NOT tgisinternal")" == "O" ]]
 capture_state "$before"
 
@@ -135,3 +156,4 @@ capture_state "$rolled_back"
 cmp -s "$before" "$rolled_back"
 
 echo "memory_v1_freeze_v4_capture_production_clone: PASS"
+echo "source_backup_trigger_state=$source_backup_trigger_state"

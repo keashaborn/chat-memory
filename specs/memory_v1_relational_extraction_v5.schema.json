@@ -1,0 +1,714 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verbalsage.internal/specs/memory_v1_relational_extraction_v5.schema.json",
+  "title": "Memory V1 normalized relational extraction packet V5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "source_envelope",
+    "predicate_registry_version",
+    "entity_mentions",
+    "observations",
+    "comparison_hints",
+    "deferrals",
+    "packet_findings"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "memory_v1_relational_extraction_v5"
+    },
+    "source_envelope": {
+      "$ref": "#/$defs/source_envelope"
+    },
+    "predicate_registry_version": {
+      "type": "string",
+      "pattern": "^memory_predicate_registry_v[0-9]+$",
+      "maxLength": 100
+    },
+    "entity_mentions": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/entity_mention"
+      }
+    },
+    "observations": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "comparison_hints": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/comparison_hint"
+      }
+    },
+    "deferrals": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/deferral"
+      }
+    },
+    "packet_findings": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{1,99}$"
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_uuid": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_string": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "source_system",
+        "source_external_id",
+        "source_sha256",
+        "source_recorded_at"
+      ],
+      "properties": {
+        "job_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_system": {
+          "const": "public.chat_log"
+        },
+        "source_external_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "source_span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end",
+        "span_sha256"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "span_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{1,99}$"
+      }
+    },
+    "entity_mention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_ref",
+        "entity_type",
+        "mention_kind",
+        "name_text",
+        "relationship_role",
+        "source_spans",
+        "extraction_confidence",
+        "reason_codes"
+      ],
+      "properties": {
+        "entity_ref": {
+          "type": "string",
+          "pattern": "^e[0-9]{2}$"
+        },
+        "entity_type": {
+          "enum": [
+            "self",
+            "person",
+            "animal",
+            "organization",
+            "place",
+            "project",
+            "object",
+            "concept"
+          ]
+        },
+        "mention_kind": {
+          "enum": [
+            "self_reference",
+            "named",
+            "role_only",
+            "anonymous"
+          ]
+        },
+        "name_text": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "relationship_role": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "source_spans": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/source_span"
+          }
+        },
+        "extraction_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason_codes": {
+          "$ref": "#/$defs/reason_codes"
+        }
+      }
+    },
+    "entity_object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "entity_ref"
+      ],
+      "properties": {
+        "kind": {
+          "const": "entity"
+        },
+        "entity_ref": {
+          "type": "string",
+          "pattern": "^e[0-9]{2}$"
+        }
+      }
+    },
+    "literal_object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "datatype",
+        "value",
+        "unit",
+        "approximate"
+      ],
+      "properties": {
+        "kind": {
+          "const": "literal"
+        },
+        "datatype": {
+          "enum": [
+            "text",
+            "number",
+            "boolean",
+            "date",
+            "duration",
+            "location",
+            "enum",
+            "json"
+          ]
+        },
+        "value": {},
+        "unit": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "approximate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "temporal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic",
+        "shape",
+        "basis",
+        "source_form",
+        "certainty",
+        "precision",
+        "instant",
+        "calendar_range",
+        "instant_range",
+        "relative_offset",
+        "recurrence",
+        "anchored_to_source_time",
+        "normalization_policy_version",
+        "reason_codes"
+      ],
+      "properties": {
+        "semantic": {
+          "enum": [
+            "occurrence",
+            "state_validity",
+            "planned_time",
+            "observation_time",
+            "none"
+          ]
+        },
+        "shape": {
+          "enum": [
+            "none",
+            "instant",
+            "bounded_interval",
+            "open_interval",
+            "recurring"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "none",
+            "instant",
+            "calendar",
+            "relative",
+            "recurring"
+          ]
+        },
+        "source_form": {
+          "enum": [
+            "none",
+            "absolute",
+            "partial_absolute",
+            "relative",
+            "implicit_source_time"
+          ]
+        },
+        "certainty": {
+          "enum": [
+            "exact",
+            "approximate",
+            "bounded",
+            "unknown"
+          ]
+        },
+        "precision": {
+          "enum": [
+            "exact",
+            "minute",
+            "day",
+            "month",
+            "year",
+            "unknown"
+          ]
+        },
+        "instant": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calendar_range": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["lower", "upper", "bounds"],
+              "properties": {
+                "lower": {
+                  "oneOf": [
+                    {"type": "string", "format": "date"},
+                    {"type": "null"}
+                  ]
+                },
+                "upper": {
+                  "oneOf": [
+                    {"type": "string", "format": "date"},
+                    {"type": "null"}
+                  ]
+                },
+                "bounds": {"const": "[)"}
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instant_range": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["lower", "upper", "bounds"],
+              "properties": {
+                "lower": {
+                  "oneOf": [
+                    {"type": "string", "format": "date-time"},
+                    {"type": "null"}
+                  ]
+                },
+                "upper": {
+                  "oneOf": [
+                    {"type": "string", "format": "date-time"},
+                    {"type": "null"}
+                  ]
+                },
+                "bounds": {"const": "[)"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
+        "relative_offset": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "direction",
+                "magnitude",
+                "unit",
+                "approximate",
+                "anchor_source"
+              ],
+              "properties": {
+                "direction": {"enum": ["past", "future"]},
+                "magnitude": {"type": "number", "exclusiveMinimum": 0},
+                "unit": {"enum": ["minute", "hour", "day", "week", "month", "year"]},
+                "approximate": {"type": "boolean"},
+                "anchor_source": {"const": "evidence_observed_at"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
+        "recurrence": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind"],
+              "properties": {
+                "kind": {"const": "unspecified_repeated"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
+        "anchored_to_source_time": {
+          "type": "boolean"
+        },
+        "normalization_policy_version": {
+          "const": "memory_temporal_normalization_v5"
+        },
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,99}$"
+          }
+        }
+      }
+    },
+    "project_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "project_key",
+        "binding_source"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "not_applicable",
+            "resolved",
+            "unresolved"
+          ]
+        },
+        "project_key": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "binding_source": {
+          "enum": [
+            "not_applicable",
+            "explicit_source_text",
+            "trusted_thread_binding",
+            "unresolved"
+          ]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_ref",
+        "subject_entity_ref",
+        "predicate",
+        "predicate_registry_status",
+        "object",
+        "polarity",
+        "modality",
+        "projection_class",
+        "surface_policy",
+        "temporal",
+        "project_scope",
+        "sensitivity",
+        "extraction_confidence",
+        "source_spans",
+        "reason_codes"
+      ],
+      "properties": {
+        "observation_ref": {
+          "type": "string",
+          "pattern": "^o[0-9]{2}$"
+        },
+        "subject_entity_ref": {
+          "type": "string",
+          "pattern": "^e[0-9]{2}$"
+        },
+        "predicate": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{1,99}$"
+        },
+        "predicate_registry_status": {
+          "const": "governed"
+        },
+        "object": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/entity_object"
+            },
+            {
+              "$ref": "#/$defs/literal_object"
+            }
+          ]
+        },
+        "polarity": {
+          "enum": [
+            "affirmed",
+            "negated"
+          ]
+        },
+        "modality": {
+          "enum": [
+            "asserted",
+            "negated",
+            "uncertain",
+            "corrective",
+            "proposed",
+            "planned",
+            "endorsed",
+            "reported_observation"
+          ]
+        },
+        "projection_class": {
+          "enum": [
+            "direct_claim",
+            "supportive_context",
+            "correction",
+            "life_preference",
+            "response_preference",
+            "project_knowledge",
+            "never_surface"
+          ]
+        },
+        "surface_policy": {
+          "enum": [
+            "direct_or_relevant",
+            "mention_when_directly_relevant",
+            "explicit_recall_only",
+            "normalization_only",
+            "exact_project_scope_only",
+            "relevant_recommendation_or_explicit_recall",
+            "zero_token_control_only",
+            "never"
+          ]
+        },
+        "temporal": {
+          "$ref": "#/$defs/temporal"
+        },
+        "project_scope": {
+          "$ref": "#/$defs/project_scope"
+        },
+        "sensitivity": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "restricted"
+          ]
+        },
+        "extraction_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source_spans": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/source_span"
+          }
+        },
+        "reason_codes": {
+          "$ref": "#/$defs/reason_codes"
+        }
+      }
+    },
+    "comparison_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_ref",
+        "relation_type",
+        "resolution_state",
+        "target_claim_id",
+        "target_lookup_key",
+        "reason_codes"
+      ],
+      "properties": {
+        "observation_ref": {
+          "type": "string",
+          "pattern": "^o[0-9]{2}$"
+        },
+        "relation_type": {
+          "enum": [
+            "duplicate_of",
+            "supports",
+            "opposes",
+            "qualifies",
+            "corrects",
+            "supersedes"
+          ]
+        },
+        "resolution_state": {
+          "enum": [
+            "unresolved",
+            "verified"
+          ]
+        },
+        "target_claim_id": {
+          "$ref": "#/$defs/nullable_uuid"
+        },
+        "target_lookup_key": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "reason_codes": {
+          "$ref": "#/$defs/reason_codes"
+        }
+      }
+    },
+    "deferral": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "memory_shape",
+        "source_spans",
+        "sensitivity",
+        "review_required"
+      ],
+      "properties": {
+        "reason_code": {
+          "enum": [
+            "question_only",
+            "context_missing",
+            "ambiguous_transcription",
+            "transient_state",
+            "structured_domain",
+            "project_scope_unresolved",
+            "unregistered_predicate",
+            "mixed_authorship",
+            "sensitive_manual_review",
+            "compound_requires_split",
+            "entity_resolution_unresolved",
+            "insufficient_evidence"
+          ]
+        },
+        "memory_shape": {
+          "enum": [
+            "none",
+            "direct_claim",
+            "supportive_context",
+            "correction",
+            "life_preference",
+            "response_preference",
+            "project_knowledge",
+            "never_surface"
+          ]
+        },
+        "source_spans": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/source_span"
+          }
+        },
+        "sensitivity": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "restricted"
+          ]
+        },
+        "review_required": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
