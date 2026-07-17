@@ -299,12 +299,14 @@ SELECT pg_temp.assert_life_control_rejected();
 SELECT pg_temp.assert_revision_mutation_denied();
 
 INSERT INTO memory.project_knowledge_head_v5(
-  knowledge_id, owner_user_id, project_id, semantic_key_sha256,
+  knowledge_id, owner_user_id, project_id, component_key, binding_source,
+  semantic_key_sha256,
   knowledge_kind, knowledge_key
 ) VALUES (
   'a8888888-1111-4111-8111-111111111111',
   '11111111-1111-4111-8111-111111111111',
-  'a5555555-1111-4111-8111-111111111111', repeat('8', 64),
+  'a5555555-1111-4111-8111-111111111111', NULL,
+  'explicit_source_text', repeat('8', 64),
   'requirement', 'security.account_isolation'
 );
 

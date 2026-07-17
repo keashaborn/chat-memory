@@ -1,5 +1,10 @@
 BEGIN;
 
+ALTER TABLE IF EXISTS memory.projection_project_payload
+  DROP CONSTRAINT IF EXISTS projection_project_payload_component_fk;
+ALTER TABLE IF EXISTS memory.project_knowledge_head_v5
+  DROP CONSTRAINT IF EXISTS project_head_v5_component_fk;
+
 DO $preflight$
 BEGIN
   IF current_user <> 'sage' THEN

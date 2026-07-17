@@ -526,6 +526,8 @@ CREATE TABLE IF NOT EXISTS memory.projection_project_payload (
   lane memory.projection_lane_v5 NOT NULL DEFAULT 'project_knowledge',
   target_action memory.projection_target_action_v5 NOT NULL,
   project_id uuid NOT NULL,
+  component_key text,
+  binding_source text NOT NULL,
   target_knowledge_id uuid,
   knowledge_kind text NOT NULL,
   knowledge_key text NOT NULL,
@@ -552,6 +554,17 @@ CREATE TABLE IF NOT EXISTS memory.projection_project_payload (
     'constraint', 'current_state', 'proposed_feature', 'requirement'
   )),
   CHECK (knowledge_key ~ '^[a-z][a-z0-9_.:-]{1,239}$'),
+  CHECK (
+    (component_key IS NULL AND binding_source IN (
+      'explicit_source_text', 'trusted_thread_binding', 'legacy_root_scope'
+    ))
+    OR
+    (component_key IS NOT NULL
+     AND component_key ~ '^[a-z][a-z0-9-]{0,99}$'
+     AND component_key NOT LIKE '%--%'
+     AND right(component_key, 1) <> '-'
+     AND binding_source = 'trusted_component_registry')
+  ),
   CHECK (btrim(canonical_text) <> '' AND length(canonical_text) <= 4000),
   CHECK (document_state IN (
     'unverified', 'working', 'proposed', 'ratified',
@@ -570,6 +583,50 @@ CREATE TABLE IF NOT EXISTS memory.projection_project_payload (
      AND target_knowledge_id IS NOT NULL)
   )
 );
+
+ALTER TABLE memory.projection_project_payload
+  ADD COLUMN IF NOT EXISTS component_key text;
+ALTER TABLE memory.projection_project_payload
+  ADD COLUMN IF NOT EXISTS binding_source text NOT NULL
+  DEFAULT 'legacy_root_scope';
+ALTER TABLE memory.projection_project_payload
+  ALTER COLUMN binding_source DROP DEFAULT;
+
+DO $block$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'memory.projection_project_payload'::regclass
+      AND conname = 'projection_project_payload_scope_check'
+  ) THEN
+    ALTER TABLE memory.projection_project_payload
+      ADD CONSTRAINT projection_project_payload_scope_check CHECK (
+        (component_key IS NULL AND binding_source IN (
+          'explicit_source_text', 'trusted_thread_binding', 'legacy_root_scope'
+        ))
+        OR
+        (component_key IS NOT NULL
+         AND component_key ~ '^[a-z][a-z0-9-]{0,99}$'
+         AND component_key NOT LIKE '%--%'
+         AND right(component_key, 1) <> '-'
+         AND binding_source = 'trusted_component_registry')
+      );
+  END IF;
+  IF to_regclass('memory.project_component_v5') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'memory.projection_project_payload'::regclass
+         AND conname = 'projection_project_payload_component_fk'
+     ) THEN
+    ALTER TABLE memory.projection_project_payload
+      ADD CONSTRAINT projection_project_payload_component_fk
+      FOREIGN KEY (owner_user_id, project_id, component_key)
+      REFERENCES memory.project_component_v5(
+        owner_user_id, project_id, component_key
+      ) ON DELETE RESTRICT;
+  END IF;
+END
+$block$;
 
 CREATE TABLE IF NOT EXISTS memory.projection_plan_observation (
   owner_user_id uuid NOT NULL,
@@ -1033,6 +1090,8 @@ BEGIN
       AND payload.projection_ref = item.projection_ref;
     expected_scope := jsonb_build_object(
       'project_id', project_payload.project_id::text,
+      'component_key', project_payload.component_key,
+      'binding_source', project_payload.binding_source,
       'knowledge_kind', project_payload.knowledge_kind,
       'knowledge_key', project_payload.knowledge_key
     );
@@ -1042,6 +1101,8 @@ BEGIN
     expected_payload := jsonb_build_object(
       'kind', 'project_knowledge',
       'project_id', project_payload.project_id::text,
+      'component_key', project_payload.component_key,
+      'binding_source', project_payload.binding_source,
       'knowledge_kind', project_payload.knowledge_kind,
       'knowledge_key', project_payload.knowledge_key,
       'canonical_text', project_payload.canonical_text,
@@ -1049,6 +1110,50 @@ BEGIN
       'authority_level', project_payload.authority_level,
       'surface_policy', project_payload.surface_policy::text
     );
+    IF project_payload.component_key IS NOT NULL AND (
+      project_payload.binding_source <> 'trusted_component_registry'
+      OR to_regclass('memory.project_component_v5') IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM memory.project_component_v5 AS component
+        WHERE component.owner_user_id = project_payload.owner_user_id
+          AND component.project_id = project_payload.project_id
+          AND component.component_key = project_payload.component_key
+      )
+    ) THEN
+      RAISE EXCEPTION 'project component is not owner-scoped and registered'
+        USING ERRCODE = '23514';
+    ELSIF project_payload.component_key IS NULL
+          AND project_payload.binding_source NOT IN (
+            'explicit_source_text', 'trusted_thread_binding',
+            'legacy_root_scope'
+          ) THEN
+      RAISE EXCEPTION 'root project binding source is invalid'
+        USING ERRCODE = '23514';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM memory.projection_plan_observation AS link
+      JOIN memory.observation AS observation
+        ON observation.owner_user_id = link.owner_user_id
+       AND observation.observation_id = link.observation_id
+      JOIN memory.project_space AS project
+        ON project.owner_user_id = project_payload.owner_user_id
+       AND project.project_id = project_payload.project_id
+      WHERE link.owner_user_id = item.owner_user_id
+        AND link.plan_id = item.plan_id
+        AND link.projection_ref = item.projection_ref
+        AND (
+          observation.project_scope->>'state' <> 'resolved'
+          OR observation.project_scope->>'project_key' <> project.project_key
+          OR observation.project_scope->>'component_key'
+               IS DISTINCT FROM project_payload.component_key
+          OR observation.project_scope->>'binding_source'
+               IS DISTINCT FROM project_payload.binding_source
+        )
+    ) THEN
+      RAISE EXCEPTION 'project projection scope differs from source observation'
+        USING ERRCODE = '23514';
+    END IF;
     IF project_payload.knowledge_kind <> (CASE item.predicate
          WHEN 'project.constraint' THEN 'constraint'
          WHEN 'project.current_state' THEN 'current_state'

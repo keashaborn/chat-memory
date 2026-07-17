@@ -276,6 +276,8 @@
       "required": [
         "kind",
         "project_id",
+        "component_key",
+        "binding_source",
         "knowledge_kind",
         "knowledge_key",
         "canonical_text",
@@ -286,6 +288,17 @@
       "properties": {
         "kind": {"const": "project_knowledge"},
         "project_id": {"$ref": "#/$defs/uuid"},
+        "component_key": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9-]{0,99}$"
+        },
+        "binding_source": {
+          "enum": [
+            "explicit_source_text",
+            "trusted_thread_binding",
+            "trusted_component_registry"
+          ]
+        },
         "knowledge_kind": {
           "enum": ["constraint", "current_state", "proposed_feature", "requirement"]
         },

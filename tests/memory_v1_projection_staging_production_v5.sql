@@ -180,6 +180,11 @@ INSERT INTO memory.entity(
     'self', 'self', 'Owner A', 'owner a'
   ),
   (
+    'a1111111-1111-4111-8111-111111111112',
+    '11111111-1111-4111-8111-111111111111',
+    'project:memory-v1', 'project', 'Memory V1', 'memory v1'
+  ),
+  (
     'b1111111-1111-4111-8111-111111111111',
     '22222222-2222-4222-8222-222222222222',
     'self', 'self', 'Owner B', 'owner b'
@@ -193,7 +198,7 @@ INSERT INTO memory.evidence(
     'aeeeeeee-1111-4111-8111-111111111111',
     '11111111-1111-4111-8111-111111111111',
     'user_statement', 'projection.clone.test', 'owner-a',
-    'My name is Eric. Keep responses concise. Verbal Sage requires account isolation.',
+    'My name is Eric. Keep responses concise. Memory V1 requires account isolation.',
     repeat('a', 64), '2026-07-15T12:00:00Z', 'medium'
   ),
   (
@@ -217,6 +222,42 @@ INSERT INTO memory.project_space(
     '22222222-2222-4222-8222-222222222222',
     'other-project', 'Other Project'
   );
+
+SET ROLE brains_app;
+SELECT set_config(
+  'app.user_id', '11111111-1111-4111-8111-111111111111', true
+);
+SELECT 1 / ((component_key = 'memory-v1')::integer)
+FROM memory.apply_owner_project_component_v5(
+  'c5555555-1111-4111-8111-111111111111',
+  'a5555555-1111-4111-8111-111111111111',
+  'memory-v1', 'Memory V1',
+  NULL,
+  ARRAY['memory v1'],
+  '{"test":"projection_component_scope"}'::jsonb
+);
+SELECT 1 / ((component_key = 'resse')::integer)
+FROM memory.apply_owner_project_component_v5(
+  'c5555555-1111-4111-8111-111111111112',
+  'a5555555-1111-4111-8111-111111111111',
+  'resse', 'RESSE',
+  NULL,
+  ARRAY['resse'],
+  '{"test":"projection_sibling_scope"}'::jsonb
+);
+SELECT set_config(
+  'app.user_id', '22222222-2222-4222-8222-222222222222', true
+);
+SELECT 1 / ((component_key = 'owner-b-only')::integer)
+FROM memory.apply_owner_project_component_v5(
+  'c5555555-2222-4222-8222-222222222222',
+  'b5555555-2222-4222-8222-222222222222',
+  'owner-b-only', 'Owner B Only',
+  NULL,
+  ARRAY['owner b only'],
+  '{"test":"projection_cross_owner_scope"}'::jsonb
+);
+RESET ROLE;
 
 CREATE FUNCTION pg_temp.assert_application_read_denied()
 RETURNS void
@@ -410,7 +451,13 @@ BEGIN
 END
 $function$;
 
-SET SESSION AUTHORIZATION memory_v5_writer;
+-- Test-only and transactionally rolled back. NOINHERIT preserves the normal
+-- brains_app boundary while permitting explicit fixture setup as the writer.
+GRANT memory_v5_writer TO brains_app;
+GRANT SELECT, INSERT ON memory.observation_entailment_v5
+  TO memory_v5_writer;
+SET SESSION AUTHORIZATION brains_app;
+SET ROLE memory_v5_writer;
 SELECT set_config(
   'app.user_id', '11111111-1111-4111-8111-111111111111', true
 );
@@ -429,6 +476,15 @@ INSERT INTO memory.entity_mention(
     'start', 0, 'end', 2, 'span_sha256', repeat('1', 64)
   )), 1.000, '[]'::jsonb,
   'projection_security_test', 'v5', repeat('2', 64)
+), (
+  'a2222222-1111-4111-8111-111111111112',
+  '11111111-1111-4111-8111-111111111111',
+  'aeeeeeee-1111-4111-8111-111111111111', repeat('9', 64),
+  'e02', 'project', 'named', 'Memory V1', NULL,
+  jsonb_build_array(jsonb_build_object(
+    'start', 41, 'end', 50, 'span_sha256', repeat('3', 64)
+  )), 1.000, '[]'::jsonb,
+  'projection_security_test', 'v5', repeat('4', 64)
 );
 
 INSERT INTO memory.entity_resolution_plan(
@@ -446,6 +502,15 @@ INSERT INTO memory.entity_resolution_plan(
   'projection_security_test', 'v5', 'link_existing',
   'auto_link_eligible', 'a1111111-1111-4111-8111-111111111111',
   NULL, repeat('3', 64), repeat('4', 64), '[]'::jsonb
+), (
+  'a3333333-1111-4111-8111-111111111112',
+  '11111111-1111-4111-8111-111111111111',
+  'aeeeeeee-1111-4111-8111-111111111111',
+  'a2222222-1111-4111-8111-111111111112',
+  'memory_predicate_registry_v5', 'memory_entity_normalization_v5',
+  'projection_security_test', 'v5', 'link_existing',
+  'auto_link_eligible', 'a1111111-1111-4111-8111-111111111112',
+  NULL, repeat('5', 64), repeat('6', 64), '[]'::jsonb
 );
 
 INSERT INTO memory.entity_resolution_candidate(
@@ -466,6 +531,21 @@ INSERT INTO memory.entity_resolution_candidate(
     'conflicting_attribute_count', 0,
     'same_name_candidate_count', 1
   ), '[]'::jsonb
+), (
+  '11111111-1111-4111-8111-111111111111',
+  'a3333333-1111-4111-8111-111111111112',
+  'a1111111-1111-4111-8111-111111111112', 1, 'project',
+  jsonb_build_object(
+    'active_status', true,
+    'entity_type_match', true,
+    'exact_canonical_name', true,
+    'exact_alias', true,
+    'relationship_role_supported', false,
+    'source_local_coreference', true,
+    'graph_neighbor_supported', true,
+    'conflicting_attribute_count', 0,
+    'same_name_candidate_count', 1
+  ), '[]'::jsonb
 );
 
 INSERT INTO memory.entity_resolution_apply(
@@ -475,6 +555,10 @@ INSERT INTO memory.entity_resolution_apply(
   '11111111-1111-4111-8111-111111111111',
   'a3333333-1111-4111-8111-111111111111', NULL,
   'a1111111-1111-4111-8111-111111111111', repeat('5', 64)
+), (
+  '11111111-1111-4111-8111-111111111111',
+  'a3333333-1111-4111-8111-111111111112', NULL,
+  'a1111111-1111-4111-8111-111111111112', repeat('6', 64)
 );
 
 SELECT jsonb_build_object(
@@ -531,11 +615,11 @@ INSERT INTO memory.observation(
     'a4444444-1111-4111-8111-111111111113',
     '11111111-1111-4111-8111-111111111111',
     'aeeeeeee-1111-4111-8111-111111111111', 'o03',
-    'a2222222-1111-4111-8111-111111111111',
+    'a2222222-1111-4111-8111-111111111112',
     'project.requirement', 'memory_predicate_registry_v5', NULL,
     :'project_literal'::jsonb, 'affirmed', 'asserted',
     'project_knowledge', 'exact_project_scope_only',
-    '{"state":"resolved","project_key":"verbal-sage","binding_source":"explicit_source_text"}',
+    '{"state":"resolved","project_key":"verbal-sage","component_key":"memory-v1","binding_source":"trusted_component_registry"}',
     'medium', 1.000,
     '[{"start":41,"end":76,"span_sha256":"3333333333333333333333333333333333333333333333333333333333333333"}]',
     '[]', 'projection_security_test', 'v5', repeat('9', 64), repeat('8', 64)
@@ -589,8 +673,45 @@ INSERT INTO memory.observation_entity_binding(
   (
     '11111111-1111-4111-8111-111111111111',
     'a4444444-1111-4111-8111-111111111113',
-    'a3333333-1111-4111-8111-111111111111',
-    'a1111111-1111-4111-8111-111111111111', NULL, NULL, repeat('c', 64)
+    'a3333333-1111-4111-8111-111111111112',
+    'a1111111-1111-4111-8111-111111111112', NULL, NULL, repeat('c', 64)
+  );
+
+INSERT INTO memory.observation_entailment_v5(
+  decision_id, owner_user_id, observation_id, observation_sha256,
+  evidence_id, evidence_content_sha256, policy_version, decision,
+  reason_code, source_spans, authorization_manifest_sha256,
+  assessor_type, assessor_ref, invoked_by_session
+) VALUES
+  (
+    'd4444444-1111-4111-8111-111111111111',
+    '11111111-1111-4111-8111-111111111111',
+    'a4444444-1111-4111-8111-111111111111', repeat('6', 64),
+    'aeeeeeee-1111-4111-8111-111111111111', repeat('a', 64),
+    'memory_v1_predicate_entailment_v5_1', 'accepted',
+    'predicate_entailment_v5_1_accepted',
+    '[{"start":0,"end":16,"span_sha256":"1111111111111111111111111111111111111111111111111111111111111111"}]',
+    repeat('d', 64), 'system', 'projection_security_test', 'brains_app'
+  ),
+  (
+    'd4444444-1111-4111-8111-111111111112',
+    '11111111-1111-4111-8111-111111111111',
+    'a4444444-1111-4111-8111-111111111112', repeat('7', 64),
+    'aeeeeeee-1111-4111-8111-111111111111', repeat('a', 64),
+    'memory_v1_predicate_entailment_v5_1', 'accepted',
+    'predicate_entailment_v5_1_accepted',
+    '[{"start":17,"end":40,"span_sha256":"2222222222222222222222222222222222222222222222222222222222222222"}]',
+    repeat('e', 64), 'system', 'projection_security_test', 'brains_app'
+  ),
+  (
+    'd4444444-1111-4111-8111-111111111113',
+    '11111111-1111-4111-8111-111111111111',
+    'a4444444-1111-4111-8111-111111111113', repeat('8', 64),
+    'aeeeeeee-1111-4111-8111-111111111111', repeat('a', 64),
+    'memory_v1_predicate_entailment_v5_1', 'accepted',
+    'predicate_entailment_v5_1_accepted',
+    '[{"start":41,"end":76,"span_sha256":"3333333333333333333333333333333333333333333333333333333333333333"}]',
+    repeat('f', 64), 'system', 'projection_security_test', 'brains_app'
   );
 
 SELECT
@@ -616,9 +737,9 @@ SELECT
   ) AS preference_semantic_sha,
   memory.v5_projection_semantic_key_sha256(
     '11111111-1111-4111-8111-111111111111', 'project_knowledge',
-    'a1111111-1111-4111-8111-111111111111', 'project.requirement',
+    'a1111111-1111-4111-8111-111111111112', 'project.requirement',
     'literal', NULL, :'project_literal_sha', 'affirmed', 'asserted',
-    '{"project_id":"a5555555-1111-4111-8111-111111111111","knowledge_kind":"requirement","knowledge_key":"memory.account_isolation"}'
+    '{"project_id":"a5555555-1111-4111-8111-111111111111","component_key":"memory-v1","binding_source":"trusted_component_registry","knowledge_kind":"requirement","knowledge_key":"memory.account_isolation"}'
   ) AS project_semantic_sha
 \gset
 
@@ -695,7 +816,7 @@ jsonb_build_object(
     'observation_sha256', repeat('8', 64), 'stance', 'supports'
   )),
   'identity', jsonb_build_object(
-    'subject_entity_id', 'a1111111-1111-4111-8111-111111111111',
+    'subject_entity_id', 'a1111111-1111-4111-8111-111111111112',
     'predicate', 'project.requirement', 'object_kind', 'literal',
     'object_entity_id', NULL, 'object_literal_sha256', :'project_literal_sha',
     'polarity', 'affirmed', 'modality', 'asserted',
@@ -717,6 +838,8 @@ jsonb_build_object(
   'payload', jsonb_build_object(
     'kind', 'project_knowledge',
     'project_id', 'a5555555-1111-4111-8111-111111111111',
+    'component_key', 'memory-v1',
+    'binding_source', 'trusted_component_registry',
     'knowledge_kind', 'requirement',
     'knowledge_key', 'memory.account_isolation',
     'canonical_text', 'Every account must remain isolated.',
@@ -808,10 +931,10 @@ INSERT INTO memory.projection_plan_item(
     '11111111-1111-4111-8111-111111111111',
     'a6666666-1111-4111-8111-111111111111', 'p03',
     'memory_predicate_registry_v5', 'project_knowledge', :'project_projection'::jsonb,
-    :'project_projection_sha', 'a1111111-1111-4111-8111-111111111111',
+    :'project_projection_sha', 'a1111111-1111-4111-8111-111111111112',
     'project.requirement', 'literal', NULL, :'project_literal_sha',
     'affirmed', 'asserted',
-    '{"project_id":"a5555555-1111-4111-8111-111111111111","knowledge_kind":"requirement","knowledge_key":"memory.account_isolation"}',
+    '{"project_id":"a5555555-1111-4111-8111-111111111111","component_key":"memory-v1","binding_source":"trusted_component_registry","knowledge_kind":"requirement","knowledge_key":"memory.account_isolation"}',
     :'project_semantic_sha', 'create', NULL, '[]', 'link_only', NULL,
     'manual_review_required', true, '["project_policy_requires_review"]'
   );
@@ -841,12 +964,14 @@ INSERT INTO memory.projection_preference_payload(
 
 INSERT INTO memory.projection_project_payload(
   owner_user_id, plan_id, projection_ref, target_action,
-  project_id, target_knowledge_id, knowledge_kind, knowledge_key,
+  project_id, component_key, binding_source, target_knowledge_id,
+  knowledge_kind, knowledge_key,
   canonical_text, document_state, authority_level, surface_policy
 ) VALUES (
   '11111111-1111-4111-8111-111111111111',
   'a6666666-1111-4111-8111-111111111111', 'p03', 'create',
-  'a5555555-1111-4111-8111-111111111111', NULL,
+  'a5555555-1111-4111-8111-111111111111', 'memory-v1',
+  'trusted_component_registry', NULL,
   'requirement', 'memory.account_isolation',
   'Every account must remain isolated.', 'ratified', 'user_ratified',
   'exact_project_scope_only'
@@ -1108,6 +1233,12 @@ BEGIN
      OR (SELECT count(*) FROM memory.preference_revision_v5 WHERE owner_user_id = '11111111-1111-4111-8111-111111111111') <> 1
      OR (SELECT count(*) FROM memory.preference_revision_observation WHERE owner_user_id = '11111111-1111-4111-8111-111111111111') <> 1
      OR (SELECT count(*) FROM memory.project_knowledge_head_v5 WHERE owner_user_id = '11111111-1111-4111-8111-111111111111') <> 1
+     OR NOT EXISTS (
+       SELECT 1 FROM memory.project_knowledge_head_v5 AS head
+       WHERE head.owner_user_id = '11111111-1111-4111-8111-111111111111'
+         AND head.component_key = 'memory-v1'
+         AND head.binding_source = 'trusted_component_registry'
+     )
      OR (SELECT count(*) FROM memory.project_knowledge_revision_v5 WHERE owner_user_id = '11111111-1111-4111-8111-111111111111') <> 1
      OR (SELECT count(*) FROM memory.project_knowledge_revision_observation WHERE owner_user_id = '11111111-1111-4111-8111-111111111111') <> 1
      OR EXISTS (
@@ -1252,6 +1383,55 @@ BEGIN
   END IF;
 END
 $zero_write_replay$;
+
+SET SESSION AUTHORIZATION brains_app;
+SET ROLE memory_v5_writer;
+SELECT set_config(
+  'app.user_id', '11111111-1111-4111-8111-111111111111', true
+);
+INSERT INTO memory.project_knowledge_head_v5(
+  owner_user_id, project_id, component_key, binding_source,
+  semantic_key_sha256, knowledge_kind, knowledge_key
+) VALUES
+  (
+    '11111111-1111-4111-8111-111111111111',
+    'a5555555-1111-4111-8111-111111111111', NULL,
+    'trusted_thread_binding', repeat('d', 64),
+    'requirement', 'memory.account_isolation'
+  ),
+  (
+    '11111111-1111-4111-8111-111111111111',
+    'a5555555-1111-4111-8111-111111111111', 'resse',
+    'trusted_component_registry', repeat('e', 64),
+    'requirement', 'memory.account_isolation'
+  );
+DO $scope_isolation$
+DECLARE
+  denied boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO memory.project_knowledge_head_v5(
+      owner_user_id, project_id, component_key, binding_source,
+      semantic_key_sha256, knowledge_kind, knowledge_key
+    ) VALUES (
+      '11111111-1111-4111-8111-111111111111',
+      'a5555555-1111-4111-8111-111111111111', 'owner-b-only',
+      'trusted_component_registry', repeat('f', 64),
+      'requirement', 'memory.cross_owner_rejected'
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    denied := true;
+  END;
+  IF NOT denied OR (
+    SELECT count(*) FROM memory.project_knowledge_head_v5
+    WHERE owner_user_id = '11111111-1111-4111-8111-111111111111'
+      AND knowledge_key = 'memory.account_isolation'
+  ) <> 3 THEN
+    RAISE EXCEPTION 'root, sibling, or cross-owner component scope failed';
+  END IF;
+END
+$scope_isolation$;
+RESET SESSION AUTHORIZATION;
 
 ROLLBACK;
 

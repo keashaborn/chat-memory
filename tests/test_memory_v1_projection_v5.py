@@ -140,6 +140,8 @@ def project_projection() -> dict:
     projection["payload"] = {
         "kind": "project_knowledge",
         "project_id": PROJECT,
+        "component_key": "memory-v1",
+        "binding_source": "trusted_component_registry",
         "knowledge_kind": "requirement",
         "knowledge_key": "memory.account_isolation",
         "canonical_text": "Memory retrieval must remain owner-scoped.",
@@ -232,6 +234,20 @@ class ProjectionV5Test(unittest.TestCase):
 
     def test_project_requires_trusted_project_id_and_scope(self) -> None:
         validate_packet(packet(project_projection()), OWNER_A, self.registry_by_name)
+
+    def test_root_project_scope_is_distinct_and_valid(self) -> None:
+        projection = project_projection()
+        projection["payload"]["component_key"] = None
+        projection["payload"]["binding_source"] = "trusted_thread_binding"
+        rehash_projection(projection)
+        validate_packet(packet(projection), OWNER_A, self.registry_by_name)
+
+    def test_component_without_registry_binding_fails_closed(self) -> None:
+        projection = project_projection()
+        projection["payload"]["binding_source"] = "explicit_source_text"
+        rehash_projection(projection)
+        with self.assertRaisesRegex(AssertionError, "registry-bound"):
+            validate_packet(packet(projection), OWNER_A, self.registry_by_name)
 
     def test_correction_requires_reviewed_relation(self) -> None:
         validate_packet(packet(correction_projection()), OWNER_A, self.registry_by_name)

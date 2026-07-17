@@ -113,6 +113,49 @@ CREATE INDEX IF NOT EXISTS project_component_registration_event_v5_component_idx
     owner_user_id,project_id,component_id,created_at DESC
   );
 
+-- Projection tables may have been installed before component scope. Add the
+-- composite owner/project/component boundary whichever migration runs second.
+DO $block$
+BEGIN
+  IF to_regclass('memory.project_knowledge_head_v5') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute
+       WHERE attrelid = 'memory.project_knowledge_head_v5'::regclass
+         AND attname = 'component_key' AND NOT attisdropped
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'memory.project_knowledge_head_v5'::regclass
+         AND conname = 'project_head_v5_component_fk'
+     ) THEN
+    ALTER TABLE memory.project_knowledge_head_v5
+      ADD CONSTRAINT project_head_v5_component_fk
+      FOREIGN KEY (owner_user_id, project_id, component_key)
+      REFERENCES memory.project_component_v5(
+        owner_user_id, project_id, component_key
+      ) ON DELETE RESTRICT;
+  END IF;
+  IF to_regclass('memory.projection_project_payload') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute
+       WHERE attrelid = 'memory.projection_project_payload'::regclass
+         AND attname = 'component_key' AND NOT attisdropped
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'memory.projection_project_payload'::regclass
+         AND conname = 'projection_project_payload_component_fk'
+     ) THEN
+    ALTER TABLE memory.projection_project_payload
+      ADD CONSTRAINT projection_project_payload_component_fk
+      FOREIGN KEY (owner_user_id, project_id, component_key)
+      REFERENCES memory.project_component_v5(
+        owner_user_id, project_id, component_key
+      ) ON DELETE RESTRICT;
+  END IF;
+END
+$block$;
+
 ALTER TABLE memory.project_component_v5 OWNER TO sage;
 ALTER TABLE memory.project_component_alias_v5 OWNER TO sage;
 ALTER TABLE memory.project_component_registration_event_v5 OWNER TO sage;

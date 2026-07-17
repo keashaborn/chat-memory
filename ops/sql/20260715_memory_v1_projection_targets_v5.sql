@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS memory.project_knowledge_head_v5 (
   knowledge_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id uuid NOT NULL,
   project_id uuid NOT NULL,
+  component_key text,
+  binding_source text NOT NULL,
   semantic_key_sha256 text NOT NULL,
   knowledge_kind text NOT NULL,
   knowledge_key text NOT NULL,
@@ -131,7 +133,6 @@ CREATE TABLE IF NOT EXISTS memory.project_knowledge_head_v5 (
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (owner_user_id, project_id, knowledge_id),
   UNIQUE (owner_user_id, project_id, semantic_key_sha256),
-  UNIQUE (owner_user_id, project_id, knowledge_key),
   FOREIGN KEY (owner_user_id, project_id)
     REFERENCES memory.project_space(owner_user_id, project_id)
     ON DELETE RESTRICT,
@@ -141,11 +142,97 @@ CREATE TABLE IF NOT EXISTS memory.project_knowledge_head_v5 (
   )),
   CHECK (knowledge_key ~ '^[a-z][a-z0-9_.:-]{1,239}$'),
   CHECK (
+    (component_key IS NULL AND binding_source IN (
+      'explicit_source_text', 'trusted_thread_binding', 'legacy_root_scope'
+    ))
+    OR
+    (component_key IS NOT NULL
+     AND component_key ~ '^[a-z][a-z0-9-]{0,99}$'
+     AND component_key NOT LIKE '%--%'
+     AND right(component_key, 1) <> '-'
+     AND binding_source = 'trusted_component_registry')
+  ),
+  CHECK (
     (current_revision_id IS NULL AND revision_number = 0)
     OR (current_revision_id IS NOT NULL AND revision_number > 0)
   ),
   CHECK (updated_at >= created_at)
 );
+
+-- Additive compatibility for installations that already have the V5 target.
+-- Existing project rows predate component provenance and are marked honestly;
+-- new inserts have no default and must supply an explicit binding source.
+ALTER TABLE memory.project_knowledge_head_v5
+  ADD COLUMN IF NOT EXISTS component_key text;
+ALTER TABLE memory.project_knowledge_head_v5
+  ADD COLUMN IF NOT EXISTS binding_source text NOT NULL
+  DEFAULT 'legacy_root_scope';
+ALTER TABLE memory.project_knowledge_head_v5
+  ALTER COLUMN binding_source DROP DEFAULT;
+
+DO $block$
+DECLARE
+  constraint_name text;
+BEGIN
+  SELECT constraint_row.conname INTO constraint_name
+  FROM pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid = 'memory.project_knowledge_head_v5'::regclass
+    AND constraint_row.contype = 'u'
+    AND (
+      SELECT array_agg(attribute.attname ORDER BY attribute.attname)
+      FROM unnest(constraint_row.conkey) AS key(attnum)
+      JOIN pg_attribute AS attribute
+        ON attribute.attrelid = constraint_row.conrelid
+       AND attribute.attnum = key.attnum
+    ) = ARRAY['knowledge_key','owner_user_id','project_id']::name[];
+  IF constraint_name IS NOT NULL THEN
+    EXECUTE format(
+      'ALTER TABLE memory.project_knowledge_head_v5 DROP CONSTRAINT %I',
+      constraint_name
+    );
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'memory.project_knowledge_head_v5'::regclass
+      AND conname = 'project_head_v5_scope_check'
+  ) THEN
+    ALTER TABLE memory.project_knowledge_head_v5
+      ADD CONSTRAINT project_head_v5_scope_check CHECK (
+        (component_key IS NULL AND binding_source IN (
+          'explicit_source_text', 'trusted_thread_binding', 'legacy_root_scope'
+        ))
+        OR
+        (component_key IS NOT NULL
+         AND component_key ~ '^[a-z][a-z0-9-]{0,99}$'
+         AND component_key NOT LIKE '%--%'
+         AND right(component_key, 1) <> '-'
+         AND binding_source = 'trusted_component_registry')
+      );
+  END IF;
+  IF to_regclass('memory.project_component_v5') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'memory.project_knowledge_head_v5'::regclass
+         AND conname = 'project_head_v5_component_fk'
+     ) THEN
+    ALTER TABLE memory.project_knowledge_head_v5
+      ADD CONSTRAINT project_head_v5_component_fk
+      FOREIGN KEY (owner_user_id, project_id, component_key)
+      REFERENCES memory.project_component_v5(
+        owner_user_id, project_id, component_key
+      ) ON DELETE RESTRICT;
+  END IF;
+END
+$block$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS project_head_v5_root_knowledge_key_uq
+  ON memory.project_knowledge_head_v5(
+    owner_user_id, project_id, knowledge_key
+  ) WHERE component_key IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS project_head_v5_component_knowledge_key_uq
+  ON memory.project_knowledge_head_v5(
+    owner_user_id, project_id, component_key, knowledge_key
+  ) WHERE component_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS memory.project_knowledge_revision_v5 (
   revision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -372,6 +459,8 @@ DECLARE
 BEGIN
   IF NEW.owner_user_id IS DISTINCT FROM OLD.owner_user_id
      OR NEW.project_id IS DISTINCT FROM OLD.project_id
+     OR NEW.component_key IS DISTINCT FROM OLD.component_key
+     OR NEW.binding_source IS DISTINCT FROM OLD.binding_source
      OR NEW.knowledge_id IS DISTINCT FROM OLD.knowledge_id
      OR NEW.semantic_key_sha256 IS DISTINCT FROM OLD.semantic_key_sha256
      OR NEW.knowledge_kind IS DISTINCT FROM OLD.knowledge_kind

@@ -498,10 +498,29 @@ BEGIN
       RAISE EXCEPTION 'owner-scoped project is not registered'
         USING ERRCODE = '23514';
     END IF;
+    IF project_payload.component_key IS NOT NULL THEN
+      IF project_payload.binding_source <> 'trusted_component_registry'
+         OR to_regclass('memory.project_component_v5') IS NULL
+         OR NOT EXISTS (
+           SELECT 1 FROM memory.project_component_v5 AS component
+           WHERE component.owner_user_id = actor
+             AND component.project_id = project_payload.project_id
+             AND component.component_key = project_payload.component_key
+         ) THEN
+        RAISE EXCEPTION 'owner-scoped project component is not registered'
+          USING ERRCODE = '23514';
+      END IF;
+    ELSIF project_payload.binding_source NOT IN (
+      'explicit_source_text', 'trusted_thread_binding', 'legacy_root_scope'
+    ) THEN
+      RAISE EXCEPTION 'root project binding source is invalid'
+        USING ERRCODE = '23514';
+    END IF;
     SELECT stored.* INTO project_head
     FROM memory.project_knowledge_head_v5 AS stored
     WHERE stored.owner_user_id = actor
       AND stored.project_id = project_payload.project_id
+      AND stored.component_key IS NOT DISTINCT FROM project_payload.component_key
       AND (
         stored.knowledge_id = project_payload.target_knowledge_id
         OR (item.target_action = 'create'
@@ -517,6 +536,8 @@ BEGIN
       IF NOT FOUND OR project_head.knowledge_id
             <> project_payload.target_knowledge_id
          OR project_head.status <> 'active'
+         OR project_head.component_key IS DISTINCT FROM project_payload.component_key
+         OR project_head.binding_source IS DISTINCT FROM project_payload.binding_source
          OR project_head.semantic_key_sha256 <> item.semantic_key_sha256 THEN
         RAISE EXCEPTION 'project target identity or state mismatch'
           USING ERRCODE = '23514';
@@ -858,6 +879,8 @@ DECLARE
   revision_id_value uuid;
   revision_number_value integer;
   project_id_value uuid;
+  component_key_value text;
+  binding_source_value text;
   object_literal_value jsonb;
   sensitivity_value memory.sensitivity_level;
   content_value jsonb;
@@ -899,9 +922,11 @@ BEGIN
       existing.resulting_claim_revision_number,
       preference_revision.revision_number,
       project_revision.revision_number
-    ), existing.resulting_project_id
+    ), existing.resulting_project_id,
+      replay_project_head.component_key, replay_project_head.binding_source
     INTO aggregate_id_value, revision_id_value,
-      revision_number_value, project_id_value
+      revision_number_value, project_id_value,
+      component_key_value, binding_source_value
     FROM (SELECT 1) AS singleton
     LEFT JOIN memory.claim_revision AS claim_revision
       ON claim_revision.owner_user_id = existing.owner_user_id
@@ -919,14 +944,20 @@ BEGIN
       ON project_revision.owner_user_id = existing.owner_user_id
      AND project_revision.project_id = existing.resulting_project_id
      AND project_revision.revision_id
-           = existing.resulting_project_revision_id;
+           = existing.resulting_project_revision_id
+    LEFT JOIN memory.project_knowledge_head_v5 AS replay_project_head
+      ON replay_project_head.owner_user_id = project_revision.owner_user_id
+     AND replay_project_head.project_id = project_revision.project_id
+     AND replay_project_head.knowledge_id = project_revision.knowledge_id;
     result_value := jsonb_build_object(
       'apply_event_id', existing.event_id,
       'lane', existing.lane,
       'aggregate_id', aggregate_id_value,
       'revision_id', revision_id_value,
       'revision_number', revision_number_value,
-      'project_id', project_id_value
+      'project_id', project_id_value,
+      'component_key', component_key_value,
+      'binding_source', binding_source_value
     );
     RETURN QUERY SELECT existing.event_id, 'replayed', existing.lane,
       aggregate_id_value, revision_id_value, revision_number_value,
@@ -978,11 +1009,19 @@ BEGIN
       WHERE stored.owner_user_id = actor
         AND stored.project_id = project_id_value
         AND stored.revision_id = revision_id_value;
+      SELECT stored.component_key, stored.binding_source
+      INTO component_key_value, binding_source_value
+      FROM memory.project_knowledge_head_v5 AS stored
+      WHERE stored.owner_user_id = actor
+        AND stored.project_id = project_id_value
+        AND stored.knowledge_id = aggregate_id_value;
     END IF;
     result_value := result_value || jsonb_build_object(
       'aggregate_id', aggregate_id_value,
       'revision_id', revision_id_value,
-      'revision_number', revision_number_value
+      'revision_number', revision_number_value,
+      'component_key', component_key_value,
+      'binding_source', binding_source_value
     );
     RETURN QUERY SELECT existing.event_id, 'replayed', existing.lane,
       aggregate_id_value, revision_id_value, revision_number_value,
@@ -1051,11 +1090,14 @@ BEGIN
     WHERE payload.owner_user_id = actor
       AND payload.plan_id = p_plan_id
       AND payload.projection_ref = p_projection_ref;
+    component_key_value := project_payload.component_key;
+    binding_source_value := project_payload.binding_source;
     IF project_payload.target_knowledge_id IS NOT NULL THEN
       SELECT target.* INTO STRICT project_head
       FROM memory.project_knowledge_head_v5 AS target
       WHERE target.owner_user_id = actor
         AND target.project_id = project_payload.project_id
+        AND target.component_key IS NOT DISTINCT FROM project_payload.component_key
         AND target.knowledge_id = project_payload.target_knowledge_id
       FOR UPDATE;
     END IF;
@@ -1299,10 +1341,12 @@ BEGIN
     END IF;
     IF action_value = 'create' THEN
       INSERT INTO memory.project_knowledge_head_v5(
-        owner_user_id, project_id, semantic_key_sha256,
+        owner_user_id, project_id, component_key, binding_source,
+        semantic_key_sha256,
         knowledge_kind, knowledge_key
       ) VALUES (
-        actor, project_id_value, item.semantic_key_sha256,
+        actor, project_id_value, project_payload.component_key,
+        project_payload.binding_source, item.semantic_key_sha256,
         project_payload.knowledge_kind, project_payload.knowledge_key
       ) RETURNING * INTO project_head;
       GET DIAGNOSTICS step_count = ROW_COUNT;
@@ -1342,7 +1386,14 @@ BEGIN
           THEN temporal_row.calendar_range ELSE NULL END,
         CASE WHEN item.temporal_materialization = 'state_validity_only'
           THEN temporal_row.instant_range ELSE NULL END,
-        jsonb_build_object('projection_sha256', item.projection_sha256)
+        jsonb_build_object(
+          'projection_sha256', item.projection_sha256,
+          'project_scope', jsonb_build_object(
+            'project_id', project_id_value,
+            'component_key', project_payload.component_key,
+            'binding_source', project_payload.binding_source
+          )
+        )
       ) RETURNING created_revision.revision_id INTO revision_id_value;
       GET DIAGNOSTICS step_count = ROW_COUNT;
       written := written + step_count;
@@ -1443,7 +1494,11 @@ BEGIN
     'aggregate_id', aggregate_id_value,
     'revision_id', revision_id_value,
     'revision_number', revision_number_value,
-    'project_id', project_id_value
+    'project_id', project_id_value,
+    'component_key', CASE WHEN lane_value = 'project_knowledge'
+      THEN component_key_value ELSE NULL END,
+    'binding_source', CASE WHEN lane_value = 'project_knowledge'
+      THEN binding_source_value ELSE NULL END
   );
   dispatch_payload := jsonb_build_object(
     'contract_version', 'memory_projection_dispatch_v5',

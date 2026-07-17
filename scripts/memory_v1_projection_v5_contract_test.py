@@ -76,6 +76,8 @@ PREFERENCE_PAYLOAD_KEYS = {
 PROJECT_PAYLOAD_KEYS = {
     "kind",
     "project_id",
+    "component_key",
+    "binding_source",
     "knowledge_kind",
     "knowledge_key",
     "canonical_text",
@@ -323,6 +325,8 @@ def lane_scope(payload: dict[str, Any]) -> dict[str, Any]:
     if kind == "project_knowledge":
         return {
             "project_id": payload["project_id"],
+            "component_key": payload["component_key"],
+            "binding_source": payload["binding_source"],
             "knowledge_kind": payload["knowledge_kind"],
             "knowledge_key": payload["knowledge_key"],
         }
@@ -476,6 +480,22 @@ def validate_packet(
             if "project_knowledge" not in registry_entry["projection_classes"]:
                 raise AssertionError("project payload does not match predicate")
             uuid.UUID(payload["project_id"])
+            component_key = payload["component_key"]
+            binding_source = payload["binding_source"]
+            if component_key is None:
+                if binding_source not in {
+                    "explicit_source_text",
+                    "trusted_thread_binding",
+                }:
+                    raise AssertionError("root project scope has invalid binding source")
+            elif (
+                not isinstance(component_key, str)
+                or not re.fullmatch(r"[a-z][a-z0-9-]{0,99}", component_key)
+                or "--" in component_key
+                or component_key.endswith("-")
+                or binding_source != "trusted_component_registry"
+            ):
+                raise AssertionError("component project scope is not registry-bound")
             if PROJECT_KIND_FOR_PREDICATE.get(predicate) != payload["knowledge_kind"]:
                 raise AssertionError("project knowledge kind mismatch")
             if payload["surface_policy"] != "exact_project_scope_only":

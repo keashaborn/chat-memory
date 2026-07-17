@@ -1,9 +1,10 @@
 # Memory V1 Project Component Scope V5
 
-Status: offline contract; production inactive.
+Status: isolated implementation and production-schema clone tests pass;
+production inactive.
 
 Server boundary: seebx backend. This contract does not change Verbal Sage,
-RESSE, Resse-Train, Qdrant, retrieval, prompts, or another owner's records.
+RESSE, Resse-Train, Qdrant, prompts, or another owner's records.
 
 ## Identity model
 
@@ -95,15 +96,38 @@ application values.
 - No component registration enables extraction, retrieval, Qdrant projection,
   or prompt influence by itself.
 
+## Projection and retrieval contract
+
+Project projection identity includes `project_id`, nullable `component_key`,
+`binding_source`, `knowledge_kind`, and `knowledge_key`. A component projection
+is accepted only when every linked source observation has the same trusted root,
+component, and binding source. The durable head repeats the component identity;
+the immutable revision metadata retains the exact project-scope packet.
+
+Root and component knowledge use separate partial unique indexes. The same
+knowledge key may exist at root, `memory-v1`, and `resse` without collision.
+The composite component foreign key includes owner and project, so a component
+visible only to another owner cannot enter staging or durable projection.
+
+Shadow retrieval compares `(project_key, component_key)` exactly:
+
+- a root request selects only root records;
+- a component request selects only that component;
+- root knowledge is not implicitly inherited by a component;
+- sibling component knowledge is rejected;
+- a component without a project is invalid.
+
+`legacy_root_scope` is an honest compatibility marker for durable root rows that
+predate binding provenance. New projection packets cannot emit it.
+
 ## Activation sequence
 
-1. Install and clone-test the empty component registry.
-2. Register the reviewed hierarchy for the target owner.
-3. Extend normalized V5 `project_scope` with an optional component key and a
-   server-owned resolution source.
-4. Teach the bounded worker to read only the trusted registry for the bound
-   owner/project.
-5. Persist component scope in project-knowledge staging and durable heads.
-6. Test root-only, component-specific, ambiguous, cross-owner, replay, and
-   mixed-thread cases.
-7. Bind reviewed threads and run zero-influence canaries before retrieval.
+1. Install the additive component/projection schema in production.
+2. Register the reviewed hierarchy for each active owner.
+3. Bind reviewed threads to the root project; do not infer components from the
+   thread title.
+4. Run owner-scoped extraction, staging, projection, and exact-scope shadow
+   retrieval canaries.
+5. Verify root-only, component-specific, ambiguous, cross-owner, replay, and
+   mixed-thread traces with zero prompt influence.
+6. Review the canary packet before any live retrieval activation.

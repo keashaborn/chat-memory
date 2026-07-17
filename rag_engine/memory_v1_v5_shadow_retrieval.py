@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ NON_CONTENT_SURFACES = {"never", "zero_token_control_only"}
 EVIDENCE_STANCES = {"supports", "opposes", "qualifies", "context"}
 MIN_SEMANTIC_SCORE = 0.20
 RELATIVE_SEMANTIC_RATIO = 0.40
+PROJECT_SCOPE_KEY_RE = re.compile(r"^[a-z][a-z0-9-]{0,99}$")
 
 
 class V5ShadowRetrievalError(RuntimeError):
@@ -122,7 +124,9 @@ def _surface_allowed(
     intent: str,
     explicit_recall: bool,
     project_key: str | None,
+    component_key: str | None,
     record_project_key: str | None,
+    record_component_key: str | None,
 ) -> bool:
     if surface in NON_CONTENT_SURFACES:
         return False
@@ -135,7 +139,11 @@ def _surface_allowed(
             "life_preference_recall",
         }
     if surface == "exact_project_scope_only":
-        return bool(project_key and record_project_key == project_key)
+        return bool(
+            project_key
+            and record_project_key == project_key
+            and record_component_key == component_key
+        )
     return False
 
 
@@ -163,6 +171,7 @@ def evaluate_v5_shadow_claims(
     max_sensitivity: str = "medium",
     explicit_recall: bool = False,
     project_key: str | None = None,
+    component_key: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     actor = _uuid(actor_user_id, "actor_user_id")
@@ -191,6 +200,19 @@ def evaluate_v5_shadow_claims(
             "allowed_predicate_prefixes must contain 1 to 20 values"
         )
     normalized_project = str(project_key or "").strip() or None
+    normalized_component = str(component_key or "").strip() or None
+    if normalized_component and not normalized_project:
+        raise V5ShadowRetrievalError("component_key requires project_key")
+    for value, field in (
+        (normalized_project, "project_key"),
+        (normalized_component, "component_key"),
+    ):
+        if value and (
+            not PROJECT_SCOPE_KEY_RE.fullmatch(value)
+            or "--" in value
+            or value.endswith("-")
+        ):
+            raise V5ShadowRetrievalError(f"{field} is invalid")
     candidates = _candidate_map(candidate_hits)
     semantic_floor = _semantic_floor(list(candidates.values()))
     evaluated_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -231,6 +253,9 @@ def evaluate_v5_shadow_claims(
             raise V5ShadowRetrievalError("retrieval_policy must be an object")
         surface = str(policy.get("surface_policy") or "").strip().casefold()
         record_project = str(record.get("project_key") or "").strip() or None
+        record_component = (
+            str(record.get("component_key") or "").strip() or None
+        )
         evidence_by_stance = _evidence_by_stance(
             record.get("evidence_by_stance"),
             f"records[{index}].evidence_by_stance",
@@ -257,6 +282,20 @@ def evaluate_v5_shadow_claims(
         elif metadata.get("memory_contract") != "memory_projection_v5":
             reasons.append("invalid_v5_contract")
         if not str(record.get("canonical_key") or "").startswith("v5:"):
+            reasons.append("invalid_v5_contract")
+        if record_component and not record_project:
+            reasons.append("invalid_v5_contract")
+        if record_project and (
+            not PROJECT_SCOPE_KEY_RE.fullmatch(record_project)
+            or "--" in record_project
+            or record_project.endswith("-")
+        ):
+            reasons.append("invalid_v5_contract")
+        if record_component and (
+            not PROJECT_SCOPE_KEY_RE.fullmatch(record_component)
+            or "--" in record_component
+            or record_component.endswith("-")
+        ):
             reasons.append("invalid_v5_contract")
         if record.get("projection_review_decision") != "authorized":
             reasons.append("projection_not_authorized")
@@ -287,7 +326,9 @@ def evaluate_v5_shadow_claims(
             intent=normalized_intent,
             explicit_recall=bool(explicit_recall),
             project_key=normalized_project,
+            component_key=normalized_component,
             record_project_key=record_project,
+            record_component_key=record_component,
         ):
             reasons.append("surface_policy")
 
@@ -298,6 +339,8 @@ def evaluate_v5_shadow_claims(
                 "predicate": predicate,
                 "status": status,
                 "surface_policy": surface,
+                "project_key": record_project,
+                "component_key": record_component,
                 "semantic_score": semantic,
                 "importance": importance,
                 "salience": salience,
@@ -348,6 +391,8 @@ def evaluate_v5_shadow_claims(
             "predicate": record["predicate"],
             "status": record["status"],
             "surface_policy": record["surface_policy"],
+            "project_key": record["project_key"],
+            "component_key": record["component_key"],
             "use_instruction": _use_instruction(
                 record["status"], record["surface_policy"]
             ),

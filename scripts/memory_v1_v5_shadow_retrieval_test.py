@@ -48,6 +48,7 @@ def record() -> dict:
         },
         "observation_ids": ["9bf1e6b2-1840-4524-98dc-142567ebe013"],
         "project_key": None,
+        "component_key": None,
     }
 
 
@@ -120,6 +121,84 @@ def main() -> None:
     zero_token = record()
     zero_token["retrieval_policy"]["surface_policy"] = "zero_token_control_only"
     assert evaluate(zero_token)["selected_count"] == 0
+
+    component = record()
+    component["retrieval_policy"]["surface_policy"] = "exact_project_scope_only"
+    component["project_key"] = "verbal-sage"
+    component["component_key"] = "memory-v1"
+    component_selected = evaluate_v5_shadow_claims(
+        OWNER,
+        query="What is the Memory V1 requirement?",
+        intent="technical_project_recall",
+        domain="project",
+        allowed_predicate_prefixes=["occupation."],
+        candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+        records=[component],
+        project_key="verbal-sage",
+        component_key="memory-v1",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+    assert component_selected["selected_count"] == 1
+    assert component_selected["claims"][0]["component_key"] == "memory-v1"
+
+    sibling_blocked = evaluate_v5_shadow_claims(
+        OWNER,
+        query="What is the RESSE requirement?",
+        intent="technical_project_recall",
+        domain="project",
+        allowed_predicate_prefixes=["occupation."],
+        candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+        records=[component],
+        project_key="verbal-sage",
+        component_key="resse",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+    assert sibling_blocked["selected_count"] == 0
+    assert sibling_blocked["rejected_counts"]["surface_policy"] == 1
+
+    root_blocked = evaluate_v5_shadow_claims(
+        OWNER,
+        query="What is the root project requirement?",
+        intent="technical_project_recall",
+        domain="project",
+        allowed_predicate_prefixes=["occupation."],
+        candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+        records=[component],
+        project_key="verbal-sage",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+    assert root_blocked["selected_count"] == 0
+
+    root = deepcopy(component)
+    root["component_key"] = None
+    root_selected = evaluate_v5_shadow_claims(
+        OWNER,
+        query="What is the root project requirement?",
+        intent="technical_project_recall",
+        domain="project",
+        allowed_predicate_prefixes=["occupation."],
+        candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+        records=[root],
+        project_key="verbal-sage",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+    assert root_selected["selected_count"] == 1
+
+    try:
+        evaluate_v5_shadow_claims(
+            OWNER,
+            query="Invalid component-only scope",
+            intent="technical_project_recall",
+            domain="project",
+            allowed_predicate_prefixes=["occupation."],
+            candidate_hits=[{"claim_id": CLAIM, "semantic_score": 0.91}],
+            records=[component],
+            component_key="memory-v1",
+        )
+    except V5ShadowRetrievalError as exc:
+        assert "requires project_key" in str(exc)
+    else:
+        raise AssertionError("component-only retrieval scope was accepted")
 
     expired = record()
     expired["valid_to"] = "2026-07-15T00:00:00+00:00"
