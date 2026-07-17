@@ -3,7 +3,7 @@
   "authorization": {
     "external_call_authorized": true,
     "authorized_at": "2026-07-17",
-    "canonical_text_sha256": "07a095461fa27d11f76916a893038f13152708ec6bfc4cb5071548b4f819626c",
+    "canonical_text_sha256": "7e247feca33fcfe6c005fbcbe24817153f33b319ab3796e19cbe39415c6de820",
     "scope": "second one-record Memory V1 extraction canary over the reviewed retry target",
     "store": false,
     "maximum_external_calls": 1,

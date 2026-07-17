@@ -6,7 +6,7 @@ set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
 manifest=ops/manifests/memory_v1_v5_bound_exact_job_canary_retry_authorized_20260717.json
-manifest_sha=1aca1660d206649e55954d047df0dfa364e8ee512ea655a3de7809c4bd7c6804
+manifest_sha=70e938ca5d4191a90360567bd0245b5bab8f24fa66bacaa15f16f5e7f77b25c1
 container=brains-postgres-1
 snapshot_dir=/home/ubuntu/brains/snapshots
 python=/opt/chat-memory/venv/bin/python
