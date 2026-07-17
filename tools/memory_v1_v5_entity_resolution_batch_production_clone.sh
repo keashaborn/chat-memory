@@ -12,12 +12,13 @@ compose=(
 )
 runner=scripts/memory_v1_v5_entity_resolution_batch.py
 fixture=tests/memory_v1_v5_entity_resolution_batch_fixture.py
-plan=/home/ubuntu/memory-v1-reviews/v5-10-v5-13-entity-resolution-batch-plan-0544232-20260717.json
+manifest=/home/ubuntu/memory-v1-reviews/v5-10-v5-13-entity-resolution-batch-manifest.json
 review_root=/home/ubuntu/memory-v1-reviews
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 backup=$(mktemp /tmp/memory-v1-entity-batch.XXXXXX.dump)
 work=$(mktemp -d /tmp/memory-v1-entity-batch.XXXXXX)
 authorization="$work/authorization.json"
+plan="$work/plan.json"
 report="$work/apply-report.json"
 baseline="$work/unchanged-before.tsv"
 post="$work/unchanged-after.tsv"
@@ -116,6 +117,9 @@ before_other=$(other_owner_signature)
 capture_unchanged "$baseline"
 
 head=$(git -C "$repo_root" rev-parse HEAD)
+POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$runner" plan \
+  --manifest "$manifest" --review-root "$review_root" --output "$plan"
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$fixture" \
   --plan "$plan" --output "$authorization" --head "$head"
 MEMORY_V1_V5_ENTITY_RESOLUTION_BATCH_APPLY=authorized POSTGRES_DSN="$dsn" \
