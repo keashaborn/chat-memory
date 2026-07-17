@@ -46,6 +46,7 @@ SENSITIVITY_RANK = {
 SERVER_OWNED_KEYS = {
     "approved",
     "claim_id",
+    "component_key",
     "durable_entity_id",
     "entity_id",
     "evidence_id",
@@ -243,9 +244,11 @@ class NormalizedTemporal(ProviderTemporal):
 class ProjectScope(StrictModel):
     state: Literal["not_applicable", "resolved", "unresolved"]
     project_key: str | None
+    component_key: str | None
     binding_source: Literal[
         "not_applicable",
         "explicit_source_text",
+        "trusted_component_registry",
         "trusted_thread_binding",
         "unresolved",
     ]
@@ -475,11 +478,65 @@ class TrustedExtractionSource:
 
 
 @dataclass(frozen=True)
+class TrustedProjectComponent:
+    component_id: str
+    component_key: str
+    display_name: str
+    parent_component_id: str | None
+    aliases: tuple[str, ...]
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        component_id: Any,
+        component_key: Any,
+        display_name: Any,
+        parent_component_id: Any,
+        aliases: Any,
+    ) -> "TrustedProjectComponent":
+        if not isinstance(component_key, str):
+            raise ValueError("component_key must be text")
+        canonical_key = _project_name_key(component_key)
+        if not canonical_key or len(canonical_key) > 100:
+            raise ValueError("component_key must contain 1 to 100 characters")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ValueError("component display_name must be non-empty text")
+        if len(display_name.strip()) > 200:
+            raise ValueError("component display_name exceeds 200 characters")
+        if not isinstance(aliases, (list, tuple)) or not 1 <= len(aliases) <= 22:
+            raise ValueError("component aliases must contain 1 to 22 values")
+        canonical_aliases: set[str] = {
+            canonical_key,
+            _project_name_key(display_name),
+        }
+        for alias in aliases:
+            if not isinstance(alias, str):
+                raise ValueError("component aliases must be text")
+            canonical_alias = _project_name_key(alias)
+            if not canonical_alias or len(canonical_alias) > 200:
+                raise ValueError("component alias is invalid")
+            canonical_aliases.add(canonical_alias)
+        return cls(
+            component_id=_uuid_text(component_id, "component_id"),
+            component_key=canonical_key,
+            display_name=display_name.strip(),
+            parent_component_id=(
+                _uuid_text(parent_component_id, "parent_component_id")
+                if parent_component_id is not None
+                else None
+            ),
+            aliases=tuple(sorted(canonical_aliases)),
+        )
+
+
+@dataclass(frozen=True)
 class TrustedProjectBinding:
     thread_id: str
     project_id: str
     project_key: str
     binding_event_id: str
+    components: tuple[TrustedProjectComponent, ...] = ()
 
     @classmethod
     def create(
@@ -489,12 +546,34 @@ class TrustedProjectBinding:
         project_id: Any,
         project_key: Any,
         binding_event_id: Any,
+        components: Any = (),
     ) -> "TrustedProjectBinding":
         if not isinstance(project_key, str):
             raise ValueError("project_key must be text")
         canonical_key = project_key.strip()
         if not canonical_key or len(canonical_key) > 500:
             raise ValueError("project_key must contain 1 to 500 characters")
+        if not isinstance(components, (list, tuple)) or len(components) > 100:
+            raise ValueError("trusted components must contain at most 100 rows")
+        canonical_components = tuple(components)
+        root_key = _project_name_key(canonical_key)
+        component_keys: set[str] = set()
+        component_ids: set[str] = set()
+        component_aliases: set[str] = set()
+        for component in canonical_components:
+            if not isinstance(component, TrustedProjectComponent):
+                raise ValueError("trusted components have an invalid type")
+            if component.component_key in component_keys:
+                raise ValueError("trusted component keys are not unique")
+            if component.component_id in component_ids:
+                raise ValueError("trusted component ids are not unique")
+            if component_aliases.intersection(component.aliases):
+                raise ValueError("trusted component aliases are ambiguous")
+            if root_key in component.aliases:
+                raise ValueError("trusted component alias conflicts with project root")
+            component_keys.add(component.component_key)
+            component_ids.add(component.component_id)
+            component_aliases.update(component.aliases)
         return cls(
             thread_id=_uuid_text(thread_id, "thread_id"),
             project_id=_uuid_text(project_id, "project_id"),
@@ -503,6 +582,7 @@ class TrustedProjectBinding:
                 binding_event_id,
                 "binding_event_id",
             ),
+            components=canonical_components,
         )
 
 
@@ -728,27 +808,33 @@ def validate_and_normalize(
             subject_mention = entity_mentions_by_ref[
                 item["subject_entity_ref"]
             ]
-            if trusted_project_binding is None or not (
-                _project_mention_matches_binding(
+            resolution = (
+                _project_mention_resolution(
                     subject_mention,
                     trusted_project_binding,
                 )
-            ):
+                if trusted_project_binding is not None
+                else None
+            )
+            if resolution is None:
                 item["project_scope"] = {
                     "state": "unresolved",
                     "project_key": None,
+                    "component_key": None,
                     "binding_source": "unresolved",
                 }
             else:
                 item["project_scope"] = {
                     "state": "resolved",
                     "project_key": trusted_project_binding.project_key,
-                    "binding_source": "trusted_thread_binding",
+                    "component_key": resolution[0],
+                    "binding_source": resolution[1],
                 }
         else:
             item["project_scope"] = {
                 "state": "not_applicable",
                 "project_key": None,
+                "component_key": None,
                 "binding_source": "not_applicable",
             }
         observations.append(item)
@@ -880,22 +966,31 @@ def _project_name_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", unaccented.casefold()).strip("-")
 
 
-def _project_mention_matches_binding(
+def _project_mention_resolution(
     mention: dict[str, Any],
     binding: TrustedProjectBinding,
-) -> bool:
+) -> tuple[str | None, str] | None:
     if mention["entity_type"] != "project":
-        return False
+        return None
     if mention["mention_kind"] == "anonymous":
-        return (
+        if (
             mention["name_text"] is None
             and mention["relationship_role"] == "project:current_thread"
-        )
+        ):
+            return None, "trusted_thread_binding"
+        return None
     if mention["mention_kind"] == "named" and mention["name_text"]:
-        return _project_name_key(mention["name_text"]) == _project_name_key(
-            binding.project_key
-        )
-    return False
+        mention_key = _project_name_key(mention["name_text"])
+        if mention_key == _project_name_key(binding.project_key):
+            return None, "trusted_thread_binding"
+        matches = [
+            component
+            for component in binding.components
+            if mention_key in component.aliases
+        ]
+        if len(matches) == 1:
+            return matches[0].component_key, "trusted_component_registry"
+    return None
 
 
 def _datetime_text(value: Any, label: str) -> str:

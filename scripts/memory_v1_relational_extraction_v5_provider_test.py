@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
     TrustedProjectBinding,
+    TrustedProjectComponent,
     load_registry,
     load_schema,
     synthetic_provider,
@@ -18,7 +19,7 @@ REGISTRY_SHA256 = (
     "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
 )
 SCHEMA_SHA256 = (
-    "c1d613b16795c181780d60219860f8068cee1369b069735db94887b0c1b8b377"
+    "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70"
 )
 SOURCE = "My name is Avery."
 SOURCE_SHA256 = (
@@ -27,6 +28,10 @@ SOURCE_SHA256 = (
 PROJECT_SOURCE = "Verbal Sage must keep owner boundaries fail-closed."
 PROJECT_SOURCE_SHA256 = (
     "9079a50293a8be146b295842466779da55f4fdedc649d7a3c041891e7ce0a21b"
+)
+COMPONENT_SOURCE = "Memory V1 must keep owner boundaries fail-closed."
+COMPONENT_SOURCE_SHA256 = (
+    "ce58230aed63507e2872a5c6cb203459a23e6269e17e800e1d4f24382da08cb1"
 )
 
 
@@ -163,6 +168,25 @@ def project_output() -> dict:
     }
 
 
+def component_output() -> dict:
+    output = copy.deepcopy(project_output())
+    output["entity_mentions"][0].update(
+        {
+            "name_text": "Memory V1",
+            "source_spans": [
+                {"start": 0, "end": 9, "quote": "Memory V1"}
+            ],
+        }
+    )
+    output["observations"][0]["source_spans"] = [
+        {"start": 0, "end": 49, "quote": COMPONENT_SOURCE}
+    ]
+    output["deferrals"][0]["source_spans"] = [
+        {"start": 0, "end": 49, "quote": COMPONENT_SOURCE}
+    ]
+    return output
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     registry = load_registry(
@@ -249,11 +273,19 @@ def main() -> int:
     ):
         raise AssertionError("unbound project observation lost its deferral")
 
+    memory_component = TrustedProjectComponent.create(
+        component_id="aaaaaaaa-0013-4000-8000-000000000013",
+        component_key="memory-v1",
+        display_name="Memory V1",
+        parent_component_id=None,
+        aliases=["memory-v1", "memory-system", "memory"],
+    )
     binding = TrustedProjectBinding.create(
         thread_id="aaaaaaaa-0010-4000-8000-000000000010",
         project_id="aaaaaaaa-0011-4000-8000-000000000011",
         project_key="verbal-sage",
         binding_event_id="aaaaaaaa-0012-4000-8000-000000000012",
+        components=[memory_component],
     )
     bound_project = validate_and_normalize(
         project_provider,
@@ -266,6 +298,7 @@ def main() -> int:
     if bound_observation["project_scope"] != {
         "state": "resolved",
         "project_key": "verbal-sage",
+        "component_key": None,
         "binding_source": "trusted_thread_binding",
     }:
         raise AssertionError("trusted project binding was not injected")
@@ -299,6 +332,40 @@ def main() -> int:
     ]["state"] != "resolved":
         raise AssertionError("trusted anonymous thread project was not resolved")
 
+    component_source = TrustedExtractionSource.create(
+        job_id="aaaaaaaa-0030-4000-8000-000000000030",
+        source_system="public.chat_log",
+        source_external_id="aaaaaaaa-0031-4000-8000-000000000031",
+        source_sha256=COMPONENT_SOURCE_SHA256,
+        source_recorded_at="2026-07-16T12:03:00Z",
+        content=COMPONENT_SOURCE,
+    )
+    component_project = validate_and_normalize(
+        synthetic_provider(
+            provider_id="synthetic_fixture",
+            provider_version="v1",
+            output=component_output(),
+        ),
+        source=component_source,
+        registry=registry,
+        schema=schema,
+        trusted_project_binding=binding,
+    )
+    if component_project.normalized_packet["observations"][0][
+        "project_scope"
+    ] != {
+        "state": "resolved",
+        "project_key": "verbal-sage",
+        "component_key": "memory-v1",
+        "binding_source": "trusted_component_registry",
+    }:
+        raise AssertionError("trusted named component was not resolved")
+    if any(
+        item["reason_code"] == "project_scope_unresolved"
+        for item in component_project.normalized_packet["deferrals"]
+    ):
+        raise AssertionError("resolved component retained unresolved deferral")
+
     mismatched_output = copy.deepcopy(project_output())
     mismatched_output["entity_mentions"][0]["name_text"] = "Other Project"
     mismatched_project = validate_and_normalize(
@@ -330,6 +397,40 @@ def main() -> int:
             binding_event_id=binding.binding_event_id,
         ),
         "empty trusted project key",
+    )
+    conflicting_component = TrustedProjectComponent.create(
+        component_id="aaaaaaaa-0014-4000-8000-000000000014",
+        component_key="other-component",
+        display_name="Other Component",
+        parent_component_id=None,
+        aliases=["memory"],
+    )
+    expect_error(
+        lambda: TrustedProjectBinding.create(
+            thread_id=binding.thread_id,
+            project_id=binding.project_id,
+            project_key=binding.project_key,
+            binding_event_id=binding.binding_event_id,
+            components=[memory_component, conflicting_component],
+        ),
+        "ambiguous trusted component aliases",
+    )
+    root_collision = TrustedProjectComponent.create(
+        component_id="aaaaaaaa-0015-4000-8000-000000000015",
+        component_key="root-collision",
+        display_name="Root Collision",
+        parent_component_id=None,
+        aliases=["verbal-sage"],
+    )
+    expect_error(
+        lambda: TrustedProjectBinding.create(
+            thread_id=binding.thread_id,
+            project_id=binding.project_id,
+            project_key=binding.project_key,
+            binding_event_id=binding.binding_event_id,
+            components=[root_collision],
+        ),
+        "component alias conflicting with project root",
     )
 
     malformed = valid_output()

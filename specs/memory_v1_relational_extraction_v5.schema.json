@@ -466,6 +466,7 @@
       "required": [
         "state",
         "project_key",
+        "component_key",
         "binding_source"
       ],
       "properties": {
@@ -479,10 +480,14 @@
         "project_key": {
           "$ref": "#/$defs/nullable_string"
         },
+        "component_key": {
+          "$ref": "#/$defs/nullable_string"
+        },
         "binding_source": {
           "enum": [
             "not_applicable",
             "explicit_source_text",
+            "trusted_component_registry",
             "trusted_thread_binding",
             "unresolved"
           ]

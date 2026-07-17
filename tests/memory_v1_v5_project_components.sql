@@ -212,6 +212,15 @@ SELECT pg_temp.assert_component_call_denied(
 );
 
 SELECT pg_temp.assert_component_call_denied(
+  $sql$SELECT * FROM memory.apply_owner_project_component_v5(
+    'ca100000-0000-4000-8000-000000000007',
+    'ca000000-0000-4000-8000-000000000001',
+    'root-collision','Root Collision',NULL,
+    ARRAY['Verbal Sage'],'{}'::jsonb
+  )$sql$
+);
+
+SELECT pg_temp.assert_component_call_denied(
   $sql$SELECT * FROM memory.read_owner_project_components_v5(
     'cb000000-0000-4000-8000-000000000001'
   )$sql$

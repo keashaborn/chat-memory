@@ -210,6 +210,7 @@ def fact_bundle() -> dict[str, Any]:
         "project_scope": {
             "state": "not_applicable",
             "project_key": None,
+            "component_key": None,
             "binding_source": "not_applicable",
         },
         "sensitivity": "low",

@@ -24,6 +24,7 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
     TrustedProjectBinding,
+    TrustedProjectComponent,
     load_registry,
     load_schema,
     validate_and_normalize,
@@ -37,7 +38,7 @@ EXPECTED_REGISTRY_SHA256 = (
     "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
 )
 EXPECTED_SCHEMA_SHA256 = (
-    "c1d613b16795c181780d60219860f8068cee1369b069735db94887b0c1b8b377"
+    "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70"
 )
 DEFAULT_REGISTRY = (
     Path(__file__).resolve().parents[1]
@@ -238,9 +239,20 @@ async def read_context(
             worker_id,
             job["evidence_content_sha256"],
         )
+        component_rows = []
+        if row is not None and row["project_id"] is not None:
+            component_rows = await conn.fetch(
+                """
+                SELECT *
+                FROM memory.read_owner_project_components_v5($1)
+                """,
+                row["project_id"],
+            )
     if row is None:
         raise RuntimeError("V5 context function returned no row")
-    return dict(row)
+    context = dict(row)
+    context["project_components"] = [dict(item) for item in component_rows]
+    return context
 
 
 async def persist_packet(
@@ -358,11 +370,22 @@ async def process_job(
         )
         trusted_binding = None
         if context["binding_event_id"] is not None:
+            trusted_components = tuple(
+                TrustedProjectComponent.create(
+                    component_id=item["component_id"],
+                    component_key=item["component_key"],
+                    display_name=item["display_name"],
+                    parent_component_id=item["parent_component_id"],
+                    aliases=item["aliases"],
+                )
+                for item in context["project_components"]
+            )
             trusted_binding = TrustedProjectBinding.create(
                 thread_id=context["thread_id"],
                 project_id=context["project_id"],
                 project_key=context["project_key"],
                 binding_event_id=context["binding_event_id"],
+                components=trusted_components,
             )
         transport = OpenAIResponsesTransport(
             enable_token=os.getenv("MEMORY_V1_V5_EXTERNAL_CALLS")

@@ -890,12 +890,14 @@ def enrich_packet(
                 observation["project_scope"] = {
                     "state": "unresolved",
                     "project_key": None,
+                    "component_key": None,
                     "binding_source": "unresolved",
                 }
             else:
                 observation["project_scope"] = {
                     "state": "not_applicable",
                     "project_key": None,
+                    "component_key": None,
                     "binding_source": "not_applicable",
                 }
             observations.append(observation)

@@ -57,6 +57,10 @@ the model has no trusted project binding. When project knowledge omits a project
 name, use an anonymous entity_type=project mention with name_text=null and
 relationship_role=project:current_thread. Never invent or bind a project name;
 the server may resolve that placeholder from a trusted thread binding.
+Keep explicitly named subsystems or components as named project mentions. Do
+not collapse names such as Memory V1, RESSE, or LifeSwitch into Verbal Sage or
+into an anonymous project reference. The server alone validates component
+aliases inside the trusted owner/project registry.
 
 Response preferences are stable instructions about assistant behavior. Life
 preferences concern activities, media, food, places, and similar user choices.

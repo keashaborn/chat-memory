@@ -205,6 +205,7 @@ DECLARE
   canonical_aliases text[];
   request_sha text;
   existing_component memory.project_component_v5%ROWTYPE;
+  project_record memory.project_space%ROWTYPE;
   existing_event memory.project_component_registration_event_v5%ROWTYPE;
   new_component_id uuid;
   new_event memory.project_component_registration_event_v5%ROWTYPE;
@@ -331,13 +332,21 @@ BEGIN
     RETURN;
   END IF;
 
-  PERFORM 1
+  SELECT project.*
+  INTO project_record
   FROM memory.project_space AS project
   WHERE project.owner_user_id = actor
     AND project.project_id = p_project_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'owner project is not visible'
       USING ERRCODE = 'P0002';
+  END IF;
+  IF canonical_aliases && ARRAY[
+    memory.normalize_project_component_alias_v5(project_record.project_key),
+    memory.normalize_project_component_alias_v5(project_record.display_name)
+  ] THEN
+    RAISE EXCEPTION 'component alias conflicts with the project root'
+      USING ERRCODE = '23514';
   END IF;
 
   IF p_parent_component_id IS NOT NULL THEN
