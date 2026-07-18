@@ -139,19 +139,24 @@ def secure_write(path: Path, value: dict[str, Any]) -> str:
 async def assert_other_owner_denied(
     conn: Any, other_owner: str, observation_id: uuid.UUID
 ) -> None:
-    await conn.execute("SELECT set_config('app.user_id',$1,true)", other_owner)
+    transaction = conn.transaction(readonly=True)
+    await transaction.start()
     try:
-        await conn.fetchrow(
-            "SELECT * FROM memory.preflight_project_projection_source_v5($1)",
-            observation_id,
-        )
-    except Exception as error:
-        if getattr(error, "sqlstate", None) != "P0002":
-            raise
-    else:
-        raise ProjectProjectionApplyError(
-            "cross-owner project projection source unexpectedly resolved"
-        )
+        await conn.execute("SELECT set_config('app.user_id',$1,true)", other_owner)
+        try:
+            await conn.fetchrow(
+                "SELECT * FROM memory.preflight_project_projection_source_v5($1)",
+                observation_id,
+            )
+        except Exception as error:
+            if getattr(error, "sqlstate", None) != "P0002":
+                raise
+        else:
+            raise ProjectProjectionApplyError(
+                "cross-owner project projection source unexpectedly resolved"
+            )
+    finally:
+        await transaction.rollback()
 
 
 async def apply_bundle(
@@ -165,6 +170,7 @@ async def apply_bundle(
     observation_id = uuid.UUID(bundle["source_snapshot"]["observation_id"])
     other_owner = "557ea042-cb82-48f8-9429-472e96c957ef"
     reason_codes_text = stable_json(REASON_CODES)
+    await assert_other_owner_denied(conn, other_owner, observation_id)
     transaction = conn.transaction()
     await transaction.start()
     try:
@@ -247,7 +253,6 @@ async def apply_bundle(
             or apply_replay["rows_written"] != 0
         ):
             raise ProjectProjectionApplyError("in-transaction replay was not zero-write")
-        await assert_other_owner_denied(conn, other_owner, observation_id)
         result = {
             "contract_version": RESULT_CONTRACT,
             "mode": "apply",
@@ -347,31 +352,31 @@ async def replay_bundle(
             or str(applied["apply_event_id"]) != prior["apply_event_id"]
         ):
             raise ProjectProjectionApplyError("cross-transaction replay was not zero-write")
-        await assert_other_owner_denied(
-            conn, "557ea042-cb82-48f8-9429-472e96c957ef", observation_id
-        )
-        await transaction.rollback()
-        return {
-            "contract_version": REPLAY_CONTRACT,
-            "mode": "replay",
-            "head_commit": commit,
-            "owner_user_id": owner,
-            "plan_id": str(plan_id),
-            "request_id": str(request_id),
-            "bundle_sha256": bundle["bundle_sha256"],
-            "review_id": prior["review_id"],
-            "apply_event_id": prior["apply_event_id"],
-            "stage_rows_written": 0,
-            "review_rows_written": 0,
-            "apply_rows_written": 0,
-            "cross_owner_rejected": True,
-            "database_writes": 0,
-            "qdrant_writes": 0,
-            "external_model_calls": 0,
-        }
     except BaseException:
         await transaction.rollback()
         raise
+    await transaction.rollback()
+    await assert_other_owner_denied(
+        conn, "557ea042-cb82-48f8-9429-472e96c957ef", observation_id
+    )
+    return {
+        "contract_version": REPLAY_CONTRACT,
+        "mode": "replay",
+        "head_commit": commit,
+        "owner_user_id": owner,
+        "plan_id": str(plan_id),
+        "request_id": str(request_id),
+        "bundle_sha256": bundle["bundle_sha256"],
+        "review_id": prior["review_id"],
+        "apply_event_id": prior["apply_event_id"],
+        "stage_rows_written": 0,
+        "review_rows_written": 0,
+        "apply_rows_written": 0,
+        "cross_owner_rejected": True,
+        "database_writes": 0,
+        "qdrant_writes": 0,
+        "external_model_calls": 0,
+    }
 
 
 async def async_main() -> int:
