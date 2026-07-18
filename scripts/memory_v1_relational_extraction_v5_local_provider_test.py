@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    LOCAL_CALL_ENABLE_TOKEN,
+    LOCAL_PROVIDER_ID,
+    LOCAL_PROVIDER_VERSION,
+    LlamaCppSecureTransport,
+    LocalLlamaCppProvider,
+    LocalProviderAdapterError,
+    LocalStructuredResult,
+    StaticLocalStructuredTransport,
+    _llama_cpp_output_schema,
+    _local_examples,
+    _structured_result,
+)
+from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
+    SyntheticFixtureProvider,
+    TrustedExtractionSource,
+    canonical_sha256,
+    load_registry,
+    load_schema,
+    sha256_text,
+    validate_and_normalize,
+)
+
+
+REGISTRY_SHA256 = (
+    "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
+)
+SCHEMA_SHA256 = (
+    "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70"
+)
+MODEL_FILE_SHA256 = (
+    "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+)
+CONTENT = "My name is Avery."
+
+
+def provider_output() -> dict[str, Any]:
+    return {
+        "entity_mentions": [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "mention_kind": "self_reference",
+                "name_text": None,
+                "relationship_role": "user:self",
+                "source_spans": [
+                    {"start": 0, "end": len(CONTENT), "quote": CONTENT}
+                ],
+                "extraction_confidence": 0.99,
+                "reason_codes": ["explicit_self_reference"],
+            }
+        ],
+        "observations": [
+            {
+                "observation_ref": "o00",
+                "subject_entity_ref": "e00",
+                "predicate": "identity.name",
+                "object": {
+                    "kind": "literal",
+                    "datatype": "text",
+                    "value": "Avery",
+                    "unit": None,
+                    "approximate": False,
+                },
+                "polarity": "affirmed",
+                "modality": "asserted",
+                "projection_class": "direct_claim",
+                "surface_policy": "direct_or_relevant",
+                "temporal": {
+                    "semantic": "observation_time",
+                    "shape": "none",
+                    "basis": "none",
+                    "source_form": "implicit_source_time",
+                    "certainty": "unknown",
+                    "precision": "unknown",
+                    "instant": None,
+                    "calendar_range": None,
+                    "instant_range": None,
+                    "relative_offset": None,
+                    "recurrence": None,
+                    "anchored_to_source_time": False,
+                    "reason_codes": ["implicit_source_time"],
+                },
+                "sensitivity": "medium",
+                "extraction_confidence": 0.99,
+                "source_spans": [
+                    {"start": 0, "end": len(CONTENT), "quote": CONTENT}
+                ],
+                "reason_codes": ["explicit_name_statement"],
+            }
+        ],
+        "comparison_hints": [],
+        "deferrals": [],
+        "packet_findings": [],
+    }
+
+
+def expect_adapter_error(callback, code: str) -> LocalProviderAdapterError:
+    try:
+        callback()
+    except LocalProviderAdapterError as exc:
+        if exc.code != code:
+            raise AssertionError(f"expected {code}, received {exc.code}") from exc
+        return exc
+    raise AssertionError(f"expected {code}")
+
+
+def expect_value_error(callback, label: str) -> None:
+    try:
+        callback()
+    except ValueError:
+        return
+    raise AssertionError(f"expected ValueError for {label}")
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parents[1]
+    registry = load_registry(
+        root / "specs" / "memory_v1_predicate_registry_v5.json",
+        REGISTRY_SHA256,
+    )
+    schema = load_schema(
+        root / "specs" / "memory_v1_relational_extraction_v5.schema.json",
+        SCHEMA_SHA256,
+    )
+    source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000001",
+        source_system="public.chat_log",
+        source_external_id="00000000-0000-4000-8000-000000000002",
+        source_sha256=sha256_text(CONTENT),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=CONTENT,
+    )
+    raw = provider_output()
+    result = LocalStructuredResult(
+        response_id="local-synthetic-1",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=raw,
+        response_sha256=canonical_sha256(raw),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    transport = StaticLocalStructuredTransport(result=result)
+    provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=transport,
+    )
+    validated = validate_and_normalize(
+        provider,
+        source=source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    if validated.external_model_calls != 0:
+        raise AssertionError("local provider counted as an external call")
+    if provider.local_model_calls != 1:
+        raise AssertionError("local provider call count changed")
+    if validated.normalized_packet["observations"][0]["object"]["value"] != (
+        "Avery"
+    ):
+        raise AssertionError("local provider output changed")
+    if provider.last_audit is None:
+        raise AssertionError("local provider audit is missing")
+    if provider.last_audit["response_status"] != "completed":
+        raise AssertionError("local provider audit status changed")
+    request_body = transport.requests[0].body()
+    if "store" in request_body:
+        raise AssertionError("local transport unexpectedly emitted store state")
+    if request_body["chat_template_kwargs"] != {"enable_thinking": False}:
+        raise AssertionError("local non-thinking mode changed")
+    if (
+        request_body["temperature"] != 0.2
+        or request_body["top_k"] != 20
+        or request_body["top_p"] != 0.8
+        or request_body["seed"] != 1
+    ):
+        raise AssertionError("local deterministic sampling contract changed")
+    if request_body["response_format"]["type"] != "json_schema":
+        raise AssertionError("local JSON-schema constraint changed")
+    canonical_provider_schema = ProviderPacket.model_json_schema()
+    grammar_schema = _llama_cpp_output_schema(canonical_provider_schema)
+    quote_contract = canonical_provider_schema["$defs"]["ProposedSourceSpan"][
+        "properties"
+    ]["quote"]
+    quote_grammar = grammar_schema["$defs"]["ProposedSourceSpan"][
+        "properties"
+    ]["quote"]
+    if quote_contract.get("maxLength") != 5000:
+        raise AssertionError("canonical source-span limit changed")
+    if "maxLength" in quote_grammar:
+        raise AssertionError("oversized llama.cpp repetition was not removed")
+    if grammar_schema["properties"]["packet_findings"]["maxItems"] != 0:
+        raise AssertionError("local packet findings must remain grammar-empty")
+    if grammar_schema["properties"]["observations"]["maxItems"] != 8:
+        raise AssertionError("local observation grammar budget changed")
+    request_observation = request_body["response_format"]["json_schema"][
+        "schema"
+    ]["$defs"]["ProviderObservation"]
+    governed_predicates = {
+        item["predicate"] for item in registry["predicates"]
+    }
+    if set(request_observation["properties"]["predicate"]["enum"]) != (
+        governed_predicates
+    ):
+        raise AssertionError("local predicate grammar allowlist changed")
+
+    for ordinal, (example_text, example_packet) in enumerate(
+        _local_examples(),
+        start=10,
+    ):
+        example_source = TrustedExtractionSource.create(
+            job_id=f"00000000-0000-4000-8000-{ordinal:012d}",
+            source_system="public.chat_log",
+            source_external_id=(
+                f"10000000-0000-4000-8000-{ordinal:012d}"
+            ),
+            source_sha256=sha256_text(example_text),
+            source_recorded_at="2026-07-17T12:00:00+00:00",
+            content=example_text,
+        )
+        validate_and_normalize(
+            SyntheticFixtureProvider(example_packet),
+            source=example_source,
+            registry=registry,
+            schema=schema,
+            allowed_provider_versions={"synthetic_fixture": "v1"},
+            max_external_model_calls=0,
+        )
+
+    disabled = LlamaCppSecureTransport(
+        endpoint="http://127.0.0.1:18080/v1/chat/completions",
+        enable_token=None,
+        allow_loopback_http=True,
+        allow_unauthenticated_loopback=True,
+    )
+    expect_adapter_error(
+        lambda: disabled.complete(transport.requests[0]),
+        "local_provider_disabled",
+    )
+    if disabled.local_model_calls != 0:
+        raise AssertionError("disabled local provider attempted a call")
+    expect_value_error(
+        lambda: LlamaCppSecureTransport(
+            endpoint="http://172.31.44.129:18080/v1/chat/completions",
+            enable_token=LOCAL_CALL_ENABLE_TOKEN,
+            allow_loopback_http=True,
+        ),
+        "non-loopback plaintext endpoint",
+    )
+    expect_value_error(
+        lambda: LlamaCppSecureTransport(
+            endpoint="https://127.0.0.1:18080/v1/chat/completions",
+            enable_token=LOCAL_CALL_ENABLE_TOKEN,
+            api_key="a" * 32,
+        ),
+        "HTTPS endpoint without mTLS identity",
+    )
+    expect_value_error(
+        lambda: LlamaCppSecureTransport(
+            endpoint="http://127.0.0.1:18080/v1/chat/completions",
+            enable_token=LOCAL_CALL_ENABLE_TOKEN,
+            allow_loopback_http=True,
+        ),
+        "authenticated loopback requirement",
+    )
+
+    parsed = _structured_result(
+        {
+            "id": "local-synthetic-1",
+            "model": "qwen3-8b-local-extractor",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": __import__("json").dumps(raw),
+                    },
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 200},
+        }
+    )
+    if parsed.parsed != raw:
+        raise AssertionError("local structured response parsing changed")
+    expect_adapter_error(
+        lambda: _structured_result(
+            {
+                "model": "qwen3-8b-local-extractor",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "{}",
+                            "reasoning_content": "hidden reasoning",
+                        },
+                    }
+                ],
+            }
+        ),
+        "local_reasoning_content_forbidden",
+    )
+
+    wrong_model_transport = StaticLocalStructuredTransport(
+        result=LocalStructuredResult(
+            response_id=None,
+            model="different-model",
+            finish_reason="stop",
+            parsed=raw,
+            response_sha256=canonical_sha256(raw),
+            prompt_tokens=None,
+            completion_tokens=None,
+        )
+    )
+    wrong_model_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=wrong_model_transport,
+    )
+    expect_adapter_error(
+        lambda: wrong_model_provider.extract(source),
+        "local_model_alias_mismatch",
+    )
+
+    print("memory_v1_relational_extraction_v5_local_provider_test: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
