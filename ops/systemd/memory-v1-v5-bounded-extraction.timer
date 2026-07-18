@@ -1,0 +1,12 @@
+[Unit]
+Description=Run one bounded Memory V1 V5 extraction every ten minutes
+
+[Timer]
+OnBootSec=15min
+OnUnitInactiveSec=10min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=memory-v1-v5-bounded-extraction.service
+
+[Install]
+WantedBy=timers.target

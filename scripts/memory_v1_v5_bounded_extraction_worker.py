@@ -31,7 +31,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 )
 
 
-WORKER_VERSION = "memory_v1_v5_bounded_extraction_worker_v1"
+WORKER_VERSION = "memory_v1_v5_bounded_extraction_worker_v2"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_bounded_extraction_apply_v1"
 PERSIST_NAMESPACE = uuid.UUID("3fc762b4-6e78-4cbd-b669-36427f647eb2")
 EXPECTED_REGISTRY_SHA256 = (
@@ -68,7 +68,7 @@ def arguments() -> argparse.Namespace:
         )
     )
     parser.add_argument("--owner-user-id", action="append", default=[])
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-id")
     parser.add_argument("--model")
     parser.add_argument("--registry", default=str(DEFAULT_REGISTRY))
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
@@ -78,6 +78,9 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--lease-seconds", type=int, default=300)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--max-output-tokens", type=int, default=16000)
+    parser.add_argument("--rolling-window-seconds", type=int, default=86400)
+    parser.add_argument("--max-reserved-calls", type=int, default=12)
+    parser.add_argument("--failure-threshold", type=int, default=3)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--enable-external-call", action="store_true")
     return parser.parse_args()
@@ -135,10 +138,13 @@ def worker_reference(value: str | None) -> str:
 
 
 def validate_arguments(args: argparse.Namespace) -> uuid.UUID:
-    try:
-        run_id = uuid.UUID(str(args.run_id))
-    except ValueError as exc:
-        raise RuntimeError("run id must be a UUID") from exc
+    if args.run_id is None:
+        run_id = uuid.uuid4()
+    else:
+        try:
+            run_id = uuid.UUID(str(args.run_id))
+        except ValueError as exc:
+            raise RuntimeError("run id must be a UUID") from exc
     if not 1 <= args.max_jobs <= 10:
         raise RuntimeError("max-jobs must be between 1 and 10")
     if not 1 <= args.max_attempts <= 3:
@@ -149,6 +155,14 @@ def validate_arguments(args: argparse.Namespace) -> uuid.UUID:
         raise RuntimeError("timeout-seconds must be between 1 and 600")
     if not 1000 <= args.max_output_tokens <= 20000:
         raise RuntimeError("max-output-tokens must be between 1000 and 20000")
+    if not 3600 <= args.rolling_window_seconds <= 604800:
+        raise RuntimeError(
+            "rolling-window-seconds must be between 3600 and 604800"
+        )
+    if not 1 <= args.max_reserved_calls <= 100:
+        raise RuntimeError("max-reserved-calls must be between 1 and 100")
+    if not 1 <= args.failure_threshold <= 10:
+        raise RuntimeError("failure-threshold must be between 1 and 10")
     if args.enable_external_call and not args.apply:
         raise RuntimeError("external-call enablement requires --apply")
     if args.apply and not args.enable_external_call:
@@ -213,25 +227,77 @@ async def claim_job(
     *,
     owner: uuid.UUID,
     operation_id: uuid.UUID,
+    run_id: uuid.UUID,
     worker_id: str,
     lease_seconds: int,
     max_attempts: int,
+    model_sha256: str,
+    rolling_window_seconds: int,
+    max_reserved_calls: int,
+    failure_threshold: int,
 ) -> dict[str, Any] | None:
     async with conn.transaction():
         await set_actor(conn, owner)
         row = await conn.fetchrow(
             """
             SELECT *
-            FROM memory.claim_owner_evidence_extraction_job_v1(
-              $1,'relational_extraction',$2,$3,$4
+            FROM memory.claim_owner_v5_bounded_extraction_job_v1(
+              $1,$2,'relational_extraction',$3,$4,$5,$6,$7,$8,$9,$10,$11
             )
             """,
             operation_id,
+            run_id,
             worker_id,
             lease_seconds,
             max_attempts,
+            OPENAI_PROVIDER_ID,
+            OPENAI_PROVIDER_VERSION,
+            model_sha256,
+            rolling_window_seconds,
+            max_reserved_calls,
+            failure_threshold,
         )
     return dict(row) if row else None
+
+
+async def complete_call(
+    conn: asyncpg.Connection,
+    *,
+    owner: uuid.UUID,
+    operation_id: uuid.UUID,
+    reservation_event_id: uuid.UUID,
+    run_id: uuid.UUID,
+    job_id: uuid.UUID,
+    outcome: str,
+    external_model_calls: int,
+    rejection_code_value: str | None = None,
+    provider_output_sha256: str | None = None,
+    validator_packet_sha256: str | None = None,
+    packet_storage_sha256: str | None = None,
+) -> dict[str, Any]:
+    async with conn.transaction():
+        await set_actor(conn, owner)
+        row = await conn.fetchrow(
+            """
+            SELECT *
+            FROM memory.complete_owner_v5_extraction_call_v1(
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+            )
+            """,
+            operation_id,
+            reservation_event_id,
+            run_id,
+            job_id,
+            outcome,
+            external_model_calls,
+            rejection_code_value,
+            provider_output_sha256,
+            validator_packet_sha256,
+            packet_storage_sha256,
+        )
+    if row is None:
+        raise RuntimeError("V5 extraction call completion returned no row")
+    return dict(row)
 
 
 async def read_context(
@@ -528,6 +594,7 @@ async def main() -> int:
             return 0
 
         remaining = args.max_jobs
+        model_sha256 = sha256_text(str(args.model))
         for owner in owners:
             for sequence in range(args.max_jobs):
                 if remaining == 0:
@@ -540,11 +607,31 @@ async def main() -> int:
                     conn,
                     owner=owner,
                     operation_id=claim_operation_id,
+                    run_id=run_id,
                     worker_id=worker_id,
                     lease_seconds=args.lease_seconds,
                     max_attempts=args.max_attempts,
+                    model_sha256=model_sha256,
+                    rolling_window_seconds=args.rolling_window_seconds,
+                    max_reserved_calls=args.max_reserved_calls,
+                    failure_threshold=args.failure_threshold,
                 )
                 if job is None:
+                    break
+                if job["job_id"] is None:
+                    reports.append(
+                        {
+                            "route": "relational_extraction",
+                            "outcome": str(job["control_outcome"]),
+                            "external_model_calls": 0,
+                            "reserved_calls_in_window": int(
+                                job["reserved_calls_in_window"]
+                            ),
+                            "consecutive_rejections": int(
+                                job["consecutive_rejections"]
+                            ),
+                        }
+                    )
                     break
                 remaining -= 1
                 if job["status"] != "processing":
@@ -571,10 +658,52 @@ async def main() -> int:
                         max_output_tokens=args.max_output_tokens,
                     )
                     total_external_calls += calls
+                    completion_operation_id = uuid.uuid5(
+                        PERSIST_NAMESPACE,
+                        f"call-complete:{job['reservation_event_id']}",
+                    )
+                    await complete_call(
+                        conn,
+                        owner=owner,
+                        operation_id=completion_operation_id,
+                        reservation_event_id=uuid.UUID(
+                            str(job["reservation_event_id"])
+                        ),
+                        run_id=run_id,
+                        job_id=uuid.UUID(str(job["job_id"])),
+                        outcome="accepted",
+                        external_model_calls=calls,
+                        provider_output_sha256=str(
+                            report["provider_output_sha256"]
+                        ),
+                        validator_packet_sha256=str(
+                            report["validator_packet_sha256"]
+                        ),
+                        packet_storage_sha256=str(
+                            report["packet_storage_sha256"]
+                        ),
+                    )
                     reports.append(report)
                 except ProcessingRejected as exc:
                     code = exc.code
                     total_external_calls += exc.external_model_calls
+                    completion_operation_id = uuid.uuid5(
+                        PERSIST_NAMESPACE,
+                        f"call-complete:{job['reservation_event_id']}",
+                    )
+                    await complete_call(
+                        conn,
+                        owner=owner,
+                        operation_id=completion_operation_id,
+                        reservation_event_id=uuid.UUID(
+                            str(job["reservation_event_id"])
+                        ),
+                        run_id=run_id,
+                        job_id=uuid.UUID(str(job["job_id"])),
+                        outcome="rejected",
+                        external_model_calls=exc.external_model_calls,
+                        rejection_code_value=code,
+                    )
                     failure_operation_id = uuid.uuid5(
                         PERSIST_NAMESPACE,
                         f"failure:{job['job_id']}:{job['attempts']}",
@@ -607,7 +736,7 @@ async def main() -> int:
                     "worker_version": WORKER_VERSION,
                     "apply": True,
                     "route": "relational_extraction",
-                    "model_sha256": sha256_text(str(args.model)),
+                    "model_sha256": model_sha256,
                     "owner_count": len(owners),
                     "processed": len(reports),
                     "external_model_calls": total_external_calls,

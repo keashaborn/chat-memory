@@ -75,6 +75,9 @@ def args(**overrides: object) -> SimpleNamespace:
         "lease_seconds": 300,
         "timeout_seconds": 120.0,
         "max_output_tokens": 16000,
+        "rolling_window_seconds": 86400,
+        "max_reserved_calls": 12,
+        "failure_threshold": 3,
         "enable_external_call": False,
         "apply": False,
         "model": None,
@@ -93,9 +96,24 @@ def expect_error(callback: object, label: str) -> None:
 
 def main() -> int:
     validate_arguments(args())
+    generated_run_id = validate_arguments(args(run_id=None))
+    if not isinstance(generated_run_id, uuid.UUID):
+        raise AssertionError("missing run id was not generated safely")
     expect_error(
         lambda: validate_arguments(args(max_jobs=11)),
         "unbounded job count",
+    )
+    expect_error(
+        lambda: validate_arguments(args(rolling_window_seconds=3599)),
+        "short quota window",
+    )
+    expect_error(
+        lambda: validate_arguments(args(max_reserved_calls=101)),
+        "unbounded reserved calls",
+    )
+    expect_error(
+        lambda: validate_arguments(args(failure_threshold=11)),
+        "unbounded failure threshold",
     )
     expect_error(
         lambda: validate_arguments(args(enable_external_call=True)),
