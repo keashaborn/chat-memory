@@ -156,28 +156,29 @@ async def run() -> int:
         tx = conn.transaction(readonly=args.mode == "preflight", isolation="serializable")
         await tx.start()
         await conn.execute("SELECT set_config('app.user_id',$1,true)", manifest["owner_user_id"])
-        prepared: list[tuple[dict[str, Any], Any]] = []
+        prepared: list[dict[str, Any]] = []
         for item in items:
-            row = await conn.fetchrow(
-                """SELECT * FROM memory.preflight_projection_review_v5(
-                    $1,$2,'authorized'::memory.projection_review_decision_v5,
-                    $3,$4,$5,$6::jsonb
-                )""",
-                uuid.UUID(item["plan_id"]), item["projection_ref"],
-                manifest["reviewer_type"], manifest["reviewer_ref"],
-                manifest["reason"], json.dumps(manifest["reason_codes"], separators=(",", ":")),
-            )
-            if (
-                row["review_number"] != item["review_number"]
-                or row["projection_sha256"] != item["projection_sha256"]
-                or row["semantic_key_sha256"] != item["semantic_key_sha256"]
-                or row["authorization_manifest_sha256"]
-                != item["authorization_manifest_sha256"]
-            ):
-                raise ReviewBatchError("projection review preflight drifted")
-            prepared.append((item, row))
+            if args.mode != "replay":
+                row = await conn.fetchrow(
+                    """SELECT * FROM memory.preflight_projection_review_v5(
+                        $1,$2,'authorized'::memory.projection_review_decision_v5,
+                        $3,$4,$5,$6::jsonb
+                    )""",
+                    uuid.UUID(item["plan_id"]), item["projection_ref"],
+                    manifest["reviewer_type"], manifest["reviewer_ref"],
+                    manifest["reason"], json.dumps(manifest["reason_codes"], separators=(",", ":")),
+                )
+                if (
+                    row["review_number"] != item["review_number"]
+                    or row["projection_sha256"] != item["projection_sha256"]
+                    or row["semantic_key_sha256"] != item["semantic_key_sha256"]
+                    or row["authorization_manifest_sha256"]
+                    != item["authorization_manifest_sha256"]
+                ):
+                    raise ReviewBatchError("projection review preflight drifted")
+            prepared.append(item)
         if args.mode in {"apply", "replay"}:
-            for item, _preflight in prepared:
+            for item in prepared:
                 row = await conn.fetchrow(
                     """SELECT * FROM memory.review_projection_v5(
                         $1,$2,'authorized'::memory.projection_review_decision_v5,
