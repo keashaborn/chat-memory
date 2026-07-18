@@ -19,12 +19,12 @@ provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
 provider_test=scripts/memory_v1_relational_extraction_v5_local_provider_test.py
 canary=scripts/memory_v1_v5_local_inference_canary.py
 required_ancestor=82803717773245fcfe953d343fdd01cdee828f11
-expected_migration_sha=d74272e9c40c306e78b6166981c4c8cfbc87e156980ca87340a35b95e9892b74
-expected_rollback_sha=ed21cb3e686385728828b90cc188e943fba43c52534b229c19c1438e27ee44d9
-expected_test_sha=5c4b30056bfa87eb47f11b8f0e788a85e6fb940198020f72c319b9c8224c59ab
+expected_migration_sha=02d9e9a75d5315b45604e75178e0f0d39a478b4c21eb800d2a637d4bfad0fb8c
+expected_rollback_sha=42c9cda1830e81e1eb105014be6e3895b4fa98bebaecc56de93fa6d3d0dec0fa
+expected_test_sha=cbd64ecaeb593e84ec4aacf150b5de4aba9e87f6819659ebe9425c81e75061d9
 expected_provider_sha=5d0bd5b146986bf85a3dbf51e48234d5402c9fd4f917c6fff24dab500d48c484
 expected_provider_test_sha=21b613a973dfa1a338b763b35c4543ba07e88e43cb40c6781c13c3c5ebc87187
-expected_canary_sha=1207db0507ea57d4afc8dc0804cbe38dcaa80edc40f6b11790c90be2bb3520b2
+expected_canary_sha=50ecc1bf6bc2a57cace736606f13afab60595ded52f21eb2e0b22203bbe78bc8
 container=brains-postgres-1
 database=memory
 snapshot_dir=/home/ubuntu/brains/snapshots
@@ -150,6 +150,9 @@ phase=preflight
   AND to_regprocedure(
     'memory.complete_owner_v5_local_inference_v1(uuid,uuid,uuid,uuid,text,integer,text,text,text,text)'
   ) IS NULL
+  AND to_regprocedure(
+    'memory.requeue_owner_local_transport_failure_v1(uuid,uuid,text,uuid,uuid,integer,text,text)'
+  ) IS NULL
 )::integer")" == 1 ]]
 
 : >"$unit_state"
@@ -243,11 +246,12 @@ cmp -s "$baseline" "$post" || {
       'brains_app','memory.evidence_extraction_packet_v5_local','DELETE'
     )
   )
-  AND (SELECT count(*)=3 FROM pg_proc
+  AND (SELECT count(*)=4 FROM pg_proc
     WHERE oid IN (
       'memory.claim_owner_v5_local_inference_job_v1(uuid,uuid,uuid,text,text,text,integer,integer,text,text,text,text,text,text,integer,integer,integer)'::regprocedure,
       'memory.persist_owner_v5_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)'::regprocedure,
-      'memory.complete_owner_v5_local_inference_v1(uuid,uuid,uuid,uuid,text,integer,text,text,text,text)'::regprocedure
+      'memory.complete_owner_v5_local_inference_v1(uuid,uuid,uuid,uuid,text,integer,text,text,text,text)'::regprocedure,
+      'memory.requeue_owner_local_transport_failure_v1(uuid,uuid,text,uuid,uuid,integer,text,text)'::regprocedure
     )
     AND prosecdef
     AND proowner='memory_v5_local_inference_maintainer'::regrole

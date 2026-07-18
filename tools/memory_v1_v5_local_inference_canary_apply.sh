@@ -14,8 +14,8 @@ if [[ "${MEMORY_V1_V5_LOCAL_INFERENCE_CANARY:-}" != "authorized" ]]; then
   echo 'MEMORY_V1_V5_LOCAL_INFERENCE_CANARY=authorized is required' >&2
   exit 1
 fi
-if [[ $# -ne 4 ]]; then
-  echo 'usage: canary_apply.sh JOB_ID EVIDENCE_ID CONTENT_SHA256 RUN_ID' >&2
+if [[ $# -lt 4 || $# -gt 5 ]]; then
+  echo 'usage: canary_apply.sh JOB_ID EVIDENCE_ID CONTENT_SHA256 RUN_ID [PRIOR_ATTEMPTS]' >&2
   exit 2
 fi
 
@@ -24,17 +24,21 @@ target_job=$1
 target_evidence=$2
 target_content_sha=$3
 run_id=$4
+prior_attempts=${5:-0}
 uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 sha_re='^[0-9a-f]{64}$'
 [[ "$target_job" =~ $uuid_re ]]
 [[ "$target_evidence" =~ $uuid_re ]]
 [[ "$run_id" =~ $uuid_re ]]
 [[ "$target_content_sha" =~ $sha_re ]]
+[[ "$prior_attempts" =~ ^[0-9]+$ ]]
+[[ "$prior_attempts" -ge 0 && "$prior_attempts" -le 19 ]]
+max_attempts=$((prior_attempts+1))
 
 repo_root=$(git rev-parse --show-toplevel)
 canary=scripts/memory_v1_v5_local_inference_canary.py
 provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
-expected_canary_sha=1207db0507ea57d4afc8dc0804cbe38dcaa80edc40f6b11790c90be2bb3520b2
+expected_canary_sha=50ecc1bf6bc2a57cace736606f13afab60595ded52f21eb2e0b22203bbe78bc8
 expected_provider_sha=5d0bd5b146986bf85a3dbf51e48234d5402c9fd4f917c6fff24dab500d48c484
 api_key_file=/etc/memory-v1-local-inference/api-key
 env_file=/opt/chat-memory/.env
@@ -206,7 +210,7 @@ resume_mode=$(psql_scalar "SELECT CASE WHEN EXISTS (
     AND job.evidence_id='$target_evidence'::uuid
     AND job.evidence_content_sha256='$target_content_sha'
     AND job.status='processing' AND job.route='relational_extraction'
-    AND job.attempts=1 AND job.lease_expires_at>clock_timestamp()
+    AND job.attempts=$max_attempts AND job.lease_expires_at>clock_timestamp()
     AND evidence.status='active' AND event.action='reserved'
     AND event.run_id='$run_id'::uuid
 ) THEN 1 ELSE 0 END")
@@ -218,7 +222,7 @@ if [[ "$resume_mode" == 0 ]]; then
     AND job.evidence_id='$target_evidence'::uuid
     AND job.evidence_content_sha256='$target_content_sha'
     AND job.status='pending' AND job.route='relational_extraction'
-    AND job.attempts=0 AND evidence.status='active'")" == 1 ]]
+    AND job.attempts=$prior_attempts AND evidence.status='active'")" == 1 ]]
   [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event
     WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
 fi
@@ -282,6 +286,7 @@ PYTHONPATH="$repo_root" \
     --evidence-id "$target_evidence" \
     --expected-job-id "$target_job" \
     --expected-content-sha256 "$target_content_sha" \
+    --max-attempts "$max_attempts" \
     --run-id "$run_id" --apply >"$canary_output" 2>"$canary_log"
 canary_rc=$?
 set -e

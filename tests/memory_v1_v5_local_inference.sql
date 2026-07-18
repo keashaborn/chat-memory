@@ -16,7 +16,8 @@ BEGIN
   FOREACH function_oid IN ARRAY ARRAY[
     'memory.claim_owner_v5_local_inference_job_v1(uuid,uuid,uuid,text,text,text,integer,integer,text,text,text,text,text,text,integer,integer,integer)'::regprocedure,
     'memory.persist_owner_v5_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)'::regprocedure,
-    'memory.complete_owner_v5_local_inference_v1(uuid,uuid,uuid,uuid,text,integer,text,text,text,text)'::regprocedure
+    'memory.complete_owner_v5_local_inference_v1(uuid,uuid,uuid,uuid,text,integer,text,text,text,text)'::regprocedure,
+    'memory.requeue_owner_local_transport_failure_v1(uuid,uuid,text,uuid,uuid,integer,text,text)'::regprocedure
   ]
   LOOP
     IF NOT EXISTS (
@@ -340,7 +341,7 @@ SELECT * FROM memory.complete_owner_v5_local_inference_v1(
   'fb700000-0000-4000-8000-000000000011',
   :'claim_b_reservation_event_id',
   'fb500000-0000-4000-8000-000000000002',:'claim_b_job_id',
-  'rejected',0,'synthetic_local_rejected',NULL,NULL,NULL
+  'rejected',1,'local_transport_timeout',NULL,NULL,NULL
 ) \gset rejected_
 SELECT 1/((:'rejected_outcome'='rejected')::integer);
 
@@ -355,6 +356,55 @@ FROM memory.claim_owner_v5_local_inference_job_v1(
   'relational_extraction','local-inference-test',300,1,
   'local_llama_cpp','v1',repeat('3',64),repeat('4',64),repeat('5',64),
   repeat('6',64),86400,12,1
+);
+
+SELECT * FROM memory.fail_owner_evidence_extraction_job_v1(
+  'fb800000-0000-4000-8000-000000000001',:'claim_b_job_id',
+  :'claim_b_lease_token','local-inference-test',repeat('b',64),
+  'local_inference_rejected','local_transport_timeout',1
+) \gset failed_b_
+SELECT 1/((:'failed_b_status'='skipped')::integer);
+SELECT set_config(
+  'test.local_rejected_event_id',:'rejected_event_id',true
+);
+
+SELECT set_config(
+  'app.user_id','fa111111-1111-4111-8111-111111111111',true
+);
+DO $cross_owner_retry$
+BEGIN
+  PERFORM * FROM memory.requeue_owner_local_transport_failure_v1(
+    'fa900000-0000-4000-8000-000000000001',
+    'fb400000-0000-4000-8000-000000000001',repeat('b',64),
+    'fb800000-0000-4000-8000-000000000001',
+    current_setting('test.local_rejected_event_id')::uuid,
+    1,'local_transport_timeout',
+    'private_gpu_route_recovery'
+  );
+  RAISE EXCEPTION 'cross-owner local transport retry unexpectedly succeeded';
+EXCEPTION WHEN check_violation THEN NULL;
+END
+$cross_owner_retry$;
+
+SELECT set_config(
+  'app.user_id','fb222222-2222-4222-8222-222222222222',true
+);
+SELECT * FROM memory.requeue_owner_local_transport_failure_v1(
+  'fb900000-0000-4000-8000-000000000001',:'claim_b_job_id',
+  repeat('b',64),'fb800000-0000-4000-8000-000000000001',
+  :'rejected_event_id',1,'local_transport_timeout',
+  'private_gpu_route_recovery'
+) \gset retried_b_
+SELECT
+  1/((:'retried_b_status'='pending')::integer),
+  1/((:'retried_b_attempts'='1')::integer),
+  1/((:'retried_b_apply_outcome'='applied')::integer);
+SELECT 1/((apply_outcome='replayed')::integer)
+FROM memory.requeue_owner_local_transport_failure_v1(
+  'fb900000-0000-4000-8000-000000000001',:'claim_b_job_id',
+  repeat('b',64),'fb800000-0000-4000-8000-000000000001',
+  :'rejected_event_id',1,'local_transport_timeout',
+  'private_gpu_route_recovery'
 );
 
 DO $direct_write$

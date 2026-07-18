@@ -11,6 +11,9 @@ $preflight$;
 DROP FUNCTION IF EXISTS memory.complete_owner_v5_local_inference_v1(
   uuid,uuid,uuid,uuid,text,integer,text,text,text,text
 );
+DROP FUNCTION IF EXISTS memory.requeue_owner_local_transport_failure_v1(
+  uuid,uuid,text,uuid,uuid,integer,text,text
+);
 DROP FUNCTION IF EXISTS memory.persist_owner_v5_local_packet_v1(
   uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,
   boolean,integer
@@ -45,6 +48,8 @@ BEGIN
     REVOKE SELECT,INSERT ON memory.evidence_extraction_event
       FROM memory_v5_local_inference_maintainer;
     REVOKE SELECT ON memory.evidence
+      FROM memory_v5_local_inference_maintainer;
+    REVOKE SELECT ON memory.evidence_extraction_packet_v5
       FROM memory_v5_local_inference_maintainer;
     DROP ROLE memory_v5_local_inference_maintainer;
   END IF;

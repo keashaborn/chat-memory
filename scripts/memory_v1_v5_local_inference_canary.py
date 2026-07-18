@@ -105,6 +105,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     parser.add_argument("--worker-id")
     parser.add_argument("--lease-seconds", type=int, default=900)
+    parser.add_argument("--max-attempts", type=int, default=1)
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument("--max-output-tokens", type=int, default=4096)
     parser.add_argument("--rolling-window-seconds", type=int, default=86400)
@@ -134,6 +135,8 @@ def validated_arguments(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("model file hash must be lowercase SHA-256")
     if not 30 <= args.lease_seconds <= 3600:
         raise RuntimeError("lease seconds must be between 30 and 3600")
+    if not 1 <= args.max_attempts <= 20:
+        raise RuntimeError("max attempts must be between 1 and 20")
     if not 1.0 <= args.timeout_seconds <= 600.0:
         raise RuntimeError("timeout seconds must be between 1 and 600")
     if not 1000 <= args.max_output_tokens <= 20000:
@@ -247,8 +250,8 @@ async def claim_exact(
         row = await conn.fetchrow(
             """
             SELECT * FROM memory.claim_owner_v5_local_inference_job_v1(
-              $1,$2,$3,$4,'relational_extraction',$5,$6,1,
-              $7,$8,$9,$10,$11,$12,$13,$14,$15
+              $1,$2,$3,$4,'relational_extraction',$5,$6,$7,
+              $8,$9,$10,$11,$12,$13,$14,$15,$16
             )
             """,
             operation_id,
@@ -257,6 +260,7 @@ async def claim_exact(
             expected_content_sha256,
             worker_id,
             args.lease_seconds,
+            args.max_attempts,
             LOCAL_PROVIDER_ID,
             LOCAL_PROVIDER_VERSION,
             canonical_sha256(args.model),
