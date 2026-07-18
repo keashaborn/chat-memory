@@ -9,10 +9,15 @@ compose=(docker compose -p memoryv1claimprojectionv51clone \
 migration=ops/sql/20260718_memory_v1_claim_projection_api_v5_1.sql
 rollback=ops/sql/20260718_memory_v1_claim_projection_api_v5_1_rollback.sql
 backup=$(mktemp /tmp/memory-v1-claim-projection-v5-1.XXXXXX.dump)
+review_tmp=
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
   rm -f "$backup"
+  if [[ -n "$review_tmp" && -d "$review_tmp" ]]; then
+    find "$review_tmp" -type f -delete
+    rmdir "$review_tmp"
+  fi
 }
 trap cleanup EXIT
 chmod 0600 "$backup"
@@ -247,6 +252,83 @@ run_sql <"$repo_root/$rollback"
   AND to_regprocedure('memory.preflight_claim_projection_source_v5_1(uuid)') IS NULL
   AND to_regprocedure('memory.preflight_claim_projection_packet_v5_1(uuid,text)') IS NULL
   AND to_regprocedure('memory.stage_claim_projection_plan_v5_1(uuid,text,text)') IS NULL
+)::integer")" == 1 ]]
+
+# Reinstall in the disposable clone, generate four zero-write bundles, then
+# prove the reusable batch runner commits exactly 24 preparation rows and
+# performs a zero-write replay across committed transaction boundaries.
+run_sql <"$repo_root/$migration"
+review_tmp=$(mktemp -d /home/ubuntu/memory-v1-reviews/.claim-projection-clone.XXXXXX)
+chmod 0700 "$review_tmp"
+clone_dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:$port/memory"
+head=$(git -C "$repo_root" rev-parse HEAD)
+declare -a bundle_args=()
+while IFS=$'\t' read -r observation plan label; do
+  bundle="$review_tmp/$label.json"
+  POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts" \
+    /opt/chat-memory/venv/bin/python \
+    "$repo_root/scripts/memory_v1_v5_claim_projection_preflight.py" \
+    --owner 1240822d-ac9a-4096-95aa-e2b24d36ef50 \
+    --observation-id "$observation" --plan-id "$plan" \
+    --output "$bundle" >/dev/null
+  bundle_args+=(--bundle "$bundle")
+done <<'EOF'
+43858045-c943-425c-a018-2fca175a722e	ce967856-a164-526f-b6b9-25ae83272479	relationship
+3807e5bb-cf65-4c84-83a4-ab049f4a95d2	d093f78f-1de7-5c60-b428-024381424ad7	name
+fb05d48e-4dee-4ca4-a501-029f9ca8629b	4326e92c-bbdf-5529-8988-8bb88955a4bd	sex
+8ab3b466-d24a-4de8-a0ee-37b8bae15df2	886c6391-159a-5a08-a284-42e32b1023f0	breed
+EOF
+manifest="$review_tmp/manifest.json"
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts" \
+  /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_claim_projection_stage_manifest.py" \
+  --owner 1240822d-ac9a-4096-95aa-e2b24d36ef50 \
+  --required-head "$head" \
+  --assessor-ref memory_v1_claim_projection_v5_1_clone_batch \
+  "${bundle_args[@]}" --output "$manifest" >/dev/null
+preflight_result="$review_tmp/preflight.json"
+apply_result="$review_tmp/apply.json"
+replay_result="$review_tmp/replay.json"
+POSTGRES_DSN="$clone_dsn" MEMORY_V1_REQUIRED_HEAD="$head" \
+PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_claim_projection_stage_batch.py" \
+  --mode preflight --manifest "$manifest" --output "$preflight_result" \
+  >/dev/null
+POSTGRES_DSN="$clone_dsn" MEMORY_V1_REQUIRED_HEAD="$head" \
+MEMORY_V1_CLAIM_PROJECTION_STAGE_BATCH_APPLY=authorized \
+PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_claim_projection_stage_batch.py" \
+  --mode apply --manifest "$manifest" --output "$apply_result" >/dev/null
+POSTGRES_DSN="$clone_dsn" MEMORY_V1_REQUIRED_HEAD="$head" \
+PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_claim_projection_stage_batch.py" \
+  --mode replay --manifest "$manifest" --output "$replay_result" >/dev/null
+[[ "$(jq -r '.rows_written' "$preflight_result")" == 0 ]]
+[[ "$(jq -r '.rows_written' "$apply_result")" == 24 ]]
+[[ "$(jq -r '.rows_written' "$replay_result")" == 0 ]]
+[[ "$(scalar "SELECT (
+  (SELECT count(*) FROM memory.observation_entailment_v5
+    WHERE observation_id=ANY(ARRAY[
+      '43858045-c943-425c-a018-2fca175a722e',
+      '3807e5bb-cf65-4c84-83a4-ab049f4a95d2',
+      'fb05d48e-4dee-4ca4-a501-029f9ca8629b',
+      '8ab3b466-d24a-4de8-a0ee-37b8bae15df2'
+    ]::uuid[]))=4
+  AND (SELECT count(*) FROM memory.projection_plan
+    WHERE plan_id=ANY(ARRAY[
+      'ce967856-a164-526f-b6b9-25ae83272479',
+      'd093f78f-1de7-5c60-b428-024381424ad7',
+      '4326e92c-bbdf-5529-8988-8bb88955a4bd',
+      '886c6391-159a-5a08-a284-42e32b1023f0'
+    ]::uuid[]))=4
+  AND (SELECT count(*) FROM memory.projection_plan_item
+    WHERE plan_id=ANY(ARRAY[
+      'ce967856-a164-526f-b6b9-25ae83272479',
+      'd093f78f-1de7-5c60-b428-024381424ad7',
+      '4326e92c-bbdf-5529-8988-8bb88955a4bd',
+      '886c6391-159a-5a08-a284-42e32b1023f0'
+    ]::uuid[]))=4
+  AND (SELECT count(*) FROM memory.claim)=$before_claims
 )::integer")" == 1 ]]
 
 printf '%s\n' 'memory_v1_claim_projection_api_v5_1_production_clone: PASS'
