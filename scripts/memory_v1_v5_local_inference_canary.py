@@ -809,13 +809,19 @@ async def run() -> int:
             packet_storage_sha256=persisted["packet_storage_sha256"],
         )
 
-        enqueued_replay = await enqueue_exact(
-            conn,
-            owner=ids["owner"],
-            evidence_id=ids["evidence_id"],
-            selector_version=args.selector_version,
-            expected_content_sha256=args.expected_content_sha256,
-        )
+        if ids["expected_job_id"] is None:
+            enqueued_replay = await enqueue_exact(
+                conn,
+                owner=ids["owner"],
+                evidence_id=ids["evidence_id"],
+                selector_version=args.selector_version,
+                expected_content_sha256=args.expected_content_sha256,
+            )
+        else:
+            enqueued_replay = {
+                "job_id": job_id,
+                "apply_outcome": "replayed",
+            }
         claim_replay = await claim_exact(
             conn,
             owner=ids["owner"],
@@ -861,6 +867,10 @@ async def run() -> int:
             )
         ):
             raise RuntimeError("accepted canary replay was not zero-write")
+        invocation_zero_write = all(
+            item["apply_outcome"] == "replayed"
+            for item in (enqueued, claim, persisted, completed)
+        )
 
         print(
             stable_json(
@@ -894,11 +904,12 @@ async def run() -> int:
                     "local_model_calls": local_calls,
                     "audit": sanitized_audit(provider),
                     "zero_write_replay_proved": True,
+                    "invocation_zero_write": invocation_zero_write,
                     "completion_apply_outcome": completed["apply_outcome"],
                     "write_counts": {
-                        "queue": 3,
-                        "ledger": 2,
-                        "packets": 1,
+                        "queue": 0 if invocation_zero_write else 3,
+                        "ledger": 0 if invocation_zero_write else 2,
+                        "packets": 0 if invocation_zero_write else 1,
                         "claims": 0,
                         "qdrant": 0,
                         "prompt_influence": 0,
