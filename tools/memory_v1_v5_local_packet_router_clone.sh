@@ -137,12 +137,14 @@ run_sql <"$repo_root/$visibility" >/dev/null
 run_sql <"$repo_root/$review_read" >/dev/null
 
 run_sql -c "
+  ALTER TABLE memory.relational_stage_batch DISABLE TRIGGER USER;
   DELETE FROM memory.relational_stage_batch
   WHERE owner_user_id='$owner'::uuid
     AND evidence_id=(
       SELECT evidence_id FROM memory.evidence_extraction_packet_v5_local
       WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid
-    )
+    );
+  ALTER TABLE memory.relational_stage_batch ENABLE TRIGGER USER;
 " >/dev/null
 [[ "$(scalar "
   SELECT count(*) FROM memory.relational_stage_batch AS stage
