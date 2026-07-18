@@ -235,7 +235,8 @@ if [[ "$resume_mode" == 0 ]]; then
           'local_transport_timeout',
           'local_transport_unavailable',
           'local_transport_rate_limited',
-          'local_transport_server_error'
+          'local_transport_server_error',
+          'local_validation_rejected'
         )
     ) = $prior_attempts
   )::integer
