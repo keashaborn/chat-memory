@@ -255,4 +255,49 @@ run_sql <"$repo_root/$rollback"
   AND to_regprocedure('memory.stage_project_projection_plan_v5(uuid,text,text)') IS NULL
 )::integer")" == 1 ]]
 
+# Reinstall only inside the disposable clone and exercise the actual controlled
+# apply/replay program across committed transactions.
+run_sql <"$repo_root/$migration"
+clone_dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:$port/memory"
+runner_bundle="$snapshot_dir/runner-bundle.json"
+runner_apply="$snapshot_dir/runner-apply.json"
+runner_replay="$snapshot_dir/runner-replay.json"
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_project_projection_preflight.py" \
+  --owner 1240822d-ac9a-4096-95aa-e2b24d36ef50 \
+  --observation-id 258d8d96-2cbd-4296-b878-769c90533fae \
+  --plan-id c8e6f378-0f69-56b8-a032-e01af4411f8e \
+  --knowledge-key architecture.memory_service --output "$runner_bundle" \
+  >/dev/null
+MEMORY_V1_PROJECT_PROJECTION_APPLY=authorized POSTGRES_DSN="$clone_dsn" \
+  PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_project_projection_apply.py" \
+  --mode apply --bundle "$runner_bundle" \
+  --request-id a3ac4965-c20a-540a-96ff-a497b98c51c1 \
+  --output "$runner_apply" >/dev/null
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python \
+  "$repo_root/scripts/memory_v1_v5_project_projection_apply.py" \
+  --mode replay --bundle "$runner_bundle" \
+  --request-id a3ac4965-c20a-540a-96ff-a497b98c51c1 \
+  --prior-result "$runner_apply" --output "$runner_replay" >/dev/null
+[[ "$(scalar "SELECT (
+  (SELECT count(*) FROM memory.projection_plan
+    WHERE plan_id='c8e6f378-0f69-56b8-a032-e01af4411f8e'::uuid)=1
+  AND (SELECT count(*) FROM memory.projection_review
+    WHERE plan_id='c8e6f378-0f69-56b8-a032-e01af4411f8e'::uuid)=1
+  AND (SELECT count(*) FROM memory.project_knowledge_head_v5
+    WHERE knowledge_key='architecture.memory_service')=1
+  AND (SELECT count(*) FROM memory.project_knowledge_revision_v5
+    WHERE knowledge_id=(SELECT knowledge_id FROM memory.project_knowledge_head_v5
+      WHERE knowledge_key='architecture.memory_service'))=1
+  AND (SELECT count(*) FROM memory.projection_apply_event
+    WHERE request_id='a3ac4965-c20a-540a-96ff-a497b98c51c1'::uuid)=1
+  AND (SELECT count(*) FROM memory.projection_dispatch_v5
+    WHERE apply_event_id=(SELECT event_id FROM memory.projection_apply_event
+      WHERE request_id='a3ac4965-c20a-540a-96ff-a497b98c51c1'::uuid))=1
+)::integer")" == 1 ]]
+[[ "$(jq -r '.database_writes' "$runner_replay")" == 0 ]]
+
 printf '%s\n' 'memory_v1_v5_project_projection_api_production_clone: PASS'
