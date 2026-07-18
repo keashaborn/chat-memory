@@ -38,7 +38,7 @@ max_attempts=$((prior_attempts+1))
 repo_root=$(git rev-parse --show-toplevel)
 canary=scripts/memory_v1_v5_local_inference_canary.py
 provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
-expected_canary_sha=50ecc1bf6bc2a57cace736606f13afab60595ded52f21eb2e0b22203bbe78bc8
+expected_canary_sha=9abaacba470a23ce0ed874101eb70f44f433862d0e145d562c33bfff61af58d3
 expected_provider_sha=5d0bd5b146986bf85a3dbf51e48234d5402c9fd4f917c6fff24dab500d48c484
 api_key_file=/etc/memory-v1-local-inference/api-key
 env_file=/opt/chat-memory/.env
@@ -223,9 +223,10 @@ if [[ "$resume_mode" == 0 ]]; then
     AND job.evidence_content_sha256='$target_content_sha'
     AND job.status='pending' AND job.route='relational_extraction'
     AND job.attempts=$prior_attempts AND evidence.status='active'")" == 1 ]]
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event
+    WHERE owner_user_id='$target_owner'::uuid AND run_id='$run_id'::uuid")" == 0 ]]
   [[ "$(psql_scalar "SELECT (
-    count(*) FILTER (WHERE run_id='$run_id'::uuid) = 0
-    AND count(*) = (2 * $prior_attempts)
+    count(*) = (2 * $prior_attempts)
     AND count(*) FILTER (WHERE action='reserved') = $prior_attempts
     AND count(*) FILTER (
       WHERE action='completed'
@@ -303,6 +304,8 @@ PYTHONPATH="$repo_root" \
     --expected-job-id "$target_job" \
     --expected-content-sha256 "$target_content_sha" \
     --max-attempts "$max_attempts" \
+    --max-reserved-jobs "$max_attempts" \
+    --failure-threshold "$max_attempts" \
     --run-id "$run_id" --apply >"$canary_output" 2>"$canary_log"
 canary_rc=$?
 set -e

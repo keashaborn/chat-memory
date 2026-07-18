@@ -500,7 +500,10 @@ async def run() -> int:
             worker_id=worker_id,
             args=args,
         )
-        if claim.get("evidence_id") != ids["evidence_id"]:
+        if (
+            claim["control_outcome"] == "reserved"
+            and claim.get("evidence_id") != ids["evidence_id"]
+        ):
             raise RuntimeError("exact local claim evidence id changed")
         if claim["control_outcome"] != "reserved":
             print(
