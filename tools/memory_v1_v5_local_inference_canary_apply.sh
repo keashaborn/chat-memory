@@ -223,8 +223,24 @@ if [[ "$resume_mode" == 0 ]]; then
     AND job.evidence_content_sha256='$target_content_sha'
     AND job.status='pending' AND job.route='relational_extraction'
     AND job.attempts=$prior_attempts AND evidence.status='active'")" == 1 ]]
-  [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event
-    WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
+  [[ "$(psql_scalar "SELECT (
+    count(*) FILTER (WHERE run_id='$run_id'::uuid) = 0
+    AND count(*) = (2 * $prior_attempts)
+    AND count(*) FILTER (WHERE action='reserved') = $prior_attempts
+    AND count(*) FILTER (
+      WHERE action='completed'
+        AND outcome='rejected'
+        AND rejection_code IN (
+          'local_transport_timeout',
+          'local_transport_unavailable',
+          'local_transport_rate_limited',
+          'local_transport_server_error'
+        )
+    ) = $prior_attempts
+  )::integer
+  FROM memory.v5_local_inference_event
+  WHERE owner_user_id='$target_owner'::uuid
+    AND job_id='$target_job'::uuid")" == 1 ]]
 fi
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
