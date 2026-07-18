@@ -1079,8 +1079,7 @@ BEGIN
 
   UPDATE memory.evidence_extraction_job AS job
   SET status='pending',available_at=clock_timestamp(),worker_id=NULL,
-    last_error=NULL,result='{}'::jsonb,checkpoint_sequence=0,
-    checkpoint_sha256=NULL
+    last_error=NULL
   WHERE job.owner_user_id=actor AND job.job_id=p_job_id;
 
   INSERT INTO memory.evidence_extraction_event(
