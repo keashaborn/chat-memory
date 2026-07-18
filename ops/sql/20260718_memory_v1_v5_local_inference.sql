@@ -308,6 +308,7 @@ DECLARE
   actor uuid;
   worker_sha text;
   target_job_sha text;
+  new_lease_token uuid := gen_random_uuid();
   reservation_id uuid := gen_random_uuid();
   replayed memory.v5_local_inference_event%ROWTYPE;
   claimed record;
@@ -469,18 +470,89 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT * INTO claimed
-  FROM memory.claim_owner_evidence_extraction_job_v1(
-    p_operation_id,p_route,p_worker_id,p_lease_seconds,p_max_attempts
-  );
+  WITH selected AS (
+    SELECT
+      extraction_job.job_id,
+      extraction_job.status AS prior_status
+    FROM memory.evidence_extraction_job AS extraction_job
+    WHERE extraction_job.owner_user_id=actor
+      AND extraction_job.job_id=p_expected_job_id
+      AND extraction_job.route=p_route
+      AND extraction_job.evidence_content_sha256=p_expected_content_sha256
+      AND extraction_job.available_at<=clock_timestamp()
+      AND extraction_job.attempts<p_max_attempts
+      AND (
+        extraction_job.status IN ('pending','error')
+        OR (
+          extraction_job.status='processing'
+          AND extraction_job.lease_expires_at<=clock_timestamp()
+        )
+      )
+    FOR UPDATE
+  ),
+  updated AS (
+    UPDATE memory.evidence_extraction_job AS extraction_job
+    SET
+      status='processing',
+      attempts=extraction_job.attempts+1,
+      lease_token=new_lease_token,
+      lease_expires_at=
+        clock_timestamp()+make_interval(secs=>p_lease_seconds),
+      worker_id=p_worker_id,
+      last_error=NULL
+    FROM selected
+    WHERE extraction_job.owner_user_id=actor
+      AND extraction_job.job_id=selected.job_id
+    RETURNING extraction_job.*,selected.prior_status
+  )
+  SELECT
+    updated.*,
+    evidence.kind::text AS evidence_kind,
+    evidence.source_system AS evidence_source_system,
+    evidence.external_id AS evidence_external_id,
+    evidence.content AS evidence_content,
+    evidence.observed_at AS evidence_observed_at,
+    evidence.recorded_at AS evidence_recorded_at,
+    evidence.sensitivity::text AS evidence_sensitivity
+  INTO claimed
+  FROM updated
+  JOIN memory.evidence AS evidence
+    ON evidence.owner_user_id=updated.owner_user_id
+   AND evidence.evidence_id=updated.evidence_id
+  WHERE evidence.content IS NOT NULL
+    AND evidence.content_sha256=updated.evidence_content_sha256;
   IF NOT FOUND THEN
-    RETURN;
-  END IF;
-  IF claimed.job_id<>p_expected_job_id
-     OR claimed.evidence_content_sha256<>p_expected_content_sha256 THEN
-    RAISE EXCEPTION 'V5 local inference target changed before claim'
+    RAISE EXCEPTION 'exact V5 local inference target is unavailable'
       USING ERRCODE='23514';
   END IF;
+
+  INSERT INTO memory.evidence_extraction_event(
+    owner_user_id,
+    job_id,
+    operation_id,
+    event_type,
+    from_status,
+    to_status,
+    actor_type,
+    actor_ref,
+    details
+  ) VALUES (
+    actor,
+    claimed.job_id,
+    p_operation_id,
+    'claimed',
+    claimed.prior_status,
+    'processing',
+    'worker',
+    p_worker_id,
+    jsonb_build_object(
+      'route',claimed.route,
+      'lease_token',new_lease_token,
+      'attempt',claimed.attempts,
+      'lease_seconds',p_lease_seconds,
+      'reclaimed',claimed.prior_status='processing'
+    )
+  );
 
   INSERT INTO memory.v5_local_inference_event(
     event_id,owner_user_id,operation_id,run_id,job_id,action,outcome,
@@ -501,7 +573,7 @@ BEGIN
 
   RETURN QUERY SELECT
     claimed.job_id,claimed.evidence_id,claimed.lease_token,
-    claimed.status,claimed.route,claimed.attempts,
+    claimed.status::text,claimed.route,claimed.attempts,
     claimed.evidence_content_sha256,claimed.evidence_kind,
     claimed.evidence_source_system,claimed.evidence_external_id,
     claimed.evidence_content,claimed.evidence_observed_at,

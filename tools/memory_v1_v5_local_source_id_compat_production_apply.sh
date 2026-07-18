@@ -13,8 +13,8 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 migration=ops/sql/20260718_memory_v1_v5_local_inference.sql
 test_sql=tests/memory_v1_v5_local_inference.sql
-expected_migration_sha=3db6e453f3becf76bc84b28e9908c17cdc2d1a8327b0bc165e663f4652863ab5
-expected_test_sha=cbd64ecaeb593e84ec4aacf150b5de4aba9e87f6819659ebe9425c81e75061d9
+expected_migration_sha=2825d5e0d0d079f1ba647c047985cef886e116eab75e2719e24357748775fd65
+expected_test_sha=d35cc89464ff30a61ead04ecf2a810ef18a57478540efa0162d5b0d1dd1dce6a
 target_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 target_job=16c36c01-f052-4a49-abbb-cfb2a47b50d4
 target_evidence=00614247-c79d-5c63-9c37-d53419118b06

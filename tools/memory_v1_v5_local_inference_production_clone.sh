@@ -16,9 +16,9 @@ compose=(
 migration=ops/sql/20260718_memory_v1_v5_local_inference.sql
 rollback=ops/sql/20260718_memory_v1_v5_local_inference_rollback.sql
 test_sql=tests/memory_v1_v5_local_inference.sql
-migration_sha=3db6e453f3becf76bc84b28e9908c17cdc2d1a8327b0bc165e663f4652863ab5
+migration_sha=2825d5e0d0d079f1ba647c047985cef886e116eab75e2719e24357748775fd65
 rollback_sha=42c9cda1830e81e1eb105014be6e3895b4fa98bebaecc56de93fa6d3d0dec0fa
-test_sha=cbd64ecaeb593e84ec4aacf150b5de4aba9e87f6819659ebe9425c81e75061d9
+test_sha=d35cc89464ff30a61ead04ecf2a810ef18a57478540efa0162d5b0d1dd1dce6a
 
 backup=$(mktemp /tmp/memory-v1-v5-local-inference.XXXXXX.dump)
 tables=$(mktemp /tmp/memory-v1-v5-local-inference-tables.XXXXXX.txt)

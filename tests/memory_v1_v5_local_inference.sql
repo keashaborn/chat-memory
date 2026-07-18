@@ -119,7 +119,7 @@ INSERT INTO memory.evidence_extraction_job(
   'fa111111-1111-4111-8111-111111111111',
   'fa200000-0000-4000-8000-000000000001',
   'fa300000-0000-4000-8000-000000000001','local_inference_test_v1',
-  repeat('a',64),'relational_extraction','eligible_unprocessed','pending',0
+  repeat('a',64),'relational_extraction','eligible_unprocessed','pending',10
 );
 INSERT INTO memory.evidence_extraction_event(
   owner_user_id,job_id,event_type,from_status,to_status,actor_type,
@@ -127,6 +127,48 @@ INSERT INTO memory.evidence_extraction_event(
 ) VALUES (
   'fa111111-1111-4111-8111-111111111111',
   'fa400000-0000-4000-8000-000000000001','queued',NULL,'pending',
+  'system','local-inference-test','{}'
+);
+
+-- A higher-priority sibling proves the local claim is exact-job scoped.
+INSERT INTO memory.evidence(
+  evidence_id,owner_user_id,kind,source_system,external_id,content,
+  content_sha256,recorded_at,sensitivity,status,metadata
+) VALUES (
+  'fa200000-0000-4000-8000-000000000002',
+  'fa111111-1111-4111-8111-111111111111','user_statement',
+  'public.chat_log','local-inference-owner-a-sibling',
+  'This sibling must remain pending.',repeat('c',64),
+  '2026-07-18T04:59:00Z','medium','active','{}'
+);
+INSERT INTO memory.evidence_intake_terminal(
+  terminal_id,owner_user_id,evidence_id,selector_version,outcome,reason_code,
+  evidence_content_sha256,decision_fingerprint,actor_user_id,
+  invoked_by_role,details
+) VALUES (
+  'fa300000-0000-4000-8000-000000000002',
+  'fa111111-1111-4111-8111-111111111111',
+  'fa200000-0000-4000-8000-000000000002','local_inference_test_v1',
+  'dispatched','eligible_dispatched',repeat('c',64),repeat('7',64),
+  'fa111111-1111-4111-8111-111111111111','sage',
+  '{"route":"relational_extraction"}'
+);
+INSERT INTO memory.evidence_extraction_job(
+  job_id,owner_user_id,evidence_id,intake_terminal_id,selector_version,
+  evidence_content_sha256,route,intake_reason_code,status,priority
+) VALUES (
+  'fa400000-0000-4000-8000-000000000002',
+  'fa111111-1111-4111-8111-111111111111',
+  'fa200000-0000-4000-8000-000000000002',
+  'fa300000-0000-4000-8000-000000000002','local_inference_test_v1',
+  repeat('c',64),'relational_extraction','eligible_unprocessed','pending',0
+);
+INSERT INTO memory.evidence_extraction_event(
+  owner_user_id,job_id,event_type,from_status,to_status,actor_type,
+  actor_ref,details
+) VALUES (
+  'fa111111-1111-4111-8111-111111111111',
+  'fa400000-0000-4000-8000-000000000002','queued',NULL,'pending',
   'system','local-inference-test','{}'
 );
 
@@ -193,6 +235,28 @@ SELECT
   1/((:'claim_control_outcome'='reserved')::integer),
   1/((:'claim_apply_outcome'='applied')::integer),
   1/((:'claim_evidence_content_sha256'=repeat('a',64))::integer);
+
+RESET SESSION AUTHORIZATION;
+SELECT
+  1/((status='pending')::integer),
+  1/((attempts=0)::integer),
+  1/((lease_token IS NULL)::integer),
+  1/((NOT EXISTS (
+    SELECT 1
+    FROM memory.evidence_extraction_event AS event
+    WHERE event.owner_user_id=
+      'fa111111-1111-4111-8111-111111111111'::uuid
+      AND event.job_id='fa400000-0000-4000-8000-000000000002'::uuid
+      AND event.event_type='claimed'
+  ))::integer)
+FROM memory.evidence_extraction_job
+WHERE owner_user_id='fa111111-1111-4111-8111-111111111111'::uuid
+  AND job_id='fa400000-0000-4000-8000-000000000002'::uuid;
+
+SET SESSION AUTHORIZATION brains_app;
+SELECT set_config(
+  'app.user_id','fa111111-1111-4111-8111-111111111111',true
+);
 
 SELECT
   1/((job_id=:'claim_job_id'::uuid)::integer),
