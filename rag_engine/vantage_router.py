@@ -23,6 +23,12 @@ from .memory_v1_v5_shadow_trace import run_memory_v1_v5_shadow_trace
 from .memory_v1_v5_shadow_trace_store import (
     persist_memory_v1_v5_shadow_trace,
 )
+from .memory_v1_v5_project_shadow_trace import (
+    run_memory_v1_v5_project_shadow_trace,
+)
+from .memory_v1_v5_project_shadow_trace_store import (
+    persist_memory_v1_v5_project_shadow_trace,
+)
 from .memory_v1_intent import (
     apply_legacy_personal_memory_gate,
     classify_legacy_personal_memory_access,
@@ -190,6 +196,57 @@ def _persist_v5_shadow_trace_for_turn(
         )
         sys.stderr.flush()
     return result
+
+
+def _persist_v5_project_shadow_trace_for_turn(
+    *,
+    actor_user_id: str,
+    turn_plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    trace = turn_plan.get("memory_v1_v5_project_shadow")
+    if not isinstance(trace, dict):
+        return {"status": "skipped", "reason": "trace_absent", "rows_written": 0}
+    existing = trace.get("persistence")
+    if isinstance(existing, dict):
+        return existing
+    if trace.get("persistable") is not True:
+        result = {
+            "status": "skipped",
+            "reason": "trace_not_persistable",
+            "rows_written": 0,
+        }
+        trace["persistence"] = result
+        return result
+    result = persist_memory_v1_v5_project_shadow_trace(actor_user_id, trace)
+    trace["persistence"] = result
+    trace["trace_writes"] = int(result.get("rows_written") or 0)
+    if result.get("status") == "error":
+        import sys
+        sys.stderr.write(
+            "[vantage] V5 project shadow trace persistence failed "
+            f"error_type={result.get('error_type', 'unknown')}\n"
+        )
+        sys.stderr.flush()
+    return result
+
+
+def _persist_v5_shadow_traces_for_turn(
+    *,
+    actor_user_id: str,
+    turn_plan: Dict[str, Any],
+    query_embedding: QueryEmbeddingCache,
+) -> Dict[str, Any]:
+    return {
+        "governed_claim": _persist_v5_shadow_trace_for_turn(
+            actor_user_id=actor_user_id,
+            turn_plan=turn_plan,
+            query_embedding=query_embedding,
+        ),
+        "project_knowledge": _persist_v5_project_shadow_trace_for_turn(
+            actor_user_id=actor_user_id,
+            turn_plan=turn_plan,
+        ),
+    }
 
 
 class VantageLimits(BaseModel):
@@ -1779,6 +1836,15 @@ def vantage_query(req: Request, payload: VantageQuery):
             thread_id=payload.thread_id,
             embedding_provider=query_embedding.get,
         )
+        turn_plan["memory_v1_v5_project_shadow"] = (
+            run_memory_v1_v5_project_shadow_trace(
+                payload.user_id,
+                query=payload.message,
+                request_classification=turn_intent,
+                request_id=req_request_id,
+                thread_id=payload.thread_id,
+            )
+        )
 
         governed_runtime = run_memory_v1_runtime(
             payload.user_id,
@@ -1917,7 +1983,7 @@ def vantage_query(req: Request, payload: VantageQuery):
                     "pragmatics_path": "ritual_bypass_v0",
                 })
 
-            _persist_v5_shadow_trace_for_turn(
+            _persist_v5_shadow_traces_for_turn(
                 actor_user_id=payload.user_id,
                 turn_plan=turn_plan,
                 query_embedding=query_embedding,
@@ -2002,7 +2068,7 @@ def vantage_query(req: Request, payload: VantageQuery):
                     "pragmatics_path": "legacy_greeting_bypass",
                 })
 
-            _persist_v5_shadow_trace_for_turn(
+            _persist_v5_shadow_traces_for_turn(
                 actor_user_id=payload.user_id,
                 turn_plan=turn_plan,
                 query_embedding=query_embedding,
@@ -2303,7 +2369,7 @@ def vantage_query(req: Request, payload: VantageQuery):
         except Exception:
             pass
 
-        _persist_v5_shadow_trace_for_turn(
+        _persist_v5_shadow_traces_for_turn(
             actor_user_id=payload.user_id,
             turn_plan=turn_plan,
             query_embedding=query_embedding,
