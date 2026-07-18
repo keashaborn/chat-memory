@@ -32,9 +32,9 @@ units_quiesced=0
 unit_state=$(mktemp /tmp/memory-v1-v5-stage-apply-units.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-v5-stage-apply-tables.XXXXXX)
 
-psql_scalar() {
+psql_row() {
   docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
-    -U sage -d "$database" -c "$1" | tr -d '[:space:]'
+    -U sage -d "$database" -c "$1" | sed -n '1p'
 }
 
 qdrant_signature() {
@@ -97,7 +97,7 @@ capture_partition() {
     else
       predicate=true
     fi
-    state=$(psql_scalar "
+    state=$(psql_row "
       SELECT count(*)::text || E'\\t' || encode(public.digest(convert_to(
         coalesce(string_agg(row_json,E'\\n' ORDER BY row_json),''),
         'UTF8'),'sha256'),'hex')
