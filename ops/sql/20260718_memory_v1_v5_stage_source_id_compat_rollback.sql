@@ -1,6 +1,6 @@
 BEGIN;
 
-DO $
+DO $preflight$
 BEGIN
   IF current_user<>'sage'
      OR to_regrole('memory_v5_writer') IS NULL
@@ -9,7 +9,7 @@ BEGIN
     RAISE EXCEPTION 'V5 stage source-ID compatibility prerequisites are absent';
   END IF;
 END
-$;
+$preflight$;
 
 CREATE OR REPLACE FUNCTION memory.stage_relational_packet_v5(
   p_request_id uuid,
