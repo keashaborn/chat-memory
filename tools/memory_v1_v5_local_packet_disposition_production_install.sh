@@ -318,11 +318,12 @@ jq -n \
     completed_at:$completed_at,head_commit:$head_commit,
     owner_user_id_sha256:$owner_sha256,packet_id_sha256:$packet_sha256,
     backup:{path:$backup,sha256:$backup_sha256},
-    result:{dispositions_written:1,stage_rows_written:0,claims_written:0,
-      qdrant_writes:0,prompt_influence:0,external_model_calls:0},
+    result:{dispositions_written:1,other_owner_rows_written:0,
+      stage_rows_written:0,claims_written:0,qdrant_writes:0,
+      prompt_influence:0,external_model_calls:0},
     checks:{hash_locked_inputs:true,fresh_backup:true,
       rollback_only_security_test:true,owner_isolation:true,
-      other_owner_rows_written:0,zero_write_replay:true,
+      other_owner_rows_unchanged:true,zero_write_replay:true,
       existing_tables_unchanged:true,qdrant_unchanged:true,
       timers_restored_exactly:true},qdrant_sha256:$qdrant_sha256}' \
   >"$report"
