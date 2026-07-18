@@ -18,6 +18,7 @@ preflight_rollback=ops/sql/20260716_memory_v1_v5_stage_preflight_api_rollback.sq
 preflight_test=tests/memory_v1_v5_stage_preflight_api.sql
 source_id_migration=ops/sql/20260718_memory_v1_v5_stage_source_id_compat.sql
 source_id_rollback=ops/sql/20260718_memory_v1_v5_stage_source_id_compat_rollback.sql
+source_id_test=tests/memory_v1_v5_stage_source_id_compat.sql
 seed_sql=tests/memory_v1_v5_stage_batch_seed.sql
 runner=scripts/memory_v1_v5_stage_batch.py
 fixture=tests/memory_v1_v5_stage_batch_fixture.py
@@ -42,7 +43,7 @@ chmod 0600 "$backup"
 
 run_sql() {
   "${compose[@]}" exec -T postgres psql -X -v ON_ERROR_STOP=1 \
-    -U sage -d memory
+    -U sage -d memory "$@"
 }
 
 scalar() {
@@ -74,6 +75,13 @@ run_sql <"$preflight_migration"
 run_sql <"$preflight_test"
 run_sql <"$source_id_migration"
 run_sql <"$source_id_migration"
+run_sql \
+  -v target_owner=11111111-1111-4111-8111-111111111111 \
+  -v other_owner=22222222-2222-4222-8222-222222222222 \
+  -v evidence_id=aeeeeeee-1111-4111-8111-111111111112 \
+  -v source_id=aeeeeeee-1111-4111-8111-111111111112 \
+  -v source_sha256=3f55b194db3ae03b7100b9e8f572ab254f43bed87b151c3a5e0015163374d2aa \
+  -v source_recorded_at=2026-07-16T12:01:00Z <"$source_id_test"
 run_sql <"$seed_sql"
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test"
