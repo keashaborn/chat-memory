@@ -170,7 +170,10 @@ async def insert_outbox(conn: Any, owner: str, claim_id: str, revision: int) -> 
              AND aggregate_id=$2 AND operation='upsert'""",
         uuid.UUID(owner), uuid.UUID(claim_id),
     )
-    if not existing or existing["payload"] != {"claim_id": claim_id, "revision_number": revision}:
+    existing_payload = existing["payload"] if existing else None
+    if isinstance(existing_payload, str):
+        existing_payload = json.loads(existing_payload)
+    if not existing or existing_payload != {"claim_id": claim_id, "revision_number": revision}:
         raise ApplyBatchError("existing projection outbox payload mismatch")
     return str(existing["outbox_id"]), 0
 
