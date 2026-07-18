@@ -224,7 +224,7 @@ SELECT jsonb_build_object(
   'source_envelope',jsonb_build_object(
     'job_id',:'claim_job_id',
     'source_system',:'claim_evidence_source_system',
-    'source_external_id',:'claim_evidence_external_id',
+    'source_external_id',:'claim_evidence_id',
     'source_sha256',:'claim_evidence_content_sha256',
     'source_recorded_at',:'claim_evidence_recorded_at'
   ),

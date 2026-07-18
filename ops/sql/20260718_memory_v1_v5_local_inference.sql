@@ -702,7 +702,12 @@ BEGIN
      OR p_normalized_packet#>>'{source_envelope,source_system}'
         IS DISTINCT FROM evidence_record.source_system
      OR p_normalized_packet#>>'{source_envelope,source_external_id}'
-        IS DISTINCT FROM evidence_record.external_id
+        IS DISTINCT FROM (CASE
+          WHEN evidence_record.external_id ~*
+            '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN lower(evidence_record.external_id)
+          ELSE evidence_record.evidence_id::text
+        END)
      OR p_normalized_packet#>>'{source_envelope,source_sha256}'
         IS DISTINCT FROM evidence_record.content_sha256
      OR (p_normalized_packet#>>'{source_envelope,source_recorded_at}')::timestamptz

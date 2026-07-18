@@ -65,6 +65,17 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def canonical_source_external_id(
+    value: Any,
+    *,
+    evidence_id: uuid.UUID,
+) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return str(evidence_id)
+
+
 def stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -512,7 +523,10 @@ async def run() -> int:
         source = TrustedExtractionSource.create(
             job_id=claim["job_id"],
             source_system=claim["evidence_source_system"],
-            source_external_id=claim["evidence_external_id"],
+            source_external_id=canonical_source_external_id(
+                claim["evidence_external_id"],
+                evidence_id=claim["evidence_id"],
+            ),
             source_sha256=claim["evidence_content_sha256"],
             source_recorded_at=claim["evidence_recorded_at"],
             content=claim["evidence_content"],

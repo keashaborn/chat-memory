@@ -34,7 +34,7 @@ sha_re='^[0-9a-f]{64}$'
 repo_root=$(git rev-parse --show-toplevel)
 canary=scripts/memory_v1_v5_local_inference_canary.py
 provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
-expected_canary_sha=e97621a1437ad66660121efb358ebfcd6e248336f1e43a2f663632598f320e39
+expected_canary_sha=1207db0507ea57d4afc8dc0804cbe38dcaa80edc40f6b11790c90be2bb3520b2
 expected_provider_sha=5d0bd5b146986bf85a3dbf51e48234d5402c9fd4f917c6fff24dab500d48c484
 api_key_file=/etc/memory-v1-local-inference/api-key
 env_file=/opt/chat-memory/.env
@@ -195,7 +195,23 @@ phase=preflight
   to_regclass('memory.v5_local_inference_event') IS NOT NULL
   AND to_regclass('memory.evidence_extraction_packet_v5_local') IS NOT NULL
 )::integer")" == 1 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job AS job
+resume_mode=$(psql_scalar "SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM memory.evidence_extraction_job AS job
+  JOIN memory.evidence AS evidence USING(owner_user_id,evidence_id)
+  JOIN memory.v5_local_inference_event AS event
+    ON event.owner_user_id=job.owner_user_id AND event.job_id=job.job_id
+  WHERE job.owner_user_id='$target_owner'::uuid
+    AND job.job_id='$target_job'::uuid
+    AND job.evidence_id='$target_evidence'::uuid
+    AND job.evidence_content_sha256='$target_content_sha'
+    AND job.status='processing' AND job.route='relational_extraction'
+    AND job.attempts=1 AND job.lease_expires_at>clock_timestamp()
+    AND evidence.status='active' AND event.action='reserved'
+    AND event.run_id='$run_id'::uuid
+) THEN 1 ELSE 0 END")
+if [[ "$resume_mode" == 0 ]]; then
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job AS job
   JOIN memory.evidence AS evidence USING(owner_user_id,evidence_id)
   WHERE job.owner_user_id='$target_owner'::uuid
     AND job.job_id='$target_job'::uuid
@@ -203,8 +219,9 @@ phase=preflight
     AND job.evidence_content_sha256='$target_content_sha'
     AND job.status='pending' AND job.route='relational_extraction'
     AND job.attempts=0 AND evidence.status='active'")" == 1 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event
-  WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event
+    WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
+fi
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == 0 ]]
 
@@ -299,8 +316,14 @@ local_events_after=$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")
 packets_after=$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")
-[[ $((target_events_after-target_events_before)) -eq 2 ]]
-[[ $((local_events_after-local_events_before)) -eq 2 ]]
+expected_target_event_delta=2
+expected_local_event_delta=2
+if [[ "$resume_mode" == 1 ]]; then
+  expected_target_event_delta=1
+  expected_local_event_delta=1
+fi
+[[ $((target_events_after-target_events_before)) -eq "$expected_target_event_delta" ]]
+[[ $((local_events_after-local_events_before)) -eq "$expected_local_event_delta" ]]
 if [[ "$outcome" == accepted ]]; then
   [[ $((packets_after-packets_before)) -eq 1 ]]
   expected_status=review_required

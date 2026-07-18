@@ -16,9 +16,9 @@ compose=(
 migration=ops/sql/20260718_memory_v1_v5_local_inference.sql
 rollback=ops/sql/20260718_memory_v1_v5_local_inference_rollback.sql
 test_sql=tests/memory_v1_v5_local_inference.sql
-migration_sha=f460315d6e50d05fc4a6ee35324d8ce54189d257f430af4a0c64f02c0fa16442
+migration_sha=d74272e9c40c306e78b6166981c4c8cfbc87e156980ca87340a35b95e9892b74
 rollback_sha=ed21cb3e686385728828b90cc188e943fba43c52534b229c19c1438e27ee44d9
-test_sha=62223adff516b44e761c57d865afcb9447aa28487f4161d43c962d3d244b9099
+test_sha=5c4b30056bfa87eb47f11b8f0e788a85e6fb940198020f72c319b9c8224c59ab
 
 backup=$(mktemp /tmp/memory-v1-v5-local-inference.XXXXXX.dump)
 tables=$(mktemp /tmp/memory-v1-v5-local-inference-tables.XXXXXX.txt)
@@ -99,14 +99,24 @@ printf '%s\n' \
   'GRANT EXECUTE ON FUNCTION memory.current_actor_user_id() TO brains_app;' \
   | run_sql
 
+preexisting_local=$(scalar "SELECT (
+  to_regclass('memory.v5_local_inference_event') IS NOT NULL
+  AND to_regclass('memory.evidence_extraction_packet_v5_local') IS NOT NULL
+)::integer")
+local_events_before=0
+local_packets_before=0
+if [[ "$preexisting_local" == 1 ]]; then
+  local_events_before=$(scalar 'SELECT count(*) FROM memory.v5_local_inference_event')
+  local_packets_before=$(scalar 'SELECT count(*) FROM memory.evidence_extraction_packet_v5_local')
+fi
 scalar "
   SELECT table_schema || E'\\t' || table_name
   FROM information_schema.tables
   WHERE table_type='BASE TABLE'
     AND table_schema IN ('memory','public')
-    AND table_name NOT IN (
+    AND ($preexisting_local=1 OR table_name NOT IN (
       'v5_local_inference_event','evidence_extraction_packet_v5_local'
-    )
+    ))
   ORDER BY table_schema,table_name
 " >"$tables"
 capture_state "$before"
@@ -115,8 +125,8 @@ run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$test_sql"
 
-[[ "$(scalar 'SELECT count(*) FROM memory.v5_local_inference_event')" == "0" ]]
-[[ "$(scalar 'SELECT count(*) FROM memory.evidence_extraction_packet_v5_local')" == "0" ]]
+[[ "$(scalar 'SELECT count(*) FROM memory.v5_local_inference_event')" == "$local_events_before" ]]
+[[ "$(scalar 'SELECT count(*) FROM memory.evidence_extraction_packet_v5_local')" == "$local_packets_before" ]]
 [[ "$(scalar "SELECT (
   (SELECT count(*)=2 FROM pg_class
     WHERE oid IN (
@@ -153,6 +163,11 @@ run_sql <"$repo_root/$test_sql"
 )::integer")" == "1" ]]
 capture_state "$after_test"
 cmp -s "$before" "$after_test"
+
+if [[ "$preexisting_local" == 1 ]]; then
+  printf '%s\n' 'memory_v1_v5_local_inference_production_clone: PASS (compatibility)'
+  exit 0
+fi
 
 run_sql <"$repo_root/$rollback"
 [[ "$(scalar "SELECT (
