@@ -46,6 +46,11 @@ BEGIN;
 SET LOCAL statement_timeout='30s';
 SELECT set_config('test.packet_id',:'packet_id',true);
 SELECT set_config('test.packet_storage_sha256',:'packet_storage_sha256',true);
+SELECT set_config('test.auto_link_count',:'auto_link_count',true);
+SELECT set_config('test.manual_review_count',:'manual_review_count',true);
+SELECT set_config('test.deferred_count',:'deferred_count',true);
+SELECT set_config('test.rejected_count',:'rejected_count',true);
+SELECT set_config('test.blocking_code_count',:'blocking_code_count',true);
 SET SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id',:'owner_user_id',true);
 
@@ -61,8 +66,11 @@ BEGIN
     '30000000-0000-4000-8000-000000000003',
     '30000000-0000-4000-8000-000000000004',
     repeat('a',64),repeat('b',64),repeat('c',40),
-    :auto_link_count,:manual_review_count,:deferred_count,:rejected_count,
-    :blocking_code_count
+    current_setting('test.auto_link_count')::integer,
+    current_setting('test.manual_review_count')::integer,
+    current_setting('test.deferred_count')::integer,
+    current_setting('test.rejected_count')::integer,
+    current_setting('test.blocking_code_count')::integer
   );
   IF result.apply_outcome<>'applied'
      OR result.review_disposition<>'manual_review_required' THEN
@@ -76,8 +84,11 @@ BEGIN
     '30000000-0000-4000-8000-000000000003',
     '30000000-0000-4000-8000-000000000004',
     repeat('a',64),repeat('b',64),repeat('c',40),
-    :auto_link_count,:manual_review_count,:deferred_count,:rejected_count,
-    :blocking_code_count
+    current_setting('test.auto_link_count')::integer,
+    current_setting('test.manual_review_count')::integer,
+    current_setting('test.deferred_count')::integer,
+    current_setting('test.rejected_count')::integer,
+    current_setting('test.blocking_code_count')::integer
   );
   IF result.apply_outcome<>'replayed' THEN
     RAISE EXCEPTION 'local review artifact replay wrote twice';
@@ -108,8 +119,11 @@ BEGIN
       '40000000-0000-4000-8000-000000000003',
       '40000000-0000-4000-8000-000000000004',
       repeat('d',64),repeat('e',64),repeat('f',40),
-      :auto_link_count,:manual_review_count,:deferred_count,:rejected_count,
-      :blocking_code_count
+      current_setting('test.auto_link_count')::integer,
+      current_setting('test.manual_review_count')::integer,
+      current_setting('test.deferred_count')::integer,
+      current_setting('test.rejected_count')::integer,
+      current_setting('test.blocking_code_count')::integer
     );
     RAISE EXCEPTION 'cross-owner local review artifact unexpectedly succeeded';
   EXCEPTION WHEN check_violation THEN
