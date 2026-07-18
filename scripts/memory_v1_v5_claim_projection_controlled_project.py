@@ -105,7 +105,10 @@ async def claim_job(
             uuid.UUID(OWNER), uuid.UUID(item["outbox_id"]),
             uuid.UUID(item["claim_id"]), worker_id,
         )
-        if not row or row["attempts"] != 1 or row["payload"] != {
+        job_payload = row["payload"] if row else None
+        if isinstance(job_payload, str):
+            job_payload = json.loads(job_payload)
+        if not row or row["attempts"] != 1 or job_payload != {
             "claim_id": item["claim_id"], "revision_number": 2
         }:
             raise ControlledProjectionError("exact projection outbox job is not pending")
