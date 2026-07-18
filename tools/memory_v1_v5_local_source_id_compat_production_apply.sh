@@ -129,10 +129,14 @@ phase=preflight
     AND job.job_id='$target_job'::uuid
     AND job.evidence_id='$target_evidence'::uuid
     AND job.evidence_content_sha256='$target_content_sha'
-    AND job.status='processing' AND job.attempts=1
-    AND job.lease_expires_at>clock_timestamp()
+    AND job.status='skipped' AND job.attempts=1
+    AND job.lease_token IS NULL AND job.lease_expires_at IS NULL
+    AND job.last_error='local_inference_rejected: local_transport_timeout'
     AND evidence.status='active'
-    AND event.action='reserved' AND event.run_id='$target_run'::uuid
+    AND event.action='completed' AND event.run_id='$target_run'::uuid
+    AND event.outcome='rejected'
+    AND event.rejection_code='local_transport_timeout'
+    AND event.local_model_calls=1 AND event.external_model_calls=0
 ) AND NOT EXISTS (
   SELECT 1 FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid
