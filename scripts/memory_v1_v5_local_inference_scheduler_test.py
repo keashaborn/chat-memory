@@ -13,6 +13,7 @@ from scripts.memory_v1_v5_local_inference_scheduler import (
     CANARY_CONTRACT,
     canary_command,
     canonical_owners,
+    loopback_dsn,
     sanitized_canary_result,
     validate_arguments,
 )
@@ -51,6 +52,19 @@ def completed(payload: dict, returncode: int) -> subprocess.CompletedProcess[str
 
 def main() -> int:
     assert canonical_owners([str(OWNER), str(OWNER)]) == [OWNER]
+    assert loopback_dsn("postgresql://user@127.0.0.1:5432/memory") == (
+        "postgresql://user@127.0.0.1:5432/memory"
+    )
+    for invalid_dsn in (
+        "postgresql://user@10.0.0.1:5432/memory",
+        "https://127.0.0.1/memory",
+    ):
+        try:
+            loopback_dsn(invalid_dsn)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("non-loopback database DSN was accepted")
     try:
         canonical_owners([])
     except RuntimeError:

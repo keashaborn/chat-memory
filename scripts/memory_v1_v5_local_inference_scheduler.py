@@ -12,6 +12,7 @@ import sys
 import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -121,6 +122,15 @@ def validate_arguments(args: argparse.Namespace) -> uuid.UUID:
 
 def worker_reference() -> str:
     return f"{WORKER_VERSION}:{socket.gethostname()}"
+
+
+def loopback_dsn(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise RuntimeError("scheduler database DSN scheme is invalid")
+    if parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+        raise RuntimeError("scheduler database DSN must be loopback-only")
+    return value
 
 
 async def set_actor(conn: asyncpg.Connection, owner: uuid.UUID) -> None:
@@ -282,7 +292,9 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
-    conn = await asyncpg.connect(dsn, command_timeout=30)
+    conn = await asyncpg.connect(
+        loopback_dsn(dsn), command_timeout=30, ssl=False
+    )
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("local scheduler requires brains_app session")
