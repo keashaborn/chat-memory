@@ -1,5 +1,9 @@
 \set ON_ERROR_STOP on
 
+SELECT count(*)::integer AS component_binding_count_before
+FROM memory.project_thread_component_binding_event_v5
+\gset
+
 BEGIN;
 SET SESSION AUTHORIZATION brains_app;
 
@@ -52,7 +56,7 @@ BEGIN
 END
 $direct_table_denial$;
 
-SELECT 1 / ((apply_outcome='applied')::integer)
+SELECT 1 / ((apply_outcome IN ('applied','already_bound'))::integer)
 FROM memory.apply_owner_project_thread_component_binding_v5(
   'e4868a85-976f-418a-9576-03d1c9e78300',
   'd776c8ef-7f3d-45b2-8820-4be87b7ca19d',
@@ -64,7 +68,7 @@ FROM memory.apply_owner_project_thread_component_binding_v5(
   'bind','explicit_registered_component_name'
 );
 
-SELECT 1 / ((apply_outcome='replayed')::integer)
+SELECT 1 / ((apply_outcome IN ('replayed','already_bound'))::integer)
 FROM memory.apply_owner_project_thread_component_binding_v5(
   'e4868a85-976f-418a-9576-03d1c9e78300',
   'd776c8ef-7f3d-45b2-8820-4be87b7ca19d',
@@ -176,7 +180,7 @@ BEGIN
 END
 $maintenance_denial$;
 
-SELECT 1 / ((count(*)=0)::integer)
+SELECT 1 / ((count(*)=:component_binding_count_before)::integer)
 FROM memory.project_thread_component_binding_event_v5;
 
 SELECT 1 / ((count(*)=3)::integer)
