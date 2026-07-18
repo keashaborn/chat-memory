@@ -193,7 +193,8 @@ git merge-base --is-ancestor 0fdf0d1343c222d8e03b8227daf398669983c073 HEAD
 [[ "$(systemctl is-active memory-v1-v5-local-inference-tunnel.service)" == active ]]
 sudo -n test -r /etc/memory-v1-local-inference/api-key
 [[ "$(sudo -n stat -c '%a:%U:%G' /etc/memory-v1-local-inference/api-key)" == 600:root:root ]]
-python3 scripts/memory_v1_v5_local_inference_scheduler_test.py >/dev/null
+PYTHONPATH="$repo_root" python3 \
+  scripts/memory_v1_v5_local_inference_scheduler_test.py >/dev/null
 systemd-analyze verify "$service_source" "$timer_source"
 
 exec 9>"$lock_file"
