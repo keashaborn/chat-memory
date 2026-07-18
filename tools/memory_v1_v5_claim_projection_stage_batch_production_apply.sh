@@ -30,6 +30,8 @@ phase=initialization
 status_file=
 run_tag=
 units_quiesced=0
+brains_quiesced=0
+brains_state_before=
 unit_state=$(mktemp /tmp/memory-v1-claim-projection-stage-units.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-claim-projection-stage-tables.XXXXXX)
 timers=(
@@ -70,10 +72,23 @@ restore_timers() {
   units_quiesced=0
 }
 
+restore_runtime() {
+  if [[ "$brains_quiesced" -eq 1 ]]; then
+    if [[ "$brains_state_before" == active ]]; then
+      sudo -n systemctl start brains.service
+    else
+      sudo -n systemctl stop brains.service
+    fi
+    [[ "$(systemctl is-active brains.service)" == "$brains_state_before" ]]
+    brains_quiesced=0
+  fi
+  restore_timers
+}
+
 record_exit() {
   code=$?
-  if [[ "$units_quiesced" -eq 1 ]]; then
-    restore_timers || code=1
+  if [[ "$brains_quiesced" -eq 1 || "$units_quiesced" -eq 1 ]]; then
+    restore_runtime || code=1
   fi
   rm -f "$unit_state" "$table_list"
   if [[ -n "$status_file" ]]; then
@@ -208,6 +223,18 @@ while IFS=$'\t' read -r unit _enabled _active; do
   [[ "$(systemctl is-active "$unit")" == inactive ]]
 done <"$unit_state"
 
+phase=quiesce_brains
+brains_state_before=$(systemctl is-active brains.service)
+if [[ "$brains_state_before" == active ]]; then
+  sudo -n systemctl stop brains.service
+fi
+brains_quiesced=1
+for _attempt in $(seq 1 30); do
+  systemctl is-active --quiet brains.service || break
+  sleep 1
+done
+! systemctl is-active --quiet brains.service
+
 phase=capture_baseline
 docker exec "$container" psql -X -A -F $'\t' -t -v ON_ERROR_STOP=1 \
   -U sage -d "$database" -c "
@@ -276,7 +303,7 @@ qdrant_replay=$(qdrant_signature)
 [[ "$qdrant_replay" == "$qdrant_before" ]]
 
 phase=restore_timer_state
-restore_timers
+restore_runtime
 
 phase=report
 report="$snapshot_dir/memory_v1_claim_projection_stage_batch_${run_tag}.json"
@@ -317,6 +344,7 @@ report = {
         "retrieval_activated": False,
         "prompt_influence_activated": False,
         "timers_restored_exactly": True,
+        "brains_service_restored_exactly": True,
     },
 }
 path = Path(os.environ["REPORT"])
