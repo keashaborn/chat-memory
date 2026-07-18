@@ -378,7 +378,9 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
                 resolve_mention(
                     mention,
                     derived["observations"],
-                    await _candidates(conn, owner, mention),
+                    await _candidates(
+                        conn, owner, mention, derived["observations"]
+                    ),
                     derived["deferrals"],
                 )
                 for mention in derived["entity_mentions"]

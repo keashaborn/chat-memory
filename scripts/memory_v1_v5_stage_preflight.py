@@ -23,7 +23,7 @@ LEGACY_MATERIALIZED_PIPELINES = {
 }
 CURRENT_MATERIALIZED_PIPELINE = "memory_v1_relational_specialized_v5_2"
 RESOLVER = "memory_v1_owner_exact_resolver"
-RESOLVER_VERSION = "v5.2"
+RESOLVER_VERSION = "v5.3"
 REQUEST_NAMESPACE = uuid.UUID("0f3cc8bb-167e-5f5d-91d7-d2f1889eed35")
 SENSITIVE_LEVELS = {"medium", "high", "restricted"}
 CORRECTION_CLASSES = {"correction"}
@@ -527,16 +527,7 @@ def resolve_mention(
             selected = str(candidates[0]["entity_id"])
             reasons = ["trusted_project_scope_existing_entity_review"]
         else:
-            action = "create_new"
-            state = "manual_review_required"
-            proposed = {
-                "entity_type": "project",
-                "identity_state": "named",
-                "canonical_name": name.strip(),
-                "display_label": name.strip(),
-                "creation_reason": "trusted_project_scope_new_entity",
-            }
-            reasons = ["trusted_project_scope_new_entity_review"]
+            reasons = ["trusted_project_component_entity_required"]
     elif kind != "named" or not isinstance(name, str) or not name.strip():
         reasons = ["stable_named_identity_required"]
     elif len(candidates) > 1:
@@ -599,7 +590,10 @@ async def _normalize(conn: asyncpg.Connection, value: str) -> str:
 
 
 async def _candidates(
-    conn: asyncpg.Connection, owner: uuid.UUID, mention: dict[str, Any]
+    conn: asyncpg.Connection,
+    owner: uuid.UUID,
+    mention: dict[str, Any],
+    observations: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     if mention["mention_kind"] == "self_reference":
         rows = await conn.fetch(
@@ -617,6 +611,25 @@ async def _candidates(
     if mention["mention_kind"] != "named" or not isinstance(name, str) or not name.strip():
         return []
     normalized = await _normalize(conn, name)
+    if mention["entity_type"] == "project":
+        scope = _trusted_project_scope(
+            _mention_observations(mention, observations or [])
+        )
+        if scope is None or scope.get("component_key") is None:
+            return []
+        rows = await conn.fetch(
+            """
+            SELECT entity_id,entity_type,exact_canonical_name,exact_alias
+            FROM memory.resolve_owner_project_component_entity_candidate_v5(
+              $1,$2,$3
+            )
+            ORDER BY entity_id
+            """,
+            scope["project_key"],
+            scope["component_key"],
+            normalized,
+        )
+        return [dict(row) for row in rows]
     rows = await conn.fetch(
         """
         SELECT entity.entity_id, entity.entity_type,
@@ -721,7 +734,9 @@ async def main() -> int:
                     resolve_mention(
                         mention,
                         packet["observations"],
-                        await _candidates(conn, owner, mention),
+                        await _candidates(
+                            conn, owner, mention, packet["observations"]
+                        ),
                         packet["deferrals"],
                     )
                 )

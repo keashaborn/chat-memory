@@ -120,15 +120,11 @@ def main() -> None:
         [project_observation("e11")],
         [],
     )
-    assert trusted_project["action"] == "create_new"
-    assert trusted_project["decision_state"] == "manual_review_required"
-    assert trusted_project["proposed_entity"] == {
-        "entity_type": "project",
-        "identity_state": "named",
-        "canonical_name": "Verbal Sage Memory V1/V5",
-        "display_label": "Verbal Sage Memory V1/V5",
-        "creation_reason": "trusted_project_scope_new_entity",
-    }
+    assert trusted_project["action"] == "defer"
+    assert trusted_project["decision_state"] == "deferred"
+    assert trusted_project["review_reason_codes"] == [
+        "trusted_project_component_entity_required"
+    ]
 
     trusted_existing_project = resolve_mention(
         mention("e12", "project", "named", "Verbal Sage Memory V1/V5"),
