@@ -75,6 +75,7 @@ run_sql <"$preflight_migration"
 run_sql <"$preflight_test"
 run_sql <"$source_id_migration"
 run_sql <"$source_id_migration"
+run_sql <"$seed_sql"
 run_sql \
   -v target_owner=11111111-1111-4111-8111-111111111111 \
   -v other_owner=22222222-2222-4222-8222-222222222222 \
@@ -82,7 +83,6 @@ run_sql \
   -v source_id=aeeeeeee-1111-4111-8111-111111111112 \
   -v source_sha256=3f55b194db3ae03b7100b9e8f572ab254f43bed87b151c3a5e0015163374d2aa \
   -v source_recorded_at=2026-07-16T12:01:00Z <"$source_id_test"
-run_sql <"$seed_sql"
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test"
 /opt/chat-memory/venv/bin/python "$fixture" prepare --review-root "$reviews"
