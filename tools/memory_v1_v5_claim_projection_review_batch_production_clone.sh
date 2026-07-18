@@ -34,8 +34,8 @@ cleanup() {
 }
 trap cleanup EXIT
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
-docker exec "$container" pg_dump -U sage -d "$source_db" -Fc --no-owner \
-  | docker exec -i "$container" pg_restore -U sage -d "$clone_db" --no-owner
+docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
+  | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
 
 clone_dsn=$(SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone_db" python3 - <<'PY'
 import os
