@@ -1266,6 +1266,22 @@ def _normalize_temporal(
                 "anchored_to_source_time": True,
             }
         )
+    elif (
+        temporal["shape"] == "none"
+        and temporal["basis"] == "none"
+        and temporal["source_form"] == "implicit_source_time"
+    ):
+        # An undated occurrence or planned event is not known to have happened
+        # at ingestion time. Preserve the unknown time instead of converting
+        # source-recording time into a false event timestamp.
+        temporal["source_form"] = "none"
+        temporal["anchored_to_source_time"] = False
+        repair_code = "server_undated_temporal_unanchored"
+        if (
+            repair_code not in temporal["reason_codes"]
+            and len(temporal["reason_codes"]) < 10
+        ):
+            temporal["reason_codes"].append(repair_code)
     elif temporal["source_form"] == "implicit_source_time":
         temporal["anchored_to_source_time"] = True
         if temporal["shape"] == "instant" and temporal["basis"] == "instant":

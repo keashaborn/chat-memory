@@ -121,6 +121,7 @@ def _example_span(source: str) -> dict[str, Any]:
 
 
 def _example_temporal(semantic: str = "observation_time") -> dict[str, Any]:
+    undated_occurrence = semantic == "occurrence"
     return {
         "anchored_to_source_time": False,
         "basis": "none",
@@ -129,12 +130,14 @@ def _example_temporal(semantic: str = "observation_time") -> dict[str, Any]:
         "instant": None,
         "instant_range": None,
         "precision": "unknown",
-        "reason_codes": ["implicit_source_time"],
+        "reason_codes": [
+            "undated_occurrence" if undated_occurrence else "implicit_source_time"
+        ],
         "recurrence": None,
         "relative_offset": None,
         "semantic": semantic,
         "shape": "none",
-        "source_form": "implicit_source_time",
+        "source_form": "none" if undated_occurrence else "implicit_source_time",
     }
 
 
@@ -933,7 +936,10 @@ LOCAL_EXTRACTION_INSTRUCTIONS = (
     "observation_time, shape=none, basis=none, source_form=implicit_source_time, "
     "certainty=unknown, precision=unknown, and null for instant, all ranges, "
     "relative_offset, and recurrence. Unused nullable values are null, never an "
-    "empty string. A self mention has name_text=null; the stated name belongs in "
+    "empty string. For an undated occurrence, use semantic=occurrence, "
+    "shape=none, basis=none, source_form=none, anchored_to_source_time=false, "
+    "and do not invent an event date from the source recording time. A self "
+    "mention has name_text=null; the stated name belongs in "
     "the identity.name observation object. If a source needs more than eight "
     "entities or observations, defer it as compound_requires_split. Always emit "
     "packet_findings as an empty array. Every observation subject and every "

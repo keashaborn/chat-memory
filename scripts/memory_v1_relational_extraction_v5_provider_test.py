@@ -5,6 +5,7 @@ import copy
 from pathlib import Path
 
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    _normalize_temporal,
     ProviderPacket,
     REASON_CODE_PATTERN,
     TrustedExtractionSource,
@@ -212,6 +213,28 @@ def main() -> int:
         repo_root / "specs" / "memory_v1_relational_extraction_v5.schema.json",
         SCHEMA_SHA256,
     )
+    undated_occurrence = temporal_none()
+    undated_occurrence.update(
+        {
+            "semantic": "occurrence",
+            "source_form": "implicit_source_time",
+            "reason_codes": ["implicit_source_time"],
+        }
+    )
+    normalized_occurrence = _normalize_temporal(
+        undated_occurrence,
+        "2026-07-16T12:01:00Z",
+    )
+    if (
+        normalized_occurrence["shape"] != "none"
+        or normalized_occurrence["basis"] != "none"
+        or normalized_occurrence["source_form"] != "none"
+        or normalized_occurrence["anchored_to_source_time"]
+        or normalized_occurrence["instant"] is not None
+        or "server_undated_temporal_unanchored"
+        not in normalized_occurrence["reason_codes"]
+    ):
+        raise AssertionError("undated occurrence acquired a false source timestamp")
     source = TrustedExtractionSource.create(
         job_id="aaaaaaaa-0001-4000-8000-000000000001",
         source_system="public.chat_log",
