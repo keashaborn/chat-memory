@@ -11,7 +11,7 @@ if [[ "${MEMORY_V1_V5_STAGE_SOURCE_ID_COMPAT_INSTALL:-}" != authorized ]]; then
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
-foundation_commit=2f8e132f
+foundation_commit=2f8e1328dd735996b34a9fd48dc3466e732783ab
 migration=ops/sql/20260718_memory_v1_v5_stage_source_id_compat.sql
 rollback=ops/sql/20260718_memory_v1_v5_stage_source_id_compat_rollback.sql
 test_sql=tests/memory_v1_v5_stage_source_id_compat.sql
