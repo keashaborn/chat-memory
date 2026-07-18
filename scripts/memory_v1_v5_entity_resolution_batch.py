@@ -35,7 +35,7 @@ DEFAULT_REVIEW_ROOT = "/home/ubuntu/memory-v1-reviews"
 REQUEST_NAMESPACE = uuid.UUID("86d15273-5406-55bb-8d70-8c0bd371a7e9")
 MAX_ITEMS = 32
 MAX_NEW_ROWS = 500
-OPERATIONS = {"auto_apply", "approve_and_apply"}
+OPERATIONS = {"auto_apply", "approve_and_apply", "approve_existing_and_apply"}
 
 
 class EntityResolutionBatchError(RuntimeError):
@@ -78,7 +78,12 @@ def _digest(value: Any, field: str) -> str:
 
 
 def _expected_base_rows(items: list[dict[str, Any]]) -> int:
-    return sum(2 if item["operation"] == "auto_apply" else 6 for item in items)
+    rows_by_operation = {
+        "auto_apply": 2,
+        "approve_and_apply": 6,
+        "approve_existing_and_apply": 5,
+    }
+    return sum(rows_by_operation[item["operation"]] for item in items)
 
 
 def load_manifest(
@@ -106,15 +111,23 @@ def load_manifest(
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, raw_item in enumerate(value["items"]):
+        if not isinstance(raw_item, dict):
+            raise EntityResolutionBatchError(
+                f"manifest item {index} fields do not match the contract"
+            )
+        operation = raw_item.get("operation")
+        item_keys = {
+            "resolution_id",
+            "operation",
+            "expected_action",
+            "expected_decision_state",
+            "review_reason",
+        }
+        if operation == "approve_existing_and_apply":
+            item_keys.add("expected_entity_id")
         item = exact_object(
             raw_item,
-            {
-                "resolution_id",
-                "operation",
-                "expected_action",
-                "expected_decision_state",
-                "review_reason",
-            },
+            item_keys,
             f"manifest item {index}",
         )
         resolution_id = _uuid(item["resolution_id"], f"items[{index}].resolution_id")
@@ -131,7 +144,7 @@ def load_manifest(
                 or item["review_reason"] is not None
             ):
                 raise EntityResolutionBatchError("auto-apply item contract is invalid")
-        else:
+        elif operation == "approve_and_apply":
             reason = item["review_reason"]
             if (
                 item["expected_action"] != "create_new"
@@ -141,6 +154,22 @@ def load_manifest(
                 or len(reason) > 500
             ):
                 raise EntityResolutionBatchError("approve-and-apply item contract is invalid")
+        else:
+            reason = item["review_reason"]
+            if (
+                item["expected_action"] != "link_existing"
+                or item["expected_decision_state"] != "manual_review_required"
+                or not isinstance(reason, str)
+                or not reason.strip()
+                or len(reason) > 500
+            ):
+                raise EntityResolutionBatchError(
+                    "approve-existing-and-apply item contract is invalid"
+                )
+            item["expected_entity_id"] = _uuid(
+                item["expected_entity_id"],
+                f"items[{index}].expected_entity_id",
+            )
         items.append({**item, "resolution_id": resolution_id})
     bindings = value["expected_total_bindings"]
     new_rows = value["expected_new_rows"]
@@ -246,6 +275,13 @@ async def _apply_preflight(
         raise EntityResolutionBatchError("auto-apply has no prospective entity")
     if item["operation"] == "approve_and_apply" and output["prospective_entity_id"] is not None:
         raise EntityResolutionBatchError("create-new preflight unexpectedly selected an entity")
+    if (
+        item["operation"] == "approve_existing_and_apply"
+        and output["prospective_entity_id"] != item["expected_entity_id"]
+    ):
+        raise EntityResolutionBatchError(
+            "reviewed existing-entity preflight selected a different entity"
+        )
     return output
 
 
@@ -491,7 +527,7 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                 item = entry["manifest_item"]
                 review_id: uuid.UUID | None = None
                 review_result: dict[str, Any] | None = None
-                if item["operation"] == "approve_and_apply":
+                if item["operation"] != "auto_apply":
                     current_review = await _review_preflight(conn, item)
                     if current_review != entry["preflight"]:
                         raise EntityResolutionBatchError("review preflight drifted")
@@ -522,6 +558,14 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 if apply_result["outcome"] != "applied":
                     raise EntityResolutionBatchError("resolution outcome is not applied")
+                if (
+                    item["operation"] == "approve_existing_and_apply"
+                    and apply_result["applied_entity_id"]
+                    != item["expected_entity_id"]
+                ):
+                    raise EntityResolutionBatchError(
+                        "reviewed resolution applied to a different entity"
+                    )
                 applied.append(
                     {
                         "resolution_id": item["resolution_id"],
@@ -547,7 +591,7 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                 item = entry["manifest_item"]
                 replay_review: dict[str, Any] | None = None
                 review_id = uuid.UUID(prior["review_id"]) if prior["review_id"] else None
-                if item["operation"] == "approve_and_apply":
+                if item["operation"] != "auto_apply":
                     replay_review = await _review(
                         conn,
                         item,

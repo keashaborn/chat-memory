@@ -14,6 +14,7 @@ from scripts.memory_v1_v5_entity_resolution_batch import (
 
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 RESOLUTION = "6e6283dd-05e6-43e4-aee3-c4f48d947038"
+ENTITY = "9378f68c-2087-4365-8a9a-a166faf1324e"
 
 
 class EntityResolutionBatchManifestTest(unittest.TestCase):
@@ -69,6 +70,41 @@ class EntityResolutionBatchManifestTest(unittest.TestCase):
         value["items"].append(dict(value["items"][0]))
         value["expected_new_rows"] = 6
         with self.assertRaisesRegex(EntityResolutionBatchError, "duplicate"):
+            load_manifest(str(self.write(value)), root=self.root)
+
+    def test_accepts_reviewed_existing_entity_with_exact_target(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 6
+        value["items"] = [
+            {
+                "resolution_id": RESOLUTION,
+                "operation": "approve_existing_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": "Trusted project registry alias matches exactly.",
+                "expected_entity_id": ENTITY,
+            }
+        ]
+        metadata, _, _ = load_manifest(str(self.write(value)), root=self.root)
+        self.assertEqual(metadata["expected_new_rows"], 6)
+        self.assertEqual(metadata["items"][0]["expected_entity_id"], ENTITY)
+
+    def test_rejects_reviewed_existing_entity_without_exact_target(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 6
+        value["items"] = [
+            {
+                "resolution_id": RESOLUTION,
+                "operation": "approve_existing_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": "Trusted project registry alias matches exactly.",
+                "expected_entity_id": "not-a-uuid",
+            }
+        ]
+        with self.assertRaisesRegex(EntityResolutionBatchError, "UUID"):
             load_manifest(str(self.write(value)), root=self.root)
 
 
