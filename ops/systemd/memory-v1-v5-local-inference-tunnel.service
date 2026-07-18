@@ -47,6 +47,7 @@ SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressDeny=any
 IPAddressAllow=172.31.44.129
+IPAddressAllow=localhost
 TasksMax=64
 
 [Install]
