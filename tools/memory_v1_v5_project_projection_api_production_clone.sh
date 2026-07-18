@@ -51,10 +51,21 @@ printf '%s\n' \
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
 
-MEMORY_V1_PROJECT_ENTAILMENT_APPLY=authorized \
-MEMORY_V1_DB_CONTAINER=memoryv1v5projectprojectionclone-postgres-1 \
-MEMORY_V1_SNAPSHOT_DIR="$snapshot_dir" \
-"$repo_root/tools/memory_v1_project_observation_entailment_apply.sh"
+if [[ "$(scalar "SELECT count(*) FROM memory.observation_entailment_v5
+  WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+    AND observation_id='258d8d96-2cbd-4296-b878-769c90533fae'::uuid")" == 0 ]]; then
+  MEMORY_V1_PROJECT_ENTAILMENT_APPLY=authorized \
+  MEMORY_V1_DB_CONTAINER=memoryv1v5projectprojectionclone-postgres-1 \
+  MEMORY_V1_SNAPSHOT_DIR="$snapshot_dir" \
+  "$repo_root/tools/memory_v1_project_observation_entailment_apply.sh"
+else
+  [[ "$(scalar "SELECT count(*) FROM memory.observation_entailment_v5
+    WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+      AND observation_id='258d8d96-2cbd-4296-b878-769c90533fae'::uuid
+      AND decision='accepted'
+      AND reason_code='predicate_entailment_v5_1_accepted'
+      AND authorization_manifest_sha256='6154ba22e45d7f4bc12a27688fb3f5eb38f9cc5cf0fda1c1e2f2141c71a9e089'")" == 1 ]]
+fi
 
 [[ "$(scalar "SELECT count(*) FROM pg_proc WHERE oid IN (
   'memory.preflight_project_projection_source_v5(uuid)'::regprocedure,
@@ -94,6 +105,22 @@ OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER = "557ea042-cb82-48f8-9429-472e96c957ef"
 OBSERVATION = "258d8d96-2cbd-4296-b878-769c90533fae"
 PLAN = "758d8d96-2cbd-4296-b878-769c90533fae"
+APPLY_REQUEST = "a58d8d96-2cbd-4296-b878-769c90533fae"
+REVIEWER = "memory_v1_v5_project_projection_preparation_20260718"
+REASON = (
+    "direct user-endorsed architecture statement, exact trusted component "
+    "scope, deterministic entailment accepted; phase-authorized project "
+    "projection preparation"
+)
+REASON_CODES = json.dumps(
+    [
+        "direct_user_statement",
+        "trusted_component_scope",
+        "accepted_predicate_entailment",
+        "phase_authorized_projection_preparation",
+    ],
+    separators=(",", ":"),
+)
 
 
 async def main():
@@ -136,6 +163,67 @@ async def main():
         )
         assert replay["outcome"] == "replayed"
         assert replay["rows_written"] == 0
+        review_preflight = await conn.fetchrow(
+            """SELECT * FROM memory.preflight_projection_review_v5(
+                $1,'p01','authorized'::memory.projection_review_decision_v5,
+                'system',$2,$3,$4::jsonb
+            )""",
+            uuid.UUID(PLAN),
+            REVIEWER,
+            REASON,
+            REASON_CODES,
+        )
+        reviewed = await conn.fetchrow(
+            """SELECT * FROM memory.review_projection_v5(
+                $1,'p01','authorized'::memory.projection_review_decision_v5,
+                'system',$2,$3,$4::jsonb,$5
+            )""",
+            uuid.UUID(PLAN),
+            REVIEWER,
+            REASON,
+            REASON_CODES,
+            review_preflight["authorization_manifest_sha256"],
+        )
+        assert reviewed["outcome"] == "applied"
+        assert reviewed["rows_written"] == 1
+        apply_preflight = await conn.fetchrow(
+            "SELECT * FROM memory.preflight_projection_apply_v5($1,'p01',$2)",
+            uuid.UUID(PLAN),
+            reviewed["review_id"],
+        )
+        materialized = await conn.fetchrow(
+            "SELECT * FROM memory.apply_projection_v5($1,$2,'p01',$3,$4)",
+            uuid.UUID(APPLY_REQUEST),
+            uuid.UUID(PLAN),
+            reviewed["review_id"],
+            apply_preflight["apply_manifest_sha256"],
+        )
+        assert materialized["outcome"] == "applied"
+        assert str(materialized["lane"]) == "project_knowledge"
+        assert materialized["revision_number"] == 1
+        assert materialized["rows_written"] == 6
+        review_replay = await conn.fetchrow(
+            """SELECT * FROM memory.review_projection_v5(
+                $1,'p01','authorized'::memory.projection_review_decision_v5,
+                'system',$2,$3,$4::jsonb,$5
+            )""",
+            uuid.UUID(PLAN),
+            REVIEWER,
+            REASON,
+            REASON_CODES,
+            review_preflight["authorization_manifest_sha256"],
+        )
+        apply_replay = await conn.fetchrow(
+            "SELECT * FROM memory.apply_projection_v5($1,$2,'p01',$3,$4)",
+            uuid.UUID(APPLY_REQUEST),
+            uuid.UUID(PLAN),
+            reviewed["review_id"],
+            apply_preflight["apply_manifest_sha256"],
+        )
+        assert review_replay["outcome"] == "replayed"
+        assert review_replay["rows_written"] == 0
+        assert apply_replay["outcome"] == "replayed"
+        assert apply_replay["rows_written"] == 0
         await transaction.rollback()
 
         transaction = conn.transaction(readonly=True)
@@ -159,6 +247,7 @@ asyncio.run(main())
 PY
 
 [[ "$(scalar "SELECT count(*) FROM memory.projection_plan WHERE projector='memory_v1_deterministic_project_projection_v5'")" == 0 ]]
+[[ "$(scalar "SELECT count(*) FROM memory.project_knowledge_head_v5 WHERE knowledge_key='architecture.memory_service'")" == 0 ]]
 run_sql <"$repo_root/$rollback"
 [[ "$(scalar "SELECT (
   to_regprocedure('memory.preflight_project_projection_source_v5(uuid)') IS NULL
