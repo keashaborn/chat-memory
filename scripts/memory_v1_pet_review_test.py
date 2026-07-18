@@ -31,6 +31,12 @@ def main() -> int:
         raise AssertionError("structured Neko entity extraction failed")
     if structured_entity_values(dahlia["object_literal"], dahlia["qualifiers"]) != {"dahlia"}:
         raise AssertionError("structured Dahlia entity extraction failed")
+    if structured_entity_values(
+        {"kind": "literal", "value": "German shepherd"},
+        {},
+        ("Dahlia", None),
+    ) != {"dahlia"}:
+        raise AssertionError("relational subject entity extraction failed")
 
     print("memory_v1_pet_review: PASS")
     return 0

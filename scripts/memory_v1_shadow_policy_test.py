@@ -95,6 +95,26 @@ def main() -> int:
         intent="personal_recall",
         entity_hints=["dahlia"],
     )
+    for message in (
+        "What breed was Dahlia?",
+        "Was Dahlia a German shepherd?",
+        "What was Dahlia’s sex?",
+        "What do you remember about Dahlia?",
+        "Did I have a pet named Dahlia?",
+    ):
+        expect(
+            message,
+            "SPECIFIC_RECALL" if "remember" in message else "GENERAL",
+            domain="pet_profile",
+            intent="personal_recall",
+            entity_hints=["dahlia"],
+            explicit_recall=True,
+        )
+    expect_suppressed(
+        "Dahlia was a female German shepherd.",
+        "GENERAL",
+        "information_providing_turn",
+    )
     expect(
         "Was it Nemo or Neko?",
         "SPECIFIC_RECALL",

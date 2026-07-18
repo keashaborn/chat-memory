@@ -41,7 +41,9 @@ def _normalized_entity(value: Any) -> str:
 
 
 def structured_entity_values(
-    object_literal: Any, qualifiers: Any
+    object_literal: Any,
+    qualifiers: Any,
+    entity_names: Sequence[Any] = (),
 ) -> set[str]:
     """Extract governed entity labels from structured fields, never prose."""
     allowed_keys = {
@@ -68,6 +70,10 @@ def structured_entity_values(
 
     walk(_json_object(object_literal, "object_literal"))
     walk(_json_object(qualifiers, "qualifiers"))
+    for value in entity_names:
+        normalized = _normalized_entity(value)
+        if normalized:
+            values.add(normalized)
     return values
 
 
@@ -204,11 +210,20 @@ async def build_memory_packet(
         if candidate_ids:
             rows = await conn.fetch(
                 """
-                SELECT claim_id, canonical_text, status::text, confidence,
-                       importance, salience, sensitivity::text,
-                       valid_from, valid_to, retrieval_policy,
-                       subject_entity_id, predicate, object_entity_id, object_literal,
-                       qualifiers,
+                SELECT memory.claim.claim_id,
+                       memory.claim.canonical_text,
+                       memory.claim.status::text,
+                       memory.claim.confidence,
+                       memory.claim.importance,
+                       memory.claim.salience,
+                       memory.claim.sensitivity::text,
+                       memory.claim.valid_from, memory.claim.valid_to,
+                       memory.claim.retrieval_policy,
+                       memory.claim.subject_entity_id, memory.claim.predicate,
+                       memory.claim.object_entity_id, memory.claim.object_literal,
+                       memory.claim.qualifiers,
+                       subject_entity.canonical_name AS subject_entity_name,
+                       object_entity.canonical_name AS object_entity_name,
                        ARRAY(
                          SELECT link.evidence_id
                          FROM memory.claim_evidence AS link
@@ -221,12 +236,50 @@ async def build_memory_packet(
                          ORDER BY link.evidence_id
                        ) AS active_evidence_ids
                 FROM memory.claim
-                WHERE owner_user_id=$1
-                  AND claim_id = ANY($2::uuid[])
+                LEFT JOIN memory.entity AS subject_entity
+                  ON subject_entity.owner_user_id=memory.claim.owner_user_id
+                 AND subject_entity.entity_id=memory.claim.subject_entity_id
+                LEFT JOIN memory.entity AS object_entity
+                  ON object_entity.owner_user_id=memory.claim.owner_user_id
+                 AND object_entity.entity_id=memory.claim.object_entity_id
+                WHERE memory.claim.owner_user_id=$1
+                  AND memory.claim.claim_id = ANY($2::uuid[])
                 """,
                 actor,
                 candidate_ids,
             )
+            v5_rows = await conn.fetch(
+                """
+                SELECT owner_user_id, claim_id, evidence_by_stance
+                FROM memory.read_v5_shadow_claims($1::uuid[])
+                """,
+                candidate_ids,
+            )
+        else:
+            v5_rows = []
+
+        v5_evidence_by_claim: Dict[uuid.UUID, set[str]] = {}
+        for row in v5_rows:
+            if uuid.UUID(str(row["owner_user_id"])) != actor:
+                raise RetrievalValidationError(
+                    "V5 evidence reader returned a cross-owner claim"
+                )
+            claim_id = uuid.UUID(str(row["claim_id"]))
+            if claim_id not in candidates or claim_id in v5_evidence_by_claim:
+                raise RetrievalValidationError("V5 evidence reader returned invalid claims")
+            evidence = _json_object(
+                row["evidence_by_stance"],
+                "evidence_by_stance",
+            )
+            refs: set[str] = set()
+            for stance in ("supports", "opposes", "qualifies", "context"):
+                values = evidence.get(stance, [])
+                if not isinstance(values, list):
+                    raise RetrievalValidationError(
+                        f"evidence_by_stance.{stance} must be a list"
+                    )
+                refs.update(str(uuid.UUID(str(value))) for value in values)
+            v5_evidence_by_claim[claim_id] = refs
 
         visible_ids = {uuid.UUID(str(row["claim_id"])) for row in rows}
         semantic_floor = semantic_relevance_floor(
@@ -244,9 +297,10 @@ async def build_memory_packet(
             policy = _json_object(row["retrieval_policy"], "retrieval_policy")
             reasons: list[str] = []
             semantic = candidates[claim_id]
-            active_evidence_refs = [
-                str(evidence_id) for evidence_id in row["active_evidence_ids"]
-            ]
+            active_evidence_refs = sorted(
+                {str(evidence_id) for evidence_id in row["active_evidence_ids"]}
+                | v5_evidence_by_claim.get(claim_id, set())
+            )
 
             if semantic < semantic_floor:
                 reasons.append("semantic_relevance")
@@ -282,7 +336,12 @@ async def build_memory_packet(
 
             if normalized_entity_hints:
                 claim_entities = structured_entity_values(
-                    row["object_literal"], row["qualifiers"]
+                    row["object_literal"],
+                    row["qualifiers"],
+                    (
+                        row["subject_entity_name"],
+                        row["object_entity_name"],
+                    ),
                 )
                 if not normalized_entity_hints.intersection(claim_entities):
                     reasons.append("entity")

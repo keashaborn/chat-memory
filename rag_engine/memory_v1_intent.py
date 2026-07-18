@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v5"
+VERSION = "memory_intent_adapter_v6"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -30,7 +30,9 @@ NAME_TERMS = (
     "name should be",
 )
 FAMILY_TERMS = ("mother", "mom", "mum", "father", "dad", "parent", "deedee")
-PET_TERMS = ("pet", "dog", "cat", "neko", "nemo", "dahlia", "helsing")
+PET_SIGNAL_RE = re.compile(
+    r"\b(?:pets?|dogs?|cats?|neko|nemo|dahlia|helsing)\b"
+)
 CAREGIVING_TERMS = (
     "caregiving",
     "caregiver",
@@ -266,6 +268,17 @@ NAME_RECALL_RE = re.compile(
     r"do you remember (?:my|the) (?:pet|dog|cat)(?:'s|’s)? name|"
     r"how (?:is|was) (?:my |the )?(?:pet(?:'s|’s)? )?name spell)\b"
 )
+PET_PROFILE_QUERY_RE = re.compile(
+    r"(?:\b(?:what|which) (?:breed|sex|gender|name|type|kind)\b|"
+    r"^what (?:is|was) (?:my |the )?"
+    r"(?:pet|dog|cat|neko|nemo|dahlia|helsing)(?:'s|’s)? "
+    r"(?:breed|sex|gender|name|type|kind)\b|"
+    r"^(?:is|was) (?:my |the )?"
+    r"(?:pet|dog|cat|neko|nemo|dahlia|helsing)(?:'s|’s)? "
+    r"(?:(?:a|an)\b|male\b|female\b|"
+    r"(?:breed|sex|gender|name|type|kind)\b)|"
+    r"^(?:do|did) i (?:have|own) (?:a |an |the )?(?:pet|dog|cat)\b)"
+)
 NAMED_PERSONAL_TERMS = (
     "neko",
     "nemo",
@@ -379,8 +392,15 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     name_recall_requested = recall_requested and bool(NAME_RECALL_RE.search(text))
     broad_pet_recall = bool(BROAD_PET_RECALL_RE.search(text))
     broad_family_recall = bool(BROAD_FAMILY_RECALL_RE.search(text))
-    pet_event = _contains(text, PET_TERMS) and (
+    has_pet_signal = bool(PET_SIGNAL_RE.search(text))
+    pet_event = has_pet_signal and (
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    )
+    named_pet_recall = recall_requested and has_pet_signal
+    pet_profile_recall = (
+        not pet_event
+        and has_pet_signal
+        and (named_pet_recall or bool(PET_PROFILE_QUERY_RE.search(text)))
     )
     family_event = _contains(text, FAMILY_TERMS) and (
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
@@ -397,6 +417,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         domain = "name_correction"
     elif (pet_event and recall_requested) or broad_pet_recall:
         domain = "pet_loss"
+    elif pet_profile_recall:
+        domain = "pet_profile"
     elif (family_event and recall_requested) or broad_family_recall:
         domain = "family_death"
     elif support_requested:
@@ -414,12 +436,13 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             or caregiving_context
             or alcohol_context
             or rural_life_context
+            or has_pet_signal
         ):
             return {"eligible": False, "reason": "information_providing_turn"}
         return {"eligible": False, "reason": "unclassified_domain"}
 
     entity_hints: list[str] = []
-    if domain == "pet_loss":
+    if domain in {"pet_loss", "pet_profile"}:
         if "neko" in text or "nemo" in text:
             entity_hints = ["neko"]
         elif "dahlia" in text:
@@ -442,6 +465,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             or normalization_requested
             or broad_pet_recall
             or broad_family_recall
+            or pet_profile_recall
         ),
         "entity_hints": entity_hints,
     }

@@ -158,6 +158,29 @@ def main() -> int:
         specialized=False,
         governed=True,
     )
+    for message in (
+        "What breed was Dahlia?",
+        "Was Dahlia a German shepherd?",
+        "What was Dahlia’s sex?",
+        "What do you remember about Dahlia?",
+        "Did I have a pet named Dahlia?",
+    ):
+        expect(
+            message,
+            "SPECIFIC_RECALL" if "remember" in message else "GENERAL",
+            memory_intent="personal_recall",
+            domains=["pet_profile"],
+            specialized=False,
+            governed=True,
+        )
+    expect(
+        "Dahlia was a female German shepherd.",
+        "GENERAL",
+        memory_intent="none",
+        domains=[],
+        specialized=False,
+        governed=False,
+    )
     expect(
         "When did I stop drinking alcohol?",
         "SPECIFIC_RECALL",
