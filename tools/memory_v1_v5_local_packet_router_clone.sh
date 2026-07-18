@@ -17,6 +17,7 @@ review_read=ops/sql/20260718_memory_v1_v5_local_packet_review_read.sql
 migration=ops/sql/20260718_memory_v1_v5_local_packet_review_artifact.sql
 rollback=ops/sql/20260718_memory_v1_v5_local_packet_review_artifact_rollback.sql
 sql_test=tests/memory_v1_v5_local_packet_review_artifact.sql
+production_test=tests/memory_v1_v5_local_packet_review_artifact_production.sql
 router=scripts/memory_v1_v5_local_packet_router.py
 router_test=scripts/memory_v1_v5_local_packet_router_test.py
 reviewer=scripts/memory_v1_v5_review_local_packet.py
@@ -31,6 +32,7 @@ declare -A expected_sha256=(
   ["$migration"]="9a3cf7ade161ee2dbd6a64c2b6fb680c0240373f1277569f9f56c9a83b8789d9"
   ["$rollback"]="b95bbbf8544fb115c953b2135ea11d4aef03a61bed31f953b8f94dae2b4e63e7"
   ["$sql_test"]="46b3209f58b6d4d0b352542168b81e4f70266687b7421a4916dc66bf624988f3"
+  ["$production_test"]="9cba6c3a33c8039991a2b4269981bdb3c055d919c9df8317891761e54ae77c8e"
   ["$router"]="08f7434514805a17897447b89235efa6e3495a59795016ce66ce5c5855afa9a5"
   ["$router_test"]="105fcdd63765e9fbd7a073b14aed0ac43927d5a9dab1be044c50f6cad4e88407"
   ["$reviewer"]="49a765ab9e671ee0adf1f74e12f9e696bc82846abbb8e4497b8aec4851edee94"
@@ -178,6 +180,8 @@ run_sql \
   -v auto_link_count=0 -v manual_review_count=2 \
   -v deferred_count=0 -v rejected_count=0 -v blocking_code_count=1 \
   <"$repo_root/$sql_test"
+run_sql -v other_owner_user_id="$other" -v foreign_packet_id="$packet" \
+  <"$repo_root/$production_test"
 [[ "$(scalar 'SELECT count(*) FROM memory.v5_local_packet_review_artifact')" == 0 ]]
 
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
