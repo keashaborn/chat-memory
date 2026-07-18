@@ -13,7 +13,19 @@ SELECT 1 / (
     'memory.stage_relational_packet_v5(uuid,uuid,text,text,text,text,text,text)',
     'EXECUTE'
   )
-  AND NOT has_table_privilege('brains_app','memory.evidence','SELECT')
+  AND (SELECT relrowsecurity AND relforcerowsecurity
+       FROM pg_class
+       WHERE oid='memory.evidence'::regclass)
+  AND NOT (SELECT rolbypassrls OR rolsuper
+           FROM pg_roles
+           WHERE rolname='brains_app')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_class AS relation
+    CROSS JOIN LATERAL aclexplode(COALESCE(
+      relation.relacl, acldefault('r', relation.relowner))) AS grant_row
+    WHERE relation.oid='memory.evidence'::regclass
+      AND grant_row.grantee=0 AND grant_row.privilege_type='SELECT'
+  )
 )::integer AS assert_controlled_acl;
 
 SELECT set_config('test.evidence_id', :'evidence_id', true);

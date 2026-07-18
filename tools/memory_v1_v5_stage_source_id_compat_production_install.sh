@@ -17,7 +17,7 @@ rollback=ops/sql/20260718_memory_v1_v5_stage_source_id_compat_rollback.sql
 test_sql=tests/memory_v1_v5_stage_source_id_compat.sql
 expected_migration_sha=a45ec57f3c5ecb0838fb019d4d485d25b34110688cc6d4bb25cbea32b17a9383
 expected_rollback_sha=2a59e06a107b9646d9f2ef2bf94274581ccac7f5a115f5bf53b47d522e016aa4
-expected_test_sha=e06b6dbe4d8d4559c7669004d3af9668eeb47e52324c96536b1f53c0def79816
+expected_test_sha=f8d03b72d9eb14ec04a9f72c6a4b899f9cf38ec4c32a3827849eec952274ca53
 target_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 evidence_id=00614247-c79d-5c63-9c37-d53419118b06
@@ -133,10 +133,18 @@ phase=preflight
     'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)'
   ) IS NOT NULL
   AND to_regprocedure(
-    'memory.stage_relational_packet_v5(uuid,uuid,uuid,uuid,text,text,text,timestamptz,jsonb,jsonb,jsonb,jsonb,jsonb,text,text,text)'
+    'memory.stage_relational_packet_v5(uuid,uuid,text,text,text,text,text,text)'
   ) IS NOT NULL
-  AND NOT has_table_privilege(
-    'brains_app','memory.evidence','SELECT'
+  AND (SELECT relrowsecurity AND relforcerowsecurity
+       FROM pg_class WHERE oid='memory.evidence'::regclass)
+  AND NOT (SELECT rolbypassrls OR rolsuper
+           FROM pg_roles WHERE rolname='brains_app')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_class AS relation
+    CROSS JOIN LATERAL aclexplode(COALESCE(
+      relation.relacl, acldefault('r', relation.relowner))) AS grant_row
+    WHERE relation.oid='memory.evidence'::regclass
+      AND grant_row.grantee=0 AND grant_row.privilege_type='SELECT'
   )
 )::integer")" == 1 ]]
 
@@ -208,12 +216,22 @@ qdrant_after=$(qdrant_signature)
     'memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)'::regprocedure
   ))='memory_v5_writer'
   AND pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid=
-    'memory.stage_relational_packet_v5(uuid,uuid,uuid,uuid,text,text,text,timestamptz,jsonb,jsonb,jsonb,jsonb,jsonb,text,text,text)'::regprocedure
+    'memory.stage_relational_packet_v5(uuid,uuid,text,text,text,text,text,text)'::regprocedure
   ))='memory_v5_writer'
   AND has_function_privilege(
     'brains_app','memory.preflight_relational_stage_bundle_v5(uuid,text,text,timestamptz)','EXECUTE'
   )
-  AND NOT has_table_privilege('brains_app','memory.evidence','SELECT')
+  AND (SELECT relrowsecurity AND relforcerowsecurity
+       FROM pg_class WHERE oid='memory.evidence'::regclass)
+  AND NOT (SELECT rolbypassrls OR rolsuper
+           FROM pg_roles WHERE rolname='brains_app')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_class AS relation
+    CROSS JOIN LATERAL aclexplode(COALESCE(
+      relation.relacl, acldefault('r', relation.relowner))) AS grant_row
+    WHERE relation.oid='memory.evidence'::regclass
+      AND grant_row.grantee=0 AND grant_row.privilege_type='SELECT'
+  )
 )::integer")" == 1 ]]
 
 restore_timers
@@ -232,7 +250,7 @@ jq -n \
     evidence:{before:$before,after:$after,log:$log,qdrant_sha256:$qdrant_sha256},
     checks:{fresh_backup:true,function_compatibility_only:true,
       owner_scoped_preflight:true,cross_owner_rejection:true,
-      application_has_no_direct_evidence_select:true,
+      application_evidence_access_rls_forced:true,
       rollback_only_security_test:true,memory_rows_unchanged:true,
       qdrant_unchanged:true,timers_restored:true,external_model_calls:0},
     hard_stop:"before_relational_staging_apply_or_entity_resolution_or_projection_or_live_retrieval"}' \
