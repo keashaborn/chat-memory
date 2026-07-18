@@ -342,6 +342,12 @@ def main() -> int:
         for item in broken_pet_packet["entity_mentions"]
         if item["entity_type"] != "self"
     ]
+    broken_pet_sex = next(
+        item
+        for item in broken_pet_packet["observations"]
+        if item["predicate"] == "pet.sex"
+    )
+    broken_pet_sex["object"]["datatype"] = "text"
     pet_source = TrustedExtractionSource.create(
         job_id="00000000-0000-4000-8000-000000000095",
         source_system="public.chat_log",
@@ -383,6 +389,18 @@ def main() -> int:
         raise AssertionError("deterministic pet entity repair changed")
     if "self_entity_link" not in repair_provider.last_audit["compiler_repairs"]:
         raise AssertionError("pet entity repair audit is missing")
+    repaired_pet_sex = next(
+        item
+        for item in repaired.normalized_packet["observations"]
+        if item["predicate"] == "pet.sex"
+    )
+    if repaired_pet_sex["object"]["datatype"] != "enum":
+        raise AssertionError("registry enum datatype repair changed")
+    if (
+        "literal_datatype_to_registry_enum"
+        not in repair_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("registry enum datatype repair audit is missing")
 
     hearing_text = "My cat Echo is deaf."
     hearing_span = {

@@ -1434,6 +1434,7 @@ def _pet_name(content: str) -> str | None:
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
+    registry: dict[str, Any],
 ) -> tuple[ProviderPacket, tuple[str, ...]]:
     value = packet.model_dump(mode="json")
     entities = value["entity_mentions"]
@@ -1596,6 +1597,26 @@ def _compile_entity_links(
                         "entity_ref": place_ref,
                     }
             repairs.append("residence_link_normalized")
+
+    registry_rules = {
+        item["predicate"]: item for item in registry["predicates"]
+    }
+    object_contracts = registry["object_contracts"]
+    for observation in observations:
+        obj = observation["object"]
+        rule = registry_rules.get(observation["predicate"])
+        if obj["kind"] != "literal" or rule is None:
+            continue
+        contract = object_contracts[rule["object_contract"]]
+        allowed_values = contract["value_schema"].get("enum")
+        if (
+            obj["datatype"] == "text"
+            and contract["datatype"] == "enum"
+            and isinstance(allowed_values, list)
+            and obj["value"] in allowed_values
+        ):
+            obj["datatype"] = "enum"
+            repairs.append("literal_datatype_to_registry_enum")
 
     compiled = ProviderPacket.model_validate(value)
     return compiled, tuple(sorted(set(repairs)))
@@ -1831,6 +1852,7 @@ class LocalLlamaCppProvider:
         self._model_file_sha256 = model_file_sha256
         self._runtime_revision = runtime_revision
         self._registry_contract = _registry_contract(registry)
+        self._registry = deepcopy(registry)
         self._allowed_predicates = tuple(
             sorted(item["predicate"] for item in registry["predicates"])
         )
@@ -1960,6 +1982,7 @@ class LocalLlamaCppProvider:
             compiled_packet, repairs = _compile_entity_links(
                 source,
                 raw_packet,
+                self._registry,
             )
             self.last_audit.update(
                 {

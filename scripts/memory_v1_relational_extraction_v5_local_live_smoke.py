@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
@@ -76,8 +77,9 @@ def main() -> int:
     transport = LlamaCppSecureTransport(
         endpoint=args.endpoint,
         enable_token=LOCAL_CALL_ENABLE_TOKEN,
+        api_key=os.getenv("MEMORY_V1_LOCAL_INFERENCE_API_KEY"),
         allow_loopback_http=True,
-        allow_unauthenticated_loopback=True,
+        allow_unauthenticated_loopback=False,
     )
     provider = LocalLlamaCppProvider(
         model=args.model,

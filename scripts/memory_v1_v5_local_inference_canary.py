@@ -23,6 +23,11 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalLlamaCppProvider,
     LocalProviderAdapterError,
 )
+from scripts.memory_v1_relational_extraction_v5_observable_provider import (
+    CapturingProvider,
+    classify_validator_rejection,
+    sanitize_provider_packet,
+)
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
     canonical_sha256,
@@ -34,6 +39,9 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 
 WORKER_VERSION = "memory_v1_v5_local_inference_canary_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_local_inference_canary_apply_v1"
+DIAGNOSTIC_ENABLE_TOKEN = (
+    "memory_v1_v5_local_inference_diagnostic_replay_v1"
+)
 PERSIST_NAMESPACE = uuid.UUID("a1ab4c90-2b6a-4a4b-a8e9-746c03917721")
 EXPECTED_REGISTRY_SHA256 = (
     "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
@@ -111,6 +119,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--rolling-window-seconds", type=int, default=86400)
     parser.add_argument("--max-reserved-jobs", type=int, default=1)
     parser.add_argument("--failure-threshold", type=int, default=1)
+    parser.add_argument("--diagnostic-replay", action="store_true")
     parser.add_argument("--apply", action="store_true")
     return parser.parse_args()
 
@@ -153,6 +162,14 @@ def validated_arguments(args: argparse.Namespace) -> dict[str, Any]:
         APPLY_ENABLE_TOKEN
     ):
         raise RuntimeError("local inference apply capability is absent")
+    if args.diagnostic_replay and not args.apply:
+        raise RuntimeError("--diagnostic-replay requires --apply")
+    if args.diagnostic_replay and os.getenv(
+        "MEMORY_V1_V5_LOCAL_INFERENCE_DIAGNOSTIC"
+    ) != DIAGNOSTIC_ENABLE_TOKEN:
+        raise RuntimeError(
+            "local inference diagnostic replay capability is absent"
+        )
     return {
         "owner": owner,
         "evidence_id": evidence_id,
@@ -505,6 +522,13 @@ async def run() -> int:
             and claim.get("evidence_id") != ids["evidence_id"]
         ):
             raise RuntimeError("exact local claim evidence id changed")
+        if args.diagnostic_replay and (
+            enqueued["apply_outcome"] != "replayed"
+            or claim["apply_outcome"] != "replayed"
+        ):
+            raise RuntimeError(
+                "diagnostic mode requires a zero-write claim replay"
+            )
         if claim["control_outcome"] != "reserved":
             print(
                 stable_json(
@@ -554,9 +578,14 @@ async def run() -> int:
             max_output_tokens=args.max_output_tokens,
             timeout_seconds=args.timeout_seconds,
         )
+        capturing = (
+            CapturingProvider(provider)
+            if args.diagnostic_replay
+            else None
+        )
         try:
             validated = validate_and_normalize(
-                provider,
+                capturing if capturing is not None else provider,
                 source=source,
                 registry=registry,
                 schema=schema,
@@ -569,6 +598,52 @@ async def run() -> int:
             if provider.external_model_calls != 0 or local_calls not in {0, 1}:
                 raise RuntimeError("local/external call accounting changed")
         except Exception as exc:
+            if args.diagnostic_replay:
+                if isinstance(exc, LocalProviderAdapterError):
+                    diagnostic_code = exc.code
+                elif isinstance(exc, ValueError):
+                    diagnostic_code = classify_validator_rejection(str(exc))
+                else:
+                    diagnostic_code = "uncatalogued_diagnostic_error"
+                packet = (
+                    capturing.last_packet
+                    if capturing is not None
+                    else None
+                )
+                print(
+                    stable_json(
+                        {
+                            "contract_version": (
+                                "memory_v1_v5_local_diagnostic_replay_v1"
+                            ),
+                            "apply": False,
+                            "outcome": "rejected",
+                            "rejection_code": diagnostic_code,
+                            "rejection_class": type(exc).__name__,
+                            "rejection_message_sha256": sha256_text(str(exc)),
+                            "external_model_calls": (
+                                provider.external_model_calls
+                            ),
+                            "local_model_calls": provider.local_model_calls,
+                            "sanitized_provider_packet": (
+                                sanitize_provider_packet(packet)
+                                if packet is not None
+                                else None
+                            ),
+                            "audit": sanitized_audit(provider),
+                            "claim_replay_proved": True,
+                            "write_counts": {
+                                "queue": 0,
+                                "ledger": 0,
+                                "packets": 0,
+                                "claims": 0,
+                                "qdrant": 0,
+                                "prompt_influence": 0,
+                            },
+                        }
+                    )
+                )
+                return 1
             local_calls = provider.local_model_calls
             code = rejection_code(exc)
             fail_operation_id = uuid.uuid5(
@@ -651,6 +726,55 @@ async def run() -> int:
                 )
             )
             return 1
+
+        if args.diagnostic_replay:
+            packet = (
+                capturing.last_packet
+                if capturing is not None
+                else None
+            )
+            if packet is None:
+                raise RuntimeError(
+                    "diagnostic replay lost the provider packet"
+                )
+            print(
+                stable_json(
+                    {
+                        "contract_version": (
+                            "memory_v1_v5_local_diagnostic_replay_v1"
+                        ),
+                        "apply": False,
+                        "outcome": "accepted",
+                        "external_model_calls": (
+                            provider.external_model_calls
+                        ),
+                        "local_model_calls": provider.local_model_calls,
+                        "provider_output_sha256": (
+                            validated.provider_output_sha256
+                        ),
+                        "validator_packet_sha256": (
+                            validated.normalized_packet_sha256
+                        ),
+                        "manual_review_required": (
+                            validated.manual_review_required
+                        ),
+                        "sanitized_provider_packet": (
+                            sanitize_provider_packet(packet)
+                        ),
+                        "audit": sanitized_audit(provider),
+                        "claim_replay_proved": True,
+                        "write_counts": {
+                            "queue": 0,
+                            "ledger": 0,
+                            "packets": 0,
+                            "claims": 0,
+                            "qdrant": 0,
+                            "prompt_influence": 0,
+                        },
+                    }
+                )
+            )
+            return 0
 
         packet_id = uuid.uuid5(PERSIST_NAMESPACE, f"packet:{job_id}")
         persist_operation_id = uuid.uuid5(
