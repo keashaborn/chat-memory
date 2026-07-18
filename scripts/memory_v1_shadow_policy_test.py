@@ -21,6 +21,7 @@ def expect(
     intent: str,
     entity_hints: list[str] | None = None,
     explicit_recall: bool | None = None,
+    allowed_predicates: list[str] | None = None,
 ) -> None:
     result = classify_shadow_context(message, turn_intent)
     if not result["eligible"]:
@@ -36,6 +37,13 @@ def expect(
     if explicit_recall is not None and result["explicit_recall"] != explicit_recall:
         raise AssertionError(
             f"expected explicit_recall={explicit_recall}, got {result['explicit_recall']}"
+        )
+    if (
+        allowed_predicates is not None
+        and result["allowed_predicates"] != allowed_predicates
+    ):
+        raise AssertionError(
+            f"expected predicates {allowed_predicates}, got {result['allowed_predicates']}"
         )
 
 
@@ -72,6 +80,7 @@ def main() -> int:
         intent="personal_recall",
         entity_hints=[],
         explicit_recall=True,
+        allowed_predicates=["personal_event.occurred"],
     )
     expect(
         "What do you know about my pets?",
@@ -80,6 +89,7 @@ def main() -> int:
         intent="personal_recall",
         entity_hints=[],
         explicit_recall=True,
+        allowed_predicates=["personal_event.occurred"],
     )
     expect(
         "What happened to Neko?",
@@ -87,6 +97,7 @@ def main() -> int:
         domain="pet_loss",
         intent="personal_recall",
         entity_hints=["neko"],
+        allowed_predicates=["personal_event.occurred"],
     )
     expect(
         "What happened to Dahlia?",
@@ -94,13 +105,23 @@ def main() -> int:
         domain="pet_loss",
         intent="personal_recall",
         entity_hints=["dahlia"],
+        allowed_predicates=["personal_event.occurred"],
     )
-    for message in (
-        "What breed was Dahlia?",
-        "Was Dahlia a German shepherd?",
-        "What was Dahlia’s sex?",
-        "What do you remember about Dahlia?",
-        "Did I have a pet named Dahlia?",
+    for message, predicates in (
+        ("What breed was Dahlia?", ["pet.breed"]),
+        ("Was Dahlia a German shepherd?", ["pet.breed"]),
+        ("What was Dahlia’s sex?", ["pet.sex"]),
+        ("What was Dahlia's name?", ["identity.name"]),
+        (
+            "What do you remember about Dahlia?",
+            [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        ),
+        ("Did I have a pet named Dahlia?", ["relationship.has_pet"]),
     ):
         expect(
             message,
@@ -109,6 +130,7 @@ def main() -> int:
             intent="personal_recall",
             entity_hints=["dahlia"],
             explicit_recall=True,
+            allowed_predicates=predicates,
         )
     expect_suppressed(
         "Dahlia was a female German shepherd.",

@@ -16,7 +16,7 @@ from .openai_client import embed_text
 from .qdrant_compat import make_qdrant_client
 
 
-VERSION = "memory_v1_governed_runtime_v4"
+VERSION = "memory_v1_governed_runtime_v5"
 
 
 def classify_shadow_context(message: str, turn_intent: str) -> Dict[str, Any]:
@@ -143,6 +143,7 @@ async def _packet(
             max_sensitivity=_maximum_sensitivity(actor, context),
             explicit_recall=bool(context["explicit_recall"]),
             entity_hints=context["entity_hints"],
+            allowed_predicates=context.get("allowed_predicates", []),
             request_id=request_id,
             thread_id=thread_id,
             runtime_activation=runtime_activation,
@@ -261,6 +262,7 @@ def run_memory_v1_runtime(
                 "domain": context["domain"],
                 "intent": context["intent"],
                 "entity_hints": context["entity_hints"],
+                "allowed_predicates": packet["allowed_predicates"],
                 "candidate_count": packet["candidate_count"],
                 "selected_count": packet["selected_count"],
                 "token_estimate": packet["token_estimate"],

@@ -164,6 +164,7 @@ async def build_memory_packet(
     max_sensitivity: str = "medium",
     explicit_recall: bool = False,
     entity_hints: Sequence[str] = (),
+    allowed_predicates: Sequence[str] = (),
     request_id: str | None = None,
     answer_id: str | uuid.UUID | None = None,
     thread_id: str | uuid.UUID | None = None,
@@ -197,6 +198,19 @@ async def build_memory_packet(
             normalized_entity_hints.add(normalized)
     if len(normalized_entity_hints) > 8:
         raise RetrievalValidationError("entity_hints must contain at most 8 values")
+    normalized_allowed_predicates: set[str] = set()
+    allowed_predicate_chars = set("abcdefghijklmnopqrstuvwxyz0123456789._")
+    for value in allowed_predicates:
+        normalized = str(value or "").strip().casefold()
+        if not normalized:
+            continue
+        if (
+            len(normalized) > 128 or not set(normalized) <= allowed_predicate_chars
+        ):
+            raise RetrievalValidationError("allowed_predicates contains an invalid value")
+        normalized_allowed_predicates.add(normalized)
+    if len(normalized_allowed_predicates) > 16:
+        raise RetrievalValidationError("allowed_predicates must contain at most 16 values")
 
     candidates = _candidate_map(candidate_hits)
     candidate_ids = list(candidates)
@@ -282,8 +296,14 @@ async def build_memory_packet(
             v5_evidence_by_claim[claim_id] = refs
 
         visible_ids = {uuid.UUID(str(row["claim_id"])) for row in rows}
+        semantic_visible_ids = {
+            uuid.UUID(str(row["claim_id"]))
+            for row in rows
+            if not normalized_allowed_predicates
+            or str(row["predicate"]).casefold() in normalized_allowed_predicates
+        }
         semantic_floor = semantic_relevance_floor(
-            [candidates[claim_id] for claim_id in visible_ids]
+            [candidates[claim_id] for claim_id in semantic_visible_ids]
         )
         rejected_counts: Counter[str] = Counter()
         if len(visible_ids) < len(candidate_ids):
@@ -295,6 +315,7 @@ async def build_memory_packet(
             status = str(row["status"])
             sensitivity = str(row["sensitivity"])
             policy = _json_object(row["retrieval_policy"], "retrieval_policy")
+            predicate = str(row["predicate"]).strip().casefold()
             reasons: list[str] = []
             semantic = candidates[claim_id]
             active_evidence_refs = sorted(
@@ -304,6 +325,11 @@ async def build_memory_packet(
 
             if semantic < semantic_floor:
                 reasons.append("semantic_relevance")
+            if (
+                normalized_allowed_predicates
+                and predicate not in normalized_allowed_predicates
+            ):
+                reasons.append("predicate")
 
             if status not in RETRIEVABLE_STATUSES:
                 reasons.append(f"status:{status}")
@@ -361,6 +387,7 @@ async def build_memory_packet(
                 {
                     "claim_id": claim_id,
                     "text": text,
+                    "predicate": predicate,
                     "status": status,
                     "confidence": confidence,
                     "importance": importance,
@@ -442,6 +469,7 @@ async def build_memory_packet(
                     "semantic_floor": round(semantic_floor, 6),
                     "explicit_recall": bool(explicit_recall),
                     "entity_hints": sorted(normalized_entity_hints),
+                    "allowed_predicates": sorted(normalized_allowed_predicates),
                     "prompt_injection": prompt_injection,
                     "answer_model_exposure": answer_model_exposure,
                     "retrieval_activation": retrieval_activation,
@@ -477,6 +505,7 @@ async def build_memory_packet(
         packet_claims = [
             {
                 "claim_id": str(item["claim_id"]),
+                "predicate": item["predicate"],
                 "text": item["text"],
                 "status": item["status"],
                 "confidence": item["confidence"],
@@ -502,6 +531,7 @@ async def build_memory_packet(
             "intent": intent,
             "domain": domain,
             "claims": packet_claims,
+            "allowed_predicates": sorted(normalized_allowed_predicates),
             "selected_count": len(packet_claims),
             "candidate_count": len(candidate_ids),
             "visible_candidate_count": len(visible_ids),

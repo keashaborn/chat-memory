@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v6"
+VERSION = "memory_intent_adapter_v7"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -279,6 +279,11 @@ PET_PROFILE_QUERY_RE = re.compile(
     r"(?:breed|sex|gender|name|type|kind)\b)|"
     r"^(?:do|did) i (?:have|own) (?:a |an |the )?(?:pet|dog|cat)\b)"
 )
+PET_BREED_ASSERTION_RE = re.compile(
+    r"^(?:is|was) (?:my |the )?"
+    r"(?:pet|dog|cat|neko|nemo|dahlia|helsing)(?:'s|’s)? "
+    r"(?:a|an)\b"
+)
 NAMED_PERSONAL_TERMS = (
     "neko",
     "nemo",
@@ -441,6 +446,29 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             return {"eligible": False, "reason": "information_providing_turn"}
         return {"eligible": False, "reason": "unclassified_domain"}
 
+    allowed_predicates: list[str] = []
+    if domain == "pet_loss":
+        allowed_predicates = ["personal_event.occurred"]
+    elif domain == "pet_profile":
+        if re.match(r"^(?:do|did) i (?:have|own)\b", text):
+            allowed_predicates.append("relationship.has_pet")
+        if re.search(r"\b(?:sex|gender|male|female)\b", text):
+            allowed_predicates.append("pet.sex")
+        if re.search(r"\bname\b", text):
+            allowed_predicates.append("identity.name")
+        if (
+            re.search(r"\b(?:breed|type|kind)\b", text)
+            or PET_BREED_ASSERTION_RE.search(text)
+        ):
+            allowed_predicates.append("pet.breed")
+        if not allowed_predicates:
+            allowed_predicates = [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ]
+
     entity_hints: list[str] = []
     if domain in {"pet_loss", "pet_profile"}:
         if "neko" in text or "nemo" in text:
@@ -468,6 +496,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             or pet_profile_recall
         ),
         "entity_hints": entity_hints,
+        "allowed_predicates": allowed_predicates,
     }
 
 
