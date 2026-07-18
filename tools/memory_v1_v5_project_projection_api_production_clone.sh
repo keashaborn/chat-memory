@@ -9,10 +9,13 @@ compose=(docker compose -p memoryv1v5projectprojectionclone \
 migration=ops/sql/20260718_memory_v1_v5_project_projection_api.sql
 rollback=ops/sql/20260718_memory_v1_v5_project_projection_api_rollback.sql
 backup=$(mktemp /tmp/memory-v1-v5-project-projection.XXXXXX.dump)
+snapshot_dir=$(mktemp -d /tmp/memory-v1-v5-project-projection-snapshots.XXXXXX)
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
   rm -f "$backup"
+  find "$snapshot_dir" -type f -delete
+  rmdir "$snapshot_dir"
 }
 trap cleanup EXIT
 chmod 0600 "$backup"
@@ -47,6 +50,11 @@ printf '%s\n' \
 
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
+
+MEMORY_V1_PROJECT_ENTAILMENT_APPLY=authorized \
+MEMORY_V1_DB_CONTAINER=memoryv1v5projectprojectionclone-postgres-1 \
+MEMORY_V1_SNAPSHOT_DIR="$snapshot_dir" \
+"$repo_root/tools/memory_v1_project_observation_entailment_apply.sh"
 
 [[ "$(scalar "SELECT count(*) FROM pg_proc WHERE oid IN (
   'memory.preflight_project_projection_source_v5(uuid)'::regprocedure,
@@ -86,16 +94,6 @@ OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER = "557ea042-cb82-48f8-9429-472e96c957ef"
 OBSERVATION = "258d8d96-2cbd-4296-b878-769c90533fae"
 PLAN = "758d8d96-2cbd-4296-b878-769c90533fae"
-ENTAILMENT_REQUEST = "29beddb5-e645-52b9-af9b-2dbe74313d9a"
-ENTAILMENT_MANIFEST = "6154ba22e45d7f4bc12a27688fb3f5eb38f9cc5cf0fda1c1e2f2141c71a9e089"
-ENTAILMENT_SPANS = json.dumps(
-    [{
-        "start": 47,
-        "end": 140,
-        "span_sha256": "37333a4515d5b148abb3222e31d7966b56160f112bc20c2ad0847e777b29fafd",
-    }],
-    separators=(",", ":"),
-)
 
 
 async def main():
@@ -104,19 +102,6 @@ async def main():
         transaction = conn.transaction()
         await transaction.start()
         await conn.execute("SELECT set_config('app.user_id',$1,true)", OWNER)
-        entailment = await conn.fetchrow(
-            """SELECT * FROM memory.record_observation_entailment_v5(
-                $1,$2,'accepted'::memory.observation_entailment_decision_v5,
-                'predicate_entailment_v5_1_accepted',$3::jsonb,
-                'system','memory_v1_predicate_entailment_v5_1',$4
-            )""",
-            uuid.UUID(ENTAILMENT_REQUEST),
-            uuid.UUID(OBSERVATION),
-            ENTAILMENT_SPANS,
-            ENTAILMENT_MANIFEST,
-        )
-        assert entailment["outcome"] == "applied"
-        assert entailment["rows_written"] == 2
         row = await conn.fetchrow(
             "SELECT * FROM memory.preflight_project_projection_source_v5($1)",
             uuid.UUID(OBSERVATION),

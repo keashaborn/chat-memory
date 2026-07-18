@@ -232,10 +232,11 @@ DO $cross_owner$
 BEGIN
   BEGIN
     PERFORM * FROM memory.preflight_observation_entailment_v5(
-      :'observation'::uuid,
+      '258d8d96-2cbd-4296-b878-769c90533fae'::uuid,
       'accepted'::memory.observation_entailment_decision_v5,
-      'predicate_entailment_v5_1_accepted',:'spans'::jsonb,
-      'system',:'assessor_ref'
+      'predicate_entailment_v5_1_accepted',
+      '[{"start":47,"end":140,"span_sha256":"37333a4515d5b148abb3222e31d7966b56160f112bc20c2ad0847e777b29fafd"}]'::jsonb,
+      'system','memory_v1_predicate_entailment_v5_1'
     );
     RAISE EXCEPTION 'cross-owner entailment preflight unexpectedly succeeded';
   EXCEPTION WHEN SQLSTATE 'P0002' THEN
