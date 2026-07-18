@@ -58,6 +58,11 @@ scalar() {
     -U sage -d memory -c "$1" | tr -d '[:space:]'
 }
 
+query_rows() {
+  "${compose[@]}" exec -T postgres psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U sage -d memory -c "$1"
+}
+
 capture_authority_state() {
   local output=$1
   : >"$output"
@@ -72,7 +77,7 @@ capture_authority_state() {
       ) AS rows
     ")
     printf '%s\t%s\t%s\n' "$schema" "$table" "$state" >>"$output"
-  done < <(scalar "
+  done < <(query_rows "
     SELECT table_schema || E'\\t' || table_name
     FROM information_schema.tables
     WHERE table_type='BASE TABLE'
