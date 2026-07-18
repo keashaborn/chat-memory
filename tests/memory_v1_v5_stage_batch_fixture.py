@@ -17,6 +17,7 @@ OWNER_A = "11111111-1111-4111-8111-111111111111"
 OWNER_B = "22222222-2222-4222-8222-222222222222"
 SELF_A = "a1111111-1111-4111-8111-111111111111"
 CONFIRMATION = "STAGE_REVIEWED_OWNER_V5_PACKETS_ONLY"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def arguments() -> argparse.Namespace:
@@ -42,6 +43,28 @@ def digest(value: str | bytes) -> str:
 
 
 def secure_write(path: Path, value: dict[str, Any]) -> str:
+    if value.get("contract_version") == "memory_v1_v5_stage_preflight_v1":
+        value = dict(value)
+        report_path = path.with_name(f"{path.stem}-source-review.json")
+        report_sha = secure_write(
+            report_path,
+            {
+                "contract_version": "memory_v1_v5_stage_fixture_review_v1",
+                "case_id": value["case_id"],
+            },
+        )
+        value["source_report"] = {
+            "path": str(report_path),
+            "sha256": report_sha,
+        }
+        value["schemas"] = {
+            "extraction_sha256": digest(
+                (ROOT / "specs/memory_v1_relational_extraction_v5.schema.json").read_bytes()
+            ),
+            "resolution_sha256": digest(
+                (ROOT / "specs/memory_v1_entity_resolution_review_v5.schema.json").read_bytes()
+            ),
+        }
     raw = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "wb") as stream:

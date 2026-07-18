@@ -12,6 +12,7 @@ import uuid
 from scripts.memory_v1_v5_stage_batch import (
     StageBatchError,
     apply_once,
+    expected_schema_hashes,
     load_manifest,
     stable_json,
 )
@@ -143,7 +144,17 @@ class StageBatchTest(unittest.TestCase):
 
     def manifest(self, *, owner=OWNER, bundle_owner=OWNER, counts=None):
         bundle_path = self.root / "bundle.json"
-        bundle_sha = write_secure(bundle_path, empty_bundle(bundle_owner))
+        report_path = self.root / "source-review.json"
+        report_sha = write_secure(
+            report_path, {"contract_version": "unit_source_review_v1"}
+        )
+        bundle = empty_bundle(bundle_owner)
+        bundle["source_report"] = {
+            "path": str(report_path),
+            "sha256": report_sha,
+        }
+        bundle["schemas"] = expected_schema_hashes()
+        bundle_sha = write_secure(bundle_path, bundle)
         manifest = {
             "contract_version": "memory_v1_v5_stage_batch_manifest_v1",
             "target_server": "seebx",
@@ -167,6 +178,21 @@ class StageBatchTest(unittest.TestCase):
         manifest_path = self.root / "manifest.json"
         write_secure(manifest_path, manifest)
         return manifest_path
+
+    def rewrite_bundle(self, manifest_path, mutator):
+        manifest = json.loads(manifest_path.read_text())
+        bundle_path = Path(manifest["bundles"][0]["path"])
+        bundle = json.loads(bundle_path.read_text())
+        mutator(bundle)
+        manifest["bundles"][0]["sha256"] = write_secure(bundle_path, bundle)
+        write_secure(manifest_path, manifest)
+
+    def test_manifest_rejects_changed_source_report(self):
+        manifest = self.manifest()
+        report_path = self.root / "source-review.json"
+        write_secure(report_path, {"contract_version": "tampered"})
+        with self.assertRaisesRegex(StageBatchError, "source report content hash"):
+            load_manifest(str(manifest), root=self.root)
 
     def test_manifest_accepts_empty_audited_outcome(self):
         metadata, bundles, _, _ = load_manifest(
@@ -228,6 +254,43 @@ class StageBatchTest(unittest.TestCase):
         write_secure(manifest_path, manifest)
         with self.assertRaisesRegex(StageBatchError, "outside"):
             load_manifest(str(manifest_path), root=self.root)
+
+    def test_manifest_rejects_unbound_schema_hash(self):
+        manifest = self.manifest()
+        self.rewrite_bundle(
+            manifest,
+            lambda bundle: bundle["schemas"].__setitem__(
+                "extraction_sha256", "0" * 64
+            ),
+        )
+        with self.assertRaisesRegex(StageBatchError, "checked-in contracts"):
+            load_manifest(str(manifest), root=self.root)
+
+    def test_manifest_rejects_false_resolution_summary(self):
+        manifest = self.manifest()
+        self.rewrite_bundle(
+            manifest,
+            lambda bundle: bundle["resolution_summary"].__setitem__(
+                "deferred", 1
+            ),
+        )
+        with self.assertRaisesRegex(StageBatchError, "differs from resolution packet"):
+            load_manifest(str(manifest), root=self.root)
+
+    def test_manifest_rejects_false_internal_packet_hash(self):
+        manifest = self.manifest()
+
+        def mutate(bundle):
+            resolution = json.loads(bundle["resolution_packet_text"])
+            resolution["packet_sha256"] = "0" * 64
+            bundle["resolution_packet_text"] = stable_json(resolution)
+            bundle["resolution_packet_sha256"] = digest(
+                bundle["resolution_packet_text"]
+            )
+
+        self.rewrite_bundle(manifest, mutate)
+        with self.assertRaisesRegex(StageBatchError, "internal hash"):
+            load_manifest(str(manifest), root=self.root)
 
     def test_apply_sets_actor_and_owner_lock(self):
         row = {

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 import datetime as dt
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -17,6 +19,12 @@ from typing import Any
 import uuid
 
 import asyncpg
+
+from scripts.memory_v1_v5_stage_preflight import (
+    _schema_hash,
+    _validate_extraction_packet,
+    _validate_resolution_packet,
+)
 
 
 MANIFEST_CONTRACT = "memory_v1_v5_stage_batch_manifest_v1"
@@ -182,6 +190,62 @@ def exact_object(value: Any, keys: set[str], field: str) -> dict[str, Any]:
     return value
 
 
+@lru_cache(maxsize=1)
+def expected_schema_hashes() -> dict[str, str]:
+    root = Path(__file__).resolve().parents[1]
+    return {
+        "extraction_sha256": _schema_hash(
+            root / "specs/memory_v1_relational_extraction_v5.schema.json"
+        ),
+        "resolution_sha256": _schema_hash(
+            root / "specs/memory_v1_entity_resolution_review_v5.schema.json"
+        ),
+    }
+
+
+def validate_packet_integrity(
+    extraction: dict[str, Any], resolution: dict[str, Any]
+) -> None:
+    try:
+        _validate_extraction_packet(extraction)
+        _validate_resolution_packet(resolution, extraction)
+    except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+        raise StageBatchError(f"bundle packet validation failed: {exc}") from exc
+    resolution_body = {
+        key: value
+        for key, value in resolution.items()
+        if key != "packet_sha256"
+    }
+    if resolution["packet_sha256"] != sha256_text(stable_json(resolution_body)):
+        raise StageBatchError("resolution packet internal hash mismatch")
+
+
+def validated_resolution_summary(
+    value: Any, resolution: dict[str, Any]
+) -> dict[str, int]:
+    summary = exact_object(
+        value,
+        {"auto_link_eligible", "manual_review_required", "deferred", "rejected"},
+        "resolution_summary",
+    )
+    if any(
+        not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < 0
+        for count in summary.values()
+    ):
+        raise StageBatchError("resolution summary counts are invalid")
+    states = Counter(item["decision_state"] for item in resolution["resolutions"])
+    unknown = set(states) - set(summary)
+    if unknown:
+        raise StageBatchError("resolution summary contains an unknown decision state")
+    expected = {key: states.get(key, 0) for key in summary}
+    if summary != expected:
+        raise StageBatchError("resolution summary differs from resolution packet")
+    return summary
+
+
+
 def packet_source(packet: dict[str, Any], field: str) -> dict[str, Any]:
     source = exact_object(packet.get("source_envelope"), SOURCE_KEYS, field)
     if source["source_system"] != "public.chat_log":
@@ -307,6 +371,7 @@ def load_bundle(
         != "memory_predicate_registry_v5"
     ):
         raise StageBatchError("bundle packet contract is invalid")
+    validate_packet_integrity(extraction, resolution)
     source = packet_source(extraction, "extraction source")
     if packet_source(resolution, "resolution source") != source:
         raise StageBatchError("extraction and resolution sources differ")
@@ -315,19 +380,20 @@ def load_bundle(
         raise StageBatchError(
             f"bundle expected counts differ from packet structure: {path}"
         )
-    exact_object(
-        value["resolution_summary"],
-        {"auto_link_eligible", "manual_review_required", "deferred", "rejected"},
-        "resolution_summary",
-    )
+    validated_resolution_summary(value["resolution_summary"], resolution)
     schemas = exact_object(
         value["schemas"], {"extraction_sha256", "resolution_sha256"}, "schemas"
     )
-    if not all(sha256_valid(schemas[key]) for key in schemas):
-        raise StageBatchError("bundle schema hashes are invalid")
-    exact_object(value["source_report"], {"path", "sha256"}, "source_report")
-    if not sha256_valid(value["source_report"]["sha256"]):
+    if schemas != expected_schema_hashes():
+        raise StageBatchError("bundle schemas differ from checked-in contracts")
+    source_report = exact_object(
+        value["source_report"], {"path", "sha256"}, "source_report"
+    )
+    if not sha256_valid(source_report["sha256"]):
         raise StageBatchError("source report SHA-256 is invalid")
+    source_report_path = secure_input(source_report["path"], root=root)
+    if sha256_file(source_report_path) != source_report["sha256"]:
+        raise StageBatchError("source report content hash mismatch")
     return {
         "path": str(path),
         "sha256": spec["sha256"],
