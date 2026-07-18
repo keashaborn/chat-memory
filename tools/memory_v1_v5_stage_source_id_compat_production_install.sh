@@ -65,6 +65,9 @@ restore_timers() {
 
 record_exit() {
   exit_code=$?
+  if [[ "$exit_code" -eq 0 && "$phase" != complete ]]; then
+    exit_code=1
+  fi
   restore_timers || exit_code=1
   rm -f "$unit_state" "$table_list"
   if [[ -n "$status_file" ]]; then
@@ -254,3 +257,11 @@ jq -n \
       rollback_only_security_test:true,memory_rows_unchanged:true,
       qdrant_unchanged:true,timers_restored:true,external_model_calls:0},
     hard_stop:"before_relational_staging_apply_or_entity_resolution_or_projection_or_live_retrieval"}' \
+  >"$report"
+chmod 0600 "$report"
+sha256sum "$report" >"$report.sha256"
+chmod 0600 "$report.sha256"
+
+phase=complete
+printf '%s\n' 'memory_v1_v5_stage_source_id_compat_production_install: PASS'
+printf 'report=%s\nbackup=%s\n' "$report" "$backup"
