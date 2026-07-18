@@ -11,6 +11,7 @@ import socket
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -86,6 +87,15 @@ def canonical_source_external_id(
 
 def stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def loopback_dsn(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise RuntimeError("local canary database DSN scheme is invalid")
+    if parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+        raise RuntimeError("local canary database DSN must be loopback-only")
+    return value
 
 
 def arguments() -> argparse.Namespace:
@@ -447,7 +457,9 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
-    conn = await asyncpg.connect(dsn, command_timeout=args.lease_seconds)
+    conn = await asyncpg.connect(
+        loopback_dsn(dsn), command_timeout=args.lease_seconds, ssl=False
+    )
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("local inference canary requires brains_app session")

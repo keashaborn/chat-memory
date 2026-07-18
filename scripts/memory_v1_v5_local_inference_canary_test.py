@@ -5,6 +5,7 @@ import uuid
 
 from scripts.memory_v1_v5_local_inference_canary import (
     canonical_source_external_id,
+    loopback_dsn,
 )
 
 
@@ -26,6 +27,20 @@ def main() -> int:
         evidence_id=evidence_id,
     ) != str(evidence_id):
         raise AssertionError("absent source IDs must bind to evidence UUID")
+    if loopback_dsn("postgresql://user@127.0.0.1:5432/memory") != (
+        "postgresql://user@127.0.0.1:5432/memory"
+    ):
+        raise AssertionError("loopback database DSN changed")
+    for invalid_dsn in (
+        "postgresql://user@10.0.0.1:5432/memory",
+        "https://127.0.0.1/memory",
+    ):
+        try:
+            loopback_dsn(invalid_dsn)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("non-loopback database DSN was accepted")
     print("memory_v1_v5_local_inference_canary_test: PASS")
     return 0
 
