@@ -1,24 +1,24 @@
 [Unit]
-Description=Memory V1 private tunnel from seebx through RESSE to GPU inference
+Description=Memory V1 private tunnel from RESSE to Resse-Train GPU inference
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=memory-v1-local-tunnel
-Group=memory-v1-local-tunnel
+User=memory-v1-gpu-tunnel
+Group=memory-v1-gpu-tunnel
 UMask=0077
 ExecStart=/usr/bin/ssh -NT \
-  -i /etc/memory-v1-local-inference/tunnel_ed25519 \
-  -o UserKnownHostsFile=/etc/memory-v1-local-inference/known_hosts \
+  -i /etc/memory-v1-gpu-tunnel/id_ed25519 \
+  -o UserKnownHostsFile=/etc/memory-v1-gpu-tunnel/known_hosts \
   -o StrictHostKeyChecking=yes \
   -o BatchMode=yes \
   -o IdentitiesOnly=yes \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:18080:127.0.0.1:18081 \
-  memory-v1-tunnel@172.31.44.129
+  -L 127.0.0.1:18081:127.0.0.1:18080 \
+  memory-v1-gpu-tunnel@172.31.44.27
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=30s
@@ -46,7 +46,7 @@ RestrictRealtime=true
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressDeny=any
-IPAddressAllow=172.31.44.129
+IPAddressAllow=172.31.44.27
 IPAddressAllow=localhost
 TasksMax=64
 
