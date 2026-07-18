@@ -75,7 +75,7 @@ INSERT INTO memory.evidence(
     'aeeeeeee-1111-4111-8111-111111111112',
     '11111111-1111-4111-8111-111111111111',
     'user_statement','public.chat_log',
-    'aaaaaaaa-0002-4000-8000-000000000002',
+    'chat_log:aaaaaaaa-0002-4000-8000-000000000002:span:synthetic',
     'My name is Avery.',
     '3f55b194db3ae03b7100b9e8f572ab254f43bed87b151c3a5e0015163374d2aa',
     '2026-07-16T12:01:00Z','2026-07-16T12:01:00Z',1,1,

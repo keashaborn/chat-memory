@@ -16,6 +16,8 @@ component_migration=ops/sql/20260717_memory_v1_v5_project_components.sql
 preflight_migration=ops/sql/20260716_memory_v1_v5_stage_preflight_api.sql
 preflight_rollback=ops/sql/20260716_memory_v1_v5_stage_preflight_api_rollback.sql
 preflight_test=tests/memory_v1_v5_stage_preflight_api.sql
+source_id_migration=ops/sql/20260718_memory_v1_v5_stage_source_id_compat.sql
+source_id_rollback=ops/sql/20260718_memory_v1_v5_stage_source_id_compat_rollback.sql
 seed_sql=tests/memory_v1_v5_stage_batch_seed.sql
 runner=scripts/memory_v1_v5_stage_batch.py
 fixture=tests/memory_v1_v5_stage_batch_fixture.py
@@ -70,6 +72,8 @@ run_sql <"$component_migration"
 run_sql <"$preflight_migration"
 run_sql <"$preflight_migration"
 run_sql <"$preflight_test"
+run_sql <"$source_id_migration"
+run_sql <"$source_id_migration"
 run_sql <"$seed_sql"
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test"
