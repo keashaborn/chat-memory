@@ -19,6 +19,7 @@ target_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 target_job=16c36c01-f052-4a49-abbb-cfb2a47b50d4
 target_evidence=00614247-c79d-5c63-9c37-d53419118b06
 target_content_sha=6886231333bed756f3643f81acecf3644c69b5e3f6ffc07f6b8edbaadf83f3c7
+target_retry_operation=20000000-0000-4000-8000-000000000001
 target_run=bd4a7d2a-bb65-4cb6-88b9-08b37e47b184
 container=brains-postgres-1
 database=memory
@@ -123,20 +124,39 @@ phase=preflight
   SELECT 1
   FROM memory.evidence_extraction_job AS job
   JOIN memory.evidence AS evidence USING(owner_user_id,evidence_id)
-  JOIN memory.v5_local_inference_event AS event
-    ON event.owner_user_id=job.owner_user_id AND event.job_id=job.job_id
   WHERE job.owner_user_id='$target_owner'::uuid
     AND job.job_id='$target_job'::uuid
     AND job.evidence_id='$target_evidence'::uuid
     AND job.evidence_content_sha256='$target_content_sha'
-    AND job.status='skipped' AND job.attempts=1
+    AND job.status='pending' AND job.attempts=1
     AND job.lease_token IS NULL AND job.lease_expires_at IS NULL
-    AND job.last_error='local_inference_rejected: local_transport_timeout'
+    AND job.last_error IS NULL
     AND evidence.status='active'
-    AND event.action='completed' AND event.run_id='$target_run'::uuid
-    AND event.outcome='rejected'
-    AND event.rejection_code='local_transport_timeout'
-    AND event.local_model_calls=1 AND event.external_model_calls=0
+    AND EXISTS (
+      SELECT 1
+      FROM memory.v5_local_inference_event AS event
+      WHERE event.owner_user_id=job.owner_user_id
+        AND event.job_id=job.job_id
+        AND event.action='completed'
+        AND event.run_id='$target_run'::uuid
+        AND event.outcome='rejected'
+        AND event.rejection_code='local_transport_timeout'
+        AND event.local_model_calls=1
+        AND event.external_model_calls=0
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM memory.evidence_extraction_event AS retry
+      WHERE retry.owner_user_id=job.owner_user_id
+        AND retry.job_id=job.job_id
+        AND retry.operation_id='$target_retry_operation'::uuid
+        AND retry.event_type='queued'
+        AND retry.from_status='skipped'
+        AND retry.to_status='pending'
+        AND retry.actor_type='admin'
+        AND retry.actor_ref='local_transport_retry'
+        AND retry.details->>'rejection_code'='local_transport_timeout'
+    )
 ) AND NOT EXISTS (
   SELECT 1 FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid
