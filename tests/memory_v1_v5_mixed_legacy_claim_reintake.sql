@@ -57,6 +57,7 @@ SELECT set_config(
   true
 );
 SELECT set_config('test.owner_b',:'owner_b',true);
+SELECT set_config('test.owner_a',:'owner_a',true);
 
 SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id',:'owner_a',true);
@@ -153,15 +154,15 @@ BEGIN
   FROM (
     SELECT 'head|' || to_jsonb(head)::text AS value
     FROM memory.user_preference AS head
-    WHERE head.owner_user_id=:'owner_a'::uuid
+    WHERE head.owner_user_id=current_setting('test.owner_a')::uuid
     UNION ALL
     SELECT 'revision|' || to_jsonb(revision)::text
     FROM memory.preference_revision AS revision
-    WHERE revision.owner_user_id=:'owner_a'::uuid
+    WHERE revision.owner_user_id=current_setting('test.owner_a')::uuid
     UNION ALL
     SELECT 'evidence|' || to_jsonb(link)::text
     FROM memory.preference_revision_evidence AS link
-    WHERE link.owner_user_id=:'owner_a'::uuid
+    WHERE link.owner_user_id=current_setting('test.owner_a')::uuid
   ) AS values;
   IF current_signature<>current_setting('test.preference_signature') THEN
     RAISE EXCEPTION 'mixed reintake modified the preference lane';
