@@ -224,6 +224,98 @@ create index plan_revision_events_revision_idx
     owner_user_id, plan_revision_id, id
   );
 
+create table lifeswitch_agentic.command_receipts (
+  owner_user_id uuid not null,
+  command_name text not null
+    check (command_name ~ '^[a-z0-9_.]{1,80}$'),
+  idempotency_key text not null
+    check (
+      char_length(idempotency_key) between 1 and 128
+      and idempotency_key ~ '^[!-~]+$'
+    ),
+  request_sha256 text not null
+    check (request_sha256 ~ '^[0-9a-f]{64}$'),
+  state text not null check (state in ('started', 'completed')),
+  response jsonb,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz,
+  primary key (owner_user_id, command_name, idempotency_key),
+  check (response is null or jsonb_typeof(response) = 'object'),
+  check (
+    (state = 'started' and response is null and completed_at is null)
+    or
+    (state = 'completed' and response is not null and completed_at is not null)
+  )
+);
+
+create table lifeswitch_agentic.outbox_events (
+  id uuid primary key,
+  owner_user_id uuid not null,
+  aggregate_type text not null
+    check (aggregate_type ~ '^[a-z0-9_.]{1,80}$'),
+  aggregate_id uuid not null,
+  event_type text not null
+    check (event_type ~ '^[a-z0-9_.]{1,120}$'),
+  event_version integer not null check (event_version > 0),
+  payload jsonb not null check (
+    jsonb_typeof(payload) = 'object'
+    and octet_length(payload::text) <= 16384
+  ),
+  occurred_at timestamptz not null default now(),
+  available_at timestamptz not null default now(),
+  claimed_by text,
+  claim_token uuid,
+  claim_expires_at timestamptz,
+  attempt_count integer not null default 0 check (attempt_count >= 0),
+  handled_at timestamptz,
+  last_error_code text check (
+    last_error_code is null
+    or last_error_code ~ '^[a-z0-9_.-]{1,120}$'
+  ),
+  request_id text,
+  check (
+    (
+      claimed_by is null
+      and claim_token is null
+      and claim_expires_at is null
+    )
+    or
+    (
+      claimed_by is not null
+      and char_length(claimed_by) between 1 and 160
+      and claim_token is not null
+      and claim_expires_at is not null
+    )
+  ),
+  check (
+    handled_at is null
+    or (
+      claimed_by is null
+      and claim_token is null
+      and claim_expires_at is null
+    )
+  )
+);
+
+create index outbox_events_pending_idx
+  on lifeswitch_agentic.outbox_events (available_at, id)
+  where handled_at is null;
+
+create index outbox_events_expired_claim_idx
+  on lifeswitch_agentic.outbox_events (claim_expires_at)
+  where handled_at is null and claimed_by is not null;
+
+create table lifeswitch_agentic.outbox_deliveries (
+  outbox_event_id uuid not null
+    references lifeswitch_agentic.outbox_events (id) on delete restrict,
+  consumer_name text not null
+    check (consumer_name ~ '^[a-z0-9_.-]{1,120}$'),
+  handler_version text not null
+    check (handler_version ~ '^[a-zA-Z0-9_.-]{1,80}$'),
+  delivered_at timestamptz not null default now(),
+  primary key (outbox_event_id, consumer_name, handler_version)
+);
+
 alter table lifeswitch_agentic.plan_versions
   add constraint plan_versions_source_revision_fkey
   foreign key (owner_user_id, source_revision_id)
@@ -317,6 +409,75 @@ begin
 end;
 $$;
 
+create function lifeswitch_agentic.protect_command_receipt()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception '% is history-preserving',
+      tg_table_schema || '.' || tg_table_name
+      using errcode = '55000';
+  end if;
+
+  if old.state = 'started'
+     and new.state = 'completed'
+     and old.owner_user_id = new.owner_user_id
+     and old.command_name = new.command_name
+     and old.idempotency_key = new.idempotency_key
+     and old.request_sha256 = new.request_sha256
+     and old.response is null
+     and new.response is not null
+     and old.completed_at is null
+     and new.completed_at is not null
+     and old.created_at = new.created_at then
+    return new;
+  end if;
+
+  raise exception 'invalid command receipt mutation'
+    using errcode = '55000';
+end;
+$$;
+
+create function lifeswitch_agentic.protect_outbox_event()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception '% is history-preserving',
+      tg_table_schema || '.' || tg_table_name
+      using errcode = '55000';
+  end if;
+
+  if old.handled_at is null
+     and new.id = old.id
+     and new.owner_user_id = old.owner_user_id
+     and new.aggregate_type = old.aggregate_type
+     and new.aggregate_id = old.aggregate_id
+     and new.event_type = old.event_type
+     and new.event_version = old.event_version
+     and new.payload = old.payload
+     and new.occurred_at = old.occurred_at
+     and new.request_id is not distinct from old.request_id
+     and new.attempt_count >= old.attempt_count then
+    if new.handled_at is not null
+       and not exists (
+         select 1
+         from lifeswitch_agentic.outbox_deliveries delivery
+         where delivery.outbox_event_id = old.id
+       ) then
+      raise exception 'outbox event requires durable delivery before completion'
+        using errcode = '55000';
+    end if;
+    return new;
+  end if;
+
+  raise exception 'invalid outbox event mutation'
+    using errcode = '55000';
+end;
+$$;
+
 create trigger plan_versions_protect_history
 before update or delete on lifeswitch_agentic.plan_versions
 for each row
@@ -334,6 +495,21 @@ execute function lifeswitch_agentic.reject_immutable_mutation();
 
 create trigger plan_revision_changes_append_only
 before update or delete on lifeswitch_agentic.plan_revision_changes
+for each row
+execute function lifeswitch_agentic.reject_immutable_mutation();
+
+create trigger command_receipts_protect_history
+before update or delete on lifeswitch_agentic.command_receipts
+for each row
+execute function lifeswitch_agentic.protect_command_receipt();
+
+create trigger outbox_events_protect_payload
+before update or delete on lifeswitch_agentic.outbox_events
+for each row
+execute function lifeswitch_agentic.protect_outbox_event();
+
+create trigger outbox_deliveries_append_only
+before update or delete on lifeswitch_agentic.outbox_deliveries
 for each row
 execute function lifeswitch_agentic.reject_immutable_mutation();
 

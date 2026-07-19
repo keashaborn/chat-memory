@@ -43,6 +43,9 @@ class PlanMigrationContractTest(unittest.TestCase):
             "plan_revisions",
             "plan_revision_changes",
             "plan_revision_events",
+            "command_receipts",
+            "outbox_events",
+            "outbox_deliveries",
         ):
             with self.subTest(table=table):
                 self.assertRegex(
@@ -86,6 +89,25 @@ class PlanMigrationContractTest(unittest.TestCase):
         self.assertIn("base_plan_version_id is null", self.lower)
         self.assertIn("'owner_approval'", self.lower)
         self.assertIn("activated_by_actor_user_id is not null", self.lower)
+
+    def test_idempotency_and_crash_safe_outbox_contracts_exist(self) -> None:
+        self.assertIn("primary key (owner_user_id, command_name, idempotency_key)", self.lower)
+        self.assertIn("command_receipts_protect_history", self.lower)
+        self.assertIn("request_sha256", self.lower)
+        for field in (
+            "claimed_by",
+            "claim_token",
+            "claim_expires_at",
+            "attempt_count",
+            "handled_at",
+            "last_error_code",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, self.lower)
+        self.assertIn("outbox_events_pending_idx", self.lower)
+        self.assertIn("outbox_events_expired_claim_idx", self.lower)
+        self.assertIn("outbox_events_protect_payload", self.lower)
+        self.assertIn("outbox_deliveries_append_only", self.lower)
 
 
 if __name__ == "__main__":
