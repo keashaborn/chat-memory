@@ -81,7 +81,7 @@ capture_protected_state() {
       continue
     fi
     [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]]
-    [[ "$has_owner" == t || "$has_owner" == f ]]
+    [[ "$has_owner" == true || "$has_owner" == false ]]
     state=$(psql_scalar "
       SELECT count(*)::text || E'\\t' || encode(public.digest(convert_to(
         coalesce(string_agg(row_json,E'\\n' ORDER BY row_json),''),
@@ -101,9 +101,9 @@ capture_non_target_state() {
   : >"$output"
   while IFS=$'\t' read -r table has_owner; do
     [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]]
-    [[ "$has_owner" == t || "$has_owner" == f ]]
+    [[ "$has_owner" == true || "$has_owner" == false ]]
     predicate=true
-    if [[ "$has_owner" == t ]]; then
+    if [[ "$has_owner" == true ]]; then
       predicate="owner_user_id <> '$owner'::uuid"
     fi
     state=$(psql_scalar "
