@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v3"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v4"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1078,6 +1078,16 @@ _RESIDENCE_RE = re.compile(
     r"\blive\s+in\s+(.+?)(?:[.!?]|$)",
     re.IGNORECASE,
 )
+_EXPLICIT_REPORTED_AGE_RE = re.compile(
+    r"\b(?:"
+    r"(?:my|his|her|their)\s+age\s+is|"
+    r"i\s+am|i['’]m|he\s+is|she\s+is|they\s+are|"
+    r"[A-Z][\w'’-]{0,79}\s+is"
+    r")\s+(?:about\s+|approximately\s+)?"
+    r"(?P<value>\d{1,3}(?:\.\d+)?)\s*"
+    r"(?P<unit>days?|months?|years?)\s+old\b",
+    re.IGNORECASE,
+)
 _PARENT_ROLE_RE = re.compile(
     r"\b(?:father|mother|parent|dad|mom)\b",
     re.IGNORECASE,
@@ -1482,6 +1492,26 @@ def _explicit_self_occupation_supported(content: str, value: Any) -> bool:
     )
 
 
+def _explicit_reported_age_supported(
+    content: str, object_value: dict[str, Any]
+) -> bool:
+    if object_value.get("kind") != "literal":
+        return False
+    value = object_value.get("value")
+    unit = object_value.get("unit")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if unit not in {"day", "month", "year"}:
+        return False
+    for match in _EXPLICIT_REPORTED_AGE_RE.finditer(content):
+        stated_unit = match.group("unit").casefold().rstrip("s")
+        if stated_unit != unit:
+            continue
+        if abs(float(match.group("value")) - float(value)) <= 1e-9:
+            return True
+    return False
+
+
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
@@ -1789,12 +1819,24 @@ def _compile_entity_links(
         item["predicate"]: item for item in registry["predicates"]
     }
     object_contracts = registry["object_contracts"]
+    invalid_contract_refs: set[str] = set()
+    invalid_age_refs: set[str] = set()
     for observation in observations:
         obj = observation["object"]
         rule = registry_rules.get(observation["predicate"])
-        if obj["kind"] != "literal" or rule is None:
+        if rule is None:
             continue
         contract = object_contracts[rule["object_contract"]]
+        if obj["kind"] != contract["kind"]:
+            invalid_contract_refs.add(observation["observation_ref"])
+            continue
+        if observation["predicate"] == "age.reported" and not (
+            _explicit_reported_age_supported(content, obj)
+        ):
+            invalid_age_refs.add(observation["observation_ref"])
+            continue
+        if obj["kind"] != "literal":
+            continue
         value_schema = contract.get("value_schema")
         if contract.get("kind") != "literal" or not isinstance(
             value_schema, dict
@@ -1804,6 +1846,8 @@ def _compile_entity_links(
             # schema for predicates whose object contract is an entity.
             continue
         allowed_values = value_schema.get("enum")
+        if obj["datatype"] == contract["datatype"]:
+            continue
         if (
             obj["datatype"] == "text"
             and contract["datatype"] == "enum"
@@ -1812,6 +1856,40 @@ def _compile_entity_links(
         ):
             obj["datatype"] = "enum"
             repairs.append("literal_datatype_to_registry_enum")
+            continue
+        invalid_contract_refs.add(observation["observation_ref"])
+
+    invalid_refs = invalid_contract_refs | invalid_age_refs
+    if invalid_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in invalid_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in invalid_refs
+        ]
+        if invalid_contract_refs:
+            repairs.append("unsupported_object_contract_deferred")
+        if invalid_age_refs:
+            repairs.append("age_requires_explicit_age_statement")
+        if not any(
+            item["reason_code"] == "insufficient_evidence"
+            for item in value["deferrals"]
+        ):
+            value["deferrals"].append(
+                {
+                    "reason_code": "insufficient_evidence",
+                    "memory_shape": "none",
+                    "source_spans": [_source_span(source)],
+                    "sensitivity": "low",
+                }
+            )
+        if not observations:
+            value["entity_mentions"] = []
+            value["comparison_hints"] = []
 
     compiled = ProviderPacket.model_validate(value)
     return compiled, tuple(sorted(set(repairs)))

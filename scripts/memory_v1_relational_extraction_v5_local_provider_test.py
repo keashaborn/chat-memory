@@ -201,29 +201,96 @@ def main() -> int:
         registry=registry,
         transport=StaticLocalStructuredTransport(result=mismatch_result),
     )
-    mismatch_compiled = mismatch_provider.extract(source)
-    if mismatch_compiled.observations[0].object.kind != "literal":
-        raise AssertionError("mismatched object contract was silently changed")
-    mismatch_validation_provider = LocalLlamaCppProvider(
-        model="qwen3-8b-local-extractor",
-        model_file_sha256=MODEL_FILE_SHA256,
-        runtime_revision="llama.cpp-b10066-86a9c79f8",
+    mismatch_validated = validate_and_normalize(
+        mismatch_provider,
+        source=source,
         registry=registry,
-        transport=StaticLocalStructuredTransport(result=mismatch_result),
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
     )
-    expect_value_error(
-        lambda: validate_and_normalize(
-            mismatch_validation_provider,
-            source=source,
+    if mismatch_validated.normalized_packet["observations"]:
+        raise AssertionError("mismatched object contract survived")
+    if (
+        "unsupported_object_contract_deferred"
+        not in mismatch_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("object contract deferral audit is missing")
+
+    for ordinal, (age_content, age_value, should_survive) in enumerate(
+        (
+            ("I am 45 years old.", 45, True),
+            (
+                "I have not worked as an engineer for fifteen years.",
+                15,
+                False,
+            ),
+        ),
+        start=3,
+    ):
+        age_source = TrustedExtractionSource.create(
+            job_id=f"00000000-0000-4000-8000-{ordinal:012d}",
+            source_system="public.chat_log",
+            source_external_id=(
+                f"10000000-0000-4000-8000-{ordinal:012d}"
+            ),
+            source_sha256=sha256_text(age_content),
+            source_recorded_at="2026-07-17T12:00:00+00:00",
+            content=age_content,
+        )
+        age_packet = deepcopy(raw)
+        age_span = {
+            "start": 0,
+            "end": len(age_content),
+            "quote": age_content,
+        }
+        age_packet["entity_mentions"][0]["source_spans"] = [age_span]
+        age_observation = age_packet["observations"][0]
+        age_observation["predicate"] = "age.reported"
+        age_observation["object"] = {
+            "kind": "literal",
+            "datatype": "number",
+            "value": age_value,
+            "unit": "year",
+            "approximate": False,
+        }
+        age_observation["source_spans"] = [age_span]
+        age_result = LocalStructuredResult(
+            response_id=f"local-age-{ordinal}",
+            model="qwen3-8b-local-extractor",
+            finish_reason="stop",
+            parsed=age_packet,
+            response_sha256=canonical_sha256(age_packet),
+            prompt_tokens=100,
+            completion_tokens=200,
+        )
+        age_provider = LocalLlamaCppProvider(
+            model="qwen3-8b-local-extractor",
+            model_file_sha256=MODEL_FILE_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=StaticLocalStructuredTransport(result=age_result),
+        )
+        age_validated = validate_and_normalize(
+            age_provider,
+            source=age_source,
             registry=registry,
             schema=schema,
             allowed_provider_versions={
                 LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
             },
             max_external_model_calls=0,
-        ),
-        "literal object for entity contract",
-    )
+        )
+        survived = bool(age_validated.normalized_packet["observations"])
+        if survived != should_survive:
+            raise AssertionError("explicit age support guard changed")
+        if not should_survive and (
+            "age_requires_explicit_age_statement"
+            not in age_provider.last_audit["compiler_repairs"]
+        ):
+            raise AssertionError("invalid age deferral audit is missing")
     invalid_raw = deepcopy(raw)
     invalid_raw["entity_mentions"] = "private source prose must not survive"
     invalid_result = LocalStructuredResult(
