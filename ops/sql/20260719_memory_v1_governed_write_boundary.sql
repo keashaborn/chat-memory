@@ -49,7 +49,10 @@ BEGIN
       FROM pg_proc
       WHERE oid = function_oid
         AND prosecdef
-        AND proconfig = ARRAY['search_path=pg_catalog']::text[]
+        AND proconfig IN (
+          ARRAY['search_path=pg_catalog']::text[],
+          ARRAY['search_path=""']::text[]
+        )
     ) THEN
       RAISE EXCEPTION 'controlled function % is not fail-closed', function_oid;
     END IF;
