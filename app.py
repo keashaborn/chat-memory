@@ -57,6 +57,13 @@ app.include_router(
         dsn=os.environ["POSTGRES_DSN"],
         people_schema=os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people"),
         legacy_plan_schema=os.getenv("LIFESWITCH_PLAN_SCHEMA", "lifeswitch_plan"),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        plan_recommendation_model=(
+            os.getenv("LIFESWITCH_PLAN_MODEL")
+            or os.getenv("OPENAI_CHAT_MODEL")
+            or os.getenv("VANTAGE_MODEL")
+            or "gpt-5.2"
+        ),
     ),
     prefix="/lifeswitch/plan",
 )

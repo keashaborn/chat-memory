@@ -8,10 +8,15 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .legacy_plan_adoption import LegacyPlanAdoptionResult, LegacyPlanAdoptionService
 from .plan_domain import PlanDocumentV1, PlanDomainError, RevisionState, RevisionTrigger
+from .plan_recommendations import (
+    PlanRecommendationError,
+    PlanRecommendationService,
+    RecommendationFocus,
+)
 from .plan_read_repository import (
     ActivePlanView,
     PlanReadRepository,
@@ -59,6 +64,11 @@ class SaveDraftRequest(StrictRequestModel):
     document: dict[str, Any]
 
 
+class PlanRecommendationRequest(StrictRequestModel):
+    focus: RecommendationFocus = "whole_plan"
+    user_request: str = Field(default="", max_length=1200)
+
+
 def _request_id(request: Request) -> str | None:
     value = getattr(request.state, "request_id", None)
     if value is None:
@@ -91,6 +101,7 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         "validation_version_stale",
         "active_plan_required",
         "no_plan_changes",
+        "revision_not_draft",
     }:
         status_code = 409
     elif error.code in {
@@ -127,6 +138,17 @@ def _internal_http_error() -> HTTPException:
             "code": "internal_error",
             "message": "The plan request could not be completed.",
             "retryable": True,
+        },
+    )
+
+
+def _recommendation_http_error(error: PlanRecommendationError) -> HTTPException:
+    return HTTPException(
+        status_code=503 if error.retryable else 422,
+        detail={
+            "code": error.code,
+            "message": str(error),
+            "retryable": error.retryable,
         },
     )
 
@@ -275,6 +297,7 @@ def create_plan_router(
     plan_repository: PlanRepository | None = None,
     read_repository: PlanReadRepository | None = None,
     legacy_adoption_service: LegacyPlanAdoptionService | None = None,
+    recommendation_service: PlanRecommendationService | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
@@ -394,6 +417,52 @@ def create_plan_router(
             return {"revision": _revision_review(view, context)}
         except PlanDomainError as error:
             raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/revisions/{revision_id}/recommendations")
+    async def review_draft_with_sage(
+        revision_id: uuid.UUID,
+        body: PlanRecommendationRequest,
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:edit")
+            if recommendation_service is None:
+                raise PlanRecommendationError(
+                    "recommendation_provider_unavailable",
+                    "Sage Plan review is not configured.",
+                    retryable=True,
+                )
+            async with connection_provider() as conn:
+                view = await read_repo.get_revision_review(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    revision_id=revision_id,
+                )
+            if view is None:
+                raise PlanDomainError("entity_out_of_scope", "revision is unavailable")
+            if view.state != RevisionState.DRAFT.value:
+                raise PlanDomainError(
+                    "revision_not_draft",
+                    "Sage can review only an inactive draft revision",
+                )
+            document = PlanDocumentV1.from_mapping(view.proposed_document)
+            recommendation = await recommendation_service.review_draft(
+                document=document,
+                focus=body.focus,
+                user_request=body.user_request.strip(),
+            )
+            return {
+                "revision_id": str(view.revision_id),
+                "state": view.state,
+                "active_plan_changed": False,
+                "recommendation": recommendation,
+            }
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except PlanRecommendationError as error:
+            raise _recommendation_http_error(error) from error
         except asyncpg.PostgresError as error:
             raise _internal_http_error() from error
 

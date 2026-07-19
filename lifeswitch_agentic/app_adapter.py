@@ -11,6 +11,10 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .legacy_plan_adoption import LegacyPlanAdoptionService
 from .plan_api import ActorContext, create_plan_router
+from .plan_recommendations import (
+    OpenAIPlanRecommendationProvider,
+    PlanRecommendationService,
+)
 from .plan_repository import PlanRepository
 
 
@@ -149,13 +153,24 @@ def create_lifeswitch_plan_app_router(
     dsn: str,
     people_schema: str = "lifeswitch_people",
     legacy_plan_schema: str = "lifeswitch_plan",
+    openai_api_key: str | None = None,
+    plan_recommendation_model: str = "gpt-5.2",
 ) -> APIRouter:
     adapter = LifeSwitchPlanAppAdapter(dsn=dsn, people_schema=people_schema)
     plan_repository = PlanRepository()
+    recommendation_service = None
+    if str(openai_api_key or "").strip():
+        recommendation_service = PlanRecommendationService(
+            OpenAIPlanRecommendationProvider(
+                api_key=str(openai_api_key),
+                model=plan_recommendation_model,
+            )
+        )
     return create_plan_router(
         connection_provider=adapter.connection,
         actor_dependency=adapter.actor_context,
         plan_repository=plan_repository,
+        recommendation_service=recommendation_service,
         legacy_adoption_service=LegacyPlanAdoptionService(
             plan_repository=plan_repository,
             legacy_schema=legacy_plan_schema,

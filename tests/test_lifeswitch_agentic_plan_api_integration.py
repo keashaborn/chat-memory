@@ -13,6 +13,43 @@ import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
 from lifeswitch_agentic.plan_api import ActorContext, create_plan_router
+from lifeswitch_agentic.plan_recommendations import (
+    ModelEvidence,
+    ModelPlanReview,
+    ModelSuggestion,
+    PlanRecommendationService,
+    ProviderPlanReview,
+)
+
+
+class FakePlanRecommendationProvider:
+    async def review_plan(self, **_: Any) -> ProviderPlanReview:
+        return ProviderPlanReview(
+            output=ModelPlanReview(
+                summary="The goal can be stated more measurably.",
+                questions=[],
+                suggestions=[
+                    ModelSuggestion(
+                        field_path="/primary_goal",
+                        proposed_value=(
+                            "Reduce body-fat percentage to 16% while maintaining strength."
+                        ),
+                        rationale="This makes the intended outcome measurable.",
+                        evidence=[
+                            ModelEvidence(
+                                field_path="/phase_label",
+                                explanation="The phase label already identifies 16% body fat.",
+                            )
+                        ],
+                        confidence="high",
+                        data_sufficiency="sufficient",
+                    )
+                ],
+            ),
+            provider="fake",
+            model="fake-plan-model",
+            response_id="resp_api_test",
+        )
 
 
 def plan_document(*, calorie_lower: int = 1800) -> dict[str, Any]:
@@ -150,6 +187,9 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             create_plan_router(
                 connection_provider=connection_provider,
                 actor_dependency=actor_dependency,
+                recommendation_service=PlanRecommendationService(
+                    FakePlanRecommendationProvider()
+                ),
             ),
             prefix="/lifeswitch/plan",
         )
@@ -231,6 +271,7 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "/lifeswitch/plan/versions",
             "/lifeswitch/plan/versions/{plan_version_id}",
             "/lifeswitch/plan/revisions/{revision_id}",
+            "/lifeswitch/plan/revisions/{revision_id}/recommendations",
             "/lifeswitch/plan/revisions",
             "/lifeswitch/plan/revisions/adopt-current-profile",
             "/lifeswitch/plan/revisions/adopt-current-profile/refresh",
@@ -241,7 +282,11 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
         }
         self.assertTrue(expected.issubset(paths))
-        for model_name in ("CreateDraftRequest", "SaveDraftRequest"):
+        for model_name in (
+            "CreateDraftRequest",
+            "SaveDraftRequest",
+            "PlanRecommendationRequest",
+        ):
             properties = schema["components"]["schemas"][model_name]["properties"]
             for forbidden in (
                 "owner_user_id",
@@ -250,6 +295,53 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 "permission_scopes",
             ):
                 self.assertNotIn(forbidden, properties)
+
+    async def test_sage_review_is_edit_scoped_and_does_not_mutate_draft(self) -> None:
+        status, _, draft = await self.create_draft()
+        self.assertEqual(status, 201)
+        revision_id = draft["revision_id"]
+
+        status, _, denied = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/recommendations",
+            principal="viewer",
+            json_body={"focus": "goal", "user_request": "Review the goal."},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(denied["detail"]["code"], "permission_denied")
+
+        status, _, review = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/recommendations",
+            json_body={"focus": "goal", "user_request": "Review the goal."},
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(review["active_plan_changed"])
+        self.assertFalse(review["recommendation"]["provenance"]["writes_performed"])
+        self.assertEqual(len(review["recommendation"]["suggestions"]), 1)
+
+        status, _, stored = await self.request(
+            "GET", f"/lifeswitch/plan/revisions/{revision_id}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            stored["revision"]["proposed_document"]["primary_goal"],
+            plan_document()["primary_goal"],
+        )
+
+        status, _, _ = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/propose",
+            idempotency_key=f"propose-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        status, _, conflict = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/recommendations",
+            json_body={"focus": "whole_plan"},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(conflict["detail"]["code"], "revision_not_draft")
 
     async def test_owner_lifecycle_is_explicit_and_versioned(self) -> None:
         status, _, payload = await self.request("GET", "/lifeswitch/plan/active")

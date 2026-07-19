@@ -18,6 +18,8 @@ class LifeSwitchPlanAppRegistrationContractTest(unittest.TestCase):
         )
         self.assertIn("create_lifeswitch_plan_app_router(", source)
         self.assertIn('prefix="/lifeswitch/plan"', source)
+        self.assertIn('openai_api_key=os.getenv("OPENAI_API_KEY")', source)
+        self.assertIn('os.getenv("LIFESWITCH_PLAN_MODEL")', source)
 
 
 if __name__ == "__main__":
