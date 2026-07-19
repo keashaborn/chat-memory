@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import json
+import os
+import unittest
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Mapping
+from urllib.parse import urlencode, urlsplit
+
+import asyncpg
+from fastapi import FastAPI, HTTPException, Request
+
+from lifeswitch_agentic.plan_api import ActorContext, create_plan_router
+
+
+def plan_document(*, calorie_lower: int = 1800) -> dict[str, Any]:
+    return {
+        "phase": "cut",
+        "phase_label": "Cut to 16% body fat",
+        "primary_goal": "Reduce body-fat percentage while maintaining strength.",
+        "start_date": "2026-07-01",
+        "review_date": "2026-07-15",
+        "review_cadence": "weekly",
+        "body_state": {"body_fat_percent": 20},
+        "nutrition_targets": {
+            "calorie_target": {"lower": calorie_lower, "upper": 2100},
+            "protein_grams_minimum": 160,
+        },
+        "training_targets": {"strength_sessions_per_week": 3},
+        "conditioning_targets": {},
+        "activity_targets": {"steps_minimum": 7000},
+        "recovery_targets": {},
+        "monitoring_rules": {"review_every_days": 7},
+        "coach_notes": "",
+    }
+
+
+async def asgi_request(
+    app: FastAPI,
+    method: str,
+    target: str,
+    *,
+    headers: Mapping[str, str] | None = None,
+    json_body: Any = None,
+) -> tuple[int, dict[str, str], Any]:
+    parsed = urlsplit(target)
+    body = b"" if json_body is None else json.dumps(json_body).encode("utf-8")
+    request_headers = {"host": "testserver", **dict(headers or {})}
+    if json_body is not None:
+        request_headers["content-type"] = "application/json"
+        request_headers["content-length"] = str(len(body))
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": method.upper(),
+        "scheme": "http",
+        "path": parsed.path,
+        "raw_path": parsed.path.encode("ascii"),
+        "query_string": parsed.query.encode("ascii"),
+        "root_path": "",
+        "headers": [
+            (name.lower().encode("latin-1"), value.encode("latin-1"))
+            for name, value in request_headers.items()
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    request_sent = False
+    messages: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal request_sent
+        if request_sent:
+            return {"type": "http.disconnect"}
+        request_sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    await app(scope, receive, send)
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    response_body = b"".join(
+        message.get("body", b"")
+        for message in messages
+        if message["type"] == "http.response.body"
+    )
+    response_headers = {
+        name.decode("latin-1"): value.decode("latin-1")
+        for name, value in start.get("headers", [])
+    }
+    decoded = json.loads(response_body) if response_body else None
+    return int(start["status"]), response_headers, decoded
+
+
+class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.dsn = os.getenv("LIFESWITCH_AGENTIC_TEST_DSN", "").strip()
+        if not self.dsn:
+            self.skipTest("LIFESWITCH_AGENTIC_TEST_DSN is not configured")
+
+        self.owner = uuid.uuid4()
+        self.other_owner = uuid.uuid4()
+        self.coach = uuid.uuid4()
+        self.viewer = uuid.uuid4()
+
+        @asynccontextmanager
+        async def connection_provider() -> AsyncIterator[asyncpg.Connection]:
+            conn = await asyncpg.connect(self.dsn)
+            try:
+                yield conn
+            finally:
+                await conn.close()
+
+        async def actor_dependency(request: Request) -> ActorContext:
+            principal = request.headers.get("x-test-principal", "owner")
+            contexts = {
+                "owner": ActorContext(
+                    actor_user_id=self.owner,
+                    owner_user_id=self.owner,
+                    owner_timezone="America/Chicago",
+                ),
+                "other-owner": ActorContext(
+                    actor_user_id=self.other_owner,
+                    owner_user_id=self.other_owner,
+                    owner_timezone="America/New_York",
+                ),
+                "coach": ActorContext(
+                    actor_user_id=self.coach,
+                    owner_user_id=self.owner,
+                    owner_timezone="America/Chicago",
+                    permission_scopes=frozenset({"plan:view", "plan:edit"}),
+                ),
+                "viewer": ActorContext(
+                    actor_user_id=self.viewer,
+                    owner_user_id=self.owner,
+                    owner_timezone="America/Chicago",
+                    permission_scopes=frozenset({"plan:view"}),
+                ),
+            }
+            if principal not in contexts:
+                raise HTTPException(status_code=401, detail="unknown test principal")
+            return contexts[principal]
+
+        self.app = FastAPI()
+        self.app.include_router(
+            create_plan_router(
+                connection_provider=connection_provider,
+                actor_dependency=actor_dependency,
+            ),
+            prefix="/lifeswitch/plan",
+        )
+
+    async def request(
+        self,
+        method: str,
+        target: str,
+        *,
+        principal: str = "owner",
+        idempotency_key: str | None = None,
+        json_body: Any = None,
+    ) -> tuple[int, dict[str, str], Any]:
+        headers = {"x-test-principal": principal, "x-request-id": str(uuid.uuid4())}
+        if idempotency_key is not None:
+            headers["idempotency-key"] = idempotency_key
+        return await asgi_request(
+            self.app,
+            method,
+            target,
+            headers=headers,
+            json_body=json_body,
+        )
+
+    async def create_draft(
+        self,
+        *,
+        principal: str = "owner",
+        key: str | None = None,
+        document: dict[str, Any] | None = None,
+        base_plan_version_id: str | None = None,
+    ) -> tuple[int, dict[str, str], Any]:
+        body: dict[str, Any] = {"document": document or plan_document()}
+        if base_plan_version_id is not None:
+            body["base_plan_version_id"] = base_plan_version_id
+        return await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions",
+            principal=principal,
+            idempotency_key=key or f"create-{uuid.uuid4()}",
+            json_body=body,
+        )
+
+    async def test_route_contract_does_not_accept_identity_or_timezone_fields(self) -> None:
+        schema = self.app.openapi()
+        paths = schema["paths"]
+        expected = {
+            "/lifeswitch/plan/active",
+            "/lifeswitch/plan/versions",
+            "/lifeswitch/plan/versions/{plan_version_id}",
+            "/lifeswitch/plan/revisions/{revision_id}",
+            "/lifeswitch/plan/revisions",
+            "/lifeswitch/plan/revisions/{revision_id}/draft",
+            "/lifeswitch/plan/revisions/{revision_id}/propose",
+            "/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
+        }
+        self.assertTrue(expected.issubset(paths))
+        for model_name in ("CreateDraftRequest", "SaveDraftRequest"):
+            properties = schema["components"]["schemas"][model_name]["properties"]
+            for forbidden in (
+                "owner_user_id",
+                "actor_user_id",
+                "owner_timezone",
+                "permission_scopes",
+            ):
+                self.assertNotIn(forbidden, properties)
+
+    async def test_owner_lifecycle_is_explicit_and_versioned(self) -> None:
+        status, _, payload = await self.request("GET", "/lifeswitch/plan/active")
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["active_plan"])
+
+        status, _, draft = await self.create_draft()
+        self.assertEqual(status, 201)
+        self.assertEqual(draft["state"], "draft")
+        self.assertFalse(draft["active_plan_changed"])
+        revision_id = draft["revision_id"]
+
+        status, _, review = await self.request(
+            "GET", f"/lifeswitch/plan/revisions/{revision_id}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(review["revision"]["state"], "draft")
+        self.assertFalse(review["revision"]["can_approve"])
+
+        status, _, proposal = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/propose",
+            idempotency_key=f"propose-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(proposal["state"], "proposed")
+        self.assertEqual(proposal["validation_status"], "valid")
+        self.assertGreater(proposal["change_count"], 0)
+        self.assertFalse(proposal["active_plan_changed"])
+
+        status, _, review = await self.request(
+            "GET", f"/lifeswitch/plan/revisions/{revision_id}"
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(review["revision"]["can_approve"])
+        self.assertTrue(review["revision"]["base_is_current"])
+        self.assertGreater(len(review["revision"]["changes"]), 0)
+
+        status, _, activation = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
+            idempotency_key=f"approve-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(activation["active_plan_changed"])
+        self.assertEqual(activation["version_number"], 1)
+
+        status, _, active = await self.request("GET", "/lifeswitch/plan/active")
+        self.assertEqual(status, 200)
+        self.assertEqual(active["active_plan"]["version_number"], 1)
+        self.assertEqual(active["active_plan"]["document"]["phase"], "cut")
+
+        status, _, history = await self.request(
+            "GET", "/lifeswitch/plan/versions?" + urlencode({"limit": 20})
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(history["versions"]), 1)
+        version_id = history["versions"][0]["plan_version_id"]
+        status, _, version = await self.request(
+            "GET", f"/lifeswitch/plan/versions/{version_id}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(version["plan_version"]["source_revision_id"], revision_id)
+
+        status, _, second_draft = await self.create_draft(
+            document=plan_document(calorie_lower=1700),
+            base_plan_version_id=activation["plan_version_id"],
+        )
+        self.assertEqual(status, 201)
+        second_revision_id = second_draft["revision_id"]
+        status, _, _ = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{second_revision_id}/propose",
+            idempotency_key=f"second-propose-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        status, _, second_activation = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{second_revision_id}/approve-and-activate",
+            idempotency_key=f"second-approve-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(second_activation["version_number"], 2)
+
+        status, _, first_page = await self.request(
+            "GET", "/lifeswitch/plan/versions?" + urlencode({"limit": 1})
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(first_page["versions"][0]["version_number"], 2)
+        self.assertEqual(first_page["next_before_version"], 2)
+        status, _, second_page = await self.request(
+            "GET",
+            "/lifeswitch/plan/versions?"
+            + urlencode({"limit": 1, "before_version": first_page["next_before_version"]}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(second_page["versions"][0]["version_number"], 1)
+        self.assertIsNone(second_page["next_before_version"])
+
+    async def test_coach_can_draft_but_only_owner_can_activate(self) -> None:
+        status, _, draft = await self.create_draft(principal="coach")
+        self.assertEqual(status, 201)
+        revision_id = draft["revision_id"]
+        status, _, _ = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/propose",
+            principal="coach",
+            idempotency_key=f"coach-propose-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+
+        status, _, review = await self.request(
+            "GET",
+            f"/lifeswitch/plan/revisions/{revision_id}",
+            principal="coach",
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(review["revision"]["can_approve"])
+
+        status, _, denied = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
+            principal="coach",
+            idempotency_key=f"coach-approve-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(denied["detail"]["code"], "owner_approval_required")
+
+        status, _, approved = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
+            principal="owner",
+            idempotency_key=f"owner-approve-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(approved["active_plan_changed"])
+
+    async def test_viewer_cannot_write(self) -> None:
+        status, _, payload = await self.create_draft(principal="viewer")
+        self.assertEqual(status, 403)
+        self.assertEqual(payload["detail"]["code"], "permission_denied")
+
+    async def test_cross_account_resources_are_indistinguishable_from_missing(self) -> None:
+        status, _, draft = await self.create_draft()
+        self.assertEqual(status, 201)
+        status, _, payload = await self.request(
+            "GET",
+            f"/lifeswitch/plan/revisions/{draft['revision_id']}",
+            principal="other-owner",
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["detail"]["code"], "entity_out_of_scope")
+        self.assertEqual(payload["detail"]["message"], "Resource unavailable.")
+
+    async def test_write_requires_idempotency_key(self) -> None:
+        status, _, payload = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions",
+            json_body={"document": plan_document()},
+        )
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["detail"][0]["loc"][-1], "Idempotency-Key")
+
+    async def test_duplicate_command_replays_and_conflicting_input_is_rejected(self) -> None:
+        key = f"duplicate-{uuid.uuid4()}"
+        status, _, first = await self.create_draft(key=key)
+        self.assertEqual(status, 201)
+        status, _, replay = await self.create_draft(key=key)
+        self.assertEqual(status, 201)
+        self.assertEqual(replay, first)
+
+        status, _, conflict = await self.create_draft(
+            key=key,
+            document=plan_document(calorie_lower=1700),
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(conflict["detail"]["code"], "idempotency_conflict")
+
+        conn = await asyncpg.connect(self.dsn)
+        try:
+            count = await conn.fetchval(
+                """
+                select count(*)
+                from lifeswitch_agentic.plan_revisions
+                where owner_user_id = $1
+                """,
+                self.owner,
+            )
+        finally:
+            await conn.close()
+        self.assertEqual(count, 1)
+
+    async def test_body_identity_override_and_unknown_plan_fields_are_rejected(self) -> None:
+        status, _, payload = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions",
+            idempotency_key=f"body-identity-{uuid.uuid4()}",
+            json_body={
+                "document": plan_document(),
+                "owner_user_id": str(self.other_owner),
+            },
+        )
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["detail"][0]["type"], "value_error.extra")
+
+        bad_document = plan_document()
+        bad_document["biomarkers"] = {"a1c": 5.4}
+        status, _, payload = await self.create_draft(document=bad_document)
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["detail"]["code"], "unknown_plan_field")
+
+
+if __name__ == "__main__":
+    unittest.main()
