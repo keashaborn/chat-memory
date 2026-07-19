@@ -34,8 +34,25 @@ def main() -> int:
     first = operation_ids(OWNER, PACKET, "a" * 64)
     second = operation_ids(OWNER, PACKET, "a" * 64)
     changed = operation_ids(OWNER, PACKET, "b" * 64)
-    if first != second or first == changed or first[0] == first[1]:
+    review_unresolved = operation_ids(
+        OWNER,
+        PACKET,
+        "a" * 64,
+        "deferral_only_review_unresolved",
+    )
+    if (
+        first != second
+        or first == changed
+        or first == review_unresolved
+        or first[0] == first[1]
+    ):
         raise AssertionError("disposition identities are not deterministic")
+    try:
+        operation_ids(OWNER, PACKET, "a" * 64, "unsafe_reason")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("unsupported disposition reason was accepted")
     for invalid_owners in (
         [],
         ["not-a-uuid"],

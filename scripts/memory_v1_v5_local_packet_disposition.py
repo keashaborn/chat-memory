@@ -51,9 +51,17 @@ def canonical_owners(values: Sequence[str]) -> list[uuid.UUID]:
 
 
 def operation_ids(
-    owner: uuid.UUID, packet_id: uuid.UUID, packet_storage_sha256: str
+    owner: uuid.UUID,
+    packet_id: uuid.UUID,
+    packet_storage_sha256: str,
+    reason_code: str = "deferral_only_no_stage",
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    identity = f"{owner}|{packet_id}|{packet_storage_sha256}|deferral_only_no_stage"
+    if reason_code not in {
+        "deferral_only_no_stage",
+        "deferral_only_review_unresolved",
+    }:
+        raise RuntimeError("unsupported terminal deferral reason code")
+    identity = f"{owner}|{packet_id}|{packet_storage_sha256}|{reason_code}"
     return (
         uuid.uuid5(IDENTITY_NAMESPACE, f"operation|{identity}"),
         uuid.uuid5(IDENTITY_NAMESPACE, f"disposition|{identity}"),
@@ -93,8 +101,12 @@ async def finalize(
     target: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     packet_id = uuid.UUID(str(target["packet_id"]))
+    reason_code = str(target["reason_code"])
     operation_id, disposition_id = operation_ids(
-        owner, packet_id, str(target["packet_storage_sha256"])
+        owner,
+        packet_id,
+        str(target["packet_storage_sha256"]),
+        reason_code,
     )
 
     async def invoke() -> dict[str, Any]:
@@ -103,13 +115,14 @@ async def finalize(
             row = await conn.fetchrow(
                 """
                 SELECT * FROM memory.finalize_owner_v5_local_deferral_v1(
-                  $1,$2,$3,$4,'deferral_only_no_stage'
+                  $1,$2,$3,$4,$5
                 )
                 """,
                 operation_id,
                 disposition_id,
                 packet_id,
                 target["packet_storage_sha256"],
+                reason_code,
             )
         if row is None:
             raise RuntimeError("local packet disposition returned no row")
