@@ -79,6 +79,7 @@ restore_timers() {
 record_exit() {
   exit_code=$?
   if [[ "$migration_installed" -eq 1 && "$installation_committed" -eq 0 ]]; then
+    sudo -n systemctl stop "$entity_timer" >/dev/null 2>&1 || true
     run_sql <"$rollback" >/dev/null 2>&1 || exit_code=1
   fi
   restore_timers || exit_code=1
@@ -248,9 +249,10 @@ jq -n \
       forced_rls_preserved:true,cross_owner_plan_empty:true,
       all_rows_unchanged:true,qdrant_unchanged:true,
       review_files_unchanged:true,claims_written_zero:true,
-      prompt_influence_zero:true,external_model_calls:0,
+      prompt_influence_zero:true,external_model_calls_zero:true,
       existing_timer_states_restored:true,
       entity_validation_timer_safely_resumed:true},
+    metrics:{external_model_calls:0},
     qdrant_sha256:$qdrant_sha256,
     hard_stop:"before_processing_any_stale_compiler_artifact"}' >"$report"
 chmod 0600 "$report"
