@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import traceback
 
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_CALL_ENABLE_TOKEN,
@@ -38,6 +39,18 @@ MODEL_FILE_SHA256 = (
     "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
 )
 CONTENT = "My name is Avery."
+
+
+def sanitized_traceback(exc: BaseException) -> list[dict[str, object]]:
+    """Return code locations only; never include exception values or source lines."""
+    return [
+        {
+            "file": Path(frame.filename).name,
+            "function": frame.name,
+            "line": frame.lineno,
+        }
+        for frame in traceback.extract_tb(exc.__traceback__)
+    ]
 
 
 def arguments() -> argparse.Namespace:
@@ -130,6 +143,7 @@ def main() -> int:
                         "class": type(exc).__name__,
                         "code": rejection_code,
                         "message_sha256": sha256_text(str(exc)),
+                        "traceback": sanitized_traceback(exc),
                     },
                     "sanitized_provider_packet": (
                         sanitize_provider_packet(capturing.last_packet)
