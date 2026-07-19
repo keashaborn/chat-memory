@@ -1580,19 +1580,16 @@ def _compile_entity_links(
         role = entity_roles.get(obj["entity_ref"])
         normalized_role = role.casefold() if isinstance(role, str) else ""
         if normalized_role.startswith(("child:", "son:", "daughter:")):
-            if self_ref is None and _FIRST_PERSON_RE.search(content):
-                self_ref = _add_compiler_entity(
-                    source,
-                    entities,
-                    entity_type="self",
-                    name_text=None,
-                    relationship_role="user:self",
-                )
-                repairs.append("self_entity_link")
-            if self_ref is not None:
-                observation["predicate"] = "relationship.parent_of"
-                observation["subject_entity_ref"] = self_ref
-                repairs.append("child_relation_normalized")
+            unsupported_relationship_refs.add(observation["observation_ref"])
+            value["deferrals"].append(
+                {
+                    "reason_code": "unregistered_predicate",
+                    "memory_shape": "direct_claim",
+                    "source_spans": observation["source_spans"],
+                    "sensitivity": observation["sensitivity"],
+                }
+            )
+            repairs.append("unsupported_child_relation_deferred")
         elif normalized_role.startswith(
             ("spouse:", "wife:", "husband:", "partner:")
         ):

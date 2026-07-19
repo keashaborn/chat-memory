@@ -303,13 +303,13 @@ def main() -> int:
     }
     if "relationship.has_pet" in relationship_predicates:
         raise AssertionError("person relationship survived as has_pet")
-    if "relationship.parent_of" not in relationship_predicates:
-        raise AssertionError("explicit child relation was not normalized")
-    if not any(
+    if "relationship.parent_of" in relationship_predicates:
+        raise AssertionError("unsupported self-to-child relation was forced")
+    if sum(
         item["reason_code"] == "unregistered_predicate"
         for item in relationship_packet["deferrals"]
-    ):
-        raise AssertionError("unsupported spouse relation was not deferred")
+    ) != 2:
+        raise AssertionError("unsupported child/spouse relations were not deferred")
     request_body = transport.requests[0].body()
     if "store" in request_body:
         raise AssertionError("local transport unexpectedly emitted store state")
