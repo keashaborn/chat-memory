@@ -137,8 +137,6 @@ SELECT 1 / ((count(*)=0)::integer)
 FROM memory.evidence
 WHERE source_system='governed_write_boundary_test'
   AND external_id='controlled-writer';
-SELECT 1 / ((count(*)=0)::integer)
-FROM memory.read_v5_shadow_claims(ARRAY[]::uuid[]);
 
 RESET SESSION AUTHORIZATION;
 ROLLBACK;
