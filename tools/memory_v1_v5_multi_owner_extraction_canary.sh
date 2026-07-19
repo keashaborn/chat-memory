@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # seebx backend only. Processes exactly one pending extraction job for one of
-# the two user-owned test accounts on the private GPU. It proves that every
+# the two user-owned test accounts using private infrastructure. Deterministic
+# deferrals may complete without invoking the GPU. It proves that every
 # non-target row, all claims, Qdrant, prompts, and review files are unchanged.
 
 if [[ "${MEMORY_V1_V5_MULTI_OWNER_CANARY:-}" != authorized ]]; then
@@ -82,6 +83,15 @@ restore_timers() {
 record_exit() {
   exit_code=$?
   restore_timers || exit_code=1
+  if [[ "$exit_code" -ne 0 && -n "$status_file" && -s "$raw_output" ]]; then
+    failure_output="${status_file%.status}.failure-output.json"
+    if tr -d '\r' <"$raw_output" | grep '^{' | tail -n 1 >"$failure_output" \
+        && jq -e 'type=="object"' "$failure_output" >/dev/null 2>&1; then
+      chmod 0600 "$failure_output"
+    else
+      rm -f "$failure_output"
+    fi
+  fi
   rm -f "$timer_state" "$table_list" "$before" "$after" \
     "$raw_output" "$json_output"
   if [[ -n "$status_file" ]]; then
@@ -226,7 +236,8 @@ jq -e '
   .worker_version=="memory_v1_v5_local_inference_scheduler_v1" and
   .apply==true and .processed==1 and
   (.result.outcome=="accepted" or .result.outcome=="rejected") and
-  .result.local_model_calls==1 and .result.external_model_calls==0 and
+  (.result.local_model_calls==0 or .result.local_model_calls==1) and
+  .result.external_model_calls==0 and
   .result.write_counts.claims==0 and .result.write_counts.qdrant==0 and
   .result.write_counts.prompt_influence==0 and
   .result.zero_write_replay_proved==true
@@ -262,14 +273,18 @@ jq -n \
   --arg output "$preserved_output" \
   --arg outcome "$(jq -r '.result.outcome' "$json_output")" \
   --arg rejection_code "$(jq -r '.result.rejection_code // ""' "$json_output")" \
+  --argjson local_model_calls "$(jq -r '.result.local_model_calls' "$json_output")" \
   --arg qdrant_sha256 "$qdrant_after" \
   '{contract_version:"memory_v1_v5_multi_owner_extraction_canary_report_v1",
     completed_at:$completed_at,head_commit:$head_commit,
     target_owner_user_id_sha256:$target_owner_sha256,
     backup:{path:$backup,sha256:$backup_sha256},
     sanitized_output:$output,outcome:$outcome,
+    local_model_calls:$local_model_calls,external_model_calls:0,
     rejection_code:(if $rejection_code=="" then null else $rejection_code end),
-    checks:{fresh_backup:true,private_model_only:true,exactly_one_job:true,
+    checks:{fresh_backup:true,private_infrastructure_only:true,
+      at_most_one_private_model_call:true,external_model_calls_zero:true,
+      exactly_one_job:true,
       zero_write_replay:true,non_target_rows_unchanged:true,
       claims_unchanged:true,qdrant_unchanged:true,
       prompt_influence_zero:true,review_files_unchanged:true,
