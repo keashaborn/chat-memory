@@ -2,7 +2,7 @@
 BEGIN;
 SET LOCAL statement_timeout='60s';
 SET LOCAL lock_timeout='5s';
-SET LOCAL SESSION AUTHORIZATION brains_app;
+SET SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id', :'owner_user_id', true);
 SELECT set_config('app.test_packet_id', :'packet_id', true);
 SELECT set_config(
@@ -82,4 +82,5 @@ BEGIN
 END
 $isolation$;
 
+RESET SESSION AUTHORIZATION;
 ROLLBACK;
