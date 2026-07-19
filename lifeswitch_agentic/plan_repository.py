@@ -565,6 +565,11 @@ class PlanRepository:
                     _json_object(base_value, field="base document")
                 )
             changes = diff_plan_documents(base_document, document)
+            if base_document is not None and not changes:
+                raise PlanDomainError(
+                    "no_plan_changes",
+                    "revision matches the active plan",
+                )
             change_rows = [
                 (
                     self._id_factory(),

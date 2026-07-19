@@ -60,6 +60,7 @@ class LegacyPlanAdoptionResult:
     legacy_profile_updated_at: dt.datetime
     created: bool
     refreshed: bool = False
+    imported: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +224,7 @@ class LegacyPlanAdoptionService:
             )
             detail = {
                 "source_kind": f"{self._legacy_schema}.plan_profile",
+                "source_action": "adoption",
                 "legacy_plan_profile_id": str(legacy.plan_profile_id),
                 "legacy_profile_updated_at": legacy.updated_at.isoformat(),
                 "adopted_document_sha256": legacy.document.sha256(),
@@ -252,14 +254,18 @@ class LegacyPlanAdoptionService:
                 created=True,
             )
 
-    async def refresh_adopted_draft_from_current_profile(
+    async def create_revision_from_current_profile(
         self,
         conn: asyncpg.Connection,
         *,
         owner_user_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        author_type: str,
+        trigger: RevisionTrigger,
         idempotency_key: str,
         request_id: str | None = None,
     ) -> LegacyPlanAdoptionResult:
+        key_digest = hashlib.sha256(idempotency_key.strip().encode("utf-8")).hexdigest()
         async with conn.transaction():
             owner_state = await conn.fetchrow(
                 f"""
@@ -270,29 +276,180 @@ class LegacyPlanAdoptionService:
                 """,
                 owner_user_id,
             )
-            if owner_state is None:
+            if owner_state is None or owner_state["active_plan_version_id"] is None:
                 raise PlanDomainError(
-                    "legacy_adoption_unavailable",
-                    "legacy plan adoption has not been started",
+                    "active_plan_required",
+                    "activate the initial plan before preparing a later revision",
                 )
-            existing = await self._existing_adoption(
+            active_plan_version_id = owner_state["active_plan_version_id"]
+
+            replay = await conn.fetchrow(
+                f"""
+                select revision.id, revision.base_plan_version_id,
+                       event.detail
+                from {AGENTIC_SCHEMA}.plan_revision_events event
+                join {AGENTIC_SCHEMA}.plan_revisions revision
+                  on revision.owner_user_id = event.owner_user_id
+                 and revision.id = event.plan_revision_id
+                where event.owner_user_id = $1
+                  and event.event_type = 'plan_revision_legacy_imported'
+                  and event.detail->>'idempotency_key_sha256' = $2
+                limit 1
+                """,
+                owner_user_id,
+                key_digest,
+            )
+            if replay is not None:
+                detail = _event_detail(replay["detail"])
+                return LegacyPlanAdoptionResult(
+                    revision=RevisionRecord(
+                        revision_id=replay["id"],
+                        owner_user_id=owner_user_id,
+                        base_plan_version_id=replay["base_plan_version_id"],
+                        state=RevisionState.DRAFT,
+                        document_sha256=str(detail["imported_document_sha256"]),
+                    ),
+                    source_kind=str(detail["source_kind"]),
+                    legacy_plan_profile_id=uuid.UUID(
+                        str(detail["legacy_plan_profile_id"])
+                    ),
+                    legacy_profile_updated_at=dt.datetime.fromisoformat(
+                        str(detail["legacy_profile_updated_at"])
+                    ),
+                    created=False,
+                    imported=True,
+                )
+
+            open_revision_id = await conn.fetchval(
+                f"""
+                select id
+                from {AGENTIC_SCHEMA}.plan_revisions
+                where owner_user_id = $1
+                  and state in ('draft', 'proposed', 'needs_changes')
+                order by created_at desc, id desc
+                limit 1
+                """,
+                owner_user_id,
+            )
+            if open_revision_id is not None:
+                raise PlanDomainError(
+                    "state_conflict",
+                    "finish the current open revision before preparing another",
+                )
+
+            legacy = await self._load_current_legacy_profile(
                 conn,
                 owner_user_id=owner_user_id,
             )
-            if existing is None:
+            active_document_sha256 = await conn.fetchval(
+                f"""
+                select document_sha256
+                from {AGENTIC_SCHEMA}.plan_versions
+                where owner_user_id = $1 and id = $2
+                """,
+                owner_user_id,
+                active_plan_version_id,
+            )
+            if active_document_sha256 is None:
+                raise PlanDomainError(
+                    "entity_out_of_scope",
+                    "active plan version is unavailable",
+                )
+            if legacy.document.sha256() == active_document_sha256:
+                raise PlanDomainError(
+                    "no_plan_changes",
+                    "the Plan editor already matches the active plan",
+                )
+
+            revision = await self._plan_repository.create_draft(
+                conn,
+                owner_user_id=owner_user_id,
+                document=legacy.document,
+                trigger=trigger,
+                base_plan_version_id=active_plan_version_id,
+                author_type=author_type,
+                idempotency_key=idempotency_key,
+                author_actor_user_id=actor_user_id,
+                request_id=request_id,
+            )
+            detail = {
+                "source_kind": f"{self._legacy_schema}.plan_profile",
+                "source_action": "revision",
+                "legacy_plan_profile_id": str(legacy.plan_profile_id),
+                "legacy_profile_updated_at": legacy.updated_at.isoformat(),
+                "imported_document_sha256": legacy.document.sha256(),
+                "base_plan_version_id": str(active_plan_version_id),
+                "idempotency_key_sha256": key_digest,
+            }
+            await conn.execute(
+                f"""
+                insert into {AGENTIC_SCHEMA}.plan_revision_events (
+                  plan_revision_id, owner_user_id, event_type,
+                  actor_user_id, prior_state, new_state,
+                  reason_code, detail, request_id
+                ) values (
+                  $1, $2, 'plan_revision_legacy_imported',
+                  $3, 'draft', 'draft',
+                  'current_profile_revision', $4::jsonb, $5
+                )
+                """,
+                revision.revision_id,
+                owner_user_id,
+                actor_user_id,
+                json.dumps(detail, sort_keys=True, separators=(",", ":")),
+                request_id,
+            )
+            return LegacyPlanAdoptionResult(
+                revision=revision,
+                source_kind=detail["source_kind"],
+                legacy_plan_profile_id=legacy.plan_profile_id,
+                legacy_profile_updated_at=legacy.updated_at,
+                created=True,
+                imported=True,
+            )
+
+    async def refresh_draft_from_current_profile(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        owner_user_id: uuid.UUID,
+        revision_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        idempotency_key: str,
+        request_id: str | None = None,
+    ) -> LegacyPlanAdoptionResult:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                select revision.base_plan_version_id, revision.state,
+                       revision.proposed_document_sha256
+                from {AGENTIC_SCHEMA}.plan_revisions revision
+                where revision.owner_user_id = $1
+                  and revision.id = $2
+                  and exists (
+                    select 1
+                    from {AGENTIC_SCHEMA}.plan_revision_events source_event
+                    where source_event.owner_user_id = revision.owner_user_id
+                      and source_event.plan_revision_id = revision.id
+                      and source_event.event_type in (
+                        'plan_revision_legacy_adopted',
+                        'plan_revision_legacy_imported'
+                      )
+                  )
+                for update
+                """,
+                owner_user_id,
+                revision_id,
+            )
+            if row is None:
                 raise PlanDomainError(
                     "legacy_adoption_unavailable",
-                    "legacy plan adoption has not been started",
+                    "current-profile draft is unavailable",
                 )
-            if existing.revision.state is not RevisionState.DRAFT:
+            if row["state"] != RevisionState.DRAFT.value:
                 raise PlanDomainError(
                     "state_conflict",
-                    "only an adoption draft can be refreshed",
-                )
-            if owner_state["active_plan_version_id"] is not None:
-                raise PlanDomainError(
-                    "state_conflict",
-                    "the adopted plan has already been activated",
+                    "only a current-profile draft can be refreshed",
                 )
 
             legacy = await self._load_current_legacy_profile(
@@ -302,10 +459,10 @@ class LegacyPlanAdoptionService:
             revision = await self._plan_repository.save_draft(
                 conn,
                 owner_user_id=owner_user_id,
-                revision_id=existing.revision.revision_id,
+                revision_id=revision_id,
                 document=legacy.document,
                 idempotency_key=idempotency_key,
-                actor_user_id=owner_user_id,
+                actor_user_id=actor_user_id,
                 request_id=request_id,
             )
             idempotency_key_sha256 = hashlib.sha256(
@@ -313,6 +470,7 @@ class LegacyPlanAdoptionService:
             ).hexdigest()
             detail = {
                 "source_kind": f"{self._legacy_schema}.plan_profile",
+                "source_action": "refresh",
                 "legacy_plan_profile_id": str(legacy.plan_profile_id),
                 "legacy_profile_updated_at": legacy.updated_at.isoformat(),
                 "refreshed_document_sha256": legacy.document.sha256(),
@@ -327,19 +485,20 @@ class LegacyPlanAdoptionService:
                 )
                 select
                   $1, $2, 'plan_revision_legacy_refreshed',
-                  $2, 'draft', 'draft',
-                  'owner_requested_refresh', $3::jsonb, $4
+                  $3, 'draft', 'draft',
+                  'actor_requested_refresh', $4::jsonb, $5
                 where not exists (
                   select 1
                   from {AGENTIC_SCHEMA}.plan_revision_events
                   where owner_user_id = $2
                     and plan_revision_id = $1
                     and event_type = 'plan_revision_legacy_refreshed'
-                    and detail->>'idempotency_key_sha256' = $5
+                    and detail->>'idempotency_key_sha256' = $6
                 )
                 """,
                 revision.revision_id,
                 owner_user_id,
+                actor_user_id,
                 json.dumps(detail, sort_keys=True, separators=(",", ":")),
                 request_id,
                 idempotency_key_sha256,
@@ -352,3 +511,29 @@ class LegacyPlanAdoptionService:
                 created=False,
                 refreshed=True,
             )
+
+    async def refresh_adopted_draft_from_current_profile(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        owner_user_id: uuid.UUID,
+        idempotency_key: str,
+        request_id: str | None = None,
+    ) -> LegacyPlanAdoptionResult:
+        existing = await self._existing_adoption(
+            conn,
+            owner_user_id=owner_user_id,
+        )
+        if existing is None:
+            raise PlanDomainError(
+                "legacy_adoption_unavailable",
+                "legacy plan adoption has not been started",
+            )
+        return await self.refresh_draft_from_current_profile(
+            conn,
+            owner_user_id=owner_user_id,
+            revision_id=existing.revision.revision_id,
+            actor_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+        )

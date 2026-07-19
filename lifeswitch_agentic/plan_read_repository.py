@@ -212,6 +212,7 @@ class PlanReadRepository:
                        and event.plan_revision_id = revision.id
                        and event.event_type in (
                          'plan_revision_legacy_adopted',
+                         'plan_revision_legacy_imported',
                          'plan_revision_legacy_refreshed'
                        )
                      order by event.id desc

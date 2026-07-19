@@ -89,6 +89,8 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         "idempotency_in_progress",
         "revision_not_proposed",
         "validation_version_stale",
+        "active_plan_required",
+        "no_plan_changes",
     }:
         status_code = 409
     elif error.code in {
@@ -172,11 +174,15 @@ def _legacy_adoption_result(result: LegacyPlanAdoptionResult) -> dict[str, Any]:
     payload = _revision_record(result.revision)
     payload["source"] = {
         "kind": result.source_kind,
+        "action": (
+            "refresh" if result.refreshed else "revision" if result.imported else "adoption"
+        ),
         "legacy_plan_profile_id": str(result.legacy_plan_profile_id),
         "legacy_profile_updated_at": _iso(result.legacy_profile_updated_at),
     }
     payload["created"] = result.created
     payload["refreshed"] = result.refreshed
+    payload["imported"] = result.imported
     return payload
 
 
@@ -454,6 +460,34 @@ def create_plan_router(
         except asyncpg.PostgresError as error:
             raise _internal_http_error() from error
 
+    @router.post("/revisions/from-current-profile", status_code=201)
+    async def create_revision_from_current_profile(
+        request: Request,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:edit")
+            async with connection_provider() as conn:
+                result = await adoption_service.create_revision_from_current_profile(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    actor_user_id=context.actor_user_id,
+                    author_type="owner" if context.is_owner else "coach",
+                    trigger=(
+                        RevisionTrigger.OWNER_REQUEST
+                        if context.is_owner
+                        else RevisionTrigger.COACH_REQUEST
+                    ),
+                    idempotency_key=idempotency_key,
+                    request_id=_request_id(request),
+                )
+            return _legacy_adoption_result(result)
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
     @router.post("/revisions/adopt-current-profile/refresh")
     async def refresh_adopted_profile(
         request: Request,
@@ -470,6 +504,30 @@ def create_plan_router(
                 result = await adoption_service.refresh_adopted_draft_from_current_profile(
                     conn,
                     owner_user_id=context.owner_user_id,
+                    idempotency_key=idempotency_key,
+                    request_id=_request_id(request),
+                )
+            return _legacy_adoption_result(result)
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/revisions/{revision_id}/refresh-current-profile")
+    async def refresh_revision_from_current_profile(
+        revision_id: uuid.UUID,
+        request: Request,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:edit")
+            async with connection_provider() as conn:
+                result = await adoption_service.refresh_draft_from_current_profile(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    revision_id=revision_id,
+                    actor_user_id=context.actor_user_id,
                     idempotency_key=idempotency_key,
                     request_id=_request_id(request),
                 )
