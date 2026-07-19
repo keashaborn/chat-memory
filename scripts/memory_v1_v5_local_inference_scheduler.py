@@ -142,7 +142,7 @@ async def plan_owner(
     owner: uuid.UUID,
     *,
     max_attempts: int,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
+) -> tuple[dict[str, Any], dict[str, Any] | None, Any]:
     async with conn.transaction(readonly=True):
         await set_actor(conn, owner)
         rows = await conn.fetch(
@@ -170,6 +170,15 @@ async def plan_owner(
             owner,
             max_attempts,
         )
+        last_service_at = await conn.fetchval(
+            """
+            SELECT max(updated_at)
+            FROM memory.evidence_extraction_job
+            WHERE owner_user_id=$1 AND route='relational_extraction'
+              AND status IN ('review_required','completed','skipped','error')
+            """,
+            owner,
+        )
     target = dict(target_row) if target_row else None
     report = {
         "owner_user_id_sha256": sha256_text(str(owner)),
@@ -178,8 +187,28 @@ async def plan_owner(
         "next_job_id_sha256": (
             sha256_text(str(target["job_id"])) if target is not None else None
         ),
+        "last_service_at": (
+            last_service_at.isoformat() if last_service_at is not None else None
+        ),
     }
-    return report, target
+    return report, target, last_service_at
+
+
+def select_owner_target(
+    planned: Sequence[tuple[uuid.UUID, dict[str, Any], dict[str, Any] | None, Any]],
+) -> tuple[uuid.UUID, dict[str, Any]] | None:
+    candidates = [item for item in planned if item[2] is not None]
+    if not candidates:
+        return None
+    selected = min(
+        candidates,
+        key=lambda item: (
+            item[3] is not None,
+            item[3] if item[3] is not None else "",
+            str(item[0]),
+        ),
+    )
+    return selected[0], selected[2]
 
 
 def load_api_key(credential_name: str) -> str:
@@ -305,11 +334,8 @@ async def run() -> int:
     finally:
         await conn.close()
 
-    plans = [report for _, report, _ in planned]
-    selected = next(
-        ((owner, target) for owner, _, target in planned if target is not None),
-        None,
-    )
+    plans = [report for _, report, _, _ in planned]
+    selected = select_owner_target(planned)
     if not args.apply:
         print(
             stable_json(
@@ -319,6 +345,9 @@ async def run() -> int:
                     "owner_count": len(owners),
                     "max_jobs": 1,
                     "plans": plans,
+                    "next_owner_user_id_sha256": (
+                        sha256_text(str(selected[0])) if selected is not None else None
+                    ),
                     "external_model_calls": 0,
                     "local_model_calls": 0,
                     "write_counts": {

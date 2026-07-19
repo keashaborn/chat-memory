@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.memory_v1_v5_local_inference_scheduler import (
@@ -15,6 +16,7 @@ from scripts.memory_v1_v5_local_inference_scheduler import (
     canonical_owners,
     loopback_dsn,
     sanitized_canary_result,
+    select_owner_target,
     validate_arguments,
 )
 
@@ -71,6 +73,30 @@ def main() -> int:
         pass
     else:
         raise AssertionError("empty owner allowlist was accepted")
+
+    owner_b = uuid.UUID("557ea042-cb82-48f8-9429-472e96c957ef")
+    owner_c = uuid.UUID("d839b4bc-0bd2-4f2d-aafe-0f3f75883db8")
+    target_a = {"job_id": uuid.uuid4()}
+    target_b = {"job_id": uuid.uuid4()}
+    target_c = {"job_id": uuid.uuid4()}
+    now = datetime.now(timezone.utc)
+    selected = select_owner_target(
+        [
+            (OWNER, {}, target_a, now),
+            (owner_c, {}, target_c, None),
+            (owner_b, {}, target_b, None),
+        ]
+    )
+    assert selected == (owner_b, target_b)
+    selected = select_owner_target(
+        [
+            (OWNER, {}, target_a, now),
+            (owner_b, {}, target_b, datetime(2026, 1, 1, tzinfo=timezone.utc)),
+            (owner_c, {}, target_c, datetime(2026, 2, 1, tzinfo=timezone.utc)),
+        ]
+    )
+    assert selected == (owner_b, target_b)
+    assert select_owner_target([(OWNER, {}, None, None)]) is None
 
     validate_arguments(args())
     original = os.environ.get("MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY")
