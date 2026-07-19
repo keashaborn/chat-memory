@@ -214,6 +214,36 @@ def main() -> int:
         raise AssertionError("validation error locations changed")
     if "private source prose" in str(invalid_audit):
         raise AssertionError("private provider input leaked into diagnostics")
+    compiler_raw = deepcopy(raw)
+    rejected_name = deepcopy(compiler_raw["observations"][0])
+    rejected_name["observation_ref"] = "o01"
+    rejected_name["object"]["value"] = "Jordan"
+    compiler_raw["observations"].append(rejected_name)
+    compiler_result = LocalStructuredResult(
+        response_id="local-compiler-repair-1",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=compiler_raw,
+        response_sha256=canonical_sha256(compiler_raw),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    compiler_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=compiler_result),
+    )
+    compiler_packet = compiler_provider.extract(source).model_dump(mode="json")
+    if [item["observation_ref"] for item in compiler_packet["observations"]] != [
+        "o00"
+    ]:
+        raise AssertionError("unsupported self-name observation survived compiler")
+    if [item["reason_code"] for item in compiler_packet["deferrals"]] != [
+        "insufficient_evidence"
+    ]:
+        raise AssertionError("compiler repair deferral changed")
     request_body = transport.requests[0].body()
     if "store" in request_body:
         raise AssertionError("local transport unexpectedly emitted store state")

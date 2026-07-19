@@ -12,9 +12,11 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_PROVIDER_VERSION,
     LlamaCppSecureTransport,
     LocalLlamaCppProvider,
+    LocalProviderAdapterError,
 )
 from scripts.memory_v1_relational_extraction_v5_observable_provider import (
     CapturingProvider,
+    classify_validator_rejection,
     sanitize_provider_packet,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
@@ -108,6 +110,12 @@ def main() -> int:
             max_external_model_calls=0,
         )
     except Exception as exc:
+        if isinstance(exc, LocalProviderAdapterError):
+            rejection_code = exc.code
+        elif isinstance(exc, ValueError):
+            rejection_code = classify_validator_rejection(str(exc))
+        else:
+            rejection_code = "uncatalogued_synthetic_error"
         print(
             json.dumps(
                 {
@@ -120,6 +128,7 @@ def main() -> int:
                     "local_model_calls": provider.local_model_calls,
                     "rejection": {
                         "class": type(exc).__name__,
+                        "code": rejection_code,
                         "message_sha256": sha256_text(str(exc)),
                     },
                     "sanitized_provider_packet": (

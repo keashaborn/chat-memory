@@ -1687,7 +1687,6 @@ def _compile_entity_links(
                 "memory_shape": "none",
                 "source_spans": [_source_span(source)],
                 "sensitivity": "low",
-                "review_required": True,
             }
         )
 
@@ -1734,7 +1733,6 @@ def _compile_entity_links(
                     "memory_shape": "none",
                     "source_spans": [_source_span(source)],
                     "sensitivity": "low",
-                    "review_required": True,
                 }
             )
 
