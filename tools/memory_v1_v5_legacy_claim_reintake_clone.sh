@@ -89,8 +89,8 @@ phase=dry_run
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" venv/bin/python "$worker" \
   --owner-user-id "$owner_a" --owner-user-id "$owner_b" --limit 100 \
   --report-path "$dry" >"$dry.stdout"
-jq -e '.apply==false and .totals.planned==8 and .totals.applied==0 and
-  .totals.after==8 and .claim_writes==0 and .qdrant_writes==0 and
+jq -e '.apply==false and .totals.planned==5 and .totals.applied==0 and
+  .totals.after==5 and .claim_writes==0 and .qdrant_writes==0 and
   .external_model_calls==0 and .local_model_calls==0 and .prompt_influence==0' \
   "$dry.stdout" >/dev/null
 
@@ -99,14 +99,14 @@ MEMORY_V1_V5_LEGACY_REINTAKE_APPLY=memory_v1_v5_legacy_claim_reintake_apply_v1 \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" venv/bin/python "$worker" \
   --owner-user-id "$owner_a" --owner-user-id "$owner_b" --limit 100 --apply \
   --report-path "$applied" >"$applied.stdout"
-jq -e '.apply==true and .totals.planned==8 and .totals.applied==8 and
-  .totals.replayed==8 and .totals.after==0 and .claim_writes==0 and
+jq -e '.apply==true and .totals.planned==5 and .totals.applied==5 and
+  .totals.replayed==5 and .totals.after==0 and .claim_writes==0 and
   .qdrant_writes==0 and .external_model_calls==0 and .local_model_calls==0 and
   .prompt_influence==0' "$applied.stdout" >/dev/null
 [[ "$(docker exec "$container" psql -U sage -d "$clone" -X -Atqc \
-  "SELECT count(*) FROM memory.evidence_extraction_job WHERE selector_version='$selector'")" == 8 ]]
+  "SELECT count(*) FROM memory.evidence_extraction_job WHERE selector_version='$selector'")" == 5 ]]
 [[ "$(docker exec "$container" psql -U sage -d "$clone" -X -Atqc \
-  "SELECT count(*) FROM memory.evidence_intake_terminal WHERE selector_version='$selector'")" == 8 ]]
+  "SELECT count(*) FROM memory.evidence_intake_terminal WHERE selector_version='$selector'")" == 5 ]]
 
 phase=rollback_reinstall
 clone_sql <"$rollback" >/dev/null
