@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v1"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v2"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1017,6 +1017,12 @@ _FIRST_PERSON_RE = re.compile(
     r"\b(?:i|i'm|i’ve|i've|me|my|mine)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_SELF_NAME_RE = re.compile(
+    r"\b(?:my\s+(?:(?:first|full|legal|preferred)\s+)?name\s+"
+    r"(?:is|['’]s)|i\s+(?:am|['’]m)\s+(?:called|named)|"
+    r"i\s+go\s+by|call\s+me)\s+(?P<name>[^\n.!?]{1,120})",
+    re.IGNORECASE,
+)
 _PET_RE = re.compile(
     r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b",
     re.IGNORECASE,
@@ -1437,6 +1443,22 @@ def _pet_name(content: str) -> str | None:
     return None
 
 
+def _explicit_self_name_supported(content: str, value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    claimed_name = value.strip(" \t\r\n\"'‘’“”.,;:")
+    if not claimed_name or len(claimed_name) > 120:
+        return False
+    name_pattern = re.compile(
+        rf"(?<!\w){re.escape(claimed_name)}(?!\w)",
+        re.IGNORECASE,
+    )
+    return any(
+        name_pattern.search(match.group("name")) is not None
+        for match in _EXPLICIT_SELF_NAME_RE.finditer(content)
+    )
+
+
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
@@ -1603,6 +1625,48 @@ def _compile_entity_links(
                         "entity_ref": place_ref,
                     }
             repairs.append("residence_link_normalized")
+
+    entity_types = {
+        item["entity_ref"]: item["entity_type"] for item in entities
+    }
+    rejected_observation_refs = {
+        item["observation_ref"]
+        for item in observations
+        if item["predicate"] == "identity.name"
+        and entity_types.get(item["subject_entity_ref"]) == "self"
+        and (
+            item["object"]["kind"] != "literal"
+            or not _explicit_self_name_supported(
+                content, item["object"].get("value")
+            )
+        )
+    }
+    if rejected_observation_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in rejected_observation_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in rejected_observation_refs
+        ]
+        repairs.append("self_identity_name_requires_explicit_naming")
+        if not observations:
+            return (
+                _guard_deferral_packet(source, ("insufficient_evidence",)),
+                tuple(sorted(set(repairs))),
+            )
+        value["deferrals"].append(
+            {
+                "reason_code": "insufficient_evidence",
+                "memory_shape": "none",
+                "source_spans": [_source_span(source)],
+                "sensitivity": "low",
+                "review_required": True,
+            }
+        )
 
     registry_rules = {
         item["predicate"]: item for item in registry["predicates"]

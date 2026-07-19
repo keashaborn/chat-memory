@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -219,6 +220,65 @@ def main() -> int:
         governed_predicates
     ):
         raise AssertionError("local predicate grammar allowlist changed")
+
+    school_content = "so I went to the University of Wisconsin Green Bay"
+    school_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000009",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000009",
+        source_sha256=sha256_text(school_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=school_content,
+    )
+    school_packet = deepcopy(provider_output())
+    school_packet["entity_mentions"][0]["source_spans"] = [
+        {"start": 0, "end": len(school_content), "quote": school_content}
+    ]
+    school_observation = school_packet["observations"][0]
+    school_observation["object"]["value"] = (
+        "University of Wisconsin Green Bay"
+    )
+    school_observation["source_spans"] = [
+        {"start": 0, "end": len(school_content), "quote": school_content}
+    ]
+    school_result = LocalStructuredResult(
+        response_id="local-synthetic-school-name-error",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=school_packet,
+        response_sha256=canonical_sha256(school_packet),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    school_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=school_result),
+    )
+    school_validated = validate_and_normalize(
+        school_provider,
+        source=school_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    if school_validated.normalized_packet["observations"]:
+        raise AssertionError("school attendance survived as self identity name")
+    if [
+        item["reason_code"]
+        for item in school_validated.normalized_packet["deferrals"]
+    ] != ["insufficient_evidence"]:
+        raise AssertionError("invalid self name did not become a deferral")
+    if (
+        "self_identity_name_requires_explicit_naming"
+        not in school_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("invalid self-name compiler audit is missing")
 
     for ordinal, (example_text, example_packet) in enumerate(
         _local_examples() + _additional_local_examples(),
