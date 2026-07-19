@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v2"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v3"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1023,6 +1023,13 @@ _EXPLICIT_SELF_NAME_RE = re.compile(
     r"i\s+go\s+by|call\s+me)\s+(?P<name>[^\n.!?]{1,120})",
     re.IGNORECASE,
 )
+_EXPLICIT_SELF_OCCUPATION_RE = re.compile(
+    r"\b(?:i\s+(?:currently\s+)?work\s+as|"
+    r"i\s+am\s+employed\s+as|"
+    r"my\s+(?:job|occupation|profession)\s+is)\s+"
+    r"(?:an?\s+)?(?P<role>[^\n.!?]{1,160})",
+    re.IGNORECASE,
+)
 _PET_RE = re.compile(
     r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b",
     re.IGNORECASE,
@@ -1459,6 +1466,22 @@ def _explicit_self_name_supported(content: str, value: Any) -> bool:
     )
 
 
+def _explicit_self_occupation_supported(content: str, value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    claimed_role = value.strip(" \t\r\n\"'‘’“”.,;:")
+    if not claimed_role or len(claimed_role) > 160:
+        return False
+    role_pattern = re.compile(
+        rf"(?<!\w){re.escape(claimed_role)}(?!\w)",
+        re.IGNORECASE,
+    )
+    return any(
+        role_pattern.search(match.group("role")) is not None
+        for match in _EXPLICIT_SELF_OCCUPATION_RE.finditer(content)
+    )
+
+
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
@@ -1667,6 +1690,53 @@ def _compile_entity_links(
                 "review_required": True,
             }
         )
+
+    entity_names = {
+        item["entity_ref"]: item.get("name_text") for item in entities
+    }
+    rejected_occupation_refs = {
+        item["observation_ref"]
+        for item in observations
+        if item["predicate"] == "occupation.works_as"
+        and entity_types.get(item["subject_entity_ref"]) == "self"
+        and (
+            item["object"]["kind"] != "entity"
+            or not _explicit_self_occupation_supported(
+                content,
+                entity_names.get(item["object"].get("entity_ref")),
+            )
+        )
+    }
+    if rejected_occupation_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in rejected_occupation_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in rejected_occupation_refs
+        ]
+        repairs.append("self_occupation_requires_explicit_employment")
+        if not observations:
+            return (
+                _guard_deferral_packet(source, ("insufficient_evidence",)),
+                tuple(sorted(set(repairs))),
+            )
+        if not any(
+            item["reason_code"] == "insufficient_evidence"
+            for item in value["deferrals"]
+        ):
+            value["deferrals"].append(
+                {
+                    "reason_code": "insufficient_evidence",
+                    "memory_shape": "none",
+                    "source_spans": [_source_span(source)],
+                    "sensitivity": "low",
+                    "review_required": True,
+                }
+            )
 
     registry_rules = {
         item["predicate"]: item for item in registry["predicates"]

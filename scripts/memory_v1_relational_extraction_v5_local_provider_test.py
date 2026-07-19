@@ -280,6 +280,85 @@ def main() -> int:
     ):
         raise AssertionError("invalid self-name compiler audit is missing")
 
+    degree_content = "I got my doctor in clinical psychology."
+    degree_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000008",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000008",
+        source_sha256=sha256_text(degree_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=degree_content,
+    )
+    degree_packet = deepcopy(provider_output())
+    degree_packet["entity_mentions"][0]["source_spans"] = [
+        {"start": 0, "end": len(degree_content), "quote": degree_content}
+    ]
+    degree_packet["entity_mentions"].append(
+        {
+            "entity_ref": "e01",
+            "entity_type": "concept",
+            "mention_kind": "named",
+            "name_text": "doctor in clinical psychology",
+            "relationship_role": "occupation:reported",
+            "source_spans": [
+                {
+                    "start": 0,
+                    "end": len(degree_content),
+                    "quote": degree_content,
+                }
+            ],
+            "extraction_confidence": 0.99,
+            "reason_codes": ["explicit_occupation_concept"],
+        }
+    )
+    degree_observation = degree_packet["observations"][0]
+    degree_observation["predicate"] = "occupation.works_as"
+    degree_observation["object"] = {
+        "kind": "entity",
+        "entity_ref": "e01",
+    }
+    degree_observation["source_spans"] = [
+        {"start": 0, "end": len(degree_content), "quote": degree_content}
+    ]
+    degree_result = LocalStructuredResult(
+        response_id="local-synthetic-degree-occupation-error",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=degree_packet,
+        response_sha256=canonical_sha256(degree_packet),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    degree_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=degree_result),
+    )
+    degree_validated = validate_and_normalize(
+        degree_provider,
+        source=degree_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    if degree_validated.normalized_packet["observations"]:
+        raise AssertionError("degree statement survived as occupation")
+    if [
+        item["reason_code"]
+        for item in degree_validated.normalized_packet["deferrals"]
+    ] != ["insufficient_evidence"]:
+        raise AssertionError("invalid occupation did not become a deferral")
+    if (
+        "self_occupation_requires_explicit_employment"
+        not in degree_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("invalid occupation compiler audit is missing")
+
     for ordinal, (example_text, example_packet) in enumerate(
         _local_examples() + _additional_local_examples(),
         start=10,
