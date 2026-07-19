@@ -15,6 +15,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalStructuredResult,
     StaticLocalStructuredTransport,
     _additional_local_examples,
+    _deterministic_policy_packet,
     _llama_cpp_output_schema,
     _local_examples,
     _structured_result,
@@ -975,6 +976,34 @@ def main() -> int:
             raise AssertionError(f"missing deterministic {expected_reason}")
         if guard_provider.local_model_calls != 0:
             raise AssertionError("deterministic deferral called the model")
+
+    transient_only_text = "I've felt blocked lately."
+    transient_only_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000094",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000094",
+        source_sha256=sha256_text(transient_only_text),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=transient_only_text,
+    )
+    transient_guard = _deterministic_policy_packet(transient_only_source)
+    if transient_guard is None or transient_guard[1] != "transient_state":
+        raise AssertionError("transient-only deterministic guard changed")
+
+    mixed_text = (
+        "My dog is Koda. I love classical music. "
+        "I've felt blocked lately."
+    )
+    mixed_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000094",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000094",
+        source_sha256=sha256_text(mixed_text),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=mixed_text,
+    )
+    if _deterministic_policy_packet(mixed_source) is not None:
+        raise AssertionError("mixed durable/transient turn was discarded by guard")
 
     pet_text, pet_packet = _local_examples()[7]
     broken_pet_packet = __import__("copy").deepcopy(pet_packet)

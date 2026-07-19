@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v4"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v5"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1399,7 +1399,14 @@ def _deterministic_policy_packet(
             "structured_domain",
         )
         return _guard_deferral_packet(source, reasons), "structured_domain"
-    if _TRANSIENT_RE.search(content):
+    # A transient clause may coexist with durable facts in one user turn. The
+    # whole-turn guard is safe only when no durable assertion is present; mixed
+    # turns must reach the extractor so it can preserve durable clauses and
+    # defer only the transient clause.
+    if (
+        _TRANSIENT_RE.search(content)
+        and not _DURABLE_ASSERTION_RE.search(content)
+    ):
         return _guard_deferral_packet(
             source, ("transient_state",)
         ), "transient_state"
