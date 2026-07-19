@@ -226,12 +226,14 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
         schema = self.app.openapi()
         paths = schema["paths"]
         expected = {
+            "/lifeswitch/plan/workspace",
             "/lifeswitch/plan/active",
             "/lifeswitch/plan/versions",
             "/lifeswitch/plan/versions/{plan_version_id}",
             "/lifeswitch/plan/revisions/{revision_id}",
             "/lifeswitch/plan/revisions",
             "/lifeswitch/plan/revisions/adopt-current-profile",
+            "/lifeswitch/plan/revisions/adopt-current-profile/refresh",
             "/lifeswitch/plan/revisions/{revision_id}/draft",
             "/lifeswitch/plan/revisions/{revision_id}/propose",
             "/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
@@ -408,6 +410,85 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             str(legacy_profile_id),
         )
 
+        status, _, workspace = await self.request("GET", "/lifeswitch/plan/workspace")
+        self.assertEqual(status, 200)
+        self.assertIsNone(workspace["active_plan"])
+        self.assertEqual(
+            workspace["capabilities"],
+            {"can_edit": True, "can_approve": True},
+        )
+        self.assertEqual(workspace["open_revision"]["revision_id"], adopted["revision_id"])
+        self.assertEqual(
+            workspace["open_revision"]["source"]["legacy_plan_profile_id"],
+            str(legacy_profile_id),
+        )
+
+        status, _, coach_workspace = await self.request(
+            "GET",
+            "/lifeswitch/plan/workspace",
+            principal="coach",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            coach_workspace["capabilities"],
+            {"can_edit": True, "can_approve": False},
+        )
+        status, _, viewer_workspace = await self.request(
+            "GET",
+            "/lifeswitch/plan/workspace",
+            principal="viewer",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            viewer_workspace["capabilities"],
+            {"can_edit": False, "can_approve": False},
+        )
+
+        conn = await asyncpg.connect(self.dsn)
+        try:
+            await conn.execute(
+                """
+                update lifeswitch_plan.plan_profile
+                set nutrition_targets =
+                      '{"calorie_target":{"lower":1750,"upper":2050},"protein_grams_minimum":165}'::jsonb,
+                    updated_at = '2026-07-19T13:00:00Z'::timestamptz
+                where owner_user_id = $1
+                """,
+                self.owner,
+            )
+        finally:
+            await conn.close()
+
+        refresh_key = f"adopt-refresh-{uuid.uuid4()}"
+        status, _, refreshed = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions/adopt-current-profile/refresh",
+            idempotency_key=refresh_key,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(refreshed["refreshed"])
+        self.assertEqual(refreshed["revision_id"], adopted["revision_id"])
+        status, _, replayed_refresh = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions/adopt-current-profile/refresh",
+            idempotency_key=refresh_key,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(replayed_refresh["revision_id"], adopted["revision_id"])
+
+        status, _, workspace = await self.request("GET", "/lifeswitch/plan/workspace")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            workspace["open_revision"]["proposed_document"]["nutrition_targets"][
+                "calorie_target"
+            ]["lower"],
+            1750,
+        )
+        self.assertEqual(
+            workspace["open_revision"]["source"]["legacy_profile_updated_at"],
+            "2026-07-19T13:00:00+00:00",
+        )
+
         status, _, active = await self.request("GET", "/lifeswitch/plan/active")
         self.assertEqual(status, 200)
         self.assertIsNone(active["active_plan"])
@@ -457,6 +538,9 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
                   (select count(*) from lifeswitch_agentic.plan_revision_events
                    where owner_user_id = $1
                      and event_type = 'plan_revision_legacy_adopted') as adoption_event_count,
+                  (select count(*) from lifeswitch_agentic.plan_revision_events
+                   where owner_user_id = $1
+                     and event_type = 'plan_revision_legacy_refreshed') as refresh_event_count,
                   (select activation_type from lifeswitch_agentic.plan_versions
                    where owner_user_id = $1 and status = 'active') as activation_type
                 """,
@@ -466,6 +550,7 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             await conn.close()
         self.assertEqual(counts["revision_count"], 1)
         self.assertEqual(counts["adoption_event_count"], 1)
+        self.assertEqual(counts["refresh_event_count"], 1)
         self.assertEqual(counts["activation_type"], "owner_approval")
 
     async def test_coach_can_draft_but_only_owner_can_activate(self) -> None:
@@ -572,7 +657,10 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(status, 422)
-        self.assertEqual(payload["detail"][0]["type"], "value_error.extra")
+        self.assertIn(
+            payload["detail"][0]["type"],
+            {"value_error.extra", "extra_forbidden"},
+        )
 
         bad_document = plan_document()
         bad_document["biomarkers"] = {"a1c": 5.4}

@@ -77,7 +77,11 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         return _internal_http_error()
     if error.code in {"permission_denied", "owner_approval_required", "owner_actor_mismatch"}:
         status_code = 403
-    elif error.code in {"entity_out_of_scope", "legacy_plan_unavailable"}:
+    elif error.code in {
+        "entity_out_of_scope",
+        "legacy_plan_unavailable",
+        "legacy_adoption_unavailable",
+    }:
         status_code = 404
     elif error.code in {
         "state_conflict",
@@ -172,6 +176,7 @@ def _legacy_adoption_result(result: LegacyPlanAdoptionResult) -> dict[str, Any]:
         "legacy_profile_updated_at": _iso(result.legacy_profile_updated_at),
     }
     payload["created"] = result.created
+    payload["refreshed"] = result.refreshed
     return payload
 
 
@@ -248,6 +253,7 @@ def _revision_review(view: RevisionReviewView, context: ActorContext) -> dict[st
         "activated_plan_version_id": (
             str(view.activated_plan_version_id) if view.activated_plan_version_id else None
         ),
+        "source": dict(view.source) if view.source is not None else None,
         "can_approve": (
             context.is_owner
             and view.state == RevisionState.PROPOSED.value
@@ -270,6 +276,36 @@ def create_plan_router(
         plan_repository=write_repo
     )
     router = APIRouter(tags=["LifeSwitch Plan Agentic"])
+
+    @router.get("/workspace")
+    async def get_plan_workspace(
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:view")
+            async with connection_provider() as conn:
+                active = await read_repo.get_active_plan(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                )
+                open_revision = await read_repo.get_latest_open_revision(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                )
+            return {
+                "active_plan": _active_plan(active) if active else None,
+                "open_revision": (
+                    _revision_review(open_revision, context) if open_revision else None
+                ),
+                "capabilities": {
+                    "can_edit": context.permits("plan:edit"),
+                    "can_approve": context.is_owner,
+                },
+            }
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
 
     @router.get("/active")
     async def get_active_plan(
@@ -407,6 +443,31 @@ def create_plan_router(
                 )
             async with connection_provider() as conn:
                 result = await adoption_service.adopt_current_profile_as_draft(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    idempotency_key=idempotency_key,
+                    request_id=_request_id(request),
+                )
+            return _legacy_adoption_result(result)
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/revisions/adopt-current-profile/refresh")
+    async def refresh_adopted_profile(
+        request: Request,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            if not context.is_owner:
+                raise PlanDomainError(
+                    "owner_approval_required",
+                    "only the owner can refresh the adopted plan draft",
+                )
+            async with connection_provider() as conn:
+                result = await adoption_service.refresh_adopted_draft_from_current_profile(
                     conn,
                     owner_user_id=context.owner_user_id,
                     idempotency_key=idempotency_key,

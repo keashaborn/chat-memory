@@ -82,6 +82,7 @@ class RevisionReviewView:
     proposed_at: dt.datetime | None
     resolved_at: dt.datetime | None
     activated_plan_version_id: uuid.UUID | None
+    source: Mapping[str, Any] | None
 
 
 class PlanReadRepository:
@@ -203,7 +204,19 @@ class PlanReadRepository:
                    revision.proposed_document_sha256,
                    revision.validation_result,
                    revision.proposed_at, revision.resolved_at,
-                   revision.activated_plan_version_id
+                   revision.activated_plan_version_id,
+                   (
+                     select event.detail
+                     from {SCHEMA}.plan_revision_events event
+                     where event.owner_user_id = revision.owner_user_id
+                       and event.plan_revision_id = revision.id
+                       and event.event_type in (
+                         'plan_revision_legacy_adopted',
+                         'plan_revision_legacy_refreshed'
+                       )
+                     order by event.id desc
+                     limit 1
+                   ) as legacy_source
             from {SCHEMA}.plan_revisions revision
             left join {SCHEMA}.plan_owner_state owner_state
               on owner_state.owner_user_id = revision.owner_user_id
@@ -270,4 +283,34 @@ class PlanReadRepository:
             proposed_at=row["proposed_at"],
             resolved_at=row["resolved_at"],
             activated_plan_version_id=row["activated_plan_version_id"],
+            source=(
+                _json_object(row["legacy_source"], field="revision source")
+                if row["legacy_source"] is not None
+                else None
+            ),
+        )
+
+    async def get_latest_open_revision(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        owner_user_id: uuid.UUID,
+    ) -> RevisionReviewView | None:
+        revision_id = await conn.fetchval(
+            f"""
+            select id
+            from {SCHEMA}.plan_revisions
+            where owner_user_id = $1
+              and state in ('draft', 'proposed', 'needs_changes')
+            order by created_at desc, id desc
+            limit 1
+            """,
+            owner_user_id,
+        )
+        if revision_id is None:
+            return None
+        return await self.get_revision_review(
+            conn,
+            owner_user_id=owner_user_id,
+            revision_id=revision_id,
         )
