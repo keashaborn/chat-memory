@@ -69,7 +69,7 @@ done
 [[ "$(sha256sum "$repo_root/$test_sql" | cut -d' ' -f1)" == "$expected_test_sha" ]]
 
 docker exec brains-postgres-1 pg_dump -U sage -d memory \
-  -Fc --no-owner --no-privileges >"$backup"
+  -Fc --no-owner >"$backup"
 [[ -s "$backup" ]]
 
 "${compose[@]}" up -d --wait postgres
@@ -94,7 +94,7 @@ printf '%s\n' \
   'CREATE ROLE memory_v5_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
-  --clean --if-exists --no-owner --no-privileges <"$backup"
+  --clean --if-exists --no-owner <"$backup"
 printf '%s\n' \
   'GRANT USAGE ON SCHEMA memory TO brains_app;' \
   'GRANT EXECUTE ON FUNCTION memory.current_actor_user_id() TO brains_app;' \
