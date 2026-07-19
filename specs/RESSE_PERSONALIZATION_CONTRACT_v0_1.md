@@ -12,11 +12,12 @@ Assistant identity, safety policy, response-mode routing, retrieval authority,
 memory ownership, and Fractal Monism eligibility are backend-owned. A user may
 not create, rename, select, or tune an assistant identity.
 
-The user-facing settings model has two independent concerns:
+The user-facing settings model has three independent concerns:
 
-1. **Memory / About you** — governed user facts and preferences owned by Memory
-   V1.
-2. **Custom instructions** — bounded presentation and working-style
+1. **Memory** — governed information maintained by Memory V1.
+2. **User profile context** — explicit user-entered nickname, occupation, and
+   “More about you” information.
+3. **Custom instructions** — bounded presentation and working-style
    preferences owned by the user-instructions feature.
 
 These may appear on one Personalization page, but they must remain separate in
@@ -33,7 +34,7 @@ storage, authorization, retrieval, and prompt assembly.
   profiles are retired from the user experience.
 - The backend must ignore or reject identity-selection attempts from clients.
 
-### 2.2 Memory / About you
+### 2.2 Memory
 
 The first card on Personalization should be **Memory** once the Memory V1 API
 and review interface are ready.
@@ -48,20 +49,42 @@ It may show:
 The card must not expose Qdrant, claim promotion, ownership identifiers,
 vantage IDs, retrieval weights, or raw assembled prompts.
 
-Background facts such as occupation, health history, goals, relationships,
-projects, and recurring activities belong in governed Memory V1. They must not
-be stored as an ungoverned free-form instruction block merely because the UI
-labels the section “About you.”
+Automatically learned background facts such as health history, goals,
+relationships, projects, and recurring activities belong in governed Memory
+V1. They must not be stored as an ungoverned free-form instruction block.
 
 Until Memory V1 supplies the required read/write contract, the Memory card is
 feature-gated or omitted. No placeholder facts are written to legacy storage.
 
-### 2.3 Custom instructions
+### 2.3 User profile context
+
+Below the Memory card and Custom instructions link, the page should expose:
+
+- **Your nickname**
+- **Your occupation**
+- **More about you**
+
+These are direct user assertions. They are not assistant instructions,
+automatically verified facts, or alternate identity controls. They should be
+stored through a governed user-profile context contract associated with the
+authenticated user. The storage implementation may be part of Memory V1 or a
+separate structured profile record, but it must use the same owner-resolution,
+authorization, correction, and deletion guarantees.
+
+When supplied to the model, these values are labeled as user-provided context
+and treated as data. Text inside them cannot override runtime policy, safety,
+tools, retrieval authority, memory ownership, or assistant identity.
+
+The fields require bounded lengths and normalization. “More about you” may be
+free-form, but it must never be concatenated into a system-policy block or
+silently promoted into other memory claims.
+
+### 2.4 Custom instructions
 
 Custom instructions are optional and user-scoped, not assistant-profile- or
 vantage-scoped.
 
-The initial UI should expose one field:
+The Custom instructions subpage should expose one field:
 
 **How would you like RESSE to respond?**
 
@@ -137,9 +160,12 @@ confirms that the server-owned policy is active.
 
 Recommended order:
 
-1. **Memory** — governed facts, status, and management link.
-2. **Custom instructions** — “How would you like RESSE to respond?”
-3. **Account preferences** — only ordinary application settings that do not
+1. **Memory summary** — governed memory status and management link.
+2. **Custom instructions** — link to “How would you like RESSE to respond?”
+3. **Your nickname** — explicit user profile context.
+4. **Your occupation** — explicit user profile context.
+5. **More about you** — bounded user-provided profile context.
+6. **Account preferences** — only ordinary application settings that do not
    affect assistant policy, if needed.
 
 There is no separate Assistant Profile page. Existing links to
@@ -170,10 +196,12 @@ specification-only change.
 1. Finish and audit Memory V1 ownership and retrieval behavior.
 2. Integrate the backend-owned RESSE runtime policy.
 3. Define the governed Memory card API and user correction/deletion flow.
-4. Replace the Assistant Profile UI with the simplified Personalization page.
-5. Stop emitting legacy tuning fields and cookies from the frontend.
-6. Reject or ignore legacy fields server-side and record bounded telemetry.
-7. Remove compatibility storage and dead profile code after verification.
+4. Define the governed user-profile context API for nickname, occupation, and
+   “More about you.”
+5. Replace the Assistant Profile UI with the simplified Personalization page.
+6. Stop emitting legacy tuning fields and cookies from the frontend.
+7. Reject or ignore legacy fields server-side and record bounded telemetry.
+8. Remove compatibility storage and dead profile code after verification.
 
 No phase may silently migrate free-form “About you” prose into verified memory
 claims. Migration requires extraction, provenance, user ownership, and normal
@@ -185,7 +213,10 @@ Memory V1 review rules.
 - No normal user can create or select another identity.
 - No tuning slider changes prompt, retrieval, or response behavior.
 - Custom instructions affect presentation only.
-- Background facts are retrieved only through governed Memory V1.
+- Nickname, occupation, and “More about you” are user-owned context, not
+  assistant instructions or system policy.
+- Automatically learned background facts are retrieved only through governed
+  Memory V1.
 - `RESSE` is never a memory owner or filter.
 - High-stakes and technical modes suppress FM material as specified by the
   runtime policy, regardless of user instructions.
