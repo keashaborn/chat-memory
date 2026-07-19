@@ -485,6 +485,13 @@ class PlanRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event_count, 2)
 
     async def test_outbox_claim_release_reclaim_and_completion_are_lease_safe(self) -> None:
+        await self.conn.execute(
+            """
+            truncate table
+              lifeswitch_agentic.outbox_deliveries,
+              lifeswitch_agentic.outbox_events;
+            """
+        )
         owner = uuid.uuid4()
         await self._activate_initial(owner)
         outbox = OutboxRepository()
