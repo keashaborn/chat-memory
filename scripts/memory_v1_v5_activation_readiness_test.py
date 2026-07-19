@@ -128,6 +128,13 @@ def main() -> None:
     ]["current_compiler"] = False
     assert run(stale_compiler)["checks"]["current_compiler_gate_installed"] is False
 
+    stopped_health_monitor = deepcopy(ready_values)
+    stopped_health_monitor[3]["memory-v1-v5-local-inference-health.timer"] = {
+        "enabled": "enabled",
+        "active": "inactive",
+    }
+    assert run(stopped_health_monitor)["checks"]["automation_timer_contract_exact"] is False
+
     prose_trace = deepcopy(ready_values)
     prose_trace[0]["trace_relations"]["v5_shadow_trace_event"]["columns"].append(
         "query_text"

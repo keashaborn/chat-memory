@@ -1,6 +1,6 @@
 # Memory V1 V5 activation readiness
 
-Status: read-only v3 current-invariant gate. Admin-only V5 shadow retrieval is
+Status: read-only v4 current-invariant gate. Admin-only V5 shadow retrieval is
 live with zero prompt or answer influence.
 
 Server boundary: seebx backend. The gate does not run on Verbal Sage, RESSE, or
@@ -15,8 +15,8 @@ Resse-Train. It makes no database or Qdrant writes and no model calls.
    predicate registry remains proposed/inactive.
 2. `automation_current`: the production checkout is clean, all four downstream
    planners enforce the current deterministic compiler hash, the exact timer
-   contract is present, the private GPU tunnel is active, and systemd has no
-   failed units.
+   contract includes an active five-minute private-model health monitor, the
+   private GPU tunnel is active, and systemd has no failed units.
 3. `projection_consistent`: every supported Postgres claim has exactly one
    owner-scoped Qdrant projection, every Qdrant point maps back to that same
    Postgres claim and owner, and no point lacks its owner.
@@ -40,10 +40,10 @@ prose, prompt content, or answer content. The report is written mode `0600`.
 
 ## Required sequence
 
-1. Preserve a passing v3 report and checksum for the current admin-only shadow.
+1. Preserve a passing v4 report and checksum for the current admin-only shadow.
 2. Add only the two owner-controlled test accounts to the zero-influence shadow
    allowlist; do not enable all authenticated accounts.
-3. Gather ordinary-use traces for those accounts and rerun the v3 gate until
+3. Gather ordinary-use traces for those accounts and rerun the v4 gate until
    all allowlisted owners have isolated traces.
 4. Evaluate selection quality, suppression behavior, missing-memory rate, and
    false-positive rate from sanitized trace outcomes plus targeted owner-only

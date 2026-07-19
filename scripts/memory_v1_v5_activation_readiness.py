@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "memory_v1_v5_activation_readiness_v3"
+VERSION = "memory_v1_v5_activation_readiness_v4"
 REGISTRY_VERSION = "memory_predicate_registry_v5"
 REGISTRY_SHA256 = "4d626433109c89c18d5ea374e173ca6785de6f9c20ecc05fef9f6447bfc671f4"
 COMPILER_SHA256 = "5cb83e837e38174af4cfda016c20009168ff62974e7d9137b30228d9973256a2"
@@ -91,6 +91,7 @@ EXPECTED_TIMER_STATES = {
     "memory-v1-v5-local-claim-projection.timer": ("enabled", "active"),
     "memory-v1-v5-local-entailment.timer": ("enabled", "active"),
     "memory-v1-v5-local-entity-validation.timer": ("enabled", "active"),
+    "memory-v1-v5-local-inference-health.timer": ("enabled", "active"),
     "memory-v1-v5-local-inference-scheduler.timer": ("enabled", "active"),
     "memory-v1-v5-local-packet-router.timer": ("enabled", "active"),
 }
