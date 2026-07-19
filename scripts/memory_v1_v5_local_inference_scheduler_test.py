@@ -15,6 +15,7 @@ from scripts.memory_v1_v5_local_inference_scheduler import (
     canary_command,
     canonical_owners,
     loopback_dsn,
+    ordered_owner_targets,
     sanitized_canary_result,
     select_owner_target,
     validate_arguments,
@@ -88,6 +89,13 @@ def main() -> int:
         ]
     )
     assert selected == (owner_b, target_b)
+    assert ordered_owner_targets(
+        [
+            (OWNER, {}, target_a, now),
+            (owner_c, {}, target_c, None),
+            (owner_b, {}, target_b, None),
+        ]
+    ) == [(owner_b, target_b), (owner_c, target_c), (OWNER, target_a)]
     selected = select_owner_target(
         [
             (OWNER, {}, target_a, now),

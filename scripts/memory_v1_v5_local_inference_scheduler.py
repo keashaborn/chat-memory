@@ -194,13 +194,11 @@ async def plan_owner(
     return report, target, last_service_at
 
 
-def select_owner_target(
+def ordered_owner_targets(
     planned: Sequence[tuple[uuid.UUID, dict[str, Any], dict[str, Any] | None, Any]],
-) -> tuple[uuid.UUID, dict[str, Any]] | None:
+) -> list[tuple[uuid.UUID, dict[str, Any]]]:
     candidates = [item for item in planned if item[2] is not None]
-    if not candidates:
-        return None
-    selected = min(
+    ordered = sorted(
         candidates,
         key=lambda item: (
             item[3] is not None,
@@ -208,7 +206,14 @@ def select_owner_target(
             str(item[0]),
         ),
     )
-    return selected[0], selected[2]
+    return [(item[0], item[2]) for item in ordered]
+
+
+def select_owner_target(
+    planned: Sequence[tuple[uuid.UUID, dict[str, Any], dict[str, Any] | None, Any]],
+) -> tuple[uuid.UUID, dict[str, Any]] | None:
+    ordered = ordered_owner_targets(planned)
+    return ordered[0] if ordered else None
 
 
 def load_api_key(credential_name: str) -> str:
@@ -335,7 +340,8 @@ async def run() -> int:
         await conn.close()
 
     plans = [report for _, report, _, _ in planned]
-    selected = select_owner_target(planned)
+    ordered_targets = ordered_owner_targets(planned)
+    selected = ordered_targets[0] if ordered_targets else None
     if not args.apply:
         print(
             stable_json(
@@ -377,23 +383,45 @@ async def run() -> int:
         )
         return 0
 
-    owner, target = selected
     api_key = load_api_key(args.credential_name)
-    result = invoke_canary(
-        args,
-        owner=owner,
-        run_id=run_id,
-        target=target,
-        api_key=api_key,
-    )
+    blocked: list[dict[str, Any]] = []
+    for owner, target in ordered_targets:
+        result = invoke_canary(
+            args,
+            owner=owner,
+            run_id=run_id,
+            target=target,
+            api_key=api_key,
+        )
+        if result.get("outcome") in {"quota_exhausted", "circuit_open"}:
+            blocked.append(result)
+            continue
+        print(
+            stable_json(
+                {
+                    "worker_version": WORKER_VERSION,
+                    "apply": True,
+                    "owner_count": len(owners),
+                    "processed": 1,
+                    "blocked_owner_count": len(blocked),
+                    "blocked": blocked,
+                    "result": result,
+                }
+            )
+        )
+        return 0
     print(
         stable_json(
             {
                 "worker_version": WORKER_VERSION,
                 "apply": True,
+                "outcome": "all_owners_blocked",
                 "owner_count": len(owners),
-                "processed": 1,
-                "result": result,
+                "processed": 0,
+                "blocked_owner_count": len(blocked),
+                "blocked": blocked,
+                "external_model_calls": 0,
+                "local_model_calls": 0,
             }
         )
     )
