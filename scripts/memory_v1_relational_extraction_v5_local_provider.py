@@ -1078,6 +1078,10 @@ _RESIDENCE_RE = re.compile(
     r"\blive\s+in\s+(.+?)(?:[.!?]|$)",
     re.IGNORECASE,
 )
+_HISTORICAL_RESIDENCE_RE = re.compile(
+    r"\b(?:used\s+to\s+live|previously\s+lived|formerly\s+lived)\b",
+    re.IGNORECASE,
+)
 _EXPLICIT_REPORTED_AGE_RE = re.compile(
     r"\b(?:"
     r"(?:my|his|her|their)\s+age\s+is|"
@@ -1512,6 +1516,24 @@ def _explicit_reported_age_supported(
     return False
 
 
+def _observation_source_text(
+    content: str, observation: dict[str, Any]
+) -> str:
+    pieces: list[str] = []
+    for span in observation.get("source_spans", []):
+        start = span.get("start")
+        end = span.get("end")
+        if (
+            isinstance(start, int)
+            and not isinstance(start, bool)
+            and isinstance(end, int)
+            and not isinstance(end, bool)
+            and 0 <= start < end <= len(content)
+        ):
+            pieces.append(content[start:end])
+    return "\n".join(pieces)
+
+
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
@@ -1705,9 +1727,18 @@ def _compile_entity_links(
                 relationship_role="user:self",
             )
             repairs.append("self_entity_link")
-        place_ref = _entity_ref(entities, "place")
+        residence_observations = [
+            item
+            for item in observations
+            if item["predicate"] == "residence.lives_at"
+        ]
+        place_refs = {
+            item["entity_ref"]
+            for item in entities
+            if item["entity_type"] == "place"
+        }
         residence = _RESIDENCE_RE.search(content)
-        if place_ref is None and residence:
+        if not place_refs and len(residence_observations) == 1 and residence:
             place_name = residence.group(1).strip(" ,")
             if place_name:
                 place_ref = _add_compiler_entity(
@@ -1717,16 +1748,25 @@ def _compile_entity_links(
                     name_text=place_name,
                     relationship_role="residence:reported",
                 )
+                place_refs.add(place_ref)
                 repairs.append("place_entity_link")
-        if self_ref is not None and place_ref is not None:
-            for observation in observations:
-                if observation["predicate"] == "residence.lives_at":
-                    observation["subject_entity_ref"] = self_ref
+        if self_ref is not None:
+            residence_changed = False
+            for observation in residence_observations:
+                observation["subject_entity_ref"] = self_ref
+                obj = observation["object"]
+                if obj["kind"] == "entity" and (
+                    obj.get("entity_ref") in place_refs
+                ):
+                    continue
+                if len(place_refs) == 1 and len(residence_observations) == 1:
                     observation["object"] = {
                         "kind": "entity",
-                        "entity_ref": place_ref,
+                        "entity_ref": next(iter(place_refs)),
                     }
-            repairs.append("residence_link_normalized")
+                    residence_changed = True
+            if residence_changed:
+                repairs.append("residence_link_normalized")
 
     entity_types = {
         item["entity_ref"]: item["entity_type"] for item in entities
@@ -1821,10 +1861,18 @@ def _compile_entity_links(
     object_contracts = registry["object_contracts"]
     invalid_contract_refs: set[str] = set()
     invalid_age_refs: set[str] = set()
+    invalid_historical_residence_refs: set[str] = set()
+    invalid_project_scope_refs: set[str] = set()
     for observation in observations:
         obj = observation["object"]
         rule = registry_rules.get(observation["predicate"])
         if rule is None:
+            continue
+        subject_type = entity_types.get(observation["subject_entity_ref"])
+        if subject_type not in rule["subject_entity_types"]:
+            invalid_contract_refs.add(observation["observation_ref"])
+            if observation["predicate"].startswith("project."):
+                invalid_project_scope_refs.add(observation["observation_ref"])
             continue
         contract = object_contracts[rule["object_contract"]]
         if obj["kind"] != contract["kind"]:
@@ -1834,6 +1882,15 @@ def _compile_entity_links(
             _explicit_reported_age_supported(content, obj)
         ):
             invalid_age_refs.add(observation["observation_ref"])
+            continue
+        if observation["predicate"] == "residence.lives_at" and (
+            _HISTORICAL_RESIDENCE_RE.search(
+                _observation_source_text(content, observation)
+            )
+        ):
+            invalid_historical_residence_refs.add(
+                observation["observation_ref"]
+            )
             continue
         if obj["kind"] != "literal":
             continue
@@ -1859,7 +1916,11 @@ def _compile_entity_links(
             continue
         invalid_contract_refs.add(observation["observation_ref"])
 
-    invalid_refs = invalid_contract_refs | invalid_age_refs
+    invalid_refs = (
+        invalid_contract_refs
+        | invalid_age_refs
+        | invalid_historical_residence_refs
+    )
     if invalid_refs:
         observations[:] = [
             item
@@ -1875,7 +1936,22 @@ def _compile_entity_links(
             repairs.append("unsupported_object_contract_deferred")
         if invalid_age_refs:
             repairs.append("age_requires_explicit_age_statement")
-        if not any(
+        if invalid_historical_residence_refs:
+            repairs.append("historical_residence_requires_interval")
+        if invalid_project_scope_refs and not any(
+            item["reason_code"] == "project_scope_unresolved"
+            for item in value["deferrals"]
+        ):
+            value["deferrals"].append(
+                {
+                    "reason_code": "project_scope_unresolved",
+                    "memory_shape": "project_knowledge",
+                    "source_spans": [_source_span(source)],
+                    "sensitivity": "medium",
+                }
+            )
+        general_invalid_refs = invalid_refs - invalid_project_scope_refs
+        if general_invalid_refs and not any(
             item["reason_code"] == "insufficient_evidence"
             for item in value["deferrals"]
         ):

@@ -291,6 +291,181 @@ def main() -> int:
             not in age_provider.last_audit["compiler_repairs"]
         ):
             raise AssertionError("invalid age deferral audit is missing")
+
+    residence_content = (
+        "I used to live in Alba, but now I live in Birch."
+    )
+    residence_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000006",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000006",
+        source_sha256=sha256_text(residence_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=residence_content,
+    )
+    residence_packet = deepcopy(raw)
+    full_residence_span = {
+        "start": 0,
+        "end": len(residence_content),
+        "quote": residence_content,
+    }
+    residence_packet["entity_mentions"][0]["source_spans"] = [
+        full_residence_span
+    ]
+    residence_packet["entity_mentions"].extend(
+        [
+            {
+                "entity_ref": "e01",
+                "entity_type": "place",
+                "mention_kind": "named",
+                "name_text": "Alba",
+                "relationship_role": "residence:former",
+                "source_spans": [full_residence_span],
+                "extraction_confidence": 0.99,
+                "reason_codes": ["explicit_former_residence"],
+            },
+            {
+                "entity_ref": "e02",
+                "entity_type": "place",
+                "mention_kind": "named",
+                "name_text": "Birch",
+                "relationship_role": "residence:current",
+                "source_spans": [full_residence_span],
+                "extraction_confidence": 0.99,
+                "reason_codes": ["explicit_current_residence"],
+            },
+        ]
+    )
+    former_quote = "I used to live in Alba"
+    current_quote = "now I live in Birch"
+    former_observation = residence_packet["observations"][0]
+    former_observation["predicate"] = "residence.lives_at"
+    former_observation["object"] = {
+        "kind": "entity",
+        "entity_ref": "e01",
+    }
+    former_observation["temporal"]["semantic"] = "state_validity"
+    former_observation["source_spans"] = [
+        {
+            "start": residence_content.index(former_quote),
+            "end": residence_content.index(former_quote)
+            + len(former_quote),
+            "quote": former_quote,
+        }
+    ]
+    current_observation = deepcopy(former_observation)
+    current_observation["observation_ref"] = "o01"
+    current_observation["object"]["entity_ref"] = "e02"
+    current_observation["source_spans"] = [
+        {
+            "start": residence_content.index(current_quote),
+            "end": residence_content.index(current_quote)
+            + len(current_quote),
+            "quote": current_quote,
+        }
+    ]
+    residence_packet["observations"].append(current_observation)
+    residence_result = LocalStructuredResult(
+        response_id="local-multiple-residences",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=residence_packet,
+        response_sha256=canonical_sha256(residence_packet),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    residence_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=residence_result),
+    )
+    residence_validated = validate_and_normalize(
+        residence_provider,
+        source=residence_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    residence_observations = residence_validated.normalized_packet[
+        "observations"
+    ]
+    if len(residence_observations) != 1 or residence_observations[0][
+        "object"
+    ] != {"kind": "entity", "entity_ref": "e02"}:
+        raise AssertionError("multiple residence links were collapsed")
+    if (
+        "historical_residence_requires_interval"
+        not in residence_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("unbounded historical residence was not deferred")
+
+    personal_project_content = "I am writing a fantasy novel."
+    personal_project_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000007",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000007",
+        source_sha256=sha256_text(personal_project_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=personal_project_content,
+    )
+    personal_project_packet = deepcopy(raw)
+    personal_project_span = {
+        "start": 0,
+        "end": len(personal_project_content),
+        "quote": personal_project_content,
+    }
+    personal_project_packet["entity_mentions"][0]["source_spans"] = [
+        personal_project_span
+    ]
+    personal_project_observation = personal_project_packet["observations"][0]
+    personal_project_observation["predicate"] = "project.current_state"
+    personal_project_observation["object"]["value"] = (
+        "writing a fantasy novel"
+    )
+    personal_project_observation["projection_class"] = "project_knowledge"
+    personal_project_observation["surface_policy"] = "exact_project_scope_only"
+    personal_project_observation["temporal"]["semantic"] = "state_validity"
+    personal_project_observation["source_spans"] = [personal_project_span]
+    personal_project_result = LocalStructuredResult(
+        response_id="local-unregistered-personal-project",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=personal_project_packet,
+        response_sha256=canonical_sha256(personal_project_packet),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    personal_project_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(
+            result=personal_project_result
+        ),
+    )
+    personal_project_validated = validate_and_normalize(
+        personal_project_provider,
+        source=personal_project_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    if personal_project_validated.normalized_packet["observations"]:
+        raise AssertionError("unregistered personal project survived")
+    if [
+        item["reason_code"]
+        for item in personal_project_validated.normalized_packet["deferrals"]
+    ] != ["project_scope_unresolved"]:
+        raise AssertionError("personal project did not use project deferral")
     invalid_raw = deepcopy(raw)
     invalid_raw["entity_mentions"] = "private source prose must not survive"
     invalid_result = LocalStructuredResult(
