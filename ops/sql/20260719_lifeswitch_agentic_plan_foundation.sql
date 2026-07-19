@@ -224,6 +224,10 @@ create index plan_revision_events_revision_idx
     owner_user_id, plan_revision_id, id
   );
 
+create unique index plan_revision_events_one_legacy_adoption_owner_idx
+  on lifeswitch_agentic.plan_revision_events (owner_user_id)
+  where event_type = 'plan_revision_legacy_adopted';
+
 create table lifeswitch_agentic.command_receipts (
   owner_user_id uuid not null,
   command_name text not null

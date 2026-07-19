@@ -10,6 +10,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from .legacy_plan_adoption import LegacyPlanAdoptionResult, LegacyPlanAdoptionService
 from .plan_domain import PlanDocumentV1, PlanDomainError, RevisionState, RevisionTrigger
 from .plan_read_repository import (
     ActivePlanView,
@@ -76,7 +77,7 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         return _internal_http_error()
     if error.code in {"permission_denied", "owner_approval_required", "owner_actor_mismatch"}:
         status_code = 403
-    elif error.code in {"entity_out_of_scope"}:
+    elif error.code in {"entity_out_of_scope", "legacy_plan_unavailable"}:
         status_code = 404
     elif error.code in {
         "state_conflict",
@@ -161,6 +162,17 @@ def _activation_result(result: ActivationResult) -> dict[str, Any]:
         "state": RevisionState.ACTIVATED.value,
         "active_plan_changed": True,
     }
+
+
+def _legacy_adoption_result(result: LegacyPlanAdoptionResult) -> dict[str, Any]:
+    payload = _revision_record(result.revision)
+    payload["source"] = {
+        "kind": result.source_kind,
+        "legacy_plan_profile_id": str(result.legacy_plan_profile_id),
+        "legacy_profile_updated_at": _iso(result.legacy_profile_updated_at),
+    }
+    payload["created"] = result.created
+    return payload
 
 
 def _active_plan(view: ActivePlanView) -> dict[str, Any]:
@@ -250,9 +262,13 @@ def create_plan_router(
     actor_dependency: ActorDependency,
     plan_repository: PlanRepository | None = None,
     read_repository: PlanReadRepository | None = None,
+    legacy_adoption_service: LegacyPlanAdoptionService | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
+    adoption_service = legacy_adoption_service or LegacyPlanAdoptionService(
+        plan_repository=write_repo
+    )
     router = APIRouter(tags=["LifeSwitch Plan Agentic"])
 
     @router.get("/active")
@@ -372,6 +388,31 @@ def create_plan_router(
                     request_id=_request_id(request),
                 )
             return _revision_record(result)
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/revisions/adopt-current-profile", status_code=201)
+    async def adopt_current_profile(
+        request: Request,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            if not context.is_owner:
+                raise PlanDomainError(
+                    "owner_approval_required",
+                    "only the owner can adopt the current plan profile",
+                )
+            async with connection_provider() as conn:
+                result = await adoption_service.adopt_current_profile_as_draft(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    idempotency_key=idempotency_key,
+                    request_id=_request_id(request),
+                )
+            return _legacy_adoption_result(result)
         except PlanDomainError as error:
             raise _domain_http_error(error) from error
         except asyncpg.PostgresError as error:

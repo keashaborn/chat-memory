@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 
+from .legacy_plan_adoption import LegacyPlanAdoptionService
 from .plan_api import ActorContext, create_plan_router
+from .plan_repository import PlanRepository
 
 
 PLAN_PERMISSION_SCOPES = frozenset({"plan:view", "plan:comment", "plan:edit"})
@@ -146,9 +148,16 @@ def create_lifeswitch_plan_app_router(
     *,
     dsn: str,
     people_schema: str = "lifeswitch_people",
+    legacy_plan_schema: str = "lifeswitch_plan",
 ) -> APIRouter:
     adapter = LifeSwitchPlanAppAdapter(dsn=dsn, people_schema=people_schema)
+    plan_repository = PlanRepository()
     return create_plan_router(
         connection_provider=adapter.connection,
         actor_dependency=adapter.actor_context,
+        plan_repository=plan_repository,
+        legacy_adoption_service=LegacyPlanAdoptionService(
+            plan_repository=plan_repository,
+            legacy_schema=legacy_plan_schema,
+        ),
     )

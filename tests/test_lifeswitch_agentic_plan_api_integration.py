@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import unittest
@@ -152,6 +153,35 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             ),
             prefix="/lifeswitch/plan",
         )
+        conn = await asyncpg.connect(self.dsn)
+        try:
+            await conn.execute("create schema if not exists lifeswitch_plan")
+            await conn.execute(
+                """
+                create table if not exists lifeswitch_plan.plan_profile (
+                  plan_profile_id uuid primary key,
+                  owner_user_id uuid not null unique,
+                  phase text not null,
+                  phase_label text not null,
+                  primary_goal text not null,
+                  start_date date,
+                  review_date date,
+                  review_cadence text not null,
+                  body_state jsonb not null,
+                  nutrition_targets jsonb not null,
+                  training_targets jsonb not null,
+                  conditioning_targets jsonb not null,
+                  activity_targets jsonb not null,
+                  recovery_targets jsonb not null,
+                  monitoring_rules jsonb not null,
+                  coach_notes text not null,
+                  is_active boolean not null,
+                  updated_at timestamptz not null
+                )
+                """
+            )
+        finally:
+            await conn.close()
 
     async def request(
         self,
@@ -201,6 +231,7 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "/lifeswitch/plan/versions/{plan_version_id}",
             "/lifeswitch/plan/revisions/{revision_id}",
             "/lifeswitch/plan/revisions",
+            "/lifeswitch/plan/revisions/adopt-current-profile",
             "/lifeswitch/plan/revisions/{revision_id}/draft",
             "/lifeswitch/plan/revisions/{revision_id}/propose",
             "/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
@@ -313,6 +344,129 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(second_page["versions"][0]["version_number"], 1)
         self.assertIsNone(second_page["next_before_version"])
+
+    async def test_legacy_profile_adoption_creates_one_draft_and_never_auto_activates(self) -> None:
+        legacy_profile_id = uuid.uuid4()
+        conn = await asyncpg.connect(self.dsn)
+        try:
+            await conn.execute(
+                """
+                insert into lifeswitch_plan.plan_profile (
+                  plan_profile_id, owner_user_id,
+                  phase, phase_label, primary_goal,
+                  start_date, review_date, review_cadence,
+                  body_state, nutrition_targets, training_targets,
+                  conditioning_targets, activity_targets,
+                  recovery_targets, monitoring_rules, coach_notes,
+                  is_active, updated_at
+                ) values (
+                  $1, $2,
+                  'cut', 'Cut to 16% body fat',
+                  'Reduce body-fat percentage while maintaining strength.',
+                  '2026-07-01'::date, '2026-07-15'::date, 'weekly',
+                  '{"body_fat_percent":20}'::jsonb,
+                  '{"calorie_target":{"lower":1800,"upper":2100},"protein_grams_minimum":160}'::jsonb,
+                  '{"strength_sessions_per_week":3}'::jsonb,
+                  '{}'::jsonb,
+                  '{"steps_minimum":7000}'::jsonb,
+                  '{}'::jsonb,
+                  '{"review_every_days":7}'::jsonb,
+                  '', true, '2026-07-19T12:00:00Z'::timestamptz
+                )
+                """,
+                legacy_profile_id,
+                self.owner,
+            )
+        finally:
+            await conn.close()
+
+        first_attempt, second_attempt = await asyncio.gather(
+            self.request(
+                "POST",
+                "/lifeswitch/plan/revisions/adopt-current-profile",
+                idempotency_key=f"adopt-{uuid.uuid4()}",
+            ),
+            self.request(
+                "POST",
+                "/lifeswitch/plan/revisions/adopt-current-profile",
+                idempotency_key=f"adopt-concurrent-{uuid.uuid4()}",
+            ),
+        )
+        self.assertEqual(first_attempt[0], 201)
+        self.assertEqual(second_attempt[0], 201)
+        adoption_payloads = (first_attempt[2], second_attempt[2])
+        self.assertEqual(len({payload["revision_id"] for payload in adoption_payloads}), 1)
+        self.assertEqual(
+            sorted(payload["created"] for payload in adoption_payloads),
+            [False, True],
+        )
+        adopted = next(payload for payload in adoption_payloads if payload["created"])
+        self.assertEqual(adopted["state"], "draft")
+        self.assertFalse(adopted["active_plan_changed"])
+        self.assertEqual(
+            adopted["source"]["legacy_plan_profile_id"],
+            str(legacy_profile_id),
+        )
+
+        status, _, active = await self.request("GET", "/lifeswitch/plan/active")
+        self.assertEqual(status, 200)
+        self.assertIsNone(active["active_plan"])
+
+        status, _, replay = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions/adopt-current-profile",
+            idempotency_key=f"adopt-again-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(replay["revision_id"], adopted["revision_id"])
+        self.assertFalse(replay["created"])
+
+        status, _, denied = await self.request(
+            "POST",
+            "/lifeswitch/plan/revisions/adopt-current-profile",
+            principal="coach",
+            idempotency_key=f"coach-adopt-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(denied["detail"]["code"], "owner_approval_required")
+
+        revision_id = adopted["revision_id"]
+        status, _, proposal = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/propose",
+            idempotency_key=f"adopt-propose-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertIn(proposal["validation_status"], {"valid", "valid_with_warnings"})
+
+        status, _, activation = await self.request(
+            "POST",
+            f"/lifeswitch/plan/revisions/{revision_id}/approve-and-activate",
+            idempotency_key=f"adopt-approve-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(activation["active_plan_changed"])
+
+        conn = await asyncpg.connect(self.dsn)
+        try:
+            counts = await conn.fetchrow(
+                """
+                select
+                  (select count(*) from lifeswitch_agentic.plan_revisions
+                   where owner_user_id = $1) as revision_count,
+                  (select count(*) from lifeswitch_agentic.plan_revision_events
+                   where owner_user_id = $1
+                     and event_type = 'plan_revision_legacy_adopted') as adoption_event_count,
+                  (select activation_type from lifeswitch_agentic.plan_versions
+                   where owner_user_id = $1 and status = 'active') as activation_type
+                """,
+                self.owner,
+            )
+        finally:
+            await conn.close()
+        self.assertEqual(counts["revision_count"], 1)
+        self.assertEqual(counts["adoption_event_count"], 1)
+        self.assertEqual(counts["activation_type"], "owner_approval")
 
     async def test_coach_can_draft_but_only_owner_can_activate(self) -> None:
         status, _, draft = await self.create_draft(principal="coach")

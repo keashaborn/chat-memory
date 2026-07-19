@@ -56,6 +56,7 @@ app.include_router(
     create_lifeswitch_plan_app_router(
         dsn=os.environ["POSTGRES_DSN"],
         people_schema=os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people"),
+        legacy_plan_schema=os.getenv("LIFESWITCH_PLAN_SCHEMA", "lifeswitch_plan"),
     ),
     prefix="/lifeswitch/plan",
 )

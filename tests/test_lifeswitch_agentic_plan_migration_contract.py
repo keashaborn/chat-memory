@@ -83,6 +83,11 @@ class PlanMigrationContractTest(unittest.TestCase):
             self.lower,
             r"plan_revision_events_revision_idx\s+on\s+lifeswitch_agentic\.plan_revision_events\s*\(\s*owner_user_id\s*,\s*plan_revision_id",
         )
+        self.assertIn("plan_revision_events_one_legacy_adoption_owner_idx", self.lower)
+        self.assertRegex(
+            self.lower,
+            r"where\s+event_type\s*=\s*'plan_revision_legacy_adopted'",
+        )
 
     def test_initial_plan_and_owner_only_activation_provenance_are_represented(self) -> None:
         self.assertIn("'initial_plan'", self.lower)
