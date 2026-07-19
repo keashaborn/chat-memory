@@ -244,6 +244,72 @@ def main() -> int:
         "insufficient_evidence"
     ]:
         raise AssertionError("compiler repair deferral changed")
+    relationship_raw = deepcopy(raw)
+    child_entity = deepcopy(relationship_raw["entity_mentions"][0])
+    child_entity.update(
+        {
+            "entity_ref": "e01",
+            "entity_type": "person",
+            "mention_kind": "named",
+            "name_text": "Riley",
+            "relationship_role": "child:current",
+        }
+    )
+    spouse_entity = deepcopy(child_entity)
+    spouse_entity.update(
+        {
+            "entity_ref": "e02",
+            "name_text": "Jordan",
+            "relationship_role": "spouse:current",
+        }
+    )
+    relationship_raw["entity_mentions"].extend([child_entity, spouse_entity])
+    child_observation = deepcopy(relationship_raw["observations"][0])
+    child_observation.update(
+        {
+            "observation_ref": "o01",
+            "predicate": "relationship.has_pet",
+            "object": {"kind": "entity", "entity_ref": "e01"},
+        }
+    )
+    spouse_observation = deepcopy(child_observation)
+    spouse_observation.update(
+        {"observation_ref": "o02", "object": {"kind": "entity", "entity_ref": "e02"}}
+    )
+    relationship_raw["observations"].extend(
+        [child_observation, spouse_observation]
+    )
+    relationship_result = LocalStructuredResult(
+        response_id="local-relationship-repair-1",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=relationship_raw,
+        response_sha256=canonical_sha256(relationship_raw),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    relationship_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=relationship_result),
+    )
+    relationship_packet = relationship_provider.extract(source).model_dump(
+        mode="json"
+    )
+    relationship_predicates = {
+        item["predicate"] for item in relationship_packet["observations"]
+    }
+    if "relationship.has_pet" in relationship_predicates:
+        raise AssertionError("person relationship survived as has_pet")
+    if "relationship.parent_of" not in relationship_predicates:
+        raise AssertionError("explicit child relation was not normalized")
+    if not any(
+        item["reason_code"] == "unregistered_predicate"
+        for item in relationship_packet["deferrals"]
+    ):
+        raise AssertionError("unsupported spouse relation was not deferred")
     request_body = transport.requests[0].body()
     if "store" in request_body:
         raise AssertionError("local transport unexpectedly emitted store state")

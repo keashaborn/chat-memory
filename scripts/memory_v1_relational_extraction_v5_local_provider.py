@@ -1566,6 +1566,58 @@ def _compile_entity_links(
                         break
         repairs.append("pet_relation_normalized")
 
+    entity_roles = {
+        item["entity_ref"]: item.get("relationship_role")
+        for item in entities
+    }
+    unsupported_relationship_refs: set[str] = set()
+    for observation in observations:
+        obj = observation["object"]
+        if observation["predicate"] != "relationship.has_pet" or (
+            obj["kind"] != "entity"
+        ):
+            continue
+        role = entity_roles.get(obj["entity_ref"])
+        normalized_role = role.casefold() if isinstance(role, str) else ""
+        if normalized_role.startswith(("child:", "son:", "daughter:")):
+            if self_ref is None and _FIRST_PERSON_RE.search(content):
+                self_ref = _add_compiler_entity(
+                    source,
+                    entities,
+                    entity_type="self",
+                    name_text=None,
+                    relationship_role="user:self",
+                )
+                repairs.append("self_entity_link")
+            if self_ref is not None:
+                observation["predicate"] = "relationship.parent_of"
+                observation["subject_entity_ref"] = self_ref
+                repairs.append("child_relation_normalized")
+        elif normalized_role.startswith(
+            ("spouse:", "wife:", "husband:", "partner:")
+        ):
+            unsupported_relationship_refs.add(observation["observation_ref"])
+            value["deferrals"].append(
+                {
+                    "reason_code": "unregistered_predicate",
+                    "memory_shape": "direct_claim",
+                    "source_spans": observation["source_spans"],
+                    "sensitivity": observation["sensitivity"],
+                }
+            )
+            repairs.append("unsupported_partner_relation_deferred")
+    if unsupported_relationship_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in unsupported_relationship_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in unsupported_relationship_refs
+        ]
+
     if "relationship.parent_of" in predicates and _PARENT_ROLE_RE.search(content):
         person_ref = _entity_ref(entities, "person")
         if self_ref is None and _FIRST_PERSON_RE.search(content):
