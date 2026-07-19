@@ -29,7 +29,7 @@ chmod 0600 "$backup" "$dry" "$applied"
 
 cleanup() {
   docker exec "$container" dropdb -U sage --if-exists "$clone" >/dev/null 2>&1 || true
-  rm -f "$backup" "$dry" "$applied"
+  rm -f "$backup" "$dry" "$applied" "$dry.stdout" "$applied.stdout"
 }
 trap cleanup EXIT
 

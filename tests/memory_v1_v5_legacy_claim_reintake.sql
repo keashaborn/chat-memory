@@ -26,6 +26,7 @@ $test$;
 
 SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id',:'owner_a',true);
+SELECT set_config('test.owner_b',:'owner_b',true);
 
 DO $test$
 DECLARE
@@ -42,7 +43,7 @@ BEGIN
 
   SELECT evidence_id INTO cross_owner_evidence
   FROM memory.evidence
-  WHERE owner_user_id=:'owner_b'::uuid
+  WHERE owner_user_id=current_setting('test.owner_b')::uuid
   ORDER BY evidence_id LIMIT 1;
   IF EXISTS (
     SELECT 1 FROM memory.plan_owner_v5_legacy_claim_reintake_v1(
