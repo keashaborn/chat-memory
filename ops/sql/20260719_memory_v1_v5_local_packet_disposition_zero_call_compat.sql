@@ -70,6 +70,11 @@ $migration$;
 ALTER FUNCTION memory.finalize_owner_v5_local_deferral_v1(
   uuid,uuid,uuid,text,text
 ) OWNER TO sage;
+GRANT USAGE ON SCHEMA memory TO brains_app;
+REVOKE ALL ON FUNCTION memory.plan_owner_v5_local_packet_disposition_v1(integer)
+  FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION memory.plan_owner_v5_local_packet_disposition_v1(integer)
+  TO brains_app;
 REVOKE ALL ON FUNCTION memory.finalize_owner_v5_local_deferral_v1(
   uuid,uuid,uuid,text,text
 ) FROM PUBLIC;
