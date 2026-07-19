@@ -1795,7 +1795,15 @@ def _compile_entity_links(
         if obj["kind"] != "literal" or rule is None:
             continue
         contract = object_contracts[rule["object_contract"]]
-        allowed_values = contract["value_schema"].get("enum")
+        value_schema = contract.get("value_schema")
+        if contract.get("kind") != "literal" or not isinstance(
+            value_schema, dict
+        ):
+            # Leave kind/contract mismatches intact for the governed registry
+            # validator. Compiler normalization must never assume a literal
+            # schema for predicates whose object contract is an entity.
+            continue
+        allowed_values = value_schema.get("enum")
         if (
             obj["datatype"] == "text"
             and contract["datatype"] == "enum"

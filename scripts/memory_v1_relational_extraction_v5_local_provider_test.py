@@ -180,6 +180,50 @@ def main() -> int:
         raise AssertionError("local provider audit is missing")
     if provider.last_audit["response_status"] != "completed":
         raise AssertionError("local provider audit status changed")
+
+    mismatched_object = deepcopy(raw)
+    mismatched_object["observations"][0]["predicate"] = (
+        "relationship.has_pet"
+    )
+    mismatch_result = LocalStructuredResult(
+        response_id="local-mismatched-object-contract",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=mismatched_object,
+        response_sha256=canonical_sha256(mismatched_object),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    mismatch_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=mismatch_result),
+    )
+    mismatch_compiled = mismatch_provider.extract(source)
+    if mismatch_compiled.observations[0].object.kind != "literal":
+        raise AssertionError("mismatched object contract was silently changed")
+    mismatch_validation_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=mismatch_result),
+    )
+    expect_value_error(
+        lambda: validate_and_normalize(
+            mismatch_validation_provider,
+            source=source,
+            registry=registry,
+            schema=schema,
+            allowed_provider_versions={
+                LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+            },
+            max_external_model_calls=0,
+        ),
+        "literal object for entity contract",
+    )
     invalid_raw = deepcopy(raw)
     invalid_raw["entity_mentions"] = "private source prose must not survive"
     invalid_result = LocalStructuredResult(
