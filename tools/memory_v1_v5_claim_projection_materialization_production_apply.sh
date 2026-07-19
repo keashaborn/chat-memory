@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Records a bounded hash-locked, owner-scoped projection review
-# decisions. It cannot call apply_projection_v5 or materialize claims.
+# seebx backend only. Materializes a bounded reviewed V5 claim batch and
+# applies audited supported assessments. It never calls an external model,
+# writes Qdrant, activates retrieval, or influences prompts.
 
-if [[ "${MEMORY_V1_CLAIM_PROJECTION_REVIEW_BATCH_PRODUCTION_APPLY:-}" != authorized ]]; then
-  echo 'MEMORY_V1_CLAIM_PROJECTION_REVIEW_BATCH_PRODUCTION_APPLY=authorized is required' >&2
+if [[ "${MEMORY_V1_CLAIM_PROJECTION_MATERIALIZATION_PRODUCTION_APPLY:-}" != authorized ]]; then
+  echo 'MEMORY_V1_CLAIM_PROJECTION_MATERIALIZATION_PRODUCTION_APPLY=authorized is required' >&2
   exit 1
 fi
 if [[ "$#" -ne 4 ]]; then
-  echo 'usage: review_batch_production_apply.sh MANIFEST PREFLIGHT APPLY REPLAY' >&2
+  echo 'usage: materialization_production_apply.sh MANIFEST PREFLIGHT APPLY REPLAY' >&2
   exit 2
 fi
-
 repo_root=$(git rev-parse --show-toplevel)
 manifest=$(realpath "$1")
 preflight_result=$(realpath -m "$2")
@@ -21,31 +21,23 @@ replay_result=$(realpath -m "$4")
 review_root=/home/ubuntu/memory-v1-reviews
 target_owner=$(jq -er '.owner_user_id' "$manifest")
 item_count=$(jq -er '.items|length' "$manifest")
+expected_insert=$(jq -er '.expected_insert_rows' "$manifest")
+expected_mutated=$(jq -er '.expected_mutated_rows' "$manifest")
 container=brains-postgres-1
 database=memory
 snapshot_dir=/home/ubuntu/brains/snapshots
-runner=scripts/memory_v1_v5_claim_projection_review_batch.py
-lock_file=/home/ubuntu/brains/.memory_v1_claim_projection_review_batch_apply.lock
+apply_runner=scripts/memory_v1_v5_claim_projection_apply_batch.py
+lock_file=/home/ubuntu/brains/.memory_v1_claim_projection_apply_batch.lock
 phase=initialization
 status_file=
 run_tag=
 units_quiesced=0
 brains_quiesced=0
 brains_state_before=
-unit_state=$(mktemp /tmp/memory-v1-claim-projection-review-units.XXXXXX)
-table_list=$(mktemp /tmp/memory-v1-claim-projection-review-tables.XXXXXX)
+unit_state=$(mktemp /tmp/memory-v1-claim-apply-units.XXXXXX)
+table_list=$(mktemp /tmp/memory-v1-claim-apply-tables.XXXXXX)
 psql_row() {
-  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
-    -U sage -d "$database" -c "$1" | sed -n '1p'
-}
-
-qdrant_signature() {
-  curl --fail --silent --show-error --max-time 30 \
-    -H 'content-type: application/json' \
-    -d '{"limit":10000,"with_payload":true,"with_vector":true}' \
-    http://127.0.0.1:6333/collections/memory_claim_v1/points/scroll \
-    | jq -cS '.result.points | sort_by(.id|tostring)' \
-    | sha256sum | awk '{print $1}'
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 -U sage -d "$database" -c "$1" | sed -n '1p'
 }
 
 restore_timers() {
@@ -95,21 +87,29 @@ capture_partition() {
   chmod 0600 "$output"
 }
 
+qdrant_signature() {
+  curl --fail --silent --show-error --max-time 30 \
+    -H 'content-type: application/json' \
+    -d '{"limit":10000,"with_payload":true,"with_vector":true}' \
+    http://127.0.0.1:6333/collections/memory_claim_v1/points/scroll \
+    | jq -cS '.result.points | sort_by(.id|tostring)' \
+    | sha256sum | awk '{print $1}'
+}
+
 verify_target_delta() {
-  BEFORE="$1" AFTER="$2" EXPECTED_REVIEWS="$item_count" python3 - <<'PY'
-import os
+  BEFORE="$1" AFTER="$2" MANIFEST="$manifest" python3 - <<'PY'
+import json,os
 from pathlib import Path
 def load(path):
-    result={}
+    out={}
     for line in Path(path).read_text().splitlines():
-        table,count,digest=line.split("\t")
-        result[table]=(int(count),digest)
-    return result
+        table,count,digest=line.split('\t'); out[table]=(int(count),digest)
+    return out
 before,after=load(os.environ['BEFORE']),load(os.environ['AFTER'])
-if before.keys()!=after.keys(): raise SystemExit('target-owner table set changed')
+expected=json.loads(Path(os.environ['MANIFEST']).read_text())['expected_table_rows']
+if before.keys()!=after.keys(): raise SystemExit('target table set changed')
 for table in before:
-    wanted=int(os.environ['EXPECTED_REVIEWS']) if table=='projection_review' else 0
-    delta=after[table][0]-before[table][0]
+    wanted=expected.get(table,0); delta=after[table][0]-before[table][0]
     if delta!=wanted: raise SystemExit(f'unexpected target delta {table}: {delta} != {wanted}')
     if wanted==0 and before[table][1]!=after[table][1]: raise SystemExit(f'unexpected target mutation {table}')
 PY
@@ -119,26 +119,22 @@ PY
 for output in "$preflight_result" "$apply_result" "$replay_result"; do [[ "$output" == "$review_root"/* && ! -e "$output" ]]; done
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 head=$(git -C "$repo_root" rev-parse HEAD)
-[[ "$(jq -er '.contract_version' "$manifest")" == memory_v1_claim_projection_review_batch_manifest_v1 ]]
-[[ "$(jq -er '.owner_user_id' "$manifest")" == "$target_owner" ]]
 [[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
 [[ "$item_count" -ge 1 && "$item_count" -le 32 ]]
-[[ "$(jq -er '.expected_new_rows' "$manifest")" == "$item_count" ]]
-
+[[ "$expected_insert" -eq $((item_count*12)) ]]
+[[ "$expected_mutated" -eq $((item_count*13)) ]]
 set -a; source "$repo_root/.env"; set +a
-[[ -n "${POSTGRES_DSN:-}" ]]
+[[ -n "${POSTGRES_DSN:-}" && -n "${QDRANT_URL:-}" ]]
 exec 9>"$lock_file"; flock -n 9
 umask 077
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git -C "$repo_root" rev-parse --short=12 HEAD)"
-status_file="$snapshot_dir/memory_v1_claim_projection_review_batch_${run_tag}.status"
-target_before="$snapshot_dir/memory_v1_claim_projection_review_target_before_${run_tag}.tsv"
-target_preflight="$snapshot_dir/memory_v1_claim_projection_review_target_preflight_${run_tag}.tsv"
-target_after="$snapshot_dir/memory_v1_claim_projection_review_target_after_${run_tag}.tsv"
-target_replay="$snapshot_dir/memory_v1_claim_projection_review_target_replay_${run_tag}.tsv"
-non_target_before="$snapshot_dir/memory_v1_claim_projection_review_non_target_before_${run_tag}.tsv"
-non_target_preflight="$snapshot_dir/memory_v1_claim_projection_review_non_target_preflight_${run_tag}.tsv"
-non_target_after="$snapshot_dir/memory_v1_claim_projection_review_non_target_after_${run_tag}.tsv"
-non_target_replay="$snapshot_dir/memory_v1_claim_projection_review_non_target_replay_${run_tag}.tsv"
+status_file="$snapshot_dir/memory_v1_claim_projection_apply_batch_${run_tag}.status"
+target_before="$snapshot_dir/memory_v1_claim_apply_target_before_${run_tag}.tsv"
+target_apply="$snapshot_dir/memory_v1_claim_apply_target_after_${run_tag}.tsv"
+target_replay="$snapshot_dir/memory_v1_claim_apply_target_replay_${run_tag}.tsv"
+non_target_before="$snapshot_dir/memory_v1_claim_apply_non_target_before_${run_tag}.tsv"
+non_target_apply="$snapshot_dir/memory_v1_claim_apply_non_target_after_${run_tag}.tsv"
+non_target_replay="$snapshot_dir/memory_v1_claim_apply_non_target_replay_${run_tag}.tsv"
 
 phase=capture_timer_state
 : >"$unit_state"
@@ -171,8 +167,8 @@ capture_partition target "$target_before"; capture_partition non_target "$non_ta
 qdrant_before=$(qdrant_signature)
 
 phase=backup
-backup_partial="$snapshot_dir/.memory_pre_claim_projection_review_${run_tag}.dump.partial"
-backup="$snapshot_dir/memory_pre_claim_projection_review_${run_tag}.dump"
+backup_partial="$snapshot_dir/.memory_pre_claim_projection_apply_${run_tag}.dump.partial"
+backup="$snapshot_dir/memory_pre_claim_projection_apply_${run_tag}.dump"
 docker exec "$container" pg_dump -U sage -d "$database" -Fc --no-owner --no-privileges >"$backup_partial"
 [[ -s "$backup_partial" ]]
 docker exec -i "$container" pg_restore -l <"$backup_partial" >"$backup.catalog"
@@ -181,45 +177,46 @@ mv "$backup_partial" "$backup"; chmod 0600 "$backup" "$backup.catalog"
 sha256sum "$backup" >"$backup.sha256"; chmod 0600 "$backup.sha256"
 
 phase=zero_write_preflight
-MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python "$repo_root/$runner" --mode preflight --manifest "$manifest" --output "$preflight_result"
-[[ "$(jq -er '.rows_written' "$preflight_result")" == 0 ]]
-capture_partition target "$target_preflight"; capture_partition non_target "$non_target_preflight"
-cmp -s "$target_before" "$target_preflight"; cmp -s "$non_target_before" "$non_target_preflight"
+MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" --mode preflight --manifest "$manifest" --output "$preflight_result"
+[[ "$(jq -er '.insert_rows' "$preflight_result")" == 0 ]]
 
-phase=transactional_review
-MEMORY_V1_REQUIRED_HEAD="$head" MEMORY_V1_CLAIM_PROJECTION_REVIEW_BATCH_APPLY=authorized PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python "$repo_root/$runner" --mode apply --manifest "$manifest" --output "$apply_result"
-[[ "$(jq -er '.rows_written' "$apply_result")" == "$item_count" ]]
-capture_partition target "$target_after"; capture_partition non_target "$non_target_after"
-verify_target_delta "$target_before" "$target_after"; cmp -s "$non_target_before" "$non_target_after"
-qdrant_after=$(qdrant_signature); [[ "$qdrant_after" == "$qdrant_before" ]]
+phase=transactional_apply
+MEMORY_V1_REQUIRED_HEAD="$head" MEMORY_V1_CLAIM_PROJECTION_APPLY_BATCH=authorized PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" --mode apply --manifest "$manifest" --output "$apply_result"
+[[ "$(jq -er '.insert_rows' "$apply_result")" == "$expected_insert" && "$(jq -er '.mutated_rows' "$apply_result")" == "$expected_mutated" ]]
+capture_partition target "$target_apply"; capture_partition non_target "$non_target_apply"
+verify_target_delta "$target_before" "$target_apply"; cmp -s "$non_target_before" "$non_target_apply"
+[[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
 phase=zero_write_replay
-MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts" /opt/chat-memory/venv/bin/python "$repo_root/$runner" --mode replay --manifest "$manifest" --output "$replay_result"
-[[ "$(jq -er '.rows_written' "$replay_result")" == 0 ]]
+MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" --mode replay --manifest "$manifest" --apply-result "$apply_result" --output "$replay_result"
+[[ "$(jq -er '.insert_rows' "$replay_result")" == 0 && "$(jq -er '.mutated_rows' "$replay_result")" == 0 ]]
 capture_partition target "$target_replay"; capture_partition non_target "$non_target_replay"
-cmp -s "$target_after" "$target_replay"; cmp -s "$non_target_after" "$non_target_replay"
-qdrant_replay=$(qdrant_signature); [[ "$qdrant_replay" == "$qdrant_before" ]]
+cmp -s "$target_apply" "$target_replay"; cmp -s "$non_target_apply" "$non_target_replay"
+
+[[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
 phase=restore_runtime
 restore_runtime
 phase=report
-report="$snapshot_dir/memory_v1_claim_projection_review_batch_${run_tag}.json"
-REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" QDRANT="$qdrant_before" HEAD="$head" ITEM_COUNT="$item_count" python3 - <<'PY'
+report="$snapshot_dir/memory_v1_claim_projection_apply_batch_${run_tag}.json"
+REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" HEAD="$head" ITEM_COUNT="$item_count" EXPECTED_INSERT="$expected_insert" EXPECTED_MUTATED="$expected_mutated" QDRANT="$qdrant_before" python3 - <<'PY'
 import datetime as dt,json,os
 from pathlib import Path
-manifest=json.loads(Path(os.environ['MANIFEST']).read_text())
+m=json.loads(Path(os.environ['MANIFEST']).read_text())
 report={
- 'contract_version':'memory_v1_claim_projection_review_batch_report_v1',
+ 'contract_version':'memory_v1_claim_projection_apply_batch_report_v1',
  'completed_at':dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z'),
- 'head_commit':os.environ['HEAD'],'owner_user_id':manifest['owner_user_id'],
- 'manifest_sha256':manifest['manifest_sha256'],'backup':os.environ['BACKUP'],
- 'evidence':{'preflight_result':os.environ['PREFLIGHT'],'apply_result':os.environ['APPLY'],'replay_result':os.environ['REPLAY']},
- 'verification':{'review_rows_written':int(os.environ['ITEM_COUNT']),'zero_write_replay':True,'non_target_memory_unchanged':True,
-   'claims_written':0,'projection_apply_events_written':0,'qdrant_sha256':os.environ['QDRANT'],'qdrant_unchanged':True,
-   'retrieval_activated':False,'prompt_influence_activated':False,'timers_restored_exactly':True,'brains_service_restored_exactly':True},
- 'hard_stop':'before_projection_apply_claim_materialization_or_retrieval_activation'}
+ 'head_commit':os.environ['HEAD'],'owner_user_id':m['owner_user_id'],'manifest_sha256':m['manifest_sha256'],
+ 'backup':os.environ['BACKUP'],
+ 'evidence':{'preflight':os.environ['PREFLIGHT'],'apply':os.environ['APPLY'],'replay':os.environ['REPLAY']},
+ 'verification':{'insert_rows':int(os.environ['EXPECTED_INSERT']),'mutated_rows':int(os.environ['EXPECTED_MUTATED']),
+   'claims_supported':int(os.environ['ITEM_COUNT']),'zero_write_replay':True,
+   'embedding_requests':0,'qdrant_points_created':0,'qdrant_sha256':os.environ['QDRANT'],
+   'non_target_database_unchanged':True,'qdrant_unchanged':True,'prompt_influence':False,
+   'general_account_activation':False,'timers_restored_exactly':True,'brains_service_restored_exactly':True},
+ 'hard_stop':'before_qdrant_projection_retrieval_prompt_influence_or_general_account_activation'}
 path=Path(os.environ['REPORT']); path.write_text(json.dumps(report,indent=2,sort_keys=True)+'\n'); path.chmod(0o600)
 PY
 phase=complete
 printf 'backup=%s\nreport=%s\n' "$backup" "$report"
-printf 'memory_v1_v5_claim_projection_review_batch_production_apply: PASS\n'
+printf 'memory_v1_v5_claim_projection_materialization_production_apply: PASS\n'

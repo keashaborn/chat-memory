@@ -35,17 +35,17 @@ ASSESSMENT = {
     "reviewer_type": "system",
     "reviewer_ref": "memory_v1_deterministic_claim_projection_v5_1_apply_20260718",
 }
-EXPECTED_TABLE_ROWS = {
-    "claim": 4,
-    "claim_revision": 8,
-    "claim_observation": 4,
-    "projection_apply_event": 4,
-    "projection_dispatch_v5": 4,
-    "claim_assessment_review_v5": 4,
-    "claim_assessment": 4,
-    "claim_assessment_apply_v5": 4,
-    "relational_operation_request": 8,
-    "projection_outbox": 4,
+EXPECTED_ROWS_PER_ITEM = {
+    "claim": 1,
+    "claim_revision": 2,
+    "claim_observation": 1,
+    "projection_apply_event": 1,
+    "projection_dispatch_v5": 1,
+    "claim_assessment_review_v5": 1,
+    "claim_assessment": 1,
+    "claim_assessment_apply_v5": 1,
+    "relational_operation_request": 2,
+    "projection_outbox": 1,
 }
 
 
@@ -121,12 +121,13 @@ async def run() -> int:
         or review_manifest.get("owner_user_id") != owner
         or review_result.get("owner_user_id") != owner
         or review_result.get("manifest_sha256") != review_manifest.get("manifest_sha256")
-        or review_result.get("rows_written") != 4
+        or review_result.get("rows_written")
+        != len(review_manifest.get("items", []))
     ):
-        raise ManifestError("review artifacts do not describe the authorized four-row batch")
+        raise ManifestError("review artifacts do not describe the authorized batch")
     reviewed = {item["plan_id"]: item for item in review_result.get("outcomes", [])}
     staged = {item["plan_id"]: item for item in review_manifest.get("items", [])}
-    if len(reviewed) != 4 or reviewed.keys() != staged.keys():
+    if not 1 <= len(reviewed) <= 32 or reviewed.keys() != staged.keys():
         raise ManifestError("review and staged plan identities differ")
 
     dsn = os.environ.get("POSTGRES_DSN", "").strip()
@@ -182,6 +183,10 @@ async def run() -> int:
     finally:
         await conn.close()
 
+    expected_table_rows = {
+        table: rows * len(items)
+        for table, rows in EXPECTED_ROWS_PER_ITEM.items()
+    }
     manifest = {
         "contract_version": CONTRACT,
         "owner_user_id": owner,
@@ -193,9 +198,9 @@ async def run() -> int:
         "review_result_file_sha256": file_sha256(review_result_path),
         "review_result_sha256": review_result["result_sha256"],
         "assessment": ASSESSMENT,
-        "expected_insert_rows": sum(EXPECTED_TABLE_ROWS.values()),
-        "expected_mutated_rows": sum(EXPECTED_TABLE_ROWS.values()) + 4,
-        "expected_table_rows": EXPECTED_TABLE_ROWS,
+        "expected_insert_rows": sum(expected_table_rows.values()),
+        "expected_mutated_rows": sum(expected_table_rows.values()) + len(items),
+        "expected_table_rows": expected_table_rows,
         "items": items,
     }
     manifest["manifest_sha256"] = sha256(manifest)

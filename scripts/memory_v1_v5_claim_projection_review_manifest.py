@@ -98,8 +98,8 @@ async def run() -> int:
 
     args = arguments()
     owner = str(uuid.UUID(args.owner))
-    if len(args.bundle) != 4:
-        raise ManifestError("exactly four bundles are required")
+    if not 1 <= len(args.bundle) <= 32:
+        raise ManifestError("between one and 32 bundles are required")
     if len(args.required_head) != 40 or any(c not in "0123456789abcdef" for c in args.required_head):
         raise ManifestError("required head must be a full lowercase commit hash")
     output = private_path(args.output, output=True)
@@ -177,7 +177,7 @@ async def run() -> int:
         "reviewer_ref": REVIEWER_REF,
         "reason": REASON,
         "reason_codes": REASON_CODES,
-        "expected_new_rows": 4,
+        "expected_new_rows": len(items),
         "items": items,
     }
     manifest["manifest_sha256"] = sha256(manifest)

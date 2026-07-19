@@ -17,6 +17,18 @@ from memory_v1_projection_v5_contract_test import sha256
 MANIFEST_CONTRACT = "memory_v1_claim_projection_apply_batch_manifest_v1"
 RESULT_CONTRACT = "memory_v1_claim_projection_apply_batch_result_v1"
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
+EXPECTED_ROWS_PER_ITEM = {
+    "claim": 1,
+    "claim_revision": 2,
+    "claim_observation": 1,
+    "projection_apply_event": 1,
+    "projection_dispatch_v5": 1,
+    "claim_assessment_review_v5": 1,
+    "claim_assessment": 1,
+    "claim_assessment_apply_v5": 1,
+    "relational_operation_request": 2,
+    "projection_outbox": 1,
+}
 
 
 class ApplyBatchError(RuntimeError):
@@ -73,11 +85,17 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if set(value) != keys or value.get("contract_version") != MANIFEST_CONTRACT:
         raise ApplyBatchError("manifest contract or fields mismatch")
     uuid.UUID(value["owner_user_id"])
+    item_count = len(value["items"]) if isinstance(value["items"], list) else 0
+    expected_table_rows = {
+        table: rows * item_count
+        for table, rows in EXPECTED_ROWS_PER_ITEM.items()
+    }
     if (
-        value["expected_insert_rows"] != 48
-        or value["expected_mutated_rows"] != 52
-        or not isinstance(value["items"], list)
-        or len(value["items"]) != 4
+        not 1 <= item_count <= 32
+        or value["expected_table_rows"] != expected_table_rows
+        or value["expected_insert_rows"] != sum(expected_table_rows.values())
+        or value["expected_mutated_rows"]
+        != sum(expected_table_rows.values()) + item_count
     ):
         raise ApplyBatchError("manifest row budget mismatch")
     for field in ("review_manifest_path", "review_result_path"):
@@ -124,9 +142,9 @@ def validate_replay_result(path: Path, manifest: dict[str, Any]) -> dict[str, An
         value.get("contract_version") != RESULT_CONTRACT
         or value.get("mode") != "apply"
         or value.get("manifest_sha256") != manifest["manifest_sha256"]
-        or value.get("insert_rows") != 48
-        or value.get("mutated_rows") != 52
-        or len(value.get("outcomes", [])) != 4
+        or value.get("insert_rows") != manifest["expected_insert_rows"]
+        or value.get("mutated_rows") != manifest["expected_mutated_rows"]
+        or len(value.get("outcomes", [])) != len(manifest["items"])
     ):
         raise ApplyBatchError("apply result cannot authorize replay")
     return value
@@ -337,7 +355,7 @@ async def run() -> int:
         "outcomes": outcomes,
         "external_model_calls": 0,
         "qdrant_writes": 0,
-        "claims_supported": 4 if args.mode == "apply" else 0,
+        "claims_supported": len(items) if args.mode == "apply" else 0,
         "retrieval_activated": False,
         "prompt_influence_activated": False,
     }

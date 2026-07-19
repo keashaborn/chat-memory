@@ -75,9 +75,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
         or not isinstance(value["reason_codes"], list)
         or len(value["reason_codes"]) < 1
         or len(set(value["reason_codes"])) != len(value["reason_codes"])
-        or value["expected_new_rows"] != 4
+        or value["expected_new_rows"] != len(value["items"])
         or not isinstance(value["items"], list)
-        or len(value["items"]) != 4
+        or not 1 <= len(value["items"]) <= 32
     ):
         raise ReviewBatchError("manifest review boundary mismatch")
     return value

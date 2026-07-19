@@ -46,6 +46,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--owner", required=True)
     parser.add_argument("--observation-id", required=True)
     parser.add_argument("--plan-id", required=True)
+    parser.add_argument("--expect-existing-plan", action="store_true")
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
@@ -275,6 +276,8 @@ async def assert_database_hashes(
     plan_id: uuid.UUID,
     projection: dict[str, Any],
     packet: dict[str, Any],
+    *,
+    expected_existing_plans: int,
 ) -> dict[str, str]:
     packet_text = stable_json(packet)
     expected = {
@@ -294,7 +297,10 @@ async def assert_database_hashes(
     for key, value in expected.items():
         if database[key] != value:
             raise ClaimProjectionError(f"database {key} mismatch")
-    if database["existing_claims"] != 0 or database["existing_plans"] != 0:
+    if (
+        database["existing_claims"] != 0
+        or database["existing_plans"] != expected_existing_plans
+    ):
         raise ClaimProjectionError("projection target or plan already exists")
     return {"packet_text": packet_text, **expected}
 
@@ -320,7 +326,12 @@ async def async_main() -> int:
             packet = build_packet(projection)
             validate_packet(packet, str(owner), registry)
             hashes = await assert_database_hashes(
-                conn, owner, plan_id, projection, packet
+                conn,
+                owner,
+                plan_id,
+                projection,
+                packet,
+                expected_existing_plans=(1 if args.expect_existing_plan else 0),
             )
     finally:
         await conn.close()

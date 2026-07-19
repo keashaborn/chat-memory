@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Applies and replay-proofs the four reviewed V5 claims on
+# seebx backend only. Applies and replay-proofs a bounded reviewed V5 batch on
 # a disposable production clone. No external model or Qdrant call is made.
 
 if [[ "$#" -ne 4 ]]; then
@@ -22,6 +22,16 @@ set -a; source "$repo_root/.env"; set +a
 [[ -n "${POSTGRES_DSN:-}" && -z "$(git -C "$repo_root" status --porcelain)" ]]
 head=$(git -C "$repo_root" rev-parse HEAD)
 [[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
+item_count=$(jq -er '.items|length' "$manifest")
+expected_insert=$(jq -er '.expected_insert_rows' "$manifest")
+expected_mutated=$(jq -er '.expected_mutated_rows' "$manifest")
+target_owner=$(jq -er '.owner_user_id' "$manifest")
+if [[ "$target_owner" == 557ea042-cb82-48f8-9429-472e96c957ef ]]; then
+  other_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
+else
+  other_owner=557ea042-cb82-48f8-9429-472e96c957ef
+fi
+[[ "$item_count" -ge 1 && "$item_count" -le 32 ]]
 for output in "$preflight" "$apply" "$replay"; do
   [[ "$output" == /home/ubuntu/memory-v1-reviews/* && ! -e "$output" ]]
 done
@@ -55,8 +65,8 @@ POSTGRES_DSN="$clone_dsn" MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root
   /opt/chat-memory/venv/bin/python "$repo_root/$runner" --mode replay \
   --manifest "$manifest" --apply-result "$apply" --output "$replay"
 [[ "$(jq -er '.insert_rows' "$preflight")" == 0 ]]
-[[ "$(jq -er '.insert_rows' "$apply")" == 48 ]]
-[[ "$(jq -er '.mutated_rows' "$apply")" == 52 ]]
+[[ "$(jq -er '.insert_rows' "$apply")" == "$expected_insert" ]]
+[[ "$(jq -er '.mutated_rows' "$apply")" == "$expected_mutated" ]]
 [[ "$(jq -er '.insert_rows' "$replay")" == 0 ]]
 [[ "$(jq -er '.mutated_rows' "$replay")" == 0 ]]
 
@@ -81,15 +91,16 @@ for table in before:
 PY
 
 claim_ids=$(jq -r '[.outcomes[].claim_id]|join(",")' "$apply")
-[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
-[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50' AND status='pending' AND attempts=0 AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
+[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
+[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner' AND status='pending' AND attempts=0 AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
 
 probe_plan=$(jq -er '.items[0].plan_id' "$manifest")
 probe_review=$(jq -er '.items[0].review_id' "$manifest")
 POSTGRES_DSN="$clone_dsn" psql "$clone_dsn" -X -q -v ON_ERROR_STOP=1 \
-  -v probe_plan="$probe_plan" -v probe_review="$probe_review" <<'SQL'
+  -v probe_plan="$probe_plan" -v probe_review="$probe_review" \
+  -v other_owner="$other_owner" <<'SQL'
 BEGIN READ ONLY;
-SELECT set_config('app.user_id','557ea042-cb82-48f8-9429-472e96c957ef',true);
+SELECT set_config('app.user_id', :'other_owner', true);
 SELECT set_config('test.probe_plan', :'probe_plan', true);
 SELECT set_config('test.probe_review', :'probe_review', true);
 DO $isolation$
@@ -106,5 +117,6 @@ END
 $isolation$;
 ROLLBACK;
 SQL
-printf 'insert_rows=48\nmutated_rows=52\nzero_write_replay=true\n'
+printf 'insert_rows=%s\nmutated_rows=%s\nzero_write_replay=true\n' \
+  "$expected_insert" "$expected_mutated"
 printf 'memory_v1_v5_claim_projection_apply_batch_production_clone: PASS\n'
