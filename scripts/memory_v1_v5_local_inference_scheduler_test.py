@@ -28,6 +28,7 @@ OWNER = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 def args(**overrides: object) -> argparse.Namespace:
     values: dict[str, object] = {
         "run_id": str(uuid.uuid4()),
+        "selector_version": None,
         "max_jobs": 1,
         "max_attempts": 1,
         "lease_seconds": 900,
@@ -107,6 +108,14 @@ def main() -> int:
     assert select_owner_target([(OWNER, {}, None, None)]) is None
 
     validate_arguments(args())
+    validate_arguments(args(selector_version="20260719_v5_legacy_claim_reintake_v1"))
+    for invalid_selector in ("", "UPPER", "contains space", "../escape"):
+        try:
+            validate_arguments(args(selector_version=invalid_selector))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("invalid selector-version was accepted")
     original = os.environ.get("MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY")
     try:
         os.environ.pop("MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY", None)

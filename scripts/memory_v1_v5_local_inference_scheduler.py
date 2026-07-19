@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -44,6 +45,7 @@ SAFE_CANARY_FIELDS = {
     "completion_apply_outcome",
     "write_counts",
 }
+SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,99}$")
 
 
 def sha256_text(value: str) -> str:
@@ -62,6 +64,7 @@ def arguments() -> argparse.Namespace:
         )
     )
     parser.add_argument("--owner-user-id", action="append", default=[])
+    parser.add_argument("--selector-version")
     parser.add_argument("--run-id")
     parser.add_argument("--canary", default=str(DEFAULT_CANARY))
     parser.add_argument("--credential-name", default="local_api_key")
@@ -99,6 +102,10 @@ def validate_arguments(args: argparse.Namespace) -> uuid.UUID:
         raise RuntimeError("run id must be a UUID") from exc
     if args.max_jobs != 1:
         raise RuntimeError("initial local scheduler requires max-jobs=1")
+    if args.selector_version is not None and not SELECTOR_RE.fullmatch(
+        args.selector_version
+    ):
+        raise RuntimeError("selector-version is invalid")
     if not 1 <= args.max_attempts <= 3:
         raise RuntimeError("max-attempts must be between 1 and 3")
     if not 30 <= args.lease_seconds <= 3600:
@@ -142,6 +149,7 @@ async def plan_owner(
     owner: uuid.UUID,
     *,
     max_attempts: int,
+    selector_version: str | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, Any]:
     async with conn.transaction(readonly=True):
         await set_actor(conn, owner)
@@ -150,9 +158,11 @@ async def plan_owner(
             SELECT status::text AS status,count(*)::integer AS count
             FROM memory.evidence_extraction_job
             WHERE owner_user_id=$1 AND route='relational_extraction'
+              AND ($2::text IS NULL OR selector_version=$2)
             GROUP BY status ORDER BY status
             """,
             owner,
+            selector_version,
         )
         target_row = await conn.fetchrow(
             """
@@ -163,21 +173,25 @@ async def plan_owner(
               AND route='relational_extraction'
               AND status IN ('pending','error')
               AND attempts<$2
+              AND ($3::text IS NULL OR selector_version=$3)
               AND available_at<=clock_timestamp()
             ORDER BY priority,available_at,created_at,job_id
             LIMIT 1
             """,
             owner,
             max_attempts,
+            selector_version,
         )
         last_service_at = await conn.fetchval(
             """
             SELECT max(updated_at)
             FROM memory.evidence_extraction_job
             WHERE owner_user_id=$1 AND route='relational_extraction'
+              AND ($2::text IS NULL OR selector_version=$2)
               AND status IN ('review_required','completed','skipped','error')
             """,
             owner,
+            selector_version,
         )
     target = dict(target_row) if target_row else None
     report = {
@@ -189,6 +203,9 @@ async def plan_owner(
         ),
         "last_service_at": (
             last_service_at.isoformat() if last_service_at is not None else None
+        ),
+        "selector_version_sha256": (
+            sha256_text(selector_version) if selector_version is not None else None
         ),
     }
     return report, target, last_service_at
@@ -333,7 +350,17 @@ async def run() -> int:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("local scheduler requires brains_app session")
         planned = [
-            (owner, *(await plan_owner(conn, owner, max_attempts=args.max_attempts)))
+            (
+                owner,
+                *(
+                    await plan_owner(
+                        conn,
+                        owner,
+                        max_attempts=args.max_attempts,
+                        selector_version=args.selector_version,
+                    )
+                ),
+            )
             for owner in owners
         ]
     finally:
