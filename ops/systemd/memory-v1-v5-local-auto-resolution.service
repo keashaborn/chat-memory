@@ -1,0 +1,49 @@
+[Unit]
+Description=Memory V1 exact-link local entity resolution worker
+After=network-online.target brains.service memory-v1-v5-local-auto-stage.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/chat-memory
+EnvironmentFile=/opt/chat-memory/.env
+Environment=PYTHONPATH=/opt/chat-memory
+Environment=MEMORY_V1_V5_LOCAL_AUTO_RESOLUTION_APPLY=memory_v1_v5_local_auto_resolution_apply_v1
+RuntimeDirectory=memory-v1-v5-local-auto-resolution
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-auto-resolution/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_auto_resolution.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --apply
+TimeoutStartSec=5min
+UMask=0077
+Nice=10
+CPUQuota=20%
+MemoryMax=512M
+TasksMax=64
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+RemoveIPC=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

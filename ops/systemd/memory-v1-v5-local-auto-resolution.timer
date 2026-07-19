@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply one exact local Memory V1 entity link every two hours
+
+[Timer]
+OnBootSec=1h10min
+OnUnitInactiveSec=2h
+RandomizedDelaySec=2min
+Persistent=true
+Unit=memory-v1-v5-local-auto-resolution.service
+
+[Install]
+WantedBy=timers.target
