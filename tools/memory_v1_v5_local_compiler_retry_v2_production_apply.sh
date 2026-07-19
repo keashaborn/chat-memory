@@ -27,7 +27,7 @@ unit_state=$(mktemp /tmp/memory-v1-v5-local-compiler-retry-v2-apply-units.XXXXXX
 table_list=$(mktemp /tmp/memory-v1-v5-local-compiler-retry-v2-apply-tables.XXXXXX)
 
 psql_scalar() {
-  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+  docker exec "$container" psql -X -A -t -F $'\t' -v ON_ERROR_STOP=1 \
     -U sage -d "$database" -c "$1"
 }
 
