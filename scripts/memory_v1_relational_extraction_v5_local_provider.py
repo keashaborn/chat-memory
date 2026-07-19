@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v5"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v6"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1086,6 +1086,18 @@ _BEHAVIOR_CESSATION_RE = re.compile(
     r"\b(?:stopped|quit|gave\s+up|no\s+longer)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_CALENDAR_YEAR_RE = re.compile(
+    r"\b(?:\d{4}-\d{2}-\d{2}|"
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?"
+    r"(?:,\s*|\s+)\d{4}|"
+    r"\d{1,2}(?:st|nd|rd|th)?\s+"
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{4})\b",
+    re.IGNORECASE,
+)
 _SENSITIVITY_RANK = {
     "low": 0,
     "medium": 1,
@@ -1890,6 +1902,24 @@ def _compile_entity_links(
         ):
             observation["sensitivity"] = rule["sensitivity_floor"]
             repairs.append("sensitivity_floor_normalized")
+        temporal = observation["temporal"]
+        if (
+            temporal["basis"] == "calendar"
+            and temporal["source_form"] == "partial_absolute"
+            and temporal["calendar_range"] is not None
+            and _EXPLICIT_CALENDAR_YEAR_RE.search(
+                _observation_source_text(content, observation)
+            )
+        ):
+            temporal["source_form"] = "absolute"
+            temporal["anchored_to_source_time"] = False
+            repair_code = "explicit_calendar_year_source_form"
+            if (
+                repair_code not in temporal["reason_codes"]
+                and len(temporal["reason_codes"]) < 10
+            ):
+                temporal["reason_codes"].append(repair_code)
+            repairs.append("explicit_calendar_year_source_form_normalized")
         if observation["predicate"] == "health.user_reported_observation":
             if observation["modality"] == "asserted":
                 observation["modality"] = "reported_observation"
@@ -1897,7 +1927,6 @@ def _compile_entity_links(
             if _BEHAVIOR_CESSATION_RE.search(
                 _observation_source_text(content, observation)
             ):
-                temporal = observation["temporal"]
                 temporal["semantic"] = "state_validity"
                 if (
                     temporal["basis"] == "calendar"

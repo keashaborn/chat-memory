@@ -553,6 +553,14 @@ def main() -> int:
         is not None
     ):
         raise AssertionError("cessation interval was not left open")
+    if normalized_cessation["temporal"]["source_form"] != "absolute" or (
+        normalized_cessation["temporal"]["anchored_to_source_time"]
+    ):
+        raise AssertionError("explicit dated cessation remained partial")
+    if "explicit_calendar_year_source_form_normalized" not in (
+        cessation_provider.last_audit["compiler_repairs"]
+    ):
+        raise AssertionError("explicit calendar source-form repair is missing")
     invalid_raw = deepcopy(raw)
     invalid_raw["entity_mentions"] = "private source prose must not survive"
     invalid_result = LocalStructuredResult(
