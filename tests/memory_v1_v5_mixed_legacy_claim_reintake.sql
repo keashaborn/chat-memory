@@ -56,6 +56,7 @@ SELECT set_config(
   ),
   true
 );
+SELECT set_config('test.owner_b',:'owner_b',true);
 
 SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id',:'owner_a',true);
@@ -131,7 +132,7 @@ BEGIN
     RAISE EXCEPTION 'mixed reintake plan was not exhausted';
   END IF;
 
-  PERFORM set_config('app.user_id',:'owner_b',true);
+  PERFORM set_config('app.user_id',current_setting('test.owner_b'),true);
   IF EXISTS (
     SELECT 1 FROM memory.evidence_extraction_job
     WHERE selector_version='20260719_v5_mixed_preference_legacy_reintake_v1'
