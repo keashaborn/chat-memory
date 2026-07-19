@@ -51,11 +51,11 @@ production_rows_before=$(docker exec "$container" psql -X -A -t \
   | tr -d '[:space:]')
 
 docker exec "$container" pg_dump -U sage -d "$production" \
-  -Fc --no-owner --no-privileges >"$backup"
+  -Fc --no-owner >"$backup"
 [[ -s "$backup" ]]
 docker exec "$container" createdb -U sage -T template0 "$clone"
 docker exec -i "$container" pg_restore -U sage -d "$clone" \
-  --no-owner --no-privileges <"$backup"
+  --no-owner <"$backup"
 
 packet_sha=$(clone_scalar "SELECT packet_storage_sha256
   FROM memory.evidence_extraction_packet_v5_local
