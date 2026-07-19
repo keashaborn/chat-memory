@@ -17,6 +17,9 @@ clone="memory_v5_review_lane_${$}"
 router=scripts/memory_v1_v5_local_packet_router.py
 reviewer=scripts/memory_v1_v5_review_local_packet.py
 unit_test=scripts/memory_v1_v5_review_local_packet_test.py
+migration=ops/sql/20260719_memory_v1_v5_relational_review_admission_compat.sql
+rollback=ops/sql/20260719_memory_v1_v5_relational_review_admission_compat_rollback.sql
+test_sql=tests/memory_v1_v5_relational_review_admission_compat.sql
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 backup=$(mktemp /tmp/memory-v1-review-lane.XXXXXX.dump)
 review_root=$(mktemp -d /tmp/memory-v1-review-lane.XXXXXX)
@@ -39,6 +42,11 @@ clone_scalar() {
     -U sage -d "$clone" -c "$1" | tr -d '[:space:]'
 }
 
+clone_sql() {
+  docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+    -U sage -d "$clone" "$@"
+}
+
 qdrant_signature() {
   curl --fail --silent --show-error --max-time 30 \
     -H 'content-type: application/json' \
@@ -53,6 +61,7 @@ qdrant_signature() {
   == c94817bf7b0c74fb9a2808794b5a34284021d090b23e022e60db63168c71f111 ]]
 [[ "$(sha256sum "$unit_test" | awk '{print $1}')" \
   == a8e1758faa4b33cc7de55ca72399e8f538c16bef5a11c200db378218721bf59e ]]
+[[ -f "$migration" && -f "$rollback" && -f "$test_sql" ]]
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test" >/dev/null
 
 qdrant_before=$(qdrant_signature)
@@ -104,6 +113,13 @@ target=$(docker exec "$container" psql -X -A -t -F $'\t' \
 [[ -n "$target" ]]
 IFS=$'\t' read -r owner packet <<<"$target"
 [[ "$owner" =~ ^[0-9a-f-]{36}$ && "$packet" =~ ^[0-9a-f-]{36}$ ]]
+
+clone_sql <"$migration" >/dev/null
+clone_sql <"$migration" >/dev/null
+clone_sql -v owner_user_id="$owner" -v packet_id="$packet" \
+  <"$test_sql" >/dev/null
+clone_sql <"$rollback" >/dev/null
+clone_sql <"$migration" >/dev/null
 
 clone_dsn=$(/opt/chat-memory/venv/bin/python -c \
   'import sys; from urllib.parse import urlsplit,urlunsplit; u=urlsplit(sys.argv[1]); print(urlunsplit((u.scheme,u.netloc,"/"+sys.argv[2],u.query,u.fragment)))' \
