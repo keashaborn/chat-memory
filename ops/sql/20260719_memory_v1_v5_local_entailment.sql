@@ -180,6 +180,12 @@ TO memory_v5_local_entailment_maintainer;
 GRANT USAGE ON SCHEMA memory TO memory_v5_local_entailment_maintainer;
 GRANT USAGE ON TYPE memory.observation_entailment_decision_v5
 TO memory_v5_local_entailment_maintainer;
+GRANT EXECUTE ON FUNCTION memory.current_actor_user_id()
+TO memory_v5_local_entailment_maintainer;
+GRANT EXECUTE ON FUNCTION memory.v5_digest_text(text)
+TO memory_v5_local_entailment_maintainer;
+GRANT EXECUTE ON FUNCTION memory.v5_source_spans_valid(jsonb)
+TO memory_v5_local_entailment_maintainer;
 GRANT EXECUTE ON FUNCTION memory.preflight_observation_entailment_v5(
   uuid,memory.observation_entailment_decision_v5,text,jsonb,text,text
 ) TO memory_v5_local_entailment_maintainer;

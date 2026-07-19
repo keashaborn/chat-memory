@@ -32,8 +32,8 @@ clone_test=tools/memory_v1_v5_local_entailment_clone.sh
 lock_file=/home/ubuntu/brains/.memory_v1_v5_local_entailment_install.lock
 
 declare -A expected_sha256=(
-  ["$migration"]="a2c70cec4145304f52c1eae40ada8a1a6a6068b71308cf60b542452892a0f2f9"
-  ["$rollback"]="392d312179e79247d84a8c1178ee796e4b7bb153e598520e3911ee239ecc5a8d"
+  ["$migration"]="344b8d16764a4d7c8e4dd4cb9623ae8ef1a2c7abfbf5b5681a5c45998d0c3d90"
+  ["$rollback"]="f2a24063f6203aec1270d127eb686b4ec3c43a78aef23a3a6bc80a6696e70f2a"
   ["$production_test"]="b1909744d72e4dbad7a5d972b5c234c4d524313f6e3468722357d423eaa2241e"
   ["$provider"]="284ad4921b43fbbf5e8d0b9bfdebc33ab0d5af82a9574312d041e515e8479e94"
   ["$worker"]="0a6005e07edacc0ffd7e72017c1555164d594b12c2089aa84892ca5412bc9023"
