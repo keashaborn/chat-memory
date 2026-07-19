@@ -117,7 +117,7 @@ capture_non_target() {
           ORDER BY row_json),''),'UTF8'),'sha256'),'hex')
         FROM (SELECT to_jsonb(value)::text AS row_json
           FROM \"$schema\".\"$table\" AS value
-          WHERE owner_user_id IS DISTINCT FROM '$target'::uuid) rows")
+          WHERE owner_user_id::text IS DISTINCT FROM '$target') rows")
     else
       state=$(scalar "SELECT count(*)::text || ':' ||
         encode(public.digest(convert_to(coalesce(string_agg(row_json,E'\\n'
@@ -198,9 +198,9 @@ chmod 0600 "$backup.sha256"
 phase=baseline
 docker exec "$container" psql -X -A -t -U sage -d "$database" -c \
   "SELECT t.table_schema || E'\\t' || t.table_name || E'\\t' ||
-     EXISTS (SELECT 1 FROM information_schema.columns c
+     CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns c
        WHERE c.table_schema=t.table_schema AND c.table_name=t.table_name
-         AND c.column_name='owner_user_id')
+         AND c.column_name='owner_user_id') THEN 't' ELSE 'f' END
    FROM information_schema.tables t
    WHERE t.table_type='BASE TABLE' AND t.table_schema IN ('memory','public')
    ORDER BY t.table_schema,t.table_name" >"$table_list"
