@@ -95,6 +95,10 @@ printf '%s\n' \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
+printf '%s\n' \
+  'GRANT USAGE ON SCHEMA memory TO brains_app;' \
+  'GRANT EXECUTE ON FUNCTION memory.current_actor_user_id() TO brains_app;' \
+  | run_sql
 
 scalar "
   SELECT table_schema || E'\\t' || table_name
