@@ -24,9 +24,20 @@ BEGIN
 END
 $test$;
 
+SELECT set_config(
+  'test.cross_owner_evidence',
+  (
+    SELECT evidence_id::text
+    FROM memory.evidence
+    WHERE owner_user_id=:'owner_b'::uuid
+    ORDER BY evidence_id
+    LIMIT 1
+  ),
+  true
+);
+
 SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id',:'owner_a',true);
-SELECT set_config('test.owner_b',:'owner_b',true);
 
 DO $test$
 DECLARE
@@ -41,10 +52,7 @@ BEGIN
     RAISE EXCEPTION 'owner A has no legacy-only migration evidence';
   END IF;
 
-  SELECT evidence_id INTO cross_owner_evidence
-  FROM memory.evidence
-  WHERE owner_user_id=current_setting('test.owner_b')::uuid
-  ORDER BY evidence_id LIMIT 1;
+  cross_owner_evidence := current_setting('test.cross_owner_evidence')::uuid;
   IF EXISTS (
     SELECT 1 FROM memory.plan_owner_v5_legacy_claim_reintake_v1(
       '20260719_v5_legacy_claim_reintake_v1',1,cross_owner_evidence
