@@ -1,49 +1,57 @@
 # Memory V1 V5 activation readiness
 
-Status: read-only v2 gate implemented; no V5 runtime activation.
+Status: read-only v3 current-invariant gate. Admin-only V5 shadow retrieval is
+live with zero prompt or answer influence.
 
-Server boundary: seebx backend. This gate does not run on Verbal Sage, RESSE,
-or Resse-Train.
+Server boundary: seebx backend. The gate does not run on Verbal Sage, RESSE, or
+Resse-Train. It makes no database or Qdrant writes and no model calls.
 
-## Four separate boundaries
+## Independent boundaries
 
-1. `schema_installed_and_restricted`: all hash-locked V5 relations exist, force
-   RLS, expose no direct table grants to `brains_app`, retain the restricted
-   `memory_v5_writer`, and keep the predicate registry proposed/inactive.
-2. `manual_shadow_stage`: the schema boundary passes and every tracked V5 row
-   and owner count exactly matches a reviewed governed-state baseline. Any
-   unreviewed row or owner drift fails closed.
-3. `durable_apply`: manual staging passes and `brains_app` has no direct mutation
-   privileges on shared V5 durable targets (`entity`, `claim`, and
-   `claim_revision`).
-4. `shadow_retrieval` and `prompt_influence`: remain false. The restricted V5
-   reader, selector, retracted-claim negative control, hash-locked candidate
-   discovery, and router-side zero-write trace pass isolated/clone tests. They
-   are not deployed or live-audited; a separate activation gate does not exist.
+1. `database_boundary`: every owner-bearing `memory.*` table forces RLS; the
+   eight governed durable tables expose no direct mutation privilege to
+   `brains_app`; controlled functions and restricted non-login roles remain in
+   place; sanitized trace tables are forced-RLS and append-only; and the V5
+   predicate registry remains proposed/inactive.
+2. `automation_current`: the production checkout is clean, all four downstream
+   planners enforce the current deterministic compiler hash, the exact timer
+   contract is present, the private GPU tunnel is active, and systemd has no
+   failed units.
+3. `projection_consistent`: every supported Postgres claim has exactly one
+   owner-scoped Qdrant projection, every Qdrant point maps back to that same
+   Postgres claim and owner, and no point lacks its owner.
+4. `allowlisted_zero_influence_shadow_observed`: shadow retrieval and sanitized
+   trace persistence are enabled only for an explicit UUID allowlist; every
+   allowlisted owner has claim traces; project trace owners are allowlisted;
+   and every persisted trace asserts zero database writes, Qdrant writes,
+   retrieval activation, prompt injection, and answer-model exposure.
+5. `prompt_influence` and `general_account_activation` remain false. They are
+   separate later decisions and are not implied by a passing shadow gate.
 
-The checker uses the local PostgreSQL container's maintenance role for one
-repeatable-read, read-only transaction. The application DSN is deliberately not
-used because `brains_app` cannot inspect V5 tables. The installation manifest
-defines the tracked relation set; the separately hashed governed-state baseline
-defines exact allowed row and owner counts. It makes
-no OpenAI, Qdrant, Redis, Supabase, or application calls. Its JSON report is
-written with mode `0600`.
+Current counts are diagnostics, not frozen expectations. New evidence,
+entities, assessments, claims, and traces are legitimate append-only growth.
+The v2 exact-row baseline incorrectly treated governed growth as drift and is
+no longer used for activation readiness.
+
+The report contains hashes, counts, role/function names, boolean outcomes, and
+timer state. It removes raw supported-claim identifiers and hashes owner UUIDs
+in trace distributions. It never stores query text, claim prose, evidence
+prose, prompt content, or answer content. The report is written mode `0600`.
 
 ## Required sequence
 
-1. Run the gate against production and preserve its checksum.
-2. Deploy the disabled-by-default V5 shadow trace code without changing service
-   configuration.
-3. Re-run the retracted-claim negative control and governed-state readiness
-   gate against the deployed code.
-4. Enable zero-write shadow tracing for explicit test owners only.
-5. Compare live traces across at least two owners and negative-control turns.
-6. Replace legacy direct shared-target writes with controlled functions and
-   revoke their table privileges.
-7. Refresh the governed-state baseline after each separately reviewed durable
-   transition.
-8. Only then design a separately gated prompt cutover and legacy retirement.
-
-The existing `memory-v1-consolidation`, `memory-v1-governance`, and
-`memory-v1-projection` timers remain legacy Memory V1 services. None is a V5
-worker, and no V5 worker or timer may reuse those names during shadow testing.
+1. Preserve a passing v3 report and checksum for the current admin-only shadow.
+2. Add only the two owner-controlled test accounts to the zero-influence shadow
+   allowlist; do not enable all authenticated accounts.
+3. Gather ordinary-use traces for those accounts and rerun the v3 gate until
+   all allowlisted owners have isolated traces.
+4. Evaluate selection quality, suppression behavior, missing-memory rate, and
+   false-positive rate from sanitized trace outcomes plus targeted owner-only
+   review.
+5. Expand zero-influence shadow coverage to the remaining real accounts only
+   after the multi-owner canary passes.
+6. Design a separately bounded prompt-influence canary with strict retrieval
+   budgets, Postgres revalidation, rollback controls, and legacy fallback
+   isolation.
+7. Retire remaining legacy prompt contributors only after the new path passes
+   live answer-quality and account-isolation checks.
