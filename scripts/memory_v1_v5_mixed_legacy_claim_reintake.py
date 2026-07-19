@@ -18,7 +18,7 @@ import asyncpg
 
 VERSION = "memory_v1_v5_mixed_legacy_claim_reintake_v1"
 SELECTOR_VERSION = "20260719_v5_mixed_preference_legacy_reintake_v1"
-REASON_CODE = "eligible_mixed_preference_relational_reintake"
+REASON_CODE = "eligible_unprocessed"
 APPLY_TOKEN = "memory_v1_v5_mixed_legacy_claim_reintake_apply_v1"
 
 

@@ -74,7 +74,7 @@ BEGIN
   IF NOT FOUND
      OR planned.outcome<>'eligible'
      OR planned.route<>'relational_extraction'
-     OR planned.reason_code<>'eligible_mixed_preference_relational_reintake'
+     OR planned.reason_code<>'eligible_unprocessed'
      OR planned.legacy_claim_count<>5
      OR planned.active_preference_count<>2 THEN
     RAISE EXCEPTION 'owner A mixed reintake plan changed';

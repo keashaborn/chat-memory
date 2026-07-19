@@ -65,7 +65,7 @@ BEGIN
     evidence.content_sha256,
     'eligible'::text,
     'relational_extraction'::text,
-    'eligible_mixed_preference_relational_reintake'::text,
+    'eligible_unprocessed'::text,
     claim_links.legacy_claim_count,
     preference_links.active_preference_count
   FROM memory.evidence AS evidence
@@ -189,7 +189,7 @@ BEGIN
      OR p_selector_version<>'20260719_v5_mixed_preference_legacy_reintake_v1'
      OR p_expected_content_sha256 !~ '^[0-9a-f]{64}$'
      OR p_expected_route<>'relational_extraction'
-     OR p_expected_reason_code<>'eligible_mixed_preference_relational_reintake' THEN
+     OR p_expected_reason_code<>'eligible_unprocessed' THEN
     RAISE EXCEPTION 'mixed legacy V5 reintake enqueue inputs are invalid'
       USING ERRCODE='22023';
   END IF;
