@@ -1,0 +1,37 @@
+{
+  "contract_version": "memory_v1_v5_local_compiler_retry_manifest_v2",
+  "required_ancestor_commit": "479dd92634336e5dcf28e3c911cc32bcff092fc9",
+  "owner_user_id": "557ea042-cb82-48f8-9429-472e96c957ef",
+  "retry_contract_version": "memory_v1_local_policy_compiler_v4",
+  "rows": [
+    {
+      "operation_id": "d99b1bbf-0fa1-4b1b-a4bb-75096bbd224a",
+      "job_id": "2a1d1519-b0f4-4a43-962d-12686d85f89e",
+      "expected_content_sha256": "2de0989137c018f67b3386726d5222c604dba2ffae4a302bc57f2e55fece4681",
+      "prior_failure_operation_id": "e4c21d74-b5f6-5f4c-bac6-d76b7043b0a0",
+      "local_completion_event_id": "8dac68b2-8488-4faa-a917-e62feb5abb2a",
+      "expected_attempts": 1,
+      "rejection_code": "invalid_structured_output",
+      "prior_policy_compiler_sha256": "5cb83e837e38174af4cfda016c20009168ff62974e7d9137b30228d9973256a2"
+    },
+    {
+      "operation_id": "42517f47-f48b-4aee-b31e-0c39845e24ee",
+      "job_id": "cb7e0e52-bbf9-4ecc-9433-000e9fd9ae54",
+      "expected_content_sha256": "2bb5304cb478a28bf754b5aeb7c8380dc158e2b8882113deef7acc8e16a3ac40",
+      "prior_failure_operation_id": "223f18cb-b763-5f1a-a519-bfc7a7f2d614",
+      "local_completion_event_id": "b06adf49-cbba-4433-872e-d4bfaf194d99",
+      "expected_attempts": 1,
+      "rejection_code": "local_validation_rejected",
+      "prior_policy_compiler_sha256": "5cb83e837e38174af4cfda016c20009168ff62974e7d9137b30228d9973256a2"
+    }
+  ],
+  "expected_effects": {
+    "jobs_requeued": 2,
+    "audit_events_inserted": 2,
+    "model_calls": 0,
+    "packet_writes": 0,
+    "claim_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_influence_changes": 0
+  }
+}
