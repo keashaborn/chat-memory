@@ -35,7 +35,7 @@ declare -A expected_sha256=(
   ["$production_test"]="9cba6c3a33c8039991a2b4269981bdb3c055d919c9df8317891761e54ae77c8e"
   ["$router"]="08f7434514805a17897447b89235efa6e3495a59795016ce66ce5c5855afa9a5"
   ["$router_test"]="105fcdd63765e9fbd7a073b14aed0ac43927d5a9dab1be044c50f6cad4e88407"
-  ["$reviewer"]="49a765ab9e671ee0adf1f74e12f9e696bc82846abbb8e4497b8aec4851edee94"
+  ["$reviewer"]="c94817bf7b0c74fb9a2808794b5a34284021d090b23e022e60db63168c71f111"
 )
 
 backup=$(mktemp /tmp/memory-v1-v5-local-router.XXXXXX.dump)

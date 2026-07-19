@@ -38,7 +38,7 @@ declare -A expected_sha256=(
   ["$production_test"]="9cba6c3a33c8039991a2b4269981bdb3c055d919c9df8317891761e54ae77c8e"
   ["$router"]="08f7434514805a17897447b89235efa6e3495a59795016ce66ce5c5855afa9a5"
   ["$router_test"]="105fcdd63765e9fbd7a073b14aed0ac43927d5a9dab1be044c50f6cad4e88407"
-  ["$review_builder"]="49a765ab9e671ee0adf1f74e12f9e696bc82846abbb8e4497b8aec4851edee94"
+  ["$review_builder"]="c94817bf7b0c74fb9a2808794b5a34284021d090b23e022e60db63168c71f111"
   ["$service_source"]="29440f8cf7cbb93d556441b5b564d6acbff17dcdbf362b245a2115350ea5e48c"
   ["$timer_source"]="d63af9811bf5aa3d74b5d1894dd076da7f7873f25e1d486f3ef1b424c6ec9baf"
 )

@@ -9,6 +9,7 @@ import json
 from scripts.memory_v1_v5_review_local_packet import (
     _sha256_valid,
     packet_quality_findings,
+    review_artifact_eligible,
 )
 
 
@@ -85,9 +86,38 @@ def main() -> int:
     ]
     assert len(codes) == len(set(codes))
 
+    assert not review_artifact_eligible(
+        {
+            "manual_review_required": False,
+            "entity_mention_count": 0,
+            "observation_count": 0,
+            "comparison_hint_count": 0,
+        }
+    )
+    assert review_artifact_eligible(
+        {
+            "manual_review_required": False,
+            "entity_mention_count": 1,
+            "observation_count": 1,
+            "comparison_hint_count": 0,
+        }
+    )
+    assert review_artifact_eligible(
+        {
+            "manual_review_required": True,
+            "entity_mention_count": 0,
+            "observation_count": 0,
+            "comparison_hint_count": 0,
+        }
+    )
+
     assert _sha256_valid("a" * 64)
     assert not _sha256_valid("A" * 64)
     assert not _sha256_valid("a" * 63)
 
     print("memory_v1_v5_review_local_packet: PASS")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -206,6 +206,15 @@ def packet_quality_findings(packet: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
+def review_artifact_eligible(row: dict[str, Any]) -> bool:
+    return bool(
+        row["manual_review_required"]
+        or row["entity_mention_count"]
+        or row["observation_count"]
+        or row["comparison_hint_count"]
+    )
+
+
 def _validate_row(row: dict[str, Any], packet: dict[str, Any]) -> None:
     if any(not _sha256_valid(row[field]) for field in HASH_FIELDS):
         raise LocalPacketReviewError("local packet provenance contains an invalid hash")
@@ -217,8 +226,10 @@ def _validate_row(row: dict[str, Any], packet: dict[str, Any]) -> None:
         raise LocalPacketReviewError("local packet storage integrity was not verified")
     if canonical_sha256(packet) != row["validator_packet_sha256"]:
         raise LocalPacketReviewError("immutable normalized packet hash mismatch")
-    if not row["manual_review_required"]:
-        raise LocalPacketReviewError("local packet is not marked for manual review")
+    if not review_artifact_eligible(row):
+        raise LocalPacketReviewError(
+            "local packet has no reviewable relational content"
+        )
     if (
         row["job_status"] != "review_required"
         or row["job_route"] != "relational_extraction"
