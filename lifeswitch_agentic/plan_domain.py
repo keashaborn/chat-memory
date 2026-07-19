@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 
 PLAN_DOCUMENT_SCHEMA_VERSION = 1
+PLAN_VALIDATION_VERSION = 1
 VALID_PHASES = frozenset({"cut", "maintenance", "lean_gain", "recomp", "other"})
 PLAN_SECTION_FIELDS = (
     "body_state",
@@ -281,6 +282,29 @@ def validate_plan_document(document: PlanDocumentV1) -> tuple[PlanValidationIssu
             )
         )
     return tuple(issues)
+
+
+def plan_validation_result(document: PlanDocumentV1) -> dict[str, Any]:
+    issues = validate_plan_document(document)
+    if any(issue.severity == "error" for issue in issues):
+        status = "invalid"
+    elif issues:
+        status = "valid_with_warnings"
+    else:
+        status = "valid"
+    return {
+        "status": status,
+        "validation_version": PLAN_VALIDATION_VERSION,
+        "issues": [
+            {
+                "code": issue.code,
+                "field_path": issue.field_path,
+                "severity": issue.severity,
+                "message": issue.message,
+            }
+            for issue in issues
+        ],
+    }
 
 
 _ALLOWED_TRANSITIONS: dict[RevisionState, frozenset[RevisionState]] = {

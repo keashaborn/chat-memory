@@ -35,6 +35,7 @@ create table lifeswitch_agentic.plan_versions (
   superseded_at timestamptz,
   created_at timestamptz not null default now(),
   unique (owner_user_id, version_number),
+  unique (owner_user_id, id),
   check (
     (
       activation_type = 'owner_approval'
@@ -65,11 +66,13 @@ create index plan_versions_owner_history_idx
 
 create table lifeswitch_agentic.plan_owner_state (
   owner_user_id uuid primary key,
-  active_plan_version_id uuid
-    references lifeswitch_agentic.plan_versions (id) on delete restrict,
+  active_plan_version_id uuid,
   next_version_number bigint not null default 1
     check (next_version_number > 0),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  foreign key (owner_user_id, active_plan_version_id)
+    references lifeswitch_agentic.plan_versions (owner_user_id, id)
+    on delete restrict
 );
 
 create unique index plan_owner_state_active_version_idx
@@ -79,10 +82,8 @@ create unique index plan_owner_state_active_version_idx
 create table lifeswitch_agentic.plan_revisions (
   id uuid primary key,
   owner_user_id uuid not null,
-  base_plan_version_id uuid
-    references lifeswitch_agentic.plan_versions (id) on delete restrict,
-  supersedes_revision_id uuid
-    references lifeswitch_agentic.plan_revisions (id) on delete restrict,
+  base_plan_version_id uuid,
+  supersedes_revision_id uuid,
   state text not null check (
     state in (
       'draft', 'proposed', 'needs_changes', 'rejected',
@@ -110,8 +111,17 @@ create table lifeswitch_agentic.plan_revisions (
   updated_at timestamptz not null default now(),
   proposed_at timestamptz,
   resolved_at timestamptz,
-  activated_plan_version_id uuid
-    references lifeswitch_agentic.plan_versions (id) on delete restrict,
+  activated_plan_version_id uuid,
+  unique (owner_user_id, id),
+  foreign key (owner_user_id, base_plan_version_id)
+    references lifeswitch_agentic.plan_versions (owner_user_id, id)
+    on delete restrict,
+  foreign key (owner_user_id, supersedes_revision_id)
+    references lifeswitch_agentic.plan_revisions (owner_user_id, id)
+    on delete restrict,
+  foreign key (owner_user_id, activated_plan_version_id)
+    references lifeswitch_agentic.plan_versions (owner_user_id, id)
+    on delete restrict,
   check (num_nonnulls(author_actor_user_id, author_agent_task_id) = 1),
   check (
     (
@@ -130,8 +140,21 @@ create table lifeswitch_agentic.plan_revisions (
     (trigger_type <> 'initial_plan' and base_plan_version_id is not null)
   ),
   check (
-    (state = 'proposed')
-    = (proposed_at is not null and resolved_at is null)
+    (state = 'draft' and proposed_at is null and resolved_at is null)
+    or
+    (state = 'proposed' and proposed_at is not null and resolved_at is null)
+    or
+    (
+      state in (
+        'needs_changes', 'rejected', 'withdrawn',
+        'conflicted', 'activated'
+      )
+      and resolved_at is not null
+    )
+  ),
+  check (
+    state in ('draft', 'withdrawn')
+    or (validation_version is not null and validation_result is not null)
   ),
   check (
     (state = 'activated')
@@ -179,8 +202,7 @@ create index plan_revision_changes_revision_idx
 
 create table lifeswitch_agentic.plan_revision_events (
   id bigint generated always as identity primary key,
-  plan_revision_id uuid not null
-    references lifeswitch_agentic.plan_revisions (id) on delete restrict,
+  plan_revision_id uuid not null,
   owner_user_id uuid not null,
   event_type text not null,
   actor_user_id uuid,
@@ -191,16 +213,21 @@ create table lifeswitch_agentic.plan_revision_events (
   detail jsonb not null default '{}'::jsonb,
   request_id text,
   created_at timestamptz not null default now(),
+  foreign key (owner_user_id, plan_revision_id)
+    references lifeswitch_agentic.plan_revisions (owner_user_id, id)
+    on delete restrict,
   check (num_nonnulls(actor_user_id, agent_task_id) <= 1)
 );
 
 create index plan_revision_events_revision_idx
-  on lifeswitch_agentic.plan_revision_events (plan_revision_id, id);
+  on lifeswitch_agentic.plan_revision_events (
+    owner_user_id, plan_revision_id, id
+  );
 
 alter table lifeswitch_agentic.plan_versions
   add constraint plan_versions_source_revision_fkey
-  foreign key (source_revision_id)
-  references lifeswitch_agentic.plan_revisions (id)
+  foreign key (owner_user_id, source_revision_id)
+  references lifeswitch_agentic.plan_revisions (owner_user_id, id)
   on delete restrict;
 
 create index plan_versions_source_revision_idx
@@ -302,6 +329,11 @@ execute function lifeswitch_agentic.protect_plan_revision();
 
 create trigger plan_revision_events_append_only
 before update or delete on lifeswitch_agentic.plan_revision_events
+for each row
+execute function lifeswitch_agentic.reject_immutable_mutation();
+
+create trigger plan_revision_changes_append_only
+before update or delete on lifeswitch_agentic.plan_revision_changes
 for each row
 execute function lifeswitch_agentic.reject_immutable_mutation();
 

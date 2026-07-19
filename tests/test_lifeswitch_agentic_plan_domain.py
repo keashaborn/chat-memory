@@ -11,6 +11,7 @@ from lifeswitch_agentic.plan_domain import (
     RevisionTrigger,
     assert_revision_transition,
     diff_plan_documents,
+    plan_validation_result,
     validate_activation,
     validate_plan_document,
     validate_revision_base,
@@ -115,6 +116,12 @@ class PlanDocumentV1Test(unittest.TestCase):
                 ("monitoring_rules_missing", "warning"),
             },
         )
+
+    def test_validation_result_has_deterministic_status_and_version(self) -> None:
+        result = plan_validation_result(plan(monitoring_rules={}))
+        self.assertEqual(result["status"], "valid_with_warnings")
+        self.assertEqual(result["validation_version"], 1)
+        self.assertEqual(result["issues"][0]["code"], "monitoring_rules_missing")
 
 
 class RevisionStateTest(unittest.TestCase):
