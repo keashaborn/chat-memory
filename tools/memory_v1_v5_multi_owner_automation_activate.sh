@@ -46,7 +46,8 @@ timer_state=$(mktemp /tmp/memory-v1-v5-multi-owner-timers.XXXXXX)
 unit_backup=$(mktemp -d /tmp/memory-v1-v5-multi-owner-units.XXXXXX)
 before=$(mktemp /tmp/memory-v1-v5-multi-owner-before.XXXXXX)
 after=$(mktemp /tmp/memory-v1-v5-multi-owner-after.XXXXXX)
-chmod 0600 "$timer_state" "$before" "$after"
+table_list=$(mktemp /tmp/memory-v1-v5-multi-owner-tables.XXXXXX)
+chmod 0600 "$timer_state" "$before" "$after" "$table_list"
 chmod 0700 "$unit_backup"
 
 qdrant_signature() {
@@ -58,11 +59,23 @@ qdrant_signature() {
     | sha256sum | awk '{print $1}'
 }
 
-memory_signature() {
-  docker exec "$container" pg_dump -U sage -d "$database" \
-    --schema=memory --data-only --no-owner --no-privileges \
-    --column-inserts \
-    | sha256sum | awk '{print $1}'
+scalar() {
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U sage -d "$database" -c "$1" | tr -d '[:space:]'
+}
+
+capture_memory_state() {
+  local output=$1 table state
+  : >"$output"
+  while IFS= read -r table; do
+    [[ "$table" =~ ^[a-z0-9_]+$ ]]
+    state=$(scalar "SELECT count(*)::text || E'\\t' ||
+      encode(public.digest(convert_to(coalesce(string_agg(row_json,E'\\n'
+        ORDER BY row_json),''),'UTF8'),'sha256'),'hex')
+      FROM (SELECT to_jsonb(value)::text AS row_json
+        FROM memory.\"$table\" AS value) rows")
+    printf '%s\t%s\n' "$table" "$state" >>"$output"
+  done <"$table_list"
 }
 
 restore_timers() {
@@ -104,7 +117,7 @@ record_exit() {
   fi
   restore_timers || exit_code=1
   rm -rf "$unit_backup"
-  rm -f "$timer_state" "$before" "$after"
+  rm -f "$timer_state" "$before" "$after" "$table_list"
   if [[ -n "$status_file" ]]; then
     {
       printf 'run_tag=%s\n' "$run_tag"
@@ -173,7 +186,13 @@ printf '%s  %s\n' "$backup_sha256" "$backup" >"$backup.sha256"
 chmod 0600 "$backup.sha256"
 
 phase=baseline
-memory_signature >"$before"
+docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+  -U sage -d "$database" -c "SELECT table_name
+    FROM information_schema.tables
+    WHERE table_type='BASE TABLE' AND table_schema='memory'
+    ORDER BY table_name" >"$table_list"
+[[ -s "$table_list" ]]
+capture_memory_state "$before"
 qdrant_before=$(qdrant_signature)
 for service in "${services[@]}"; do
   [[ -f "/etc/systemd/system/$service" ]]
@@ -194,7 +213,7 @@ for service in "${services[@]}"; do
 done
 
 phase=zero_write_postflight
-memory_signature >"$after"
+capture_memory_state "$after"
 cmp -s "$before" "$after"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
@@ -208,7 +227,7 @@ jq -n \
   --arg head_commit "$(git rev-parse HEAD)" \
   --arg backup "$backup" --arg backup_sha256 "$backup_sha256" \
   --arg qdrant_sha256 "$qdrant_after" \
-  --arg memory_sha256 "$(<"$after")" \
+  --arg memory_sha256 "$(sha256sum "$after" | awk '{print $1}')" \
   '{contract_version:"memory_v1_v5_multi_owner_automation_install_v1",
     completed_at:$completed_at,head_commit:$head_commit,
     backup:{path:$backup,sha256:$backup_sha256},
