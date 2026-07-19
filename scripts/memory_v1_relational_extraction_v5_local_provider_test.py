@@ -466,6 +466,92 @@ def main() -> int:
         for item in personal_project_validated.normalized_packet["deferrals"]
     ] != ["project_scope_unresolved"]:
         raise AssertionError("personal project did not use project deferral")
+
+    cessation_content = "I stopped drinking alcohol on July 1, 2026."
+    cessation_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000009",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000009",
+        source_sha256=sha256_text(cessation_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=cessation_content,
+    )
+    cessation_packet = deepcopy(raw)
+    cessation_span = {
+        "start": 0,
+        "end": len(cessation_content),
+        "quote": cessation_content,
+    }
+    cessation_packet["entity_mentions"][0]["source_spans"] = [
+        cessation_span
+    ]
+    cessation_observation = cessation_packet["observations"][0]
+    cessation_observation["predicate"] = "health.user_reported_observation"
+    cessation_observation["object"]["value"] = "stopped drinking alcohol"
+    cessation_observation["projection_class"] = "supportive_context"
+    cessation_observation["surface_policy"] = "explicit_recall_only"
+    cessation_observation["sensitivity"] = "medium"
+    cessation_observation["source_spans"] = [cessation_span]
+    cessation_observation["temporal"].update(
+        {
+            "semantic": "occurrence",
+            "shape": "bounded_interval",
+            "basis": "calendar",
+            "source_form": "partial_absolute",
+            "certainty": "exact",
+            "precision": "day",
+            "instant": None,
+            "calendar_range": {
+                "lower": "2026-07-01",
+                "upper": "2026-07-02",
+                "bounds": "[)",
+            },
+            "instant_range": None,
+            "relative_offset": None,
+            "recurrence": None,
+            "anchored_to_source_time": False,
+        }
+    )
+    cessation_result = LocalStructuredResult(
+        response_id="local-dated-cessation",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=cessation_packet,
+        response_sha256=canonical_sha256(cessation_packet),
+        prompt_tokens=100,
+        completion_tokens=200,
+    )
+    cessation_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=cessation_result),
+    )
+    cessation_validated = validate_and_normalize(
+        cessation_provider,
+        source=cessation_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    normalized_cessation = cessation_validated.normalized_packet[
+        "observations"
+    ][0]
+    if normalized_cessation["modality"] != "reported_observation":
+        raise AssertionError("cessation report modality changed")
+    if normalized_cessation["sensitivity"] != "high":
+        raise AssertionError("health sensitivity floor changed")
+    if normalized_cessation["temporal"]["semantic"] != "state_validity":
+        raise AssertionError("cessation state temporal semantic changed")
+    if normalized_cessation["temporal"]["shape"] != "open_interval" or (
+        normalized_cessation["temporal"]["calendar_range"]["upper"]
+        is not None
+    ):
+        raise AssertionError("cessation interval was not left open")
     invalid_raw = deepcopy(raw)
     invalid_raw["entity_mentions"] = "private source prose must not survive"
     invalid_result = LocalStructuredResult(

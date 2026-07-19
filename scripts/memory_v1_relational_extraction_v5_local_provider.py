@@ -1082,6 +1082,16 @@ _HISTORICAL_RESIDENCE_RE = re.compile(
     r"\b(?:used\s+to\s+live|previously\s+lived|formerly\s+lived)\b",
     re.IGNORECASE,
 )
+_BEHAVIOR_CESSATION_RE = re.compile(
+    r"\b(?:stopped|quit|gave\s+up|no\s+longer)\b",
+    re.IGNORECASE,
+)
+_SENSITIVITY_RANK = {
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "restricted": 3,
+}
 _EXPLICIT_REPORTED_AGE_RE = re.compile(
     r"\b(?:"
     r"(?:my|his|her|their)\s+age\s+is|"
@@ -1868,6 +1878,44 @@ def _compile_entity_links(
         rule = registry_rules.get(observation["predicate"])
         if rule is None:
             continue
+        if _SENSITIVITY_RANK[observation["sensitivity"]] < (
+            _SENSITIVITY_RANK[rule["sensitivity_floor"]]
+        ):
+            observation["sensitivity"] = rule["sensitivity_floor"]
+            repairs.append("sensitivity_floor_normalized")
+        if observation["predicate"] == "health.user_reported_observation":
+            if observation["modality"] == "asserted":
+                observation["modality"] = "reported_observation"
+                repairs.append("health_report_modality_normalized")
+            if _BEHAVIOR_CESSATION_RE.search(
+                _observation_source_text(content, observation)
+            ):
+                temporal = observation["temporal"]
+                temporal["semantic"] = "state_validity"
+                if (
+                    temporal["basis"] == "calendar"
+                    and temporal["calendar_range"] is not None
+                    and temporal["calendar_range"]["lower"] is not None
+                ):
+                    temporal["shape"] = "open_interval"
+                    temporal["calendar_range"]["upper"] = None
+                else:
+                    temporal.update(
+                        {
+                            "shape": "none",
+                            "basis": "none",
+                            "source_form": "implicit_source_time",
+                            "certainty": "unknown",
+                            "precision": "unknown",
+                            "instant": None,
+                            "calendar_range": None,
+                            "instant_range": None,
+                            "relative_offset": None,
+                            "recurrence": None,
+                            "anchored_to_source_time": False,
+                        }
+                    )
+                repairs.append("cessation_state_validity_normalized")
         subject_type = entity_types.get(observation["subject_entity_ref"])
         if subject_type not in rule["subject_entity_types"]:
             invalid_contract_refs.add(observation["observation_ref"])
