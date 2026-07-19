@@ -26,10 +26,23 @@ backup=$(mktemp /tmp/memory-v1-v5-legacy-reintake.XXXXXX.dump)
 dry=$(mktemp /tmp/memory-v1-v5-legacy-reintake-dry.XXXXXX.json)
 applied=$(mktemp /tmp/memory-v1-v5-legacy-reintake-applied.XXXXXX.json)
 chmod 0600 "$backup" "$dry" "$applied"
+phase=initialize
 
 cleanup() {
+  rc=$?
+  trap - EXIT
   docker exec "$container" dropdb -U sage --if-exists "$clone" >/dev/null 2>&1 || true
+  if (( rc != 0 )); then
+    printf 'memory_v1_v5_legacy_claim_reintake_clone: FAIL phase=%s rc=%s\n' "$phase" "$rc" >&2
+    for diagnostic in "$dry.stdout" "$applied.stdout"; do
+      if [[ -s "$diagnostic" ]]; then
+        jq -c '{apply,owner_count,totals,claim_writes,qdrant_writes,external_model_calls,local_model_calls,prompt_influence}' \
+          "$diagnostic" >&2 || true
+      fi
+    done
+  fi
   rm -f "$backup" "$dry" "$applied" "$dry.stdout" "$applied.stdout"
+  exit "$rc"
 }
 trap cleanup EXIT
 
@@ -48,19 +61,23 @@ qdrant_signature() {
 }
 
 [[ -z "$(git status --porcelain)" ]]
+phase=offline_tests
 PYTHONPATH="$repo_root" venv/bin/python "$worker_test" >/dev/null
 python3 -m py_compile "$worker"
+phase=production_baseline
 production_jobs_before=$(docker exec "$container" psql -U sage -d "$production" -X -Atqc \
   "SELECT count(*) FROM memory.evidence_extraction_job WHERE selector_version='$selector'")
 production_claims_before=$(docker exec "$container" psql -U sage -d "$production" -X -Atqc \
   'SELECT count(*) FROM memory.claim')
 qdrant_before=$(qdrant_signature)
 
+phase=clone_restore
 docker exec "$container" pg_dump -U sage -d "$production" -Fc >"$backup"
 [[ -s "$backup" ]]
 docker exec "$container" createdb -U sage -T template0 "$clone"
 docker exec -i "$container" pg_restore -U sage -d "$clone" --exit-on-error <"$backup"
 
+phase=migration_and_security
 clone_sql <"$migration" >/dev/null
 clone_sql <"$migration" >/dev/null
 clone_sql -v owner_a="$owner_a" -v owner_b="$owner_b" <"$test_sql" >/dev/null
@@ -68,6 +85,7 @@ clone_sql -v owner_a="$owner_a" -v owner_b="$owner_b" <"$test_sql" >/dev/null
 clone_dsn=$(venv/bin/python -c \
   'import sys; from urllib.parse import urlsplit,urlunsplit; u=urlsplit(sys.argv[1]); print(urlunsplit((u.scheme,u.netloc,"/"+sys.argv[2],u.query,u.fragment)))' \
   "$POSTGRES_DSN" "$clone")
+phase=dry_run
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" venv/bin/python "$worker" \
   --owner-user-id "$owner_a" --owner-user-id "$owner_b" --limit 100 \
   --report-path "$dry" >"$dry.stdout"
@@ -76,6 +94,7 @@ jq -e '.apply==false and .totals.planned==8 and .totals.applied==0 and
   .external_model_calls==0 and .local_model_calls==0 and .prompt_influence==0' \
   "$dry.stdout" >/dev/null
 
+phase=transactional_apply
 MEMORY_V1_V5_LEGACY_REINTAKE_APPLY=memory_v1_v5_legacy_claim_reintake_apply_v1 \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" venv/bin/python "$worker" \
   --owner-user-id "$owner_a" --owner-user-id "$owner_b" --limit 100 --apply \
@@ -89,15 +108,18 @@ jq -e '.apply==true and .totals.planned==8 and .totals.applied==8 and
 [[ "$(docker exec "$container" psql -U sage -d "$clone" -X -Atqc \
   "SELECT count(*) FROM memory.evidence_intake_terminal WHERE selector_version='$selector'")" == 8 ]]
 
+phase=rollback_reinstall
 clone_sql <"$rollback" >/dev/null
 [[ "$(docker exec "$container" psql -U sage -d "$clone" -X -Atqc \
   "SELECT to_regprocedure('memory.plan_owner_v5_legacy_claim_reintake_v1(text,integer,uuid)') IS NULL")" == t ]]
 clone_sql <"$migration" >/dev/null
 
+phase=production_isolation
 [[ "$(docker exec "$container" psql -U sage -d "$production" -X -Atqc \
   "SELECT count(*) FROM memory.evidence_extraction_job WHERE selector_version='$selector'")" == "$production_jobs_before" ]]
 [[ "$(docker exec "$container" psql -U sage -d "$production" -X -Atqc \
   'SELECT count(*) FROM memory.claim')" == "$production_claims_before" ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
+phase=complete
 rm -f "$dry.stdout" "$applied.stdout"
 printf '%s\n' 'memory_v1_v5_legacy_claim_reintake_clone: PASS'
