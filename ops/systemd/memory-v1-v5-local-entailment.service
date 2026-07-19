@@ -15,7 +15,9 @@ Environment=MEMORY_V1_V5_LOCAL_ENTAILMENT_APPLY=memory_v1_v5_local_entailment_ap
 LoadCredential=local_api_key:/etc/memory-v1-local-inference/api-key
 RuntimeDirectory=memory-v1-v5-local-entailment
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --max-output-tokens 128 --timeout-seconds 300 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --max-output-tokens 128 --timeout-seconds 300 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --max-output-tokens 128 --timeout-seconds 300 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --max-output-tokens 128 --timeout-seconds 300 --apply
 TimeoutStartSec=7min
 UMask=0077
 Nice=10

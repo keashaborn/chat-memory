@@ -9,8 +9,11 @@ accounts:
 
 The allowlist is repeated explicitly in the seven local pipeline service
 definitions: inference, packet routing, auto-stage, entity validation,
-auto-resolution, entailment, and claim projection. Every worker still derives
-the transaction actor independently and all durable tables retain forced RLS.
+auto-resolution, entailment, and claim projection. Each oneshot service has one
+sequential `ExecStart` per owner. Every worker invocation receives exactly one
+owner UUID, derives the transaction actor independently, and completes before
+the next owner begins. This prevents first-owner starvation without sharing a
+cursor or transaction between accounts. All durable tables retain forced RLS.
 
 This does not enable V5 prompt influence, all-authenticated shadow retrieval,
 the external OpenAI extraction scheduler, deletion, or another owner's data.

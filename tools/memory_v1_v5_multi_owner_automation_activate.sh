@@ -26,14 +26,14 @@ services=(
   memory-v1-v5-local-claim-projection.service
 )
 declare -A expected_sha256=(
-  [ops/systemd/memory-v1-v5-local-inference-scheduler.service]=4557f82582f8ef3a4526148f34196c8b0fd9458c7868404c5d32ed3d4fad7194
-  [ops/systemd/memory-v1-v5-local-packet-router.service]=eaf1079f7a436759d4b5b394bc63ee538464dac83cf9634abf495b1e4db96e52
-  [ops/systemd/memory-v1-v5-local-auto-stage.service]=153ea7eb43bfd3d5dbc327cc5a28bc80f3df6d6c5e8a594c3ed265f7e4548ac4
-  [ops/systemd/memory-v1-v5-local-entity-validation.service]=037da2cf2c8767c476b6a3f63b8ee4a39c9e7f13021f41711e9ff87c275205f1
-  [ops/systemd/memory-v1-v5-local-auto-resolution.service]=413a8f88ba800ef8652b987fb33ccaefd8aacd511d62628a475156e0a245e4f1
-  [ops/systemd/memory-v1-v5-local-entailment.service]=6a07989c753c93e2c46b18fec4a4f0a68d9f888675528218f6e6e506a55e14c6
-  [ops/systemd/memory-v1-v5-local-claim-projection.service]=16706063005152ac89e833dac1e81713e7535e56a5e96010d55bda244d115792
-  [$contract_test]=ad489495698ba86c40f985b8a5578332f344c5c2adbef44fb857d223c84f1134
+  [ops/systemd/memory-v1-v5-local-inference-scheduler.service]=890e6439f351a8ee23ef5ed1e948e011b3170fd33c827f8108c128c2248fbde3
+  [ops/systemd/memory-v1-v5-local-packet-router.service]=081175bab2e92ce390bf0a815cf49b13106dfeae3d04d132e40710030dd2d83f
+  [ops/systemd/memory-v1-v5-local-auto-stage.service]=2d2d8291a39c8b1667c2f2be908493f12326dea355aefeec50f425b4d96bc225
+  [ops/systemd/memory-v1-v5-local-entity-validation.service]=1b09614d17b851bd8b5579f1bc84e83b0d1749ad503a07583dac0115e1427269
+  [ops/systemd/memory-v1-v5-local-auto-resolution.service]=6ec6450a6ff29d6f19d7b227c1a8a72d381fe86cfb8604171656bc22c01835ac
+  [ops/systemd/memory-v1-v5-local-entailment.service]=dda5d1bdbce7464091cab9a1382d6cab98ea9960b6e8b72640728d0b30b62e58
+  [ops/systemd/memory-v1-v5-local-claim-projection.service]=e2c8e8adccb226a822389a5abb792b2d5c54a7f0939772f5e00a66b4ce25aa2e
+  [$contract_test]=b7422369157c7231346b1e911439cd851d7adb8cec09520fc05fa3c553a2b8c3
 )
 
 phase=initialization

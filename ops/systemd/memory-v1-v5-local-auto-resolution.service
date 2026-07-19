@@ -13,7 +13,9 @@ Environment=PYTHONPATH=/opt/chat-memory
 Environment=MEMORY_V1_V5_LOCAL_AUTO_RESOLUTION_APPLY=memory_v1_v5_local_auto_resolution_apply_v1
 RuntimeDirectory=memory-v1-v5-local-auto-resolution
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-auto-resolution/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_auto_resolution.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-auto-resolution/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_auto_resolution.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-auto-resolution/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_auto_resolution.py --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-auto-resolution/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_auto_resolution.py --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --apply
 TimeoutStartSec=5min
 UMask=0077
 Nice=10

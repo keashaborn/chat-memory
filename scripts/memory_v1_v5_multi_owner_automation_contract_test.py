@@ -22,15 +22,15 @@ SERVICES = {
 }
 
 
-def exec_start(path: Path) -> list[str]:
+def exec_starts(path: Path) -> list[list[str]]:
     rows = [
         line.removeprefix("ExecStart=")
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.startswith("ExecStart=")
     ]
-    if len(rows) != 1:
-        raise AssertionError(f"{path.name} must have exactly one ExecStart")
-    return shlex.split(rows[0])
+    if not rows:
+        raise AssertionError(f"{path.name} has no ExecStart")
+    return [shlex.split(row) for row in rows]
 
 
 def owners(command: list[str]) -> list[str]:
@@ -45,14 +45,20 @@ def owners(command: list[str]) -> list[str]:
 
 def main() -> None:
     for service in sorted(SERVICES):
-        command = exec_start(SYSTEMD / service)
-        configured = owners(command)
+        commands = exec_starts(SYSTEMD / service)
+        assert len(commands) == len(EXPECTED_OWNERS), service
+        configured = [owner for command in commands for owner in owners(command)]
         assert len(configured) == len(EXPECTED_OWNERS), service
         assert set(configured) == EXPECTED_OWNERS, service
-        assert command[-1] == "--apply", service
+        assert all(command[-1] == "--apply" for command in commands), service
+        assert all(len(owners(command)) == 1 for command in commands), service
 
     # External OpenAI extraction remains a separate admin-only circuit.
-    external = owners(exec_start(SYSTEMD / "memory-v1-v5-bounded-extraction.service"))
+    external_commands = exec_starts(
+        SYSTEMD / "memory-v1-v5-bounded-extraction.service"
+    )
+    assert len(external_commands) == 1
+    external = owners(external_commands[0])
     assert external == ["1240822d-ac9a-4096-95aa-e2b24d36ef50"]
 
     print("memory_v1_v5_multi_owner_automation_contract: PASS")
