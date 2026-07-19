@@ -54,11 +54,11 @@ def main() -> None:
                 os.environ["CREDENTIALS_DIRECTORY"] = original
 
     payload = json.dumps(
-        {"object": "list", "data": [{"id": "qwen3-8b-local-extractor"}]}
+        {"object": "list", "data": [{"id": "qwen3-14b-local-extractor"}]}
     ).encode("utf-8")
     with patch("urllib.request.urlopen", return_value=Response(payload)) as mocked:
         assert fetch_models(endpoint, "x" * 32, 5.0) == [
-            "qwen3-8b-local-extractor"
+            "qwen3-14b-local-extractor"
         ]
         request = mocked.call_args.args[0]
         assert request.full_url == "http://127.0.0.1:18080/v1/models"

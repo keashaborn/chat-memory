@@ -30,7 +30,7 @@ def arguments() -> argparse.Namespace:
         "--endpoint", default="http://127.0.0.1:18080/v1/models"
     )
     parser.add_argument("--credential-name", default="local_api_key")
-    parser.add_argument("--expected-model", default="qwen3-8b-local-extractor")
+    parser.add_argument("--expected-model", default="qwen3-14b-local-extractor")
     parser.add_argument("--timeout-seconds", type=float, default=15.0)
     return parser.parse_args()
 
