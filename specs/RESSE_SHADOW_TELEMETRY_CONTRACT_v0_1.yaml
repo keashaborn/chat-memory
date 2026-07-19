@@ -1,0 +1,91 @@
+contract:
+  id: resse_shadow_telemetry_v0_1
+  status: proposed_isolated_only
+  date: '2026-07-19'
+  runtime_integration_authorized: false
+
+purpose:
+  - compare_candidate_and_baseline_decision_classes_before_cutover
+  - measure_policy_fallbacks_without_recording_conversation_or_personal_data
+
+event:
+  name: resse_policy_shadow_decision
+  required_fields:
+    - schema_version
+    - occurred_at
+    - correlation_id
+    - candidate
+    - execution
+  fields:
+    schema_version:
+      constant: resse_shadow_telemetry_v0_1
+    occurred_at:
+      type: rfc3339_utc
+    correlation_id:
+      type: random_ephemeral_identifier
+      constraints:
+        - generated_per_request
+        - not_derived_from_user_account_email_device_or_message
+        - expires_under_standard_trace_retention
+    candidate:
+      fields:
+        composite_policy_version: {type: allowlisted_string}
+        runtime_policy_version: {type: allowlisted_string}
+        preference_policy_version: {type: allowlisted_string}
+        assistant_profile_id: {constant: RESSE}
+        mode: {enum: [HIGH_STAKES, TECHNICAL, FM_EXPLICIT, COACHING, ORDINARY]}
+        closure: {enum: [complete, technical_procedure, material_clarification, consented_coaching, safety_action]}
+        fm_lens: {enum: [off, optional, on]}
+        fm_tiers: {type: array_of_allowlisted_tier_names}
+        fm_max_hits: {type: nonnegative_integer}
+        governed_memory_allowed: {type: boolean}
+        structured_data_allowed: {type: boolean}
+        selected_profile_field_names: {type: array_of_field_names_no_values}
+        custom_instructions_selected: {type: boolean}
+        suppressed_reason_codes: {type: array_of_allowlisted_codes}
+        ignored_field_names: {type: array_of_field_names_no_values}
+        validation_note_codes: {type: array_of_allowlisted_codes}
+    comparison:
+      optional: true
+      fields:
+        baseline_behavior_class: {type: allowlisted_enum_or_null}
+        candidate_behavior_class: {type: allowlisted_enum}
+        behavior_class_changed: {type: boolean}
+        fm_eligibility_changed: {type: boolean}
+        closure_class_changed: {type: boolean}
+    execution:
+      fields:
+        decision_latency_ms: {type: nonnegative_number}
+        adapter_outcome: {enum: [shadow_only, accepted, fallback, error]}
+        fallback_reason_code: {type: allowlisted_string_or_null}
+
+prohibited_fields:
+  - raw_user_message
+  - conversation_text
+  - assistant_response
+  - nickname_value
+  - occupation_value
+  - more_about_you_value
+  - custom_instructions_value
+  - memory_claims
+  - memory_evidence
+  - structured_health_or_account_values
+  - retrieved_corpus_text
+  - assembled_prompt_or_prompt_blocks
+  - tool_arguments_or_tool_results
+  - authentication_tokens_or_headers
+  - user_id_email_ip_address_or_device_id
+  - vector_embeddings
+
+operational_rules:
+  - telemetry_failure_must_not_change_the_policy_decision
+  - unknown_fields_are_rejected_not_serialized
+  - arrays_contain_codes_or_field_names_never_values
+  - no_free_form_strings_except_allowlisted_version_and_reason_codes
+  - retention_and_access_control_require_security_review_before_integration
+  - shadow_mode_does_not_call_a_second_model_or_duplicate_memory_retrieval
+
+rollback:
+  - disable_shadow_emission_with_server_owned_feature_flag
+  - preserve_candidate_policy_decision_when_observability_is_unavailable
+  - never_fall_back_to_client_supplied_identity_mode_or_tuning_fields
