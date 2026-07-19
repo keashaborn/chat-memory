@@ -180,6 +180,40 @@ def main() -> int:
         raise AssertionError("local provider audit is missing")
     if provider.last_audit["response_status"] != "completed":
         raise AssertionError("local provider audit status changed")
+    invalid_raw = deepcopy(raw)
+    invalid_raw["entity_mentions"] = "private source prose must not survive"
+    invalid_result = LocalStructuredResult(
+        response_id="local-invalid-1",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=invalid_raw,
+        response_sha256=canonical_sha256(invalid_raw),
+        prompt_tokens=100,
+        completion_tokens=20,
+    )
+    invalid_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=invalid_result),
+    )
+    expect_adapter_error(
+        lambda: invalid_provider.extract(source), "invalid_structured_output"
+    )
+    invalid_audit = invalid_provider.last_audit
+    if invalid_audit is None:
+        raise AssertionError("invalid structured output audit is missing")
+    if invalid_audit["validation_exception_class"] != "ValidationError":
+        raise AssertionError("validation exception class changed")
+    if invalid_audit["validation_error_count"] < 1:
+        raise AssertionError("validation error count was not captured")
+    if not invalid_audit["validation_error_types"]:
+        raise AssertionError("validation error types were not captured")
+    if invalid_audit["validation_error_locations"] != [["entity_mentions"]]:
+        raise AssertionError("validation error locations changed")
+    if "private source prose" in str(invalid_audit):
+        raise AssertionError("private provider input leaked into diagnostics")
     request_body = transport.requests[0].body()
     if "store" in request_body:
         raise AssertionError("local transport unexpectedly emitted store state")

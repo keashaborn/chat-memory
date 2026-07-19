@@ -46,6 +46,7 @@ SAFE_CANARY_FIELDS = {
     "write_counts",
 }
 SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,99}$")
+SAFE_AUDIT_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
 
 
 def sha256_text(value: str) -> str:
@@ -307,7 +308,66 @@ def sanitized_canary_result(completed: subprocess.CompletedProcess[str]) -> dict
     ) or (completed.returncode == 1 and outcome == "rejected")
     if not handled:
         raise RuntimeError("local canary exit/outcome contract changed")
-    return {key: payload[key] for key in sorted(SAFE_CANARY_FIELDS) if key in payload}
+    sanitized = {
+        key: payload[key]
+        for key in sorted(SAFE_CANARY_FIELDS)
+        if key in payload
+    }
+    audit = payload.get("audit")
+    if audit is not None:
+        if not isinstance(audit, dict):
+            raise RuntimeError("local canary audit is invalid")
+        safe_audit: dict[str, Any] = {}
+        for key in (
+            "error_code",
+            "validation_exception_class",
+        ):
+            value = audit.get(key)
+            if value is not None:
+                if not isinstance(value, str) or not SAFE_AUDIT_CODE_RE.fullmatch(value):
+                    raise RuntimeError("local canary audit code is invalid")
+                safe_audit[key] = value
+        count = audit.get("validation_error_count")
+        if count is not None:
+            if not isinstance(count, int) or not 0 <= count <= 32:
+                raise RuntimeError("local canary audit count is invalid")
+            safe_audit["validation_error_count"] = count
+        error_types = audit.get("validation_error_types")
+        if error_types is not None:
+            if (
+                not isinstance(error_types, list)
+                or len(error_types) > 32
+                or any(
+                    not isinstance(value, str)
+                    or not SAFE_AUDIT_CODE_RE.fullmatch(value)
+                    for value in error_types
+                )
+            ):
+                raise RuntimeError("local canary audit types are invalid")
+            safe_audit["validation_error_types"] = error_types
+        locations = audit.get("validation_error_locations")
+        if locations is not None:
+            if not isinstance(locations, list) or len(locations) > 32:
+                raise RuntimeError("local canary audit locations are invalid")
+            safe_locations: list[list[str | int]] = []
+            for location in locations:
+                if not isinstance(location, list) or len(location) > 16:
+                    raise RuntimeError("local canary audit location is invalid")
+                if any(
+                    not (
+                        isinstance(token, int)
+                        or (
+                            isinstance(token, str)
+                            and SAFE_AUDIT_CODE_RE.fullmatch(token)
+                        )
+                    )
+                    for token in location
+                ):
+                    raise RuntimeError("local canary audit location token is invalid")
+                safe_locations.append(location)
+            safe_audit["validation_error_locations"] = safe_locations
+        sanitized["audit"] = safe_audit
+    return sanitized
 
 
 def invoke_canary(

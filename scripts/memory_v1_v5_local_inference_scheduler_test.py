@@ -153,6 +153,14 @@ def main() -> int:
                 "job_id_sha256": "b" * 64,
                 "local_model_calls": 1,
                 "external_model_calls": 0,
+                "audit": {
+                    "error_code": "invalid_structured_output",
+                    "validation_exception_class": "ValidationError",
+                    "validation_error_count": 1,
+                    "validation_error_types": ["list_type"],
+                    "validation_error_locations": [["entity_mentions"]],
+                    "source_text": "must not survive",
+                },
                 "source_text": "must not survive",
             },
             0,
@@ -160,6 +168,10 @@ def main() -> int:
     )
     assert accepted["outcome"] == "accepted"
     assert "source_text" not in accepted
+    assert "source_text" not in accepted["audit"]
+    assert accepted["audit"]["validation_error_locations"] == [
+        ["entity_mentions"]
+    ]
 
     rejected = sanitized_canary_result(
         completed(

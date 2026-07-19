@@ -443,6 +443,10 @@ def sanitized_audit(provider: LocalLlamaCppProvider) -> dict[str, Any] | None:
         "policy_guard_code",
         "compiler_repairs",
         "compiled_packet_sha256",
+        "validation_exception_class",
+        "validation_error_count",
+        "validation_error_types",
+        "validation_error_locations",
     }
     return {key: value for key, value in provider.last_audit.items() if key in allowed}
 

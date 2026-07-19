@@ -2137,7 +2137,50 @@ class LocalLlamaCppProvider:
                 }
             )
             return compiled_packet
-        except (ValidationError, TypeError, ValueError) as exc:
+        except ValidationError as exc:
+            errors = exc.errors(include_url=False, include_input=False)
+            self.last_audit.update(
+                {
+                    "validation_exception_class": "ValidationError",
+                    "validation_error_count": len(errors),
+                    "validation_error_types": sorted(
+                        {
+                            str(item.get("type", "unknown"))
+                            for item in errors
+                        }
+                    )[:32],
+                    "validation_error_locations": [
+                        [
+                            token
+                            if isinstance(token, int)
+                            else (
+                                str(token)
+                                if re.fullmatch(
+                                    r"[A-Za-z_][A-Za-z0-9_]{0,79}",
+                                    str(token),
+                                )
+                                else f"sha256:{canonical_sha256(str(token))}"
+                            )
+                            for token in item.get("loc", ())
+                        ]
+                        for item in errors[:32]
+                    ],
+                }
+            )
+            self.last_audit["error_code"] = "invalid_structured_output"
+            raise LocalProviderAdapterError(
+                "invalid_structured_output",
+                retryable=False,
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            self.last_audit.update(
+                {
+                    "validation_exception_class": type(exc).__name__,
+                    "validation_error_count": 1,
+                    "validation_error_types": ["compiler_validation_error"],
+                    "validation_error_locations": [],
+                }
+            )
             self.last_audit["error_code"] = "invalid_structured_output"
             raise LocalProviderAdapterError(
                 "invalid_structured_output",
