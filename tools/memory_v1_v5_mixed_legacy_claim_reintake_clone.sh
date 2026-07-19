@@ -27,6 +27,7 @@ backup=$(mktemp /tmp/memory-v1-v5-mixed-reintake.XXXXXX.dump)
 dry=$(mktemp /tmp/memory-v1-v5-mixed-reintake-dry.XXXXXX.json)
 applied=$(mktemp /tmp/memory-v1-v5-mixed-reintake-applied.XXXXXX.json)
 chmod 0600 "$backup" "$dry" "$applied"
+rm -f "$dry" "$applied"
 phase=initialize
 
 cleanup() {
