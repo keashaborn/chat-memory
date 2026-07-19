@@ -333,6 +333,8 @@ def evaluation(
 
 def secure_write(path: Path, packet: dict[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        raise RuntimeError("completion audit output already exists")
     payload = (json.dumps(packet, indent=2, sort_keys=True) + "\n").encode("utf-8")
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:

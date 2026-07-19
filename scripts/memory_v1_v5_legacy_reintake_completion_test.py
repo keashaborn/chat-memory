@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from memory_v1_v5_legacy_reintake_completion import evaluation
+import tempfile
+from pathlib import Path
+
+from memory_v1_v5_legacy_reintake_completion import evaluation, secure_write
 
 
 def snapshot(status_counts: dict[str, int], attempts: list[int]) -> dict:
@@ -87,6 +90,16 @@ def main() -> None:
         baseline=baseline,
     )
     assert cross_owner["pass"] is False
+
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "audit.json"
+        secure_write(output, {"test": True})
+        try:
+            secure_write(output, {"test": False})
+        except RuntimeError as exc:
+            assert str(exc) == "completion audit output already exists"
+        else:
+            raise AssertionError("audit output overwrite was not rejected")
 
     print("memory_v1_v5_legacy_reintake_completion: PASS")
 
