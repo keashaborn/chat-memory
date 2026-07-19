@@ -1,5 +1,9 @@
 \set ON_ERROR_STOP on
 
+SELECT set_config('test.owner_user_id',:'owner_user_id',false);
+SELECT set_config('test.packet_id',:'packet_id',false);
+SELECT set_config('test.packet_storage_sha256',:'packet_storage_sha256',false);
+
 DO $catalog$
 DECLARE
   function_definition text;
@@ -21,9 +25,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM memory.evidence_extraction_packet_v5_local
-    WHERE owner_user_id=:'owner_user_id'::uuid
-      AND packet_id=:'packet_id'::uuid
-      AND packet_storage_sha256=:'packet_storage_sha256'
+    WHERE owner_user_id=current_setting('test.owner_user_id')::uuid
+      AND packet_id=current_setting('test.packet_id')::uuid
+      AND packet_storage_sha256=current_setting('test.packet_storage_sha256')
       AND local_model_calls=0 AND external_model_calls=0
       AND entity_mention_count=0 AND observation_count=0
       AND comparison_hint_count=0 AND deferral_count>0
