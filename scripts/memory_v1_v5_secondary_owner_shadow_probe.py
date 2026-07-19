@@ -74,6 +74,10 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--query", required=True)
     parser.add_argument("--request-classification", required=True)
     parser.add_argument("--expected-selected", type=int, required=True)
+    parser.add_argument(
+        "--seed-claim-id",
+        help="Use this owner-scoped claim vector as the deterministic query seed.",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument(
         "--qdrant-scroll-url",
@@ -82,7 +86,7 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def validate(args: argparse.Namespace) -> uuid.UUID:
+def validate(args: argparse.Namespace) -> tuple[uuid.UUID, uuid.UUID | None]:
     try:
         owner = uuid.UUID(args.owner_user_id)
     except ValueError as exc:
@@ -93,20 +97,30 @@ def validate(args: argparse.Namespace) -> uuid.UUID:
         raise RuntimeError("query is required and bounded")
     if not str(args.request_classification).strip():
         raise RuntimeError("request classification is required")
-    return owner
+    try:
+        seed_claim_raw = getattr(args, "seed_claim_id", None)
+        seed_claim = uuid.UUID(seed_claim_raw) if seed_claim_raw else None
+    except ValueError as exc:
+        raise RuntimeError("seed-claim-id must be a UUID") from exc
+    return owner, seed_claim
 
 
-def owner_seed_vector(url: str, owner: uuid.UUID) -> tuple[list[float], str]:
+def owner_seed_vector(
+    url: str,
+    owner: uuid.UUID,
+    seed_claim: uuid.UUID | None = None,
+) -> tuple[list[float], str]:
+    conditions: list[dict[str, Any]] = [
+        {
+            "key": "owner_user_id",
+            "match": {"value": str(owner)},
+        }
+    ]
+    if seed_claim is not None:
+        conditions.append({"has_id": [str(seed_claim)]})
     body = {
         "limit": 1,
-        "filter": {
-            "must": [
-                {
-                    "key": "owner_user_id",
-                    "match": {"value": str(owner)},
-                }
-            ]
-        },
+        "filter": {"must": conditions},
         "with_payload": False,
         "with_vector": True,
     }
@@ -124,6 +138,8 @@ def owner_seed_vector(url: str, owner: uuid.UUID) -> tuple[list[float], str]:
     point = points[0]
     if not isinstance(point, dict) or "id" not in point:
         raise RuntimeError("owner seed point is invalid")
+    if seed_claim is not None and str(point["id"]) != str(seed_claim):
+        raise RuntimeError("owner seed claim identity mismatch")
     vector = point.get("vector")
     if not isinstance(vector, list) or not 1 <= len(vector) <= 16384:
         raise RuntimeError("owner seed vector is invalid")
@@ -196,8 +212,12 @@ def secure_write(path: Path, value: dict[str, Any]) -> str:
 
 def main() -> int:
     args = arguments()
-    owner = validate(args)
-    vector, point_id_sha256 = owner_seed_vector(args.qdrant_scroll_url, owner)
+    owner, seed_claim = validate(args)
+    vector, point_id_sha256 = owner_seed_vector(
+        args.qdrant_scroll_url,
+        owner,
+        seed_claim,
+    )
     with temporary_owner_allowlist(owner):
         raw_trace = run_memory_v1_v5_shadow_trace(
             str(owner),
@@ -215,6 +235,9 @@ def main() -> int:
         "mode": "read_only_zero_influence",
         "owner_user_id_sha256": sha256_text(str(owner)),
         "seed_point_id_sha256": point_id_sha256,
+        "seed_claim_id_sha256": (
+            sha256_text(str(seed_claim)) if seed_claim is not None else None
+        ),
         "seed_vector_dimension": len(vector),
         "trace": trace,
         "database_writes": 0,

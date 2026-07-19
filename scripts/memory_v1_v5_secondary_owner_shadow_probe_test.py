@@ -4,12 +4,14 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
+from argparse import Namespace
 from pathlib import Path
 
 from memory_v1_v5_secondary_owner_shadow_probe import (
     sanitized_trace,
     secure_write,
     temporary_owner_allowlist,
+    validate,
 )
 
 
@@ -33,6 +35,18 @@ def trace() -> dict:
 
 
 def main() -> None:
+    parsed_owner, parsed_seed = validate(
+        Namespace(
+            owner_user_id=str(OWNER),
+            expected_selected=1,
+            query="Tell me about my pets.",
+            request_classification="SPECIFIC_RECALL",
+            seed_claim_id="fc4b1c5b-40f6-4e8e-8c78-8b3429930506",
+        )
+    )
+    assert parsed_owner == OWNER
+    assert parsed_seed == uuid.UUID("fc4b1c5b-40f6-4e8e-8c78-8b3429930506")
+
     original = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
     os.environ["MEMORY_V1_V5_SHADOW_USER_IDS"] = original
     with temporary_owner_allowlist(OWNER):

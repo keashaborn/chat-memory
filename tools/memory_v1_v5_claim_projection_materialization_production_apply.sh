@@ -41,9 +41,16 @@ psql_row() {
 }
 
 restore_timers() {
+  local defer_projection=${1:-0}
   [[ "$units_quiesced" -eq 1 ]] || return 0
   while IFS=$'\t' read -r unit enabled active; do
     [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]]
+    if [[ "$defer_projection" -eq 1 && "$unit" == memory-v1-projection.timer ]]; then
+      sudo -n systemctl stop "$unit"
+      [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
+      [[ "$(systemctl is-active "$unit")" == inactive ]]
+      continue
+    fi
     if [[ "$active" == active ]]; then sudo -n systemctl start "$unit"; else sudo -n systemctl stop "$unit"; fi
     [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
     [[ "$(systemctl is-active "$unit")" == "$active" ]]
@@ -57,7 +64,16 @@ restore_runtime() {
     [[ "$(systemctl is-active brains.service)" == "$brains_state_before" ]]
     brains_quiesced=0
   fi
-  restore_timers
+  restore_timers 0
+}
+
+restore_runtime_deferred_projection() {
+  if [[ "$brains_quiesced" -eq 1 ]]; then
+    if [[ "$brains_state_before" == active ]]; then sudo -n systemctl start brains.service; else sudo -n systemctl stop brains.service; fi
+    [[ "$(systemctl is-active brains.service)" == "$brains_state_before" ]]
+    brains_quiesced=0
+  fi
+  restore_timers 1
 }
 
 record_exit() {
@@ -196,7 +212,8 @@ cmp -s "$target_apply" "$target_replay"; cmp -s "$non_target_apply" "$non_target
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
 phase=restore_runtime
-restore_runtime
+restore_runtime_deferred_projection
+[[ "$(qdrant_signature)" == "$qdrant_before" ]]
 phase=report
 report="$snapshot_dir/memory_v1_claim_projection_apply_batch_${run_tag}.json"
 REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" HEAD="$head" ITEM_COUNT="$item_count" EXPECTED_INSERT="$expected_insert" EXPECTED_MUTATED="$expected_mutated" QDRANT="$qdrant_before" python3 - <<'PY'
@@ -213,7 +230,8 @@ report={
    'claims_supported':int(os.environ['ITEM_COUNT']),'zero_write_replay':True,
    'embedding_requests':0,'qdrant_points_created':0,'qdrant_sha256':os.environ['QDRANT'],
    'non_target_database_unchanged':True,'qdrant_unchanged':True,'prompt_influence':False,
-   'general_account_activation':False,'timers_restored_exactly':True,'brains_service_restored_exactly':True},
+   'general_account_activation':False,'non_projection_timers_restored_exactly':True,
+   'projection_timer_intentionally_quiesced':True,'brains_service_restored_exactly':True},
  'hard_stop':'before_qdrant_projection_retrieval_prompt_influence_or_general_account_activation'}
 path=Path(os.environ['REPORT']); path.write_text(json.dumps(report,indent=2,sort_keys=True)+'\n'); path.chmod(0o600)
 PY
