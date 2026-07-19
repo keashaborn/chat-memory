@@ -102,6 +102,65 @@ class ClaimProjectionPreflightTest(unittest.TestCase):
             "The user has a pet named Koda.",
         )
 
+    def test_kinship_predicates_are_neutral_and_deterministic(self) -> None:
+        cases = {
+            "relationship.parent_of": (
+                "person",
+                "Dad",
+                "self",
+                "Self",
+                "Dad is the user's parent.",
+            ),
+            "relationship.sibling_of": (
+                "self",
+                "Self",
+                "person",
+                "Avery",
+                "The user and Avery are siblings.",
+            ),
+        }
+        for predicate, values in cases.items():
+            subject_type, subject_name, object_type, object_name, expected = values
+            with self.subTest(predicate=predicate):
+                row = source("pet.breed")
+                row.update(
+                    {
+                        "predicate": predicate,
+                        "subject_entity_type": subject_type,
+                        "subject_canonical_name": subject_name,
+                        "object_kind": "entity",
+                        "object_entity_id": "a7f071ff-d519-4345-890f-96557c52b109",
+                        "object_entity_type": object_type,
+                        "object_entity_status": "active",
+                        "object_canonical_name": object_name,
+                        "object_literal": None,
+                        "object_literal_sha256": None,
+                    }
+                )
+                row["canonical_text"] = render_canonical_text(row)
+                projection = build_projection(OWNER, row)
+                validate_packet(build_packet(projection), OWNER, self.registry)
+                self.assertEqual(projection["payload"]["canonical_text"], expected)
+
+    def test_kinship_direction_and_entity_types_fail_closed(self) -> None:
+        row = source("pet.breed")
+        row.update(
+            {
+                "predicate": "relationship.parent_of",
+                "subject_entity_type": "self",
+                "subject_canonical_name": "Self",
+                "object_kind": "entity",
+                "object_entity_id": "a7f071ff-d519-4345-890f-96557c52b109",
+                "object_entity_type": "person",
+                "object_entity_status": "active",
+                "object_canonical_name": "Dad",
+                "object_literal": None,
+                "object_literal_sha256": None,
+            }
+        )
+        with self.assertRaises(ClaimProjectionError):
+            render_canonical_text(row)
+
     def test_control_text_and_approximation_fail_closed(self) -> None:
         row = source("pet.breed")
         for value in (" bad", "bad\ntext"):

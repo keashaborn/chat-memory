@@ -31,6 +31,8 @@ SUPPORTED_PREDICATES = {
     "pet.breed",
     "pet.sex",
     "relationship.has_pet",
+    "relationship.parent_of",
+    "relationship.sibling_of",
 }
 CONTROL_CHARS = {chr(value) for value in range(32)} | {chr(127)}
 
@@ -104,6 +106,26 @@ def render_canonical_text(row: dict[str, Any]) -> str:
         if subject_type == "self":
             return f"The user has a pet named {object_name}."
         return f"{subject_name} has a pet named {object_name}."
+    if predicate in {"relationship.parent_of", "relationship.sibling_of"}:
+        object_name = safe_text(row["object_canonical_name"], "object name")
+        object_type = row["object_entity_type"]
+        if (
+            object_kind != "entity"
+            or row["object_entity_id"] is None
+            or row["object_literal"] is not None
+        ):
+            raise ClaimProjectionError("kinship relationship rendering mismatch")
+        if predicate == "relationship.parent_of":
+            if subject_type != "person" or object_type not in {"person", "self"}:
+                raise ClaimProjectionError("parent relationship type mismatch")
+            if object_type == "self":
+                return f"{subject_name} is the user's parent."
+            return f"{subject_name} is a parent of {object_name}."
+        if subject_type not in {"person", "self"} or object_type != "person":
+            raise ClaimProjectionError("sibling relationship type mismatch")
+        if subject_type == "self":
+            return f"The user and {object_name} are siblings."
+        return f"{subject_name} and {object_name} are siblings."
     if object_kind != "literal" or row["object_entity_id"] is not None:
         raise ClaimProjectionError("literal identity mismatch")
     value = literal_value(predicate, row["object_literal"])
