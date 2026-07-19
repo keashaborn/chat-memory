@@ -57,6 +57,8 @@ BEGIN
       FROM memory_v5_local_entailment_maintainer;
     REVOKE EXECUTE ON FUNCTION memory.v5_source_spans_valid(jsonb)
       FROM memory_v5_local_entailment_maintainer;
+    REVOKE EXECUTE ON FUNCTION memory.v5_sha256_valid(text)
+      FROM memory_v5_local_entailment_maintainer;
     REVOKE EXECUTE ON FUNCTION memory.preflight_observation_entailment_v5(
       uuid,memory.observation_entailment_decision_v5,text,jsonb,text,text
     ) FROM memory_v5_local_entailment_maintainer;

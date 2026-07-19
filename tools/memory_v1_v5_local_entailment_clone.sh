@@ -106,6 +106,12 @@ MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port" "${compose[@]}" exec -T postgres \
   pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
 printf '%s\n' 'GRANT USAGE ON SCHEMA memory TO brains_app;' | run_sql >/dev/null
+run_sql >/dev/null <<'SQL'
+REVOKE ALL ON FUNCTION memory.current_actor_user_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION memory.v5_digest_text(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION memory.v5_source_spans_valid(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION memory.v5_sha256_valid(text) FROM PUBLIC;
+SQL
 
 run_sql -At -c "SELECT table_schema || E'\\t' || table_name
   FROM information_schema.tables WHERE table_type='BASE TABLE'
