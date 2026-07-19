@@ -4,6 +4,10 @@ SET LOCAL statement_timeout='60s';
 SET LOCAL lock_timeout='5s';
 SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id', :'owner_user_id', true);
+SELECT set_config('app.test_packet_id', :'packet_id', true);
+SELECT set_config(
+  'app.test_packet_storage_sha256', :'packet_storage_sha256', true
+);
 
 DO $test$
 DECLARE
@@ -13,7 +17,7 @@ DECLARE
 BEGIN
   SELECT * INTO planned
   FROM memory.plan_owner_v5_local_packet_disposition_v1(20)
-  WHERE packet_id=:'packet_id'::uuid;
+  WHERE packet_id=current_setting('app.test_packet_id')::uuid;
   IF NOT FOUND
      OR planned.disposition_route<>'terminal_deferral'
      OR planned.reason_code<>'deferral_only_review_unresolved'
@@ -28,7 +32,8 @@ BEGIN
     PERFORM * FROM memory.finalize_owner_v5_local_deferral_v1(
       '9b1f68f0-a557-5d14-bdf1-a8abfb2bdd21'::uuid,
       '37658ef4-01a5-59ce-a865-196b2ecc0da7'::uuid,
-      :'packet_id'::uuid,:'packet_storage_sha256',
+      current_setting('app.test_packet_id')::uuid,
+      current_setting('app.test_packet_storage_sha256'),
       'deferral_only_no_stage'
     );
     RAISE EXCEPTION 'manual-review packet accepted the non-review reason';
@@ -39,14 +44,16 @@ BEGIN
   FROM memory.finalize_owner_v5_local_deferral_v1(
     '7f799bf4-c0be-5434-a9f7-a220e34f8f45'::uuid,
     '0f63c218-d885-5dbc-9b42-e8fb91f7bf19'::uuid,
-    :'packet_id'::uuid,:'packet_storage_sha256',
+    current_setting('app.test_packet_id')::uuid,
+    current_setting('app.test_packet_storage_sha256'),
     'deferral_only_review_unresolved'
   );
   SELECT * INTO replayed
   FROM memory.finalize_owner_v5_local_deferral_v1(
     '7f799bf4-c0be-5434-a9f7-a220e34f8f45'::uuid,
     '0f63c218-d885-5dbc-9b42-e8fb91f7bf19'::uuid,
-    :'packet_id'::uuid,:'packet_storage_sha256',
+    current_setting('app.test_packet_id')::uuid,
+    current_setting('app.test_packet_storage_sha256'),
     'deferral_only_review_unresolved'
   );
   IF applied.apply_outcome<>'applied'
@@ -65,7 +72,8 @@ BEGIN
     PERFORM * FROM memory.finalize_owner_v5_local_deferral_v1(
       '1b1b2d00-c8f8-5ce2-88db-0fbb20da61f0'::uuid,
       '69c42a47-4a62-5e21-9163-0819eb8f969d'::uuid,
-      :'packet_id'::uuid,:'packet_storage_sha256',
+      current_setting('app.test_packet_id')::uuid,
+      current_setting('app.test_packet_storage_sha256'),
       'deferral_only_review_unresolved'
     );
     RAISE EXCEPTION 'cross-owner manual deferral unexpectedly succeeded';
