@@ -51,12 +51,17 @@ def arguments() -> argparse.Namespace:
         "--model-file-sha256",
         default=MODEL_FILE_SHA256,
     )
+    parser.add_argument("--content", default=CONTENT)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     return parser.parse_args()
 
 
 def main() -> int:
     args = arguments()
+    if not isinstance(args.content, str) or not 1 <= len(args.content) <= 5000:
+        raise RuntimeError("synthetic content must contain 1 to 5000 characters")
+    if "\x00" in args.content:
+        raise RuntimeError("synthetic content contains a null byte")
     root = Path(__file__).resolve().parents[1]
     registry = load_registry(
         root / "specs" / "memory_v1_predicate_registry_v5.json",
@@ -70,9 +75,9 @@ def main() -> int:
         job_id="00000000-0000-4000-8000-000000000011",
         source_system="public.chat_log",
         source_external_id="00000000-0000-4000-8000-000000000012",
-        source_sha256=sha256_text(CONTENT),
+        source_sha256=sha256_text(args.content),
         source_recorded_at="2026-07-17T12:00:00+00:00",
-        content=CONTENT,
+        content=args.content,
     )
     transport = LlamaCppSecureTransport(
         endpoint=args.endpoint,
