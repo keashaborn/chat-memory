@@ -42,17 +42,20 @@ class FakeProvider:
     def __init__(self, output: ModelPlanReview) -> None:
         self.output = output
         self.last_editable_paths: tuple[str, ...] = ()
+        self.last_observation_context: Mapping[str, Any] = {}
 
     async def review_plan(
         self,
         *,
         document: Mapping[str, Any],
         validation: Mapping[str, Any],
+        observation_context: Mapping[str, Any],
         focus: RecommendationFocus,
         user_request: str,
         editable_paths: tuple[str, ...],
     ) -> ProviderPlanReview:
         self.last_editable_paths = editable_paths
+        self.last_observation_context = observation_context
         return ProviderPlanReview(
             output=self.output,
             provider="fake",
@@ -154,6 +157,48 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
             user_request="",
         )
         self.assertEqual(result["suggestions"], [])
+
+    async def test_canonical_context_is_valid_evidence_and_explicit_request_limits_focus(self) -> None:
+        provider = FakeProvider(
+            ModelPlanReview(
+                summary="The calorie range can be evaluated from logged intake.",
+                questions=[
+                    ModelQuestion(
+                        field_path="/training_targets",
+                        question="How many strength sessions are planned?",
+                        why_needed="This is unrelated and must be filtered.",
+                    )
+                ],
+                suggestions=[
+                    suggestion(
+                        "/nutrition_targets/calorie_target/lower",
+                        1850,
+                        evidence_path="/context/nutrition/calories/adherence/percent_of_observed_days",
+                    ),
+                    suggestion("/training_targets/strength_sessions_per_week", 4),
+                ],
+            )
+        )
+        context = {
+            "nutrition": {
+                "calories": {
+                    "adherence": {"percent_of_observed_days": 82.0},
+                }
+            },
+            "writes_performed": False,
+        }
+        result = await PlanRecommendationService(provider).review_draft(
+            document=PlanDocumentV1.from_mapping(plan_document()),
+            focus="whole_plan",
+            user_request="Are my calorie goals okay?",
+            observation_context=context,
+        )
+        self.assertEqual(result["questions"], [])
+        self.assertEqual(len(result["suggestions"]), 1)
+        self.assertEqual(result["suggestions"][0]["evidence"][0]["observed_value"], 82.0)
+        self.assertEqual(result["provenance"]["effective_focus"], "nutrition_targets")
+        self.assertTrue(all(path.startswith("/nutrition_targets/") for path in provider.last_editable_paths))
+        self.assertEqual(provider.last_observation_context, context)
 
 
 class PlanRecommendationSourceBoundaryTest(unittest.TestCase):

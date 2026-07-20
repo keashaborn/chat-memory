@@ -131,6 +131,19 @@ class LifeSwitchPlanAppAdapterIntegrationTest(unittest.IsolatedAsyncioTestCase):
               relationship_permission_id, relationship_id,
               grantor_user_id, grantee_user_id,
               permission_scope, permission_level, is_enabled
+            ) values ($1, $2, $3, $4, 'nutrition:view', 'view', true)
+            """,
+            uuid.uuid4(),
+            relationship_id,
+            owner,
+            coach,
+        )
+        await self.conn.execute(
+            """
+            insert into lifeswitch_people.relationship_permission (
+              relationship_permission_id, relationship_id,
+              grantor_user_id, grantee_user_id,
+              permission_scope, permission_level, is_enabled
             ) values ($1, $2, $3, $4, 'plan:edit', 'edit', true)
             """,
             uuid.uuid4(),
@@ -147,6 +160,8 @@ class LifeSwitchPlanAppAdapterIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(context.permits("plan:edit"))
         self.assertTrue(context.permits("plan:view"))
         self.assertTrue(context.permits("plan:comment"))
+        self.assertTrue(context.permits("nutrition:view"))
+        self.assertFalse(context.permits("training:view"))
         self.assertEqual(context.owner_timezone, "UTC")
 
     async def test_disabled_or_unaccepted_permission_grants_nothing(self) -> None:

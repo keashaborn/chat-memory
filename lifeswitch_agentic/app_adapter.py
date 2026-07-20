@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .legacy_plan_adoption import LegacyPlanAdoptionService
 from .plan_api import ActorContext, create_plan_router
+from .plan_observation_context import CanonicalPlanObservationContextRepository
 from .plan_recommendations import (
     OpenAIPlanRecommendationProvider,
     PlanRecommendationService,
@@ -18,7 +19,16 @@ from .plan_recommendations import (
 from .plan_repository import PlanRepository
 
 
-PLAN_PERMISSION_SCOPES = frozenset({"plan:view", "plan:comment", "plan:edit"})
+PLAN_PERMISSION_SCOPES = frozenset(
+    {
+        "plan:view",
+        "plan:comment",
+        "plan:edit",
+        "nutrition:view",
+        "training:view",
+        "measurements:view",
+    }
+)
 _SQL_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -171,6 +181,7 @@ def create_lifeswitch_plan_app_router(
         actor_dependency=adapter.actor_context,
         plan_repository=plan_repository,
         recommendation_service=recommendation_service,
+        observation_context_repository=CanonicalPlanObservationContextRepository(),
         legacy_adoption_service=LegacyPlanAdoptionService(
             plan_repository=plan_repository,
             legacy_schema=legacy_plan_schema,

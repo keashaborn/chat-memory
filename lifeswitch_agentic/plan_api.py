@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 
 from .legacy_plan_adoption import LegacyPlanAdoptionResult, LegacyPlanAdoptionService
 from .plan_domain import PlanDocumentV1, PlanDomainError, RevisionState, RevisionTrigger
+from .plan_observation_context import (
+    ObservationPermissions,
+    PlanObservationContextRepository,
+)
 from .plan_recommendations import (
     PlanRecommendationError,
     PlanRecommendationService,
@@ -298,6 +302,7 @@ def create_plan_router(
     read_repository: PlanReadRepository | None = None,
     legacy_adoption_service: LegacyPlanAdoptionService | None = None,
     recommendation_service: PlanRecommendationService | None = None,
+    observation_context_repository: PlanObservationContextRepository | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
@@ -440,18 +445,34 @@ def create_plan_router(
                     owner_user_id=context.owner_user_id,
                     revision_id=revision_id,
                 )
-            if view is None:
-                raise PlanDomainError("entity_out_of_scope", "revision is unavailable")
-            if view.state != RevisionState.DRAFT.value:
-                raise PlanDomainError(
-                    "revision_not_draft",
-                    "Sage can review only an inactive draft revision",
+                if view is None:
+                    raise PlanDomainError("entity_out_of_scope", "revision is unavailable")
+                if view.state != RevisionState.DRAFT.value:
+                    raise PlanDomainError(
+                        "revision_not_draft",
+                        "Sage can review only an inactive draft revision",
+                    )
+                document = PlanDocumentV1.from_mapping(view.proposed_document)
+                observation_context = (
+                    await observation_context_repository.summarize(
+                        conn,
+                        owner_user_id=context.owner_user_id,
+                        owner_timezone=context.owner_timezone,
+                        document=document.to_dict(),
+                        permissions=ObservationPermissions(
+                            nutrition=context.permits("nutrition:view"),
+                            training=context.permits("training:view"),
+                            measurements=context.permits("measurements:view"),
+                        ),
+                    )
+                    if observation_context_repository is not None
+                    else {"status": "not_configured", "writes_performed": False}
                 )
-            document = PlanDocumentV1.from_mapping(view.proposed_document)
             recommendation = await recommendation_service.review_draft(
                 document=document,
                 focus=body.focus,
                 user_request=body.user_request.strip(),
+                observation_context=observation_context,
             )
             return {
                 "revision_id": str(view.revision_id),
