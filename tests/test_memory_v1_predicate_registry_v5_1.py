@@ -8,6 +8,8 @@ from pathlib import Path
 from scripts.memory_v1_predicate_registry_v5_1 import (
     DEFAULT_INTEGRATION,
     build_composite,
+    emit_install_sql,
+    install_rows,
 )
 
 
@@ -96,6 +98,30 @@ class PredicateRegistryV51IntegrationTest(unittest.TestCase):
         result = build_composite()
         self.assertTrue(result["hash_bound"])
         self.assertEqual(len(result["registry_sha256"]), 64)
+
+    def test_install_rows_normalize_storage_contract(self) -> None:
+        rows = install_rows()
+        contracts = {row["predicate"]: row for row in rows["contracts"]}
+        self.assertEqual(len(contracts), 82)
+        self.assertEqual(len(rows["relationships"]), 41)
+        self.assertEqual(contracts["identity.name_canonical"]["cardinality"], "one")
+        self.assertEqual(contracts["relationship.friend_of"]["object_kind"], "entity")
+        self.assertEqual(contracts["relationship.friend_of"]["cardinality"], "many")
+        self.assertEqual(len(contracts["relationship.friend_of"]["contract_sha256"]), 64)
+
+    def test_generated_migration_is_additive_and_runtime_disabled(self) -> None:
+        sql = emit_install_sql()
+        self.assertIn("'memory_predicate_registry_v5_1'", sql)
+        self.assertIn("'memory_v1_relational_extraction_v5_1'", sql)
+        self.assertIn("'proposed', false", sql)
+        self.assertIn("relationship_predicate_contract_v5_1", sql)
+        self.assertIn("reject_predicate_registry_v5_1_mutation", sql)
+        for forbidden in (
+            "INSERT INTO memory.observation",
+            "INSERT INTO memory.claim",
+            "INSERT INTO memory.projection",
+        ):
+            self.assertNotIn(forbidden, sql.lower())
 
 
 if __name__ == "__main__":
