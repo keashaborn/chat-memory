@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from .plan_domain import PlanDocumentV1, PlanDomainError, plan_validation_result
+from .recommendation_policy import build_ambiguity_routes, evaluate_suggestion
 
 
 RecommendationFocus = Literal[
@@ -86,6 +87,7 @@ class PlanRecommendationProvider(Protocol):
         document: Mapping[str, Any],
         validation: Mapping[str, Any],
         observation_context: Mapping[str, Any],
+        ambiguity_routes: tuple[Mapping[str, str], ...],
         focus: RecommendationFocus,
         user_request: str,
         editable_paths: tuple[str, ...],
@@ -114,9 +116,14 @@ zero. Do not call resistance-session counts strength adherence because rehab is
 not yet classified. A single calorie point target has no deterministic adherence
 range. Prefer recent logged response/adherence evidence over estimating energy
 needs from demographics when evaluating an intervention already in progress.
-Use confidence and data_sufficiency conservatively. Return no suggestion when the
-existing value is already suitable. The application independently validates all
-paths, types, values, evidence, and the resulting Plan before display.
+Use the deterministic ambiguity_routes to ask for information, defer, or identify
+research need. They are routing constraints, not evidence. Never change a numeric
+nutrition target merely because observed intake differs from it. A numeric target
+change requires a triggered deterministic decision rule or cited research supplied
+in the context. Use confidence and data_sufficiency conservatively. Return no
+suggestion when the existing value is already suitable; zero suggestions is valid.
+The application independently validates all paths, types, values, evidence, policy
+contradictions, and the resulting Plan before display.
 """.strip()
 
 
@@ -146,6 +153,7 @@ class OpenAIPlanRecommendationProvider:
         document: Mapping[str, Any],
         validation: Mapping[str, Any],
         observation_context: Mapping[str, Any],
+        ambiguity_routes: tuple[Mapping[str, str], ...],
         focus: RecommendationFocus,
         user_request: str,
         editable_paths: tuple[str, ...],
@@ -158,6 +166,7 @@ class OpenAIPlanRecommendationProvider:
             "draft": document,
             "deterministic_validation": validation,
             "observation_context": observation_context,
+            "ambiguity_routes": list(ambiguity_routes),
         }
         try:
             response = await self._client.responses.parse(
@@ -322,6 +331,7 @@ class PlanRecommendationService:
         evidence_document = {**source, "context": context}
         evidence_node_paths, _ = _document_paths(evidence_document)
         selected_focus = _effective_focus(focus, user_request)
+        ambiguity_routes = tuple(build_ambiguity_routes(source, context, user_request))
         editable_paths = tuple(
             sorted(
                 path
@@ -333,6 +343,7 @@ class PlanRecommendationService:
             document=source,
             validation=validation,
             observation_context=context,
+            ambiguity_routes=ambiguity_routes,
             focus=selected_focus,
             user_request=user_request,
             editable_paths=editable_paths,
@@ -359,6 +370,7 @@ class PlanRecommendationService:
 
         working = copy.deepcopy(source)
         suggestions: list[dict[str, Any]] = []
+        rejected_reason_codes: list[str] = []
         seen_suggestions: set[str] = set()
         for suggestion in provider_review.output.suggestions:
             path = suggestion.field_path
@@ -391,6 +403,18 @@ class PlanRecommendationService:
             if not evidence:
                 continue
 
+            policy_decision = evaluate_suggestion(
+                field_path=path,
+                current_value=current_value,
+                proposed_value=suggestion.proposed_value,
+                evidence_paths=tuple(item["field_path"] for item in evidence),
+                observation_context=context,
+            )
+            if not policy_decision.allowed:
+                if policy_decision.reason_code:
+                    rejected_reason_codes.append(policy_decision.reason_code)
+                continue
+
             candidate = copy.deepcopy(working)
             try:
                 _set_pointer(candidate, path, suggestion.proposed_value)
@@ -417,6 +441,12 @@ class PlanRecommendationService:
             "questions": questions,
             "suggestions": suggestions,
             "observation_context": context,
+            "policy": {
+                "ambiguity_routes": list(ambiguity_routes),
+                "rejected_suggestion_count": len(rejected_reason_codes),
+                "rejected_reason_codes": sorted(set(rejected_reason_codes)),
+                "research_gateway_status": "not_connected",
+            },
             "provenance": {
                 "provider": provider_review.provider,
                 "model": provider_review.model,

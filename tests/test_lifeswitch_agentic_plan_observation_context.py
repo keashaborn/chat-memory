@@ -126,6 +126,69 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
         self.assertEqual(adherence["status"], "not_evaluable")
         self.assertEqual(adherence["reason"], "point_target_has_no_acceptable_range")
 
+    async def test_structured_daily_and_weekly_rules_are_scored_separately(self) -> None:
+        today = dt.datetime.now(ZoneInfo("UTC")).date()
+        nutrition = [
+            {
+                "day": today - dt.timedelta(days=offset),
+                "entry_count": 2,
+                "kcal": 1800 if offset < 3 else 2000,
+                "protein_g": 190 if offset != 5 else 170,
+            }
+            for offset in range(7)
+        ]
+        conn = FakeConnection(
+            {
+                "lifeswitch_plan_context:nutrition_daily_totals": nutrition,
+                "lifeswitch_plan_context:measurements": [],
+                "lifeswitch_plan_context:resistance_sessions": [],
+                "lifeswitch_plan_context:conditioning_sessions": [],
+            }
+        )
+        structured = document()
+        structured["nutrition_targets"] = {
+            "calories": "2000",
+            "protein_g": "180",
+            "calorie_target": {
+                "nominal_kcal": 2000,
+                "daily_range_kcal": {"lower": 1800, "upper": 2100},
+                "rolling_average_kcal": {
+                    "window_days": 7,
+                    "lower": 1800,
+                    "upper": 2000,
+                },
+            },
+            "protein_target": {
+                "minimum_g": 180,
+                "weekly_adherence": {
+                    "mode": "days_hit",
+                    "window_days": 7,
+                    "required_hit_days": 6,
+                },
+            },
+            "adherence_rule": {
+                "daily_requires_both_calorie_and_protein": True,
+                "weekly_requires_both_calorie_and_protein": True,
+            },
+        }
+        result = await CanonicalPlanObservationContextRepository().summarize(
+            conn,  # type: ignore[arg-type]
+            owner_user_id=uuid.uuid4(),
+            owner_timezone="UTC",
+            document=structured,
+            permissions=ObservationPermissions(True, True, True),
+        )
+        nutrition_result = result["nutrition"]
+        self.assertEqual(
+            nutrition_result["combined_daily_adherence"]["days_meeting_both"], 6
+        )
+        weekly = nutrition_result["weekly_evaluation"]
+        self.assertEqual(weekly["status"], "evaluable")
+        self.assertTrue(weekly["calorie_average_within_range"])
+        self.assertEqual(weekly["protein_days_meeting_minimum"], 6)
+        self.assertTrue(weekly["protein_days_hit_rule_met"])
+        self.assertTrue(weekly["combined_rule_met"])
+
     async def test_delegated_context_respects_each_view_permission(self) -> None:
         conn = FakeConnection({})
         result = await CanonicalPlanObservationContextRepository().summarize(

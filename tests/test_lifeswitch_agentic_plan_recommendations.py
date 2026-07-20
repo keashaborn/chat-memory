@@ -43,6 +43,7 @@ class FakeProvider:
         self.output = output
         self.last_editable_paths: tuple[str, ...] = ()
         self.last_observation_context: Mapping[str, Any] = {}
+        self.last_ambiguity_routes: tuple[Mapping[str, str], ...] = ()
 
     async def review_plan(
         self,
@@ -50,12 +51,14 @@ class FakeProvider:
         document: Mapping[str, Any],
         validation: Mapping[str, Any],
         observation_context: Mapping[str, Any],
+        ambiguity_routes: tuple[Mapping[str, str], ...],
         focus: RecommendationFocus,
         user_request: str,
         editable_paths: tuple[str, ...],
     ) -> ProviderPlanReview:
         self.last_editable_paths = editable_paths
         self.last_observation_context = observation_context
+        self.last_ambiguity_routes = ambiguity_routes
         return ProviderPlanReview(
             output=self.output,
             provider="fake",
@@ -106,6 +109,7 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
                     suggestion(
                         "/nutrition_targets/calorie_target/lower",
                         1900,
+                        evidence_path="/context/nutrition/decision_rule/triggered",
                     ),
                     suggestion("/primary_goal", 123),
                     suggestion("/unknown/path", "not allowed"),
@@ -119,11 +123,16 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         service = PlanRecommendationService(provider)
         document = PlanDocumentV1.from_mapping(plan_document())
+        context = {
+            "nutrition": {"decision_rule": {"triggered": True}},
+            "writes_performed": False,
+        }
 
         result = await service.review_draft(
             document=document,
             focus="whole_plan",
             user_request="Review the target boundaries.",
+            observation_context=context,
         )
 
         self.assertEqual(len(result["questions"]), 1)
@@ -135,7 +144,7 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(accepted["current_value"], 1800)
         self.assertEqual(accepted["proposed_value"], 1900)
-        self.assertEqual(accepted["evidence"][0]["observed_value"], document.primary_goal)
+        self.assertTrue(accepted["evidence"][0]["observed_value"])
         self.assertFalse(result["provenance"]["writes_performed"])
         self.assertEqual(result["provenance"]["draft_sha256"], document.sha256())
         self.assertNotIn("/schema_version", provider.last_editable_paths)
@@ -173,7 +182,7 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
                     suggestion(
                         "/nutrition_targets/calorie_target/lower",
                         1850,
-                        evidence_path="/context/nutrition/calories/adherence/percent_of_observed_days",
+                        evidence_path="/context/nutrition/decision_rule/triggered",
                     ),
                     suggestion("/training_targets/strength_sessions_per_week", 4),
                 ],
@@ -183,7 +192,8 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
             "nutrition": {
                 "calories": {
                     "adherence": {"percent_of_observed_days": 82.0},
-                }
+                },
+                "decision_rule": {"triggered": True},
             },
             "writes_performed": False,
         }
@@ -195,10 +205,54 @@ class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["questions"], [])
         self.assertEqual(len(result["suggestions"]), 1)
-        self.assertEqual(result["suggestions"][0]["evidence"][0]["observed_value"], 82.0)
+        self.assertTrue(result["suggestions"][0]["evidence"][0]["observed_value"])
         self.assertEqual(result["provenance"]["effective_focus"], "nutrition_targets")
         self.assertTrue(all(path.startswith("/nutrition_targets/") for path in provider.last_editable_paths))
         self.assertEqual(provider.last_observation_context, context)
+
+    async def test_rejects_random_protein_reduction_when_current_target_is_reliably_exceeded(self) -> None:
+        raw_document = plan_document()
+        raw_document["nutrition_targets"] = {"protein_g": 180}
+        provider = FakeProvider(
+            ModelPlanReview(
+                summary="The current protein target is being met reliably.",
+                questions=[],
+                suggestions=[
+                    suggestion(
+                        "/nutrition_targets/protein_g",
+                        170,
+                        evidence_path="/context/nutrition/protein/adherence/percent_of_observed_days",
+                    )
+                ],
+            )
+        )
+        context = {
+            "nutrition": {
+                "data_sufficiency": "sufficient",
+                "protein": {
+                    "average_on_logged_days": 213.6,
+                    "adherence": {
+                        "status": "evaluable",
+                        "percent_of_observed_days": 90.5,
+                    },
+                },
+            },
+            "writes_performed": False,
+        }
+        result = await PlanRecommendationService(provider).review_draft(
+            document=PlanDocumentV1.from_mapping(raw_document),
+            focus="nutrition_targets",
+            user_request="Are my protein goals okay?",
+            observation_context=context,
+        )
+        self.assertEqual(result["suggestions"], [])
+        self.assertEqual(result["policy"]["rejected_suggestion_count"], 1)
+        self.assertIn(
+            "protein_reduction_contradicts_successful_adherence",
+            result["policy"]["rejected_reason_codes"],
+        )
+        route_codes = {item["code"] for item in provider.last_ambiguity_routes}
+        self.assertIn("external_knowledge_may_be_needed", route_codes)
 
 
 class PlanRecommendationSourceBoundaryTest(unittest.TestCase):

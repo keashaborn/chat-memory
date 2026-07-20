@@ -145,6 +145,147 @@ def _section_target(
     return {"status": "unavailable", "reason": "target_missing"}
 
 
+def _calorie_target_config(document: Mapping[str, Any]) -> dict[str, Any]:
+    section = document.get("nutrition_targets")
+    if not isinstance(section, Mapping):
+        section = {}
+    raw = section.get("calorie_target")
+    if isinstance(raw, Mapping) and any(
+        key in raw for key in ("nominal_kcal", "daily_range_kcal", "rolling_average_kcal")
+    ):
+        nominal = _parse_numeric_target(
+            raw.get("nominal_kcal"),
+            source_path="/nutrition_targets/calorie_target/nominal_kcal",
+            minimum=500,
+            maximum=10000,
+        )
+        daily_range = _parse_numeric_target(
+            raw.get("daily_range_kcal"),
+            source_path="/nutrition_targets/calorie_target/daily_range_kcal",
+            minimum=500,
+            maximum=10000,
+        )
+        rolling_raw = raw.get("rolling_average_kcal")
+        rolling_average = _parse_numeric_target(
+            rolling_raw,
+            source_path="/nutrition_targets/calorie_target/rolling_average_kcal",
+            minimum=500,
+            maximum=10000,
+        )
+        window_days = 0
+        if isinstance(rolling_raw, Mapping):
+            parsed_window = _float(rolling_raw.get("window_days"))
+            if parsed_window is not None and 2 <= parsed_window <= 28:
+                window_days = int(parsed_window)
+        rolling_average["window_days"] = window_days or None
+        return {
+            "status": (
+                "available"
+                if any(item.get("status") == "available" for item in (nominal, daily_range, rolling_average))
+                else "unavailable"
+            ),
+            "format": "structured",
+            "nominal": nominal,
+            "daily_range": daily_range,
+            "rolling_average": rolling_average,
+        }
+
+    legacy = _section_target(
+        document,
+        section_name="nutrition_targets",
+        candidate_keys=("calorie_target", "calorie_range", "calories", "target_kcal"),
+        minimum=500,
+        maximum=10000,
+    )
+    if legacy.get("kind") == "range":
+        nominal = {"status": "unavailable", "reason": "target_missing"}
+        daily_range = legacy
+    else:
+        nominal = legacy
+        daily_range = {"status": "unavailable", "reason": "range_missing"}
+    return {
+        "status": legacy.get("status", "unavailable"),
+        "format": "legacy",
+        "nominal": nominal,
+        "daily_range": daily_range,
+        "rolling_average": {
+            "status": "unavailable",
+            "reason": "rolling_average_rule_missing",
+            "window_days": None,
+        },
+    }
+
+
+def _protein_target_config(document: Mapping[str, Any]) -> dict[str, Any]:
+    section = document.get("nutrition_targets")
+    if not isinstance(section, Mapping):
+        section = {}
+    raw = section.get("protein_target")
+    if isinstance(raw, Mapping) and "minimum_g" in raw:
+        minimum = _parse_numeric_target(
+            raw.get("minimum_g"),
+            source_path="/nutrition_targets/protein_target/minimum_g",
+            minimum=10,
+            maximum=1000,
+        )
+        weekly_raw = raw.get("weekly_adherence")
+        weekly: dict[str, Any] = {
+            "status": "unavailable",
+            "reason": "weekly_protein_rule_missing",
+        }
+        if isinstance(weekly_raw, Mapping):
+            mode = str(weekly_raw.get("mode") or "").strip()
+            window = _float(weekly_raw.get("window_days"))
+            required = _float(weekly_raw.get("required_hit_days"))
+            if (
+                mode == "days_hit"
+                and window is not None
+                and required is not None
+                and 2 <= window <= 28
+                and 1 <= required <= window
+            ):
+                weekly = {
+                    "status": "available",
+                    "mode": mode,
+                    "window_days": int(window),
+                    "required_hit_days": int(required),
+                    "source_path": "/nutrition_targets/protein_target/weekly_adherence",
+                }
+        return {
+            "status": minimum.get("status", "unavailable"),
+            "format": "structured",
+            "minimum": minimum,
+            "weekly_adherence": weekly,
+        }
+
+    minimum = _section_target(
+        document,
+        section_name="nutrition_targets",
+        candidate_keys=("protein_grams_minimum", "protein_minimum_g", "protein_g", "protein"),
+        minimum=10,
+        maximum=1000,
+    )
+    return {
+        "status": minimum.get("status", "unavailable"),
+        "format": "legacy",
+        "minimum": minimum,
+        "weekly_adherence": {
+            "status": "unavailable",
+            "reason": "weekly_protein_rule_missing",
+        },
+    }
+
+
+def _boolean_rule(document: Mapping[str, Any], key: str) -> bool | None:
+    section = document.get("nutrition_targets")
+    if not isinstance(section, Mapping):
+        return None
+    raw = section.get("adherence_rule")
+    if not isinstance(raw, Mapping) or not isinstance(raw.get(key), bool):
+        return None
+    return bool(raw[key])
+
+
 def _data_sufficiency(observations: int, *, limited: int, sufficient: int) -> str:
     if observations >= sufficient:
         return "sufficient"
@@ -358,25 +499,15 @@ class CanonicalPlanObservationContextRepository:
         observed = [row for row in rows if int(row["entry_count"] or 0) > 0]
         calories = {row["day"]: float(row["kcal"] or 0) for row in observed}
         protein = {row["day"]: float(row["protein_g"] or 0) for row in observed}
-        calorie_target = _section_target(
-            document,
-            section_name="nutrition_targets",
-            candidate_keys=("calorie_target", "calorie_range", "calories", "target_kcal"),
-            minimum=500,
-            maximum=10000,
-        )
-        protein_target = _section_target(
-            document,
-            section_name="nutrition_targets",
-            candidate_keys=("protein_grams_minimum", "protein_minimum_g", "protein_g", "protein"),
-            minimum=10,
-            maximum=1000,
-        )
+        calorie_target = _calorie_target_config(document)
+        protein_target = _protein_target_config(document)
+        daily_calorie_target = calorie_target["daily_range"]
+        protein_minimum = protein_target["minimum"]
 
         calorie_adherence: dict[str, Any]
-        if calorie_target.get("kind") == "range":
-            lower = float(calorie_target["lower"])
-            upper = float(calorie_target["upper"])
+        if daily_calorie_target.get("kind") == "range":
+            lower = float(daily_calorie_target["lower"])
+            upper = float(daily_calorie_target["upper"])
             hits = sum(lower <= value <= upper for value in calories.values())
             calorie_adherence = {
                 "status": "evaluable",
@@ -384,7 +515,7 @@ class CanonicalPlanObservationContextRepository:
                 "observed_days": len(calories),
                 "percent_of_observed_days": _round(100 * hits / len(calories), 1) if calories else None,
             }
-        elif calorie_target.get("kind") == "point":
+        elif calorie_target["nominal"].get("kind") == "point":
             calorie_adherence = {
                 "status": "not_evaluable",
                 "reason": "point_target_has_no_acceptable_range",
@@ -396,13 +527,13 @@ class CanonicalPlanObservationContextRepository:
             }
 
         protein_adherence: dict[str, Any]
-        if protein_target.get("kind") == "range":
-            lower = float(protein_target["lower"])
-            upper = float(protein_target["upper"])
+        if protein_minimum.get("kind") == "range":
+            lower = float(protein_minimum["lower"])
+            upper = float(protein_minimum["upper"])
             hits = sum(lower <= value <= upper for value in protein.values())
             rule = "within_range"
-        elif protein_target.get("kind") == "point":
-            lower = float(protein_target["value"])
+        elif protein_minimum.get("kind") == "point":
+            lower = float(protein_minimum["value"])
             hits = sum(value >= lower for value in protein.values())
             rule = "at_or_above_single_protein_target"
         else:
@@ -416,9 +547,108 @@ class CanonicalPlanObservationContextRepository:
                 "observed_days": len(protein),
                 "percent_of_observed_days": _round(100 * hits / len(protein), 1) if protein else None,
             }
-            if protein_target.get("status") == "available"
+            if protein_minimum.get("status") == "available"
             else {"status": "not_evaluable", "reason": "protein_target_unavailable"}
         )
+
+        daily_combined_required = _boolean_rule(
+            document, "daily_requires_both_calorie_and_protein"
+        )
+        if (
+            daily_combined_required is True
+            and calorie_adherence.get("status") == "evaluable"
+            and protein_adherence.get("status") == "evaluable"
+        ):
+            calorie_lower = float(daily_calorie_target["lower"])
+            calorie_upper = float(daily_calorie_target["upper"])
+            protein_lower = float(
+                protein_minimum.get("lower", protein_minimum.get("value"))
+            )
+            common_days = set(calories) & set(protein)
+            combined_hits = sum(
+                calorie_lower <= calories[day] <= calorie_upper
+                and protein[day] >= protein_lower
+                for day in common_days
+            )
+            daily_combined = {
+                "status": "evaluable",
+                "rule": "calorie_range_and_protein_minimum",
+                "days_meeting_both": combined_hits,
+                "observed_days": len(common_days),
+                "percent_of_observed_days": (
+                    _round(100 * combined_hits / len(common_days), 1) if common_days else None
+                ),
+            }
+        elif daily_combined_required is True:
+            daily_combined = {
+                "status": "not_evaluable",
+                "reason": "daily_component_rule_unavailable",
+            }
+        else:
+            daily_combined = {
+                "status": "not_configured",
+                "reason": "combined_daily_rule_not_required",
+            }
+
+        rolling_rule = calorie_target["rolling_average"]
+        protein_weekly_rule = protein_target["weekly_adherence"]
+        weekly_combined_required = _boolean_rule(
+            document, "weekly_requires_both_calorie_and_protein"
+        )
+        weekly_window = rolling_rule.get("window_days")
+        same_window = (
+            rolling_rule.get("status") == "available"
+            and protein_weekly_rule.get("status") == "available"
+            and weekly_window == protein_weekly_rule.get("window_days")
+        )
+        if same_window and weekly_window:
+            period_start = as_of - dt.timedelta(days=int(weekly_window) - 1)
+            period_days = [
+                period_start + dt.timedelta(days=offset)
+                for offset in range(int(weekly_window))
+            ]
+            logged_period_days = [day for day in period_days if day in calories and day in protein]
+            full_window = len(logged_period_days) == int(weekly_window)
+            calorie_average = _mean([calories[day] for day in logged_period_days])
+            calorie_week_hit = (
+                full_window
+                and calorie_average is not None
+                and float(rolling_rule["lower"]) <= calorie_average <= float(rolling_rule["upper"])
+            )
+            protein_hit_days = sum(
+                protein[day] >= float(protein_minimum.get("lower", protein_minimum.get("value")))
+                for day in logged_period_days
+            )
+            protein_week_hit = (
+                full_window
+                and protein_hit_days >= int(protein_weekly_rule["required_hit_days"])
+            )
+            weekly_evaluation = {
+                "status": "evaluable" if full_window else "insufficient_data",
+                "window_days": int(weekly_window),
+                "logged_days": len(logged_period_days),
+                "calorie_average": _round(calorie_average, 1),
+                "calorie_average_within_range": calorie_week_hit if full_window else None,
+                "protein_days_meeting_minimum": protein_hit_days,
+                "protein_required_hit_days": int(protein_weekly_rule["required_hit_days"]),
+                "protein_days_hit_rule_met": protein_week_hit if full_window else None,
+                "combined_rule_required": weekly_combined_required,
+                "combined_rule_met": (
+                    calorie_week_hit and protein_week_hit
+                    if full_window and weekly_combined_required is True
+                    else None
+                ),
+            }
+        else:
+            weekly_evaluation = {
+                "status": "not_evaluable",
+                "reason": (
+                    "weekly_rule_windows_do_not_match"
+                    if rolling_rule.get("status") == "available"
+                    and protein_weekly_rule.get("status") == "available"
+                    else "weekly_rules_not_fully_configured"
+                ),
+            }
 
         return {
             "status": "available",
@@ -438,6 +668,8 @@ class CanonicalPlanObservationContextRepository:
                 "recent_week_comparison": _weekly_values(protein, as_of=as_of),
                 "adherence": protein_adherence,
             },
+            "combined_daily_adherence": daily_combined,
+            "weekly_evaluation": weekly_evaluation,
         }
 
     async def _measurements(
