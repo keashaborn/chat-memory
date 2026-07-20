@@ -62,19 +62,19 @@ BEGIN;
 SET LOCAL statement_timeout='30s';
 
 INSERT INTO memory.predicate(predicate,object_kind,cardinality,description)
-VALUES ('preference.life','literal','many','Rollback-only pattern fixture');
+VALUES ('test.pattern_preference_v5_1','literal','many','Rollback-only pattern fixture');
 INSERT INTO memory.predicate_registry_version(
   registry_version,contract_version,status,runtime_active,
   unknown_predicate_action,registry_sha256
 ) VALUES (
   'memory_predicate_registry_v5','memory_v1_relational_extraction_v5',
   'proposed',false,'defer_unregistered_predicate',repeat('9',64)
-);
+) ON CONFLICT (registry_version) DO NOTHING;
 INSERT INTO memory.predicate_contract(
   predicate,registry_version,lifecycle,extraction_allowed,object_kind,
   cardinality,successor_predicates,contract,contract_sha256
 ) VALUES (
-  'preference.life','memory_predicate_registry_v5','active',true,'literal',
+  'test.pattern_preference_v5_1','memory_predicate_registry_v5','active',true,'literal',
   'many','{}','{}',repeat('8',64)
 );
 
@@ -204,9 +204,9 @@ INSERT INTO memory.observation(
   extraction_confidence,source_spans,extractor,extractor_version,
   packet_sha256,observation_sha256
 ) VALUES
-  ('d6100000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000001','o01','b6100000-0000-4000-8000-000000000001','preference.life','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"1111111111111111111111111111111111111111111111111111111111111111"}]','pattern_test','v5.1',repeat('a',64),repeat('1',64)),
-  ('d6100000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000002','o01','b6100000-0000-4000-8000-000000000002','preference.life','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"2222222222222222222222222222222222222222222222222222222222222222"}]','pattern_test','v5.1',repeat('b',64),repeat('2',64)),
-  ('d6100000-0000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000003','o01','b6100000-0000-4000-8000-000000000003','preference.life','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"3333333333333333333333333333333333333333333333333333333333333333"}]','pattern_test','v5.1',repeat('c',64),repeat('3',64));
+  ('d6100000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000001','o01','b6100000-0000-4000-8000-000000000001','test.pattern_preference_v5_1','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"1111111111111111111111111111111111111111111111111111111111111111"}]','pattern_test','v5.1',repeat('a',64),repeat('1',64)),
+  ('d6100000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000002','o01','b6100000-0000-4000-8000-000000000002','test.pattern_preference_v5_1','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"2222222222222222222222222222222222222222222222222222222222222222"}]','pattern_test','v5.1',repeat('b',64),repeat('2',64)),
+  ('d6100000-0000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','a6100000-0000-4000-8000-000000000003','o01','b6100000-0000-4000-8000-000000000003','test.pattern_preference_v5_1','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"classical music","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"3333333333333333333333333333333333333333333333333333333333333333"}]','pattern_test','v5.1',repeat('c',64),repeat('3',64));
 
 SELECT set_config('app.user_id','22222222-2222-4222-8222-222222222222',true);
 INSERT INTO memory.observation(
@@ -216,7 +216,7 @@ INSERT INTO memory.observation(
   extraction_confidence,source_spans,extractor,extractor_version,
   packet_sha256,observation_sha256
 ) VALUES
-  ('d6200000-0000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','a6200000-0000-4000-8000-000000000001','o01','b6200000-0000-4000-8000-000000000001','preference.life','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"jazz","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"4444444444444444444444444444444444444444444444444444444444444444"}]','pattern_test','v5.1',repeat('d',64),repeat('4',64));
+  ('d6200000-0000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','a6200000-0000-4000-8000-000000000001','o01','b6200000-0000-4000-8000-000000000001','test.pattern_preference_v5_1','memory_predicate_registry_v5','{"kind":"literal","datatype":"text","value":"jazz","unit":null,"approximate":false}','affirmed','asserted','direct_claim','direct_or_relevant','{"state":"not_applicable","project_key":null,"binding_source":"not_applicable"}','medium',1,'[{"start":0,"end":10,"span_sha256":"4444444444444444444444444444444444444444444444444444444444444444"}]','pattern_test','v5.1',repeat('d',64),repeat('4',64));
 
 SELECT set_config('app.user_id','11111111-1111-4111-8111-111111111111',true);
 INSERT INTO memory.observation_entity_binding(
@@ -267,10 +267,10 @@ BEGIN
     'source_registry_version','memory_predicate_registry_v5_1',
     'pattern_key_sha256',memory.v5_digest_text(concat_ws('|',
       'memory_v1_pattern_key_v5_1','recurrence',
-      'e6100000-0000-4000-8000-000000000001','','preference.life')),
+      'e6100000-0000-4000-8000-000000000001','','test.pattern_preference_v5_1')),
     'pattern_kind','recurrence',
     'subject_entity_id','e6100000-0000-4000-8000-000000000001',
-    'secondary_entity_id',NULL,'predicate_family','preference.life',
+    'secondary_entity_id',NULL,'predicate_family','test.pattern_preference_v5_1',
     'sensitivity','medium','pattern_state','emerging',
     'occurrence_count',3,'counterexample_count',0,
     'independent_episode_count',3,'distinct_temporal_bucket_count',3,
@@ -304,7 +304,7 @@ BEGIN
   association:=jsonb_set(association,'{pattern_key_sha256}',to_jsonb(
     memory.v5_digest_text(concat_ws('|','memory_v1_pattern_key_v5_1',
       'co_occurrence','e6100000-0000-4000-8000-000000000001','',
-      'preference.life'))));
+      'test.pattern_preference_v5_1'))));
   association:=pg_temp.finalize_pattern_proposal(association);
   PERFORM set_config('test.pattern_proposal',proposal::text,true);
   PERFORM set_config('test.pattern_inflated',inflated::text,true);
