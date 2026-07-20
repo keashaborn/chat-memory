@@ -285,6 +285,7 @@ _FOCUS_PREFIXES: dict[RecommendationFocus, tuple[str, ...]] = {
 
 _NON_AGENT_EDITABLE_PREFIXES = (
     "/training_targets/linked_workouts",
+    "/conditioning_targets/linked_conditioning",
 )
 
 

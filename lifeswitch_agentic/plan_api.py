@@ -29,6 +29,7 @@ from .plan_read_repository import (
     RevisionReviewView,
 )
 from .plan_repository import ActivationResult, PlanRepository, ProposalResult, RevisionRecord
+from .plan_conditioning_prescriptions import PlanConditioningPrescriptionService
 from .plan_workout_templates import PlanWorkoutTemplateService
 
 
@@ -305,6 +306,7 @@ def create_plan_router(
     recommendation_service: PlanRecommendationService | None = None,
     observation_context_repository: PlanObservationContextRepository | None = None,
     workout_template_service: PlanWorkoutTemplateService | None = None,
+    conditioning_prescription_service: PlanConditioningPrescriptionService | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
@@ -312,6 +314,9 @@ def create_plan_router(
         plan_repository=write_repo
     )
     workout_service = workout_template_service or PlanWorkoutTemplateService()
+    conditioning_service = (
+        conditioning_prescription_service or PlanConditioningPrescriptionService()
+    )
     router = APIRouter(tags=["LifeSwitch Plan Agentic"])
 
     @router.get("/workout-templates")
@@ -327,6 +332,24 @@ def create_plan_router(
                     owner_user_id=context.owner_user_id,
                 )
             return {"workout_templates": options}
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.get("/conditioning-prescriptions")
+    async def list_plan_conditioning_prescriptions(
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:edit")
+            _require(context, "training:view")
+            async with connection_provider() as conn:
+                options = await conditioning_service.list_options(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                )
+            return {"conditioning_prescriptions": options}
         except PlanDomainError as error:
             raise _domain_http_error(error) from error
         except asyncpg.PostgresError as error:
@@ -533,6 +556,11 @@ def create_plan_router(
                     owner_user_id=context.owner_user_id,
                     document=submitted_document,
                 )
+                document = await conditioning_service.materialize_document(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    document=document,
+                )
                 result = await write_repo.create_draft(
                     conn,
                     owner_user_id=context.owner_user_id,
@@ -669,6 +697,11 @@ def create_plan_router(
                     conn,
                     owner_user_id=context.owner_user_id,
                     document=submitted_document,
+                )
+                document = await conditioning_service.materialize_document(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    document=document,
                 )
                 result = await write_repo.save_draft(
                     conn,
