@@ -1,0 +1,51 @@
+{
+  "audit_version": "memory_v1_predicate_runtime_v5_1_v14_audit_v1",
+  "completed_at": "2026-07-20T20:51:00Z",
+  "scope": "offline_and_private_local_inference_only",
+  "runtime": {
+    "predicate_registry_version": "memory_predicate_registry_v5_1",
+    "predicate_registry_sha256": "7599840d3c7bcc39dbaa0211adf0f2a088bf9ecb03d843984c25a7ac30ed1615",
+    "policy_compiler_version": "memory_v1_relationship_policy_compiler_v14"
+  },
+  "offline_tests": {
+    "passed": 400,
+    "skipped": 26,
+    "failed": 0
+  },
+  "targeted_private_gpu_evaluation": {
+    "case_count": 4,
+    "governed_pass_count": 4,
+    "model_pass_count": 4,
+    "report_sha256": "5874c2920d7936315c4916055e4de89ec1679b2a83bdb0995745b4d5cf72f1cc"
+  },
+  "full_private_gpu_evaluation": {
+    "case_count": 120,
+    "governed_pass_count": 120,
+    "model_pass_count": 120,
+    "report_sha256": "034b8186ae54b0d30bf1bacce4fe4f51f0c6091239683d11c79d755f2d29eec3",
+    "checks": {
+      "database_writes": 0,
+      "external_model_calls": 0,
+      "local_model_calls": 119,
+      "prompt_influence": 0,
+      "qdrant_writes": 0,
+      "staging_writes": 0
+    }
+  },
+  "production_schema_clone": {
+    "result": "pass",
+    "persistent_production_writes": 0
+  },
+  "hash_locked_artifacts": {
+    "persistence_migration_sha256": "658fce782842ddb096433c6ad07f49184eefb35000bf60608e584e86656edc23",
+    "rollback_security_test_sha256": "1382ebaa5cd67a774562e68870c92dea833cebe57b18a57800ae4fbd983b4d8b",
+    "production_clone_tool_sha256": "bd69e58f611d40054a4473cdc95f5e96452847663767c9ef16e20a3dd4655c67"
+  },
+  "production_state": {
+    "schema_installed": false,
+    "runtime_deployed": false,
+    "scheduler_activated": false,
+    "retrieval_activated": false,
+    "prompt_influence_activated": false
+  }
+}

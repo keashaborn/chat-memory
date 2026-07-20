@@ -10,9 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    _compile_entity_links,
+    _example_entity,
+    _example_observation,
+    _packet,
     _relationship_v5_1_repair_entities_and_roles,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
     TrustedExtractionSource,
     _normalize_temporal,
     sha256_text,
@@ -67,6 +72,63 @@ def observation(
 
 
 class RelationshipNormalizationRepairsV51Test(unittest.TestCase):
+    def test_explicit_cohabitant_removes_false_residence_observation(self) -> None:
+        text = "I currently live with Jordan."
+        source = TrustedExtractionSource.create(
+            job_id="00000000-0000-0000-0000-000000000001",
+            source_system="public.chat_log",
+            source_external_id="00000000-0000-0000-0000-000000000002",
+            source_sha256=sha256_text(text),
+            source_recorded_at="2026-07-20T05:00:00Z",
+            content=text,
+        )
+        self_entity = _example_entity(
+            text,
+            entity_ref="e00",
+            entity_type="self",
+            mention_kind="self_reference",
+            name_text=None,
+            relationship_role="user:self",
+            reason_code="explicit_self_reference",
+        )
+        jordan = _example_entity(
+            text,
+            entity_ref="e01",
+            entity_type="person",
+            mention_kind="named",
+            name_text="Jordan",
+            relationship_role="relationship:cohabitant",
+            reason_code="explicit_named_person",
+        )
+        false_residence = _example_observation(
+            text,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="residence.lives_at",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="medium",
+            reason_code="model_misread_person_as_place",
+            temporal_semantic="state_validity",
+        )
+        packet = ProviderPacket.model_validate(
+            _packet(
+                entities=[self_entity, jordan],
+                observations=[false_residence],
+            )
+        )
+        registry = json.loads(
+            (ROOT / "specs/memory_v1_predicate_registry_v5_1.json").read_text()
+        )
+        compiled, repairs = _compile_entity_links(source, packet, registry)
+        predicates = {
+            item.predicate for item in compiled.observations
+        }
+        self.assertIn("explicit_cohabitant_false_residence_removed", repairs)
+        self.assertNotIn("residence.lives_at", predicates)
+        self.assertIn("relationship.lives_with", predicates)
+
     def test_girlfriend_overrides_wrong_spouse_proposal(self) -> None:
         self.assertEqual(
             relationship_predicate_candidates_from_source(

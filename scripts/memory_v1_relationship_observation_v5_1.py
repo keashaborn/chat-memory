@@ -28,7 +28,9 @@ SURFACE_POLICY_ADAPTER = {
 ROLE_SPLIT_RE = re.compile(r"[:/|]+")
 NESTED_POSSESSIVE_RELATION_RE = re.compile(
     r"\bmy\s+[^.!?]{1,80}(?:'s|’s)\s+"
-    r"(?:friend|coach|mentor|manager|partner|roommate|relative|doctor|provider)\b",
+    r"(?:aunt|brother|child|coach|cousin|doctor|father|friend|manager|mentor|"
+    r"mother|neighbor|neighbour|parent|partner|provider|relative|roommate|"
+    r"sibling|sister|spouse|teacher|uncle)\b",
     re.IGNORECASE,
 )
 
@@ -42,12 +44,18 @@ PREDICATE_EVIDENCE_PATTERNS = {
     "relationship.caregiver_for": r"\b(?:caregiver|carer|care\s+for|caring\s+for)\b",
     "relationship.collaborator_with": r"\bcollaborat(?:e|es|ed|ing|or)s?\b",
     "relationship.has_pet": r"\b(?:pet|pets|dog|dogs|cat|cats|animal|animals)\b",
-    "relationship.lives_with": r"\b(?:live|lives|lived|living)\s+(?:together\s+)?with\b",
+    "relationship.healthcare_provider_for": r"\b(?:doctor|physician|cardiologist|psychiatrist|psychologist|therapist)\b",
+    "relationship.in_law_of": r"\b(?:wife|husband|spouse)['’]s\s+(?:brother|sister|father|mother)\b|\b(?:brother|sister|father|mother)[\s-]+in[\s-]+law\b",
+    "relationship.lives_with": r"\b(?:live|lives|lived|living)\s+(?:together\s+)?with\b|\bshare\s+(?:an?|the)\s+(?:apartment|home|house)\b",
     "relationship.manager_of": r"\b(?:boss|manager|supervisor|reports?\s+(?:directly\s+)?to|manage[sd]?)\b",
     "relationship.mentor_of": r"\bmentor(?:s|ed|ing)?\b",
     "relationship.parent_of": r"\b(?:parent|parents|father(?![\s-]+in[\s-]+law)|mother(?![\s-]+in[\s-]+law)|dad|mom|child|children|son|sons|daughter|daughters|stepchild|stepchildren|stepson|stepsons|stepdaughter|stepdaughters)\b",
+    "relationship.plan_helper_for": r"\b(?:helps?\s+me\s+manage|permission\s+to\s+edit)\b[^.!?]{0,100}\b(?:LifeSwitch\s+)?plan\b|\b(?:LifeSwitch\s+)?plan\b[^.!?]{0,100}\bhelps?\s+me\b",
     "relationship.romantic_partner_of": r"\b(?:boyfriend|girlfriend|fianc(?:e|ee|é|ée)|life[\s-]+partner|romantic[\s-]+partner)\b",
+    "relationship.roommate_of": r"\b(?:roommate|roommates|housemate|housemates|flatmate|flatmates)\b",
     "relationship.spouse_of": r"\b(?:wife|wives|husband|husbands|spouse|spouses|married\s+to)\b",
+    "relationship.teacher_of": r"\b(?:teacher|professor|instructor|teaches|taught)\b",
+    "relationship.teammate_of": r"\b(?:teammate|teammates|same\s+[^.!?]{0,40}\bteam|play[^.!?]{0,40}\bteam)\b",
     "social.avoids": r"\bavoid(?:s|ed|ing)?\b",
     "social.competes_with": r"\b(?:compet(?:e|es|ed|ing|itor)|rival(?:s|ry)?)\b",
     "social.depends_on": r"\b(?:depend(?:s|ed|ing)?\s+on|rel(?:y|ies|ied|ying)\s+on)\b",
@@ -79,7 +87,8 @@ SUPPORT_SELF_TO_NAMED_RE = re.compile(
 HISTORICAL_RELATIONSHIP_END_RE = re.compile(
     r"\b(?:used\s+to\s+be|former(?:ly)?|ex[\s-]+(?:wife|husband|spouse|"
     r"boyfriend|girlfriend|partner|friend)|no\s+longer\s+(?:my|a)|"
-    r"lost\s+touch|relationship\s+ended|separated|divorced)\b",
+    r"lost\s+touch|relationship\s+ended|separated|divorced|"
+    r"until\s+(?:he|she|they|the\s+person)?\s*(?:died|passed\s+away))\b",
     re.IGNORECASE,
 )
 DYNAMIC_CURRENT_STATE_RE = re.compile(
@@ -87,6 +96,289 @@ DYNAMIC_CURRENT_STATE_RE = re.compile(
     r"have\s+had|has\s+had|no\s+contact)\b",
     re.IGNORECASE,
 )
+PERSON_NAME_PATTERN = r"[A-Z][A-Za-z'’\-]{1,79}"
+
+
+@dataclass(frozen=True)
+class SourceRelationshipAssertion:
+    predicate: str
+    named_party_role: str
+    name_text: str
+    historical_end: bool = False
+
+
+def explicit_relationship_assertions(
+    text: str,
+) -> tuple[SourceRelationshipAssertion, ...]:
+    """Return only explicit owner-to-person relationships entailed by source."""
+    assertions: list[SourceRelationshipAssertion] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(
+        predicate: str,
+        role: str,
+        name: str,
+        *,
+        historical_end: bool = False,
+    ) -> None:
+        normalized_name = name.strip(" \t\r\n.,;:")
+        key = (predicate, normalized_name.casefold())
+        if normalized_name and key not in seen:
+            assertions.append(
+                SourceRelationshipAssertion(
+                    predicate=predicate,
+                    named_party_role=role,
+                    name_text=normalized_name,
+                    historical_end=historical_end,
+                )
+            )
+            seen.add(key)
+
+    caregiver = re.search(
+        rf"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\s+"
+        rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
+        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if caregiver:
+        add(
+            "relationship.caregiver_for",
+            "care_recipient",
+            caregiver.group("name"),
+        )
+
+    lives_with = re.search(
+        rf"\bI\s+(?:currently\s+)?live\s+with\s+"
+        rf"(?:my\s+(?:wife|husband|spouse)\s+)?"
+        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if lives_with:
+        add("relationship.lives_with", "cohabitant", lives_with.group("name"))
+
+    shared_home = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+and\s+I\s+"
+        rf"(?:share\s+(?:an?|the)\s+(?:apartment|home|house)|live\s+together)"
+        rf"[^.!?]{{0,80}}\broommates?\b",
+        text,
+        re.IGNORECASE,
+    )
+    if shared_home:
+        add("relationship.lives_with", "cohabitant", shared_home.group("name"))
+        add("relationship.roommate_of", "roommate", shared_home.group("name"))
+
+    spouse = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+(?:is|was|used\s+to\s+be)\s+"
+        rf"my\s+(?P<role>wife|husband|spouse)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if spouse and not re.match(r"['’]s\b", text[spouse.end() :], re.IGNORECASE):
+        add(
+            "relationship.spouse_of",
+            spouse.group("role").casefold(),
+            spouse.group("name"),
+            historical_end=relationship_has_explicit_historical_end(text)
+            or bool(re.search(r"\buntil\b", text, re.IGNORECASE)),
+        )
+    possessed_spouse = re.search(
+        rf"\bmy\s+(?P<role>wife|husband|spouse)\s+"
+        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if possessed_spouse:
+        add(
+            "relationship.spouse_of",
+            possessed_spouse.group("role").casefold(),
+            possessed_spouse.group("name"),
+        )
+
+    if not re.search(
+        r"\blike\s+(?:a\s+)?(?:brother|sister|sibling)\b|"
+        r"\bnot\s+related\b",
+        text,
+        re.IGNORECASE,
+    ):
+        sibling = re.search(
+            rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+is\s+my\s+"
+            rf"(?P<role>brother|sister|sibling)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if sibling and not re.match(
+            r"(?:['’]s\b|[\s-]+in[\s-]+law\b)",
+            text[sibling.end() :],
+            re.IGNORECASE,
+        ):
+            add(
+                "relationship.sibling_of",
+                sibling.group("role").casefold(),
+                sibling.group("name"),
+            )
+
+    in_law = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+is\s+my\s+"
+        rf"(?:wife|husband|spouse)['’]s\s+"
+        rf"(?P<role>brother|sister|father|mother)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if in_law:
+        add(
+            "relationship.in_law_of",
+            f"{in_law.group('role').casefold()}_in_law",
+            in_law.group("name"),
+        )
+    direct_in_law = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+is\s+my\s+"
+        rf"(?P<role>brother|sister|father|mother)[\s-]+in[\s-]+law\b",
+        text,
+        re.IGNORECASE,
+    )
+    if direct_in_law:
+        add(
+            "relationship.in_law_of",
+            f"{direct_in_law.group('role').casefold()}_in_law",
+            direct_in_law.group("name"),
+        )
+
+    teammate = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+and\s+I\s+"
+        rf"(?:play|are|compete)[^.!?]{{0,80}}\b(?:same\s+)?[^.!?]*team\b",
+        text,
+        re.IGNORECASE,
+    )
+    if teammate:
+        add("relationship.teammate_of", "teammate", teammate.group("name"))
+
+    manager = re.search(
+        rf"\bI\s+report\s+(?:directly\s+)?to\s+"
+        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if manager:
+        add("relationship.manager_of", "manager", manager.group("name"))
+    direct_report = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+reports?\s+"
+        rf"(?:directly\s+)?to\s+me\b",
+        text,
+        re.IGNORECASE,
+    )
+    if direct_report:
+        add(
+            "relationship.manager_of",
+            "direct_report",
+            direct_report.group("name"),
+        )
+
+    clinician = re.search(
+        rf"\b(?:Dr\.\s*)?(?P<name>{PERSON_NAME_PATTERN})\s+is\s+my\s+"
+        rf"(?:friend\s+and\s+(?:also\s+)?(?:my\s+)?)?"
+        rf"(?:primary\s+care\s+)?"
+        rf"(?:doctor|physician|cardiologist|psychiatrist|psychologist|therapist)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if clinician:
+        add(
+            "relationship.healthcare_provider_for",
+            "doctor",
+            clinician.group("name"),
+        )
+
+    plan_helper = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+has\s+permission\s+to\s+"
+        rf"edit\s+my\s+LifeSwitch\s+plan[^.!?]{{0,100}}\bhelps?\s+me\b",
+        text,
+        re.IGNORECASE,
+    )
+    if plan_helper:
+        add(
+            "relationship.plan_helper_for",
+            "plan_helper",
+            plan_helper.group("name"),
+        )
+
+    teacher = re.search(
+        rf"\b(?:Professor\s+)?(?P<name>{PERSON_NAME_PATTERN})\s+"
+        rf"teaches\s+(?:me|my\s+[^.!?]{{1,80}}(?:course|class))\b",
+        text,
+        re.IGNORECASE,
+    )
+    if teacher:
+        add("relationship.teacher_of", "teacher", teacher.group("name"))
+
+    avoided = re.search(
+        rf"\bI\s+(?P<historical>used\s+to\s+)?avoid\s+"
+        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if avoided and (
+        avoided.group("historical")
+        or not re.search(
+            r"\b(?:do\s+not|don['’]?t|no\s+longer)\s+avoid\b",
+            text,
+            re.IGNORECASE,
+        )
+    ):
+        add(
+            "social.avoids",
+            "person_avoided",
+            avoided.group("name"),
+            historical_end=bool(avoided.group("historical"))
+            or bool(re.search(r"\bnot\s+avoid\b[^.!?]*\banymore\b", text, re.IGNORECASE)),
+        )
+
+    tension = re.search(
+        rf"\b(?:ongoing\s+)?tension\s+between\s+"
+        rf"(?:(?P<name_first>{PERSON_NAME_PATTERN})\s+and\s+me|"
+        rf"me\s+and\s+(?P<name_second>{PERSON_NAME_PATTERN}))\b",
+        text,
+        re.IGNORECASE,
+    )
+    if tension:
+        add(
+            "social.experiences_tension_with",
+            "person_in_tension",
+            tension.group("name_first") or tension.group("name_second"),
+        )
+
+    named_relation = re.search(
+        rf"\b(?P<name>{PERSON_NAME_PATTERN})\s+is\s+my\s+"
+        rf"(?P<roles>[^.!?]{{1,120}})",
+        text,
+        re.IGNORECASE,
+    )
+    if named_relation:
+        name = named_relation.group("name")
+        roles = named_relation.group("roles")
+        if re.search(r"['’]s\b", roles):
+            return tuple(assertions)
+        if re.search(r"\bcoworker\b", roles, re.IGNORECASE):
+            add("relationship.coworker_of", "coworker", name)
+        if re.search(
+            r"\b(?:workout|training|lifting)\s+partner\b",
+            roles,
+            re.IGNORECASE,
+        ) and not re.search(
+            r"\bnot\s+(?:my\s+)?(?:workout|training|lifting)\s+partner\b",
+            roles,
+            re.IGNORECASE,
+        ):
+            add("relationship.training_partner_of", "workout_partner", name)
+        if re.search(r"\bfriend\b", roles, re.IGNORECASE) and not re.search(
+            r"\bnot\s+(?:a\s+)?(?:personal\s+)?friend\b",
+            text,
+            re.IGNORECASE,
+        ):
+            add("relationship.friend_of", "friend", name)
+
+    return tuple(assertions)
 
 
 @dataclass(frozen=True)
@@ -201,13 +493,50 @@ def _role_supported(role: str, text: str) -> bool:
 
 def directed_role_supported_by_source(predicate: str, text: str) -> str | None:
     """Return a registry role only when source syntax fixes edge direction."""
-    if predicate != "social.supports":
+    if predicate == "social.supports":
+        named_to_self = SUPPORT_NAMED_TO_SELF_RE.search(text) is not None
+        self_to_named = SUPPORT_SELF_TO_NAMED_RE.search(text) is not None
+        if named_to_self == self_to_named:
+            return None
+        return "supporter" if named_to_self else "supported_person"
+    source_rules = {
+        "relationship.caregiver_for": (
+            r"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\b",
+            "care_recipient",
+        ),
+        "relationship.manager_of": (
+            r"\bI\s+report\s+(?:directly\s+)?to\b",
+            "manager",
+        ),
+        "relationship.healthcare_provider_for": (
+            r"\b(?:doctor|physician|cardiologist|psychiatrist|psychologist|therapist)\b",
+            "doctor",
+        ),
+        "relationship.plan_helper_for": (
+            r"\bhelps?\s+me\s+manage\s+(?:my\s+)?(?:LifeSwitch\s+)?plan\b",
+            "plan_helper",
+        ),
+        "relationship.teacher_of": (
+            r"\bteaches\s+(?:me|my\s+[^.!?]{1,80}(?:course|class))\b",
+            "teacher",
+        ),
+        "social.avoids": (r"\bI\s+(?:used\s+to\s+)?avoid\b", "person_avoided"),
+        "social.experiences_tension_with": (
+            r"\b(?:ongoing\s+)?tension\s+between\b",
+            "person_in_tension",
+        ),
+    }
+    if predicate == "relationship.manager_of" and re.search(
+        r"\b[A-Z][A-Za-z'’\-]{1,79}\s+reports?\s+"
+        r"(?:directly\s+)?to\s+me\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "direct_report"
+    rule = source_rules.get(predicate)
+    if rule is None or re.search(rule[0], text, re.IGNORECASE) is None:
         return None
-    named_to_self = SUPPORT_NAMED_TO_SELF_RE.search(text) is not None
-    self_to_named = SUPPORT_SELF_TO_NAMED_RE.search(text) is not None
-    if named_to_self == self_to_named:
-        return None
-    return "supporter" if named_to_self else "supported_person"
+    return rule[1]
 
 
 def relationship_has_explicit_historical_end(text: str) -> bool:
@@ -221,6 +550,28 @@ def predicate_supported_by_source(
     *,
     registry_path: str | Path = DEFAULT_REGISTRY,
 ) -> bool:
+    if predicate == "relationship.sibling_of" and re.search(
+        r"\blike\s+(?:a\s+)?(?:brother|sister|sibling)\b|"
+        r"\bnot\s+related\b|"
+        r"\bmy\s+(?:wife|husband|spouse)['’]s\s+"
+        r"(?:brother|sister)\b|"
+        r"\b(?:brother|sister)[\s-]+in[\s-]+law\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    if predicate == "relationship.training_partner_of" and re.search(
+        r"\bnot\s+(?:my\s+)?(?:workout|training|lifting)\s+partner\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    if predicate == "relationship.manager_of" and re.search(
+        r"\bnot\s+my\s+(?:boss|manager|supervisor)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
     if predicate == "social.trusts" and re.search(
         r"\b(?:do\s+not|don['’]?t|no\s+longer)\s+trust\b",
         text,
@@ -358,7 +709,12 @@ def normalize_relationship_observation(
         ),
         "",
     )
-    if NESTED_POSSESSIVE_RELATION_RE.search(context):
+    nested_possessive = NESTED_POSSESSIVE_RELATION_RE.search(context)
+    explicitly_governed_nested_relation = any(
+        assertion.predicate == predicate
+        for assertion in explicit_relationship_assertions(context)
+    )
+    if nested_possessive and not explicitly_governed_nested_relation:
         return _defer("relationship_belongs_to_third_party")
     if not role or not predicate_supported_by_source(
         predicate, role, context, registry_path=registry_path
@@ -551,11 +907,28 @@ def normalize_relationship_observation(
     if isinstance(reasons, list) and "relationship_v5_1_governed" not in reasons:
         reasons.append("relationship_v5_1_governed")
 
+    historical_review = (
+        re.search(
+            r"\buntil\s+(?:he|she|they|the\s+person)?\s*"
+            r"(?:died|passed\s+away)\b",
+            context,
+            re.IGNORECASE,
+        ) is not None
+        and "relationship_status_temporal_language"
+        in set(contract.get("manual_review_rules", []))
+    )
+    manual_review_required = (
+        proposal.manual_review_required or historical_review
+    )
     return ObservationDecision(
-        status=proposal.status,
-        reason_code=proposal.reason_code,
+        status="manual_review" if manual_review_required else proposal.status,
+        reason_code=(
+            "relationship_manual_review_required"
+            if manual_review_required
+            else proposal.reason_code
+        ),
         policy_version=POLICY_VERSION,
         normalized_observation=normalized,
         repairs=tuple(sorted(set(repairs))),
-        manual_review_required=proposal.manual_review_required,
+        manual_review_required=manual_review_required,
     )

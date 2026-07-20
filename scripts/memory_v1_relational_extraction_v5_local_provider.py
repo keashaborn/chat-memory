@@ -30,6 +30,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 )
 from scripts.memory_v1_relationship_observation_v5_1 import (
     directed_role_supported_by_source,
+    explicit_relationship_assertions,
     normalize_relationship_observation,
     predicate_supported_by_source,
     relationship_has_explicit_historical_end,
@@ -44,7 +45,7 @@ LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
 LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v7"
 RELATIONSHIP_V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
 RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
-    "memory_v1_relationship_policy_compiler_v10"
+    "memory_v1_relationship_policy_compiler_v14"
 )
 PROVIDER_DEFERRAL_REASON_CODES = frozenset(
     {
@@ -2029,6 +2030,7 @@ def _relationship_v5_1_repair_entities_and_roles(
             else added
         )
         repairs.append("relationship_source_direction_role_augmented")
+        repairs.append("relationship_source_role_augmented")
     all_roles = [
         role
         for field in (
@@ -2197,6 +2199,272 @@ def _relationship_deferral_reason(reason_code: str) -> str:
     if "role" in reason_code or "entity" in reason_code:
         return "entity_resolution_unresolved"
     return "insufficient_evidence"
+
+
+def _relationship_person_name_key(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = re.sub(
+        r"^(?:dr|doctor|professor|prof)\.?\s+",
+        "",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"[^a-z0-9]+", "", normalized.casefold())
+
+
+def _relationship_v5_1_temporal(
+    source: TrustedExtractionSource,
+    *,
+    temporal_profile: str,
+    historical_end: bool,
+) -> dict[str, Any]:
+    if temporal_profile == "event_independent_connection":
+        value = _example_temporal("state_validity")
+        value.update(
+            {
+                "source_form": "none",
+                "reason_codes": ["event_independent_relationship"],
+            }
+        )
+        return value
+    if historical_end:
+        year = re.search(r"\b((?:19|20)\d{2})\b", source.content)
+        if year is not None:
+            upper = f"{int(year.group(1)) + 1:04d}-01-01"
+            return {
+                "anchored_to_source_time": False,
+                "basis": "calendar",
+                "calendar_range": {
+                    "lower": None,
+                    "upper": upper,
+                    "bounds": "[)",
+                },
+                "certainty": "bounded",
+                "instant": None,
+                "instant_range": None,
+                "precision": "year",
+                "reason_codes": ["explicit_historical_relationship_end"],
+                "recurrence": None,
+                "relative_offset": None,
+                "semantic": "state_validity",
+                "shape": "open_interval",
+                "source_form": "absolute",
+            }
+        return {
+            "anchored_to_source_time": False,
+            "basis": "instant",
+            "calendar_range": None,
+            "certainty": "bounded",
+            "instant": None,
+            "instant_range": {
+                "lower": None,
+                "upper": None,
+                "bounds": "[)",
+            },
+            "precision": "exact",
+            "reason_codes": ["historical_relationship_ended_before_source"],
+            "recurrence": None,
+            "relative_offset": None,
+            "semantic": "state_validity",
+            "shape": "open_interval",
+            "source_form": "implicit_source_time",
+        }
+    return {
+        "anchored_to_source_time": False,
+        "basis": "instant",
+        "calendar_range": None,
+        "certainty": "bounded",
+        "instant": None,
+        "instant_range": {
+            "lower": None,
+            "upper": None,
+            "bounds": "[)",
+        },
+        "precision": "exact",
+        "reason_codes": ["relationship_known_current_at_source_time"],
+        "recurrence": None,
+        "relative_offset": None,
+        "semantic": "state_validity",
+        "shape": "open_interval",
+        "source_form": "implicit_source_time",
+    }
+
+
+def _relationship_v5_1_complete_explicit_assertions(
+    source: TrustedExtractionSource,
+    entities: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    comparison_hints: list[dict[str, Any]],
+    registry: dict[str, Any],
+) -> tuple[str, ...]:
+    if _relationship_source_class(source.content) != "owner_assertion":
+        return ()
+    assertions = explicit_relationship_assertions(source.content)
+    if not assertions:
+        return ()
+    repairs: list[str] = []
+    entities_by_ref = {
+        item.get("entity_ref"): item
+        for item in entities
+        if isinstance(item.get("entity_ref"), str)
+    }
+    cohabitant_name_keys = {
+        _relationship_person_name_key(assertion.name_text)
+        for assertion in assertions
+        if assertion.predicate == "relationship.lives_with"
+    }
+    false_residence_refs = {
+        str(observation.get("observation_ref"))
+        for observation in observations
+        if observation.get("predicate") == "residence.lives_at"
+        and isinstance(observation.get("object"), dict)
+        and observation["object"].get("kind") == "entity"
+        and entities_by_ref.get(
+            observation["object"].get("entity_ref"), {}
+        ).get("entity_type") == "person"
+        and _relationship_person_name_key(
+            entities_by_ref.get(
+                observation["object"].get("entity_ref"), {}
+            ).get("name_text")
+        ) in cohabitant_name_keys
+    }
+    if false_residence_refs:
+        observations[:] = [
+            observation
+            for observation in observations
+            if str(observation.get("observation_ref"))
+            not in false_residence_refs
+        ]
+        comparison_hints[:] = [
+            hint
+            for hint in comparison_hints
+            if str(hint.get("observation_ref"))
+            not in false_residence_refs
+        ]
+        repairs.append("explicit_cohabitant_false_residence_removed")
+    self_ref = _entity_ref(entities, "self")
+    if self_ref is None:
+        self_ref = _add_compiler_entity(
+            source,
+            entities,
+            entity_type="self",
+            name_text=None,
+            relationship_role="user:self",
+        )
+        repairs.append("explicit_relationship_self_entity")
+
+    for assertion in assertions:
+        policy = _relationship_v5_1_policy(
+            registry,
+            assertion.predicate,
+        )
+        if policy is None:
+            continue
+        name_key = _relationship_person_name_key(assertion.name_text)
+        named_entity = next(
+            (
+                item
+                for item in entities
+                if item.get("entity_type") == "person"
+                and _relationship_person_name_key(item.get("name_text"))
+                == name_key
+            ),
+            None,
+        )
+        if named_entity is None:
+            named_ref = _add_compiler_entity(
+                source,
+                entities,
+                entity_type="person",
+                name_text=assertion.name_text,
+                relationship_role=f"relationship:{assertion.named_party_role}",
+            )
+            named_entity = next(
+                item for item in entities if item["entity_ref"] == named_ref
+            )
+            repairs.append("explicit_relationship_named_entity")
+        elif not _role_has_any(
+            named_entity.get("relationship_role"),
+            {assertion.named_party_role},
+        ):
+            current_role = named_entity.get("relationship_role")
+            added_role = f"relationship:{assertion.named_party_role}"
+            named_entity["relationship_role"] = (
+                f"{current_role}|{added_role}"
+                if isinstance(current_role, str) and current_role
+                else added_role
+            )
+            repairs.append("explicit_relationship_role_augmented")
+
+        matching_indexes: list[int] = []
+        by_ref = {
+            item.get("entity_ref"): item
+            for item in entities
+            if isinstance(item.get("entity_ref"), str)
+        }
+        for index, observation in enumerate(observations):
+            if observation.get("predicate") != assertion.predicate:
+                continue
+            obj = observation.get("object")
+            endpoint_refs = [observation.get("subject_entity_ref")]
+            if isinstance(obj, dict) and obj.get("kind") == "entity":
+                endpoint_refs.append(obj.get("entity_ref"))
+            if any(
+                _relationship_person_name_key(
+                    by_ref.get(reference, {}).get("name_text")
+                )
+                == name_key
+                for reference in endpoint_refs
+            ):
+                matching_indexes.append(index)
+
+        named_subject_roles = set(policy.get("named_party_subject_roles", []))
+        if assertion.named_party_role in named_subject_roles:
+            subject_ref = named_entity["entity_ref"]
+            object_ref = self_ref
+        else:
+            subject_ref = self_ref
+            object_ref = named_entity["entity_ref"]
+        observation = _example_observation(
+            source.content,
+            observation_ref=(
+                observations[matching_indexes[0]]["observation_ref"]
+                if matching_indexes
+                else _next_observation_ref(observations)
+            ),
+            subject_entity_ref=subject_ref,
+            predicate=assertion.predicate,
+            object_value={"kind": "entity", "entity_ref": object_ref},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity=str(policy.get("sensitivity_floor", "medium")),
+            reason_code="deterministic_explicit_relationship_assertion",
+            modality=(
+                "reported_observation"
+                if policy.get("family") == "relational_state"
+                else "asserted"
+            ),
+            temporal_semantic="state_validity",
+        )
+        observation["temporal"] = _relationship_v5_1_temporal(
+            source,
+            temporal_profile=str(policy.get("temporal_profile", "active_interval")),
+            historical_end=assertion.historical_end,
+        )
+        if matching_indexes:
+            observations[matching_indexes[0]] = observation
+            for index in reversed(matching_indexes[1:]):
+                del observations[index]
+            repairs.append(
+                f"explicit_relationship_observation_canonicalized:{assertion.predicate}"
+            )
+        else:
+            observations.append(observation)
+            repairs.append(
+                f"explicit_relationship_observation:{assertion.predicate}"
+            )
+    return tuple(repairs)
 
 
 def _compile_entity_links(
@@ -2445,6 +2713,15 @@ def _compile_entity_links(
         ]
 
     if registry.get("registry_version") == RELATIONSHIP_V5_1_REGISTRY_VERSION:
+        repairs.extend(
+            _relationship_v5_1_complete_explicit_assertions(
+                source,
+                entities,
+                observations,
+                value["comparison_hints"],
+                registry,
+            )
+        )
         governed_relationships: list[dict[str, Any]] = []
         rejected_relationship_refs: set[str] = set()
         for observation in observations:
@@ -2559,6 +2836,8 @@ def _compile_entity_links(
                 not in duplicate_relationship_refs
             ]
             repairs.append("duplicate_relationship_observations_removed")
+
+        predicates = {item["predicate"] for item in observations}
 
     if "relationship.parent_of" in predicates and _PARENT_ROLE_RE.search(content):
         person_ref = _entity_ref(entities, "person")
