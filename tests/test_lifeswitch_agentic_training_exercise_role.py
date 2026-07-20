@@ -31,6 +31,20 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
         self.assertIn("my_exercise_role_event", self.router)
         self.assertNotIn('raw_set.get("exercise_role")', self.router)
 
+    def test_session_list_publishes_deterministic_role_summaries(self) -> None:
+        self.assertIn("as strength_set_count", self.router)
+        self.assertIn("as strength_exercise_count", self.router)
+        self.assertIn("as strength_volume", self.router)
+        self.assertIn("as rehab_set_count", self.router)
+        self.assertIn("as rehab_exercise_count", self.router)
+        self.assertIn("as rehab_volume", self.router)
+        self.assertIn("end as session_role", self.router)
+        self.assertIn("as counts_toward_strength", self.router)
+        self.assertIn(
+            "coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')",
+            self.router,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

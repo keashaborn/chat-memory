@@ -2151,10 +2151,59 @@ async def list_training_sessions(
               $2::boolean as _delegated_view,
               coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
               coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
-              coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume
+              coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
+              coalesce(count(l.training_set_log_id) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+              ), 0)::int as strength_set_count,
+              coalesce(count(distinct l.exercise_id) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+              ), 0)::int as strength_exercise_count,
+              coalesce(sum(l.volume) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+              ), 0)::float as strength_volume,
+              coalesce(count(l.training_set_log_id) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+              ), 0)::int as rehab_set_count,
+              coalesce(count(distinct l.exercise_id) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+              ), 0)::int as rehab_exercise_count,
+              coalesce(sum(l.volume) filter (
+                where l.is_active=true
+                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+              ), 0)::float as rehab_volume,
+              case
+                when count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                ) > 0
+                and count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                ) > 0 then 'mixed'
+                when count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                ) > 0 then 'strength'
+                when count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                ) > 0 then 'rehab'
+                else 'unclassified'
+              end as session_role,
+              coalesce(bool_or(
+                coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+              ) filter (where l.is_active=true), false) as counts_toward_strength
             from {SCHEMA}.training_session s
             left join {SCHEMA}.training_set_log l
               on l.training_session_id=s.training_session_id
+            left join {SCHEMA}.my_exercise me
+              on me.owner_user_id=l.owner_user_id
+             and me.exercise_id=l.exercise_id
             where {' and '.join(where)}
             group by s.training_session_id
             {having}
