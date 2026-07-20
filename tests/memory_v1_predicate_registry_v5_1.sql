@@ -102,12 +102,17 @@ BEGIN
     RAISE EXCEPTION 'V5.1 source bindings mismatch';
   END IF;
 
-  IF has_table_privilege('PUBLIC',
-       'memory.relationship_predicate_contract_v5_1', 'INSERT')
-     OR has_table_privilege('PUBLIC',
-       'memory.relationship_predicate_contract_v5_1', 'UPDATE')
-     OR has_table_privilege('PUBLIC',
-       'memory.relationship_predicate_contract_v5_1', 'DELETE')
+  IF EXISTS (
+       SELECT 1
+       FROM pg_class AS relation
+       CROSS JOIN LATERAL aclexplode(
+         coalesce(relation.relacl, acldefault('r', relation.relowner))
+       ) AS acl
+       WHERE relation.oid =
+         'memory.relationship_predicate_contract_v5_1'::regclass
+         AND acl.grantee = 0
+         AND acl.privilege_type IN ('INSERT', 'UPDATE', 'DELETE')
+     )
      OR has_table_privilege('memory_v5_writer',
        'memory.relationship_predicate_contract_v5_1', 'INSERT')
      OR has_table_privilege('memory_v5_writer',
