@@ -29,6 +29,7 @@ from .plan_read_repository import (
     RevisionReviewView,
 )
 from .plan_repository import ActivationResult, PlanRepository, ProposalResult, RevisionRecord
+from .plan_workout_templates import PlanWorkoutTemplateService
 
 
 class ConnectionProvider(Protocol):
@@ -303,13 +304,33 @@ def create_plan_router(
     legacy_adoption_service: LegacyPlanAdoptionService | None = None,
     recommendation_service: PlanRecommendationService | None = None,
     observation_context_repository: PlanObservationContextRepository | None = None,
+    workout_template_service: PlanWorkoutTemplateService | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
     adoption_service = legacy_adoption_service or LegacyPlanAdoptionService(
         plan_repository=write_repo
     )
+    workout_service = workout_template_service or PlanWorkoutTemplateService()
     router = APIRouter(tags=["LifeSwitch Plan Agentic"])
+
+    @router.get("/workout-templates")
+    async def list_plan_workout_templates(
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:edit")
+            _require(context, "training:view")
+            async with connection_provider() as conn:
+                options = await workout_service.list_options(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                )
+            return {"workout_templates": options}
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
 
     @router.get("/workspace")
     async def get_plan_workspace(
@@ -496,7 +517,7 @@ def create_plan_router(
     ) -> dict[str, Any]:
         try:
             _require(context, "plan:edit")
-            document = PlanDocumentV1.from_mapping(body.document)
+            submitted_document = PlanDocumentV1.from_mapping(body.document)
             trigger = (
                 RevisionTrigger.INITIAL_PLAN
                 if body.base_plan_version_id is None
@@ -507,6 +528,11 @@ def create_plan_router(
                 )
             )
             async with connection_provider() as conn:
+                document = await workout_service.materialize_document(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    document=submitted_document,
+                )
                 result = await write_repo.create_draft(
                     conn,
                     owner_user_id=context.owner_user_id,
@@ -637,8 +663,13 @@ def create_plan_router(
     ) -> dict[str, Any]:
         try:
             _require(context, "plan:edit")
-            document = PlanDocumentV1.from_mapping(body.document)
+            submitted_document = PlanDocumentV1.from_mapping(body.document)
             async with connection_provider() as conn:
+                document = await workout_service.materialize_document(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    document=submitted_document,
+                )
                 result = await write_repo.save_draft(
                     conn,
                     owner_user_id=context.owner_user_id,

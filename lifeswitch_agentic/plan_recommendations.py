@@ -283,6 +283,17 @@ _FOCUS_PREFIXES: dict[RecommendationFocus, tuple[str, ...]] = {
     "coach_notes": ("/coach_notes",),
 }
 
+_NON_AGENT_EDITABLE_PREFIXES = (
+    "/training_targets/linked_workouts",
+)
+
+
+def _agent_may_edit(path: str) -> bool:
+    return not any(
+        path == prefix or path.startswith(f"{prefix}/")
+        for prefix in _NON_AGENT_EDITABLE_PREFIXES
+    )
+
 _REQUEST_FOCUS_TERMS: dict[RecommendationFocus, tuple[str, ...]] = {
     "nutrition_targets": ("calorie", "calories", "protein", "macro", "carb", "fat", "meal", "nutrition"),
     "training_targets": ("strength", "lifting", "weightlifting", "workout", "training", "exercise"),
@@ -337,7 +348,7 @@ class PlanRecommendationService:
             sorted(
                 path
                 for path in leaf_paths - {"/schema_version"}
-                if _path_matches_focus(path, selected_focus)
+                if _path_matches_focus(path, selected_focus) and _agent_may_edit(path)
             )
         )
         provider_review = await self._provider.review_plan(
@@ -353,8 +364,10 @@ class PlanRecommendationService:
         questions: list[dict[str, Any]] = []
         seen_questions: set[tuple[str, str]] = set()
         for question in provider_review.output.questions:
-            if question.field_path not in node_paths or not _path_matches_focus(
-                question.field_path, selected_focus
+            if (
+                question.field_path not in node_paths
+                or not _path_matches_focus(question.field_path, selected_focus)
+                or not _agent_may_edit(question.field_path)
             ):
                 continue
             key = (question.field_path, question.question.strip())
