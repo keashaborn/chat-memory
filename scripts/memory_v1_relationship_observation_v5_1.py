@@ -40,6 +40,7 @@ PREDICATE_EVIDENCE_PATTERNS = {
     "relationship.lives_with": r"\b(?:live|lives|lived|living)\s+(?:together\s+)?with\b",
     "relationship.manager_of": r"\b(?:boss|manager|supervisor|reports?\s+(?:directly\s+)?to|manage[sd]?)\b",
     "relationship.mentor_of": r"\bmentor(?:s|ed|ing)?\b",
+    "relationship.parent_of": r"\b(?:parent|parents|father|mother|dad|mom|child|children|son|sons|daughter|daughters|stepchild|stepchildren|stepson|stepsons|stepdaughter|stepdaughters)\b",
     "social.avoids": r"\bavoid(?:s|ed|ing)?\b",
     "social.competes_with": r"\b(?:compet(?:e|es|ed|ing|itor)|rival(?:s|ry)?)\b",
     "social.depends_on": r"\b(?:depend(?:s|ed|ing)?\s+on|rel(?:y|ies|ied|ying)\s+on)\b",

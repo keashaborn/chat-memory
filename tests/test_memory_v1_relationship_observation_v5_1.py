@@ -174,6 +174,17 @@ class RelationshipObservationV51Test(unittest.TestCase):
         self.assertEqual(decision.normalized_observation["object"]["entity_ref"], "e00")
         self.assertIn("canonical_relationship_direction", decision.repairs)
 
+    def test_irregular_children_plural_entails_parent_relation(self) -> None:
+        text = "David, Bertha, and Maggie are my children."
+        entities, observation = packet_parts(
+            text, "relationship.parent_of", "self_to_named", "child"
+        )
+        decision = normalize_relationship_observation(
+            observation, entities, text, source_class="owner_assertion"
+        )
+        self.assertEqual(decision.status, "accept")
+        self.assertIsNotNone(decision.normalized_observation)
+
     def test_model_role_without_source_evidence_is_deferred(self) -> None:
         text = "Morgan appears in the contact database."
         entities, observation = packet_parts(

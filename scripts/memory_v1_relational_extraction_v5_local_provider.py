@@ -30,6 +30,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 )
 from scripts.memory_v1_relationship_observation_v5_1 import (
     normalize_relationship_observation,
+    predicate_supported_by_source,
 )
 
 
@@ -40,6 +41,22 @@ LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v7"
 RELATIONSHIP_V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
 RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v8"
+)
+PROVIDER_DEFERRAL_REASON_CODES = frozenset(
+    {
+        "question_only",
+        "context_missing",
+        "ambiguous_transcription",
+        "transient_state",
+        "structured_domain",
+        "project_scope_unresolved",
+        "unregistered_predicate",
+        "mixed_authorship",
+        "sensitive_manual_review",
+        "compound_requires_split",
+        "entity_resolution_unresolved",
+        "insufficient_evidence",
+    }
 )
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
@@ -982,7 +999,20 @@ RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS = (
     "social:friend. Social tension, trust, conflict, support, avoidance, and "
     "adversarial descriptions are owner-reported states, not objective facts; "
     "use reported_observation modality. Do not substitute one relationship "
-    "predicate for another. Technical discussion, questions, fiction, quoted "
+    "predicate for another. 'I am the caregiver for my father' supports both "
+    "relationship.caregiver_for and relationship.parent_of; the family relation "
+    "must never replace the caregiving relation. The father's entity role must "
+    "include both family:father and support:care_recipient so each edge can be "
+    "validated. A workout partner uses "
+    "relationship.training_partner_of and the named person uses a registry role "
+    "such as social:workout_partner. Registry manual_review_rules are policy "
+    "metadata, never deferral reason_code values. A deferral reason_code must be "
+    "one of the exact enum values in the output schema. Every named person used "
+    "by a relationship observation must have an entity_mentions row, including "
+    "Robin in 'between me and Robin' and Blake in 'I consider Blake an enemy'. "
+    "Each child in a compound family statement has a separate person entity and "
+    "relationship.parent_of observation. Technical discussion, "
+    "questions, fiction, quoted "
     "assistant statements, and non-person metaphors do not create a relationship."
 )
 
@@ -1703,12 +1733,301 @@ def _explicit_current_relationship_state(content: str) -> bool:
     return one_off is None or continuing is not None
 
 
+def _relationship_v5_1_registered_roles(
+    registry: dict[str, Any],
+) -> frozenset[str]:
+    roles: set[str] = set()
+    for contract in registry.get("predicates", []):
+        policy = contract.get("relationship_policy")
+        if not isinstance(policy, dict):
+            continue
+        for field in (
+            "named_party_subject_roles",
+            "named_party_object_roles",
+            "named_party_symmetric_roles",
+        ):
+            values = policy.get(field, [])
+            if not isinstance(values, list):
+                continue
+            roles.update(
+                str(value).casefold()
+                for value in values
+                if isinstance(value, str)
+            )
+    return frozenset(roles)
+
+
+def _relationship_v5_1_policy(
+    registry: dict[str, Any], predicate: str
+) -> dict[str, Any] | None:
+    for contract in registry.get("predicates", []):
+        if not isinstance(contract, dict) or contract.get("predicate") != predicate:
+            continue
+        policy = contract.get("relationship_policy")
+        return policy if isinstance(policy, dict) else None
+    return None
+
+
+def _explicit_relationship_person_name(
+    content: str, predicate: str
+) -> str | None:
+    patterns: tuple[str, ...]
+    if predicate == "social.experiences_tension_with":
+        patterns = (
+            r"\bbetween\s+me\s+and\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
+            r"\btension\s+with\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
+        )
+    elif predicate == "social.perceives_as_adversary":
+        patterns = (
+            r"\b(?:consider|regard|see)\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
+        )
+    else:
+        patterns = ()
+    names = {
+        match.group("name")
+        for pattern in patterns
+        for match in re.finditer(pattern, content)
+    }
+    return next(iter(names)) if len(names) == 1 else None
+
+
+def _relationship_v5_1_repair_entities_and_roles(
+    source: TrustedExtractionSource,
+    observation: dict[str, Any],
+    entities: list[dict[str, Any]],
+    registry: dict[str, Any],
+) -> tuple[str, ...]:
+    predicate = observation.get("predicate")
+    if not isinstance(predicate, str):
+        return ()
+    policy = _relationship_v5_1_policy(registry, predicate)
+    if policy is None:
+        return ()
+    by_ref = {
+        item.get("entity_ref"): item
+        for item in entities
+        if isinstance(item.get("entity_ref"), str)
+    }
+    obj = observation.get("object")
+    if not isinstance(obj, dict) or obj.get("kind") != "entity":
+        return ()
+    subject_ref = observation.get("subject_entity_ref")
+    object_ref = obj.get("entity_ref")
+    subject = by_ref.get(subject_ref)
+    object_entity = by_ref.get(object_ref)
+    missing_ref: str | None = None
+    role_field: str | None = None
+    if (
+        isinstance(subject, dict)
+        and subject.get("entity_type") == "self"
+        and object_entity is None
+        and isinstance(object_ref, str)
+        and re.fullmatch(r"e[0-9]{2}", object_ref)
+    ):
+        missing_ref = object_ref
+        role_field = (
+            "named_party_symmetric_roles"
+            if policy.get("relation_semantics") == "symmetric"
+            else "named_party_object_roles"
+        )
+    elif (
+        isinstance(object_entity, dict)
+        and object_entity.get("entity_type") == "self"
+        and subject is None
+        and isinstance(subject_ref, str)
+        and re.fullmatch(r"e[0-9]{2}", subject_ref)
+    ):
+        missing_ref = subject_ref
+        role_field = (
+            "named_party_symmetric_roles"
+            if policy.get("relation_semantics") == "symmetric"
+            else "named_party_subject_roles"
+        )
+    repairs: list[str] = []
+    if missing_ref is not None and role_field is not None:
+        name = _explicit_relationship_person_name(source.content, predicate)
+        roles = policy.get(role_field, [])
+        if name is not None and isinstance(roles, list) and roles:
+            entities.append(
+                {
+                    "entity_ref": missing_ref,
+                    "entity_type": "person",
+                    "mention_kind": "named",
+                    "name_text": name,
+                    "relationship_role": f"relationship:{roles[0]}",
+                    "source_spans": [_source_span(source)],
+                    "extraction_confidence": 0.98,
+                    "reason_codes": [
+                        "deterministic_relationship_person_link"
+                    ],
+                }
+            )
+            repairs.append("relationship_named_entity_link")
+            by_ref[missing_ref] = entities[-1]
+            subject = by_ref.get(subject_ref)
+            object_entity = by_ref.get(object_ref)
+
+    endpoints = (subject, object_entity)
+    if not all(isinstance(item, dict) for item in endpoints):
+        return tuple(repairs)
+    named = next(
+        (
+            item
+            for item in endpoints
+            if item.get("entity_type") != "self"
+        ),
+        None,
+    )
+    self_count = sum(item.get("entity_type") == "self" for item in endpoints)
+    if named is None or self_count != 1:
+        return tuple(repairs)
+    all_roles = [
+        role
+        for field in (
+            "named_party_subject_roles",
+            "named_party_object_roles",
+            "named_party_symmetric_roles",
+        )
+        for role in policy.get(field, [])
+        if isinstance(role, str)
+    ]
+    if _role_has_any(named.get("relationship_role"), set(all_roles)):
+        return tuple(repairs)
+    if policy.get("relation_semantics") == "symmetric":
+        directional_roles = policy.get("named_party_symmetric_roles", [])
+    elif subject.get("entity_type") == "self":
+        directional_roles = policy.get("named_party_object_roles", [])
+    else:
+        directional_roles = policy.get("named_party_subject_roles", [])
+    if not isinstance(directional_roles, list) or not directional_roles:
+        return tuple(repairs)
+    source_text = _observation_source_text(source.content, observation)
+    if not predicate_supported_by_source(
+        predicate,
+        str(directional_roles[0]),
+        source_text,
+    ):
+        return tuple(repairs)
+    current = named.get("relationship_role")
+    added = f"relationship:{directional_roles[0]}"
+    named["relationship_role"] = (
+        f"{current}|{added}" if isinstance(current, str) and current else added
+    )
+    repairs.append("relationship_named_party_role_augmented")
+    return tuple(repairs)
+
+
+def _relationship_v5_1_raw_packet_boundary(
+    parsed: Any,
+    registry: dict[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Fail closed before Pydantic validation and expose taxonomy-only audit."""
+    if not isinstance(parsed, dict):
+        return parsed, {
+            "normalized_unknown_deferral_reason_count": 0,
+            "normalized_unknown_deferral_reason_sha256s": [],
+            "relationship_shape_count": 0,
+            "relationship_shapes": [],
+        }
+    value = deepcopy(parsed)
+    unknown_reason_hashes: list[str] = []
+    deferrals = value.get("deferrals")
+    if isinstance(deferrals, list):
+        for item in deferrals:
+            if not isinstance(item, dict):
+                continue
+            reason = item.get("reason_code")
+            if reason in PROVIDER_DEFERRAL_REASON_CODES:
+                continue
+            unknown_reason_hashes.append(canonical_sha256(reason))
+            item["reason_code"] = "sensitive_manual_review"
+
+    allowed_predicates = {
+        str(item.get("predicate"))
+        for item in registry.get("predicates", [])
+        if isinstance(item, dict) and isinstance(item.get("predicate"), str)
+    }
+    allowed_roles = _relationship_v5_1_registered_roles(registry)
+    entities = {
+        item.get("entity_ref"): item
+        for item in value.get("entity_mentions", [])
+        if isinstance(item, dict) and isinstance(item.get("entity_ref"), str)
+    }
+    shapes: list[dict[str, Any]] = []
+    observations = value.get("observations")
+    if isinstance(observations, list):
+        for item in observations:
+            if not isinstance(item, dict):
+                continue
+            predicate = item.get("predicate")
+            if not isinstance(predicate, str) or not predicate.startswith(
+                ("relationship.", "social.")
+            ):
+                continue
+            subject = entities.get(item.get("subject_entity_ref"), {})
+            obj = item.get("object")
+            object_entity = (
+                entities.get(obj.get("entity_ref"), {})
+                if isinstance(obj, dict) and obj.get("kind") == "entity"
+                else {}
+            )
+            endpoints = (subject, object_entity)
+            named = next(
+                (
+                    endpoint
+                    for endpoint in endpoints
+                    if isinstance(endpoint, dict)
+                    and endpoint.get("entity_type") != "self"
+                ),
+                {},
+            )
+            raw_role = named.get("relationship_role")
+            role_tokens = {
+                re.sub(r"[^a-z0-9]+", "_", token).strip("_")
+                for token in re.split(
+                    r"[:/|]+",
+                    raw_role.casefold() if isinstance(raw_role, str) else "",
+                )
+                if token
+            }
+            registered = sorted(role_tokens & allowed_roles)
+            shapes.append(
+                {
+                    "predicate": (
+                        predicate
+                        if predicate in allowed_predicates
+                        else f"sha256:{canonical_sha256(predicate)}"
+                    ),
+                    "subject_entity_type": subject.get("entity_type"),
+                    "object_entity_type": object_entity.get("entity_type"),
+                    "registered_named_party_roles": registered,
+                    "unregistered_role_sha256": (
+                        None
+                        if registered or not isinstance(raw_role, str)
+                        else canonical_sha256(raw_role)
+                    ),
+                }
+            )
+    return value, {
+        "normalized_unknown_deferral_reason_count": len(
+            unknown_reason_hashes
+        ),
+        "normalized_unknown_deferral_reason_sha256s": sorted(
+            unknown_reason_hashes
+        ),
+        "relationship_shape_count": len(shapes),
+        "relationship_shapes": shapes,
+    }
+
+
 def _relationship_deferral_reason(reason_code: str) -> str:
     if reason_code.startswith("unregistered"):
         return "unregistered_predicate"
     if reason_code.startswith("ineligible_relationship_source:assistant"):
         return "mixed_authorship"
-    return "predicate_semantics_unresolved"
+    if "role" in reason_code or "entity" in reason_code:
+        return "entity_resolution_unresolved"
+    return "insufficient_evidence"
 
 
 def _compile_entity_links(
@@ -1955,6 +2274,14 @@ def _compile_entity_links(
             predicate = observation["predicate"]
             if not predicate.startswith(("relationship.", "social.")):
                 continue
+            repairs.extend(
+                _relationship_v5_1_repair_entities_and_roles(
+                    source,
+                    observation,
+                    entities,
+                    registry,
+                )
+            )
             decision = normalize_relationship_observation(
                 observation,
                 entities,
@@ -2771,7 +3098,20 @@ class LocalLlamaCppProvider:
                 retryable=True,
             )
         try:
-            raw_packet = ProviderPacket.model_validate(result.parsed)
+            parsed = result.parsed
+            boundary_audit: dict[str, Any] = {}
+            if (
+                self._registry.get("registry_version")
+                == RELATIONSHIP_V5_1_REGISTRY_VERSION
+            ):
+                parsed, boundary_audit = (
+                    _relationship_v5_1_raw_packet_boundary(
+                        parsed,
+                        self._registry,
+                    )
+                )
+                self.last_audit.update(boundary_audit)
+            raw_packet = ProviderPacket.model_validate(parsed)
             compiled_packet, repairs = _compile_entity_links(
                 source,
                 raw_packet,

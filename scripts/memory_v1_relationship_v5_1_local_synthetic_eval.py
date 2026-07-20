@@ -259,6 +259,10 @@ def main() -> int:
                         "validation_error_count",
                         "validation_error_types",
                         "validation_error_locations",
+                        "normalized_unknown_deferral_reason_count",
+                        "normalized_unknown_deferral_reason_sha256s",
+                        "relationship_shape_count",
+                        "relationship_shapes",
                     )
                 },
             }
