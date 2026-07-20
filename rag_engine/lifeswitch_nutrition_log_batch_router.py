@@ -81,7 +81,7 @@ async def create_log_entries_batch(payload: LogBatchIn, req: Request):
             values ($1::uuid, $2::date)
             on conflict (owner_user_id, day) do update
               set updated_at=now()
-            returning nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+            returning nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
             """,
             owner,
             d,
@@ -131,6 +131,16 @@ async def create_log_entries_batch(payload: LogBatchIn, req: Request):
             )
             out.append(_row_to_jsonable(row) if row else None)
 
+        day_row = await conn.fetchrow(
+            f"""
+            select
+              nutrition_day_id, owner_user_id, day, notes, completed_at,
+              created_at, updated_at
+            from {SCHEMA}.nutrition_day
+            where nutrition_day_id=$1::uuid
+            """,
+            ndid,
+        )
         return JSONResponse({"day": _row_to_jsonable(day_row), "entries": out})
     finally:
         await conn.close()

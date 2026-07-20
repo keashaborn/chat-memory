@@ -119,6 +119,66 @@ class NutritionBatchCreate(BaseModel):
     items: list[NutritionBatchItem] = Field(..., min_length=1, max_length=100)
 
 
+class NutritionDayCompletionUpdate(BaseModel):
+    completed: bool
+
+
+async def _set_nutrition_day_completion(
+    conn,
+    *,
+    owner_user_id: str,
+    day: _dt.date,
+    completed: bool,
+) -> dict:
+    day_row = await conn.fetchrow(
+        f"""
+        select
+          nutrition_day_id, owner_user_id, day, notes, completed_at,
+          created_at, updated_at
+        from {SCHEMA}.nutrition_day
+        where owner_user_id=$1::uuid and day=$2::date
+        for update
+        """,
+        owner_user_id,
+        day,
+    )
+    if not day_row:
+        raise HTTPException(status_code=404, detail="nutrition day not found")
+
+    was_completed = day_row["completed_at"] is not None
+    if was_completed == completed:
+        return {"day": _row_to_jsonable(day_row), "changed": False}
+
+    updated = await conn.fetchrow(
+        f"""
+        update {SCHEMA}.nutrition_day
+        set completed_at = case when $3::boolean then now() else null end
+        where nutrition_day_id=$1::uuid
+          and owner_user_id=$2::uuid
+        returning
+          nutrition_day_id, owner_user_id, day, notes, completed_at,
+          created_at, updated_at
+        """,
+        day_row["nutrition_day_id"],
+        owner_user_id,
+        completed,
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="nutrition day completion changed concurrently")
+
+    await conn.execute(
+        f"""
+        insert into {SCHEMA}.nutrition_day_completion_event
+          (nutrition_day_id, owner_user_id, actor_user_id, action, source)
+        values ($1::uuid, $2::uuid, $2::uuid, $3, 'user')
+        """,
+        day_row["nutrition_day_id"],
+        owner_user_id,
+        "completed" if completed else "reopened",
+    )
+    return {"day": _row_to_jsonable(updated), "changed": True}
+
+
 @router.post("/log/entry")
 async def create_log_entry(
     req: Request,
@@ -231,7 +291,7 @@ async def create_log_entry(
             on conflict (owner_user_id, day) do update
               set updated_at=now()
             returning
-              nutrition_day_id, owner_user_id, day, notes,
+              nutrition_day_id, owner_user_id, day, notes, completed_at,
               created_at, updated_at
             """,
             owner,
@@ -265,6 +325,17 @@ async def create_log_entry(
             qty_servings,
             sort_order,
             notes,
+        )
+
+        day_row = await conn.fetchrow(
+            f"""
+            select
+              nutrition_day_id, owner_user_id, day, notes, completed_at,
+              created_at, updated_at
+            from {SCHEMA}.nutrition_day
+            where nutrition_day_id=$1::uuid
+            """,
+            ndid,
         )
 
         return JSONResponse({
@@ -350,7 +421,7 @@ async def create_log_entries_batch(
                 insert into {SCHEMA}.nutrition_day (owner_user_id, day)
                 values ($1::uuid, $2::date)
                 on conflict (owner_user_id, day) do update set updated_at=now()
-                returning nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+                returning nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
                 """,
                 owner,
                 day,
@@ -377,6 +448,16 @@ async def create_log_entries_batch(
                 )
                 entries.append(_row_to_jsonable(row))
 
+            day_row = await conn.fetchrow(
+                f"""
+                select
+                  nutrition_day_id, owner_user_id, day, notes, completed_at,
+                  created_at, updated_at
+                from {SCHEMA}.nutrition_day
+                where nutrition_day_id=$1::uuid
+                """,
+                day_row["nutrition_day_id"],
+            )
             return JSONResponse({"day": _row_to_jsonable(day_row), "entries": entries})
     finally:
         await conn.close()
@@ -529,7 +610,7 @@ async def get_log_range(
         owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
         day_rows = await conn.fetch(
             f"""
-            select nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+            select nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
             from {SCHEMA}.nutrition_day
             where owner_user_id=$1::uuid
               and day between $2::date and $3::date
@@ -656,7 +737,7 @@ async def get_log_day(
 
         day_row = await conn.fetchrow(
             f"""
-            select nutrition_day_id, owner_user_id, day, notes, created_at, updated_at
+            select nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
             from {SCHEMA}.nutrition_day
             where owner_user_id=$1::uuid and day=$2::date
             """,
@@ -731,5 +812,29 @@ async def get_log_day(
             "_target_user_id": owner,
             "_delegated_view": delegated,
         })
+    finally:
+        await conn.close()
+
+
+@router.patch("/log/day")
+async def set_log_day_completion(
+    body: NutritionDayCompletionUpdate,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    day: str = Query(..., min_length=10, max_length=10),
+):
+    owner = require_actor_matches_owner(req, owner_user_id)
+    parsed_day = _parse_day(day)
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            result = await _set_nutrition_day_completion(
+                conn,
+                owner_user_id=owner,
+                day=parsed_day,
+                completed=body.completed,
+            )
+        return JSONResponse(result)
     finally:
         await conn.close()
