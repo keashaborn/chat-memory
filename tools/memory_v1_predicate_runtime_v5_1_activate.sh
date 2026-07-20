@@ -25,6 +25,8 @@ service_source=ops/systemd/$service
 timer_source=ops/systemd/$timer
 migration=ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 test_sql=tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
+compat_migration=ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+compat_test=tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 contract_test=scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 scheduler=scripts/memory_v1_v5_local_inference_scheduler.py
 compiler_sha=af0e7b679480db10855cfb0ab2b705acd26a97238869e12b8b9a3f17bbc0024d
@@ -229,6 +231,8 @@ sha256sum -c <<'HASHES'
 17e9f5889363a57bcdadaa85e5fcb06f8e9eb063b31bb866e6b8a49cd1d099c7  scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 d20b8506f544701d58cc05a237b3131f748b6a1dd1c6c6ca56982c04c7fef2f7  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 541221a287fb5724f55fb87cbbb0ce8f570fb23e34982f0a1c162afa09095d42  tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
+0712044fe8ba5093f5310d5dccf419c2ae41f87ac12742cbed17253e9966790e  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+fb89e61e185aae099a6a992ade4f43d0777239169e0aae3d6d6b322bcf760cf7  tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 35f163241a5d770dd953d999b284e13d63735fbdbfdeeeabb98fb10ec0550af3  scripts/memory_v1_v5_local_inference_scheduler.py
 cd1524ec1ada583ee4b1fde7aa70cf44cf7bf44bb55773b14c25e6c4c93b8d57  scripts/memory_v1_predicate_runtime_profile.py
 84606d74ba719c68baaca77d9e73b4787b96ec8f3398aca60a24ee2bbfa8076e  scripts/memory_v1_relational_extraction_v5_local_provider.py
@@ -305,7 +309,10 @@ grep -Ev '^(evidence_extraction_job|evidence_extraction_event|evidence_extractio
 capture_tables "$all_tables" "$all_before"
 qdrant_before=$(qdrant_signature)
 
-phase=install_downstream_firewall
+phase=install_canonical_compiler_and_downstream_firewall
+run_sql_file "$compat_migration" >/dev/null
+run_sql_file "$compat_migration" >/dev/null
+run_sql_file "$compat_test" >/dev/null
 run_sql_file "$migration" >/dev/null
 run_sql_file "$migration" >/dev/null
 run_sql_file "$test_sql" >/dev/null

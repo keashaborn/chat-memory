@@ -15,6 +15,8 @@ compose=(
 )
 migration=ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 test_sql=tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
+compat_migration=ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+compat_test=tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 backup=$(mktemp /tmp/memory-v1-v5-1-isolation.XXXXXX.dump)
 tables=$(mktemp /tmp/memory-v1-v5-1-isolation-tables.XXXXXX.txt)
 before=$(mktemp /tmp/memory-v1-v5-1-isolation-before.XXXXXX.tsv)
@@ -54,6 +56,7 @@ capture_state() {
 }
 
 [[ -f "$repo_root/$migration" && -f "$repo_root/$test_sql" ]]
+[[ -f "$repo_root/$compat_migration" && -f "$repo_root/$compat_test" ]]
 docker exec brains-postgres-1 pg_dump -U sage -d memory \
   -Fc --no-owner --no-privileges >"$backup"
 [[ -s "$backup" ]]
@@ -94,6 +97,9 @@ scalar "
 " >"$tables"
 capture_state "$before"
 
+run_sql <"$repo_root/$compat_migration"
+run_sql <"$repo_root/$compat_migration"
+run_sql <"$repo_root/$compat_test"
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$migration"
 run_sql <"$repo_root/$test_sql"
