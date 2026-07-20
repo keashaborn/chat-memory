@@ -28,12 +28,19 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     canonical_json,
     canonical_sha256,
 )
+from scripts.memory_v1_relationship_observation_v5_1 import (
+    normalize_relationship_observation,
+)
 
 
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
 LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v7"
+RELATIONSHIP_V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
+RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
+    "memory_v1_relationship_policy_compiler_v8"
+)
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -961,6 +968,24 @@ LOCAL_EXTRACTION_INSTRUCTIONS = (
     "Unicode offsets from the actual SOURCE_CONTENT, never from an example."
 )
 
+RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS = (
+    "\n\nRELATIONSHIP_V5_1_RULES\n"
+    "These rules apply because the supplied registry is "
+    "memory_predicate_registry_v5_1. A wife, husband, or spouse is a person "
+    "linked with relationship.spouse_of; never relationship.has_pet or "
+    "relationship.sibling_of. A named father, mother, or parent is the subject "
+    "of relationship.parent_of and self is the object. A named son, daughter, "
+    "or child is the object of relationship.parent_of and self is the subject. "
+    "A brother or sister uses relationship.sibling_of. A friend uses "
+    "relationship.friend_of. Preserve the specific named-party role in "
+    "relationship_role, such as family:wife, family:father, family:son, or "
+    "social:friend. Social tension, trust, conflict, support, avoidance, and "
+    "adversarial descriptions are owner-reported states, not objective facts; "
+    "use reported_observation modality. Do not substitute one relationship "
+    "predicate for another. Technical discussion, questions, fiction, quoted "
+    "assistant statements, and non-person metaphors do not create a relationship."
+)
+
 
 _INJECTION_RE = re.compile(
     r"\b(?:ignore|disregard|override|bypass)\b.*"
@@ -1641,6 +1666,51 @@ def _observation_source_text(
     return "\n".join(pieces)
 
 
+def _relationship_source_class(content: str) -> str:
+    if _MIXED_AUTHOR_RE.search(content):
+        return "assistant_statement"
+    if re.search(r"\b(?:novel|fiction|roleplay|role-play|in\s+my\s+story)\b", content, re.IGNORECASE):
+        return "fiction_or_roleplay"
+    if re.search(
+        r"\b(?:predicate|function|class|schema|registry|memory\s+system)\b",
+        content,
+        re.IGNORECASE,
+    ):
+        return "technical_discussion"
+    if content.rstrip().endswith("?") and not re.search(
+        r"\b(?:is|are|was|were|am|have|has)\b[^?]{0,300}\.\s*"
+        r"(?:can|could|will|would|do|did)\b",
+        content,
+        re.IGNORECASE,
+    ):
+        return "question_only"
+    return "owner_assertion"
+
+
+def _explicit_current_relationship_state(content: str) -> bool:
+    one_off = re.search(
+        r"\b(?:once|one\s+time|yesterday|last\s+(?:night|week|month)|"
+        r"in\s+(?:19|20)\d{2})\b",
+        content,
+        re.IGNORECASE,
+    )
+    continuing = re.search(
+        r"\b(?:currently|ongoing|still|lately|these\s+days|for\s+several|"
+        r"no\s+contact|estranged|do\s+not\s+trust|don['’]?t\s+trust)\b",
+        content,
+        re.IGNORECASE,
+    )
+    return one_off is None or continuing is not None
+
+
+def _relationship_deferral_reason(reason_code: str) -> str:
+    if reason_code.startswith("unregistered"):
+        return "unregistered_predicate"
+    if reason_code.startswith("ineligible_relationship_source:assistant"):
+        return "mixed_authorship"
+    return "predicate_semantics_unresolved"
+
+
 def _compile_entity_links(
     source: TrustedExtractionSource,
     packet: ProviderPacket,
@@ -1788,6 +1858,11 @@ def _compile_entity_links(
     }
     unsupported_relationship_refs: set[str] = set()
     for observation in observations:
+        if (
+            registry.get("registry_version")
+            == RELATIONSHIP_V5_1_REGISTRY_VERSION
+        ):
+            continue
         obj = observation["object"]
         predicate = observation["predicate"]
         if not predicate.startswith("relationship.") or obj["kind"] != "entity":
@@ -1872,6 +1947,74 @@ def _compile_entity_links(
             for item in value["comparison_hints"]
             if item["observation_ref"] not in unsupported_relationship_refs
         ]
+
+    if registry.get("registry_version") == RELATIONSHIP_V5_1_REGISTRY_VERSION:
+        governed_relationships: list[dict[str, Any]] = []
+        rejected_relationship_refs: set[str] = set()
+        for observation in observations:
+            predicate = observation["predicate"]
+            if not predicate.startswith(("relationship.", "social.")):
+                continue
+            decision = normalize_relationship_observation(
+                observation,
+                entities,
+                content,
+                source_class=_relationship_source_class(content),
+                explicit_current_state=_explicit_current_relationship_state(
+                    content
+                ),
+            )
+            if decision.normalized_observation is None:
+                rejected_relationship_refs.add(
+                    observation["observation_ref"]
+                )
+                _append_deferral_once(
+                    value["deferrals"],
+                    reason_code=_relationship_deferral_reason(
+                        decision.reason_code
+                    ),
+                    memory_shape="direct_claim",
+                    source_spans=observation["source_spans"],
+                    sensitivity=observation["sensitivity"],
+                )
+                repairs.append(
+                    f"relationship_v5_1_deferred:{decision.reason_code}"
+                )
+                continue
+            governed_relationships.append(
+                decision.normalized_observation
+            )
+            if decision.manual_review_required:
+                _append_deferral_once(
+                    value["deferrals"],
+                    reason_code="sensitive_manual_review",
+                    memory_shape="direct_claim",
+                    source_spans=observation["source_spans"],
+                    sensitivity=decision.normalized_observation[
+                        "sensitivity"
+                    ],
+                )
+            repairs.extend(
+                f"relationship_v5_1:{repair}"
+                for repair in decision.repairs
+            )
+        if rejected_relationship_refs or governed_relationships:
+            governed_by_ref = {
+                item["observation_ref"]: item
+                for item in governed_relationships
+            }
+            observations[:] = [
+                governed_by_ref.get(item["observation_ref"], item)
+                for item in observations
+                if item["observation_ref"]
+                not in rejected_relationship_refs
+            ]
+            value["comparison_hints"] = [
+                item
+                for item in value["comparison_hints"]
+                if item["observation_ref"]
+                not in rejected_relationship_refs
+            ]
 
     if "relationship.parent_of" in predicates and _PARENT_ROLE_RE.search(content):
         person_ref = _entity_ref(entities, "person")
@@ -2490,6 +2633,12 @@ class LocalLlamaCppProvider:
         self._runtime_revision = runtime_revision
         self._registry_contract = _registry_contract(registry)
         self._registry = deepcopy(registry)
+        self._policy_compiler_version = (
+            RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION
+            if registry.get("registry_version")
+            == RELATIONSHIP_V5_1_REGISTRY_VERSION
+            else LOCAL_POLICY_COMPILER_VERSION
+        )
         self._allowed_predicates = tuple(
             sorted(item["predicate"] for item in registry["predicates"])
         )
@@ -2515,10 +2664,17 @@ class LocalLlamaCppProvider:
             f"{source.content}\n"
             "SOURCE_CONTENT_END"
         )
+        relationship_instructions = (
+            RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
+            if self._registry.get("registry_version")
+            == RELATIONSHIP_V5_1_REGISTRY_VERSION
+            else ""
+        )
         return LocalStructuredRequest(
             model=self._model,
             instructions=(
-                f"{LOCAL_EXTRACTION_INSTRUCTIONS}\n\n"
+                f"{LOCAL_EXTRACTION_INSTRUCTIONS}"
+                f"{relationship_instructions}\n\n"
                 "GOVERNED_PREDICATE_REGISTRY\n"
                 f"{self._registry_contract}"
             ),
@@ -2546,7 +2702,7 @@ class LocalLlamaCppProvider:
                 ),
                 "request_sha256": canonical_sha256(
                     {
-                        "compiler_version": LOCAL_POLICY_COMPILER_VERSION,
+                        "compiler_version": self._policy_compiler_version,
                         "guard_code": guard_code,
                         "source_sha256": source.source_sha256,
                     }
@@ -2559,7 +2715,7 @@ class LocalLlamaCppProvider:
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "error_code": None,
-                "policy_compiler_version": LOCAL_POLICY_COMPILER_VERSION,
+                "policy_compiler_version": self._policy_compiler_version,
                 "policy_guard_code": guard_code,
                 "compiler_repairs": [],
                 "compiled_packet_sha256": packet_sha256,
@@ -2624,7 +2780,7 @@ class LocalLlamaCppProvider:
             self.last_audit.update(
                 {
                     "policy_compiler_version": (
-                        LOCAL_POLICY_COMPILER_VERSION
+                        self._policy_compiler_version
                     ),
                     "policy_guard_code": None,
                     "compiler_repairs": list(repairs),

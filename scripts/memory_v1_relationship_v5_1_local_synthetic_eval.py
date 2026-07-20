@@ -255,6 +255,10 @@ def main() -> int:
                         "completion_tokens",
                         "policy_compiler_version",
                         "compiler_repairs",
+                        "validation_exception_class",
+                        "validation_error_count",
+                        "validation_error_types",
+                        "validation_error_locations",
                     )
                 },
             }
