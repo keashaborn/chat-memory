@@ -1,5 +1,5 @@
 [Unit]
-Description=Run one bounded local Memory V1 V5 extraction every two hours
+Description=Run one bounded local Memory V1 V5.1 shadow extraction every two hours
 
 [Timer]
 OnBootSec=30min
