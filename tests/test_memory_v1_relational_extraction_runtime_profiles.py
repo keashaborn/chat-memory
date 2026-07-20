@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import inspect
 from pathlib import Path
 
 
@@ -9,6 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.memory_v1_predicate_runtime_profile import load_runtime_profile
+from scripts.memory_v1_v5_local_inference_canary import (
+    effective_policy_compiler_version,
+    persist_packet,
+)
+from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    LOCAL_POLICY_COMPILER_VERSION,
+    RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION,
+)
 from scripts.memory_v1_relational_extraction_v5_provider import (
     SyntheticFixtureProvider,
     TrustedExtractionSource,
@@ -120,7 +129,23 @@ class RelationalExtractionRuntimeProfilesTest(unittest.TestCase):
                 schema=schema,
             )
 
+    def test_profiles_bind_distinct_policy_compilers(self) -> None:
+        self.assertEqual(
+            effective_policy_compiler_version(load_runtime_profile(ROOT, "v5")),
+            LOCAL_POLICY_COMPILER_VERSION,
+        )
+        self.assertEqual(
+            effective_policy_compiler_version(load_runtime_profile(ROOT, "v5_1")),
+            RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION,
+        )
+
+    def test_packet_persistence_uses_static_profile_entry_points(self) -> None:
+        source = inspect.getsource(persist_packet)
+        self.assertIn("memory.persist_owner_v5_local_packet_v1", source)
+        self.assertIn("memory.persist_owner_v5_1_local_packet_v1", source)
+        self.assertNotIn("format(", source)
+        self.assertNotIn("f\"", source)
+
 
 if __name__ == "__main__":
     unittest.main()
-

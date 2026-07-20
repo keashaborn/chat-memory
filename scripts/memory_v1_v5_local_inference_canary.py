@@ -20,6 +20,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_POLICY_COMPILER_VERSION,
     LOCAL_PROVIDER_ID,
     LOCAL_PROVIDER_VERSION,
+    RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION,
     LlamaCppSecureTransport,
     LocalLlamaCppProvider,
     LocalProviderAdapterError,
@@ -83,6 +84,14 @@ def runtime_profile_audit(profile: Any) -> dict[str, str]:
         "extraction_contract_version": profile.contract_version,
         "predicate_registry_version": profile.registry_version,
     }
+
+
+def effective_policy_compiler_version(profile: Any) -> str:
+    if profile.name == "v5":
+        return LOCAL_POLICY_COMPILER_VERSION
+    if profile.name == "v5_1":
+        return RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION
+    raise RuntimeError("unsupported local inference contract profile")
 
 
 def loopback_dsn(value: str) -> str:
@@ -270,6 +279,7 @@ async def claim_exact(
     expected_content_sha256: str,
     worker_id: str,
     args: argparse.Namespace,
+    profile: Any,
 ) -> dict[str, Any]:
     async with conn.transaction():
         await set_actor(conn, owner)
@@ -292,7 +302,7 @@ async def claim_exact(
             canonical_sha256(args.model),
             args.model_file_sha256,
             canonical_sha256(args.runtime_revision),
-            canonical_sha256(LOCAL_POLICY_COMPILER_VERSION),
+            canonical_sha256(effective_policy_compiler_version(profile)),
             args.rolling_window_seconds,
             args.max_reserved_jobs,
             args.failure_threshold,
@@ -311,18 +321,30 @@ async def persist_packet(
     job: dict[str, Any],
     worker_id: str,
     args: argparse.Namespace,
+    profile: Any,
     validated: Any,
     local_model_calls: int,
 ) -> dict[str, Any]:
-    async with conn.transaction():
-        await set_actor(conn, owner)
-        row = await conn.fetchrow(
-            """
+    if profile.name == "v5":
+        persist_sql = """
             SELECT * FROM memory.persist_owner_v5_local_packet_v1(
               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,
               $15,$16
             )
-            """,
+            """
+    elif profile.name == "v5_1":
+        persist_sql = """
+            SELECT * FROM memory.persist_owner_v5_1_local_packet_v1(
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,
+              $15,$16
+            )
+            """
+    else:
+        raise RuntimeError("unsupported local inference contract profile")
+    async with conn.transaction():
+        await set_actor(conn, owner)
+        row = await conn.fetchrow(
+            persist_sql,
             operation_id,
             packet_id,
             job["job_id"],
@@ -333,7 +355,7 @@ async def persist_packet(
             canonical_sha256(args.model),
             args.model_file_sha256,
             canonical_sha256(args.runtime_revision),
-            canonical_sha256(LOCAL_POLICY_COMPILER_VERSION),
+            canonical_sha256(effective_policy_compiler_version(profile)),
             validated.provider_output_sha256,
             validated.normalized_packet_sha256,
             stable_json(validated.normalized_packet),
@@ -540,6 +562,7 @@ async def run() -> int:
             expected_content_sha256=args.expected_content_sha256,
             worker_id=worker_id,
             args=args,
+            profile=profile,
         )
         if (
             claim["control_outcome"] == "reserved"
@@ -816,6 +839,7 @@ async def run() -> int:
             job=claim,
             worker_id=worker_id,
             args=args,
+            profile=profile,
             validated=validated,
             local_model_calls=local_calls,
         )
@@ -859,6 +883,7 @@ async def run() -> int:
             expected_content_sha256=args.expected_content_sha256,
             worker_id=worker_id,
             args=args,
+            profile=profile,
         )
         persisted_replay = await persist_packet(
             conn,
@@ -868,6 +893,7 @@ async def run() -> int:
             job=claim,
             worker_id=worker_id,
             args=args,
+            profile=profile,
             validated=validated,
             local_model_calls=local_calls,
         )
