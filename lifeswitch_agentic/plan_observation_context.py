@@ -755,11 +755,26 @@ class CanonicalPlanObservationContextRepository:
             /* lifeswitch_plan_context:resistance_sessions */
             select s.day,
                    count(l.training_set_log_id)::int as active_set_count,
-                   count(distinct l.exercise_id)::int as exercise_count
+                   count(distinct l.exercise_id)::int as exercise_count,
+                   count(l.training_set_log_id) filter (
+                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'strength'
+                   )::int as strength_set_count,
+                   count(distinct l.exercise_id) filter (
+                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'strength'
+                   )::int as strength_exercise_count,
+                   count(l.training_set_log_id) filter (
+                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'rehab'
+                   )::int as rehab_set_count,
+                   count(distinct l.exercise_id) filter (
+                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'rehab'
+                   )::int as rehab_exercise_count
             from lifeswitch_training.training_session s
             join lifeswitch_training.training_set_log l
               on l.training_session_id = s.training_session_id
              and l.is_active = true
+            left join lifeswitch_training.my_exercise me
+              on me.owner_user_id = s.owner_user_id
+             and me.exercise_id = l.exercise_id
             where s.owner_user_id = $1
               and s.is_active = true
               and s.finished_at is not null
@@ -781,24 +796,67 @@ class CanonicalPlanObservationContextRepository:
             minimum=0,
             maximum=14,
         )
+        strength_rows = [row for row in rows if int(row["strength_set_count"] or 0) > 0]
+        rehab_rows = [row for row in rows if int(row["rehab_set_count"] or 0) > 0]
+        strength_recent = sum(recent_start <= row["day"] <= as_of for row in strength_rows)
+        strength_prior = sum(prior_start <= row["day"] <= prior_end for row in strength_rows)
+        if target.get("kind") == "point":
+            planned = float(target["value"])
+            strength_adherence = {
+                "status": "evaluable",
+                "rule": "sessions_at_or_above_target",
+                "sessions_last_7_days": strength_recent,
+                "planned_sessions_per_week": planned,
+                "target_met": strength_recent >= planned,
+                "rehab_exclusion_supported": True,
+            }
+        elif target.get("kind") == "range":
+            lower = float(target["lower"])
+            upper = float(target["upper"])
+            strength_adherence = {
+                "status": "evaluable",
+                "rule": "sessions_within_target_range",
+                "sessions_last_7_days": strength_recent,
+                "planned_sessions_range": {"lower": lower, "upper": upper},
+                "target_met": lower <= strength_recent <= upper,
+                "rehab_exclusion_supported": True,
+            }
+        else:
+            strength_adherence = {
+                "status": "not_evaluable",
+                "reason": "strength_session_target_unavailable",
+                "rehab_exclusion_supported": True,
+            }
         return {
-            "status": "available_with_classification_limit",
+            "status": "available",
             "window": {"start": start.isoformat(), "end": end.isoformat(), "calendar_days": TRAINING_WINDOW_DAYS},
             "all_logged_resistance_sessions": len(rows),
             "all_logged_active_sets": sum(int(row["active_set_count"] or 0) for row in rows),
             "sessions_last_7_days": sum(recent_start <= row["day"] <= as_of for row in rows),
             "sessions_prior_7_days": sum(prior_start <= row["day"] <= prior_end for row in rows),
+            "strength_sessions": len(strength_rows),
+            "strength_active_sets": sum(int(row["strength_set_count"] or 0) for row in rows),
+            "strength_sessions_last_7_days": strength_recent,
+            "strength_sessions_prior_7_days": strength_prior,
+            "rehab_sessions": len(rehab_rows),
+            "rehab_active_sets": sum(int(row["rehab_set_count"] or 0) for row in rows),
+            "rehab_only_sessions": sum(
+                int(row["rehab_set_count"] or 0) > 0
+                and int(row["strength_set_count"] or 0) == 0
+                for row in rows
+            ),
+            "mixed_strength_rehab_sessions": sum(
+                int(row["rehab_set_count"] or 0) > 0
+                and int(row["strength_set_count"] or 0) > 0
+                for row in rows
+            ),
             "planned_sessions_per_week": target,
-            "strength_adherence": {
-                "status": "not_evaluable",
-                "reason": "rehab_exercises_are_not_explicitly_classified",
-                "rehab_exclusion_supported": False,
-            },
+            "strength_adherence": strength_adherence,
             "progression": {
                 "status": "not_computed",
-                "reason": "exercise_role_classification_and_progression_metric_are_required",
+                "reason": "progression_metric_is_not_implemented_yet",
             },
-            "data_sufficiency": _data_sufficiency(len(rows), limited=2, sufficient=6),
+            "data_sufficiency": _data_sufficiency(len(strength_rows), limited=2, sufficient=6),
         }
 
     async def _conditioning(

@@ -112,10 +112,11 @@ lacks evidence for a numeric target, ask a question instead of guessing.
 Every suggestion must cite at least one exact field in the supplied draft or
 observation_context as evidence. Observation evidence paths begin with /context.
 Do not treat missing, unavailable, permission-denied, or unclassified data as
-zero. Do not call resistance-session counts strength adherence because rehab is
-not yet classified. A single calorie point target has no deterministic adherence
-range. Prefer recent logged response/adherence evidence over estimating energy
-needs from demographics when evaluating an intervention already in progress.
+zero. Use strength-classified counts for strength adherence; never substitute
+all resistance-session counts. If rehab_exclusion_supported is false, do not
+claim strength adherence. A single calorie point target has no deterministic
+adherence range. Prefer recent logged response/adherence evidence over estimating
+energy needs from demographics when evaluating an intervention already in progress.
 Use the deterministic ambiguity_routes to ask for information, defer, or identify
 research need. They are routing constraints, not evidence. Never change a numeric
 nutrition target merely because observed intake differs from it. A numeric target

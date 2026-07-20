@@ -63,6 +63,10 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                 "day": today - dt.timedelta(days=offset),
                 "active_set_count": 12,
                 "exercise_count": 4,
+                "strength_set_count": 12,
+                "strength_exercise_count": 4,
+                "rehab_set_count": 0,
+                "rehab_exercise_count": 0,
             }
             for offset in (1, 3, 8, 10, 15, 17)
         ]
@@ -93,7 +97,7 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
             result["measurements"]["weight"]["weekly_average_trend_lb"]["data_sufficiency"],
             "sufficient",
         )
-        self.assertFalse(result["training"]["strength_adherence"]["rehab_exclusion_supported"])
+        self.assertTrue(result["training"]["strength_adherence"]["rehab_exclusion_supported"])
         self.assertEqual(result["conditioning"]["session_count"], 2)
         self.assertEqual(result["activity"]["steps"]["status"], "not_collected")
         self.assertFalse(result["writes_performed"])
@@ -202,6 +206,51 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
         self.assertEqual(result["nutrition"]["required_permission"], "nutrition:view")
         self.assertEqual(result["training"]["required_permission"], "training:view")
         self.assertEqual(result["measurements"]["required_permission"], "measurements:view")
+
+    async def test_rehab_only_session_is_excluded_from_strength_adherence(self) -> None:
+        today = dt.datetime.now(ZoneInfo("UTC")).date()
+        conn = FakeConnection(
+            {
+                "lifeswitch_plan_context:nutrition_daily_totals": [],
+                "lifeswitch_plan_context:measurements": [],
+                "lifeswitch_plan_context:resistance_sessions": [
+                    {
+                        "day": today,
+                        "active_set_count": 3,
+                        "exercise_count": 1,
+                        "strength_set_count": 0,
+                        "strength_exercise_count": 0,
+                        "rehab_set_count": 3,
+                        "rehab_exercise_count": 1,
+                    },
+                    {
+                        "day": today - dt.timedelta(days=1),
+                        "active_set_count": 12,
+                        "exercise_count": 4,
+                        "strength_set_count": 12,
+                        "strength_exercise_count": 4,
+                        "rehab_set_count": 0,
+                        "rehab_exercise_count": 0,
+                    },
+                ],
+                "lifeswitch_plan_context:conditioning_sessions": [],
+            }
+        )
+        result = await CanonicalPlanObservationContextRepository().summarize(
+            conn,  # type: ignore[arg-type]
+            owner_user_id=uuid.uuid4(),
+            owner_timezone="UTC",
+            document=document(),
+            permissions=ObservationPermissions(True, True, True),
+        )
+        training = result["training"]
+        self.assertEqual(training["all_logged_resistance_sessions"], 2)
+        self.assertEqual(training["strength_sessions"], 1)
+        self.assertEqual(training["rehab_sessions"], 1)
+        self.assertEqual(training["rehab_only_sessions"], 1)
+        self.assertEqual(training["strength_sessions_last_7_days"], 1)
+        self.assertFalse(training["strength_adherence"]["target_met"])
+        self.assertTrue(training["strength_adherence"]["rehab_exclusion_supported"])
 
 
 if __name__ == "__main__":
