@@ -1,0 +1,63 @@
+{
+  "plan_version": "memory_v1_predicate_runtime_v5_1_install_plan_v1",
+  "server": "seebx",
+  "authorized_base": "76cc4736dad0bc2d8ebca3534b9d4d8a7cf299a7",
+  "implementation_ancestor": "6e7149a",
+  "allowed_durable_changes": {
+    "memory.predicate": 38,
+    "memory.predicate_registry_version": 1,
+    "memory.predicate_registry_seed": 82,
+    "memory.predicate_contract": 82,
+    "memory.predicate_registry_source_binding_v5_1": 2,
+    "memory.relationship_predicate_contract_v5_1": 41,
+    "functions": [
+      "memory.reject_predicate_registry_v5_1_mutation()",
+      "memory.persist_owner_v5_1_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)"
+    ],
+    "immutability_triggers": "registry_generator_defined"
+  },
+  "required_proofs": [
+    "fresh_restorable_postgres_backup",
+    "all_memory_v1_timers_exactly_restored",
+    "rollback_only_security_suite_pass",
+    "brains_app_execute_only",
+    "public_execute_denied",
+    "security_definer_empty_search_path",
+    "restricted_function_owner",
+    "legacy_v5_function_unchanged",
+    "all_non_registry_memory_tables_unchanged",
+    "qdrant_unchanged",
+    "brains_health_and_readiness_pass"
+  ],
+  "prohibited_changes": [
+    "evidence_processing",
+    "claim_or_pattern_creation",
+    "scheduler_activation",
+    "qdrant_write",
+    "retrieval_activation",
+    "prompt_influence",
+    "frontend_change",
+    "external_model_call",
+    "other_owner_processing",
+    "deletion_or_redaction",
+    "authentication_or_rls_weakening"
+  ],
+  "artifact_sha256": {
+    "production_installer": "52fd23d768be5fd6e18a49415b5bc042625233ce892317cdf76ea3ef65cd3faf",
+    "registry_generator": "4b3ca8357f5b269024b531c157de84cf8bcf6fc3a13ae3cb8829ee3f83708f90",
+    "registry_integration": "12e132f03554adb041090fa74ed99c178a20c5625cade85dc1bfb52b43a61eaf",
+    "relationship_registry": "01d0045cf5607b55eb7d2b97611c5810b81c6098c6118435a2015d5cc8102a4f",
+    "generated_registry_sql": "c14b08169710553c7e6f003f88ff78ada5e4e67a877df09e8a96048acdd96d66",
+    "base_local_inference_migration": "2825d5e0d0d079f1ba647c047985cef886e116eab75e2719e24357748775fd65",
+    "v5_1_persistence_migration": "658fce782842ddb096433c6ad07f49184eefb35000bf60608e584e86656edc23",
+    "rollback_security_test": "1382ebaa5cd67a774562e68870c92dea833cebe57b18a57800ae4fbd983b4d8b",
+    "evaluation_audit": "c08d12be4df4cef6a24888f383069cca3fc09e63870ef4581b4a29c106c3c511"
+  },
+  "stop_before": [
+    "runtime_code_activation",
+    "v5_1_scheduler_activation",
+    "claim_promotion",
+    "qdrant_projection",
+    "retrieval_or_prompt_influence"
+  ]
+}
