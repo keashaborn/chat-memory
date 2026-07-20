@@ -116,8 +116,8 @@ BEGIN
         'extraction_confidence',observation.extraction_confidence,
         'observation_sha256',observation.observation_sha256,
         'evidence_content_sha256',evidence.content_sha256,
-        'evidence_directness',COALESCE(evidence.directness,0),
-        'evidence_source_reliability',COALESCE(evidence.source_reliability,0),
+        'evidence_directness',evidence.directness,
+        'evidence_source_reliability',evidence.source_reliability,
         'evidence_source_system',evidence.source_system,
         'independence_key_sha256',memory.v5_digest_text(COALESCE(
           evidence.independence_key,evidence.content_sha256,

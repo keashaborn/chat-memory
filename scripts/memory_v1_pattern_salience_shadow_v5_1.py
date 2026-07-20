@@ -69,6 +69,11 @@ def mean(values: Iterable[float]) -> float:
     return fmean(materialized) if materialized else 0.0
 
 
+def evidence_dimension(value: Any) -> float:
+    """Use a neutral prior for legacy evidence whose component is unknown."""
+    return 0.5 if value is None else float(value)
+
+
 def parse_date(value: str | None) -> date | None:
     if not value:
         return None
@@ -356,8 +361,11 @@ def build_target_packet(
     independence_keys = {row["independence_key_sha256"] for _, row in support_rows}
     opposition_keys = {row["independence_key_sha256"] for _, row in oppose_rows}
     source_count = len({row["evidence_source_system"] for row in considered})
-    directness = mean(float(row["evidence_directness"]) for row in considered)
-    reliability = mean(float(row["evidence_source_reliability"]) for row in considered)
+    directness = mean(evidence_dimension(row["evidence_directness"]) for row in considered)
+    reliability = mean(
+        evidence_dimension(row["evidence_source_reliability"])
+        for row in considered
+    )
     relevance = mean(float(link["relevance"]) for link, _ in linked)
     extraction = mean(float(row["extraction_confidence"]) for row in considered)
     independence = len(independence_keys | opposition_keys) / len(linked)
@@ -389,7 +397,7 @@ def build_target_packet(
     )
     age_days = max(0, (as_of - latest).days)
     recency = math.pow(0.5, age_days / half_life_days(target))
-    frequency = min(1.0, len(independence_keys) / 3.0)
+    frequency = min(1.0, max(0, len(independence_keys) - 1) / 2.0)
     contradiction = 1.0 if state in {"retracted", "contested"} else (
         counts["opposes"] / max(1, counts["supports"] + counts["opposes"])
     )
@@ -438,8 +446,8 @@ def build_target_packet(
             "frequency": round4(frequency),
             "recency": round4(recency),
             "emotional_significance": 0,
-            "goal_relevance": 0.8 if target["target_kind"] == "project_knowledge" else 0,
-            "future_utility": 0.7 if target["target_kind"] == "project_knowledge" else 0,
+            "goal_relevance": 0,
+            "future_utility": 0,
             "retrieval_utility": 0,
             "contradiction_pressure": round4(contradiction),
             "as_of_date": as_of.isoformat(),

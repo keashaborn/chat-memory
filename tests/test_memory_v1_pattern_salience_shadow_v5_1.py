@@ -159,10 +159,24 @@ class PatternSalienceShadowV51Tests(unittest.TestCase):
         salience = packet["salience_features"]
         self.assertEqual(assessment["independent_support_cluster_count"], 1)
         self.assertEqual(assessment["dimensions"]["independence"], 0.5)
-        self.assertEqual(salience["frequency"], 0.3333)
+        self.assertEqual(salience["frequency"], 0)
         self.assertNotIn("truth", packet)
         self.assertNotIn("salience", salience)
         self.assertNotIn("overall_score", salience)
+
+    def test_unknown_reliability_uses_neutral_prior_not_zero(self) -> None:
+        row = observation(1)
+        row["evidence_source_reliability"] = None
+        report = generate_report(
+            snapshot([row], [target([row["observation_id"]])]),
+            OWNER,
+            date(2026, 7, 20),
+        )
+        assessment = report["target_snapshot_candidates"][0]["packet"][
+            "evidence_assessment"
+        ]
+        self.assertEqual(assessment["dimensions"]["source_reliability"], 0.5)
+        self.assertEqual(assessment["dimensions"]["support_strength"], 0.5)
 
     def test_retracted_target_retains_evidence_and_pressure(self) -> None:
         row = observation(1)

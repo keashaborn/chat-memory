@@ -16,11 +16,11 @@ rollback=ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1_rollback.
 sql_test=tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
 worker=scripts/memory_v1_pattern_salience_shadow_v5_1.py
 python_test=tests/test_memory_v1_pattern_salience_shadow_v5_1.py
-migration_sha=eec8b125020507973380471274526e4c629085e27e65e224f3b02a31a38ab6e6
+migration_sha=c8b2eeb30c58a624cc7ba247af350530aa23e53195bfa728fd68de6ec4e98f96
 rollback_sha=0d793328f1a82070a32c7bce9b321899f02c34fc376a47772216ea232601aba1
 sql_test_sha=44787c4cb821400434191cdfacf0179fedd0a9071c96685f63a03efd1f3443d7
-worker_sha=57981b31194ae2ff40747277b339e1a52e3fec13e32a52d0c9d1cb41cb59604a
-python_test_sha=394d35fdc75b44ab32379d2b66d5eb58466cc315f86ceb7ea6620148d2173287
+worker_sha=16c5cb75589804c41f8286ab1bb28e06b54f0b96ec37298ceb4e421490768e52
+python_test_sha=d94d7e3c728aed6b4e84f1c92c1f35712fabe597089bb53827041c63ae5e6342
 
 backup=$(mktemp /tmp/memory-v1-pattern-salience-shadow.XXXXXX.dump)
 work=$(mktemp -d /tmp/memory-v1-pattern-salience-shadow.XXXXXX)
@@ -100,6 +100,7 @@ MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port" "${compose[@]}" up -d --wait postgres
 } | run_sql >/dev/null
 MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port" "${compose[@]}" exec -T postgres \
   pg_restore -U sage -d memory --clean --if-exists <"$backup"
+baseline_loader=$(scalar "SELECT to_regprocedure('memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)') IS NOT NULL")
 
 run_sql -At -c "SELECT table_schema || E'\\t' || table_name
   FROM information_schema.tables WHERE table_type='BASE TABLE'
@@ -136,17 +137,21 @@ capture_rows "$after_rows"
 cmp -s "$before_rows" "$after_rows"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
-run_sql <"$rollback" >/dev/null
-[[ "$(scalar "SELECT to_regprocedure('memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)') IS NULL")" == t ]]
-MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port" "${compose[@]}" exec -T postgres \
-  pg_dump -U sage -d memory --schema-only --no-owner --no-privileges \
-  >"$after_schema"
-if ! diff -I '^\\restrict ' -I '^\\unrestrict ' -q \
-  "$before_schema" "$after_schema" >/dev/null; then
-  diff -I '^\\restrict ' -I '^\\unrestrict ' -u \
-    "$before_schema" "$after_schema" | head -n 240 >&2
-  printf '%s\n' 'shadow input rollback did not restore clone schema' >&2
-  exit 1
+if [[ "$baseline_loader" == f ]]; then
+  run_sql <"$rollback" >/dev/null
+  [[ "$(scalar "SELECT to_regprocedure('memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)') IS NULL")" == t ]]
+  MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port" "${compose[@]}" exec -T postgres \
+    pg_dump -U sage -d memory --schema-only --no-owner --no-privileges \
+    >"$after_schema"
+  if ! diff -I '^\\restrict ' -I '^\\unrestrict ' -q \
+    "$before_schema" "$after_schema" >/dev/null; then
+    diff -I '^\\restrict ' -I '^\\unrestrict ' -u \
+      "$before_schema" "$after_schema" | sed -n '1,240p' >&2
+    printf '%s\n' 'shadow input rollback did not restore clone schema' >&2
+    exit 1
+  fi
+else
+  [[ "$(scalar "SELECT pg_get_userbyid(proowner)='memory_v5_epistemic_writer' FROM pg_proc WHERE oid='memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)'::regprocedure")" == t ]]
 fi
 
 printf '%s\n' 'memory_v1_pattern_salience_shadow_v5_1_production_clone: PASS'

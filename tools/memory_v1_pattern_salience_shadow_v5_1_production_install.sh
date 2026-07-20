@@ -120,10 +120,10 @@ git merge-base --is-ancestor "$authorized_base" HEAD
 git merge-base --is-ancestor "$implementation_commit" HEAD
 [[ -z "$(git status --porcelain)" ]]
 sha256sum -c <<'HASHES'
-eec8b125020507973380471274526e4c629085e27e65e224f3b02a31a38ab6e6  ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
+c8b2eeb30c58a624cc7ba247af350530aa23e53195bfa728fd68de6ec4e98f96  ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
 44787c4cb821400434191cdfacf0179fedd0a9071c96685f63a03efd1f3443d7  tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
-57981b31194ae2ff40747277b339e1a52e3fec13e32a52d0c9d1cb41cb59604a  scripts/memory_v1_pattern_salience_shadow_v5_1.py
-394d35fdc75b44ab32379d2b66d5eb58466cc315f86ceb7ea6620148d2173287  tests/test_memory_v1_pattern_salience_shadow_v5_1.py
+16c5cb75589804c41f8286ab1bb28e06b54f0b96ec37298ceb4e421490768e52  scripts/memory_v1_pattern_salience_shadow_v5_1.py
+d94d7e3c728aed6b4e84f1c92c1f35712fabe597089bb53827041c63ae5e6342  tests/test_memory_v1_pattern_salience_shadow_v5_1.py
 HASHES
 PYTHONPATH=. venv/bin/python -m unittest \
   tests/test_memory_v1_pattern_salience_shadow_v5_1.py \
@@ -208,9 +208,9 @@ phase=revalidate_before_write
 git merge-base --is-ancestor "$implementation_commit" HEAD
 [[ -z "$(git status --porcelain)" ]]
 sha256sum -c <<'HASHES'
-eec8b125020507973380471274526e4c629085e27e65e224f3b02a31a38ab6e6  ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
+c8b2eeb30c58a624cc7ba247af350530aa23e53195bfa728fd68de6ec4e98f96  ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
 44787c4cb821400434191cdfacf0179fedd0a9071c96685f63a03efd1f3443d7  tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
-57981b31194ae2ff40747277b339e1a52e3fec13e32a52d0c9d1cb41cb59604a  scripts/memory_v1_pattern_salience_shadow_v5_1.py
+16c5cb75589804c41f8286ab1bb28e06b54f0b96ec37298ceb4e421490768e52  scripts/memory_v1_pattern_salience_shadow_v5_1.py
 HASHES
 
 phase=install_restricted_loader
