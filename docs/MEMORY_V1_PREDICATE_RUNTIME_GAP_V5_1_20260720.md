@@ -54,4 +54,3 @@ The relationship design is complete enough for runtime integration, but V5.1 is 
 6. Route scheduled shadow extraction and auto-stage by the server-owned contract profile.
 7. Run bounded owner-only canaries, prove replay and account isolation, then enable nightly V5.1 review staging.
 8. Stop before claim promotion, Qdrant, retrieval, or prompt influence.
-

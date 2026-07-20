@@ -14,4 +14,3 @@ Each profile binds an artifact path and SHA-256 for its registry and normalized-
 V5 remains readable and replayable. New V5.1 writes use new V5.1 functions and exact V5.1 foreign-key contracts. No function widens V5 acceptance in place. Mixed-version batches fail before writes.
 
 The first runtime state is `shadow_review_staging`: append-only queue/ledger/packet, entity-resolution review, observation staging, and audit records are allowed. Claims, pattern heads, Qdrant projections, retrieval, and prompt influence remain disabled.
-

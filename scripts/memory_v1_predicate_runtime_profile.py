@@ -133,4 +133,3 @@ def load_runtime_profile(
         schema_path=schema_path,
         schema_artifact_sha256=value["schema_artifact_sha256"],
     )
-
