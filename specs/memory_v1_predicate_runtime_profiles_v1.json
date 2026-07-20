@@ -1,0 +1,28 @@
+{
+  "contract_version": "memory_v1_predicate_runtime_profiles_v1",
+  "profiles": {
+    "v5": {
+      "contract_version": "memory_v1_relational_extraction_v5",
+      "lifecycle": "legacy_replay",
+      "registry_artifact_sha256": "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8",
+      "registry_canonical_sha256": "c7d6397c804699ae3afa4538fe6c9535b5b1e08c357ae3a18105b81035f5cacc",
+      "registry_path": "specs/memory_v1_predicate_registry_v5.json",
+      "registry_version": "memory_predicate_registry_v5",
+      "schema_artifact_sha256": "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70",
+      "schema_path": "specs/memory_v1_relational_extraction_v5.schema.json"
+    },
+    "v5_1": {
+      "contract_version": "memory_v1_relational_extraction_v5_1",
+      "lifecycle": "shadow_review_staging",
+      "registry_artifact_sha256": "13b5993f2b158a9d84f19903131612ddd2f32e698a721a24d1b48608eff9e902",
+      "registry_canonical_sha256": "7599840d3c7bcc39dbaa0211adf0f2a088bf9ecb03d843984c25a7ac30ed1615",
+      "registry_path": "specs/memory_v1_predicate_registry_v5_1.json",
+      "registry_version": "memory_predicate_registry_v5_1",
+      "schema_artifact_sha256": "b56b20db3ce7f2e9c9ded4e00b9419f391e09c8f4f3d23d95ac2adac6028197b",
+      "schema_path": "specs/memory_v1_relational_extraction_v5_1.schema.json"
+    }
+  },
+  "scheduler_default_profile": "v5",
+  "status": "proposed",
+  "target_scheduled_profile": "v5_1"
+}

@@ -36,6 +36,10 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     load_schema,
     validate_and_normalize,
 )
+from scripts.memory_v1_predicate_runtime_profile import (
+    PROFILE_NAMES,
+    load_runtime_profile,
+)
 
 
 WORKER_VERSION = "memory_v1_v5_local_inference_canary_v1"
@@ -44,27 +48,11 @@ DIAGNOSTIC_ENABLE_TOKEN = (
     "memory_v1_v5_local_inference_diagnostic_replay_v1"
 )
 PERSIST_NAMESPACE = uuid.UUID("a1ab4c90-2b6a-4a4b-a8e9-746c03917721")
-EXPECTED_REGISTRY_SHA256 = (
-    "4837cc66f8ef41d5b091528c02e06add267586cb170dc0eb4b57fc207bd0f3d8"
-)
-EXPECTED_SCHEMA_SHA256 = (
-    "744ce1d466dfe502fb78fd0ba0a996dd723d1593f34bc456c849c20811f99e70"
-)
 PINNED_MODEL_FILE_SHA256 = (
     "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0"
 )
 PINNED_RUNTIME_REVISION = "llama.cpp-b10066-86a9c79f8"
 PINNED_MODEL_ALIAS = "qwen3-14b-local-extractor"
-DEFAULT_REGISTRY = (
-    Path(__file__).resolve().parents[1]
-    / "specs"
-    / "memory_v1_predicate_registry_v5.json"
-)
-DEFAULT_SCHEMA = (
-    Path(__file__).resolve().parents[1]
-    / "specs"
-    / "memory_v1_relational_extraction_v5.schema.json"
-)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,63}$")
 REJECTION_RE = re.compile(r"^[a-z][a-z0-9_]{1,99}$")
@@ -87,6 +75,14 @@ def canonical_source_external_id(
 
 def stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def runtime_profile_audit(profile: Any) -> dict[str, str]:
+    return {
+        "predicate_contract_profile": profile.name,
+        "extraction_contract_version": profile.contract_version,
+        "predicate_registry_version": profile.registry_version,
+    }
 
 
 def loopback_dsn(value: str) -> str:
@@ -119,8 +115,11 @@ def arguments() -> argparse.Namespace:
         "--model-file-sha256", default=PINNED_MODEL_FILE_SHA256
     )
     parser.add_argument("--runtime-revision", default=PINNED_RUNTIME_REVISION)
-    parser.add_argument("--registry", default=str(DEFAULT_REGISTRY))
-    parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
+    parser.add_argument(
+        "--contract-profile",
+        choices=sorted(PROFILE_NAMES),
+        default="v5",
+    )
     parser.add_argument("--worker-id")
     parser.add_argument("--lease-seconds", type=int, default=900)
     parser.add_argument("--max-attempts", type=int, default=1)
@@ -456,8 +455,16 @@ async def run() -> int:
     ids = validated_arguments(args)
     worker_id = worker_reference(args.worker_id)
     root = Path(__file__).resolve().parents[1]
-    registry = load_registry(Path(args.registry), EXPECTED_REGISTRY_SHA256)
-    schema = load_schema(Path(args.schema), EXPECTED_SCHEMA_SHA256)
+    profile = load_runtime_profile(root, args.contract_profile)
+    registry = load_registry(
+        profile.registry_path,
+        profile.registry_artifact_sha256,
+    )
+    schema = load_schema(
+        profile.schema_path,
+        profile.schema_artifact_sha256,
+        expected_contract_version=profile.contract_version,
+    )
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
@@ -488,6 +495,7 @@ async def run() -> int:
                 stable_json(
                     {
                         "contract_version": WORKER_VERSION,
+                        **runtime_profile_audit(profile),
                         "apply": False,
                         "plan": plan,
                         "external_model_calls": 0,
@@ -550,6 +558,7 @@ async def run() -> int:
                 stable_json(
                     {
                         "contract_version": WORKER_VERSION,
+                        **runtime_profile_audit(profile),
                         "apply": True,
                         "outcome": claim["control_outcome"],
                         "external_model_calls": 0,
@@ -632,6 +641,7 @@ async def run() -> int:
                             "contract_version": (
                                 "memory_v1_v5_local_diagnostic_replay_v1"
                             ),
+                            **runtime_profile_audit(profile),
                             "apply": False,
                             "outcome": "rejected",
                             "rejection_code": diagnostic_code,
@@ -721,6 +731,7 @@ async def run() -> int:
                 stable_json(
                     {
                         "contract_version": WORKER_VERSION,
+                        **runtime_profile_audit(profile),
                         "apply": True,
                         "outcome": "rejected",
                         "rejection_code": code,
@@ -759,6 +770,7 @@ async def run() -> int:
                         "contract_version": (
                             "memory_v1_v5_local_diagnostic_replay_v1"
                         ),
+                        **runtime_profile_audit(profile),
                         "apply": False,
                         "outcome": "accepted",
                         "external_model_calls": (
@@ -892,6 +904,7 @@ async def run() -> int:
             stable_json(
                 {
                     "contract_version": WORKER_VERSION,
+                    **runtime_profile_audit(profile),
                     "apply": True,
                     "outcome": "accepted",
                     "owner_user_id_sha256": sha256_text(str(ids["owner"])),

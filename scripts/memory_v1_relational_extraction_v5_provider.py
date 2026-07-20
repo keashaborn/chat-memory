@@ -16,6 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 CONTRACT_VERSION = "memory_v1_relational_extraction_v5"
 REGISTRY_VERSION = "memory_predicate_registry_v5"
+CONTRACT_VERSION_V5_1 = "memory_v1_relational_extraction_v5_1"
+REGISTRY_VERSION_V5_1 = "memory_predicate_registry_v5_1"
+SUPPORTED_CONTRACT_PROFILES = {
+    REGISTRY_VERSION: CONTRACT_VERSION,
+    REGISTRY_VERSION_V5_1: CONTRACT_VERSION_V5_1,
+}
 TEMPORAL_POLICY_VERSION = "memory_temporal_normalization_v5"
 SYNTHETIC_PROVIDER_ID = "synthetic_fixture"
 SYNTHETIC_PROVIDER_VERSION = "v1"
@@ -422,9 +428,15 @@ class SourceEnvelope(StrictModel):
 
 
 class NormalizedPacket(StrictModel):
-    contract_version: Literal["memory_v1_relational_extraction_v5"]
+    contract_version: Literal[
+        "memory_v1_relational_extraction_v5",
+        "memory_v1_relational_extraction_v5_1",
+    ]
     source_envelope: SourceEnvelope
-    predicate_registry_version: Literal["memory_predicate_registry_v5"]
+    predicate_registry_version: Literal[
+        "memory_predicate_registry_v5",
+        "memory_predicate_registry_v5_1",
+    ]
     entity_mentions: list[NormalizedEntityMention] = Field(max_length=24)
     observations: list[NormalizedObservation] = Field(max_length=32)
     comparison_hints: list[NormalizedComparisonHint] = Field(max_length=32)
@@ -678,7 +690,12 @@ def load_registry(path: Path, expected_sha256: str) -> dict[str, Any]:
     return value
 
 
-def load_schema(path: Path, expected_sha256: str) -> dict[str, Any]:
+def load_schema(
+    path: Path,
+    expected_sha256: str,
+    *,
+    expected_contract_version: str = CONTRACT_VERSION,
+) -> dict[str, Any]:
     if not SHA256_RE.fullmatch(expected_sha256):
         raise ValueError("expected extraction schema SHA-256 is invalid")
     if file_sha256(path) != expected_sha256:
@@ -690,7 +707,7 @@ def load_schema(path: Path, expected_sha256: str) -> dict[str, Any]:
         value.get("properties", {})
         .get("contract_version", {})
         .get("const")
-        != CONTRACT_VERSION
+        != expected_contract_version
     ):
         raise ValueError("extraction schema contract mismatch")
     if not isinstance(value.get("$defs"), dict):
@@ -699,9 +716,11 @@ def load_schema(path: Path, expected_sha256: str) -> dict[str, Any]:
 
 
 def _validate_registry(value: dict[str, Any]) -> None:
-    if value.get("registry_version") != REGISTRY_VERSION:
+    registry_version = value.get("registry_version")
+    contract_version = value.get("contract_version")
+    if registry_version not in SUPPORTED_CONTRACT_PROFILES:
         raise ValueError("predicate registry version mismatch")
-    if value.get("contract_version") != CONTRACT_VERSION:
+    if SUPPORTED_CONTRACT_PROFILES[registry_version] != contract_version:
         raise ValueError("predicate registry contract mismatch")
     if value.get("status") != "proposed":
         raise ValueError("predicate registry status changed")
@@ -730,6 +749,15 @@ def validate_and_normalize(
     max_external_model_calls: int = 0,
 ) -> ValidatedProviderResult:
     _validate_registry(registry)
+    registry_version = str(registry["registry_version"])
+    contract_version = SUPPORTED_CONTRACT_PROFILES[registry_version]
+    schema_contract_version = (
+        schema.get("properties", {})
+        .get("contract_version", {})
+        .get("const")
+    )
+    if schema_contract_version != contract_version:
+        raise ValueError("extraction schema/registry contract mismatch")
     allowlist = (
         {SYNTHETIC_PROVIDER_ID: SYNTHETIC_PROVIDER_VERSION}
         if allowed_provider_versions is None
@@ -934,7 +962,7 @@ def validate_and_normalize(
         raise ValueError("normalized deferrals exceed V5 packet budget")
 
     packet_value = {
-        "contract_version": CONTRACT_VERSION,
+        "contract_version": contract_version,
         "source_envelope": {
             "job_id": source.job_id,
             "source_system": SOURCE_SYSTEM,
@@ -942,7 +970,7 @@ def validate_and_normalize(
             "source_sha256": source.source_sha256,
             "source_recorded_at": source.source_recorded_at,
         },
-        "predicate_registry_version": REGISTRY_VERSION,
+        "predicate_registry_version": registry_version,
         "entity_mentions": mentions,
         "observations": observations,
         "comparison_hints": comparisons,

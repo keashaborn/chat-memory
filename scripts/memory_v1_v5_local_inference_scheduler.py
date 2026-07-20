@@ -17,6 +17,11 @@ from urllib.parse import urlparse
 
 import asyncpg
 
+from scripts.memory_v1_predicate_runtime_profile import (
+    PROFILE_NAMES,
+    load_runtime_profile,
+)
+
 
 WORKER_VERSION = "memory_v1_v5_local_inference_scheduler_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_local_inference_scheduler_apply_v1"
@@ -43,6 +48,9 @@ SAFE_CANARY_FIELDS = {
     "zero_write_replay_proved",
     "invocation_zero_write",
     "completion_apply_outcome",
+    "predicate_contract_profile",
+    "extraction_contract_version",
+    "predicate_registry_version",
     "write_counts",
 }
 SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,99}$")
@@ -66,6 +74,11 @@ def arguments() -> argparse.Namespace:
     )
     parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument("--selector-version")
+    parser.add_argument(
+        "--contract-profile",
+        choices=sorted(PROFILE_NAMES),
+        default="v5",
+    )
     parser.add_argument("--run-id")
     parser.add_argument("--canary", default=str(DEFAULT_CANARY))
     parser.add_argument("--credential-name", default="local_api_key")
@@ -267,6 +280,8 @@ def canary_command(
         str(target["evidence_content_sha256"]),
         "--selector-version",
         str(target["selector_version"]),
+        "--contract-profile",
+        getattr(args, "contract_profile", "v5"),
         "--run-id",
         str(run_id),
         "--endpoint",
@@ -399,6 +414,8 @@ def invoke_canary(
 async def run() -> int:
     args = arguments()
     run_id = validate_arguments(args)
+    root = Path(__file__).resolve().parents[1]
+    profile = load_runtime_profile(root, args.contract_profile)
     owners = canonical_owners(args.owner_user_id)
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
@@ -434,6 +451,9 @@ async def run() -> int:
             stable_json(
                 {
                     "worker_version": WORKER_VERSION,
+                    "predicate_contract_profile": profile.name,
+                    "extraction_contract_version": profile.contract_version,
+                    "predicate_registry_version": profile.registry_version,
                     "apply": False,
                     "owner_count": len(owners),
                     "max_jobs": 1,
@@ -460,6 +480,9 @@ async def run() -> int:
             stable_json(
                 {
                     "worker_version": WORKER_VERSION,
+                    "predicate_contract_profile": profile.name,
+                    "extraction_contract_version": profile.contract_version,
+                    "predicate_registry_version": profile.registry_version,
                     "apply": True,
                     "outcome": "no_work",
                     "owner_count": len(owners),
@@ -487,6 +510,9 @@ async def run() -> int:
             stable_json(
                 {
                     "worker_version": WORKER_VERSION,
+                    "predicate_contract_profile": profile.name,
+                    "extraction_contract_version": profile.contract_version,
+                    "predicate_registry_version": profile.registry_version,
                     "apply": True,
                     "owner_count": len(owners),
                     "processed": 1,
@@ -501,6 +527,9 @@ async def run() -> int:
         stable_json(
             {
                 "worker_version": WORKER_VERSION,
+                "predicate_contract_profile": profile.name,
+                "extraction_contract_version": profile.contract_version,
+                "predicate_registry_version": profile.registry_version,
                 "apply": True,
                 "outcome": "all_owners_blocked",
                 "owner_count": len(owners),
