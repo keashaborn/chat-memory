@@ -142,6 +142,8 @@
         "source_diversity_count",
         "supporting_observation_ids",
         "opposing_observation_ids",
+        "qualifying_observation_ids",
+        "corrective_observation_ids",
         "dimensions",
         "method",
         "method_version",
@@ -173,6 +175,8 @@
         "source_diversity_count": {"type": "integer", "minimum": 0},
         "supporting_observation_ids": {"$ref": "#/$defs/uuid_set"},
         "opposing_observation_ids": {"$ref": "#/$defs/uuid_set"},
+        "qualifying_observation_ids": {"$ref": "#/$defs/uuid_set"},
+        "corrective_observation_ids": {"$ref": "#/$defs/uuid_set"},
         "dimensions": {"$ref": "#/$defs/evidence_dimensions"},
         "method": {
           "type": "string",
@@ -249,6 +253,7 @@
         "future_utility",
         "retrieval_utility",
         "contradiction_pressure",
+        "as_of_date",
         "method_version",
         "signal_manifest_sha256"
       ],
@@ -261,6 +266,10 @@
         "future_utility": {"$ref": "#/$defs/unit_interval"},
         "retrieval_utility": {"$ref": "#/$defs/unit_interval"},
         "contradiction_pressure": {"$ref": "#/$defs/unit_interval"},
+        "as_of_date": {
+          "type": "string",
+          "format": "date"
+        },
         "method_version": {
           "const": "memory_v1_salience_features_v5_1"
         },

@@ -1,6 +1,7 @@
 # Memory V1 Epistemic, Pattern, and Salience Contract V5.1
 
-Status: proposed, specification-only, runtime inactive.
+Status: contract and additive schema production-clone verified; production
+schema, workers, readers, retrieval, and prompt influence remain inactive.
 
 Server boundary: seebx backend. Private GPU inference may propose semantic
 groupings, but Postgres remains authoritative. This contract does not install a
@@ -245,8 +246,8 @@ observation or episode replay is rejected.
 ### `memory.salience_feature_snapshot_v5_1`
 
 Append-only eight-dimensional feature vector for an exact target revision and
-as-of bucket. It includes raw signal counts/hashes and method version but no
-canonical final score.
+explicit `as_of_date` bucket. It includes raw signal counts/hashes and method
+version but no canonical final score.
 
 ### `memory.retrieval_outcome_signal_v5_1`
 
@@ -279,6 +280,12 @@ or a salience vector. Backend policy recomputes all hashes and constraints.
 Every job is lease-bound, replay-safe, input-hash locked, and writes an immutable
 event. A worker never rewrites source evidence or observations.
 
+Packet hashing is non-circular and deterministic. `packet_sha256` is the
+SHA-256 of canonical JSON after removing the top-level `packet_sha256` field.
+`input_manifest_sha256` binds the ordered, owner-scoped input revision and
+signal hashes used to build the packet. The database recomputes both applicable
+hashes before accepting a snapshot; a caller-supplied hash is never trusted.
+
 ## Security and isolation
 
 - Owner identity comes only from the authenticated transaction-local actor.
@@ -305,6 +312,29 @@ The legacy `confidence`, `importance`, and `salience` claim columns remain
 readable during cutover. V5.1 extraction and projection packets may not set
 them. The future serving adapter may derive temporary compatibility values from
 the new snapshots until all readers use the multidimensional contract.
+
+## Verified implementation checkpoint — 2026-07-20
+
+The additive migration creates nine forced-RLS owner tables, seven closed enum
+contracts, one restricted `NOLOGIN`/`NOBYPASSRLS` writer role, one exact packet
+persistence API, and one retrieval-outcome API. `brains_app` receives function
+execution only and has no direct table access. Pattern head and revision tables
+are present in the additive design but deliberately have no application write
+API until the controlled pattern review/apply phase is designed.
+
+The PostgreSQL 16 production-schema clone passed migration replay, restricted
+role and function ownership checks, canonical packet-hash recomputation,
+bounded snapshot writes, zero-write replay, conflicting-request rejection,
+missing-actor denial, cross-owner target denial, retrieval-outcome replay,
+rollback-only fixtures, guarded empty rollback, and exact pre/post schema
+comparison. No production schema, rows, Qdrant state, workers, retrieval, or
+prompts changed.
+
+Hash-locked executable artifacts:
+
+- migration: `629a315135b0b0627f88944460adbaddb48efc7ec5e78681952333b2374dc20c`;
+- rollback: `5343d67af7d7e8d784f776d9c8003aa7da4df21aa501de70c0b8496e9a2f9a6d`;
+- adversarial SQL suite: `01a567399eddde4af41561fdb73c2dea50eb27fa6c08d5798a577d003b2ecfaa`.
 
 ## Required evaluation cases
 

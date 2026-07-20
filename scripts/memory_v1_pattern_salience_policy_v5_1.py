@@ -138,6 +138,7 @@ def validate_schema_contract(schema: dict[str, Any]) -> None:
         )
     salience = definitions.get("salience_features", {}).get("properties", {})
     actual_dimensions = set(salience) - {
+        "as_of_date",
         "method_version",
         "signal_manifest_sha256",
     }
