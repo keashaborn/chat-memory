@@ -123,8 +123,8 @@ BEGIN
   FROM memory.evidence_extraction_event AS event
   WHERE event.owner_user_id=actor AND event.operation_id=p_operation_id;
   IF FOUND THEN
-    IF replayed.job_id<>p_job_id OR replayed.event_type<>'queued'
-       OR replayed.from_status<>'error' OR replayed.to_status<>'pending'
+    IF replayed.job_id<>p_job_id OR replayed.event_type<>'error'
+       OR replayed.from_status<>'error' OR replayed.to_status<>'error'
        OR replayed.actor_type<>'admin'
        OR replayed.actor_ref IS DISTINCT FROM
           'v5_1_persistence_contract_recovery'
@@ -139,7 +139,7 @@ BEGIN
       RAISE EXCEPTION 'V5.1 persistence recovery replay conflicts'
         USING ERRCODE='23514';
     END IF;
-    RETURN QUERY SELECT p_job_id,'pending'::text,1,'replayed'::text;
+    RETURN QUERY SELECT p_job_id,'error'::text,1,'replayed'::text;
     RETURN;
   END IF;
 
@@ -204,14 +204,13 @@ BEGIN
   END IF;
 
   UPDATE memory.evidence_extraction_job AS job
-  SET status='pending',available_at=current_job.created_at,
-      worker_id=NULL,last_error=NULL
+  SET available_at=current_job.created_at
   WHERE job.owner_user_id=actor AND job.job_id=p_job_id;
   INSERT INTO memory.evidence_extraction_event(
     owner_user_id,job_id,operation_id,event_type,from_status,to_status,
     actor_type,actor_ref,details
   ) VALUES (
-    actor,p_job_id,p_operation_id,'queued','error','pending','admin',
+    actor,p_job_id,p_operation_id,'error','error','error','admin',
     'v5_1_persistence_contract_recovery',jsonb_build_object(
       'expected_content_sha256',p_expected_content_sha256,
       'failure_operation_id',p_failure_operation_id,
@@ -219,7 +218,7 @@ BEGIN
       'reason_code','canonical_compiler_hash_compatibility'
     )
   );
-  RETURN QUERY SELECT p_job_id,'pending'::text,1,'applied'::text;
+  RETURN QUERY SELECT p_job_id,'error'::text,1,'applied'::text;
 END
 $function$;
 

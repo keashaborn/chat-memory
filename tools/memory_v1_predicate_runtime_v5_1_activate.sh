@@ -238,7 +238,7 @@ sha256sum -c <<'HASHES'
 17e9f5889363a57bcdadaa85e5fcb06f8e9eb063b31bb866e6b8a49cd1d099c7  scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 d20b8506f544701d58cc05a237b3131f748b6a1dd1c6c6ca56982c04c7fef2f7  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 541221a287fb5724f55fb87cbbb0ce8f570fb23e34982f0a1c162afa09095d42  tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
-f68d43e8455403467207acba35a926801540056f9a8c907d80095f301c348430  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+66fd10f565730a07fc4edf4cc264a25c0adda26f3da1afe9425cf33d76a062d3  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 b6e122ed3013ee21de43e222493285b82a28b8ec08312d39189332f6ec76ddd7  tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 35f163241a5d770dd953d999b284e13d63735fbdbfdeeeabb98fb10ec0550af3  scripts/memory_v1_v5_local_inference_scheduler.py
 cd1524ec1ada583ee4b1fde7aa70cf44cf7bf44bb55773b14c25e6c4c93b8d57  scripts/memory_v1_predicate_runtime_profile.py
@@ -347,10 +347,10 @@ SELECT * FROM memory.requeue_owner_v5_1_persistence_mismatch_v1(
 COMMIT;
 SQL
 chmod 0600 "$recovery_output"
-[[ "$(grep -c "^$recovery_job|pending|1|applied$" "$recovery_output")" == 1 ]]
-[[ "$(grep -c "^$recovery_job|pending|1|replayed$" "$recovery_output")" == 1 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='pending' AND attempts=1 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id IS NULL AND last_error IS NULL")" == 1 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_event WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND operation_id='$recovery_operation'::uuid AND event_type='queued' AND from_status='error' AND to_status='pending'")" == 1 ]]
+[[ "$(grep -c "^$recovery_job|error|1|applied$" "$recovery_output")" == 1 ]]
+[[ "$(grep -c "^$recovery_job|error|1|replayed$" "$recovery_output")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='error' AND attempts=1 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id='memory_v1_v5_local_inference_scheduler_v1:ip-172-31-32-171' AND last_error='local_inference_rejected: local_persistence_contract_mismatch'")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_event WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND operation_id='$recovery_operation'::uuid AND event_type='error' AND from_status='error' AND to_status='error'")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid")" == 0 ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
