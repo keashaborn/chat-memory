@@ -280,6 +280,26 @@ def install_rows(
     }
 
 
+def provider_registry(
+    integration_path: str | Path = DEFAULT_INTEGRATION,
+) -> dict[str, Any]:
+    path = Path(integration_path)
+    integration = json.loads(path.read_text(encoding="utf-8"))
+    root = path.resolve().parents[1]
+    base = load_bound_json(root, integration["base_registry"])
+    composite = build_composite(path)["payload"]
+    return {
+        "registry_version": composite["registry_version"],
+        "contract_version": composite["contract_version"],
+        "status": composite["status"],
+        "runtime_active": composite["runtime_active"],
+        "unknown_predicate_action": composite["unknown_predicate_action"],
+        "object_contracts": base["object_contracts"],
+        "predicates": composite["active_predicates"],
+        "legacy_compatibility": composite["legacy_predicates"],
+    }
+
+
 def emit_install_sql(
     integration_path: str | Path = DEFAULT_INTEGRATION,
 ) -> str:
@@ -565,6 +585,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--integration", default=str(DEFAULT_INTEGRATION))
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--emit-install-sql", action="store_true")
+    parser.add_argument("--emit-provider-registry", action="store_true")
     return parser.parse_args()
 
 
@@ -572,6 +593,9 @@ def main() -> int:
     args = arguments()
     if args.emit_install_sql:
         print(emit_install_sql(args.integration), end="")
+        return 0
+    if args.emit_provider_registry:
+        print(stable_json(provider_registry(args.integration)))
         return 0
     result = build_composite(args.integration)
     output = result if args.full else {

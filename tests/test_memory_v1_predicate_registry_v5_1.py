@@ -10,6 +10,7 @@ from scripts.memory_v1_predicate_registry_v5_1 import (
     build_composite,
     emit_install_sql,
     install_rows,
+    provider_registry,
 )
 
 
@@ -122,6 +123,14 @@ class PredicateRegistryV51IntegrationTest(unittest.TestCase):
             "INSERT INTO memory.projection",
         ):
             self.assertNotIn(forbidden, sql.lower())
+
+    def test_provider_registry_is_complete_but_runtime_disabled(self) -> None:
+        registry = provider_registry()
+        self.assertEqual(registry["registry_version"], "memory_predicate_registry_v5_1")
+        self.assertFalse(registry["runtime_active"])
+        self.assertEqual(len(registry["predicates"]), 63)
+        self.assertEqual(len(registry["legacy_compatibility"]), 19)
+        self.assertEqual(len(registry["object_contracts"]), 17)
 
 
 if __name__ == "__main__":
