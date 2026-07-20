@@ -6,6 +6,8 @@ DO $security$
 DECLARE
   target regprocedure :=
     'memory.persist_owner_v5_1_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)'::regprocedure;
+  recovery regprocedure :=
+    'memory.requeue_owner_v5_1_persistence_mismatch_v1(uuid,uuid,text,uuid,uuid)'::regprocedure;
   expected_sha constant text :=
     'e79079a29210cf508dfc34571a9bb9501271d4ae3ba4990c1fb910f3f8877a06';
   canonical_compiler_sha constant text :=
@@ -38,6 +40,23 @@ BEGIN
          AND acl.privilege_type='EXECUTE'
      ) THEN
     RAISE EXCEPTION 'V5.1 canonical compiler persistence ACL is unsafe';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE oid=recovery AND prosecdef
+      AND proowner='memory_v5_local_inference_maintainer'::regrole
+      AND EXISTS (
+        SELECT 1 FROM unnest(proconfig) AS setting
+        WHERE setting LIKE 'search_path=%'
+      )
+  ) OR NOT has_function_privilege('brains_app',recovery,'EXECUTE')
+     OR EXISTS (
+       SELECT 1 FROM pg_proc AS procedure
+       CROSS JOIN LATERAL aclexplode(procedure.proacl) AS acl
+       WHERE procedure.oid=recovery AND acl.grantee=0
+         AND acl.privilege_type='EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'V5.1 persistence recovery ACL is unsafe';
   END IF;
 END
 $security$;

@@ -30,6 +30,11 @@ compat_test=tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 contract_test=scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 scheduler=scripts/memory_v1_v5_local_inference_scheduler.py
 compiler_sha=af0e7b679480db10855cfb0ab2b705acd26a97238869e12b8b9a3f17bbc0024d
+recovery_job=3cd6ec76-505b-4d41-9ecd-9d820f5c3fed
+recovery_content_sha=573dbe8884b106ca530590a92ea54dbd902650d70fd8ba3676fb15ec1489e916
+recovery_failure_operation=f1840ac7-b447-56bf-b067-496a0aef2a31
+recovery_completion_event=edcad6e0-b208-41ce-ac7c-379395ca161b
+recovery_operation=89596a17-cbfd-52f8-b89a-91f74818c2e6
 
 phase=initialization
 run_id=
@@ -231,8 +236,8 @@ sha256sum -c <<'HASHES'
 17e9f5889363a57bcdadaa85e5fcb06f8e9eb063b31bb866e6b8a49cd1d099c7  scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 d20b8506f544701d58cc05a237b3131f748b6a1dd1c6c6ca56982c04c7fef2f7  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 541221a287fb5724f55fb87cbbb0ce8f570fb23e34982f0a1c162afa09095d42  tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
-0712044fe8ba5093f5310d5dccf419c2ae41f87ac12742cbed17253e9966790e  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
-fb89e61e185aae099a6a992ade4f43d0777239169e0aae3d6d6b322bcf760cf7  tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+7b81113749f0b17a7c21539680471af5101ff2a498e8eabea7151617b3b9b551  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+b6e122ed3013ee21de43e222493285b82a28b8ec08312d39189332f6ec76ddd7  tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 35f163241a5d770dd953d999b284e13d63735fbdbfdeeeabb98fb10ec0550af3  scripts/memory_v1_v5_local_inference_scheduler.py
 cd1524ec1ada583ee4b1fde7aa70cf44cf7bf44bb55773b14c25e6c4c93b8d57  scripts/memory_v1_predicate_runtime_profile.py
 84606d74ba719c68baaca77d9e73b4787b96ec8f3398aca60a24ee2bbfa8076e  scripts/memory_v1_relational_extraction_v5_local_provider.py
@@ -320,12 +325,36 @@ capture_tables "$all_tables" "$all_after_migration"
 cmp -s "$all_before" "$all_after_migration"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
-phase=quota_and_plan_preflight
-reserved=$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event WHERE owner_user_id='$owner'::uuid AND action='reserved' AND created_at>=clock_timestamp()-interval '24 hours'")
-[[ "$reserved" -lt 12 ]]
+phase=requeue_exact_persistence_mismatch
 set -a
 source "$env_file"
 set +a
+recovery_output="$snapshot_dir/memory_v1_predicate_runtime_v5_1_recovery_${run_id}.tsv"
+psql "$POSTGRES_DSN" -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
+  >"$recovery_output" <<SQL
+BEGIN;
+SELECT set_config('app.user_id','$owner',true);
+SELECT * FROM memory.requeue_owner_v5_1_persistence_mismatch_v1(
+  '$recovery_operation','$recovery_job','$recovery_content_sha',
+  '$recovery_failure_operation','$recovery_completion_event'
+);
+SELECT * FROM memory.requeue_owner_v5_1_persistence_mismatch_v1(
+  '$recovery_operation','$recovery_job','$recovery_content_sha',
+  '$recovery_failure_operation','$recovery_completion_event'
+);
+COMMIT;
+SQL
+chmod 0600 "$recovery_output"
+[[ "$(grep -c "^$recovery_job|pending|0|applied$" "$recovery_output")" == 1 ]]
+[[ "$(grep -c "^$recovery_job|pending|0|replayed$" "$recovery_output")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='pending' AND attempts=0 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id IS NULL AND last_error IS NULL")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_event WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND operation_id='$recovery_operation'::uuid AND event_type='queued' AND from_status='error' AND to_status='pending'")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid")" == 0 ]]
+[[ "$(qdrant_signature)" == "$qdrant_before" ]]
+
+phase=quota_and_plan_preflight
+reserved=$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event WHERE owner_user_id='$owner'::uuid AND action='reserved' AND created_at>=clock_timestamp()-interval '24 hours'")
+[[ "$reserved" -lt 12 ]]
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python "$scheduler" \
   --owner-user-id "$owner" --contract-profile v5_1 --max-jobs 1 \
   --max-attempts 1 --lease-seconds 900 --timeout-seconds 600 \
@@ -343,6 +372,7 @@ jq -e '
 ' "$plan" >/dev/null
 selected_job=$(psql_scalar "SELECT job_id::text FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND route='relational_extraction' AND status IN ('pending','error') AND attempts<1 AND available_at<=clock_timestamp() ORDER BY priority,available_at,created_at,job_id LIMIT 1")
 [[ -n "$selected_job" ]]
+[[ "$selected_job" == "$recovery_job" ]]
 selected_job_sha=$(printf %s "$selected_job" | sha256sum | awk '{print $1}')
 [[ "$(jq -r '.plans[0].next_job_id_sha256' "$plan")" == "$selected_job_sha" ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND job_id='$selected_job'::uuid")" == 0 ]]
@@ -476,6 +506,7 @@ PY
 
 phase=restore_timers_and_health
 restore_timers
+sudo -n systemctl start "$timer"
 authenticated_health
 [[ "$(systemctl is-enabled "$timer")" == enabled ]]
 [[ "$(systemctl is-active "$timer")" == active ]]
@@ -504,7 +535,8 @@ jq -n \
       zero_write_replay:true,other_owner_rows_unchanged:true,
       protected_memory_tables_unchanged:true,qdrant_unchanged:true,
       claims_written:0,prompt_influence:0,external_model_calls:0,
-      legacy_packet_lane_rows:0,original_timer_states_restored:true,
+      legacy_packet_lane_rows:0,non_target_timer_states_restored:true,
+      v5_1_scheduler_timer_activated:true,
       service_healthy:true},
     qdrant_sha256:$qdrant_sha256,
     hard_stop:"before_v5_1_review_stage_claim_projection_retrieval_or_prompt_influence"}' \
