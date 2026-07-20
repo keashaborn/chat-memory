@@ -9,6 +9,7 @@ from scripts.memory_v1_relationship_observation_v5_1 import (
     map_entity_relationship_role,
     normalize_relationship_observation,
     predicate_supported_by_source,
+    relationship_predicate_candidates_from_source,
     relationship_role_candidates,
 )
 from scripts.memory_v1_relationship_policy_v5_1 import load_registry
@@ -138,7 +139,14 @@ class RelationshipObservationV51Test(unittest.TestCase):
     def test_colon_namespaced_roles_are_resolved(self) -> None:
         self.assertEqual(
             relationship_role_candidates("family:mother_in_law"),
-            ("family_mother_in_law", "family", "mother_in_law"),
+            (
+                "family_mother_in_law",
+                "family",
+                "mother_in_law",
+                "mother",
+                "in",
+                "law",
+            ),
         )
         decision = map_entity_relationship_role(
             "family:mother_in_law",
@@ -146,6 +154,37 @@ class RelationshipObservationV51Test(unittest.TestCase):
         )
         self.assertEqual(decision.status, "accept")
         self.assertEqual(decision.mapping.edge_direction, "unordered_self_named")
+
+    def test_compound_role_falls_back_to_registered_atomic_role(self) -> None:
+        decision = map_entity_relationship_role(
+            "professional:running_coach",
+            proposed_predicate="relationship.coach_of",
+        )
+        self.assertEqual(decision.status, "accept")
+        self.assertEqual(decision.mapping.edge_direction, "named_to_self")
+
+    def test_explicit_source_reconciles_nearby_wrong_predicate(self) -> None:
+        self.assertEqual(
+            relationship_predicate_candidates_from_source(
+                "I currently live with Jordan.",
+                "social:roommate",
+            ),
+            ("relationship.lives_with",),
+        )
+        self.assertEqual(
+            relationship_predicate_candidates_from_source(
+                "I do not trust Alex anymore.",
+                None,
+            ),
+            ("social.distrusts",),
+        )
+        self.assertEqual(
+            relationship_predicate_candidates_from_source(
+                "Ruth is my mother-in-law.",
+                "family:mother_in_law",
+            ),
+            ("relationship.in_law_of",),
+        )
 
     def test_spouse_role_cannot_be_normalized_as_sibling(self) -> None:
         text = "Jessica is my wife."
@@ -197,6 +236,20 @@ class RelationshipObservationV51Test(unittest.TestCase):
         self.assertEqual(
             decision.reason_code,
             "relationship_predicate_not_entailed_by_source",
+        )
+
+    def test_nested_possessive_relation_does_not_attach_to_self(self) -> None:
+        text = "Nora is my sister's friend."
+        entities, observation = packet_parts(
+            text, "relationship.friend_of", "unordered_self_named", "friend"
+        )
+        decision = normalize_relationship_observation(
+            observation, entities, text, source_class="owner_assertion"
+        )
+        self.assertEqual(decision.status, "defer")
+        self.assertEqual(
+            decision.reason_code,
+            "relationship_belongs_to_third_party",
         )
 
     def test_technical_and_question_sources_fail_closed(self) -> None:

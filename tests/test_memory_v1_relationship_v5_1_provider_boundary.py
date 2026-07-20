@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    _explicit_current_relationship_state,
     _relationship_v5_1_repair_entities_and_roles,
     _relationship_v5_1_raw_packet_boundary,
 )
@@ -178,6 +179,191 @@ class RelationshipProviderBoundaryTest(unittest.TestCase):
         self.assertEqual(entities[1]["entity_ref"], "e01")
         self.assertEqual(entities[1]["name_text"], "Robin")
         self.assertIn("person_in_tension", entities[1]["relationship_role"])
+
+    def test_wrong_nearby_predicate_is_reconciled_from_explicit_source(self) -> None:
+        text = "I currently live with Jordan."
+        source = self.source(text)
+        entities = [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "relationship_role": "user:self",
+            },
+            {
+                "entity_ref": "e01",
+                "entity_type": "person",
+                "relationship_role": "social:roommate",
+            },
+        ]
+        observation = {
+            "predicate": "relationship.roommate_of",
+            "subject_entity_ref": "e00",
+            "object": {"kind": "entity", "entity_ref": "e01"},
+            "source_spans": [
+                {"start": 0, "end": len(text), "quote": text}
+            ],
+        }
+        repairs = _relationship_v5_1_repair_entities_and_roles(
+            source,
+            observation,
+            entities,
+            provider_registry(DEFAULT_INTEGRATION),
+        )
+        self.assertIn("relationship_predicate_source_reconciled", repairs)
+        self.assertEqual(observation["predicate"], "relationship.lives_with")
+
+    def test_entity_object_is_repaired_from_two_explicit_endpoints(self) -> None:
+        text = "My father Jerry currently depends on me for transportation."
+        source = self.source(text)
+        entities = [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "relationship_role": "user:self",
+            },
+            {
+                "entity_ref": "e01",
+                "entity_type": "person",
+                "relationship_role": "family:father",
+            },
+        ]
+        observation = {
+            "predicate": "social.depends_on",
+            "subject_entity_ref": "e01",
+            "object": {
+                "kind": "literal",
+                "datatype": "text",
+                "value": "transportation",
+                "unit": None,
+                "approximate": False,
+            },
+            "source_spans": [
+                {"start": 0, "end": len(text), "quote": text}
+            ],
+        }
+        repairs = _relationship_v5_1_repair_entities_and_roles(
+            source,
+            observation,
+            entities,
+            provider_registry(DEFAULT_INTEGRATION),
+        )
+        self.assertIn("relationship_entity_object_repaired", repairs)
+        self.assertEqual(
+            observation["object"],
+            {"kind": "entity", "entity_ref": "e00"},
+        )
+
+    def test_no_longer_state_is_explicit_transition(self) -> None:
+        self.assertTrue(
+            _explicit_current_relationship_state(
+                "I no longer avoid Drew; we reconciled last week."
+            )
+        )
+
+    def test_explicit_doctor_word_repairs_provider_role(self) -> None:
+        text = "Dr. Chen is my primary care doctor."
+        source = self.source(text)
+        entities = [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "relationship_role": "user:self",
+            },
+            {
+                "entity_ref": "e01",
+                "entity_type": "person",
+                "relationship_role": "medical:primary_care_physician",
+            },
+        ]
+        observation = {
+            "predicate": "relationship.healthcare_provider_for",
+            "subject_entity_ref": "e00",
+            "object": {"kind": "entity", "entity_ref": "e01"},
+            "source_spans": [
+                {"start": 0, "end": len(text), "quote": text}
+            ],
+        }
+        repairs = _relationship_v5_1_repair_entities_and_roles(
+            source,
+            observation,
+            entities,
+            provider_registry(DEFAULT_INTEGRATION),
+        )
+        self.assertIn("relationship_source_role_augmented", repairs)
+        self.assertIn("doctor", entities[1]["relationship_role"])
+
+    def test_negated_trust_is_reconciled_to_reported_distrust(self) -> None:
+        text = "I do not trust Alex anymore."
+        source = self.source(text)
+        entities = [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "relationship_role": "user:self",
+            },
+            {
+                "entity_ref": "e01",
+                "entity_type": "person",
+                "relationship_role": "social:person_trusted",
+            },
+        ]
+        observation = {
+            "predicate": "social.trusts",
+            "subject_entity_ref": "e00",
+            "object": {"kind": "entity", "entity_ref": "e01"},
+            "polarity": "negated",
+            "modality": "negated",
+            "source_spans": [
+                {"start": 0, "end": len(text), "quote": text}
+            ],
+        }
+        repairs = _relationship_v5_1_repair_entities_and_roles(
+            source,
+            observation,
+            entities,
+            provider_registry(DEFAULT_INTEGRATION),
+        )
+        self.assertIn("negated_trust_to_reported_distrust", repairs)
+        self.assertEqual(observation["predicate"], "social.distrusts")
+        self.assertEqual(observation["polarity"], "affirmed")
+        self.assertEqual(observation["modality"], "reported_observation")
+
+    def test_reconciliation_uses_full_trusted_record_not_model_span(self) -> None:
+        text = "Ruth is my mother-in-law."
+        source = self.source(text)
+        entities = [
+            {
+                "entity_ref": "e00",
+                "entity_type": "self",
+                "relationship_role": "user:self",
+            },
+            {
+                "entity_ref": "e01",
+                "entity_type": "person",
+                "relationship_role": "family:mother_in_law",
+            },
+        ]
+        truncated_end = text.index("-in-law")
+        observation = {
+            "predicate": "relationship.mentor_of",
+            "subject_entity_ref": "e00",
+            "object": {"kind": "entity", "entity_ref": "e01"},
+            "source_spans": [
+                {
+                    "start": 0,
+                    "end": truncated_end,
+                    "quote": text[:truncated_end],
+                }
+            ],
+        }
+        repairs = _relationship_v5_1_repair_entities_and_roles(
+            source,
+            observation,
+            entities,
+            provider_registry(DEFAULT_INTEGRATION),
+        )
+        self.assertIn("relationship_predicate_source_reconciled", repairs)
+        self.assertEqual(observation["predicate"], "relationship.in_law_of")
 
 
 if __name__ == "__main__":

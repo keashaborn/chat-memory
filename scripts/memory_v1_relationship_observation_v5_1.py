@@ -26,6 +26,11 @@ SURFACE_POLICY_ADAPTER = {
     "restricted_explicit_recall_only": "explicit_recall_only",
 }
 ROLE_SPLIT_RE = re.compile(r"[:/|]+")
+NESTED_POSSESSIVE_RELATION_RE = re.compile(
+    r"\bmy\s+[^.!?]{1,80}(?:'s|’s)\s+"
+    r"(?:friend|coach|mentor|manager|partner|roommate|relative|doctor|provider)\b",
+    re.IGNORECASE,
+)
 
 
 def _pattern(value: str) -> str:
@@ -40,7 +45,7 @@ PREDICATE_EVIDENCE_PATTERNS = {
     "relationship.lives_with": r"\b(?:live|lives|lived|living)\s+(?:together\s+)?with\b",
     "relationship.manager_of": r"\b(?:boss|manager|supervisor|reports?\s+(?:directly\s+)?to|manage[sd]?)\b",
     "relationship.mentor_of": r"\bmentor(?:s|ed|ing)?\b",
-    "relationship.parent_of": r"\b(?:parent|parents|father|mother|dad|mom|child|children|son|sons|daughter|daughters|stepchild|stepchildren|stepson|stepsons|stepdaughter|stepdaughters)\b",
+    "relationship.parent_of": r"\b(?:parent|parents|father(?![\s-]+in[\s-]+law)|mother(?![\s-]+in[\s-]+law)|dad|mom|child|children|son|sons|daughter|daughters|stepchild|stepchildren|stepson|stepsons|stepdaughter|stepdaughters)\b",
     "social.avoids": r"\bavoid(?:s|ed|ing)?\b",
     "social.competes_with": r"\b(?:compet(?:e|es|ed|ing|itor)|rival(?:s|ry)?)\b",
     "social.depends_on": r"\b(?:depend(?:s|ed|ing)?\s+on|rel(?:y|ies|ied|ying)\s+on)\b",
@@ -78,6 +83,10 @@ def relationship_role_candidates(value: Any) -> tuple[str, ...]:
             continue
         if candidate not in candidates:
             candidates.append(candidate)
+    for raw in tuple(candidates):
+        for token in raw.split("_"):
+            if len(token) > 1 and token not in candidates:
+                candidates.append(token)
     return tuple(candidates)
 
 
@@ -170,6 +179,12 @@ def predicate_supported_by_source(
     *,
     registry_path: str | Path = DEFAULT_REGISTRY,
 ) -> bool:
+    if predicate == "social.trusts" and re.search(
+        r"\b(?:do\s+not|don['’]?t|no\s+longer)\s+trust\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
     special = PREDICATE_EVIDENCE_PATTERNS.get(predicate)
     if special is not None and re.search(special, text, re.IGNORECASE):
         return True
@@ -179,6 +194,43 @@ def predicate_supported_by_source(
         registry_path=registry_path,
     )
     return decision.status == "accept" and _role_supported(named_party_role, text)
+
+
+def relationship_predicate_candidates_from_source(
+    text: str,
+    relationship_role: Any,
+    *,
+    registry_path: str | Path = DEFAULT_REGISTRY,
+) -> tuple[str, ...]:
+    explicit = sorted(
+        predicate
+        for predicate, pattern in PREDICATE_EVIDENCE_PATTERNS.items()
+        if re.search(pattern, text, re.IGNORECASE)
+        and not (
+            predicate == "social.trusts"
+            and re.search(
+                r"\b(?:do\s+not|don['’]?t|no\s+longer)\s+trust\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+    )
+    if explicit:
+        return tuple(explicit)
+    for role in relationship_role_candidates(relationship_role):
+        predicates = {
+            mapping.predicate
+            for mapping in role_index(registry_path).get(role, ())
+            if predicate_supported_by_source(
+                mapping.predicate,
+                role,
+                text,
+                registry_path=registry_path,
+            )
+        }
+        if predicates:
+            return tuple(sorted(predicates))
+    return ()
 
 
 def _defer(reason_code: str) -> ObservationDecision:
@@ -255,6 +307,8 @@ def normalize_relationship_observation(
         "",
     )
     context = _sentence_context(observation.get("source_spans"), text)
+    if NESTED_POSSESSIVE_RELATION_RE.search(context):
+        return _defer("relationship_belongs_to_third_party")
     if not role or not predicate_supported_by_source(
         predicate, role, context, registry_path=registry_path
     ):

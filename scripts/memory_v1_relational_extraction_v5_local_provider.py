@@ -31,6 +31,8 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 from scripts.memory_v1_relationship_observation_v5_1 import (
     normalize_relationship_observation,
     predicate_supported_by_source,
+    relationship_predicate_candidates_from_source,
+    relationship_role_candidates,
 )
 
 
@@ -1726,7 +1728,8 @@ def _explicit_current_relationship_state(content: str) -> bool:
     )
     continuing = re.search(
         r"\b(?:currently|ongoing|still|lately|these\s+days|for\s+several|"
-        r"no\s+contact|estranged|do\s+not\s+trust|don['’]?t\s+trust)\b",
+        r"no\s+contact|no\s+longer|reconciled|estranged|do\s+not\s+trust|"
+        r"don['’]?t\s+trust)\b",
         content,
         re.IGNORECASE,
     )
@@ -1771,18 +1774,15 @@ def _relationship_v5_1_policy(
 def _explicit_relationship_person_name(
     content: str, predicate: str
 ) -> str | None:
-    patterns: tuple[str, ...]
-    if predicate == "social.experiences_tension_with":
-        patterns = (
-            r"\bbetween\s+me\s+and\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
-            r"\btension\s+with\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
-        )
-    elif predicate == "social.perceives_as_adversary":
-        patterns = (
-            r"\b(?:consider|regard|see)\s+(?P<name>[A-Z][A-Za-z'’\-]{1,79})\b",
-        )
-    else:
-        patterns = ()
+    name = r"(?P<name>[A-Z][A-Za-z'’\-]{1,79})"
+    patterns = (
+        rf"\b{name}\s+and\s+I\b",
+        rf"\bbetween\s+me\s+and\s+{name}\b",
+        rf"\b(?:consider|regard|see|avoiding|avoid|trust|around)\s+{name}\b",
+        rf"\b(?:with|from)\s+(?:my\s+(?:[a-z][a-z\-]*\s+){{0,3}})?{name}\b",
+        rf"\b{name}\s+is\s+(?:a\s+|my\s+)",
+        rf"\b{name}\s+reports?\s+directly\b",
+    )
     names = {
         match.group("name")
         for pattern in patterns
@@ -1791,17 +1791,13 @@ def _explicit_relationship_person_name(
     return next(iter(names)) if len(names) == 1 else None
 
 
-def _relationship_v5_1_repair_entities_and_roles(
+def _relationship_v5_1_reconcile_predicate(
     source: TrustedExtractionSource,
     observation: dict[str, Any],
     entities: list[dict[str, Any]],
-    registry: dict[str, Any],
 ) -> tuple[str, ...]:
     predicate = observation.get("predicate")
     if not isinstance(predicate, str):
-        return ()
-    policy = _relationship_v5_1_policy(registry, predicate)
-    if policy is None:
         return ()
     by_ref = {
         item.get("entity_ref"): item
@@ -1809,11 +1805,94 @@ def _relationship_v5_1_repair_entities_and_roles(
         if isinstance(item.get("entity_ref"), str)
     }
     obj = observation.get("object")
-    if not isinstance(obj, dict) or obj.get("kind") != "entity":
+    endpoints = [by_ref.get(observation.get("subject_entity_ref"))]
+    if isinstance(obj, dict) and obj.get("kind") == "entity":
+        endpoints.append(by_ref.get(obj.get("entity_ref")))
+    named = next(
+        (
+            item
+            for item in endpoints
+            if isinstance(item, dict) and item.get("entity_type") != "self"
+        ),
+        None,
+    )
+    relationship_role = (
+        named.get("relationship_role") if isinstance(named, dict) else None
+    )
+    source_text = source.content
+    if any(
+        predicate_supported_by_source(predicate, role, source_text)
+        for role in relationship_role_candidates(relationship_role)
+    ):
         return ()
+    candidates = relationship_predicate_candidates_from_source(
+        source_text,
+        relationship_role,
+    )
+    if len(candidates) != 1 or candidates[0] == predicate:
+        return ()
+    reconciled = candidates[0]
+    observation["predicate"] = reconciled
+    repairs = ["relationship_predicate_source_reconciled"]
+    if predicate == "social.trusts" and reconciled == "social.distrusts":
+        observation["polarity"] = "affirmed"
+        observation["modality"] = "reported_observation"
+        repairs.append("negated_trust_to_reported_distrust")
+    return tuple(repairs)
+
+
+def _relationship_v5_1_repair_entities_and_roles(
+    source: TrustedExtractionSource,
+    observation: dict[str, Any],
+    entities: list[dict[str, Any]],
+    registry: dict[str, Any],
+) -> tuple[str, ...]:
+    repairs = list(
+        _relationship_v5_1_reconcile_predicate(
+            source,
+            observation,
+            entities,
+        )
+    )
+    predicate = observation.get("predicate")
+    if not isinstance(predicate, str):
+        return tuple(repairs)
+    policy = _relationship_v5_1_policy(registry, predicate)
+    if policy is None:
+        return tuple(repairs)
+    by_ref = {
+        item.get("entity_ref"): item
+        for item in entities
+        if isinstance(item.get("entity_ref"), str)
+    }
     subject_ref = observation.get("subject_entity_ref")
-    object_ref = obj.get("entity_ref")
     subject = by_ref.get(subject_ref)
+    obj = observation.get("object")
+    if not isinstance(obj, dict) or obj.get("kind") != "entity":
+        self_entities = [
+            item for item in entities if item.get("entity_type") == "self"
+        ]
+        named_entities = [
+            item for item in entities if item.get("entity_type") != "self"
+        ]
+        if len(self_entities) == 1 and len(named_entities) == 1:
+            if isinstance(subject, dict) and subject.get("entity_type") == "self":
+                observation["object"] = {
+                    "kind": "entity",
+                    "entity_ref": named_entities[0]["entity_ref"],
+                }
+            elif isinstance(subject, dict):
+                observation["object"] = {
+                    "kind": "entity",
+                    "entity_ref": self_entities[0]["entity_ref"],
+                }
+            else:
+                return tuple(repairs)
+            repairs.append("relationship_entity_object_repaired")
+            obj = observation["object"]
+        else:
+            return tuple(repairs)
+    object_ref = obj.get("entity_ref")
     object_entity = by_ref.get(object_ref)
     missing_ref: str | None = None
     role_field: str | None = None
@@ -1843,18 +1922,28 @@ def _relationship_v5_1_repair_entities_and_roles(
             if policy.get("relation_semantics") == "symmetric"
             else "named_party_subject_roles"
         )
-    repairs: list[str] = []
     if missing_ref is not None and role_field is not None:
         name = _explicit_relationship_person_name(source.content, predicate)
         roles = policy.get(role_field, [])
         if name is not None and isinstance(roles, list) and roles:
+            supported_roles = [
+                role
+                for role in roles
+                if isinstance(role, str)
+                and predicate_supported_by_source(
+                    predicate,
+                    role,
+                    source.content,
+                )
+            ]
+            chosen_role = supported_roles[0] if supported_roles else roles[0]
             entities.append(
                 {
                     "entity_ref": missing_ref,
                     "entity_type": "person",
                     "mention_kind": "named",
                     "name_text": name,
-                    "relationship_role": f"relationship:{roles[0]}",
+                    "relationship_role": f"relationship:{chosen_role}",
                     "source_spans": [_source_span(source)],
                     "extraction_confidence": 0.98,
                     "reason_codes": [
@@ -1891,6 +1980,28 @@ def _relationship_v5_1_repair_entities_and_roles(
         for role in policy.get(field, [])
         if isinstance(role, str)
     ]
+    source_text = source.content
+    entailed_roles = [
+        role
+        for role in all_roles
+        if predicate_supported_by_source(
+            predicate,
+            role,
+            source_text,
+        )
+    ]
+    if (
+        len(entailed_roles) == 1
+        and not _role_has_any(named.get("relationship_role"), set(all_roles))
+    ):
+        current = named.get("relationship_role")
+        added = f"relationship:{entailed_roles[0]}"
+        named["relationship_role"] = (
+            f"{current}|{added}"
+            if isinstance(current, str) and current
+            else added
+        )
+        repairs.append("relationship_source_role_augmented")
     if _role_has_any(named.get("relationship_role"), set(all_roles)):
         return tuple(repairs)
     if policy.get("relation_semantics") == "symmetric":
@@ -1901,7 +2012,6 @@ def _relationship_v5_1_repair_entities_and_roles(
         directional_roles = policy.get("named_party_subject_roles", [])
     if not isinstance(directional_roles, list) or not directional_roles:
         return tuple(repairs)
-    source_text = _observation_source_text(source.content, observation)
     if not predicate_supported_by_source(
         predicate,
         str(directional_roles[0]),
