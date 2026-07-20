@@ -55,10 +55,19 @@ qdrant_signature() {
     | sha256sum | awk '{print $1}'
 }
 
+normalized_dump() {
+  docker exec "$container" pg_dump -U sage -d "$clone" "$@" \
+    | sed -e '/^\\restrict /d' -e '/^\\unrestrict /d' \
+      -e '/^-- Dumped from database version /d' \
+      -e '/^-- Dumped by pg_dump version /d' \
+      -e '/^-- Started on /d' -e '/^-- Completed on /d'
+}
+
 for required in "$generator" "$integration" "$relationship_spec" \
   "$rollback" "$test_sql"; do
   [[ -f "$required" ]]
 done
+[[ -z "$(git status --porcelain)" ]]
 [[ "$(sha256sum "$integration" | awk '{print $1}')" == \
   "12e132f03554adb041090fa74ed99c178a20c5625cade85dc1bfb52b43a61eaf" ]]
 [[ "$(sha256sum "$relationship_spec" | awk '{print $1}')" == \
@@ -84,10 +93,8 @@ docker exec "$container" createdb -U sage -T template0 "$clone"
 docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --exit-on-error <"$backup"
 
-docker exec "$container" pg_dump -U sage -d "$clone" -a -n memory \
-  --no-owner --no-privileges >"$data_before"
-docker exec "$container" pg_dump -U sage -d "$clone" -s -n memory \
-  --no-owner --no-privileges >"$schema_before"
+normalized_dump -a -n memory --no-owner --no-privileges >"$data_before"
+normalized_dump -s -n memory --no-owner --no-privileges >"$schema_before"
 
 base_registry_before=$(clone_scalar \
   "SELECT row_to_json(value)::text FROM (SELECT * FROM memory.predicate_registry_version WHERE registry_version='memory_predicate_registry_v5') value")
@@ -112,10 +119,8 @@ clone_sql <"$rollback" >/dev/null
 [[ "$(clone_scalar "SELECT count(*) FROM memory.predicate_registry_version WHERE registry_version='memory_predicate_registry_v5_1'")" == "0" ]]
 [[ "$(clone_scalar "SELECT (to_regclass('memory.relationship_predicate_contract_v5_1') IS NULL AND to_regclass('memory.predicate_registry_source_binding_v5_1') IS NULL AND to_regprocedure('memory.reject_predicate_registry_v5_1_mutation()') IS NULL)::integer")" == "1" ]]
 
-docker exec "$container" pg_dump -U sage -d "$clone" -a -n memory \
-  --no-owner --no-privileges >"$data_after"
-docker exec "$container" pg_dump -U sage -d "$clone" -s -n memory \
-  --no-owner --no-privileges >"$schema_after"
+normalized_dump -a -n memory --no-owner --no-privileges >"$data_after"
+normalized_dump -s -n memory --no-owner --no-privileges >"$schema_after"
 cmp -s "$data_before" "$data_after"
 cmp -s "$schema_before" "$schema_after"
 
