@@ -164,7 +164,24 @@ def temporal_expectation_passes(
     if expectation in {"open", "dynamic_open", "event_independent"}:
         return shape == "open_interval"
     if expectation == "closed_or_bounded":
-        return shape == "bounded_interval"
+        if shape == "bounded_interval":
+            return True
+        if shape != "open_interval":
+            return False
+        instant_range = temporal.get("instant_range")
+        calendar_range = temporal.get("calendar_range")
+        return bool(
+            (
+                isinstance(instant_range, dict)
+                and instant_range.get("lower") is None
+                and instant_range.get("upper") is not None
+            )
+            or (
+                isinstance(calendar_range, dict)
+                and calendar_range.get("lower") is None
+                and calendar_range.get("upper") is not None
+            )
+        )
     raise RuntimeError("relationship temporal expectation is invalid")
 
 

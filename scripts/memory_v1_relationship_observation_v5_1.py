@@ -461,16 +461,33 @@ def normalize_relationship_observation(
         repairs.append("relationship_temporal_semantic")
     if (
         relationship_has_explicit_historical_end(context)
-        and temporal.get("shape") != "bounded_interval"
+        and not (
+            temporal.get("shape") == "bounded_interval"
+            or (
+                temporal.get("shape") == "open_interval"
+                and (
+                    (
+                        isinstance(temporal.get("instant_range"), dict)
+                        and temporal["instant_range"].get("lower") is None
+                        and temporal["instant_range"].get("upper") is not None
+                    )
+                    or (
+                        isinstance(temporal.get("calendar_range"), dict)
+                        and temporal["calendar_range"].get("lower") is None
+                        and temporal["calendar_range"].get("upper") is not None
+                    )
+                )
+            )
+        )
     ):
         temporal.update(
             {
                 "semantic": "state_validity",
-                "shape": "bounded_interval",
+                "shape": "open_interval",
                 "basis": "instant",
                 "source_form": "implicit_source_time",
                 "certainty": "bounded",
-                "precision": "unknown",
+                "precision": "exact",
                 "instant": None,
                 "calendar_range": None,
                 "instant_range": {
@@ -490,7 +507,7 @@ def normalize_relationship_observation(
             and len(temporal_reasons) < 10
         ):
             temporal_reasons.append("historical_relationship_ended_before_source")
-        repairs.append("historical_relationship_bounded_before_source")
+        repairs.append("historical_relationship_upper_bounded_by_source")
     relationship_policy = contract.get("relationship_policy")
     temporal_profile = contract.get("temporal_profile")
     if temporal_profile is None and isinstance(relationship_policy, Mapping):

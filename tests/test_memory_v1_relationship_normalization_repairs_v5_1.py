@@ -221,7 +221,7 @@ class RelationshipNormalizationRepairsV51Test(unittest.TestCase):
             (decision.normalized_observation or {})["modality"],
             "asserted",
         )
-        self.assertEqual(value["shape"], "bounded_interval")
+        self.assertEqual(value["shape"], "open_interval")
         normalized = _normalize_temporal(value, "2026-07-20T05:00:00Z")
         self.assertTrue(normalized["anchored_to_source_time"])
         self.assertIsNone(normalized["instant_range"]["lower"])

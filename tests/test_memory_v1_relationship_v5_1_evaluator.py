@@ -55,6 +55,21 @@ class RelationshipV51EvaluatorTest(unittest.TestCase):
                 "closed_or_bounded",
             )
         )
+        self.assertTrue(
+            temporal_expectation_passes(
+                {
+                    "temporal": {
+                        "semantic": "state_validity",
+                        "shape": "open_interval",
+                        "instant_range": {
+                            "lower": None,
+                            "upper": "2026-07-20T05:00:00.000000Z",
+                        },
+                    }
+                },
+                "closed_or_bounded",
+            )
+        )
         self.assertFalse(
             temporal_expectation_passes(
                 {"temporal": {"semantic": "state_validity", "shape": "open_interval"}},
@@ -76,4 +91,3 @@ class RelationshipV51EvaluatorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
