@@ -30,6 +30,7 @@ PLAN_TOP_LEVEL_FIELDS = frozenset(
         "phase",
         "phase_label",
         "primary_goal",
+        "goal_target",
         "start_date",
         "review_date",
         "review_cadence",
@@ -157,6 +158,7 @@ class PlanDocumentV1:
     phase: str
     phase_label: str
     primary_goal: str
+    goal_target: Mapping[str, Any]
     start_date: dt.date | None
     review_date: dt.date | None
     review_cadence: str
@@ -198,6 +200,7 @@ class PlanDocumentV1:
             phase=phase,
             phase_label=_clean_text(value.get("phase_label"), field="phase_label", max_length=160),
             primary_goal=_clean_text(value.get("primary_goal"), field="primary_goal", max_length=2000),
+            goal_target=_normalize_section(value.get("goal_target", {}), field="goal_target"),
             start_date=_parse_optional_date(value.get("start_date"), field="start_date"),
             review_date=_parse_optional_date(value.get("review_date"), field="review_date"),
             review_cadence=_clean_text(
@@ -226,6 +229,8 @@ class PlanDocumentV1:
             "review_cadence": self.review_cadence,
             "coach_notes": self.coach_notes,
         }
+        if self.goal_target:
+            result["goal_target"] = _thaw_json(self.goal_target)
         for field in PLAN_SECTION_FIELDS:
             result[field] = _thaw_json(getattr(self, field))
         return result

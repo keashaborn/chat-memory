@@ -21,6 +21,13 @@ def plan_document() -> dict[str, Any]:
         "phase": "cut",
         "phase_label": "Cut to 16% body fat",
         "primary_goal": "Reduce body-fat percentage while maintaining strength.",
+        "goal_target": {
+            "outcome_measure": "body_fat_percent",
+            "baseline_value": 20.0,
+            "target_value": 16.0,
+            "unit": "percent",
+            "direction": "decrease",
+        },
         "start_date": "2026-07-01",
         "review_date": "2026-07-15",
         "review_cadence": "weekly",
@@ -89,6 +96,24 @@ def suggestion(
 
 
 class PlanRecommendationServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_goal_focus_includes_structured_goal_leaves(self) -> None:
+        provider = FakeProvider(
+            ModelPlanReview(summary="The measurable goal is explicit.", questions=[], suggestions=[])
+        )
+        await PlanRecommendationService(provider).review_draft(
+            document=PlanDocumentV1.from_mapping(plan_document()),
+            focus="goal",
+            user_request="Review my goal.",
+        )
+        self.assertIn("/primary_goal", provider.last_editable_paths)
+        self.assertIn("/goal_target/target_value", provider.last_editable_paths)
+        self.assertTrue(
+            all(
+                path == "/primary_goal" or path.startswith("/goal_target/")
+                for path in provider.last_editable_paths
+            )
+        )
+
     async def test_filters_untrusted_model_output_and_never_writes(self) -> None:
         provider = FakeProvider(
             ModelPlanReview(

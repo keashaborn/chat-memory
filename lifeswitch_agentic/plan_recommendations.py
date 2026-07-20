@@ -271,7 +271,7 @@ def _compatible_value(current: Any, proposed: ProposedValue) -> bool:
 _FOCUS_PREFIXES: dict[RecommendationFocus, tuple[str, ...]] = {
     "whole_plan": ("/",),
     "direction": ("/phase", "/phase_label"),
-    "goal": ("/primary_goal",),
+    "goal": ("/primary_goal", "/goal_target"),
     "schedule": ("/start_date", "/review_date", "/review_cadence"),
     "body_state": ("/body_state",),
     "nutrition_targets": ("/nutrition_targets",),

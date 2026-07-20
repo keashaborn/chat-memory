@@ -46,6 +46,34 @@ def plan(**overrides):
 
 
 class PlanDocumentV1Test(unittest.TestCase):
+    def test_structured_goal_is_optional_and_preserved(self) -> None:
+        legacy = plan()
+        self.assertNotIn("goal_target", legacy.to_dict())
+
+        document = plan(
+            goal_target={
+                "outcome_measure": "body_fat_percent",
+                "baseline_value": 20.2,
+                "target_value": 16,
+                "unit": "percent",
+                "direction": "decrease",
+                "target_date": None,
+                "success_notes": "Maintain strength.",
+            }
+        )
+        self.assertEqual(
+            document.to_dict()["goal_target"],
+            {
+                "outcome_measure": "body_fat_percent",
+                "baseline_value": 20.2,
+                "target_value": 16,
+                "unit": "percent",
+                "direction": "decrease",
+                "target_date": None,
+                "success_notes": "Maintain strength.",
+            },
+        )
+
     def test_legacy_profile_converts_without_metadata_or_owner(self) -> None:
         document = PlanDocumentV1.from_legacy_profile(
             {
