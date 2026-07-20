@@ -1321,9 +1321,22 @@ def _normalize_temporal(
         ):
             temporal["instant_range"]["lower"] = trusted
             temporal["instant_range"]["upper"] = None
+        elif (
+            temporal["shape"] == "bounded_interval"
+            and temporal["basis"] == "instant"
+            and temporal["instant_range"] is not None
+            and temporal["instant_range"]["lower"] is None
+            and temporal["instant_range"]["upper"] is None
+        ):
+            # The trusted compiler may prove only that an explicitly historical
+            # relationship ended before this evidence was recorded. Preserve
+            # the unknown start and use source time only as a conservative
+            # upper bound; never invent the actual termination timestamp.
+            temporal["instant_range"]["upper"] = trusted
         else:
             raise ValueError(
-                "implicit source time requires an instant or open instant range"
+                "implicit source time requires an instant, open instant range, "
+                "or historical upper-bound range"
             )
 
     populated = [

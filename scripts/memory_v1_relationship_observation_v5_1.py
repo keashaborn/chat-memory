@@ -46,6 +46,8 @@ PREDICATE_EVIDENCE_PATTERNS = {
     "relationship.manager_of": r"\b(?:boss|manager|supervisor|reports?\s+(?:directly\s+)?to|manage[sd]?)\b",
     "relationship.mentor_of": r"\bmentor(?:s|ed|ing)?\b",
     "relationship.parent_of": r"\b(?:parent|parents|father(?![\s-]+in[\s-]+law)|mother(?![\s-]+in[\s-]+law)|dad|mom|child|children|son|sons|daughter|daughters|stepchild|stepchildren|stepson|stepsons|stepdaughter|stepdaughters)\b",
+    "relationship.romantic_partner_of": r"\b(?:boyfriend|girlfriend|fianc(?:e|ee|é|ée)|life[\s-]+partner|romantic[\s-]+partner)\b",
+    "relationship.spouse_of": r"\b(?:wife|wives|husband|husbands|spouse|spouses|married\s+to)\b",
     "social.avoids": r"\bavoid(?:s|ed|ing)?\b",
     "social.competes_with": r"\b(?:compet(?:e|es|ed|ing|itor)|rival(?:s|ry)?)\b",
     "social.depends_on": r"\b(?:depend(?:s|ed|ing)?\s+on|rel(?:y|ies|ied|ying)\s+on)\b",
@@ -60,6 +62,31 @@ PREDICATE_EVIDENCE_PATTERNS = {
     "social.supports": r"\b(?:support|supports|supported|supporting|provides?\s+[^.!?]{0,50}\s+support)\b",
     "social.trusts": r"\btrust(?:s|ed|ing)?\b",
 }
+
+SUPPORT_NAMED_TO_SELF_RE = re.compile(
+    r"(?:\b[A-Z][A-Za-z'’\-]{1,79}\b[^.!?]{0,80}\b"
+    r"(?:support(?:s|ed|ing)?\s+me|provides?[^.!?]{0,50}\bsupport\s+(?:for|to)\s+me)\b|"
+    r"\bI\s+(?:get|receive|received)\s+[^.!?]{0,40}\bsupport\s+from\b)",
+    re.IGNORECASE,
+)
+SUPPORT_SELF_TO_NAMED_RE = re.compile(
+    r"(?:\bI\s+(?:support|supported|am\s+supporting)\b|"
+    r"\bI\s+provide[sd]?\s+[^.!?]{0,50}\bsupport\s+(?:for|to)\b|"
+    r"\b[A-Z][A-Za-z'’\-]{1,79}\b[^.!?]{0,60}\b"
+    r"(?:gets|receives?)\s+[^.!?]{0,40}\bsupport\s+from\s+me\b)",
+    re.IGNORECASE,
+)
+HISTORICAL_RELATIONSHIP_END_RE = re.compile(
+    r"\b(?:used\s+to\s+be|former(?:ly)?|ex[\s-]+(?:wife|husband|spouse|"
+    r"boyfriend|girlfriend|partner|friend)|no\s+longer\s+(?:my|a)|"
+    r"lost\s+touch|relationship\s+ended|separated|divorced)\b",
+    re.IGNORECASE,
+)
+DYNAMIC_CURRENT_STATE_RE = re.compile(
+    r"\b(?:since|still|currently|ongoing|these\s+days|lately|right\s+now|"
+    r"have\s+had|has\s+had|no\s+contact)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -170,6 +197,21 @@ def _sentence_context(
 
 def _role_supported(role: str, text: str) -> bool:
     return re.search(_pattern(role), text, re.IGNORECASE) is not None
+
+
+def directed_role_supported_by_source(predicate: str, text: str) -> str | None:
+    """Return a registry role only when source syntax fixes edge direction."""
+    if predicate != "social.supports":
+        return None
+    named_to_self = SUPPORT_NAMED_TO_SELF_RE.search(text) is not None
+    self_to_named = SUPPORT_SELF_TO_NAMED_RE.search(text) is not None
+    if named_to_self == self_to_named:
+        return None
+    return "supporter" if named_to_self else "supported_person"
+
+
+def relationship_has_explicit_historical_end(text: str) -> bool:
+    return HISTORICAL_RELATIONSHIP_END_RE.search(text) is not None
 
 
 def predicate_supported_by_source(
@@ -284,14 +326,24 @@ def normalize_relationship_observation(
         )
     self_entity = self_entities[0]
     named_entity = object_entity if subject is self_entity else subject
-    role_decision = map_entity_relationship_role(
-        named_entity.get("relationship_role"),
-        proposed_predicate=predicate,
-        registry_path=registry_path,
+    context = _sentence_context(observation.get("source_spans"), text)
+    source_directed_role = directed_role_supported_by_source(predicate, context)
+    role_decision = (
+        map_named_party_role(
+            source_directed_role,
+            proposed_predicate=predicate,
+            registry_path=registry_path,
+        )
+        if source_directed_role is not None
+        else map_entity_relationship_role(
+            named_entity.get("relationship_role"),
+            proposed_predicate=predicate,
+            registry_path=registry_path,
+        )
     )
     if role_decision.status != "accept" or role_decision.mapping is None:
         return _defer(role_decision.reason_code)
-    role = next(
+    role = source_directed_role or next(
         (
             candidate
             for candidate in relationship_role_candidates(
@@ -306,7 +358,6 @@ def normalize_relationship_observation(
         ),
         "",
     )
-    context = _sentence_context(observation.get("source_spans"), text)
     if NESTED_POSSESSIVE_RELATION_RE.search(context):
         return _defer("relationship_belongs_to_third_party")
     if not role or not predicate_supported_by_source(
@@ -361,6 +412,20 @@ def normalize_relationship_observation(
         normalized["surface_policy"] = required_surface
         repairs.append("relationship_surface_policy")
 
+    if predicate == "social.no_contact_with" and re.search(
+        PREDICATE_EVIDENCE_PATTERNS[predicate], context, re.IGNORECASE
+    ):
+        if normalized.get("polarity") != "affirmed":
+            normalized["polarity"] = "affirmed"
+            repairs.append("lexical_state_polarity")
+        if normalized.get("modality") not in {
+            "reported_observation",
+            "uncertain",
+            "corrective",
+        }:
+            normalized["modality"] = "reported_observation"
+            repairs.append("lexical_state_modality")
+
     if contract["family"] == "relational_state":
         modality = normalized.get("modality")
         if modality == "asserted":
@@ -375,6 +440,9 @@ def normalize_relationship_observation(
         "corrective",
     }:
         return _defer("relationship_modality_invalid")
+    elif normalized.get("modality") == "reported_observation":
+        normalized["modality"] = "asserted"
+        repairs.append("direct_relationship_assertion_modality")
 
     if normalized.get("polarity") != "affirmed":
         return ObservationDecision(
@@ -391,6 +459,77 @@ def normalize_relationship_observation(
     if temporal.get("semantic") != "state_validity":
         temporal["semantic"] = "state_validity"
         repairs.append("relationship_temporal_semantic")
+    if (
+        relationship_has_explicit_historical_end(context)
+        and temporal.get("shape") != "bounded_interval"
+    ):
+        temporal.update(
+            {
+                "semantic": "state_validity",
+                "shape": "bounded_interval",
+                "basis": "instant",
+                "source_form": "implicit_source_time",
+                "certainty": "bounded",
+                "precision": "unknown",
+                "instant": None,
+                "calendar_range": None,
+                "instant_range": {
+                    "lower": None,
+                    "upper": None,
+                    "bounds": "[)",
+                },
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": False,
+            }
+        )
+        temporal_reasons = temporal.get("reason_codes")
+        if (
+            isinstance(temporal_reasons, list)
+            and "historical_relationship_ended_before_source" not in temporal_reasons
+            and len(temporal_reasons) < 10
+        ):
+            temporal_reasons.append("historical_relationship_ended_before_source")
+        repairs.append("historical_relationship_bounded_before_source")
+    relationship_policy = contract.get("relationship_policy")
+    temporal_profile = contract.get("temporal_profile")
+    if temporal_profile is None and isinstance(relationship_policy, Mapping):
+        temporal_profile = relationship_policy.get("temporal_profile")
+    dynamic_current = (
+        temporal_profile == "dynamic_state"
+        and explicit_current_state
+        and DYNAMIC_CURRENT_STATE_RE.search(context) is not None
+    )
+    if dynamic_current and temporal.get("shape") != "open_interval":
+        if (
+            temporal.get("basis") == "calendar"
+            and isinstance(temporal.get("calendar_range"), dict)
+        ):
+            temporal["shape"] = "open_interval"
+            temporal["calendar_range"]["upper"] = None
+        elif (
+            temporal.get("basis") == "instant"
+            and isinstance(temporal.get("instant_range"), dict)
+        ):
+            temporal["shape"] = "open_interval"
+            temporal["instant_range"]["upper"] = None
+        else:
+            temporal.update(
+                {
+                    "shape": "none",
+                    "basis": "none",
+                    "source_form": "implicit_source_time",
+                    "certainty": "unknown",
+                    "precision": "unknown",
+                    "instant": None,
+                    "calendar_range": None,
+                    "instant_range": None,
+                    "relative_offset": None,
+                    "recurrence": None,
+                    "anchored_to_source_time": False,
+                }
+            )
+        repairs.append("dynamic_relationship_state_opened")
     reasons = normalized.get("reason_codes")
     if isinstance(reasons, list) and "relationship_v5_1_governed" not in reasons:
         reasons.append("relationship_v5_1_governed")

@@ -29,8 +29,10 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     canonical_sha256,
 )
 from scripts.memory_v1_relationship_observation_v5_1 import (
+    directed_role_supported_by_source,
     normalize_relationship_observation,
     predicate_supported_by_source,
+    relationship_has_explicit_historical_end,
     relationship_predicate_candidates_from_source,
     relationship_role_candidates,
 )
@@ -42,7 +44,7 @@ LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
 LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v7"
 RELATIONSHIP_V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
 RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
-    "memory_v1_relationship_policy_compiler_v8"
+    "memory_v1_relationship_policy_compiler_v10"
 )
 PROVIDER_DEFERRAL_REASON_CODES = frozenset(
     {
@@ -1001,7 +1003,17 @@ RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS = (
     "social:friend. Social tension, trust, conflict, support, avoidance, and "
     "adversarial descriptions are owner-reported states, not objective facts; "
     "use reported_observation modality. Do not substitute one relationship "
-    "predicate for another. 'I am the caregiver for my father' supports both "
+    "predicate for another. A girlfriend, boyfriend, fiance, fiancee, life "
+    "partner, or explicitly romantic partner uses "
+    "relationship.romantic_partner_of, not relationship.spouse_of. A wife, "
+    "husband, spouse, or person explicitly described as married to the owner "
+    "uses relationship.spouse_of. 'Used to be', former, ex-spouse, separated, "
+    "divorced, and 'lost touch' language describes a relationship with a "
+    "bounded historical validity interval, not a currently open state. The "
+    "lexical state 'no contact' is affirmed social.no_contact_with with "
+    "reported_observation modality; it is not a negated relationship. For "
+    "social.supports, preserve direction: 'X supports me' is X to self, while "
+    "'I support X' is self to X. 'I am the caregiver for my father' supports both "
     "relationship.caregiver_for and relationship.parent_of; the family relation "
     "must never replace the caregiving relation. The father's entity role must "
     "include both family:father and support:care_recipient so each edge can be "
@@ -1733,6 +1745,8 @@ def _explicit_current_relationship_state(content: str) -> bool:
         content,
         re.IGNORECASE,
     )
+    if relationship_has_explicit_historical_end(content) and continuing is None:
+        return False
     return one_off is None or continuing is not None
 
 
@@ -1894,6 +1908,35 @@ def _relationship_v5_1_repair_entities_and_roles(
             return tuple(repairs)
     object_ref = obj.get("entity_ref")
     object_entity = by_ref.get(object_ref)
+    if subject_ref == object_ref:
+        self_entities = [
+            item for item in entities if item.get("entity_type") == "self"
+        ]
+        named_entities = [
+            item for item in entities if item.get("entity_type") != "self"
+        ]
+        if len(self_entities) == 1 and len(named_entities) == 1:
+            self_entity = self_entities[0]
+            named_entity = named_entities[0]
+            source_role = directed_role_supported_by_source(
+                predicate,
+                source.content,
+            )
+            named_subject_roles = set(
+                policy.get("named_party_subject_roles", [])
+            )
+            if source_role in named_subject_roles:
+                subject, object_entity = named_entity, self_entity
+            else:
+                subject, object_entity = self_entity, named_entity
+            observation["subject_entity_ref"] = subject["entity_ref"]
+            observation["object"] = {
+                "kind": "entity",
+                "entity_ref": object_entity["entity_ref"],
+            }
+            subject_ref = observation["subject_entity_ref"]
+            object_ref = observation["object"]["entity_ref"]
+            repairs.append("relationship_self_loop_rewired")
     missing_ref: str | None = None
     role_field: str | None = None
     if (
@@ -1970,6 +2013,22 @@ def _relationship_v5_1_repair_entities_and_roles(
     self_count = sum(item.get("entity_type") == "self" for item in endpoints)
     if named is None or self_count != 1:
         return tuple(repairs)
+    source_directed_role = directed_role_supported_by_source(
+        predicate,
+        source.content,
+    )
+    if source_directed_role is not None and not _role_has_any(
+        named.get("relationship_role"),
+        {source_directed_role},
+    ):
+        current = named.get("relationship_role")
+        added = f"relationship:{source_directed_role}"
+        named["relationship_role"] = (
+            f"{current}|{added}"
+            if isinstance(current, str) and current
+            else added
+        )
+        repairs.append("relationship_source_direction_role_augmented")
     all_roles = [
         role
         for field in (
@@ -2172,6 +2231,14 @@ def _compile_entity_links(
             or "relationship.has_pet" in predicates
             or "relationship.parent_of" in predicates
             or "relationship.sibling_of" in predicates
+            or (
+                registry.get("registry_version")
+                == RELATIONSHIP_V5_1_REGISTRY_VERSION
+                and any(
+                    predicate.startswith(("relationship.", "social."))
+                    for predicate in predicates
+                )
+            )
             or any(
                 item["subject_entity_ref"]
                 not in {entity["entity_ref"] for entity in entities}
@@ -2452,6 +2519,46 @@ def _compile_entity_links(
                 if item["observation_ref"]
                 not in rejected_relationship_refs
             ]
+        duplicate_relationship_refs: set[str] = set()
+        seen_relationships: set[tuple[str, str, str, str, str, str]] = set()
+        for observation in observations:
+            obj = observation.get("object")
+            if (
+                not observation.get("predicate", "").startswith(
+                    ("relationship.", "social.")
+                )
+                or not isinstance(obj, dict)
+                or obj.get("kind") != "entity"
+            ):
+                continue
+            key = (
+                observation["predicate"],
+                str(observation.get("subject_entity_ref")),
+                str(obj.get("entity_ref")),
+                str(observation.get("polarity")),
+                str(observation.get("modality")),
+                canonical_json(observation.get("temporal")),
+            )
+            if key in seen_relationships:
+                duplicate_relationship_refs.add(
+                    observation["observation_ref"]
+                )
+            else:
+                seen_relationships.add(key)
+        if duplicate_relationship_refs:
+            observations[:] = [
+                item
+                for item in observations
+                if item["observation_ref"]
+                not in duplicate_relationship_refs
+            ]
+            value["comparison_hints"] = [
+                item
+                for item in value["comparison_hints"]
+                if item["observation_ref"]
+                not in duplicate_relationship_refs
+            ]
+            repairs.append("duplicate_relationship_observations_removed")
 
     if "relationship.parent_of" in predicates and _PARENT_ROLE_RE.search(content):
         person_ref = _entity_ref(entities, "person")
