@@ -689,8 +689,178 @@ def main() -> int:
     if sum(
         item["reason_code"] == "unregistered_predicate"
         for item in relationship_packet["deferrals"]
-    ) != 2:
-        raise AssertionError("unsupported child/spouse relations were not deferred")
+    ) != 1:
+        raise AssertionError("co-spanned unsupported relations were not deduplicated")
+
+    mixed_content = (
+        "My name is David Baeb. I am a freelance architect. "
+        "My wife is Jessica. My children are David, Bertha, and Maggie."
+    )
+    mixed_source = TrustedExtractionSource.create(
+        job_id="00000000-0000-4000-8000-000000000091",
+        source_system="public.chat_log",
+        source_external_id="10000000-0000-4000-8000-000000000091",
+        source_sha256=sha256_text(mixed_content),
+        source_recorded_at="2026-07-17T12:00:00+00:00",
+        content=mixed_content,
+    )
+
+    def mixed_span(text: str) -> dict[str, Any]:
+        start = mixed_content.index(text)
+        return {"start": start, "end": start + len(text), "quote": text}
+
+    name_clause = "My name is David Baeb."
+    occupation_clause = "I am a freelance architect."
+    spouse_clause = "My wife is Jessica."
+    children_clause = "My children are David, Bertha, and Maggie."
+    mixed_packet = provider_output()
+    mixed_packet["entity_mentions"][0]["source_spans"] = [
+        mixed_span(name_clause)
+    ]
+    mixed_packet["observations"][0]["object"]["value"] = "David Baeb"
+    mixed_packet["observations"][0]["source_spans"] = [
+        mixed_span(name_clause)
+    ]
+    mixed_packet["entity_mentions"].extend(
+        [
+            {
+                "entity_ref": "e01",
+                "entity_type": "concept",
+                "mention_kind": "named",
+                "name_text": "freelance architect",
+                "relationship_role": "occupation:reported",
+                "source_spans": [mixed_span(occupation_clause)],
+                "extraction_confidence": 0.99,
+                "reason_codes": ["explicit_occupation_concept"],
+            },
+            *[
+                {
+                    "entity_ref": f"e{ordinal:02d}",
+                    "entity_type": "person",
+                    "mention_kind": "named",
+                    "name_text": name,
+                    "relationship_role": relationship_role,
+                    "source_spans": [mixed_span(clause)],
+                    "extraction_confidence": 0.99,
+                    "reason_codes": [reason_code],
+                }
+                for ordinal, name, relationship_role, clause, reason_code in (
+                    (
+                        2,
+                        "Jessica",
+                        "family:spouse",
+                        spouse_clause,
+                        "explicit_named_spouse",
+                    ),
+                    (
+                        3,
+                        "David",
+                        "family:child",
+                        children_clause,
+                        "explicit_named_child",
+                    ),
+                    (
+                        4,
+                        "Bertha",
+                        "family:child",
+                        children_clause,
+                        "explicit_named_child",
+                    ),
+                    (
+                        5,
+                        "Maggie",
+                        "family:child",
+                        children_clause,
+                        "explicit_named_child",
+                    ),
+                )
+            ],
+        ]
+    )
+    relationship_template = deepcopy(mixed_packet["observations"][0])
+    for ordinal, entity_ref, clause, reason_code in (
+        (2, "e02", spouse_clause, "explicit_spouse_relationship"),
+        (3, "e03", children_clause, "explicit_child_relationship"),
+        (4, "e04", children_clause, "explicit_child_relationship"),
+        (5, "e05", children_clause, "explicit_child_relationship"),
+    ):
+        observation = deepcopy(relationship_template)
+        observation.update(
+            {
+                "observation_ref": f"o{ordinal:02d}",
+                "predicate": "relationship.sibling_of",
+                "object": {"kind": "entity", "entity_ref": entity_ref},
+                "reason_codes": [reason_code],
+                "source_spans": [mixed_span(clause)],
+            }
+        )
+        mixed_packet["observations"].append(observation)
+    mixed_packet["deferrals"] = [
+        {
+            "memory_shape": "none",
+            "reason_code": "insufficient_evidence",
+            "sensitivity": "low",
+            "source_spans": [
+                {
+                    "start": 0,
+                    "end": len(mixed_content),
+                    "quote": mixed_content,
+                }
+            ],
+        }
+    ]
+    mixed_result = LocalStructuredResult(
+        response_id="local-mixed-family-role-error",
+        model="qwen3-8b-local-extractor",
+        finish_reason="stop",
+        parsed=mixed_packet,
+        response_sha256=canonical_sha256(mixed_packet),
+        prompt_tokens=200,
+        completion_tokens=400,
+    )
+    mixed_provider = LocalLlamaCppProvider(
+        model="qwen3-8b-local-extractor",
+        model_file_sha256=MODEL_FILE_SHA256,
+        runtime_revision="llama.cpp-b10066-86a9c79f8",
+        registry=registry,
+        transport=StaticLocalStructuredTransport(result=mixed_result),
+    )
+    mixed_validated = validate_and_normalize(
+        mixed_provider,
+        source=mixed_source,
+        registry=registry,
+        schema=schema,
+        allowed_provider_versions={
+            LOCAL_PROVIDER_ID: LOCAL_PROVIDER_VERSION,
+        },
+        max_external_model_calls=0,
+    )
+    mixed_normalized = mixed_validated.normalized_packet
+    if {
+        item["predicate"] for item in mixed_normalized["observations"]
+    } != {"identity.name", "occupation.works_as"}:
+        raise AssertionError("mixed family packet semantic repair changed")
+    if {
+        item["name_text"]
+        for item in mixed_normalized["entity_mentions"]
+        if item["entity_type"] == "person"
+    }:
+        raise AssertionError("unsupported family entities survived pruning")
+    if sorted(
+        item["reason_code"] for item in mixed_normalized["deferrals"]
+    ) != ["unregistered_predicate", "unregistered_predicate"]:
+        raise AssertionError("unsupported family relations were not isolated")
+    mixed_repairs = set(mixed_provider.last_audit["compiler_repairs"])
+    required_mixed_repairs = {
+        "explicit_occupation_observation_completed",
+        "orphan_entity_mentions_pruned",
+        "redundant_global_insufficient_evidence_removed",
+        "unsupported_child_relation_deferred",
+        "unsupported_partner_relation_deferred",
+    }
+    if not required_mixed_repairs <= mixed_repairs:
+        raise AssertionError("mixed family compiler audit is incomplete")
+
     request_body = transport.requests[0].body()
     if "store" in request_body:
         raise AssertionError("local transport unexpectedly emitted store state")

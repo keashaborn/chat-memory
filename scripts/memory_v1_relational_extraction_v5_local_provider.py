@@ -33,7 +33,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 LOCAL_PROVIDER_ID = "local_llama_cpp"
 LOCAL_PROVIDER_VERSION = "v1"
 LOCAL_CALL_ENABLE_TOKEN = "memory_v1_local_v5_inference_v1"
-LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v6"
+LOCAL_POLICY_COMPILER_VERSION = "memory_v1_local_policy_compiler_v7"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -1030,6 +1030,11 @@ _EXPLICIT_SELF_OCCUPATION_RE = re.compile(
     r"(?:an?\s+)?(?P<role>[^\n.!?]{1,160})",
     re.IGNORECASE,
 )
+_EXPLICIT_FREELANCE_OCCUPATION_RE = re.compile(
+    r"\bi\s+(?:am|['’]m)\s+(?:currently\s+)?(?:an?\s+)?"
+    r"(?P<role>freelance\s+[^\n.!?]{1,150})",
+    re.IGNORECASE,
+)
 _PET_RE = re.compile(
     r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b",
     re.IGNORECASE,
@@ -1120,6 +1125,14 @@ _PARENT_ROLE_RE = re.compile(
 )
 _SIBLING_ROLE_RE = re.compile(
     r"\b(?:brother|sister|sibling)\b",
+    re.IGNORECASE,
+)
+_CHILD_ROLE_RE = re.compile(
+    r"\b(?:child|children|kid|kids|son|sons|daughter|daughters)\b",
+    re.IGNORECASE,
+)
+_PARTNER_ROLE_RE = re.compile(
+    r"\b(?:wife|husband|spouse|partner)\b",
     re.IGNORECASE,
 )
 
@@ -1442,6 +1455,15 @@ def _next_entity_ref(entities: list[dict[str, Any]]) -> str:
     raise ValueError("local compiler exhausted entity references")
 
 
+def _next_observation_ref(observations: list[dict[str, Any]]) -> str:
+    used = {item["observation_ref"] for item in observations}
+    for ordinal in range(100):
+        value = f"o{ordinal:02d}"
+        if value not in used:
+            return value
+    raise ValueError("local compiler exhausted observation references")
+
+
 def _entity_ref(
     entities: list[dict[str, Any]], entity_type: str
 ) -> str | None:
@@ -1520,8 +1542,64 @@ def _explicit_self_occupation_supported(content: str, value: Any) -> bool:
         re.IGNORECASE,
     )
     return any(
-        role_pattern.search(match.group("role")) is not None
-        for match in _EXPLICIT_SELF_OCCUPATION_RE.finditer(content)
+        role_pattern.search(role) is not None
+        for role, _, _ in _explicit_self_occupation_matches(content)
+    )
+
+
+def _explicit_self_occupation_matches(
+    content: str,
+) -> tuple[tuple[str, int, int], ...]:
+    matches: list[tuple[str, int, int]] = []
+    for pattern in (
+        _EXPLICIT_SELF_OCCUPATION_RE,
+        _EXPLICIT_FREELANCE_OCCUPATION_RE,
+    ):
+        for match in pattern.finditer(content):
+            role = match.group("role").strip(" \t\r\n\"'‘’“”.,;:")
+            if role:
+                matches.append((role, match.start(), match.end()))
+    return tuple(matches)
+
+
+def _role_has_any(relationship_role: Any, values: set[str]) -> bool:
+    if not isinstance(relationship_role, str):
+        return False
+    tokens = {
+        token
+        for token in re.split(r"[:/_\-]+", relationship_role.casefold())
+        if token
+    }
+    return bool(tokens & values)
+
+
+def _append_deferral_once(
+    deferrals: list[dict[str, Any]],
+    *,
+    reason_code: str,
+    memory_shape: str,
+    source_spans: list[dict[str, Any]],
+    sensitivity: str,
+) -> None:
+    signature = (
+        reason_code,
+        memory_shape,
+        canonical_sha256(source_spans),
+    )
+    for item in deferrals:
+        if (
+            item.get("reason_code"),
+            item.get("memory_shape"),
+            canonical_sha256(item.get("source_spans", [])),
+        ) == signature:
+            return
+    deferrals.append(
+        {
+            "reason_code": reason_code,
+            "memory_shape": memory_shape,
+            "source_spans": source_spans,
+            "sensitivity": sensitivity,
+        }
     )
 
 
@@ -1574,12 +1652,25 @@ def _compile_entity_links(
     predicates = {item["predicate"] for item in observations}
     repairs: list[str] = []
     content = source.content
+    original_global_insufficient_ids = {
+        id(item)
+        for item in value["deferrals"]
+        if item.get("reason_code") == "insufficient_evidence"
+        and item.get("memory_shape") == "none"
+        and any(
+            span.get("start") == 0 and span.get("end") == len(content)
+            for span in item.get("source_spans", [])
+        )
+    }
 
     self_ref = _entity_ref(entities, "self")
+    occupation_matches = _explicit_self_occupation_matches(content)
     needs_self = bool(
         _FIRST_PERSON_RE.search(content)
         and (
-            "relationship.has_pet" in predicates
+            occupation_matches
+            or "occupation.works_as" in predicates
+            or "relationship.has_pet" in predicates
             or "relationship.parent_of" in predicates
             or "relationship.sibling_of" in predicates
             or any(
@@ -1598,6 +1689,50 @@ def _compile_entity_links(
             relationship_role="user:self",
         )
         repairs.append("self_entity_link")
+
+    if (
+        self_ref is not None
+        and len(occupation_matches) == 1
+        and "occupation.works_as" not in predicates
+    ):
+        role, start, end = occupation_matches[0]
+        matching_concepts = [
+            item
+            for item in entities
+            if item["entity_type"] == "concept"
+            and isinstance(item.get("name_text"), str)
+            and item["name_text"].strip().casefold() == role.casefold()
+            and _role_has_any(item.get("relationship_role"), {"occupation"})
+        ]
+        if len(matching_concepts) == 1:
+            observations.append(
+                {
+                    "extraction_confidence": 0.98,
+                    "modality": "asserted",
+                    "object": {
+                        "kind": "entity",
+                        "entity_ref": matching_concepts[0]["entity_ref"],
+                    },
+                    "observation_ref": _next_observation_ref(observations),
+                    "polarity": "affirmed",
+                    "predicate": "occupation.works_as",
+                    "projection_class": "direct_claim",
+                    "reason_codes": ["explicit_occupation_statement"],
+                    "sensitivity": "medium",
+                    "source_spans": [
+                        {
+                            "start": start,
+                            "end": end,
+                            "quote": content[start:end],
+                        }
+                    ],
+                    "subject_entity_ref": self_ref,
+                    "surface_policy": "direct_or_relevant",
+                    "temporal": _example_temporal("state_validity"),
+                }
+            )
+            predicates.add("occupation.works_as")
+            repairs.append("explicit_occupation_observation_completed")
 
     pet_source = bool(_PET_RE.search(content))
     pet_predicates = any(
@@ -1654,36 +1789,78 @@ def _compile_entity_links(
     unsupported_relationship_refs: set[str] = set()
     for observation in observations:
         obj = observation["object"]
-        if observation["predicate"] != "relationship.has_pet" or (
-            obj["kind"] != "entity"
-        ):
+        predicate = observation["predicate"]
+        if not predicate.startswith("relationship.") or obj["kind"] != "entity":
             continue
         role = entity_roles.get(obj["entity_ref"])
-        normalized_role = role.casefold() if isinstance(role, str) else ""
-        if normalized_role.startswith(("child:", "son:", "daughter:")):
-            unsupported_relationship_refs.add(observation["observation_ref"])
-            value["deferrals"].append(
+        source_text = _observation_source_text(content, observation)
+        if (
+            _role_has_any(
+                role,
                 {
-                    "reason_code": "unregistered_predicate",
-                    "memory_shape": "direct_claim",
-                    "source_spans": observation["source_spans"],
-                    "sensitivity": observation["sensitivity"],
-                }
+                    "child",
+                    "children",
+                    "kid",
+                    "kids",
+                    "son",
+                    "sons",
+                    "daughter",
+                    "daughters",
+                },
             )
-            repairs.append("unsupported_child_relation_deferred")
-        elif normalized_role.startswith(
-            ("spouse:", "wife:", "husband:", "partner:")
+            or _CHILD_ROLE_RE.search(source_text)
         ):
             unsupported_relationship_refs.add(observation["observation_ref"])
-            value["deferrals"].append(
-                {
-                    "reason_code": "unregistered_predicate",
-                    "memory_shape": "direct_claim",
-                    "source_spans": observation["source_spans"],
-                    "sensitivity": observation["sensitivity"],
-                }
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="unregistered_predicate",
+                memory_shape="direct_claim",
+                source_spans=observation["source_spans"],
+                sensitivity=observation["sensitivity"],
+            )
+            repairs.append("unsupported_child_relation_deferred")
+        elif (
+            _role_has_any(
+                role,
+                {"spouse", "wife", "husband", "partner"},
+            )
+            or _PARTNER_ROLE_RE.search(source_text)
+        ):
+            unsupported_relationship_refs.add(observation["observation_ref"])
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="unregistered_predicate",
+                memory_shape="direct_claim",
+                source_spans=observation["source_spans"],
+                sensitivity=observation["sensitivity"],
             )
             repairs.append("unsupported_partner_relation_deferred")
+        elif predicate == "relationship.sibling_of" and not (
+            _role_has_any(role, {"sibling", "brother", "sister"})
+            and _SIBLING_ROLE_RE.search(source_text)
+        ):
+            unsupported_relationship_refs.add(observation["observation_ref"])
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="predicate_semantics_unresolved",
+                memory_shape="direct_claim",
+                source_spans=observation["source_spans"],
+                sensitivity=observation["sensitivity"],
+            )
+            repairs.append("unsupported_sibling_semantics_deferred")
+        elif predicate == "relationship.parent_of" and not (
+            _role_has_any(role, {"parent", "father", "mother", "dad", "mom"})
+            and _PARENT_ROLE_RE.search(source_text)
+        ):
+            unsupported_relationship_refs.add(observation["observation_ref"])
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="predicate_semantics_unresolved",
+                memory_shape="direct_claim",
+                source_spans=observation["source_spans"],
+                sensitivity=observation["sensitivity"],
+            )
+            repairs.append("unsupported_parent_semantics_deferred")
     if unsupported_relationship_refs:
         observations[:] = [
             item
@@ -2050,6 +2227,33 @@ def _compile_entity_links(
         if not observations:
             value["entity_mentions"] = []
             value["comparison_hints"] = []
+
+    if observations and original_global_insufficient_ids:
+        retained_deferrals = [
+            item
+            for item in value["deferrals"]
+            if id(item) not in original_global_insufficient_ids
+        ]
+        if len(retained_deferrals) != len(value["deferrals"]):
+            value["deferrals"] = retained_deferrals
+            repairs.append("redundant_global_insufficient_evidence_removed")
+
+    referenced_entity_refs = {
+        item["subject_entity_ref"] for item in observations
+    } | {
+        item["object"]["entity_ref"]
+        for item in observations
+        if item["object"]["kind"] == "entity"
+    }
+    if len(referenced_entity_refs) < len(entities):
+        retained_entities = [
+            item
+            for item in entities
+            if item["entity_ref"] in referenced_entity_refs
+        ]
+        if len(retained_entities) != len(entities):
+            value["entity_mentions"] = retained_entities
+            repairs.append("orphan_entity_mentions_pruned")
 
     compiled = ProviderPacket.model_validate(value)
     return compiled, tuple(sorted(set(repairs)))
