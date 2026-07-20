@@ -139,7 +139,7 @@ BEGIN
       RAISE EXCEPTION 'V5.1 persistence recovery replay conflicts'
         USING ERRCODE='23514';
     END IF;
-    RETURN QUERY SELECT p_job_id,'pending'::text,0,'replayed'::text;
+    RETURN QUERY SELECT p_job_id,'pending'::text,1,'replayed'::text;
     RETURN;
   END IF;
 
@@ -204,7 +204,7 @@ BEGIN
   END IF;
 
   UPDATE memory.evidence_extraction_job AS job
-  SET status='pending',attempts=0,available_at=current_job.created_at,
+  SET status='pending',available_at=current_job.created_at,
       worker_id=NULL,last_error=NULL
   WHERE job.owner_user_id=actor AND job.job_id=p_job_id;
   INSERT INTO memory.evidence_extraction_event(
@@ -219,7 +219,7 @@ BEGIN
       'reason_code','canonical_compiler_hash_compatibility'
     )
   );
-  RETURN QUERY SELECT p_job_id,'pending'::text,0,'applied'::text;
+  RETURN QUERY SELECT p_job_id,'pending'::text,1,'applied'::text;
 END
 $function$;
 

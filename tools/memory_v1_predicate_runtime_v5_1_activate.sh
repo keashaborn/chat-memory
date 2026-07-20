@@ -42,6 +42,7 @@ status_file=
 timers_quiesced=0
 units_installed=0
 activation_committed=0
+recovery_service=
 timer_state=$(mktemp /tmp/memory-v1-v5-1-activate-timers.XXXXXX)
 unit_backup=$(mktemp -d /tmp/memory-v1-v5-1-activate-units.XXXXXX)
 all_tables=$(mktemp /tmp/memory-v1-v5-1-activate-all-tables.XXXXXX)
@@ -212,6 +213,7 @@ record_exit() {
   rm -f "$timer_state" "$all_tables" "$protected_tables" \
     "$all_before" "$all_after_migration" "$protected_before" \
     "$protected_after" "$other_before" "$other_after"
+  [[ -z "$recovery_service" ]] || rm -f "$recovery_service"
   if [[ -n "$status_file" ]]; then
     {
       printf 'run_id=%s\n' "$run_id"
@@ -236,7 +238,7 @@ sha256sum -c <<'HASHES'
 17e9f5889363a57bcdadaa85e5fcb06f8e9eb063b31bb866e6b8a49cd1d099c7  scripts/memory_v1_v5_multi_owner_automation_contract_test.py
 d20b8506f544701d58cc05a237b3131f748b6a1dd1c6c6ca56982c04c7fef2f7  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
 541221a287fb5724f55fb87cbbb0ce8f570fb23e34982f0a1c162afa09095d42  tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql
-7b81113749f0b17a7c21539680471af5101ff2a498e8eabea7151617b3b9b551  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
+f68d43e8455403467207acba35a926801540056f9a8c907d80095f301c348430  ops/sql/20260720_memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 b6e122ed3013ee21de43e222493285b82a28b8ec08312d39189332f6ec76ddd7  tests/memory_v1_predicate_runtime_v5_1_canonical_compiler_compat.sql
 35f163241a5d770dd953d999b284e13d63735fbdbfdeeeabb98fb10ec0550af3  scripts/memory_v1_v5_local_inference_scheduler.py
 cd1524ec1ada583ee4b1fde7aa70cf44cf7bf44bb55773b14c25e6c4c93b8d57  scripts/memory_v1_predicate_runtime_profile.py
@@ -345,9 +347,9 @@ SELECT * FROM memory.requeue_owner_v5_1_persistence_mismatch_v1(
 COMMIT;
 SQL
 chmod 0600 "$recovery_output"
-[[ "$(grep -c "^$recovery_job|pending|0|applied$" "$recovery_output")" == 1 ]]
-[[ "$(grep -c "^$recovery_job|pending|0|replayed$" "$recovery_output")" == 1 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='pending' AND attempts=0 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id IS NULL AND last_error IS NULL")" == 1 ]]
+[[ "$(grep -c "^$recovery_job|pending|1|applied$" "$recovery_output")" == 1 ]]
+[[ "$(grep -c "^$recovery_job|pending|1|replayed$" "$recovery_output")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='pending' AND attempts=1 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id IS NULL AND last_error IS NULL")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_event WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND operation_id='$recovery_operation'::uuid AND event_type='queued' AND from_status='error' AND to_status='pending'")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid")" == 0 ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
@@ -357,7 +359,7 @@ reserved=$(psql_scalar "SELECT count(*) FROM memory.v5_local_inference_event WHE
 [[ "$reserved" -lt 12 ]]
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python "$scheduler" \
   --owner-user-id "$owner" --contract-profile v5_1 --max-jobs 1 \
-  --max-attempts 1 --lease-seconds 900 --timeout-seconds 600 \
+  --max-attempts 2 --lease-seconds 900 --timeout-seconds 600 \
   --max-output-tokens 4096 --rolling-window-seconds 86400 \
   --max-reserved-jobs 12 --failure-threshold 3 >"$plan"
 chmod 0600 "$plan"
@@ -370,7 +372,7 @@ jq -e '
   (.write_counts|to_entries|map(.value==0)|all) and
   (.plans|length)==1 and .plans[0].next_job_id_sha256!=null
 ' "$plan" >/dev/null
-selected_job=$(psql_scalar "SELECT job_id::text FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND route='relational_extraction' AND status IN ('pending','error') AND attempts<1 AND available_at<=clock_timestamp() ORDER BY priority,available_at,created_at,job_id LIMIT 1")
+selected_job=$(psql_scalar "SELECT job_id::text FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND route='relational_extraction' AND status IN ('pending','error') AND attempts<2 AND available_at<=clock_timestamp() ORDER BY priority,available_at,created_at,job_id LIMIT 1")
 [[ -n "$selected_job" ]]
 [[ "$selected_job" == "$recovery_job" ]]
 selected_job_sha=$(printf %s "$selected_job" | sha256sum | awk '{print $1}')
@@ -386,13 +388,20 @@ cp "/etc/systemd/system/$timer" "$unit_backup/$timer"
 chmod 0600 "$unit_backup/$service" "$unit_backup/$timer"
 
 phase=install_v5_1_shadow_units
-sudo -n install -o root -g root -m 0644 "$service_source" \
+[[ "$(grep -o -- '--max-attempts 1' "$service_source" | wc -l)" == 1 ]]
+recovery_service=$(mktemp /tmp/memory-v1-v5-1-recovery-service.XXXXXX)
+sed 's/--max-attempts 1/--max-attempts 2/' "$service_source" \
+  >"$recovery_service"
+chmod 0600 "$recovery_service"
+[[ "$(sha256sum "$recovery_service" | awk '{print $1}')" == \
+  a078b5f0f1209a5c002ad3f89f74bf62f8316b04ab1e8fd9b131f96d4db9dcc8 ]]
+sudo -n install -o root -g root -m 0644 "$recovery_service" \
   "/etc/systemd/system/$service"
 sudo -n install -o root -g root -m 0644 "$timer_source" \
   "/etc/systemd/system/$timer"
 sudo -n systemctl daemon-reload
 units_installed=1
-cmp -s "$service_source" "/etc/systemd/system/$service"
+cmp -s "$recovery_service" "/etc/systemd/system/$service"
 cmp -s "$timer_source" "/etc/systemd/system/$timer"
 [[ "$(systemctl is-active "$timer")" == inactive ]]
 
@@ -423,7 +432,7 @@ packet_id=$(psql_scalar "SELECT packet_id::text FROM memory.evidence_extraction_
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND packet_id='$packet_id'::uuid AND normalized_packet->>'contract_version'='memory_v1_relational_extraction_v5_1' AND normalized_packet->>'predicate_registry_version'='memory_predicate_registry_v5_1' AND policy_compiler_sha256='$compiler_sha'")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_packet_disposition WHERE owner_user_id='$owner'::uuid AND packet_id='$packet_id'::uuid")" == 0 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.v5_local_packet_review_artifact WHERE owner_user_id='$owner'::uuid AND packet_id='$packet_id'::uuid")" == 0 ]]
-[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$selected_job'::uuid AND status='review_required' AND lease_token IS NULL AND lease_expires_at IS NULL AND last_error IS NULL")" == 1 ]]
+[[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$selected_job'::uuid AND status='review_required' AND attempts=2 AND lease_token IS NULL AND lease_expires_at IS NULL AND last_error IS NULL")" == 1 ]]
 
 phase=live_rollback_only_firewall_probe
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U sage -d "$database" \
@@ -505,6 +514,10 @@ for name, delta in (
 PY
 
 phase=restore_timers_and_health
+sudo -n install -o root -g root -m 0644 "$service_source" \
+  "/etc/systemd/system/$service"
+sudo -n systemctl daemon-reload
+cmp -s "$service_source" "/etc/systemd/system/$service"
 restore_timers
 sudo -n systemctl start "$timer"
 authenticated_health
@@ -526,6 +539,7 @@ jq -n \
     backup:{path:$backup,sha256:$backup_sha256},
     canary:{owner_count:1,profile:"v5_1",outcome:"accepted",
       local_model_calls:1,external_model_calls:0,
+      temporary_recovery_max_attempts:2,persistent_max_attempts:1,
       selected_job_sha256:$selected_job_sha256,
       packet_id_sha256:$packet_id_sha256,
       sanitized_plan:$plan,sanitized_output:$canary},
