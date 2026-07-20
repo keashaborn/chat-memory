@@ -140,7 +140,16 @@ timer_state="$snapshot_dir/memory_v1_pattern_salience_shadow_timers_before_${run
 
 phase=database_preflight
 [[ "$(psql_scalar "SELECT current_setting('server_version_num')::integer/10000")" == 16 ]]
-[[ "$(psql_scalar "SELECT to_regprocedure('memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)') IS NULL")" == t ]]
+loader_state=$(psql_scalar "SELECT CASE
+  WHEN to_regprocedure('memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)') IS NULL
+    THEN 'absent'
+  WHEN pg_get_userbyid((SELECT proowner FROM pg_proc
+    WHERE oid='memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)'::regprocedure))='memory_v5_epistemic_writer'
+    AND has_function_privilege('brains_app','memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)','EXECUTE')
+    AND NOT has_table_privilege('brains_app','memory.claim_observation','SELECT')
+    THEN 'restricted_existing'
+  ELSE 'unsafe_existing' END")
+[[ "$loader_state" == absent || "$loader_state" == restricted_existing ]]
 authenticated_health
 
 phase=capture_timer_state
@@ -247,7 +256,7 @@ phase=postflight
 capture_memory_state "$table_list" "$after_state"
 cmp -s "$before_state" "$after_state"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
-[[ "$(psql_scalar "SELECT (NOT rolcanlogin AND NOT rolinherit AND NOT rolbypassrls AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole)::text FROM pg_roles WHERE rolname='memory_v5_epistemic_writer'")" == t ]]
+[[ "$(psql_scalar "SELECT (NOT rolcanlogin AND NOT rolinherit AND NOT rolbypassrls AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole)::text FROM pg_roles WHERE rolname='memory_v5_epistemic_writer'")" == true ]]
 [[ "$(psql_scalar "SELECT NOT pg_has_role('brains_app','memory_v5_epistemic_writer','MEMBER')")" == t ]]
 [[ "$(psql_scalar "SELECT has_function_privilege('brains_app','memory.load_pattern_salience_shadow_inputs_v5_1(integer,integer)','EXECUTE')")" == t ]]
 [[ "$(psql_scalar "SELECT has_table_privilege('brains_app','memory.claim_observation','SELECT')")" == f ]]
