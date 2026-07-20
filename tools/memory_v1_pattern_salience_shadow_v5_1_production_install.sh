@@ -18,6 +18,7 @@ env_file=/opt/chat-memory/.env
 migration=ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
 test_sql=tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
 worker=scripts/memory_v1_pattern_salience_shadow_v5_1.py
+packet_probe=scripts/memory_v1_pattern_salience_shadow_persistence_probe_v5_1.py
 phase=initialization
 timers_quiesced=0
 timer_state=
@@ -124,6 +125,7 @@ c8b2eeb30c58a624cc7ba247af350530aa23e53195bfa728fd68de6ec4e98f96  ops/sql/202607
 44787c4cb821400434191cdfacf0179fedd0a9071c96685f63a03efd1f3443d7  tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
 16c5cb75589804c41f8286ab1bb28e06b54f0b96ec37298ceb4e421490768e52  scripts/memory_v1_pattern_salience_shadow_v5_1.py
 d94d7e3c728aed6b4e84f1c92c1f35712fabe597089bb53827041c63ae5e6342  tests/test_memory_v1_pattern_salience_shadow_v5_1.py
+3427cbd473c7de7778f3d1cb97209f475b58ad94a76e33733bf60b23956a67a7  scripts/memory_v1_pattern_salience_shadow_persistence_probe_v5_1.py
 HASHES
 PYTHONPATH=. venv/bin/python -m unittest \
   tests/test_memory_v1_pattern_salience_shadow_v5_1.py \
@@ -211,6 +213,7 @@ sha256sum -c <<'HASHES'
 c8b2eeb30c58a624cc7ba247af350530aa23e53195bfa728fd68de6ec4e98f96  ops/sql/20260720_memory_v1_pattern_salience_shadow_input_v5_1.sql
 44787c4cb821400434191cdfacf0179fedd0a9071c96685f63a03efd1f3443d7  tests/memory_v1_pattern_salience_shadow_input_v5_1.sql
 16c5cb75589804c41f8286ab1bb28e06b54f0b96ec37298ceb4e421490768e52  scripts/memory_v1_pattern_salience_shadow_v5_1.py
+3427cbd473c7de7778f3d1cb97209f475b58ad94a76e33733bf60b23956a67a7  scripts/memory_v1_pattern_salience_shadow_persistence_probe_v5_1.py
 HASHES
 
 phase=install_restricted_loader
@@ -252,6 +255,22 @@ jq -e '
 sha256sum "$shadow_report" >"$shadow_report.sha256"
 chmod 0600 "$shadow_report" "$shadow_report.sha256"
 
+phase=rollback_only_packet_persistence_probe
+probe_report="$shadow_report.persistence_probe.json"
+POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo" venv/bin/python "$packet_probe" \
+  --owner-user-id "$owner" \
+  --other-owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef \
+  --report "$shadow_report" >"$probe_report"
+chmod 0600 "$probe_report"
+sha256sum "$probe_report" >"$probe_report.sha256"
+chmod 0600 "$probe_report.sha256"
+jq -e '
+  .outcome=="rollback_only_probe_passed" and
+  .candidate_count>0 and .candidate_count<=32 and
+  .replay_writes==0 and .cross_owner_rejected==true and
+  .persistent_writes=="verify_with_external_table_hashes"
+' "$probe_report" >/dev/null
+
 phase=postflight
 capture_memory_state "$table_list" "$after_state"
 cmp -s "$before_state" "$after_state"
@@ -278,12 +297,13 @@ authenticated_health
 
 phase=report
 report="$snapshot_dir/memory_v1_pattern_salience_shadow_install_${run_id}.json"
-python3 - "$report" "$backup" "$checksum" "$shadow_report" "$execution_head" <<'PY'
+python3 - "$report" "$backup" "$checksum" "$shadow_report" "$probe_report" "$execution_head" <<'PY'
 import hashlib,json,sys
 from datetime import datetime,timezone
 from pathlib import Path
 report,backup,checksum,shadow_path=map(Path,sys.argv[1:5])
-execution_head=sys.argv[5]
+probe_path=Path(sys.argv[5])
+execution_head=sys.argv[6]
 shadow=json.loads(shadow_path.read_text())
 value={
   "contract_version":"memory_v1_pattern_salience_shadow_install_report_v1",
@@ -293,6 +313,8 @@ value={
   "backup_sha256":checksum.read_text().split()[0],
   "shadow_report":str(shadow_path),
   "shadow_report_file_sha256":hashlib.sha256(shadow_path.read_bytes()).hexdigest(),
+  "rollback_probe_report":str(probe_path),
+  "rollback_probe_file_sha256":hashlib.sha256(probe_path.read_bytes()).hexdigest(),
   "shadow_summary":{
     "observations":shadow["input_counts"]["observations"],
     "targets":shadow["input_counts"]["targets"],
@@ -306,6 +328,7 @@ value={
     "restricted_loader_installed_and_replay_safe":True,
     "owner_isolation_verified_on_two_real_owners":True,
     "zero_write_shadow_report":True,
+    "restricted_writer_packets_and_zero_write_replay_verified_in_rollback":True,
     "preexisting_memory_rows_unchanged":True,
     "qdrant_unchanged":True,
     "brains_health_and_readiness_passed":True,
@@ -314,7 +337,7 @@ value={
     "pattern_heads_or_revisions_written":0,
     "retrieval_or_prompt_influence":False,
   },
-  "hard_stop":"before_snapshot_or_pattern_review_persistence_pattern_apply_runtime_activation",
+  "hard_stop":"before_durable_snapshot_or_pattern_review_persistence_pattern_apply_runtime_activation",
 }
 payload=json.dumps(value,indent=2,sort_keys=True)+"\n"
 report.write_text(payload)
