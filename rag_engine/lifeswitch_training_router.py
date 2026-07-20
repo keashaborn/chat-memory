@@ -2300,22 +2300,26 @@ async def list_training_session_sets(
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
 
-        where_active = "" if include_inactive else "and is_active=true"
+        where_active = "" if include_inactive else "and l.is_active=true"
         rows = await conn.fetch(
             f"""
             select
-              training_set_log_id, training_session_id, owner_user_id,
-              workout_template_id, exercise_id, exercise_name,
-              set_type, exercise_role_snapshot,
-              exercise_sort_order, set_index, weight, reps, volume,
-              flags, notes, is_active, created_at, updated_at,
+              l.training_set_log_id, l.training_session_id, l.owner_user_id,
+              l.workout_template_id, l.exercise_id, l.exercise_name,
+              l.set_type, l.exercise_role_snapshot,
+              coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') as exercise_role,
+              l.exercise_sort_order, l.set_index, l.weight, l.reps, l.volume,
+              l.flags, l.notes, l.is_active, l.created_at, l.updated_at,
               $3::uuid as _target_user_id,
               $4::boolean as _delegated_view
-            from {SCHEMA}.training_set_log
-            where training_session_id=$1::uuid
-              and owner_user_id=$2::uuid
+            from {SCHEMA}.training_set_log l
+            left join {SCHEMA}.my_exercise me
+              on me.owner_user_id=l.owner_user_id
+             and me.exercise_id=l.exercise_id
+            where l.training_session_id=$1::uuid
+              and l.owner_user_id=$2::uuid
               {where_active}
-            order by exercise_sort_order asc, set_index asc, created_at asc
+            order by l.exercise_sort_order asc, l.set_index asc, l.created_at asc
             """,
             sid,
             owner,

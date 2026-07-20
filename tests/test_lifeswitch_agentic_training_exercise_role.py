@@ -45,6 +45,12 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
             self.router,
         )
 
+    def test_session_set_list_resolves_legacy_roles(self) -> None:
+        self.assertIn(
+            "coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') as exercise_role",
+            self.router,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
