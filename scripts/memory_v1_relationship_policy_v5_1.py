@@ -230,11 +230,15 @@ def assess_relationship_proposal(
             rules
             & {
                 "explicit_owner_stance_required",
+                "explicit_current_state_required",
                 "health_context",
                 "high_stakes_personal_safety",
+                "interpersonal_support_context_required",
                 "legal_status_claim",
+                "more_specific_relation_preferred",
                 "professional_confidentiality",
                 "restricted_explicit_recall_only",
+                "self_endpoint_required",
             }
         )
     )
