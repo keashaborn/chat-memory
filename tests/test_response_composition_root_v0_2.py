@@ -10,8 +10,10 @@ from pydantic import ValidationError
 
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
+    GovernedMemoryAssemblyV1,
     InactiveResponseCompositionRootV0_2,
 )
+from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from tests.test_openai_chat_provider_v1 import provider_response
 from tests.test_openai_moderation_adapter_v0_2 import categories, response as moderation_response
 
@@ -124,6 +126,21 @@ class CombinedOpenAIClient:
         return self
 
 
+class CapturingMemoryProvider:
+    def __init__(self) -> None:
+        self.signals: list[ResponsePolicySignalsV0_2] = []
+
+    def prepare(
+        self,
+        *,
+        authenticated_actor_user_id: UUID,
+        conversation_snapshot: Any,
+        trusted_policy_signals: ResponsePolicySignalsV0_2,
+    ) -> GovernedMemoryAssemblyV1:
+        self.signals.append(trusted_policy_signals)
+        return GovernedMemoryAssemblyV1()
+
+
 def command(message: str) -> AuthenticatedResponseCommandV0_2:
     return AuthenticatedResponseCommandV0_2(
         authenticated_actor_user_id=ACTOR,
@@ -135,6 +152,31 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
 
 
 class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_trusted_response_signals_reach_memory_provider(self) -> None:
+        for signal_values in (
+            {"technical": True},
+            {"fm_explicit": True},
+        ):
+            with self.subTest(signal_values=signal_values):
+                client = CombinedOpenAIClient(classifier_output(**signal_values))
+                memory_provider = CapturingMemoryProvider()
+                root = InactiveResponseCompositionRootV0_2(
+                    openai_client=client,
+                    classifier_model="gpt-5.1",
+                    memory_provider=memory_provider,
+                    answer_id_factory=lambda: ANSWER,
+                    correlation_id_factory=lambda: CORRELATION,
+                )
+
+                await root.execute(
+                    SnapshotConn(),
+                    command("Explain this request using the trusted server policy."),
+                )
+
+                self.assertEqual(len(memory_provider.signals), 1)
+                for key, expected in signal_values.items():
+                    self.assertIs(getattr(memory_provider.signals[0], key), expected)
+
     async def test_exact_authority_order_reaches_final_attestation(self) -> None:
         client = CombinedOpenAIClient()
         conn = SnapshotConn()

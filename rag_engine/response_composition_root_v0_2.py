@@ -39,7 +39,10 @@ from rag_engine.response_orchestration_v0_2 import (
     TrustedResponsePlanV0_2,
     TrustedResponseRequestV0_2,
 )
-from rag_engine.response_policy_v0_2 import ResponsePolicyInputV0_2
+from rag_engine.response_policy_v0_2 import (
+    ResponsePolicyInputV0_2,
+    ResponsePolicySignalsV0_2,
+)
 from rag_engine.server_response_signal_classifier_v0_2 import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
@@ -139,6 +142,7 @@ class GovernedMemoryAssemblyProviderV1(Protocol):
         *,
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
+        trusted_policy_signals: ResponsePolicySignalsV0_2,
     ) -> GovernedMemoryAssemblyV1 | Awaitable[GovernedMemoryAssemblyV1]: ...
 
 
@@ -148,8 +152,9 @@ class NoGovernedMemoryAssemblyProviderV1:
         *,
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
+        trusted_policy_signals: ResponsePolicySignalsV0_2,
     ) -> GovernedMemoryAssemblyV1:
-        del authenticated_actor_user_id, conversation_snapshot
+        del authenticated_actor_user_id, conversation_snapshot, trusted_policy_signals
         return GovernedMemoryAssemblyV1()
 
 
@@ -251,6 +256,7 @@ class InactiveResponseCompositionRootV0_2:
                 self._memory_provider.prepare(
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
                     conversation_snapshot=snapshot,
+                    trusted_policy_signals=classification.signals,
                 )
             )
             trusted_request = TrustedResponseRequestV0_2.create_from_snapshot(

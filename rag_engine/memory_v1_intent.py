@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v7"
+VERSION = "memory_intent_adapter_v8"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -29,7 +29,43 @@ NAME_TERMS = (
     "name correction",
     "name should be",
 )
-FAMILY_TERMS = ("mother", "mom", "mum", "father", "dad", "parent", "deedee")
+FAMILY_SIGNAL_RE = re.compile(
+    r"\b(?:family|family members?|relatives?|mother|mom|mum|father|dad|parents?|"
+    r"wife|husband|spouse|partner|sons?|daughters?|children|brothers?|sisters?|"
+    r"siblings?|cousins?|aunts?|uncles?|grandparents?|deedee)\b"
+)
+FAMILY_PROFILE_PREDICATES = (
+    "identity.name",
+    "life_event.died",
+    "relationship.aunt_or_uncle_of",
+    "relationship.cousin_of",
+    "relationship.grandparent_of",
+    "relationship.in_law_of",
+    "relationship.parent_of",
+    "relationship.relative_of",
+    "relationship.romantic_partner_of",
+    "relationship.sibling_of",
+    "relationship.spouse_of",
+)
+FAMILY_DEATH_PREDICATES = (
+    "identity.name",
+    "life_event.died",
+    "relationship.parent_of",
+    "relationship.sibling_of",
+    "relationship.spouse_of",
+)
+NAME_PREDICATES = (
+    "identity.name",
+    "identity.name_canonical",
+)
+LIFE_CONTEXT_PREDICATES = (
+    "occupation.works_as",
+    "preference.life",
+    "relationship.caregiver_for",
+)
+HEALTH_BEHAVIOR_PREDICATES = (
+    "health.user_reported_observation",
+)
 PET_SIGNAL_RE = re.compile(
     r"\b(?:pets?|dogs?|cats?|neko|nemo|dahlia|helsing)\b"
 )
@@ -255,10 +291,25 @@ BROAD_PET_RECALL_RE = re.compile(
     r"do you know (?:anything )?about my (?:current )?pets|"
     r"tell me (?:what you know )?about my (?:current )?pets)\b"
 )
-BROAD_FAMILY_RECALL_RE = re.compile(
+BROAD_PARENT_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:mother|mom|mum|father|dad)|"
     r"do you know (?:anything )?about my (?:mother|mom|mum|father|dad)|"
     r"more particularly do you know (?:anything )?about my (?:mother|mom|mum|father|dad))\b"
+)
+FAMILY_PROFILE_RECALL_RE = re.compile(
+    r"\b(?:(?:can you )?tell me (?:anything |what you (?:know|remember) )?about my "
+    r"(?:family|family members?|relatives?)|"
+    r"what do you (?:know|remember) about my (?:family|family members?|relatives?)|"
+    r"do you (?:know|remember) (?:anything )?about my (?:family|family members?|relatives?)|"
+    r"who (?:is|are) (?:in )?my family|"
+    r"which (?:family members?|relatives?) do you (?:know|remember))\b"
+)
+FAMILY_MEMBER_RECALL_RE = re.compile(
+    r"\b(?:(?:can you )?tell me (?:anything )?about my|"
+    r"what do you (?:know|remember) about my|"
+    r"do you (?:know|remember) (?:anything )?about my)\s+"
+    r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
+    r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent)\b"
 )
 NAME_RECALL_RE = re.compile(
     r"\b(?:was it nemo or neko|nemo or neko|"
@@ -396,7 +447,12 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     )
     name_recall_requested = recall_requested and bool(NAME_RECALL_RE.search(text))
     broad_pet_recall = bool(BROAD_PET_RECALL_RE.search(text))
-    broad_family_recall = bool(BROAD_FAMILY_RECALL_RE.search(text))
+    broad_parent_recall = bool(BROAD_PARENT_RECALL_RE.search(text))
+    broad_family_profile_recall = bool(FAMILY_PROFILE_RECALL_RE.search(text))
+    family_member_recall = bool(FAMILY_MEMBER_RECALL_RE.search(text))
+    broad_family_recall = (
+        broad_parent_recall or broad_family_profile_recall or family_member_recall
+    )
     has_pet_signal = bool(PET_SIGNAL_RE.search(text))
     pet_event = has_pet_signal and (
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
@@ -407,7 +463,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         and has_pet_signal
         and (named_pet_recall or bool(PET_PROFILE_QUERY_RE.search(text)))
     )
-    family_event = _contains(text, FAMILY_TERMS) and (
+    family_event = bool(FAMILY_SIGNAL_RE.search(text)) and (
         _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
     )
     caregiving_context = _contains(text, CAREGIVING_TERMS)
@@ -424,8 +480,10 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         domain = "pet_loss"
     elif pet_profile_recall:
         domain = "pet_profile"
-    elif (family_event and recall_requested) or broad_family_recall:
+    elif family_event and recall_requested:
         domain = "family_death"
+    elif broad_family_recall:
+        domain = "family_profile"
     elif support_requested:
         domain = "life_context"
     elif alcohol_context and recall_requested:
@@ -448,7 +506,17 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
 
     allowed_predicates: list[str] = []
     if domain == "pet_loss":
-        allowed_predicates = ["personal_event.occurred"]
+        allowed_predicates = ["life_event.died"]
+    elif domain == "family_death":
+        allowed_predicates = list(FAMILY_DEATH_PREDICATES)
+    elif domain == "family_profile":
+        allowed_predicates = list(FAMILY_PROFILE_PREDICATES)
+    elif domain == "name_correction":
+        allowed_predicates = list(NAME_PREDICATES)
+    elif domain == "life_context":
+        allowed_predicates = list(LIFE_CONTEXT_PREDICATES)
+    elif domain == "health_behavior":
+        allowed_predicates = list(HEALTH_BEHAVIOR_PREDICATES)
     elif domain == "pet_profile":
         if re.match(r"^(?:do|did) i (?:have|own)\b", text):
             allowed_predicates.append("relationship.has_pet")
@@ -468,6 +536,9 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
                 "pet.sex",
                 "relationship.has_pet",
             ]
+
+    if not allowed_predicates:
+        raise RuntimeError(f"eligible claim domain lacks predicate policy: {domain}")
 
     entity_hints: list[str] = []
     if domain in {"pet_loss", "pet_profile"}:

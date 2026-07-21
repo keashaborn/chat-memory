@@ -289,6 +289,37 @@ def main() -> int:
         domains=["family_death"],
         specialized=False,
     )
+    for message in (
+        "Can you tell me anything about my family members?",
+        "What do you remember about my mother?",
+        "Tell me about my sister.",
+    ):
+        result = classify_memory_intent(
+            message,
+            request_classification="GENERAL",
+        )
+        if result["memory_intent"] != "personal_recall":
+            raise AssertionError(f"{message!r}: {result}")
+        if result["domains"] != ["family_profile"]:
+            raise AssertionError(f"{message!r}: {result}")
+        if not result["routes"]["governed_claims"]:
+            raise AssertionError(f"{message!r}: {result}")
+        if not result["claim_context"]["allowed_predicates"]:
+            raise AssertionError(f"{message!r}: {result}")
+
+    for message in (
+        "What is the name of my dog?",
+        "When did I stop drinking alcohol?",
+        "What do you remember about the things I do with combines, bees, and llamas?",
+    ):
+        result = classify_memory_intent(
+            message,
+            request_classification="SPECIFIC_RECALL",
+        )
+        if result["routes"]["governed_claims"] and not result["claim_context"][
+            "allowed_predicates"
+        ]:
+            raise AssertionError(f"eligible claim route has no predicates: {result}")
     expect(
         "What happened to DeeDee?",
         "SPECIFIC_RECALL",

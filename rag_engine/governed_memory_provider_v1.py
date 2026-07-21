@@ -41,6 +41,7 @@ from rag_engine.openai_client import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 
 
 CLAIM_SOURCE = SourceContractVersionV1(
@@ -60,9 +61,25 @@ class LiveGovernedMemoryAssemblyProviderV1:
         *,
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
+        trusted_policy_signals: ResponsePolicySignalsV0_2,
     ) -> GovernedMemoryAssemblyV1:
+        if not isinstance(trusted_policy_signals, ResponsePolicySignalsV0_2):
+            raise TypeError("trusted response policy signals are required")
+        trusted_policy_signals = ResponsePolicySignalsV0_2.model_validate_json(
+            trusted_policy_signals.model_dump_json()
+        )
+        if trusted_policy_signals.technical is True:
+            request_classification = "TECH"
+        elif trusted_policy_signals.fm_explicit is True:
+            request_classification = "FM_CONCEPTUAL"
+        else:
+            request_classification = "GENERAL"
+
         query = conversation_snapshot.messages[-1].content
-        intent = classify_memory_intent(query, request_classification="GENERAL")
+        intent = classify_memory_intent(
+            query,
+            request_classification=request_classification,
+        )
         claim_context = dict(intent.get("claim_context") or {})
         allowed_predicates = tuple(
             sorted(
@@ -75,7 +92,11 @@ class LiveGovernedMemoryAssemblyProviderV1:
         )
 
         requested: list[MemoryLane] = []
-        if intent.get("routes", {}).get("governed_claims") and allowed_predicates:
+        if intent.get("routes", {}).get("governed_claims"):
+            if not allowed_predicates:
+                raise RuntimeError(
+                    "governed claim route lacks an explicit predicate allowlist"
+                )
             requested.append(MemoryLane.CLAIM)
         if intent.get("memory_intent") in {"preference_recall", "recommendation"}:
             requested.append(MemoryLane.PREFERENCE)
