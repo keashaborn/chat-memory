@@ -350,6 +350,39 @@ class ResponsePolicySignalsV0_2(StrictFrozenModel):
     coaching_consent: bool | None = None
     material_clarification_required: bool | None = None
     explicit_next_step_requested: bool | None = None
+    domain_risk_gate: GateState = GateState.PASS
+    domain_safety_action_required: bool = False
+    domain_risk_reason_codes: tuple[str, ...] = ()
+
+    @field_validator("domain_risk_reason_codes")
+    @classmethod
+    def sorted_unique_domain_risk_codes(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if any(not FIELD_NAME_RE.fullmatch(item) for item in value):
+            raise ValueError("domain risk reason codes contain an invalid code")
+        if value != tuple(sorted(set(value))):
+            raise ValueError("domain risk reason codes must be sorted and unique")
+        return value
+
+    @model_validator(mode="after")
+    def domain_risk_invariants(self) -> "ResponsePolicySignalsV0_2":
+        if (
+            self.domain_risk_gate is not GateState.PASS
+            and not self.domain_risk_reason_codes
+        ):
+            raise ValueError("a non-pass domain risk gate requires reason codes")
+        if (
+            self.domain_risk_gate is GateState.PASS
+            and self.domain_risk_reason_codes
+        ):
+            raise ValueError("a passing domain risk gate cannot claim risk reasons")
+        if (
+            self.domain_safety_action_required
+            and self.domain_risk_gate is not GateState.TRIGGERED
+        ):
+            raise ValueError("a domain safety action requires a triggered risk gate")
+        return self
 
 
 
@@ -642,6 +675,24 @@ def _select_mode(
             )
             or ("safety_assessment:uncertain",),
         )
+    if signals.domain_risk_gate is GateState.TRIGGERED:
+        return (
+            ResponseMode.HIGH_STAKES,
+            GateState.TRIGGERED,
+            tuple(
+                f"domain_risk:{code}"
+                for code in signals.domain_risk_reason_codes
+            ),
+        )
+    if signals.domain_risk_gate is GateState.UNCERTAIN:
+        return (
+            ResponseMode.HIGH_STAKES,
+            GateState.UNCERTAIN,
+            tuple(
+                f"domain_risk:{code}"
+                for code in signals.domain_risk_reason_codes
+            ),
+        )
 
     checks = (
         (
@@ -685,8 +736,10 @@ def _select_closure(
             "immediate_violence_or_abuse",
             "impaired_reality_testing",
         }
-        if safety_assessment.safety_action_required or local_action_categories.intersection(
-            local_high_stakes
+        if (
+            safety_assessment.safety_action_required
+            or signals.domain_safety_action_required
+            or local_action_categories.intersection(local_high_stakes)
         ):
             return Closure.SAFETY_ACTION
         return Closure.COMPLETE

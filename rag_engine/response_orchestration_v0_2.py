@@ -428,11 +428,14 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             ),
             (
                 self.shadow_trace.safety_action_required,
-                self.safety_assessment.safety_action_required,
+                self.safety_assessment.safety_action_required
+                or self.policy_signals.domain_safety_action_required,
             ),
             (
                 self.shadow_trace.safety_reason_codes,
-                tuple(sorted(self.safety_assessment.reason_codes)),
+                _combined_safety_reason_codes(
+                    self.safety_assessment, self.policy_signals
+                ),
             ),
             (
                 self.shadow_trace.mode_reason_codes,
@@ -522,6 +525,18 @@ def _plan_sha256(
     )
 
 
+def _combined_safety_reason_codes(
+    safety: SafetyAssessmentV0_2,
+    signals: ResponsePolicySignalsV0_2,
+) -> tuple[str, ...]:
+    domain = (
+        tuple(f"domain_risk:{item}" for item in signals.domain_risk_reason_codes)
+        if signals.domain_risk_gate.value != "pass"
+        else ()
+    )
+    return tuple(sorted(set((*safety.reason_codes, *domain))))
+
+
 def _shadow_trace(
     *,
     request: TrustedResponseRequestV0_2,
@@ -544,8 +559,13 @@ def _shadow_trace(
         "response_mode": decision.response_mode.value,
         "closure": decision.closure.value,
         "high_stakes_gate": decision.high_stakes_gate.value,
-        "safety_action_required": safety.safety_action_required,
-        "safety_reason_codes": tuple(sorted(safety.reason_codes)),
+        "safety_action_required": (
+            safety.safety_action_required
+            or request.trusted_policy_signals.domain_safety_action_required
+        ),
+        "safety_reason_codes": _combined_safety_reason_codes(
+            safety, request.trusted_policy_signals
+        ),
         "mode_reason_codes": tuple(sorted(decision.mode_reasons)),
         "fm_level": decision.fm_effective_level.value,
         "fm_gate_reason_codes": tuple(sorted(decision.fm_gate_reasons)),
