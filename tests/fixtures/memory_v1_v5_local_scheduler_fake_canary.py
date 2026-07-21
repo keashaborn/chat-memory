@@ -13,6 +13,7 @@ def main() -> int:
     parser.add_argument("--expected-job-id", required=True)
     parser.add_argument("--expected-content-sha256", required=True)
     parser.add_argument("--selector-version", required=True)
+    parser.add_argument("--contract-profile", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--worker-id", required=True)

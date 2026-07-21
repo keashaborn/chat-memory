@@ -10,9 +10,11 @@ import re
 import socket
 import subprocess
 import sys
+import time
 import uuid
+from collections import Counter
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 from urllib.parse import urlparse
 
 import asyncpg
@@ -23,7 +25,7 @@ from scripts.memory_v1_predicate_runtime_profile import (
 )
 
 
-WORKER_VERSION = "memory_v1_v5_local_inference_scheduler_v1"
+WORKER_VERSION = "memory_v1_v5_local_inference_scheduler_v2"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_local_inference_scheduler_apply_v1"
 CANARY_APPLY_TOKEN = "memory_v1_v5_local_inference_canary_apply_v1"
 CANARY_CONTRACT = "memory_v1_v5_local_inference_canary_v1"
@@ -86,6 +88,7 @@ def arguments() -> argparse.Namespace:
         "--endpoint", default="http://127.0.0.1:18080/v1/chat/completions"
     )
     parser.add_argument("--max-jobs", type=int, default=1)
+    parser.add_argument("--max-runtime-seconds", type=int, default=600)
     parser.add_argument("--max-attempts", type=int, default=1)
     parser.add_argument("--lease-seconds", type=int, default=900)
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
@@ -114,8 +117,10 @@ def validate_arguments(args: argparse.Namespace) -> uuid.UUID:
         run_id = uuid.UUID(str(args.run_id)) if args.run_id else uuid.uuid4()
     except ValueError as exc:
         raise RuntimeError("run id must be a UUID") from exc
-    if args.max_jobs != 1:
-        raise RuntimeError("initial local scheduler requires max-jobs=1")
+    if not 1 <= args.max_jobs <= 100:
+        raise RuntimeError("max-jobs must be between 1 and 100")
+    if not 60 <= args.max_runtime_seconds <= 21600:
+        raise RuntimeError("max-runtime-seconds must be between 60 and 21600")
     if args.selector_version is not None and not SELECTOR_RE.fullmatch(
         args.selector_version
     ):
@@ -245,6 +250,41 @@ def select_owner_target(
 ) -> tuple[uuid.UUID, dict[str, Any]] | None:
     ordered = ordered_owner_targets(planned)
     return ordered[0] if ordered else None
+
+
+def batch_child_run_id(
+    batch_run_id: uuid.UUID,
+    *,
+    ordinal: int,
+    owner: uuid.UUID,
+    job_id: uuid.UUID,
+) -> uuid.UUID:
+    if ordinal < 0:
+        raise RuntimeError("batch ordinal must be non-negative")
+    return uuid.uuid5(batch_run_id, f"{ordinal}:{owner}:{job_id}")
+
+
+def sanitized_batch_summary(
+    results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    outcomes = Counter(str(item.get("outcome", "unknown")) for item in results)
+    rejections = Counter(
+        str(item["rejection_code"])
+        for item in results
+        if item.get("rejection_code") is not None
+    )
+    return {
+        "processed": len(results),
+        "outcome_counts": dict(sorted(outcomes.items())),
+        "rejection_code_counts": dict(sorted(rejections.items())),
+        "local_model_calls": sum(
+            int(item.get("local_model_calls", 0)) for item in results
+        ),
+        "external_model_calls": sum(
+            int(item.get("external_model_calls", 0)) for item in results
+        ),
+        "result_sha256s": [sha256_text(stable_json(item)) for item in results],
+    }
 
 
 def load_api_key(credential_name: str) -> str:
@@ -411,6 +451,114 @@ def invoke_canary(
         raise RuntimeError(f"local canary failed closed:{diagnostic}") from exc
 
 
+async def plan_all_owners(
+    dsn: str,
+    owners: Sequence[uuid.UUID],
+    *,
+    max_attempts: int,
+    selector_version: str | None,
+) -> list[tuple[uuid.UUID, dict[str, Any], dict[str, Any] | None, Any]]:
+    conn = await asyncpg.connect(
+        loopback_dsn(dsn), command_timeout=30, ssl=False
+    )
+    try:
+        if await conn.fetchval("SELECT session_user") != "brains_app":
+            raise RuntimeError("local scheduler requires brains_app session")
+        return [
+            (
+                owner,
+                *(
+                    await plan_owner(
+                        conn,
+                        owner,
+                        max_attempts=max_attempts,
+                        selector_version=selector_version,
+                    )
+                ),
+            )
+            for owner in owners
+        ]
+    finally:
+        await conn.close()
+
+
+BatchPlanLoaderV2 = Callable[..., Awaitable[
+    list[tuple[uuid.UUID, dict[str, Any], dict[str, Any] | None, Any]]
+]]
+BatchCanaryInvokerV2 = Callable[..., dict[str, Any]]
+
+
+async def execute_batch_v2(
+    args: argparse.Namespace,
+    *,
+    batch_run_id: uuid.UUID,
+    owners: Sequence[uuid.UUID],
+    dsn: str,
+    api_key: str,
+    plan_loader: BatchPlanLoaderV2 = plan_all_owners,
+    canary_invoker: BatchCanaryInvokerV2 = invoke_canary,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    started_at = monotonic()
+    blocked: list[dict[str, Any]] = []
+    blocked_owners: set[uuid.UUID] = set()
+    results: list[dict[str, Any]] = []
+    stop_reason = "max_jobs_reached"
+    while len(results) < args.max_jobs:
+        if monotonic() - started_at >= args.max_runtime_seconds:
+            stop_reason = "runtime_limit_reached"
+            break
+        planned = await plan_loader(
+            dsn,
+            owners,
+            max_attempts=args.max_attempts,
+            selector_version=args.selector_version,
+        )
+        ordered_targets = [
+            item for item in ordered_owner_targets(planned)
+            if item[0] not in blocked_owners
+        ]
+        if not ordered_targets:
+            stop_reason = (
+                "all_owners_blocked" if blocked_owners else "no_work"
+            )
+            break
+        made_progress = False
+        for owner, target in ordered_targets:
+            child_run_id = batch_child_run_id(
+                batch_run_id,
+                ordinal=len(results),
+                owner=owner,
+                job_id=uuid.UUID(str(target["job_id"])),
+            )
+            result = canary_invoker(
+                args,
+                owner=owner,
+                run_id=child_run_id,
+                target=target,
+                api_key=api_key,
+            )
+            if result.get("outcome") in {"quota_exhausted", "circuit_open"}:
+                blocked.append(result)
+                blocked_owners.add(owner)
+                continue
+            results.append(result)
+            made_progress = True
+            break
+        if not made_progress:
+            stop_reason = "all_owners_blocked"
+            break
+    return {
+        "outcome": stop_reason,
+        "owner_count": len(owners),
+        "max_jobs": args.max_jobs,
+        "max_runtime_seconds": args.max_runtime_seconds,
+        **sanitized_batch_summary(results),
+        "blocked_owner_count": len(blocked_owners),
+        "blocked": blocked,
+    }
+
+
 async def run() -> int:
     args = arguments()
     run_id = validate_arguments(args)
@@ -420,28 +568,12 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
-    conn = await asyncpg.connect(
-        loopback_dsn(dsn), command_timeout=30, ssl=False
+    planned = await plan_all_owners(
+        dsn,
+        owners,
+        max_attempts=args.max_attempts,
+        selector_version=args.selector_version,
     )
-    try:
-        if await conn.fetchval("SELECT session_user") != "brains_app":
-            raise RuntimeError("local scheduler requires brains_app session")
-        planned = [
-            (
-                owner,
-                *(
-                    await plan_owner(
-                        conn,
-                        owner,
-                        max_attempts=args.max_attempts,
-                        selector_version=args.selector_version,
-                    )
-                ),
-            )
-            for owner in owners
-        ]
-    finally:
-        await conn.close()
 
     plans = [report for _, report, _, _ in planned]
     ordered_targets = ordered_owner_targets(planned)
@@ -456,7 +588,8 @@ async def run() -> int:
                     "predicate_registry_version": profile.registry_version,
                     "apply": False,
                     "owner_count": len(owners),
-                    "max_jobs": 1,
+                    "max_jobs": args.max_jobs,
+                    "max_runtime_seconds": args.max_runtime_seconds,
                     "plans": plans,
                     "next_owner_user_id_sha256": (
                         sha256_text(str(selected[0])) if selected is not None else None
@@ -494,35 +627,13 @@ async def run() -> int:
         return 0
 
     api_key = load_api_key(args.credential_name)
-    blocked: list[dict[str, Any]] = []
-    for owner, target in ordered_targets:
-        result = invoke_canary(
-            args,
-            owner=owner,
-            run_id=run_id,
-            target=target,
-            api_key=api_key,
-        )
-        if result.get("outcome") in {"quota_exhausted", "circuit_open"}:
-            blocked.append(result)
-            continue
-        print(
-            stable_json(
-                {
-                    "worker_version": WORKER_VERSION,
-                    "predicate_contract_profile": profile.name,
-                    "extraction_contract_version": profile.contract_version,
-                    "predicate_registry_version": profile.registry_version,
-                    "apply": True,
-                    "owner_count": len(owners),
-                    "processed": 1,
-                    "blocked_owner_count": len(blocked),
-                    "blocked": blocked,
-                    "result": result,
-                }
-            )
-        )
-        return 0
+    batch = await execute_batch_v2(
+        args,
+        batch_run_id=run_id,
+        owners=owners,
+        dsn=dsn,
+        api_key=api_key,
+    )
     print(
         stable_json(
             {
@@ -531,13 +642,7 @@ async def run() -> int:
                 "extraction_contract_version": profile.contract_version,
                 "predicate_registry_version": profile.registry_version,
                 "apply": True,
-                "outcome": "all_owners_blocked",
-                "owner_count": len(owners),
-                "processed": 0,
-                "blocked_owner_count": len(blocked),
-                "blocked": blocked,
-                "external_model_calls": 0,
-                "local_model_calls": 0,
+                **batch,
             }
         )
     )

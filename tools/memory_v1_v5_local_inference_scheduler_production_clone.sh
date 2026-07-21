@@ -49,7 +49,7 @@ run_sql() {
 
 scalar() {
   "${compose[@]}" exec -T postgres psql -X -A -t -v ON_ERROR_STOP=1 \
-    -U sage -d memory -c "$1" | tr -d '[:space:]'
+    -U sage -d memory -c "$1"
 }
 
 capture_state() {
@@ -93,21 +93,20 @@ docker exec brains-postgres-1 pg_dump -U sage -d memory \
   -Fc --no-owner --no-privileges >"$backup"
 [[ -s "$backup" ]]
 "${compose[@]}" up -d --wait postgres
+memory_role_sql=$(docker exec brains-postgres-1 psql -X -A -t \
+  -U sage -d memory -v ON_ERROR_STOP=1 -c "
+    SELECT format(
+      'CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;',
+      rolname
+    )
+    FROM pg_roles
+    WHERE rolname LIKE 'memory\\_%' ESCAPE '\\'
+    ORDER BY rolname
+  ")
+[[ -n "$memory_role_sql" ]]
 printf '%s\n' \
   "CREATE ROLE brains_app LOGIN PASSWORD 'clone_only_brains_password' NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;" \
-  'CREATE ROLE memory_evidence_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_review_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_trace_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_intake_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_extraction_queue_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_extraction_worker_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_extraction_retry_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_extraction_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_extraction_scheduler_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_local_inference_maintainer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
-  'CREATE ROLE memory_v5_local_review_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;' \
+  "$memory_role_sql" \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner --no-privileges <"$backup"
@@ -121,10 +120,12 @@ capture_state "$before"
 qdrant_before=$(qdrant_signature)
 
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
-  /opt/chat-memory/venv/bin/python "$repo_root/$worker" \
+  /opt/chat-memory/venv/bin/python -c \
+  'import asyncio; from scripts.memory_v1_v5_local_inference_scheduler import run; raise SystemExit(asyncio.run(run()))' \
   --owner-user-id "$owner" >"$plan"
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
-  /opt/chat-memory/venv/bin/python "$repo_root/$worker" \
+  /opt/chat-memory/venv/bin/python -c \
+  'import asyncio; from scripts.memory_v1_v5_local_inference_scheduler import run; raise SystemExit(asyncio.run(run()))' \
   --owner-user-id "$other" >"$other_plan"
 
 for outcome in accepted rejected; do
@@ -166,8 +167,13 @@ assert plan['apply'] is False and plan['external_model_calls']==0
 assert plan['plans'][0]['status_counts']['pending']>0
 assert other['plans'][0]['status_counts']['pending']>0
 assert plan['plans'][0]['owner_user_id_sha256']!=other['plans'][0]['owner_user_id_sha256']
-assert accepted['result']['outcome']=='accepted'
-assert rejected['result']['outcome']=='rejected'
+assert accepted['outcome']=='max_jobs_reached'
+assert accepted['processed']==1
+assert accepted['outcome_counts']=={'accepted':1}
+assert rejected['outcome']=='max_jobs_reached'
+assert rejected['processed']==1
+assert rejected['outcome_counts']=={'rejected':1}
+assert rejected['rejection_code_counts']=={'local_validation_rejected':1}
 assert 'source_text' not in json.dumps(accepted)
 assert invalid['outcome']=='scheduler_error'
 assert 'error_sha256' in invalid and 'traceback' not in json.dumps(invalid).lower()

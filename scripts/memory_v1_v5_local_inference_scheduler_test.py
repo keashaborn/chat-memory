@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -12,11 +13,14 @@ from pathlib import Path
 from scripts.memory_v1_v5_local_inference_scheduler import (
     APPLY_ENABLE_TOKEN,
     CANARY_CONTRACT,
+    batch_child_run_id,
     canary_command,
     canonical_owners,
+    execute_batch_v2,
     loopback_dsn,
     ordered_owner_targets,
     sanitized_canary_result,
+    sanitized_batch_summary,
     select_owner_target,
     validate_arguments,
 )
@@ -30,6 +34,7 @@ def args(**overrides: object) -> argparse.Namespace:
         "run_id": str(uuid.uuid4()),
         "selector_version": None,
         "max_jobs": 1,
+        "max_runtime_seconds": 600,
         "max_attempts": 1,
         "lease_seconds": 900,
         "timeout_seconds": 600.0,
@@ -108,6 +113,19 @@ def main() -> int:
     assert select_owner_target([(OWNER, {}, None, None)]) is None
 
     validate_arguments(args())
+    validate_arguments(args(max_jobs=100, max_runtime_seconds=21600))
+    for invalid_batch in (
+        {"max_jobs": 0},
+        {"max_jobs": 101},
+        {"max_runtime_seconds": 59},
+        {"max_runtime_seconds": 21601},
+    ):
+        try:
+            validate_arguments(args(**invalid_batch))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("invalid batch bound was accepted")
     validate_arguments(args(selector_version="20260719_v5_legacy_claim_reintake_v1"))
     for invalid_selector in ("", "UPPER", "contains space", "../escape"):
         try:
@@ -143,6 +161,26 @@ def main() -> int:
     assert command.count("--apply") == 1
     assert command[command.index("--max-reserved-jobs") + 1] == "12"
     assert command[command.index("--failure-threshold") + 1] == "3"
+
+    batch_run_id = uuid.UUID("10000000-0000-4000-8000-000000000001")
+    first_child = batch_child_run_id(
+        batch_run_id,
+        ordinal=0,
+        owner=OWNER,
+        job_id=target["job_id"],
+    )
+    assert first_child == batch_child_run_id(
+        batch_run_id,
+        ordinal=0,
+        owner=OWNER,
+        job_id=target["job_id"],
+    )
+    assert first_child != batch_child_run_id(
+        batch_run_id,
+        ordinal=1,
+        owner=OWNER,
+        job_id=target["job_id"],
+    )
 
     accepted = sanitized_canary_result(
         completed(
@@ -187,6 +225,66 @@ def main() -> int:
         )
     )
     assert rejected["outcome"] == "rejected"
+
+    summary = sanitized_batch_summary([accepted, rejected])
+    assert summary["processed"] == 2
+    assert summary["outcome_counts"] == {"accepted": 1, "rejected": 1}
+    assert summary["rejection_code_counts"] == {
+        "local_validation_rejected": 1
+    }
+    assert summary["local_model_calls"] == 2
+    assert summary["external_model_calls"] == 0
+    assert len(summary["result_sha256s"]) == 2
+
+    pending = [
+        {
+            "job_id": uuid.uuid4(),
+            "evidence_id": uuid.uuid4(),
+            "evidence_content_sha256": f"{value:x}" * 64,
+            "selector_version": "20260718_local_v1",
+        }
+        for value in (1, 2, 3)
+    ]
+    invoked_run_ids: list[uuid.UUID] = []
+
+    async def fake_plan_loader(*_args: object, **_kwargs: object):
+        current = pending[0] if pending else None
+        return [(OWNER, {}, current, now if current is not None else None)]
+
+    def fake_invoker(
+        _args: argparse.Namespace,
+        *,
+        owner: uuid.UUID,
+        run_id: uuid.UUID,
+        target: dict,
+        api_key: str,
+    ) -> dict:
+        assert owner == OWNER and api_key == "x" * 32
+        assert target == pending.pop(0)
+        invoked_run_ids.append(run_id)
+        return {
+            "outcome": "accepted",
+            "local_model_calls": 1,
+            "external_model_calls": 0,
+        }
+
+    batch = asyncio.run(
+        execute_batch_v2(
+            args(max_jobs=3),
+            batch_run_id=batch_run_id,
+            owners=[OWNER],
+            dsn="postgresql://user@127.0.0.1:5432/memory",
+            api_key="x" * 32,
+            plan_loader=fake_plan_loader,
+            canary_invoker=fake_invoker,
+            monotonic=lambda: 0.0,
+        )
+    )
+    assert batch["outcome"] == "max_jobs_reached"
+    assert batch["processed"] == 3
+    assert batch["local_model_calls"] == 3
+    assert len(set(invoked_run_ids)) == 3
+    assert pending == []
 
     for payload, returncode in (
         ({"contract_version": "wrong", "outcome": "accepted"}, 0),
