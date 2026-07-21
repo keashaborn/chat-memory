@@ -59,14 +59,21 @@ authenticated_health() {
   source "$repo_root/.env"
   set +a
   [[ -n "${VS_SERVICE_TOKEN:-}" ]]
-  [[ "$(systemctl is-active brains.service)" == active ]]
-  curl --fail --silent --show-error --max-time 15 \
-    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-    http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
-  curl --fail --silent --show-error --max-time 15 \
-    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-    http://127.0.0.1:8088/readyz \
-    | jq -e '.ok==true and .postgres==true' >/dev/null
+  for _attempt in $(seq 1 30); do
+    if [[ "$(systemctl is-active brains.service)" == active ]] \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/healthz \
+          | jq -e '.status=="ok"' >/dev/null \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/readyz \
+          | jq -e '.ok==true and .postgres==true' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 restore_timers() {
