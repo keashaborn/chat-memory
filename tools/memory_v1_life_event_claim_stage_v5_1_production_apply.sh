@@ -15,7 +15,7 @@ if [[ "$#" -ne 4 ]]; then
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
-required_ancestor=4928cf884c1d1919d4b9df4f934a8fe702f17f25
+required_ancestor=4928cf8e8ed4cb6d343ea70379f20f3e54779c6b
 runner=scripts/memory_v1_life_event_claim_stage_v5_1.py
 projector=scripts/memory_v1_life_event_claim_projection_v5_1.py
 expected_runner_sha=9d80ce730579e8f437f6d8e2ae269cd7d6616a08226d154b371443ae84b2d4db
