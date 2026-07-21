@@ -82,6 +82,10 @@ restore_runtime() {
   if [[ "$brains_quiesced" -eq 1 ]]; then
     if [[ "$brains_state_before" == active ]]; then
       sudo -n systemctl start brains.service
+      for _attempt in $(seq 1 30); do
+        [[ "$(systemctl is-active brains.service)" == active ]] && break
+        sleep 1
+      done
     else
       sudo -n systemctl stop brains.service
     fi
