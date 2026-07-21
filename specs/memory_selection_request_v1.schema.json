@@ -1,0 +1,349 @@
+{
+  "$defs": {
+    "MemoryLane": {
+      "enum": [
+        "claim",
+        "preference",
+        "project_knowledge"
+      ],
+      "title": "MemoryLane",
+      "type": "string"
+    },
+    "MemoryLaneLimitV1": {
+      "additionalProperties": false,
+      "properties": {
+        "lane": {
+          "$ref": "#/$defs/MemoryLane"
+        },
+        "max_records": {
+          "maximum": 8,
+          "minimum": 0,
+          "title": "Max Records",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "maximum": 1200,
+          "minimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lane",
+        "max_records",
+        "max_tokens"
+      ],
+      "title": "MemoryLaneLimitV1",
+      "type": "object"
+    },
+    "MemorySelectionBudgetPolicyV1": {
+      "additionalProperties": false,
+      "properties": {
+        "lane_limits": {
+          "items": {
+            "$ref": "#/$defs/MemoryLaneLimitV1"
+          },
+          "title": "Lane Limits",
+          "type": "array"
+        },
+        "max_controls": {
+          "maximum": 8,
+          "minimum": 0,
+          "title": "Max Controls",
+          "type": "integer"
+        },
+        "max_records": {
+          "maximum": 8,
+          "minimum": 0,
+          "title": "Max Records",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "maximum": 1200,
+          "minimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "policy_version": {
+          "const": "memory_selection_budget_v1",
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "token_estimator_version": {
+          "const": "memory_prompt_token_estimator_v1",
+          "title": "Token Estimator Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy_version",
+        "token_estimator_version",
+        "max_records",
+        "max_tokens",
+        "max_controls",
+        "lane_limits"
+      ],
+      "title": "MemorySelectionBudgetPolicyV1",
+      "type": "object"
+    },
+    "QueryEmbeddingArtifactV1": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_version": {
+          "const": "memory_query_embedding_artifact_v1",
+          "title": "Artifact Version",
+          "type": "string"
+        },
+        "dimension": {
+          "maximum": 65536,
+          "minimum": 0,
+          "title": "Dimension",
+          "type": "integer"
+        },
+        "external_call_count": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "External Call Count",
+          "type": "integer"
+        },
+        "model_version": {
+          "maxLength": 160,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/+\\-]{0,159}$",
+          "title": "Model Version",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/QueryEmbeddingSource"
+        },
+        "vector_sha256": {
+          "title": "Vector Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_version",
+        "source",
+        "model_version",
+        "dimension",
+        "vector_sha256",
+        "external_call_count"
+      ],
+      "title": "QueryEmbeddingArtifactV1",
+      "type": "object"
+    },
+    "QueryEmbeddingSource": {
+      "enum": [
+        "not_used",
+        "cached",
+        "private_local",
+        "external"
+      ],
+      "title": "QueryEmbeddingSource",
+      "type": "string"
+    },
+    "SelectionDirective": {
+      "enum": [
+        "evaluate",
+        "suppress"
+      ],
+      "title": "SelectionDirective",
+      "type": "string"
+    },
+    "Sensitivity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "restricted"
+      ],
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "SourceContractVersionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,119}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/+\\-]{0,159}$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "SourceContractVersionV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://verbalsage.internal/specs/memory_selection_request_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authenticated_actor_user_id": {
+      "format": "uuid",
+      "title": "Authenticated Actor User Id",
+      "type": "string"
+    },
+    "budget_policy": {
+      "$ref": "#/$defs/MemorySelectionBudgetPolicyV1"
+    },
+    "component_key": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9-]{0,99}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Component Key"
+    },
+    "contract_version": {
+      "const": "memory_selection_request_v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Domains",
+      "type": "array"
+    },
+    "explicit_recall": {
+      "title": "Explicit Recall",
+      "type": "boolean"
+    },
+    "intent_adapter_version": {
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/+\\-]{0,159}$",
+      "title": "Intent Adapter Version",
+      "type": "string"
+    },
+    "max_sensitivity": {
+      "$ref": "#/$defs/Sensitivity"
+    },
+    "memory_intent": {
+      "pattern": "^[a-z][a-z0-9_]{0,119}$",
+      "title": "Memory Intent",
+      "type": "string"
+    },
+    "owner_user_id": {
+      "format": "uuid",
+      "title": "Owner User Id",
+      "type": "string"
+    },
+    "project_key": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9-]{0,99}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Project Key"
+    },
+    "query_embedding": {
+      "$ref": "#/$defs/QueryEmbeddingArtifactV1"
+    },
+    "query_text": {
+      "maxLength": 16000,
+      "minLength": 1,
+      "title": "Query Text",
+      "type": "string"
+    },
+    "query_vector": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Query Vector",
+      "type": "array"
+    },
+    "request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "requested_lanes": {
+      "items": {
+        "$ref": "#/$defs/MemoryLane"
+      },
+      "title": "Requested Lanes",
+      "type": "array"
+    },
+    "selected_at": {
+      "format": "date-time",
+      "title": "Selected At",
+      "type": "string"
+    },
+    "selection_directive": {
+      "$ref": "#/$defs/SelectionDirective"
+    },
+    "selection_trace_id": {
+      "format": "uuid",
+      "title": "Selection Trace Id",
+      "type": "string"
+    },
+    "selector_version": {
+      "const": "memory_v1_authoritative_selector_v1",
+      "title": "Selector Version",
+      "type": "string"
+    },
+    "source_contract_versions": {
+      "items": {
+        "$ref": "#/$defs/SourceContractVersionV1"
+      },
+      "title": "Source Contract Versions",
+      "type": "array"
+    },
+    "thread_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Thread Id"
+    }
+  },
+  "required": [
+    "contract_version",
+    "selector_version",
+    "intent_adapter_version",
+    "source_contract_versions",
+    "selection_trace_id",
+    "authenticated_actor_user_id",
+    "owner_user_id",
+    "request_id",
+    "thread_id",
+    "query_text",
+    "query_vector",
+    "query_embedding",
+    "memory_intent",
+    "domains",
+    "requested_lanes",
+    "selection_directive",
+    "explicit_recall",
+    "max_sensitivity",
+    "selected_at",
+    "budget_policy"
+  ],
+  "title": "MemorySelectionRequestV1",
+  "type": "object"
+}
