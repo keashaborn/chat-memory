@@ -323,7 +323,7 @@ then
   echo 'cross-owner death-event packet was accepted' >&2
   exit 1
 fi
-rg -q 'complete accepted owner-scoped death-event source not found' \
+rg -q 'complete (accepted owner-scoped death-event|owner-scoped V5.1 claim) source not found' \
   "$cross_owner_error"
 chmod 0600 "$cross_owner_error"
 
