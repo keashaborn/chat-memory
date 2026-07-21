@@ -31,6 +31,12 @@ DOMAIN_PREDICATES = {
         "life_event.died",
         "relationship.has_pet",
     ),
+    "pet_profile": (
+        "identity.name",
+        "pet.breed",
+        "pet.sex",
+        "relationship.has_pet",
+    ),
     "family_death": (
         "life_event.died",
     ),

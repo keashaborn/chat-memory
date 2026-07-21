@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v11"
+VERSION = "memory_intent_adapter_v12"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -500,9 +500,9 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     domain = None
     if normalization_requested or name_recall_requested:
         domain = "name_correction"
-    elif (pet_event and recall_requested) or broad_pet_recall:
+    elif pet_event and recall_requested:
         domain = "pet_loss"
-    elif pet_profile_recall:
+    elif broad_pet_recall or pet_profile_recall:
         domain = "pet_profile"
     elif family_event and recall_requested:
         domain = "family_death"
@@ -592,7 +592,9 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         ),
         "entity_hints": entity_hints,
         "allowed_predicates": allowed_predicates,
-        "broad_profile_recall": bool(broad_family_profile_recall),
+        "broad_profile_recall": bool(
+            broad_family_profile_recall or broad_pet_recall
+        ),
     }
 
 

@@ -17,6 +17,49 @@ QUERY = "Have I had any deaths in the family?"
 
 
 class MemoryV1FamilyDeathRoutingTests(unittest.TestCase):
+    def test_broad_pet_recall_routes_to_profile_not_loss(self) -> None:
+        query = "Do you know anything about my pets?"
+        plan = classify_memory_intent(query, request_classification="GENERAL")
+
+        self.assertEqual(plan["memory_intent"], "personal_recall")
+        self.assertEqual(plan["domains"], ["pet_profile"])
+        self.assertTrue(plan["direct_relevance"])
+        self.assertTrue(plan["claim_context"]["explicit_recall"])
+        self.assertTrue(plan["claim_context"]["broad_profile_recall"])
+        self.assertEqual(
+            plan["claim_context"]["allowed_predicates"],
+            [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        )
+        shadow = classify_v5_shadow_context(query, "GENERAL")
+        self.assertEqual(shadow["domain"], "pet_profile")
+        self.assertEqual(
+            shadow["allowed_predicate_prefixes"],
+            [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        )
+
+    def test_explicit_pet_loss_remains_a_loss_query(self) -> None:
+        plan = classify_memory_intent(
+            "Do you remember when I lost my pet?",
+            request_classification="GENERAL",
+        )
+
+        self.assertEqual(plan["domains"], ["pet_loss"])
+        self.assertFalse(plan["claim_context"]["broad_profile_recall"])
+        self.assertEqual(
+            plan["claim_context"]["allowed_predicates"],
+            ["life_event.died"],
+        )
+
     def test_direct_family_death_recall_allows_only_death_claims(self) -> None:
         plan = classify_memory_intent(QUERY, request_classification="GENERAL")
 
