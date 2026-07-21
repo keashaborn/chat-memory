@@ -333,7 +333,8 @@ _LOCAL_APPLICATION_BOUNDARY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         "acute_grief_or_loss",
         re.compile(
             r"\b(?:i am|i'm|we are|we're) grieving\b|"
-            r"\bmy (?:wife|husband|partner|child|parent|mother|father) "
+            r"\bmy (?:wife|husband|partner|child|parent|mother|father|"
+            r"friend|sibling|brother|sister) "
             r"(?:just )?(?:died|passed away)\b|\bacute grief\b"
         ),
     ),

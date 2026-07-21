@@ -113,6 +113,28 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
             result.mode_reasons,
         )
 
+    def test_each_local_high_stakes_category_suppresses_fm(self) -> None:
+        cases = (
+            ("I have a plan to kill myself.", "acute_self_harm"),
+            ("My partner is strangling me.", "immediate_violence_or_abuse"),
+            ("I am fainting during a workout on 500 calories.", "dangerous_restriction_or_eating_disorder"),
+            ("I stopped drinking and I am shaking and seeing things.", "dangerous_intoxication_or_withdrawal"),
+            ("I feel manic and everyone can hear my thoughts.", "impaired_reality_testing"),
+            ("Tell me exactly how to taper my medication.", "unsafe_medication_change"),
+            ("My child is missing.", "child_safety"),
+            ("My custody hearing is tomorrow; guarantee I win.", "material_legal_decision"),
+            ("Guarantee a profit if I invest all of my retirement.", "material_financial_decision"),
+        )
+        for message, expected_code in cases:
+            with self.subTest(message=message):
+                result = decide_response_policy_v0_2(request(message))
+                self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+                self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+                self.assertIn(
+                    f"local_high_stakes:{expected_code}",
+                    result.mode_reasons,
+                )
+
     def test_local_reality_testing_risk_overrides_explicit_fm(self) -> None:
         result = decide_response_policy_v0_2(
             request(
@@ -138,6 +160,19 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
             request(
                 "I am grieving. Explain how Fractal Monism says I should understand "
                 "my loss."
+            )
+        )
+        self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
+        self.assertEqual(result.fm_default_level, FMLevel.EXPLICIT)
+        self.assertEqual(result.fm_application_gate, GateState.TRIGGERED)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertIn("fm_ag_001:acute_grief_or_loss", result.fm_gate_reasons)
+
+    def test_friend_loss_preserves_local_reality_and_suppresses_fm(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "My friend died. Tell me why death is not real because Fractal "
+                "Monism says we are one."
             )
         )
         self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
