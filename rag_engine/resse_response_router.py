@@ -22,8 +22,6 @@ from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 
 router = APIRouter()
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 
 class ResseResponseRequestV1(BaseModel):
@@ -37,6 +35,8 @@ class ResseResponseRequestV1(BaseModel):
 
 @router.post("/query")
 async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
+    if not DSN:
+        raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
     owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
     stateless = payload.thread_id is None

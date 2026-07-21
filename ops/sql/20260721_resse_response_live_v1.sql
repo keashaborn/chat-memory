@@ -52,7 +52,7 @@ AS $function$
          source.project_key,
          NULL::text AS component_key,
          encode(
-           digest(
+           public.digest(
              jsonb_build_object(
                'canonical_key',source.canonical_key,
                'canonical_text',source.canonical_text,
