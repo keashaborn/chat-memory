@@ -26,10 +26,9 @@ class ResseResponseRouterTests(unittest.TestCase):
             )
 
     def test_public_request_accepts_only_transport_fields(self) -> None:
-        value = ResseResponseRequestV1(
-            user_id=ACTOR,
-            message="Hello.",
-            no_store=True,
+        value = ResseResponseRequestV1.model_validate_json(
+            '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
+            '"message":"Hello.","thread_id":null,"no_store":true}'
         )
         self.assertIsNone(value.thread_id)
         self.assertEqual(
@@ -41,6 +40,13 @@ class ResseResponseRouterTests(unittest.TestCase):
                 "no_store": True,
             },
         )
+
+    def test_public_request_keeps_non_uuid_transport_fields_strict(self) -> None:
+        with self.assertRaises(ValidationError):
+            ResseResponseRequestV1.model_validate_json(
+                '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
+                '"message":"Hello.","no_store":"true"}'
+            )
 
 
 if __name__ == "__main__":

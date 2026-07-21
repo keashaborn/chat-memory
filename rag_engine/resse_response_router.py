@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
@@ -31,6 +31,18 @@ class ResseResponseRequestV1(BaseModel):
     message: str = Field(min_length=1, max_length=32_768)
     thread_id: UUID | None = None
     no_store: bool = False
+
+    @field_validator("user_id", "thread_id", mode="before")
+    @classmethod
+    def parse_wire_uuid(cls, value: object) -> object:
+        if value is None or isinstance(value, UUID):
+            return value
+        if not isinstance(value, str):
+            raise ValueError("UUID fields must be JSON strings")
+        try:
+            return UUID(value)
+        except ValueError:
+            raise ValueError("UUID field is invalid") from None
 
 
 @router.post("/query")
