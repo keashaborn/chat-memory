@@ -24,6 +24,8 @@ snapshot_dir=/home/ubuntu/brains/snapshots
 lock_file=/home/ubuntu/brains/.memory_v1_family_death_projection_install.lock
 phase=initialization
 units_quiesced=0
+brains_quiesced=0
+brains_state_before=
 status_file=
 unit_state=$(mktemp /tmp/memory-v1-family-death-units.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-family-death-tables.XXXXXX)
@@ -76,9 +78,24 @@ restore_timers() {
   units_quiesced=0
 }
 
+restore_runtime() {
+  if [[ "$brains_quiesced" -eq 1 ]]; then
+    if [[ "$brains_state_before" == active ]]; then
+      sudo -n systemctl start brains.service
+    else
+      sudo -n systemctl stop brains.service
+    fi
+    [[ "$(systemctl is-active brains.service)" == "$brains_state_before" ]]
+    brains_quiesced=0
+  fi
+  restore_timers
+}
+
 record_exit() {
   code=$?
-  if [[ "$units_quiesced" -eq 1 ]]; then restore_timers || code=1; fi
+  if [[ "$brains_quiesced" -eq 1 || "$units_quiesced" -eq 1 ]]; then
+    restore_runtime || code=1
+  fi
   rm -f "$unit_state" "$table_list"
   if [[ -n "$status_file" ]]; then
     printf 'phase=%s\nexit_code=%s\ncompleted_at=%s\n' \
@@ -138,6 +155,18 @@ while IFS=$'\t' read -r unit _enabled _active; do
   ! systemctl is-active --quiet "$service"
 done <"$unit_state"
 
+phase=quiesce_brains
+brains_state_before=$(systemctl is-active brains.service)
+if [[ "$brains_state_before" == active ]]; then
+  sudo -n systemctl stop brains.service
+fi
+brains_quiesced=1
+for _attempt in $(seq 1 30); do
+  systemctl is-active --quiet brains.service || break
+  sleep 1
+done
+! systemctl is-active --quiet brains.service
+
 phase=capture_baseline
 psql_scalar "SELECT table_name FROM information_schema.tables
   WHERE table_schema='memory' AND table_type='BASE TABLE'
@@ -188,8 +217,8 @@ cmp -s "$before" "$after"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
 
-phase=restore_timers
-restore_timers
+phase=restore_runtime
+restore_runtime
 curl --fail --silent --max-time 5 -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
   http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
 curl --fail --silent --max-time 5 -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
