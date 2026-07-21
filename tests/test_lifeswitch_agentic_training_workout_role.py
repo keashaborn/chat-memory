@@ -55,6 +55,18 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         self.assertLess(snapshot, derived)
         self.assertIn("session_role in ('strength', 'mixed') as counts_toward_strength", self.router)
 
+    def test_session_summary_uses_explicit_session_role_only_as_set_role_fallback(self) -> None:
+        strength_fallback = (
+            "coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, "
+            "base.workout_role_snapshot, 'unknown')='strength'"
+        )
+        rehab_fallback = (
+            "coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, "
+            "base.workout_role_snapshot, 'unknown')='rehab'"
+        )
+        self.assertEqual(self.router.count(strength_fallback), 3)
+        self.assertEqual(self.router.count(rehab_fallback), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
