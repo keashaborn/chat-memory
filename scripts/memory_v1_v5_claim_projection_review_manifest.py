@@ -15,6 +15,10 @@ from memory_v1_projection_v5_contract_test import sha256
 
 
 CONTRACT = "memory_v1_claim_projection_review_batch_manifest_v1"
+STAGE_BUNDLE_CONTRACTS = {
+    "memory_v1_claim_projection_stage_bundle_v5_1",
+    "memory_v1_relationship_claim_stage_bundle_v5_1",
+}
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 DECISION = "authorized"
 REVIEWER_TYPE = "system"
@@ -67,8 +71,7 @@ def private_path(value: str, *, output: bool = False) -> Path:
 def load_bundle(path: Path, owner: str) -> dict[str, Any]:
     value = json.loads(path.read_text())
     if (
-        value.get("contract_version")
-        != "memory_v1_claim_projection_stage_bundle_v5_1"
+        value.get("contract_version") not in STAGE_BUNDLE_CONTRACTS
         or value.get("owner_user_id") != owner
         or value.get("database_writes") != 0
         or value.get("external_model_calls") != 0
