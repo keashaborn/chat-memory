@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.prompt_contribution_v1 import PromptContributionKind
 from rag_engine.response_policy_prompt_v0_2 import (
     ResponsePolicyPromptError,
     ResponsePolicyPromptV0_2,
@@ -12,17 +12,34 @@ from rag_engine.response_policy_prompt_v0_2 import (
 )
 from rag_engine.response_policy_v0_2 import (
     Closure,
+    ConversationRole,
     FMLevel,
     ResponseMode,
+    ResponsePolicyConversationMessageV0_2,
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
+    SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+PROMPT_MODULE = ROOT / "rag_engine" / "response_policy_prompt_v0_2.py"
+
+
 def decision(message: str, **signals):
+    policy_input = ResponsePolicyInputV0_2.create(
+        request_id="policy-prompt-test",
+        conversation=(
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content=message,
+            ),
+        ),
+    )
     return decide_response_policy_v0_2(
-        ResponsePolicyInputV0_2(message=message),
+        policy_input,
+        safety_assessment=SafetyAssessmentV0_2.create(policy_input),
         signals=ResponsePolicySignalsV0_2(**signals),
     )
 
@@ -72,14 +89,26 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertIn("Obtain consent", rendered.content)
         self.assertIn("Never run covert experiments", rendered.content)
 
-    def test_prompt_is_deterministic_and_converts_to_typed_contribution(self) -> None:
+    def test_prompt_is_deterministic_and_carries_request_bindings(self) -> None:
         source = decision("Hello")
         first = render_response_policy_prompt_v0_2(source)
         second = render_response_policy_prompt_v0_2(source)
         self.assertEqual(first, second)
-        contribution = first.to_prompt_contribution()
-        self.assertEqual(contribution.kind, PromptContributionKind.RUNTIME_POLICY)
-        self.assertEqual(contribution.content, first.content)
+        self.assertEqual(first.request_id, source.request_id)
+        self.assertEqual(first.request_sha256, source.request_sha256)
+        self.assertEqual(
+            first.current_message_sha256,
+            source.current_message_sha256,
+        )
+        self.assertEqual(first.conversation_sha256, source.conversation_sha256)
+        self.assertEqual(
+            first.safety_assessment_sha256,
+            source.safety_assessment_sha256,
+        )
+        self.assertNotIn(
+            "prompt_contribution",
+            PROMPT_MODULE.read_text(encoding="utf-8"),
+        )
 
     def test_forged_decision_and_prompt_manifests_fail_closed(self) -> None:
         source = decision("Hello")

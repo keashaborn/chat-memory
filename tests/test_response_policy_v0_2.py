@@ -12,13 +12,19 @@ from rag_engine.response_policy_v0_2 import (
     ASSISTANT_PROFILE_ID,
     MODE_PRECEDENCE,
     Closure,
+    ConversationRole,
     FMLevel,
     GateState,
     ResponseMode,
+    ResponsePolicyContractError,
+    ResponsePolicyConversationMessageV0_2,
     ResponsePolicyDecisionV0_2,
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
-    decide_response_policy_v0_2,
+    SafetyAssessmentV0_2,
+    decide_response_policy_v0_2 as _decide_response_policy_v0_2,
+    parse_response_policy_input_v0_2,
+    parse_safety_assessment_v0_2,
 )
 
 
@@ -26,8 +32,38 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "rag_engine" / "response_policy_v0_2.py"
 
 
-def request(message: str, **kwargs):
-    return ResponsePolicyInputV0_2(message=message, **kwargs)
+def request(
+    message: str,
+    *,
+    conversation: tuple[ResponsePolicyConversationMessageV0_2, ...] | None = None,
+    request_id: str = "policy-test-request",
+    **kwargs,
+):
+    return ResponsePolicyInputV0_2.create(
+        request_id=request_id,
+        conversation=conversation
+        or (
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content=message,
+            ),
+        ),
+        **kwargs,
+    )
+
+
+def decide_response_policy_v0_2(
+    policy_input: ResponsePolicyInputV0_2,
+    *,
+    signals: ResponsePolicySignalsV0_2 | None = None,
+    safety_assessment: SafetyAssessmentV0_2 | None = None,
+):
+    return _decide_response_policy_v0_2(
+        policy_input,
+        safety_assessment=safety_assessment
+        or SafetyAssessmentV0_2.create(policy_input),
+        signals=signals,
+    )
 
 
 class ResponsePolicyV0_2Test(unittest.TestCase):
@@ -44,10 +80,16 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
         )
 
     def test_all_trusted_mode_signals_use_high_stakes_precedence(self) -> None:
+        policy_input = request("neutral text")
         result = decide_response_policy_v0_2(
-            request("neutral text"),
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(
+                policy_input,
+                high_stakes_gate=GateState.TRIGGERED,
+                safety_action_required=True,
+                reason_codes=("trusted_high_stakes",),
+            ),
             signals=ResponsePolicySignalsV0_2(
-                high_stakes=True,
                 technical=True,
                 fm_explicit=True,
                 coaching=True,
@@ -98,10 +140,8 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
                 "chest pain and shortness of breath right now."
             ),
             signals=ResponsePolicySignalsV0_2(
-                high_stakes=False,
                 technical=True,
                 fm_explicit=True,
-                safety_action_required=False,
             ),
         )
         self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
@@ -147,9 +187,14 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
         self.assertEqual(result.closure, Closure.SAFETY_ACTION)
 
     def test_uncertain_high_stakes_fails_closed(self) -> None:
+        policy_input = request("Explain Fractal Monism.")
         result = decide_response_policy_v0_2(
-            request("Explain Fractal Monism."),
-            signals=ResponsePolicySignalsV0_2(high_stakes_uncertain=True),
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(
+                policy_input,
+                high_stakes_gate=GateState.UNCERTAIN,
+                reason_codes=("assessment_uncertain",),
+            ),
         )
         self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
         self.assertEqual(result.high_stakes_gate, GateState.UNCERTAIN)
@@ -265,10 +310,19 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
 
     def test_decision_hash_is_deterministic_and_manifest_bound(self) -> None:
         policy_input = request("Explain Fractal Monism.")
+        safety = SafetyAssessmentV0_2.create(policy_input)
         first = decide_response_policy_v0_2(policy_input)
         second = decide_response_policy_v0_2(policy_input)
         self.assertEqual(first, second)
         self.assertRegex(first.decision_sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(first.request_id, policy_input.request_id)
+        self.assertEqual(first.request_sha256, policy_input.request_sha256)
+        self.assertEqual(
+            first.current_message_sha256,
+            policy_input.current_message_sha256,
+        )
+        self.assertEqual(first.conversation_sha256, policy_input.conversation_sha256)
+        self.assertEqual(first.safety_assessment_sha256, safety.assessment_sha256)
 
         tampered = first.model_dump(mode="json")
         tampered["fm_effective_level"] = "OFF"
@@ -300,14 +354,110 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
                 {"technical": "true", "unknown": False}
             )
         with self.assertRaises(ValidationError):
-            ResponsePolicyInputV0_2(
-                message="hello",
+            request(
+                "hello",
                 request_field_names=("mix", "mix"),
             )
         with self.assertRaises(ValidationError):
             ResponsePolicySignalsV0_2(
                 high_stakes=False,
                 high_stakes_uncertain=True,
+            )
+
+    def test_missing_cross_request_and_forged_safety_fail_closed(self) -> None:
+        first_request = request("Explain Fractal Monism.", request_id="request-one")
+        second_request = request("Hello", request_id="request-two")
+        valid = SafetyAssessmentV0_2.create(first_request)
+
+        with self.assertRaises(ResponsePolicyContractError):
+            _decide_response_policy_v0_2(first_request)
+        with self.assertRaises(ResponsePolicyContractError):
+            _decide_response_policy_v0_2(
+                second_request,
+                safety_assessment=valid,
+            )
+
+        forged = valid.model_copy(update={"assessment_sha256": "0" * 64})
+        with self.assertRaises(ResponsePolicyContractError):
+            _decide_response_policy_v0_2(
+                first_request,
+                safety_assessment=forged,
+            )
+
+        incomplete_payload = valid.model_dump(
+            mode="json", exclude={"assessment_sha256"}
+        )
+        incomplete_payload["assessment_complete"] = False
+        incomplete_digest = hashlib.sha256(
+            json.dumps(
+                incomplete_payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        incomplete = valid.model_copy(
+            update={
+                "assessment_complete": False,
+                "assessment_sha256": incomplete_digest,
+            }
+        )
+        with self.assertRaises(ResponsePolicyContractError):
+            _decide_response_policy_v0_2(
+                first_request,
+                safety_assessment=incomplete,
+            )
+
+    def test_prior_user_turn_high_stakes_risk_is_a_hard_veto(self) -> None:
+        conversation = (
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content="I have a plan to kill myself tonight.",
+            ),
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.ASSISTANT,
+                content="I am taking that seriously.",
+            ),
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content="Now explain Fractal Monism.",
+            ),
+        )
+        policy_input = request(
+            "Now explain Fractal Monism.",
+            conversation=conversation,
+        )
+        result = decide_response_policy_v0_2(policy_input)
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertIn("local_high_stakes:acute_self_harm", result.mode_reasons)
+
+    def test_request_and_safety_wire_manifests_are_private_and_exact(self) -> None:
+        secret = "private policy message 8f53f786"
+        policy_input = request(secret)
+        safety = SafetyAssessmentV0_2.create(policy_input)
+        self.assertNotIn(secret, repr(policy_input))
+        self.assertNotIn(secret, repr(policy_input.current_message))
+        self.assertNotIn(secret, repr(safety))
+        self.assertEqual(
+            parse_response_policy_input_v0_2(policy_input.model_dump_json()),
+            policy_input,
+        )
+        self.assertEqual(
+            parse_safety_assessment_v0_2(safety.model_dump_json()),
+            safety,
+        )
+
+        tampered = policy_input.model_dump(mode="json")
+        tampered["current_message_sha256"] = "0" * 64
+        with self.assertRaises(ResponsePolicyContractError) as caught:
+            parse_response_policy_input_v0_2(json.dumps(tampered))
+        self.assertNotIn(secret, str(caught.exception))
+
+        with self.assertRaises(ResponsePolicyContractError):
+            parse_response_policy_input_v0_2(
+                '{"request_id":"one","request_id":"two"}'
             )
 
     def test_policy_contains_no_runtime_or_external_dependencies(self) -> None:

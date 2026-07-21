@@ -21,10 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 POLICY_VERSION = "response_policy_v0_2"
 POLICY_INPUT_VERSION = "response_policy_input_v0_2"
 POLICY_SIGNALS_VERSION = "response_policy_signals_v0_2"
+SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
+SAFETY_ASSESSOR_VERSION = "resse_safety_assessor_v0_2"
 ASSISTANT_PROFILE_ID = "RESSE"
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,159}$")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
 LEGACY_REQUEST_FIELDS: frozenset[str] = frozenset(
     {
@@ -86,10 +89,20 @@ class Closure(str, Enum):
     SAFETY_ACTION = "safety_action"
 
 
+class ConversationRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class ResponsePolicyContractError(RuntimeError):
+    """Fail-closed error at the response-policy wire boundary."""
+
+
 class StrictFrozenModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
+        hide_input_in_errors=True,
         strict=True,
         revalidate_instances="always",
     )
@@ -119,11 +132,38 @@ def _wire_revalidate(model_type: type[StrictFrozenModel], value: StrictFrozenMod
     return model_type.model_validate_json(_canonical_json_bytes(value))
 
 
+class ResponsePolicyConversationMessageV0_2(StrictFrozenModel):
+    role: ConversationRole
+    content: str = Field(min_length=1, max_length=100_000, repr=False)
+
+
 class ResponsePolicyInputV0_2(StrictFrozenModel):
     contract_version: Literal[POLICY_INPUT_VERSION] = POLICY_INPUT_VERSION
-    message: str = Field(max_length=100_000)
+    request_id: str
+    conversation: tuple[ResponsePolicyConversationMessageV0_2, ...] = Field(
+        min_length=1,
+        max_length=256,
+        repr=False,
+    )
+    current_message_sha256: str
+    conversation_sha256: str
+    request_sha256: str
     requested_assistant_profile_id: str | None = Field(default=None, max_length=160)
     request_field_names: tuple[str, ...] = ()
+
+    @field_validator("request_id")
+    @classmethod
+    def valid_request_id(cls, value: str) -> str:
+        if not REQUEST_ID_RE.fullmatch(value):
+            raise ValueError("request_id is invalid")
+        return value
+
+    @field_validator("current_message_sha256", "conversation_sha256", "request_sha256")
+    @classmethod
+    def valid_request_hash(cls, value: str) -> str:
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("request binding must be a lowercase SHA-256")
+        return value
 
     @field_validator("request_field_names")
     @classmethod
@@ -134,37 +174,159 @@ class ResponsePolicyInputV0_2(StrictFrozenModel):
             raise ValueError("request_field_names must be sorted and unique")
         return value
 
+    @model_validator(mode="after")
+    def exact_request_manifest(self) -> "ResponsePolicyInputV0_2":
+        if self.conversation[-1].role is not ConversationRole.USER:
+            raise ValueError("the current conversation message must have user role")
+        if sum(len(item.content) for item in self.conversation) > 200_000:
+            raise ValueError("conversation content exceeds the policy limit")
+        current_hash = hashlib.sha256(
+            self.conversation[-1].content.encode("utf-8")
+        ).hexdigest()
+        conversation_payload = [
+            item.model_dump(mode="json") for item in self.conversation
+        ]
+        if self.current_message_sha256 != current_hash:
+            raise ValueError("current-message hash mismatch")
+        if self.conversation_sha256 != _sha256(conversation_payload):
+            raise ValueError("conversation hash mismatch")
+        payload = self.model_dump(mode="json", exclude={"request_sha256"})
+        if self.request_sha256 != _sha256(payload):
+            raise ValueError("request manifest hash mismatch")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        request_id: str,
+        conversation: tuple[ResponsePolicyConversationMessageV0_2, ...],
+        requested_assistant_profile_id: str | None = None,
+        request_field_names: tuple[str, ...] = (),
+    ) -> "ResponsePolicyInputV0_2":
+        conversation_payload = [item.model_dump(mode="json") for item in conversation]
+        payload: dict[str, Any] = {
+            "contract_version": POLICY_INPUT_VERSION,
+            "request_id": request_id,
+            "conversation": conversation_payload,
+            "current_message_sha256": hashlib.sha256(
+                conversation[-1].content.encode("utf-8")
+            ).hexdigest()
+            if conversation
+            else "",
+            "conversation_sha256": _sha256(conversation_payload),
+            "requested_assistant_profile_id": requested_assistant_profile_id,
+            "request_field_names": request_field_names,
+        }
+        payload["request_sha256"] = _sha256(payload)
+        return cls.model_validate_json(_canonical_json_bytes(payload))
+
+    @property
+    def current_message(self) -> ResponsePolicyConversationMessageV0_2:
+        return self.conversation[-1]
+
+
+class SafetyAssessmentV0_2(StrictFrozenModel):
+    contract_version: Literal[SAFETY_ASSESSMENT_VERSION] = SAFETY_ASSESSMENT_VERSION
+    assessor_version: Literal[SAFETY_ASSESSOR_VERSION] = SAFETY_ASSESSOR_VERSION
+    request_id: str
+    request_sha256: str
+    current_message_sha256: str
+    conversation_sha256: str
+    assessment_complete: Literal[True]
+    high_stakes_gate: GateState
+    safety_action_required: bool
+    reason_codes: tuple[str, ...] = ()
+    assessment_sha256: str
+
+    @field_validator("request_id")
+    @classmethod
+    def valid_request_id(cls, value: str) -> str:
+        if not REQUEST_ID_RE.fullmatch(value):
+            raise ValueError("request_id is invalid")
+        return value
+
+    @field_validator(
+        "request_sha256",
+        "current_message_sha256",
+        "conversation_sha256",
+        "assessment_sha256",
+    )
+    @classmethod
+    def valid_assessment_hash(cls, value: str) -> str:
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("safety binding must be a lowercase SHA-256")
+        return value
+
+    @field_validator("reason_codes")
+    @classmethod
+    def sorted_unique_reason_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != tuple(sorted(set(value))):
+            raise ValueError("safety reason codes must be sorted and unique")
+        return value
+
+    @model_validator(mode="after")
+    def exact_assessment_manifest(self) -> "SafetyAssessmentV0_2":
+        if self.high_stakes_gate is not GateState.PASS and not self.reason_codes:
+            raise ValueError("a non-pass safety assessment requires a reason code")
+        if self.safety_action_required and self.high_stakes_gate is GateState.PASS:
+            raise ValueError("a safety action requires a non-pass high-stakes gate")
+        payload = self.model_dump(mode="json", exclude={"assessment_sha256"})
+        if self.assessment_sha256 != _sha256(payload):
+            raise ValueError("safety-assessment manifest hash mismatch")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        request: ResponsePolicyInputV0_2,
+        *,
+        high_stakes_gate: GateState = GateState.PASS,
+        safety_action_required: bool = False,
+        reason_codes: tuple[str, ...] = (),
+    ) -> "SafetyAssessmentV0_2":
+        verified = _wire_revalidate(ResponsePolicyInputV0_2, request)
+        payload: dict[str, Any] = {
+            "contract_version": SAFETY_ASSESSMENT_VERSION,
+            "assessor_version": SAFETY_ASSESSOR_VERSION,
+            "request_id": verified.request_id,
+            "request_sha256": verified.request_sha256,
+            "current_message_sha256": verified.current_message_sha256,
+            "conversation_sha256": verified.conversation_sha256,
+            "assessment_complete": True,
+            "high_stakes_gate": high_stakes_gate.value,
+            "safety_action_required": safety_action_required,
+            "reason_codes": tuple(sorted(set(reason_codes))),
+        }
+        payload["assessment_sha256"] = _sha256(payload)
+        return cls.model_validate_json(_canonical_json_bytes(payload))
+
 
 class ResponsePolicySignalsV0_2(StrictFrozenModel):
     """Trusted server-side signals; never populate directly from request JSON."""
 
     contract_version: Literal[POLICY_SIGNALS_VERSION] = POLICY_SIGNALS_VERSION
-    high_stakes: bool | None = None
-    high_stakes_uncertain: bool = False
     technical: bool | None = None
     fm_explicit: bool | None = None
     coaching: bool | None = None
     fm_application_gate: GateState = GateState.PASS
     ordinary_fm_relevant: bool = False
     user_fm_opt_out: bool = False
-    safety_action_required: bool | None = None
     technical_procedure_requested: bool | None = None
     coaching_consent: bool | None = None
     material_clarification_required: bool | None = None
     explicit_next_step_requested: bool | None = None
 
-    @model_validator(mode="after")
-    def consistent_high_stakes_signal(self) -> "ResponsePolicySignalsV0_2":
-        if self.high_stakes_uncertain and self.high_stakes is not None:
-            raise ValueError(
-                "high_stakes_uncertain cannot accompany a definitive high_stakes signal"
-            )
-        return self
 
 
 class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
     policy_version: Literal[POLICY_VERSION]
     assistant_profile_id: Literal[ASSISTANT_PROFILE_ID]
+    request_id: str
+    request_sha256: str
+    current_message_sha256: str
+    conversation_sha256: str
+    safety_assessment_sha256: str
     response_mode: ResponseMode
     closure: Closure
     mode_reasons: tuple[str, ...]
@@ -177,6 +339,25 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
     governed_memory_allowed: Literal[True]
     structured_data_allowed: Literal[True]
     ignored_legacy_request_fields: tuple[str, ...]
+
+    @field_validator("request_id")
+    @classmethod
+    def valid_request_id(cls, value: str) -> str:
+        if not REQUEST_ID_RE.fullmatch(value):
+            raise ValueError("request_id is invalid")
+        return value
+
+    @field_validator(
+        "request_sha256",
+        "current_message_sha256",
+        "conversation_sha256",
+        "safety_assessment_sha256",
+    )
+    @classmethod
+    def valid_binding_hash(cls, value: str) -> str:
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("decision binding must be a lowercase SHA-256")
+        return value
 
     @field_validator(
         "mode_reasons", "fm_gate_reasons", "ignored_legacy_request_fields"
@@ -396,6 +577,7 @@ def _matches_any(text: str, rules: tuple[re.Pattern[str], ...]) -> bool:
 def _select_mode(
     text: str,
     signals: ResponsePolicySignalsV0_2,
+    safety_assessment: SafetyAssessmentV0_2,
     local_high_stakes: tuple[str, ...],
 ) -> tuple[ResponseMode, GateState, tuple[str, ...]]:
     # Local high-stakes detection is a hard veto: a false upstream signal cannot
@@ -406,17 +588,25 @@ def _select_mode(
             GateState.TRIGGERED,
             tuple(f"local_high_stakes:{code}" for code in local_high_stakes),
         )
-    if signals.high_stakes is True:
+    if safety_assessment.high_stakes_gate is GateState.TRIGGERED:
         return (
             ResponseMode.HIGH_STAKES,
             GateState.TRIGGERED,
-            ("trusted_high_stakes_signal",),
+            tuple(
+                f"safety_assessment:{code}"
+                for code in safety_assessment.reason_codes
+            )
+            or ("safety_assessment:high_stakes",),
         )
-    if signals.high_stakes_uncertain:
+    if safety_assessment.high_stakes_gate is GateState.UNCERTAIN:
         return (
             ResponseMode.HIGH_STAKES,
             GateState.UNCERTAIN,
-            ("trusted_high_stakes_uncertain",),
+            tuple(
+                f"safety_assessment:{code}"
+                for code in safety_assessment.reason_codes
+            )
+            or ("safety_assessment:uncertain",),
         )
 
     checks = (
@@ -448,6 +638,7 @@ def _select_closure(
     mode: ResponseMode,
     text: str,
     signals: ResponsePolicySignalsV0_2,
+    safety_assessment: SafetyAssessmentV0_2,
     local_high_stakes: tuple[str, ...],
 ) -> Closure:
     if mode is ResponseMode.HIGH_STAKES:
@@ -460,7 +651,7 @@ def _select_closure(
             "immediate_violence_or_abuse",
             "impaired_reality_testing",
         }
-        if signals.safety_action_required is True or local_action_categories.intersection(
+        if safety_assessment.safety_action_required or local_action_categories.intersection(
             local_high_stakes
         ):
             return Closure.SAFETY_ACTION
@@ -543,22 +734,77 @@ def _application_gate(
 def decide_response_policy_v0_2(
     request: ResponsePolicyInputV0_2,
     *,
+    safety_assessment: SafetyAssessmentV0_2 | None = None,
     signals: ResponsePolicySignalsV0_2 | None = None,
 ) -> ResponsePolicyDecisionV0_2:
     """Return one deterministic decision without performing a side effect."""
 
-    request = _wire_revalidate(ResponsePolicyInputV0_2, request)
-    trusted = _wire_revalidate(
-        ResponsePolicySignalsV0_2, signals or ResponsePolicySignalsV0_2()
+    if safety_assessment is None:
+        raise ResponsePolicyContractError("a completed safety assessment is required")
+    try:
+        request = _wire_revalidate(ResponsePolicyInputV0_2, request)
+        safety_assessment = _wire_revalidate(
+            SafetyAssessmentV0_2, safety_assessment
+        )
+        trusted = _wire_revalidate(
+            ResponsePolicySignalsV0_2, signals or ResponsePolicySignalsV0_2()
+        )
+    except (TypeError, ValueError) as exc:
+        raise ResponsePolicyContractError("invalid response-policy input manifest") from exc
+
+    request_bindings = (
+        request.request_id,
+        request.request_sha256,
+        request.current_message_sha256,
+        request.conversation_sha256,
     )
-    text = _normalized(request.message)
-    local_high_stakes = _matched_codes(text, _LOCAL_HIGH_STAKES_RULES)
-    local_boundaries = _matched_codes(text, _LOCAL_APPLICATION_BOUNDARY_RULES)
+    assessment_bindings = (
+        safety_assessment.request_id,
+        safety_assessment.request_sha256,
+        safety_assessment.current_message_sha256,
+        safety_assessment.conversation_sha256,
+    )
+    if assessment_bindings != request_bindings:
+        raise ResponsePolicyContractError(
+            "safety assessment does not bind to the policy request"
+        )
+
+    text = _normalized(request.current_message.content)
+    user_texts = (
+        _normalized(item.content)
+        for item in request.conversation
+        if item.role is ConversationRole.USER
+    )
+    local_high_stakes = tuple(
+        sorted(
+            {
+                code
+                for user_text in user_texts
+                for code in _matched_codes(user_text, _LOCAL_HIGH_STAKES_RULES)
+            }
+        )
+    )
+    user_texts = (
+        _normalized(item.content)
+        for item in request.conversation
+        if item.role is ConversationRole.USER
+    )
+    local_boundaries = tuple(
+        sorted(
+            {
+                code
+                for user_text in user_texts
+                for code in _matched_codes(user_text, _LOCAL_APPLICATION_BOUNDARY_RULES)
+            }
+        )
+    )
 
     mode, high_stakes_gate, mode_reasons = _select_mode(
-        text, trusted, local_high_stakes
+        text, trusted, safety_assessment, local_high_stakes
     )
-    closure = _select_closure(mode, text, trusted, local_high_stakes)
+    closure = _select_closure(
+        mode, text, trusted, safety_assessment, local_high_stakes
+    )
     default_fm = _default_fm_level(mode, trusted)
     application_gate, application_reasons = _application_gate(
         high_stakes_gate, local_boundaries, trusted
@@ -592,6 +838,11 @@ def decide_response_policy_v0_2(
     payload = _ResponsePolicyDecisionPayloadV0_2(
         policy_version=POLICY_VERSION,
         assistant_profile_id=ASSISTANT_PROFILE_ID,
+        request_id=request.request_id,
+        request_sha256=request.request_sha256,
+        current_message_sha256=request.current_message_sha256,
+        conversation_sha256=request.conversation_sha256,
+        safety_assessment_sha256=safety_assessment.assessment_sha256,
         response_mode=mode,
         closure=closure,
         mode_reasons=tuple(sorted(set(reasons))),
@@ -613,6 +864,62 @@ def decide_response_policy_v0_2(
     )
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ResponsePolicyContractError(f"duplicate JSON key: {key}")
+        document[key] = value
+    return document
+
+
+def _wire_document(value: str | bytes) -> bytes:
+    try:
+        document = json.loads(
+            value,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ResponsePolicyContractError(f"invalid JSON constant: {constant}")
+            ),
+        )
+    except ResponsePolicyContractError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ResponsePolicyContractError("invalid response-policy JSON") from exc
+    return _canonical_json_bytes(document)
+
+
+def parse_response_policy_input_v0_2(
+    value: str | bytes,
+) -> ResponsePolicyInputV0_2:
+    try:
+        return ResponsePolicyInputV0_2.model_validate_json(_wire_document(value))
+    except ResponsePolicyContractError:
+        raise
+    except ValueError as exc:
+        raise ResponsePolicyContractError("invalid response-policy input") from exc
+
+
+def parse_safety_assessment_v0_2(value: str | bytes) -> SafetyAssessmentV0_2:
+    try:
+        return SafetyAssessmentV0_2.model_validate_json(_wire_document(value))
+    except ResponsePolicyContractError:
+        raise
+    except ValueError as exc:
+        raise ResponsePolicyContractError("invalid safety assessment") from exc
+
+
+def parse_response_policy_decision_v0_2(
+    value: str | bytes,
+) -> ResponsePolicyDecisionV0_2:
+    try:
+        return ResponsePolicyDecisionV0_2.model_validate_json(_wire_document(value))
+    except ResponsePolicyContractError:
+        raise
+    except ValueError as exc:
+        raise ResponsePolicyContractError("invalid response-policy decision") from exc
+
+
 __all__ = [
     "ASSISTANT_PROFILE_ID",
     "LEGACY_REQUEST_FIELDS",
@@ -620,12 +927,21 @@ __all__ = [
     "POLICY_INPUT_VERSION",
     "POLICY_SIGNALS_VERSION",
     "POLICY_VERSION",
+    "SAFETY_ASSESSMENT_VERSION",
+    "SAFETY_ASSESSOR_VERSION",
     "Closure",
+    "ConversationRole",
     "FMLevel",
     "GateState",
     "ResponseMode",
+    "ResponsePolicyContractError",
+    "ResponsePolicyConversationMessageV0_2",
     "ResponsePolicyDecisionV0_2",
     "ResponsePolicyInputV0_2",
     "ResponsePolicySignalsV0_2",
+    "SafetyAssessmentV0_2",
     "decide_response_policy_v0_2",
+    "parse_response_policy_decision_v0_2",
+    "parse_response_policy_input_v0_2",
+    "parse_safety_assessment_v0_2",
 ]

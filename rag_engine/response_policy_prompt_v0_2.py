@@ -13,11 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.prompt_contribution_v1 import (
-    PromptContributionKind,
-    PromptContributionV1,
-)
 from rag_engine.response_policy_v0_2 import (
+    POLICY_VERSION,
     Closure,
     FMLevel,
     ResponseMode,
@@ -27,6 +24,7 @@ from rag_engine.response_policy_v0_2 import (
 
 RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_2"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
 
 class ResponsePolicyPromptError(RuntimeError):
@@ -37,6 +35,7 @@ class _StrictFrozenModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
+        hide_input_in_errors=True,
         strict=True,
         revalidate_instances="always",
     )
@@ -54,7 +53,12 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     contract_version: Literal[RESPONSE_POLICY_PROMPT_VERSION] = (
         RESPONSE_POLICY_PROMPT_VERSION
     )
-    policy_version: str
+    policy_version: Literal["response_policy_v0_2"]
+    request_id: str
+    request_sha256: str
+    current_message_sha256: str
+    conversation_sha256: str
+    safety_assessment_sha256: str
     decision_sha256: str
     response_mode: ResponseMode
     fm_effective_level: FMLevel
@@ -63,11 +67,25 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     content_sha256: str
     estimated_tokens: int = Field(ge=1)
 
-    @field_validator("decision_sha256", "content_sha256")
+    @field_validator(
+        "request_sha256",
+        "current_message_sha256",
+        "conversation_sha256",
+        "safety_assessment_sha256",
+        "decision_sha256",
+        "content_sha256",
+    )
     @classmethod
     def _valid_hash(cls, value: str) -> str:
         if not SHA256_RE.fullmatch(value):
             raise ValueError("hash must be a lowercase SHA-256")
+        return value
+
+    @field_validator("request_id")
+    @classmethod
+    def _valid_request_id(cls, value: str) -> str:
+        if not REQUEST_ID_RE.fullmatch(value):
+            raise ValueError("request_id is invalid")
         return value
 
     @model_validator(mode="after")
@@ -77,15 +95,6 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
         if self.estimated_tokens != _tokens(self.content):
             raise ValueError("response-policy token estimate mismatch")
         return self
-
-    def to_prompt_contribution(self) -> PromptContributionV1:
-        return PromptContributionV1.create(
-            contribution_id="resse.runtime_policy.v0_2",
-            kind=PromptContributionKind.RUNTIME_POLICY,
-            source_version=self.contract_version,
-            content=self.content,
-        )
-
 
 _CORE = (
     "Use one stable RESSE voice: precise, direct, calm, pragmatic, and natural. "
@@ -201,7 +210,12 @@ def render_response_policy_prompt_v0_2(
         )
     )
     return ResponsePolicyPromptV0_2(
-        policy_version=verified.policy_version,
+        policy_version=POLICY_VERSION,
+        request_id=verified.request_id,
+        request_sha256=verified.request_sha256,
+        current_message_sha256=verified.current_message_sha256,
+        conversation_sha256=verified.conversation_sha256,
+        safety_assessment_sha256=verified.safety_assessment_sha256,
         decision_sha256=verified.decision_sha256,
         response_mode=verified.response_mode,
         fm_effective_level=verified.fm_effective_level,
