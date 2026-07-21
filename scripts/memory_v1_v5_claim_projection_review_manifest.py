@@ -17,6 +17,7 @@ from memory_v1_projection_v5_contract_test import sha256
 CONTRACT = "memory_v1_claim_projection_review_batch_manifest_v1"
 STAGE_BUNDLE_CONTRACTS = {
     "memory_v1_claim_projection_stage_bundle_v5_1",
+    "memory_v1_life_event_claim_stage_bundle_v5_1",
     "memory_v1_relationship_claim_stage_bundle_v5_1",
 }
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
