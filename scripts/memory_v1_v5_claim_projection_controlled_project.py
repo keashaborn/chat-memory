@@ -31,8 +31,10 @@ APPLY_CONTRACT = "memory_v1_claim_projection_apply_batch_result_v1"
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER_OWNER = "557ea042-cb82-48f8-9429-472e96c957ef"
+MAX_CLAIMS_PER_CONTROLLED_RUN = 4
 QUERY_BY_PREDICATE = {
     "relationship.has_pet": "Do you remember my pet?",
+    "relationship.parent_of": "Do you remember who my dad is?",
     "identity.name": "What was my pet's name?",
     "pet.sex": "Was Dahlia female or male?",
     "pet.breed": "What breed was Dahlia?",
@@ -70,15 +72,18 @@ def load_apply(path: Path) -> dict[str, Any]:
         {key: item for key, item in value.items() if key != "result_sha256"}
     ):
         raise ControlledProjectionError("apply result content hash mismatch")
+    item_count = len(value.get("outcomes", [])) if isinstance(
+        value.get("outcomes"), list
+    ) else 0
     if (
         value.get("contract_version") != APPLY_CONTRACT
         or value.get("mode") != "apply"
         or value.get("owner_user_id") != OWNER
-        or value.get("insert_rows") != 48
-        or value.get("mutated_rows") != 52
-        or len(value.get("outcomes", [])) != 4
+        or not 1 <= item_count <= MAX_CLAIMS_PER_CONTROLLED_RUN
+        or value.get("insert_rows") != 12 * item_count
+        or value.get("mutated_rows") != 13 * item_count
     ):
-        raise ControlledProjectionError("apply result is outside the four-claim boundary")
+        raise ControlledProjectionError("apply result is outside the bounded claim boundary")
     return value
 
 
@@ -260,13 +265,17 @@ async def run() -> int:
             raise ControlledProjectionError("apply outcome cannot be projected")
     # Canonical text hashes are recovered from the apply manifest, not from claim prose.
     manifest_sha = apply["manifest_sha256"]
-    manifest_candidates = list(REVIEW_ROOT.glob("claim-projection-apply-batch-*.json"))
+    manifest_candidates = list(REVIEW_ROOT.rglob("*apply*manifest*.json"))
     manifests = []
     for candidate in manifest_candidates:
         if stat.S_IMODE(candidate.stat().st_mode) != 0o600:
             continue
         value = json.loads(candidate.read_text())
-        if value.get("manifest_sha256") == manifest_sha:
+        if (
+            value.get("contract_version")
+            == "memory_v1_claim_projection_apply_batch_manifest_v1"
+            and value.get("manifest_sha256") == manifest_sha
+        ):
             manifests.append((candidate, value))
     if len(manifests) != 1:
         raise ControlledProjectionError("exact immutable apply manifest was not found")
@@ -285,7 +294,7 @@ async def run() -> int:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not dsn or not qdrant_url or not api_key:
         raise ControlledProjectionError("required runtime configuration is missing")
-    if args.vector_size != 3072 or len(items) != 4:
+    if args.vector_size != 3072 or not 1 <= len(items) <= MAX_CLAIMS_PER_CONTROLLED_RUN:
         raise ControlledProjectionError("projection call or vector budget mismatch")
     model = os.environ.get("EMBED_MODEL", "text-embedding-3-large").strip()
     if model != "text-embedding-3-large":
@@ -321,7 +330,7 @@ async def run() -> int:
         for item in items:
             active_job = await claim_job(conn, item, worker_id)
             text = render_claim_for_embedding(active_job["snapshot"])
-            if calls >= 4:
+            if calls >= len(items):
                 raise ControlledProjectionError("embedding request budget exhausted")
             calls += 1
             response = provider.embeddings.create(model=model, input=text)
@@ -337,7 +346,7 @@ async def run() -> int:
                  "outbox_id": item["outbox_id"], "revision_number": 2}
             )
             active_job = None
-        if calls != 4 or writes != 4:
+        if calls != len(items) or writes != len(items):
             raise ControlledProjectionError("controlled projection did not consume exact budget")
         shadows = await shadow_tests(conn, index, items, vectors)
     except Exception as exc:

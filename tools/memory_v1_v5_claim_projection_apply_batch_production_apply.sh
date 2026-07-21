@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Materializes four reviewed V5 claims, applies audited
-# supported assessments, projects exactly four Qdrant points with zero HTTP
-# retries, and performs owner-only read-only shadow tests. Prompt influence is
-# never enabled.
+# seebx backend only. Materializes one through four reviewed V5/V5.1 claims,
+# applies audited supported assessments, projects exactly one Qdrant point per
+# claim with zero HTTP retries, and performs owner-only read-only shadow tests.
+# Prompt influence is never enabled.
 
 if [[ "${MEMORY_V1_CLAIM_PROJECTION_PRODUCTION_APPLY:-}" != authorized ]]; then
   echo 'MEMORY_V1_CLAIM_PROJECTION_PRODUCTION_APPLY=authorized is required' >&2
@@ -36,14 +36,7 @@ brains_quiesced=0
 brains_state_before=
 unit_state=$(mktemp /tmp/memory-v1-claim-apply-units.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-claim-apply-tables.XXXXXX)
-timers=(
-  memory-v1-consolidation.timer
-  memory-v1-deferred-reconciliation-scan.timer
-  memory-v1-evidence-intake-dispatcher.timer
-  memory-v1-governance.timer
-  memory-v1-projection.timer
-  memory-v1-v5-chat-capture.timer
-)
+item_count=$(jq -er '.items|length' "$manifest")
 
 psql_row() {
   docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 -U sage -d "$database" -c "$1" | sed -n '1p'
@@ -67,6 +60,28 @@ restore_runtime() {
     brains_quiesced=0
   fi
   restore_timers
+}
+
+authenticated_health() {
+  set -a
+  source "$repo_root/.env"
+  set +a
+  [[ -n "${VS_SERVICE_TOKEN:-}" ]]
+  for _attempt in $(seq 1 30); do
+    if [[ "$(systemctl is-active brains.service)" == active ]] \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/healthz \
+          | jq -e '.status=="ok"' >/dev/null \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/readyz \
+          | jq -e '.ok==true and .postgres==true' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 record_exit() {
@@ -148,7 +163,8 @@ PY
 }
 
 verify_qdrant_delta() {
-  BEFORE="$1" AFTER="$2" PROJECT="$project_result" python3 - <<'PY'
+  BEFORE="$1" AFTER="$2" PROJECT="$project_result" \
+    ITEM_COUNT="$item_count" TARGET_OWNER="$target_owner" python3 - <<'PY'
 import json,os
 from pathlib import Path
 def load(path):
@@ -159,14 +175,15 @@ def load(path):
 before,after=load(os.environ['BEFORE']),load(os.environ['AFTER'])
 project=json.loads(Path(os.environ['PROJECT']).read_text())
 ids={row['claim_id'] for row in project['completed']}
-if len(ids)!=4 or ids & before.keys(): raise SystemExit('target Qdrant points were not four new IDs')
+if len(ids)!=int(os.environ['ITEM_COUNT']) or ids & before.keys():
+    raise SystemExit('target Qdrant point count or identity mismatch')
 if after.keys()!=before.keys()|ids: raise SystemExit('unexpected target Qdrant point set delta')
 for point_id,value in before.items():
     if after[point_id]!=value: raise SystemExit('existing target Qdrant point changed')
 for point_id in ids:
     point=after[point_id]
     payload=point.get('payload',{})
-    if payload.get('owner_user_id')!='1240822d-ac9a-4096-95aa-e2b24d36ef50': raise SystemExit('Qdrant owner mismatch')
+    if payload.get('owner_user_id')!=os.environ['TARGET_OWNER']: raise SystemExit('Qdrant owner mismatch')
     if payload.get('claim_id')!=point_id or payload.get('status')!='supported': raise SystemExit('Qdrant claim payload mismatch')
     if payload.get('revision_number')!=2 or payload.get('schema_version')!='memory_claim_projection_v1': raise SystemExit('Qdrant projection contract mismatch')
     if not isinstance(point.get('vector'),list) or len(point['vector'])!=3072: raise SystemExit('Qdrant vector dimension mismatch')
@@ -178,12 +195,14 @@ for output in "$preflight_result" "$apply_result" "$replay_result" "$project_res
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 head=$(git -C "$repo_root" rev-parse HEAD)
 [[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
-[[ "$(jq -er '.expected_insert_rows' "$manifest")" == 48 ]]
-[[ "$(jq -er '.expected_mutated_rows' "$manifest")" == 52 ]]
-[[ "$(jq -er '.items|length' "$manifest")" == 4 ]]
+[[ "$(jq -er '.owner_user_id' "$manifest")" == "$target_owner" ]]
+[[ "$item_count" -ge 1 && "$item_count" -le 4 ]]
+[[ "$(jq -er '.expected_insert_rows' "$manifest")" == "$((12*item_count))" ]]
+[[ "$(jq -er '.expected_mutated_rows' "$manifest")" == "$((13*item_count))" ]]
 set -a; source "$repo_root/.env"; set +a
 [[ -n "${POSTGRES_DSN:-}" && -n "${QDRANT_URL:-}" && -n "${OPENAI_API_KEY:-}" ]]
 [[ "${EMBED_MODEL:-text-embedding-3-large}" == text-embedding-3-large ]]
+authenticated_health
 exec 9>"$lock_file"; flock -n 9
 umask 077
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git -C "$repo_root" rev-parse --short=12 HEAD)"
@@ -203,7 +222,14 @@ q_other_after="$snapshot_dir/memory_v1_claim_qdrant_other_after_${run_tag}.jsonl
 
 phase=capture_timer_state
 : >"$unit_state"
-for unit in "${timers[@]}"; do printf '%s\t%s\t%s\n' "$unit" "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")" >>"$unit_state"; done
+while IFS= read -r unit; do
+  [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]]
+  printf '%s\t%s\t%s\n' "$unit" \
+    "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")" \
+    >>"$unit_state"
+done < <(systemctl list-unit-files 'memory-v1-*.timer' --no-legend --no-pager \
+  | awk '{print $1}' | sort -u)
+[[ -s "$unit_state" ]]
 chmod 0600 "$unit_state"
 phase=quiesce_timers
 while IFS=$'\t' read -r unit _enabled active; do [[ "$active" != active ]] || sudo -n systemctl stop "$unit"; done <"$unit_state"
@@ -241,7 +267,8 @@ MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts:$repo_root" /opt/
 
 phase=transactional_apply
 MEMORY_V1_REQUIRED_HEAD="$head" MEMORY_V1_CLAIM_PROJECTION_APPLY_BATCH=authorized PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" --mode apply --manifest "$manifest" --output "$apply_result"
-[[ "$(jq -er '.insert_rows' "$apply_result")" == 48 && "$(jq -er '.mutated_rows' "$apply_result")" == 52 ]]
+[[ "$(jq -er '.insert_rows' "$apply_result")" == "$((12*item_count))" \
+   && "$(jq -er '.mutated_rows' "$apply_result")" == "$((13*item_count))" ]]
 capture_partition target "$target_apply"; capture_partition non_target "$non_target_apply"
 verify_target_delta "$target_before" "$target_apply"; cmp -s "$non_target_before" "$non_target_apply"
 q_apply_target=$(mktemp /tmp/memory-v1-q-target-apply.XXXXXX); q_apply_other=$(mktemp /tmp/memory-v1-q-other-apply.XXXXXX)
@@ -257,10 +284,10 @@ cmp -s "$target_apply" "$target_replay"; cmp -s "$non_target_apply" "$non_target
 
 phase=controlled_projection_and_shadow
 MEMORY_V1_CONTROLLED_PROJECTION=authorized PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$project_runner" --apply-result "$apply_result" --output "$project_result"
-[[ "$(jq -er '.embedding_requests' "$project_result")" == 4 ]]
+[[ "$(jq -er '.embedding_requests' "$project_result")" == "$item_count" ]]
 [[ "$(jq -er '.automatic_http_retries' "$project_result")" == 0 ]]
-[[ "$(jq -er '.qdrant_writes' "$project_result")" == 4 ]]
-[[ "$(jq -er '.shadow_tests|length' "$project_result")" == 4 ]]
+[[ "$(jq -er '.qdrant_writes' "$project_result")" == "$item_count" ]]
+[[ "$(jq -er '.shadow_tests|length' "$project_result")" == "$item_count" ]]
 capture_partition target "$target_final"; capture_partition non_target "$non_target_final"
 verify_projection_only_delta "$target_apply" "$target_final"
 cmp -s "$non_target_apply" "$non_target_final"
@@ -268,13 +295,14 @@ capture_qdrant "$q_target_after" "$q_other_after"
 cmp -s "$q_other_before" "$q_other_after"
 verify_qdrant_delta "$q_target_before" "$q_target_after"
 claim_ids=$(jq -r '[.outcomes[].claim_id]|join(",")' "$apply_result")
-[[ "$(psql_row "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner'::uuid AND status='done' AND attempts=1 AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
+[[ "$(psql_row "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner'::uuid AND status='done' AND attempts=1 AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
 
 phase=restore_runtime
 restore_runtime
+authenticated_health
 phase=report
 report="$snapshot_dir/memory_v1_claim_projection_apply_batch_${run_tag}.json"
-REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" PROJECT="$project_result" HEAD="$head" python3 - <<'PY'
+REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" PROJECT="$project_result" HEAD="$head" ITEM_COUNT="$item_count" python3 - <<'PY'
 import datetime as dt,json,os
 from pathlib import Path
 m=json.loads(Path(os.environ['MANIFEST']).read_text())
@@ -284,8 +312,10 @@ report={
  'head_commit':os.environ['HEAD'],'owner_user_id':m['owner_user_id'],'manifest_sha256':m['manifest_sha256'],
  'backup':os.environ['BACKUP'],
  'evidence':{'preflight':os.environ['PREFLIGHT'],'apply':os.environ['APPLY'],'replay':os.environ['REPLAY'],'projection':os.environ['PROJECT']},
- 'verification':{'insert_rows':48,'mutated_rows':52,'claims_supported':4,'zero_write_replay':True,
-   'embedding_requests':4,'automatic_http_retries':0,'qdrant_points_created':4,'shadow_tests_passed':4,
+ 'verification':{'insert_rows':12*int(os.environ['ITEM_COUNT']),'mutated_rows':13*int(os.environ['ITEM_COUNT']),
+   'claims_supported':int(os.environ['ITEM_COUNT']),'zero_write_replay':True,
+   'embedding_requests':int(os.environ['ITEM_COUNT']),'automatic_http_retries':0,
+   'qdrant_points_created':int(os.environ['ITEM_COUNT']),'shadow_tests_passed':int(os.environ['ITEM_COUNT']),
    'non_target_database_unchanged':True,'non_target_qdrant_unchanged':True,'prompt_influence':False,
    'general_account_activation':False,'timers_restored_exactly':True,'brains_service_restored_exactly':True},
  'hard_stop':'before_prompt_influence_or_general_account_activation'}
