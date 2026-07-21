@@ -2186,7 +2186,10 @@ async def list_training_sessions(
             left join {SCHEMA}.training_set_log l
               on l.training_session_id=s.training_session_id
             where {' and '.join(where)}
-            group by s.training_session_id
+            group by
+              s.training_session_id, s.owner_user_id, s.day,
+              s.workout_template_id, s.name, s.notes, s.started_at,
+              s.finished_at, s.is_active, s.created_at, s.updated_at
             {having}
             order by s.day desc, s.created_at desc
             limit {int(limit)}

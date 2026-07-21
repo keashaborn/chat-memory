@@ -64,6 +64,13 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
             r"coalesce\([^\n]*exercise_role[^\n]*'strength'\)",
         )
 
+    def test_session_summary_groups_every_projected_view_column(self) -> None:
+        expected_grouping = """group by
+              s.training_session_id, s.owner_user_id, s.day,
+              s.workout_template_id, s.name, s.notes, s.started_at,
+              s.finished_at, s.is_active, s.created_at, s.updated_at"""
+        self.assertIn(expected_grouping, self.router)
+
     def test_completed_child_mutations_are_retired(self) -> None:
         retired_message = (
             "completed sessions are immutable; submit an aggregate correction"
