@@ -90,11 +90,15 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((conn.entered, conn.exited), (1, 1))
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertIn("INSERT INTO public.chat_log", sql)
-        self.assertIn("$2::text", sql)
         self.assertIn("memory.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.final_answer_memory_binding_v1", sql)
         self.assertIn("UPDATE public.threads", sql)
         self.assertEqual(conn.execute_calls[0][1], (str(ACTOR),))
+        chat_call = next(
+            call for call in conn.execute_calls if "INSERT INTO public.chat_log" in call[0]
+        )
+        self.assertEqual(chat_call[1][1], ACTOR)
+        self.assertEqual(chat_call[1][2], str(ACTOR))
 
     async def test_absent_owner_thread_fails_closed(self) -> None:
         conn = FakeConnection(owns_thread=False)

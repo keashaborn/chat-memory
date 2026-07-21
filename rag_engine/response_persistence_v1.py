@@ -59,10 +59,11 @@ async def persist_finalized_response_v1(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
                   thread_id,vantage_id,request_id,created_at
                 )
-                VALUES($1,$2,$2::text,NULL,$3,$4,$5,$6,'RESSE',$7,$8)
+                VALUES($1,$2,$3,NULL,$4,$5,$6,$7,'RESSE',$8,$9)
                 """,
                 value.answer_id,
                 owner_user_id,
+                str(owner_user_id),
                 ATTESTED_ASSISTANT_SOURCE,
                 value.assistant_text,
                 ["assistant", "chat", "server_attested", "resse_v0_2"],
