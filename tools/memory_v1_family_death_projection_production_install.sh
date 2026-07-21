@@ -10,7 +10,8 @@ if [[ "${MEMORY_V1_FAMILY_DEATH_PROJECTION_INSTALL:-}" != authorized ]]; then
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
-required_ancestor=9ecb2b6
+isolated_ancestor=9ecb2b6
+production_ancestor=4928cf8
 role_migration=ops/sql/20260721_memory_v1_role_only_family_resolution_v5_1.sql
 event_migration=ops/sql/20260721_memory_v1_life_event_claim_projection_v5_1.sql
 security_test=tests/memory_v1_family_death_projection_install.sql
@@ -89,7 +90,11 @@ record_exit() {
 trap record_exit EXIT
 
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
-git -C "$repo_root" merge-base --is-ancestor "$required_ancestor" HEAD
+if ! git -C "$repo_root" merge-base --is-ancestor "$isolated_ancestor" HEAD \
+   && ! git -C "$repo_root" merge-base --is-ancestor "$production_ancestor" HEAD; then
+  echo 'required family/death projection implementation is absent' >&2
+  exit 1
+fi
 [[ "$(sha256sum "$repo_root/$role_migration" | awk '{print $1}')" == "$role_sha" ]]
 [[ "$(sha256sum "$repo_root/$event_migration" | awk '{print $1}')" == "$event_sha" ]]
 [[ "$(sha256sum "$repo_root/$security_test" | awk '{print $1}')" == "$test_sha" ]]
