@@ -173,6 +173,8 @@ target_before="$snapshot_dir/memory_v1_v5_1_entailment_target_before_${run_tag}.
 target_after="$snapshot_dir/memory_v1_v5_1_entailment_target_after_${run_tag}.tsv"
 non_target_before="$snapshot_dir/memory_v1_v5_1_entailment_non_target_before_${run_tag}.tsv"
 non_target_after="$snapshot_dir/memory_v1_v5_1_entailment_non_target_after_${run_tag}.tsv"
+qdrant_before_file="$snapshot_dir/memory_v1_v5_1_entailment_qdrant_before_${run_tag}.sha256"
+qdrant_after_file="$snapshot_dir/memory_v1_v5_1_entailment_qdrant_after_${run_tag}.sha256"
 
 phase=quiesce
 : >"$unit_state"
@@ -228,6 +230,8 @@ docker exec "$container" psql -X -A -t -F $'\t' -v ON_ERROR_STOP=1 \
 capture_partition target "$target_before"
 capture_partition non_target "$non_target_before"
 qdrant_before=$(qdrant_signature)
+printf '%s\n' "$qdrant_before" >"$qdrant_before_file"
+chmod 0600 "$qdrant_before_file"
 
 phase=preflight
 MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts" \
@@ -246,7 +250,7 @@ MEMORY_V1_REQUIRED_HEAD="$head" PYTHONPATH="$repo_root/scripts" \
   "$repo_root/venv/bin/python" "$repo_root/$runner" \
   --mode replay --manifest "$manifest" --output "$replay_result"
 [[ "$(jq -er '.rows_written' "$replay_result")" == 0 ]]
-[[ "$(jq -er '[.outcomes[].outcome] | unique == ["'"'replayed'"'"]' "$replay_result")" == true ]]
+[[ "$(jq -er '[.outcomes[].outcome] | unique == ["replayed"]' "$replay_result")" == true ]]
 
 phase=isolation
 PYTHONPATH="$repo_root/scripts" "$repo_root/venv/bin/python" \
@@ -261,6 +265,8 @@ capture_partition non_target "$non_target_after"
 cmp -s "$non_target_before" "$non_target_after"
 verify_target_delta
 qdrant_after=$(qdrant_signature)
+printf '%s\n' "$qdrant_after" >"$qdrant_after_file"
+chmod 0600 "$qdrant_after_file"
 [[ "$qdrant_before" == "$qdrant_after" ]]
 
 restore_timers
@@ -277,6 +283,7 @@ jq -n \
   --arg probe_result "$probe_result" --arg target_before "$target_before" \
   --arg target_after "$target_after" --arg non_target_before "$non_target_before" \
   --arg non_target_after "$non_target_after" --arg qdrant_sha256 "$qdrant_after" \
+  --arg qdrant_before_file "$qdrant_before_file" --arg qdrant_after_file "$qdrant_after_file" \
   --argjson database_rows_created "$expected_rows" \
   '{contract_version:"memory_v1_v5_1_entailment_production_apply_report_v1",
     completed_at:$completed_at,head_commit:$head_commit,owner_user_id:$owner_user_id,
@@ -285,7 +292,8 @@ jq -n \
     evidence:{preflight_result:$preflight_result,replay_result:$replay_result,
       cross_owner_probe:$probe_result,target_before:$target_before,
       target_after:$target_after,non_target_before:$non_target_before,
-      non_target_after:$non_target_after,qdrant_sha256:$qdrant_sha256},
+      non_target_after:$non_target_after,qdrant_before_file:$qdrant_before_file,
+      qdrant_after_file:$qdrant_after_file,qdrant_sha256:$qdrant_sha256},
     database_rows_created:$database_rows_created,
     checks:{fresh_backup:true,transactional_apply:true,exact_target_owner_deltas:true,
       zero_write_replay:true,cross_owner_rejection:true,

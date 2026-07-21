@@ -47,7 +47,8 @@ async def run() -> int:
         await conn.execute("SELECT set_config('app.user_id',$1,true)", other_owner)
         for item in manifest["items"]:
             try:
-                await validate_item(conn, manifest, item)
+                async with conn.transaction():
+                    await validate_item(conn, manifest, item)
             except asyncpg.PostgresError as exc:
                 if exc.sqlstate != "P0002":
                     raise
