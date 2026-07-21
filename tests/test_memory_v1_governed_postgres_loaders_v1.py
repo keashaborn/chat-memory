@@ -40,6 +40,7 @@ class FakeConn:
         owns_thread: bool = True,
         role: str = "brains_app",
         read_only: str = "on",
+        provolatile: str | bytes = b"s",
     ) -> None:
         self.claim_rows = claim_rows or []
         self.project_rows = project_rows or []
@@ -47,6 +48,7 @@ class FakeConn:
         self.owns_thread = owns_thread
         self.role = role
         self.read_only = read_only
+        self.provolatile = provolatile
         self.transaction_entries: list[dict[str, Any]] = []
         self.executions: list[tuple[str, tuple[Any, ...]]] = []
         self.fetches: list[tuple[str, tuple[Any, ...]]] = []
@@ -71,7 +73,7 @@ class FakeConn:
         if "FROM pg_proc" in query:
             return {
                 "prosecdef": True,
-                "provolatile": "s",
+                "provolatile": self.provolatile,
                 "owner_name": "memory_v5_reader",
                 "settings": "search_path=",
             }
@@ -142,6 +144,24 @@ class GovernedPostgresLoadersV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(batch["records"][0]["revision_id"])
         self.assertEqual(batch["records"][0]["source_content_sha256"], "a" * 64)
+
+    async def test_claim_loader_accepts_string_volatility_test_double(self) -> None:
+        batch = await load_governed_v5_claim_rows_v1(
+            FakeConn(claim_rows=[claim_row()], provolatile="s"),
+            OWNER,
+            [CLAIM],
+        )
+        self.assertTrue(batch["controls"]["restricted_read_contract"])
+
+    async def test_claim_loader_rejects_nonstable_volatility(self) -> None:
+        with self.assertRaisesRegex(
+            GovernedPostgresLoaderError, "read function contract changed"
+        ):
+            await load_governed_v5_claim_rows_v1(
+                FakeConn(claim_rows=[claim_row()], provolatile=b"v"),
+                OWNER,
+                [CLAIM],
+            )
 
     async def test_claim_loader_rejects_cross_owner_rows(self) -> None:
         with self.assertRaises(GovernedPostgresLoaderError):

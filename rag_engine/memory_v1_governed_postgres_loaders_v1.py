@@ -76,9 +76,15 @@ async def _verify_restricted_read_function(conn: Any, identity: str) -> None:
         identity,
     )
     value = dict(row) if row is not None else {}
+    volatility = value.get("provolatile")
+    if isinstance(volatility, bytes):
+        try:
+            volatility = volatility.decode("ascii")
+        except UnicodeDecodeError:
+            volatility = None
     if (
         value.get("prosecdef") is not True
-        or value.get("provolatile") != "s"
+        or volatility != "s"
         or value.get("owner_name") != "memory_v5_reader"
         or "search_path=" not in str(value.get("settings") or "")
     ):
