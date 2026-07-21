@@ -44,6 +44,24 @@ qdrant_signature() {
     | sha256sum | awk '{print $1}'
 }
 
+authenticated_health() {
+  for _attempt in $(seq 1 30); do
+    if [[ "$(systemctl is-active brains.service)" == active ]] \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/healthz \
+          | jq -e '.status=="ok"' >/dev/null \
+       && curl --fail --silent --max-time 5 \
+          -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+          http://127.0.0.1:8088/readyz \
+          | jq -e '.ok==true and .postgres==true' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 capture_state() {
   local output=$1 table state
   : >"$output"
@@ -238,10 +256,7 @@ qdrant_after=$(qdrant_signature)
 
 phase=restore_runtime
 restore_runtime
-curl --fail --silent --max-time 5 -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-  http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
-curl --fail --silent --max-time 5 -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-  http://127.0.0.1:8088/readyz | jq -e '.ok==true and .postgres==true' >/dev/null
+authenticated_health
 
 phase=report
 report="$snapshot_dir/memory_v1_family_death_projection_install_${run_id}.json"
