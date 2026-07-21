@@ -719,6 +719,13 @@ class MemorySelectionEnvelopeV1Tests(unittest.TestCase):
         self.assertTrue(all(provider.calls == 0 for provider in providers.values()))
         with self.assertRaises(ValidationError):
             request(requested_lanes=())
+        raw = request().model_dump(mode="json")
+        raw["query_text"] = "ordinary turn"
+        raw["query_vector"] = list(VECTOR)
+        raw["selection_directive"] = "suppress"
+        raw["requested_lanes"] = []
+        with self.assertRaisesRegex(ValidationError, "unused query embedding"):
+            MemorySelectionRequestV1.from_selector_wire_json(json.dumps(raw))
 
     def test_facade_reapplies_source_sensitivity_and_temporal_policy(self) -> None:
         cases = (

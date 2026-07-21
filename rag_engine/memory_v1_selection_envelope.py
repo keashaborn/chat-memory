@@ -864,8 +864,11 @@ class MemorySelectionRequestV1(StrictFrozenModel):
         if self.selection_directive == SelectionDirective.EVALUATE:
             if not self.requested_lanes:
                 raise ValueError("evaluate requires at least one requested lane")
-        elif self.requested_lanes:
-            raise ValueError("suppress requires an empty requested_lanes tuple")
+        else:
+            if self.requested_lanes:
+                raise ValueError("suppress requires an empty requested_lanes tuple")
+            if self.query_vector or self.query_embedding.source != QueryEmbeddingSource.NOT_USED:
+                raise ValueError("suppress requires an unused query embedding")
         limit_lanes = {item.lane for item in self.budget_policy.lane_limits}
         if not set(self.requested_lanes).issubset(limit_lanes):
             raise ValueError("every requested lane requires a lane budget")
@@ -974,8 +977,11 @@ class _MemorySelectionRequestBindingPayloadV1(StrictFrozenModel):
         if self.selection_directive == SelectionDirective.EVALUATE:
             if not self.requested_lanes:
                 raise ValueError("evaluate binding requires requested lanes")
-        elif self.requested_lanes:
-            raise ValueError("suppressed binding cannot request lanes")
+        else:
+            if self.requested_lanes:
+                raise ValueError("suppressed binding cannot request lanes")
+            if self.query_embedding.source != QueryEmbeddingSource.NOT_USED:
+                raise ValueError("suppressed binding requires unused embedding")
         limit_lanes = {item.lane for item in self.budget_policy.lane_limits}
         if not set(self.requested_lanes).issubset(limit_lanes):
             raise ValueError("every bound requested lane requires a lane budget")
