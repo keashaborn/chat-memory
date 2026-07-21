@@ -20,6 +20,7 @@ from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatCompletionsAdapterV1,
     OpenAIChatGenerationConfigV1,
+    OpenAIChatResponseV1,
     safety_identifier_v1,
 )
 from rag_engine.openai_moderation_adapter_v0_2 import OpenAIModerationAdapterV0_2
@@ -35,6 +36,7 @@ from rag_engine.response_finalization_v1 import (
 from rag_engine.response_orchestration_v0_2 import (
     TrustedPolicySignalsEnvelopeV0_2,
     TrustedResponseOrchestratorV0_2,
+    TrustedResponsePlanV0_2,
     TrustedResponseRequestV0_2,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicyInputV0_2
@@ -109,6 +111,26 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
         return self
 
 
+class TrustedResponseExecutionV0_2(_StrictFrozenModel):
+    """Private execution result used by trusted post-generation adapters."""
+
+    trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
+    provider_response: OpenAIChatResponseV1 = Field(repr=False)
+    finalized: FinalizedTrustedResponseV1 = Field(repr=False)
+
+    @model_validator(mode="after")
+    def bound(self) -> "TrustedResponseExecutionV0_2":
+        attestation = self.finalized.attestation
+        if attestation.trusted_plan_sha256 != self.trusted_plan.plan_sha256:
+            raise ValueError("execution finalization differs from its trusted plan")
+        if (
+            attestation.provider_response_sha256
+            != self.provider_response.response_sha256
+        ):
+            raise ValueError("execution finalization differs from its provider response")
+        return self
+
+
 class GovernedMemoryAssemblyProviderV1(Protocol):
     """Independent Memory V1 intent, selection, render, and control boundary."""
 
@@ -175,7 +197,16 @@ class InactiveResponseCompositionRootV0_2:
         conn: Any,
         command: AuthenticatedResponseCommandV0_2,
     ) -> FinalizedTrustedResponseV1:
-        """Execute the inactive typed path without accepting hidden client policy."""
+        """Execute the typed path while preserving the existing public result."""
+
+        return (await self.execute_detailed(conn, command)).finalized
+
+    async def execute_detailed(
+        self,
+        conn: Any,
+        command: AuthenticatedResponseCommandV0_2,
+    ) -> TrustedResponseExecutionV0_2:
+        """Execute and retain private typed artifacts for trusted adapters."""
 
         try:
             if not isinstance(command, AuthenticatedResponseCommandV0_2):
@@ -243,12 +274,17 @@ class InactiveResponseCompositionRootV0_2:
                 plan,
                 generation_config=self._generation_config,
             )
-            return finalize_trusted_response_v1(
+            finalized = finalize_trusted_response_v1(
                 trusted_plan=plan,
                 provider_response=response,
                 generation_config=self._generation_config,
                 answer_id=self._answer_id_factory(),
                 created_at=self._clock(),
+            )
+            return TrustedResponseExecutionV0_2(
+                trusted_plan=plan,
+                provider_response=response,
+                finalized=finalized,
             )
         except ResponseCompositionError:
             raise
@@ -263,4 +299,5 @@ __all__ = [
     "InactiveResponseCompositionRootV0_2",
     "NoGovernedMemoryAssemblyProviderV1",
     "ResponseCompositionError",
+    "TrustedResponseExecutionV0_2",
 ]

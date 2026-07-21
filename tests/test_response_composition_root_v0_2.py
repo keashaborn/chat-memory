@@ -162,6 +162,29 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
             [{"isolation": "repeatable_read", "readonly": True}],
         )
 
+    async def test_detailed_execution_is_bound_to_public_finalization(self) -> None:
+        client = CombinedOpenAIClient()
+        root = InactiveResponseCompositionRootV0_2(
+            openai_client=client,
+            classifier_model="gpt-5.1",
+            answer_id_factory=lambda: ANSWER,
+            correlation_id_factory=lambda: CORRELATION,
+        )
+
+        execution = await root.execute_detailed(
+            SnapshotConn(), command("What time is it?")
+        )
+
+        self.assertEqual(execution.finalized.answer_id, ANSWER)
+        self.assertEqual(
+            execution.finalized.attestation.trusted_plan_sha256,
+            execution.trusted_plan.plan_sha256,
+        )
+        self.assertEqual(
+            execution.finalized.attestation.provider_response_sha256,
+            execution.provider_response.response_sha256,
+        )
+
     async def test_local_domain_danger_skips_classifier_call_and_suppresses_fm(self) -> None:
         client = CombinedOpenAIClient(classifier_output(fm_explicit=True))
         root = InactiveResponseCompositionRootV0_2(

@@ -18,6 +18,7 @@ from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     InactiveResponseCompositionRootV0_2,
 )
+from rag_engine.response_inspection_v1 import build_response_inspection_v1
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 
 
@@ -33,6 +34,7 @@ class ResseResponseRequestV1(BaseModel):
     message: str = Field(min_length=1, max_length=32_768)
     thread_id: UUID | None = None
     no_store: bool = False
+    include_inspection: bool = False
 
     @field_validator("user_id", "thread_id", mode="before")
     @classmethod
@@ -68,17 +70,20 @@ async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
                 model=normalize_chat_model(os.getenv("OPENAI_CHAT_MODEL")),
             ),
         )
-        finalized = await root.execute(
+        execution = await root.execute_detailed(
             conn,
             AuthenticatedResponseCommandV0_2(
                 authenticated_actor_user_id=owner,
                 thread_id=thread_id,
                 request_id=request_id,
                 current_message=payload.message,
-                request_field_names=tuple(sorted(payload.model_fields_set)),
+                request_field_names=tuple(
+                    sorted(set(payload.model_fields_set) - {"include_inspection"})
+                ),
                 stateless=stateless,
             ),
         )
+        finalized = execution.finalized
         if not payload.no_store:
             await persist_finalized_response_v1(
                 conn,
@@ -87,12 +92,28 @@ async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
                 request_id=request_id,
                 finalized=finalized,
             )
-        return {
+        result = {
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
             "runtime": "resse_response_v0_2",
         }
+        if payload.include_inspection:
+            try:
+                result["inspection"] = build_response_inspection_v1(
+                    trusted_plan=execution.trusted_plan,
+                    provider_response=execution.provider_response,
+                    finalized=finalized,
+                    transcript_persistence=(
+                        "skipped" if payload.no_store else "persisted"
+                    ),
+                ).model_dump(mode="json")
+            except Exception:
+                logger.error(
+                    "[response_inspection] trace unavailable answer_id=%s",
+                    finalized.answer_id,
+                )
+        return result
     except HTTPException:
         raise
     except Exception as exc:
