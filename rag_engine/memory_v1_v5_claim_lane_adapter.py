@@ -102,6 +102,9 @@ ClaimRowLoaderV1 = Callable[
     [UUID, Sequence[UUID]], Awaitable[Mapping[str, Any]]
 ]
 PredicatePrefixResolverV1 = Callable[[MemorySelectionRequestV1], Sequence[str]]
+ClaimRowPolicyEvaluatorV1 = Callable[
+    [Mapping[str, Any], MemorySelectionRequestV1], bool
+]
 
 
 @dataclass(frozen=True)
@@ -185,6 +188,7 @@ def _typed_record(
     source_contract: SourceContractVersionV1,
     allowed_predicate_prefixes: Sequence[str],
     semantic_floor: float,
+    row_policy_allowed: bool = True,
 ) -> _Evaluated:
     require_fields(row, REQUIRED_ROW_FIELDS, source=SOURCE_NAME)
     owner = parse_uuid(row["owner_user_id"], field="claim.owner_user_id")
@@ -279,6 +283,8 @@ def _typed_record(
         reasons.append(RejectionCode.SUPERSEDED)
     if not _predicate_allowed(predicate, allowed_predicate_prefixes):
         reasons.append(RejectionCode.PREDICATE_PERMISSION)
+    if not row_policy_allowed:
+        reasons.append(RejectionCode.ENTITY_SCOPE)
     if surface not in CONTENT_SURFACES or not _surface_is_eligible(
         surface,
         request=request,
@@ -355,6 +361,7 @@ class V5ClaimLaneAdapterV1:
         candidate_discoverer: CandidateDiscovererV1,
         row_loader: ClaimRowLoaderV1,
         predicate_prefix_resolver: PredicatePrefixResolverV1,
+        row_policy_evaluator: ClaimRowPolicyEvaluatorV1 | None = None,
         candidate_limit: int = 24,
         minimum_semantic_score: float = 0.20,
         relative_semantic_ratio: float = 0.40,
@@ -371,6 +378,7 @@ class V5ClaimLaneAdapterV1:
         self._candidate_discoverer = candidate_discoverer
         self._row_loader = row_loader
         self._prefix_resolver = predicate_prefix_resolver
+        self._row_policy_evaluator = row_policy_evaluator
         self._candidate_limit = candidate_limit
         self._minimum_semantic_score = minimum_semantic_score
         self._relative_semantic_ratio = relative_semantic_ratio
@@ -619,6 +627,11 @@ class V5ClaimLaneAdapterV1:
                 source_contract=self._source_contract,
                 allowed_predicate_prefixes=prefixes,
                 semantic_floor=semantic_floor,
+                row_policy_allowed=(
+                    True
+                    if self._row_policy_evaluator is None
+                    else bool(self._row_policy_evaluator(row, request))
+                ),
             )
             evaluated.append(item)
             if item.reasons:
@@ -670,5 +683,6 @@ __all__ = [
     "REQUIRED_BATCH_FIELDS",
     "REQUIRED_ROW_FIELDS",
     "SOURCE_NAME",
+    "ClaimRowPolicyEvaluatorV1",
     "V5ClaimLaneAdapterV1",
 ]

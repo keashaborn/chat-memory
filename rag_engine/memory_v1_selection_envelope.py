@@ -217,6 +217,7 @@ class RejectionCode(str, Enum):
     EXPIRED = "expired"
     SUPERSEDED = "superseded"
     PREDICATE_PERMISSION = "predicate_permission"
+    ENTITY_SCOPE = "entity_scope"
     SURFACE_POLICY = "surface_policy"
     PROJECT_SCOPE = "project_scope"
     SOURCE_VERSION = "source_version"

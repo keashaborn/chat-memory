@@ -21,6 +21,9 @@ class GovernedPostgresLoaderError(RuntimeError):
 MAX_CLAIM_IDS = 100
 MAX_PROJECT_ROWS = 8
 MAX_PREFERENCE_ROWS = 200
+ENTITY_TYPES = frozenset(
+    {"animal", "concept", "object", "organization", "person", "place", "project", "self"}
+)
 
 
 def _uuid(value: Any, field: str) -> UUID:
@@ -132,6 +135,79 @@ async def load_governed_v5_claim_rows_v1(
         seen.add(claim_id)
         for field in ("metadata", "retrieval_policy", "evidence_by_stance"):
             value[field] = _json_object(value.get(field), f"claim.{field}")
+        records.append(value)
+    records.sort(key=lambda item: str(item["claim_id"]))
+    return {
+        "owner_user_id": actor,
+        "claim_ids": requested,
+        "records": records,
+        "controls": controls,
+        "database_writes": 0,
+    }
+
+
+async def load_governed_v5_claim_rows_v2(
+    conn: Any,
+    owner_user_id: UUID,
+    claim_ids: Sequence[UUID],
+) -> Mapping[str, Any]:
+    actor = _uuid(owner_user_id, "owner_user_id")
+    requested = tuple(_uuid(item, "claim_id") for item in claim_ids)
+    if not 1 <= len(requested) <= MAX_CLAIM_IDS or len(set(requested)) != len(requested):
+        raise GovernedPostgresLoaderError(
+            "claim ids must contain 1 to 100 unique UUIDs"
+        )
+    requested = tuple(sorted(requested, key=str))
+    async with conn.transaction(isolation="repeatable_read", readonly=True):
+        controls = await _establish_read_controls(conn, actor)
+        await _verify_restricted_read_function(
+            conn,
+            "memory.read_governed_claims_v2(uuid[])",
+        )
+        controls["restricted_read_contract"] = True
+        rows = list(
+            await conn.fetch(
+                "SELECT * FROM memory.read_governed_claims_v2($1::uuid[])",
+                list(requested),
+            )
+        )
+    records: list[dict[str, Any]] = []
+    seen: set[UUID] = set()
+    for row in rows:
+        value = dict(row)
+        if _uuid(value.get("owner_user_id"), "claim.owner_user_id") != actor:
+            raise GovernedPostgresLoaderError("claim read returned a cross-owner row")
+        claim_id = _uuid(value.get("claim_id"), "claim.claim_id")
+        if claim_id not in requested or claim_id in seen:
+            raise GovernedPostgresLoaderError(
+                "claim read returned an unexpected or duplicate row"
+            )
+        seen.add(claim_id)
+        for field in ("metadata", "retrieval_policy", "evidence_by_stance"):
+            value[field] = _json_object(value.get(field), f"claim.{field}")
+        value["subject_entity_id"] = _uuid(
+            value.get("subject_entity_id"), "claim.subject_entity_id"
+        )
+        subject_type = value.get("subject_entity_type")
+        if not isinstance(subject_type, str) or subject_type not in ENTITY_TYPES:
+            raise GovernedPostgresLoaderError(
+                "claim.subject_entity_type is outside the closed enum"
+            )
+        object_entity_id = value.get("object_entity_id")
+        object_type = value.get("object_entity_type")
+        if object_entity_id is None:
+            if object_type is not None:
+                raise GovernedPostgresLoaderError(
+                    "literal claim cannot have an object entity type"
+                )
+        else:
+            value["object_entity_id"] = _uuid(
+                object_entity_id, "claim.object_entity_id"
+            )
+            if not isinstance(object_type, str) or object_type not in ENTITY_TYPES:
+                raise GovernedPostgresLoaderError(
+                    "entity claim object type is outside the closed enum"
+                )
         records.append(value)
     records.sort(key=lambda item: str(item["claim_id"]))
     return {
@@ -343,4 +419,5 @@ __all__ = [
     "GovernedV5ProjectRowLoaderV1",
     "load_governed_preference_snapshot_v1",
     "load_governed_v5_claim_rows_v1",
+    "load_governed_v5_claim_rows_v2",
 ]
