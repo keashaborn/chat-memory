@@ -433,6 +433,50 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
         self.assertEqual(result.fm_effective_level, FMLevel.OFF)
         self.assertIn("local_high_stakes:acute_self_harm", result.mode_reasons)
 
+    def test_rehashed_assessed_message_manifest_cannot_change_scope(self) -> None:
+        conversation = (
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content="Prior user message.",
+            ),
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.ASSISTANT,
+                content="Prior assistant message.",
+            ),
+            ResponsePolicyConversationMessageV0_2(
+                role=ConversationRole.USER,
+                content="Current user message.",
+            ),
+        )
+        policy_input = request(
+            "Current user message.",
+            conversation=conversation,
+        )
+        valid = SafetyAssessmentV0_2.create(policy_input)
+        payload = valid.model_dump(mode="json", exclude={"assessment_sha256"})
+        payload["assessed_user_message_sha256s"] = ["0" * 64, "1" * 64]
+        payload["assessment_sha256"] = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        forged = SafetyAssessmentV0_2.model_validate_json(
+            json.dumps(payload)
+        )
+
+        with self.assertRaisesRegex(
+            ResponsePolicyContractError,
+            "does not cover the full user conversation",
+        ):
+            _decide_response_policy_v0_2(
+                policy_input,
+                safety_assessment=forged,
+            )
+
     def test_request_and_safety_wire_manifests_are_private_and_exact(self) -> None:
         secret = "private policy message 8f53f786"
         policy_input = request(secret)

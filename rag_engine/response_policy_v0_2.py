@@ -23,6 +23,7 @@ POLICY_INPUT_VERSION = "response_policy_input_v0_2"
 POLICY_SIGNALS_VERSION = "response_policy_signals_v0_2"
 SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
 SAFETY_ASSESSOR_VERSION = "resse_safety_assessor_v0_2"
+DEFAULT_SAFETY_COMPONENT = "server_safety_assessment_v0_2"
 ASSISTANT_PROFILE_ID = "RESSE"
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -233,6 +234,12 @@ class SafetyAssessmentV0_2(StrictFrozenModel):
     request_sha256: str
     current_message_sha256: str
     conversation_sha256: str
+    assessed_scope: Literal["full_user_conversation"]
+    assessed_user_message_sha256s: tuple[str, ...] = Field(
+        min_length=1,
+        max_length=128,
+    )
+    assessor_components: tuple[str, ...] = Field(min_length=1, max_length=16)
     assessment_complete: Literal[True]
     high_stakes_gate: GateState
     safety_action_required: bool
@@ -265,6 +272,24 @@ class SafetyAssessmentV0_2(StrictFrozenModel):
             raise ValueError("safety reason codes must be sorted and unique")
         return value
 
+    @field_validator("assessed_user_message_sha256s")
+    @classmethod
+    def assessed_message_hashes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not SHA256_RE.fullmatch(item) for item in value):
+            raise ValueError("assessed message hashes must be lowercase SHA-256 values")
+        return value
+
+    @field_validator("assessor_components")
+    @classmethod
+    def sorted_unique_assessor_components(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if any(not FIELD_NAME_RE.fullmatch(item) for item in value):
+            raise ValueError("assessor_components contains an invalid component")
+        if value != tuple(sorted(set(value))):
+            raise ValueError("assessor_components must be sorted and unique")
+        return value
+
     @model_validator(mode="after")
     def exact_assessment_manifest(self) -> "SafetyAssessmentV0_2":
         if self.high_stakes_gate is not GateState.PASS and not self.reason_codes:
@@ -284,8 +309,14 @@ class SafetyAssessmentV0_2(StrictFrozenModel):
         high_stakes_gate: GateState = GateState.PASS,
         safety_action_required: bool = False,
         reason_codes: tuple[str, ...] = (),
+        assessor_components: tuple[str, ...] = (DEFAULT_SAFETY_COMPONENT,),
     ) -> "SafetyAssessmentV0_2":
         verified = _wire_revalidate(ResponsePolicyInputV0_2, request)
+        assessed_user_hashes = tuple(
+            hashlib.sha256(item.content.encode("utf-8")).hexdigest()
+            for item in verified.conversation
+            if item.role is ConversationRole.USER
+        )
         payload: dict[str, Any] = {
             "contract_version": SAFETY_ASSESSMENT_VERSION,
             "assessor_version": SAFETY_ASSESSOR_VERSION,
@@ -293,6 +324,9 @@ class SafetyAssessmentV0_2(StrictFrozenModel):
             "request_sha256": verified.request_sha256,
             "current_message_sha256": verified.current_message_sha256,
             "conversation_sha256": verified.conversation_sha256,
+            "assessed_scope": "full_user_conversation",
+            "assessed_user_message_sha256s": assessed_user_hashes,
+            "assessor_components": tuple(sorted(set(assessor_components))),
             "assessment_complete": True,
             "high_stakes_gate": high_stakes_gate.value,
             "safety_action_required": safety_action_required,
@@ -768,6 +802,19 @@ def decide_response_policy_v0_2(
         raise ResponsePolicyContractError(
             "safety assessment does not bind to the policy request"
         )
+    expected_assessed_user_hashes = tuple(
+        hashlib.sha256(item.content.encode("utf-8")).hexdigest()
+        for item in request.conversation
+        if item.role is ConversationRole.USER
+    )
+    if (
+        safety_assessment.assessed_scope != "full_user_conversation"
+        or safety_assessment.assessed_user_message_sha256s
+        != expected_assessed_user_hashes
+    ):
+        raise ResponsePolicyContractError(
+            "safety assessment does not cover the full user conversation"
+        )
 
     text = _normalized(request.current_message.content)
     user_texts = (
@@ -922,6 +969,7 @@ def parse_response_policy_decision_v0_2(
 
 __all__ = [
     "ASSISTANT_PROFILE_ID",
+    "DEFAULT_SAFETY_COMPONENT",
     "LEGACY_REQUEST_FIELDS",
     "MODE_PRECEDENCE",
     "POLICY_INPUT_VERSION",

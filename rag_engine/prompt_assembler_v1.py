@@ -704,7 +704,11 @@ def _validate_fm_chain(
         raise PromptAssemblyError("FM selection bindings differ from response policy")
     if decision.fm_effective_level is FMLevel.OFF and selection.status != "OFF":
         raise PromptAssemblyError("FM OFF requires an OFF selection envelope")
-    if decision.response_mode is ResponseMode.FM_EXPLICIT and selection.status != "SELECTED":
+    if (
+        decision.response_mode is ResponseMode.FM_EXPLICIT
+        and decision.fm_effective_level is not FMLevel.OFF
+        and selection.status != "SELECTED"
+    ):
         raise PromptAssemblyError("FM_EXPLICIT requires selected canonical FM content")
     try:
         expected_selection = select_fm_v0_2(
