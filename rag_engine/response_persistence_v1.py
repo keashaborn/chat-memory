@@ -52,7 +52,7 @@ async def persist_finalized_response_v1(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
                   thread_id,vantage_id,request_id,created_at
                 )
-                VALUES($1,$2,$2,NULL,$3,$4,$5,$6,'RESSE',$7,$8)
+                VALUES($1,$2,$2::text,NULL,$3,$4,$5,$6,'RESSE',$7,$8)
                 """,
                 value.answer_id,
                 owner_user_id,
