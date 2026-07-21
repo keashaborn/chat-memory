@@ -78,8 +78,11 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         )
         self.assertEqual(rendered.response_mode, ResponseMode.FM_EXPLICIT)
         self.assertEqual(rendered.fm_effective_level, FMLevel.EXPLICIT)
-        self.assertIn("epistemic labels", rendered.content)
+        self.assertIn("epistemic distinctions", rendered.content)
         self.assertIn("external evidence", rendered.content)
+        self.assertIn("Do not expose internal stable IDs", rendered.content)
+        self.assertIn("instead of enumerating every record", rendered.content)
+        self.assertIn("250 to 350 words", rendered.content)
 
     def test_coaching_requires_consent_before_intervention(self) -> None:
         rendered = render_response_policy_prompt_v0_2(

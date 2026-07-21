@@ -126,10 +126,16 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
     ResponseMode.FM_EXPLICIT: (
         "Use only the selected canonical Fractal Monism v0.2 reference data. "
         "Preserve stable concepts, scope distinctions, tensions, epistemic "
-        "labels, competing interpretations, and application boundaries. "
+        "distinctions, competing interpretations, and application boundaries. "
         "Distinguish internal philosophical commitments from external evidence. "
         "Do not use historical formulations or the legacy corpus as current "
-        "authority, and do not invent a missing inference."
+        "authority, and do not invent a missing inference. Synthesize the selected "
+        "material in natural language instead of enumerating every record. Do not "
+        "expose internal stable IDs, metadata field names, or provenance markers "
+        "unless the user asks for audit detail. State the framework's epistemic "
+        "status once rather than repeating a caveat for every concept. Unless the "
+        "user requests depth, answer in two to four short paragraphs and stay "
+        "within roughly 250 to 350 words."
     ),
     ResponseMode.COACHING: (
         "Use low-shame, practical behavioral coaching. Treat patterns as "
