@@ -64,6 +64,7 @@ capture_state() {
 }
 
 restore_timers() {
+  local current
   [[ "$units_quiesced" -eq 1 ]] || return 0
   while IFS=$'\t' read -r unit enabled active; do
     [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]]
@@ -72,9 +73,23 @@ restore_timers() {
     else
       sudo -n systemctl stop "$unit"
     fi
-    [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
-    [[ "$(systemctl is-active "$unit")" == "$active" ]]
   done <"$unit_state"
+  current=$(mktemp /tmp/memory-v1-family-death-units-after.XXXXXX)
+  for _attempt in $(seq 1 30); do
+    : >"$current"
+    while IFS=$'\t' read -r unit _enabled _active; do
+      printf '%s\t%s\t%s\n' "$unit" \
+        "$(systemctl is-enabled "$unit" || true)" \
+        "$(systemctl is-active "$unit" || true)" >>"$current"
+    done <"$unit_state"
+    cmp -s "$unit_state" "$current" && break
+    sleep 1
+  done
+  if ! cmp -s "$unit_state" "$current"; then
+    rm -f "$current"
+    return 1
+  fi
+  rm -f "$current"
   units_quiesced=0
 }
 
