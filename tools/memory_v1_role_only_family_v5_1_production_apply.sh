@@ -13,7 +13,7 @@ if [[ "$#" -ne 4 ]]; then
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
-required_ancestor=977dad6edecf07a531fc1cfe4fd4ee3a8120b6fd
+required_ancestor=977dad69617641350537567cd3fa632527368379
 runner=scripts/memory_v1_role_only_family_apply_v5_1.py
 manifest_builder=scripts/memory_v1_role_only_family_manifest_v5_1.py
 expected_runner_sha=1bdadae978c55fa9ea5310ef84d0be8ff823896765347fd005cdd1162d863752
