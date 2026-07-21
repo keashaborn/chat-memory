@@ -108,6 +108,101 @@ async def _assert_member(conn, conversation_id: str, owner_user_id: str) -> None
         raise HTTPException(status_code=404, detail="conversation not found")
 
 
+async def _grant_default_messaging_permissions(
+    conn,
+    relationship_id: str,
+    user_a: str,
+    user_b: str,
+) -> None:
+    await conn.execute(
+        f"""
+        insert into {SCHEMA}.relationship_permission as rp (
+          relationship_id,
+          grantor_user_id,
+          grantee_user_id,
+          permission_scope,
+          permission_level,
+          is_enabled,
+          notes
+        )
+        values
+          ($1::uuid, $2::uuid, $3::uuid, 'messages:send', 'comment', true,
+           'Default messaging permission for accepted relationship.'),
+          ($1::uuid, $3::uuid, $2::uuid, 'messages:send', 'comment', true,
+           'Default messaging permission for accepted relationship.')
+        on conflict (relationship_id, grantor_user_id, grantee_user_id, permission_scope)
+        do nothing
+        """,
+        relationship_id,
+        user_a,
+        user_b,
+    )
+
+
+async def _assert_message_send_authorized(
+    conn,
+    sender_user_id: str,
+    recipient_user_id: str,
+) -> str:
+    row = await conn.fetchrow(
+        f"""
+        select r.relationship_id
+        from {SCHEMA}.relationship r
+        join {SCHEMA}.relationship_permission rp
+          on rp.relationship_id=r.relationship_id
+         and rp.grantor_user_id=$2::uuid
+         and rp.grantee_user_id=$1::uuid
+         and rp.permission_scope='messages:send'
+         and rp.permission_level <> 'none'
+         and rp.is_enabled=true
+        where (
+          (r.requester_user_id=$1::uuid and r.addressee_user_id=$2::uuid)
+          or
+          (r.requester_user_id=$2::uuid and r.addressee_user_id=$1::uuid)
+        )
+          and r.status='accepted'
+        limit 1
+        for share of r, rp
+        """,
+        sender_user_id,
+        recipient_user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=403, detail="messaging permission required")
+    return str(row["relationship_id"])
+
+
+async def _assert_conversation_send_authorized(
+    conn,
+    conversation_id: str,
+    sender_user_id: str,
+) -> None:
+    await _assert_member(conn, conversation_id, sender_user_id)
+    recipients = await conn.fetch(
+        f"""
+        select cm.user_id
+        from {SCHEMA}.conversation c
+        join {SCHEMA}.conversation_member cm
+          on cm.conversation_id=c.conversation_id
+         and cm.is_active=true
+        where c.conversation_id=$1::uuid
+          and c.is_active=true
+          and cm.user_id <> $2::uuid
+        for share of c, cm
+        """,
+        conversation_id,
+        sender_user_id,
+    )
+    if not recipients:
+        raise HTTPException(status_code=409, detail="conversation has no active recipient")
+    for recipient in recipients:
+        await _assert_message_send_authorized(
+            conn,
+            sender_user_id,
+            str(recipient["user_id"]),
+        )
+
+
 @router.post("/invitations/create")
 async def create_invitation(
     req: Request,
@@ -266,6 +361,9 @@ async def accept_invitation(
     thash = _token_hash(token)
 
     conn = await _db()
+    invitation_expired = False
+    row = None
+    updated_inv = None
     try:
         async with conn.transaction():
             inv = await conn.fetchrow(
@@ -278,7 +376,8 @@ async def accept_invitation(
                   label,
                   notes,
                   status,
-                  expires_at
+                  expires_at,
+                  created_at
                 from {SCHEMA}.invitation
                 where token_hash=$1
                 for update
@@ -307,72 +406,114 @@ async def accept_invitation(
                     """,
                     str(inv["invitation_id"]),
                 )
-                raise HTTPException(status_code=400, detail="invitation expired")
-
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.relationship (
-                  requester_user_id,
-                  addressee_user_id,
-                  status,
-                  relationship_kind,
-                  label,
-                  notes
+                invitation_expired = True
+            else:
+                existing = await conn.fetchrow(
+                    f"""
+                    select relationship_id, status, updated_at
+                    from {SCHEMA}.relationship
+                    where (
+                      (requester_user_id=$1::uuid and addressee_user_id=$2::uuid)
+                      or
+                      (requester_user_id=$2::uuid and addressee_user_id=$1::uuid)
+                    )
+                    limit 1
+                    for update
+                    """,
+                    inviter,
+                    accepter,
                 )
-                values ($1::uuid, $2::uuid, 'accepted', $3, $4, $5)
-                on conflict (
-                  least(requester_user_id, addressee_user_id),
-                  greatest(requester_user_id, addressee_user_id)
-                )
-                do update set
-                  status='accepted',
-                  relationship_kind=excluded.relationship_kind,
-                  label=excluded.label,
-                  notes=excluded.notes,
-                  updated_at=now()
-                returning
-                  relationship_id,
-                  requester_user_id,
-                  addressee_user_id,
-                  status,
-                  relationship_kind,
-                  label,
-                  notes,
-                  created_at,
-                  updated_at
-                """,
-                inviter,
-                accepter,
-                str(inv["relationship_kind"]),
-                _clean_text(inv["label"], 200),
-                _clean_text(inv["notes"], 2000),
-            )
+                if existing and str(existing["status"]) == "blocked":
+                    raise HTTPException(status_code=409, detail="relationship is blocked")
+                if existing and str(existing["status"]) == "accepted":
+                    raise HTTPException(status_code=409, detail="relationship is already accepted")
+                if (
+                    existing
+                    and str(existing["status"]) == "revoked"
+                    and inv["created_at"] <= existing["updated_at"]
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="invitation predates the relationship disconnect",
+                    )
 
-            updated_inv = await conn.fetchrow(
-                f"""
-                update {SCHEMA}.invitation
-                   set status='accepted',
-                       accepted_by_user_id=$2::uuid,
-                       accepted_at=now(),
-                       updated_at=now()
-                 where invitation_id=$1::uuid
-                returning
-                  invitation_id,
-                  created_by_user_id,
-                  accepted_by_user_id,
-                  relationship_kind,
-                  label,
-                  notes,
-                  status,
-                  expires_at,
-                  accepted_at,
-                  revoked_at,
-                  created_at,
-                  updated_at
-                """,
-                str(inv["invitation_id"]),
-                accepter,
-            )
+                row = await conn.fetchrow(
+                    f"""
+                    insert into {SCHEMA}.relationship as existing_relationship (
+                      requester_user_id,
+                      addressee_user_id,
+                      status,
+                      relationship_kind,
+                      label,
+                      notes
+                    )
+                    values ($1::uuid, $2::uuid, 'accepted', $3, $4, $5)
+                    on conflict (
+                      least(requester_user_id, addressee_user_id),
+                      greatest(requester_user_id, addressee_user_id)
+                    )
+                    do update set
+                      status='accepted',
+                      relationship_kind=excluded.relationship_kind,
+                      label=excluded.label,
+                      notes=excluded.notes,
+                      updated_at=now()
+                    where existing_relationship.status in ('pending', 'revoked')
+                    returning
+                      relationship_id,
+                      requester_user_id,
+                      addressee_user_id,
+                      status,
+                      relationship_kind,
+                      label,
+                      notes,
+                      created_at,
+                      updated_at
+                    """,
+                    inviter,
+                    accepter,
+                    str(inv["relationship_kind"]),
+                    _clean_text(inv["label"], 200),
+                    _clean_text(inv["notes"], 2000),
+                )
+                if not row:
+                    raise HTTPException(status_code=409, detail="relationship cannot be accepted")
+
+                await _grant_default_messaging_permissions(
+                    conn,
+                    str(row["relationship_id"]),
+                    inviter,
+                    accepter,
+                )
+
+                updated_inv = await conn.fetchrow(
+                    f"""
+                    update {SCHEMA}.invitation
+                       set status='accepted',
+                           accepted_by_user_id=$2::uuid,
+                           accepted_at=now(),
+                           updated_at=now()
+                     where invitation_id=$1::uuid
+                    returning
+                      invitation_id,
+                      created_by_user_id,
+                      accepted_by_user_id,
+                      relationship_kind,
+                      label,
+                      notes,
+                      status,
+                      expires_at,
+                      accepted_at,
+                      revoked_at,
+                      created_at,
+                      updated_at
+                    """,
+                    str(inv["invitation_id"]),
+                    accepter,
+                )
+
+        if invitation_expired:
+            raise HTTPException(status_code=410, detail="invitation expired")
 
         return JSONResponse({
             "invitation": _row_to_jsonable(updated_inv),
@@ -592,48 +733,61 @@ async def list_profiles(
 
     conn = await _db()
     try:
-        if ids:
-            rows = await conn.fetch(
-                f"""
-                select user_id, display_name, email, source, is_active, created_at, updated_at
-                from {SCHEMA}.user_profile
-                where user_id = any($1::uuid[])
-                  and is_active=true
-                order by lower(display_name) asc
-                """,
-                ids,
-            )
-        else:
-            rows = await conn.fetch(
-                f"""
-                with related as (
-                  select $1::uuid as user_id
-                  union
-                  select
-                    case
-                      when r.requester_user_id=$1::uuid then r.addressee_user_id
-                      else r.requester_user_id
-                    end as user_id
-                  from {SCHEMA}.relationship r
-                  where (r.requester_user_id=$1::uuid or r.addressee_user_id=$1::uuid)
-                    and r.status in ('pending','accepted')
+        rows = await conn.fetch(
+            f"""
+            select
+              p.user_id,
+              p.display_name,
+              case
+                when p.user_id=$1::uuid or exists (
+                  select 1
+                  from {SCHEMA}.relationship accepted_relationship
+                  where accepted_relationship.status='accepted'
+                    and (
+                      (accepted_relationship.requester_user_id=$1::uuid
+                       and accepted_relationship.addressee_user_id=p.user_id)
+                      or
+                      (accepted_relationship.addressee_user_id=$1::uuid
+                       and accepted_relationship.requester_user_id=p.user_id)
+                    )
+                ) then p.email
+                else null
+              end as email,
+              p.source,
+              p.is_active,
+              p.created_at,
+              p.updated_at
+            from {SCHEMA}.user_profile p
+            where p.is_active=true
+              and ($2::uuid[] is null or p.user_id=any($2::uuid[]))
+              and (
+                p.user_id=$1::uuid
+                or exists (
+                  select 1
+                  from {SCHEMA}.relationship accepted_relationship
+                  where accepted_relationship.status='accepted'
+                    and (
+                      (accepted_relationship.requester_user_id=$1::uuid
+                       and accepted_relationship.addressee_user_id=p.user_id)
+                      or
+                      (accepted_relationship.addressee_user_id=$1::uuid
+                       and accepted_relationship.requester_user_id=p.user_id)
+                    )
                 )
-                select
-                  p.user_id,
-                  p.display_name,
-                  p.email,
-                  p.source,
-                  p.is_active,
-                  p.created_at,
-                  p.updated_at
-                from related rel
-                join {SCHEMA}.user_profile p
-                  on p.user_id=rel.user_id
-                 and p.is_active=true
-                order by lower(p.display_name) asc
-                """,
-                owner_user_id,
-            )
+                or exists (
+                  select 1
+                  from {SCHEMA}.conversation_member mine
+                  join {SCHEMA}.conversation_member theirs
+                    on theirs.conversation_id=mine.conversation_id
+                   and theirs.user_id=p.user_id
+                  where mine.user_id=$1::uuid
+                )
+              )
+            order by lower(p.display_name) asc
+            """,
+            owner_user_id,
+            ids or None,
+        )
 
         return JSONResponse([_row_to_jsonable(r) for r in rows])
     finally:
@@ -641,7 +795,15 @@ async def list_profiles(
 
 
 
-async def _assert_relationship_participant(conn, relationship_id: str, owner_user_id: str):
+async def _assert_relationship_participant(
+    conn,
+    relationship_id: str,
+    owner_user_id: str,
+    *,
+    require_accepted: bool = False,
+    lock: bool = False,
+):
+    lock_clause = "for share" if lock else ""
     row = await conn.fetchrow(
         f"""
         select
@@ -655,12 +817,15 @@ async def _assert_relationship_participant(conn, relationship_id: str, owner_use
         where relationship_id=$1::uuid
           and (requester_user_id=$2::uuid or addressee_user_id=$2::uuid)
         limit 1
+        {lock_clause}
         """,
         relationship_id,
         owner_user_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="relationship not found")
+    if require_accepted and str(row["status"]) != "accepted":
+        raise HTTPException(status_code=409, detail="accepted relationship required")
     return row
 
 
@@ -736,47 +901,54 @@ async def upsert_relationship_permission(
 
     conn = await _db()
     try:
-        rel = await _assert_relationship_participant(conn, rid, owner)
-        grantee = str(rel["other_user_id"])
-
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.relationship_permission (
-              relationship_id,
-              grantor_user_id,
-              grantee_user_id,
-              permission_scope,
-              permission_level,
-              is_enabled,
-              notes
+        async with conn.transaction():
+            rel = await _assert_relationship_participant(
+                conn,
+                rid,
+                owner,
+                require_accepted=True,
+                lock=True,
             )
-            values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::boolean, $7)
-            on conflict (relationship_id, grantor_user_id, grantee_user_id, permission_scope)
-            do update set
-              permission_level=excluded.permission_level,
-              is_enabled=excluded.is_enabled,
-              notes=excluded.notes,
-              updated_at=now()
-            returning
-              relationship_permission_id,
-              relationship_id,
-              grantor_user_id,
-              grantee_user_id,
-              permission_scope,
-              permission_level,
-              is_enabled,
-              notes,
-              created_at,
-              updated_at
-            """,
-            rid,
-            owner,
-            grantee,
-            permission_scope,
-            permission_level,
-            bool(is_enabled),
-            _clean_text(payload.get("notes", "") if isinstance(payload, dict) else "", 2000),
-        )
+            grantee = str(rel["other_user_id"])
+
+            row = await conn.fetchrow(
+                f"""
+                insert into {SCHEMA}.relationship_permission (
+                  relationship_id,
+                  grantor_user_id,
+                  grantee_user_id,
+                  permission_scope,
+                  permission_level,
+                  is_enabled,
+                  notes
+                )
+                values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::boolean, $7)
+                on conflict (relationship_id, grantor_user_id, grantee_user_id, permission_scope)
+                do update set
+                  permission_level=excluded.permission_level,
+                  is_enabled=excluded.is_enabled,
+                  notes=excluded.notes,
+                  updated_at=now()
+                returning
+                  relationship_permission_id,
+                  relationship_id,
+                  grantor_user_id,
+                  grantee_user_id,
+                  permission_scope,
+                  permission_level,
+                  is_enabled,
+                  notes,
+                  created_at,
+                  updated_at
+                """,
+                rid,
+                owner,
+                grantee,
+                permission_scope,
+                permission_level,
+                bool(is_enabled),
+                _clean_text(payload.get("notes", "") if isinstance(payload, dict) else "", 2000),
+            )
         return JSONResponse(_row_to_jsonable(row))
     finally:
         await conn.close()
@@ -798,8 +970,11 @@ async def upsert_relationship(
         raise HTTPException(status_code=400, detail="cannot relate user to self")
 
     status = _clean_text(status, 40) or "accepted"
-    if status not in {"pending", "accepted", "blocked", "revoked"}:
-        raise HTTPException(status_code=400, detail="invalid status")
+    if status != "accepted":
+        raise HTTPException(
+            status_code=400,
+            detail="status is managed by invitation and disconnect workflows",
+        )
 
     relationship_kind = _clean_text(relationship_kind, 80) or "friend"
     if relationship_kind not in {"friend", "training_partner", "plan_helper", "coach"}:
@@ -809,32 +984,33 @@ async def upsert_relationship(
     try:
         row = await conn.fetchrow(
             f"""
-            insert into {SCHEMA}.relationship (
-              requester_user_id, addressee_user_id,
-              status, relationship_kind, label, notes
-            )
-            values ($1::uuid, $2::uuid, $3, $4, $5, $6)
-            on conflict (
-              least(requester_user_id, addressee_user_id),
-              greatest(requester_user_id, addressee_user_id)
-            )
-            do update set
-              status=excluded.status,
-              relationship_kind=excluded.relationship_kind,
-              label=excluded.label,
-              notes=excluded.notes,
+            update {SCHEMA}.relationship
+            set
+              relationship_kind=$3,
+              label=$4,
+              notes=$5,
               updated_at=now()
+            where status='accepted'
+              and (
+                (requester_user_id=$1::uuid and addressee_user_id=$2::uuid)
+                or
+                (requester_user_id=$2::uuid and addressee_user_id=$1::uuid)
+              )
             returning
               relationship_id, requester_user_id, addressee_user_id,
               status, relationship_kind, label, notes, created_at, updated_at
             """,
             owner,
             other,
-            status,
             relationship_kind,
             _clean_text(label, 200),
             _clean_text(notes, 2000),
         )
+        if not row:
+            raise HTTPException(
+                status_code=409,
+                detail="accepted relationship required; use the invitation workflow",
+            )
         return JSONResponse(_row_to_jsonable(row))
     finally:
         await conn.close()
@@ -868,7 +1044,45 @@ async def list_conversations(
               lm.message_id as last_message_id,
               lm.author_user_id as last_message_author_user_id,
               lm.body as last_message_body,
-              lm.created_at as last_message_created_at
+              lm.created_at as last_message_created_at,
+              case
+                when c.conversation_kind='direct'
+                 and (c.direct_user_low_id=$1::uuid or c.direct_user_high_id=$1::uuid)
+                 and exists (
+                   select 1
+                   from {SCHEMA}.conversation_member send_recipient
+                   where send_recipient.conversation_id=c.conversation_id
+                     and send_recipient.user_id=case
+                       when c.direct_user_low_id=$1::uuid then c.direct_user_high_id
+                       else c.direct_user_low_id
+                     end
+                     and send_recipient.is_active=true
+                 )
+                then exists (
+                  select 1
+                  from {SCHEMA}.relationship send_relationship
+                  join {SCHEMA}.relationship_permission send_permission
+                    on send_permission.relationship_id=send_relationship.relationship_id
+                   and send_permission.grantor_user_id=case
+                     when c.direct_user_low_id=$1::uuid then c.direct_user_high_id
+                     else c.direct_user_low_id
+                   end
+                   and send_permission.grantee_user_id=$1::uuid
+                   and send_permission.permission_scope='messages:send'
+                   and send_permission.permission_level <> 'none'
+                   and send_permission.is_enabled=true
+                  where send_relationship.status='accepted'
+                    and least(
+                      send_relationship.requester_user_id,
+                      send_relationship.addressee_user_id
+                    )=c.direct_user_low_id
+                    and greatest(
+                      send_relationship.requester_user_id,
+                      send_relationship.addressee_user_id
+                    )=c.direct_user_high_id
+                )
+                else false
+              end as can_send
             from {SCHEMA}.conversation c
             join {SCHEMA}.conversation_member cm
               on cm.conversation_id=c.conversation_id
@@ -916,6 +1130,7 @@ async def get_or_create_direct_conversation(
     conn = await _db()
     try:
         async with conn.transaction():
+            await _assert_message_send_authorized(conn, owner, other)
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.conversation (
@@ -962,7 +1177,9 @@ async def get_or_create_direct_conversation(
                 other,
             )
 
-        return JSONResponse(_row_to_jsonable(row))
+        out = _row_to_jsonable(row)
+        out["can_send"] = True
+        return JSONResponse(out)
     finally:
         await conn.close()
 
@@ -1039,7 +1256,7 @@ async def create_message(
     conn = await _db()
     try:
         async with conn.transaction():
-            await _assert_member(conn, cid, owner)
+            await _assert_conversation_send_authorized(conn, cid, owner)
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.message (
