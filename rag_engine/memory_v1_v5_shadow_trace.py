@@ -32,10 +32,7 @@ DOMAIN_PREDICATES = {
         "relationship.has_pet",
     ),
     "family_death": (
-        "identity.name",
-        "identity.name_canonical",
         "life_event.died",
-        "relationship.parent_of",
     ),
     "life_context": ("health.", "relationship.", "residence."),
     "health_behavior": ("health.",),
@@ -237,12 +234,9 @@ def classify_v5_shadow_context(
 
 
 def _maximum_sensitivity(actor: uuid.UUID, context: Mapping[str, Any]) -> str:
+    del actor
     default = os.getenv("MEMORY_V1_V5_SHADOW_MAX_SENSITIVITY", "medium")
     if not context.get("explicit_recall"):
-        return default
-    if str(actor) not in _uuid_values(
-        os.getenv("MEMORY_V1_V5_SHADOW_EXPLICIT_HIGH_USER_IDS", "")
-    ):
         return default
     return os.getenv("MEMORY_V1_V5_SHADOW_EXPLICIT_MAX_SENSITIVITY", "high")
 

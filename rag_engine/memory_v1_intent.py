@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v10"
+VERSION = "memory_intent_adapter_v11"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -48,11 +48,7 @@ FAMILY_PROFILE_PREDICATES = (
     "relationship.spouse_of",
 )
 FAMILY_DEATH_PREDICATES = (
-    "identity.name",
     "life_event.died",
-    "relationship.parent_of",
-    "relationship.sibling_of",
-    "relationship.spouse_of",
 )
 NAME_PREDICATES = (
     "identity.name",
