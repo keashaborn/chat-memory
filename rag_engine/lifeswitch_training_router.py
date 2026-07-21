@@ -9,8 +9,17 @@ import hashlib
 import secrets
 import math
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Body, Request
+from fastapi import APIRouter, HTTPException, Query, Body, Header, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_training_log_service import (
+    correct_conditioning_session as write_conditioning_correction,
+    correct_training_session as write_training_correction,
+    create_conditioning_session as write_conditioning_session,
+    create_training_session as write_training_session,
+    set_transaction_actor,
+    void_conditioning_session as write_conditioning_void,
+    void_training_session as write_training_void,
+)
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -63,6 +72,13 @@ def _clean_text(v, max_len: int | None = None) -> str:
     if max_len is not None and len(s) > max_len:
         s = s[:max_len]
     return s
+
+
+def _require_idempotency_key(value: str) -> str:
+    key = _clean_text(value, 128)
+    if not key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header required")
+    return key
 
 
 
@@ -689,6 +705,7 @@ async def deactivate_my_conditioning_prescription(
 async def create_conditioning_session(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     day: str = Query(..., min_length=10, max_length=10),
     my_conditioning_prescription_id: str | None = Query(None),
 
@@ -698,7 +715,8 @@ async def create_conditioning_session(
 
     duration_min: float = Query(0, ge=0, le=1440),
     intensity: str = Query("", max_length=400),
-    distance: str = Query("", max_length=160),
+    distance_value: float | None = Query(None, ge=0),
+    distance_unit: str | None = Query(None, max_length=8),
     heart_rate_avg: float | None = Query(None, ge=0, le=260),
     recovery_impact: str = Query("", max_length=400),
     notes: str = Query("", max_length=1600),
@@ -707,6 +725,7 @@ async def create_conditioning_session(
     dose_config: str = Query("{}", max_length=12000),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
+    write_key = _require_idempotency_key(idempotency_key)
 
     pid = (
         _as_uuid(
@@ -751,89 +770,55 @@ async def create_conditioning_session(
             detail="dose_config_must_be_object",
         )
 
-    dose_config_json = json.dumps(
-        parsed_dose_config,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    clean_distance_unit = _clean_text(distance_unit, 8).lower() or None
+    if (distance_value is None) != (clean_distance_unit is None):
+        raise HTTPException(
+            status_code=400,
+            detail="distance_value and distance_unit must be supplied together",
+        )
+
+    intent = {
+        "day": day_val.isoformat(),
+        "my_conditioning_prescription_id": pid,
+        "name": name.strip(),
+        "category": category.strip(),
+        "modality": modality.strip(),
+        "duration_min": float(duration_min),
+        "intensity": intensity.strip(),
+        "distance_value": float(distance_value) if distance_value is not None else None,
+        "distance_unit": clean_distance_unit,
+        "heart_rate_avg": float(heart_rate_avg) if heart_rate_avg is not None else None,
+        "recovery_impact": recovery_impact.strip(),
+        "notes": notes.strip(),
+        "dose_type": clean_dose_type,
+        "dose_config": parsed_dose_config,
+    }
 
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.conditioning_session_log
-              (
-                owner_user_id,
-                my_conditioning_prescription_id,
-                day,
-                name,
-                category,
-                modality,
-                duration_min,
-                intensity,
-                distance,
-                heart_rate_avg,
-                recovery_impact,
-                notes,
-                dose_type,
-                dose_config,
-                is_active
-              )
-            values
-              (
-                $1::uuid,
-                $2::uuid,
-                $3::date,
-                $4,
-                $5,
-                $6,
-                $7,
-                $8,
-                $9,
-                $10,
-                $11,
-                $12,
-                $13,
-                $14::jsonb,
-                true
-              )
-            returning
-              conditioning_session_log_id,
-              owner_user_id,
-              my_conditioning_prescription_id,
-              day,
-              name,
-              category,
-              modality,
-              duration_min,
-              intensity,
-              distance,
-              heart_rate_avg,
-              recovery_impact,
-              notes,
-              dose_type,
-              dose_config,
-              is_active,
-              created_at,
-              updated_at
-            """,
-            owner,
-            pid,
-            day_val,
-            name.strip(),
-            category.strip(),
-            modality.strip(),
-            float(duration_min),
-            intensity.strip(),
-            distance.strip(),
-            float(heart_rate_avg)
-            if heart_rate_avg is not None
-            else None,
-            recovery_impact.strip(),
-            notes.strip(),
-            clean_dose_type,
-            dose_config_json,
-        )
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            session_id = await write_conditioning_session(
+                conn,
+                intent=intent,
+                idempotency_key=write_key,
+            )
+            row = await conn.fetchrow(
+                f"""
+                select
+                  conditioning_session_log_id, owner_user_id,
+                  my_conditioning_prescription_id, day, name, category,
+                  modality, duration_min, intensity, distance,
+                  distance_value, distance_unit, heart_rate_avg,
+                  recovery_impact, notes, dose_type, dose_config,
+                  is_active, created_at, updated_at
+                from {SCHEMA}.conditioning_session_log
+                where conditioning_session_log_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                session_id,
+                owner,
+            )
 
         return JSONResponse(
             _conditioning_row_to_jsonable(row)
@@ -863,6 +848,11 @@ async def list_conditioning_sessions(
     conn = await _db()
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        session_source = (
+            "conditioning_session_log"
+            if include_inactive
+            else "conditioning_session_current_v"
+        )
 
         where = ["c.owner_user_id=$1::uuid"]
         args = [owner, delegated]
@@ -887,6 +877,8 @@ async def list_conditioning_sessions(
               c.duration_min,
               c.intensity,
               c.distance,
+              c.distance_value,
+              c.distance_unit,
               c.heart_rate_avg,
               c.recovery_impact,
               c.notes,
@@ -898,7 +890,7 @@ async def list_conditioning_sessions(
               $1::uuid as _target_user_id,
               $2::boolean as _delegated_view,
               p.name as prescription_name
-            from {SCHEMA}.conditioning_session_log c
+            from {SCHEMA}.{session_source} c
             left join {SCHEMA}.my_conditioning_prescription p
               on p.my_conditioning_prescription_id=c.my_conditioning_prescription_id
             where {' and '.join(where)}
@@ -936,6 +928,8 @@ async def get_conditioning_session(
               duration_min,
               intensity,
               distance,
+              distance_value,
+              distance_unit,
               heart_rate_avg,
               recovery_impact,
               notes,
@@ -944,7 +938,7 @@ async def get_conditioning_session(
               is_active,
               created_at,
               updated_at
-            from {SCHEMA}.conditioning_session_log
+            from {SCHEMA}.conditioning_session_current_v
             where conditioning_session_log_id=$1::uuid
               and owner_user_id=$2::uuid
             """,
@@ -963,32 +957,76 @@ async def deactivate_conditioning_session(
     conditioning_session_log_id: str,
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
+    reason: str = Body("user_deleted", embed=True),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.conditioning_session_log
-               set is_active=false, updated_at=now()
-             where conditioning_session_log_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning
-              conditioning_session_log_id,
-              owner_user_id,
-              day,
-              name,
-              is_active,
-              updated_at
-            """,
-            sid,
-            owner,
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            voided_id = await write_conditioning_void(
+                conn,
+                conditioning_session_log_id=sid,
+                reason=_clean_text(reason, 1000) or "user_deleted",
+            )
+        return JSONResponse(
+            {
+                "conditioning_session_log_id": str(voided_id),
+                "owner_user_id": owner,
+                "is_active": False,
+                "voided": True,
+            }
         )
+    finally:
+        await conn.close()
+
+
+@router.post("/conditioning_sessions/{conditioning_session_log_id}/correct")
+async def correct_conditioning_session(
+    conditioning_session_log_id: str,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    payload: dict = Body(...),
+):
+    sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
+    write_key = _require_idempotency_key(idempotency_key)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            replacement_id = await write_conditioning_correction(
+                conn,
+                conditioning_session_log_id=sid,
+                intent=payload,
+                idempotency_key=write_key,
+            )
+            row = await conn.fetchrow(
+                f"""
+                select
+                  conditioning_session_log_id, owner_user_id,
+                  my_conditioning_prescription_id, day, name, category,
+                  modality, duration_min, intensity, distance,
+                  distance_value, distance_unit, heart_rate_avg,
+                  recovery_impact, notes, dose_type, dose_config,
+                  supersedes_conditioning_session_id, is_active,
+                  created_at, updated_at
+                from {SCHEMA}.conditioning_session_current_v
+                where conditioning_session_log_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                replacement_id,
+                owner,
+            )
         if not row:
-            raise HTTPException(status_code=404, detail="conditioning session not found")
-        return JSONResponse(_row_to_jsonable(row))
+            raise HTTPException(status_code=500, detail="conditioning correction unavailable")
+        return JSONResponse(_conditioning_row_to_jsonable(row))
     finally:
         await conn.close()
 
@@ -1849,9 +1887,11 @@ async def delete_workout_template_exercise_segment(
 async def complete_training_session(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     payload: dict = Body(...),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
+    write_key = _require_idempotency_key(idempotency_key)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
 
@@ -1860,9 +1900,12 @@ async def complete_training_session(
     notes = _clean_text(payload.get("notes"), 800)
     workout_template_id = _clean_text(payload.get("workout_template_id"), 80)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
+    load_unit = _clean_text(payload.get("load_unit"), 8).lower()
 
     if not name:
         raise HTTPException(status_code=400, detail="name required")
+    if load_unit not in {"lb", "kg"}:
+        raise HTTPException(status_code=400, detail="load_unit must be lb or kg")
     try:
         day_val = _dt.date.fromisoformat(day)
     except Exception:
@@ -1897,9 +1940,8 @@ async def complete_training_session(
             raise HTTPException(status_code=400, detail=f"set {position} must be an object")
 
         exercise_id = _clean_text(raw_set.get("exercise_id"), 200)
-        exercise_name = _clean_text(raw_set.get("exercise_name"), 240)
-        if not exercise_id or not exercise_name:
-            raise HTTPException(status_code=400, detail=f"set {position} requires exercise_id and exercise_name")
+        if not exercise_id:
+            raise HTTPException(status_code=400, detail=f"set {position} requires exercise_id")
 
         try:
             exercise_sort_order = int(raw_set.get("exercise_sort_order", 0))
@@ -1957,7 +1999,6 @@ async def complete_training_session(
                         "label": _clean_text(raw_segment.get("label"), 120),
                         "weight": weight,
                         "reps": reps,
-                        "volume": weight * reps,
                         "notes": _clean_text(raw_segment.get("notes"), 800),
                     }
                 )
@@ -1965,7 +2006,6 @@ async def complete_training_session(
             segments.sort(key=lambda segment: segment["segment_index"])
             weight = segments[0]["weight"]
             reps = segments[0]["reps"]
-            volume = sum(segment["volume"] for segment in segments)
         else:
             try:
                 weight = float(raw_set.get("weight", 0))
@@ -1977,18 +2017,15 @@ async def complete_training_session(
                     status_code=400,
                     detail=f"set {position} requires nonnegative weight and positive reps",
                 )
-            volume = weight * reps
 
         normalized_sets.append(
             {
                 "exercise_id": exercise_id,
-                "exercise_name": exercise_name,
                 "exercise_sort_order": exercise_sort_order,
                 "set_index": set_index,
                 "set_type": set_type,
                 "weight": weight,
                 "reps": reps,
-                "volume": volume,
                 "flags": flags,
                 "notes": set_notes,
                 "segments": segments,
@@ -1998,93 +2035,35 @@ async def complete_training_session(
     conn = await _db()
     try:
         async with conn.transaction():
-            if wid:
-                template_ok = await conn.fetchval(
-                    f"""
-                    select 1
-                    from {SCHEMA}.workout_template
-                    where workout_template_id=$1::uuid
-                      and owner_user_id=$2::uuid
-                      and is_active=true
-                    """,
-                    wid,
-                    owner,
-                )
-                if not template_ok:
-                    raise HTTPException(status_code=404, detail="workout template not found or inactive")
-
+            await set_transaction_actor(conn, actor_user_id=owner)
+            intent = {
+                "day": day_val.isoformat(),
+                "workout_template_id": wid,
+                "name": name,
+                "notes": notes,
+                "started_at": started.isoformat(),
+                "finished_at": finished.isoformat(),
+                "load_unit": load_unit,
+                "sets": normalized_sets,
+            }
+            session_id = await write_training_session(
+                conn,
+                intent=intent,
+                idempotency_key=write_key,
+            )
             session = await conn.fetchrow(
                 f"""
-                insert into {SCHEMA}.training_session
-                  (owner_user_id, day, workout_template_id, name, notes,
-                   started_at, finished_at, is_active)
-                values
-                  ($1::uuid, $2::date, $3::uuid, $4, $5, $6::timestamptz,
-                   $7::timestamptz, true)
-                returning
+                select
                   training_session_id, owner_user_id, day, workout_template_id,
-                  name, notes, started_at, finished_at, is_active, created_at, updated_at
+                  name, notes, started_at, finished_at, is_active,
+                  created_at, updated_at
+                from {SCHEMA}.training_session
+                where training_session_id=$1::uuid
+                  and owner_user_id=$2::uuid
                 """,
+                session_id,
                 owner,
-                day_val,
-                wid,
-                name,
-                notes,
-                started,
-                finished,
             )
-            session_id = session["training_session_id"]
-
-            for completed_set in normalized_sets:
-                set_row = await conn.fetchrow(
-                    f"""
-                    insert into {SCHEMA}.training_set_log
-                      (training_session_id, owner_user_id, workout_template_id,
-                       exercise_id, exercise_name, exercise_sort_order, set_index,
-                       set_type, weight, reps, volume, flags, notes,
-                       exercise_role_snapshot, is_active)
-                    values
-                      ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7,
-                       $8, $9, $10, $11, $12, $13,
-                       coalesce((
-                         select exercise_role
-                         from {SCHEMA}.my_exercise
-                         where owner_user_id=$2::uuid and exercise_id=$4
-                       ), 'strength'), true)
-                    returning training_set_log_id
-                    """,
-                    session_id,
-                    owner,
-                    wid,
-                    completed_set["exercise_id"],
-                    completed_set["exercise_name"],
-                    completed_set["exercise_sort_order"],
-                    completed_set["set_index"],
-                    completed_set["set_type"],
-                    completed_set["weight"],
-                    completed_set["reps"],
-                    completed_set["volume"],
-                    completed_set["flags"],
-                    completed_set["notes"],
-                )
-
-                for segment in completed_set["segments"]:
-                    await conn.execute(
-                        f"""
-                        insert into {SCHEMA}.training_set_log_segment
-                          (training_set_log_id, segment_index, label, weight,
-                           reps, volume, notes)
-                        values ($1::uuid, $2, $3, $4, $5, $6, $7)
-                        """,
-                        set_row["training_set_log_id"],
-                        segment["segment_index"],
-                        segment["label"],
-                        segment["weight"],
-                        segment["reps"],
-                        segment["volume"],
-                        segment["notes"],
-                    )
-
             result = _row_to_jsonable(session)
             result["set_count"] = len(normalized_sets)
             return JSONResponse(result)
@@ -2125,6 +2104,11 @@ async def list_training_sessions(
     conn = await _db()
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        session_source = (
+            "training_session"
+            if include_inactive
+            else "training_session_current_v"
+        )
 
         where = ["s.owner_user_id=$1::uuid"]
         args = [owner, delegated]
@@ -2154,56 +2138,53 @@ async def list_training_sessions(
               coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
               coalesce(count(l.training_set_log_id) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
               ), 0)::int as strength_set_count,
               coalesce(count(distinct l.exercise_id) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
               ), 0)::int as strength_exercise_count,
               coalesce(sum(l.volume) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
               ), 0)::float as strength_volume,
               coalesce(count(l.training_set_log_id) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
               ), 0)::int as rehab_set_count,
               coalesce(count(distinct l.exercise_id) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
               ), 0)::int as rehab_exercise_count,
               coalesce(sum(l.volume) filter (
                 where l.is_active=true
-                  and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
               ), 0)::float as rehab_volume,
               case
                 when count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
                 ) > 0
                 and count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
                 ) > 0 then 'mixed'
                 when count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
                 ) > 0 then 'strength'
                 when count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='rehab'
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
                 ) > 0 then 'rehab'
                 else 'unclassified'
               end as session_role,
               coalesce(bool_or(
-                coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength')='strength'
+                coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
               ) filter (where l.is_active=true), false) as counts_toward_strength
-            from {SCHEMA}.training_session s
+            from {SCHEMA}.{session_source} s
             left join {SCHEMA}.training_set_log l
               on l.training_session_id=s.training_session_id
-            left join {SCHEMA}.my_exercise me
-              on me.owner_user_id=l.owner_user_id
-             and me.exercise_id=l.exercise_id
             where {' and '.join(where)}
             group by s.training_session_id
             {having}
@@ -2238,7 +2219,7 @@ async def get_training_session(
               name, notes, started_at, finished_at, is_active, created_at, updated_at,
               $3::uuid as _target_user_id,
               $4::boolean as _delegated_view
-            from {SCHEMA}.training_session
+            from {SCHEMA}.training_session_current_v
             where training_session_id=$1::uuid
               and owner_user_id=$2::uuid
             """,
@@ -2260,27 +2241,75 @@ async def deactivate_training_session(
     training_session_id: str,
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
+    reason: str = Body("user_deleted", embed=True),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
     conn = await _db()
     try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.training_session
-               set is_active=false, updated_at=now()
-             where training_session_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning
-              training_session_id, owner_user_id, day, name, is_active, updated_at
-            """,
-            sid,
-            owner,
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            voided_id = await write_training_void(
+                conn,
+                training_session_id=sid,
+                reason=_clean_text(reason, 1000) or "user_deleted",
+            )
+        return JSONResponse(
+            {
+                "training_session_id": str(voided_id),
+                "owner_user_id": owner,
+                "is_active": False,
+                "voided": True,
+            }
         )
+    finally:
+        await conn.close()
+
+
+@router.post("/sessions/{training_session_id}/correct")
+async def correct_training_session(
+    training_session_id: str,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    payload: dict = Body(...),
+):
+    sid = _as_uuid(training_session_id, "training_session_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
+    write_key = _require_idempotency_key(idempotency_key)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            replacement_id = await write_training_correction(
+                conn,
+                training_session_id=sid,
+                intent=payload,
+                idempotency_key=write_key,
+            )
+            row = await conn.fetchrow(
+                f"""
+                select
+                  training_session_id, owner_user_id, day,
+                  workout_template_id, name, notes, started_at, finished_at,
+                  supersedes_training_session_id, is_active,
+                  created_at, updated_at
+                from {SCHEMA}.training_session_current_v
+                where training_session_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                replacement_id,
+                owner,
+            )
         if not row:
-            raise HTTPException(status_code=404, detail="session not found")
-        return JSONResponse(_row_to_jsonable(row))
+            raise HTTPException(status_code=500, detail="training correction unavailable")
+        result = _row_to_jsonable(row)
+        result["set_count"] = len(payload.get("sets") or [])
+        return JSONResponse(result)
     finally:
         await conn.close()
 
@@ -2301,24 +2330,31 @@ async def list_training_session_sets(
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
 
         where_active = "" if include_inactive else "and l.is_active=true"
+        current_parent = "" if include_inactive else f"""
+              and exists (
+                select 1
+                from {SCHEMA}.training_session_current_v current_session
+                where current_session.training_session_id=l.training_session_id
+                  and current_session.owner_user_id=l.owner_user_id
+              )
+        """
         rows = await conn.fetch(
             f"""
             select
               l.training_set_log_id, l.training_session_id, l.owner_user_id,
               l.workout_template_id, l.exercise_id, l.exercise_name,
-              l.set_type, l.exercise_role_snapshot,
-              coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') as exercise_role,
+              l.set_type, l.exercise_role_snapshot, l.capture_role,
+              coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') as exercise_role,
               l.exercise_sort_order, l.set_index, l.weight, l.reps, l.volume,
+              l.load_unit,
               l.flags, l.notes, l.is_active, l.created_at, l.updated_at,
               $3::uuid as _target_user_id,
               $4::boolean as _delegated_view
             from {SCHEMA}.training_set_log l
-            left join {SCHEMA}.my_exercise me
-              on me.owner_user_id=l.owner_user_id
-             and me.exercise_id=l.exercise_id
             where l.training_session_id=$1::uuid
               and l.owner_user_id=$2::uuid
               {where_active}
+              {current_parent}
             order by l.exercise_sort_order asc, l.set_index asc, l.created_at asc
             """,
             sid,
@@ -2336,86 +2372,13 @@ async def add_training_set_log(
     training_session_id: str,
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
-    exercise_id: str = Query(..., min_length=1, max_length=200),
-    exercise_name: str = Query(..., min_length=1, max_length=240),
-    workout_template_id: str | None = Query(None),
-    exercise_sort_order: int = Query(0),
-    set_index: int = Query(1, ge=1, le=200),
-    set_type: str = Query("straight", max_length=40),
-    weight: float = Query(0),
-    reps: int = Query(0, ge=0, le=1000),
-    flags: str | None = Query(None, max_length=240),
-    notes: str | None = Query(None, max_length=800),
 ):
-    sid = _as_uuid(training_session_id, "training_session_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
-    wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
-    volume = float(weight) * int(reps)
-
-    conn = await _db()
-    try:
-        session = await conn.fetchrow(
-            f"""
-            select training_session_id, workout_template_id
-            from {SCHEMA}.training_session
-            where training_session_id=$1::uuid
-              and owner_user_id=$2::uuid
-              and is_active=true
-            """,
-            sid,
-            owner,
-        )
-        if not session:
-            raise HTTPException(status_code=404, detail="session not found")
-
-        if wid is None and session.get("workout_template_id"):
-            wid = str(session["workout_template_id"])
-
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.training_set_log
-              (training_session_id, owner_user_id, workout_template_id,
-               exercise_id, exercise_name, exercise_sort_order, set_index, set_type,
-               weight, reps, volume, flags, notes, exercise_role_snapshot, is_active)
-            values
-              ($1::uuid, $2::uuid, $3::uuid,
-               $4, $5, $6, $7, $8,
-               $9, $10, $11, $12, $13,
-               coalesce((
-                 select exercise_role
-                 from {SCHEMA}.my_exercise
-                 where owner_user_id=$2::uuid and exercise_id=$4
-               ), 'strength'), true)
-            returning
-              training_set_log_id, training_session_id, owner_user_id,
-              workout_template_id, exercise_id, exercise_name,
-              set_type, exercise_role_snapshot,
-              exercise_sort_order, set_index, weight, reps, volume,
-              flags, notes, is_active, created_at, updated_at
-            """,
-            sid,
-            owner,
-            wid,
-            exercise_id.strip(),
-            exercise_name.strip(),
-            int(exercise_sort_order),
-            int(set_index),
-              (set_type or "straight").strip().lower(),
-            float(weight),
-            int(reps),
-            float(volume),
-            (flags or "").strip(),
-            (notes or "").strip(),
-        )
-
-        await conn.execute(
-            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
-            sid,
-        )
-
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    _as_uuid(training_session_id, "training_session_id")
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="completed sessions are immutable; submit an aggregate correction",
+    )
 
 
 @router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/update")
@@ -2424,93 +2387,14 @@ async def update_training_set_log(
     training_set_log_id: str,
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
-    exercise_sort_order: int | None = Query(None),
-    set_index: int | None = Query(None, ge=1, le=200),
-    set_type: str | None = Query(None, max_length=40),
-    weight: float | None = Query(None),
-    reps: int | None = Query(None, ge=0, le=1000),
-    flags: str | None = Query(None, max_length=240),
-    notes: str | None = Query(None, max_length=800),
 ):
-    sid = _as_uuid(training_session_id, "training_session_id")
-    setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
-
-    conn = await _db()
-    try:
-        old = await conn.fetchrow(
-            f"""
-            select weight, reps, set_type
-            from {SCHEMA}.training_set_log
-            where training_set_log_id=$1::uuid
-              and training_session_id=$2::uuid
-              and owner_user_id=$3::uuid
-            """,
-            setid,
-            sid,
-            owner,
-        )
-        if not old:
-            raise HTTPException(status_code=404, detail="set not found")
-
-        next_weight = float(weight) if weight is not None else float(old["weight"])
-        next_reps = int(reps) if reps is not None else int(old["reps"])
-        next_set_type = set_type.strip().lower() if set_type is not None else str(old.get("set_type") or "straight")
-
-        segment_total = await conn.fetchval(
-            f"""
-            select coalesce(sum(volume), 0)
-            from {SCHEMA}.training_set_log_segment
-            where training_set_log_id=$1::uuid
-            """,
-            setid,
-        )
-        segment_total_float = float(segment_total or 0)
-        next_volume = segment_total_float if next_set_type == "drop" and segment_total_float > 0 else next_weight * next_reps
-
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.training_set_log
-               set exercise_sort_order=coalesce($4, exercise_sort_order),
-                   set_index=coalesce($5, set_index),
-                   set_type=coalesce($6, set_type),
-                   weight=$7,
-                   reps=$8,
-                   volume=$9,
-                   flags=coalesce($10, flags),
-                   notes=coalesce($11, notes),
-                   updated_at=now()
-             where training_set_log_id=$1::uuid
-               and training_session_id=$2::uuid
-               and owner_user_id=$3::uuid
-            returning
-              training_set_log_id, training_session_id, owner_user_id,
-              workout_template_id, exercise_id, exercise_name,
-              set_type, exercise_role_snapshot,
-              exercise_sort_order, set_index, weight, reps, volume,
-              flags, notes, is_active, created_at, updated_at
-            """,
-            setid,
-            sid,
-            owner,
-            exercise_sort_order,
-            set_index,
-            next_set_type,
-            next_weight,
-            next_reps,
-            next_volume,
-            (flags.strip() if flags is not None else None),
-            (notes.strip() if notes is not None else None),
-        )
-
-        await conn.execute(
-            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
-            sid,
-        )
-
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    _as_uuid(training_session_id, "training_session_id")
+    _as_uuid(training_set_log_id, "training_set_log_id")
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="completed sessions are immutable; submit an aggregate correction",
+    )
 
 
 @router.get("/sessions/{training_session_id}/sets/{training_set_log_id}/segments")
@@ -2530,12 +2414,15 @@ async def list_training_set_log_segments(
 
         parent = await conn.fetchrow(
             f"""
-            select training_set_log_id
-            from {SCHEMA}.training_set_log
-            where training_set_log_id=$1::uuid
-              and training_session_id=$2::uuid
-              and owner_user_id=$3::uuid
-              and is_active=true
+            select l.training_set_log_id
+            from {SCHEMA}.training_set_log l
+            join {SCHEMA}.training_session_current_v s
+              on s.training_session_id=l.training_session_id
+             and s.owner_user_id=l.owner_user_id
+            where l.training_set_log_id=$1::uuid
+              and l.training_session_id=$2::uuid
+              and l.owner_user_id=$3::uuid
+              and l.is_active=true
             """,
             setid,
             sid,
@@ -2578,99 +2465,14 @@ async def add_training_set_log_segment(
     training_set_log_id: str,
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
-    segment_index: int = Query(1, ge=1, le=50),
-    label: str | None = Query(None, max_length=120),
-    weight: float = Query(0),
-    reps: int = Query(0, ge=0, le=1000),
-    notes: str | None = Query(None, max_length=800),
 ):
-    sid = _as_uuid(training_session_id, "training_session_id")
-    setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
-    volume = float(weight) * int(reps)
-
-    conn = await _db()
-    try:
-        parent = await conn.fetchrow(
-            f"""
-            select training_set_log_id
-            from {SCHEMA}.training_set_log
-            where training_set_log_id=$1::uuid
-              and training_session_id=$2::uuid
-              and owner_user_id=$3::uuid
-              and is_active=true
-            """,
-            setid,
-            sid,
-            owner,
-        )
-        if not parent:
-            raise HTTPException(status_code=404, detail="set not found")
-
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.training_set_log_segment
-              (training_set_log_id, segment_index, label, weight, reps, volume, notes)
-            values
-              ($1::uuid, $2, $3, $4, $5, $6, $7)
-            on conflict (training_set_log_id, segment_index) do update
-              set label=excluded.label,
-                  weight=excluded.weight,
-                  reps=excluded.reps,
-                  volume=excluded.volume,
-                  notes=excluded.notes,
-                  updated_at=now()
-            returning
-              training_set_log_segment_id,
-              training_set_log_id,
-              segment_index,
-              label,
-              weight,
-              reps,
-              volume,
-              notes,
-              created_at,
-              updated_at
-            """,
-            setid,
-            int(segment_index),
-            (label or "").strip(),
-            float(weight),
-            int(reps),
-            float(volume),
-            (notes or "").strip(),
-        )
-
-        total = await conn.fetchval(
-            f"""
-            select coalesce(sum(volume), 0)
-            from {SCHEMA}.training_set_log_segment
-            where training_set_log_id=$1::uuid
-            """,
-            setid,
-        )
-        await conn.execute(
-            f"""
-            update {SCHEMA}.training_set_log
-               set volume=$4,
-                   updated_at=now()
-             where training_set_log_id=$1::uuid
-               and training_session_id=$2::uuid
-               and owner_user_id=$3::uuid
-            """,
-            setid,
-            sid,
-            owner,
-            float(total or 0),
-        )
-        await conn.execute(
-            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
-            sid,
-        )
-
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
-    finally:
-        await conn.close()
+    _as_uuid(training_session_id, "training_session_id")
+    _as_uuid(training_set_log_id, "training_set_log_id")
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="completed sessions are immutable; submit an aggregate correction",
+    )
 
 
 @router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/segments/{training_set_log_segment_id}/delete")
@@ -2681,62 +2483,14 @@ async def delete_training_set_log_segment(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    sid = _as_uuid(training_session_id, "training_session_id")
-    setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    segid = _as_uuid(training_set_log_segment_id, "training_set_log_segment_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
-
-    conn = await _db()
-    try:
-        res = await conn.execute(
-            f"""
-            delete from {SCHEMA}.training_set_log_segment
-             where training_set_log_segment_id=$1::uuid
-               and training_set_log_id=$2::uuid
-               and exists (
-                 select 1
-                 from {SCHEMA}.training_set_log l
-                 where l.training_set_log_id=$2::uuid
-                   and l.training_session_id=$3::uuid
-                   and l.owner_user_id=$4::uuid
-               )
-            """,
-            segid,
-            setid,
-            sid,
-            owner,
-        )
-
-        total = await conn.fetchval(
-            f"""
-            select coalesce(sum(volume), 0)
-            from {SCHEMA}.training_set_log_segment
-            where training_set_log_id=$1::uuid
-            """,
-            setid,
-        )
-        await conn.execute(
-            f"""
-            update {SCHEMA}.training_set_log
-               set volume=$4,
-                   updated_at=now()
-             where training_set_log_id=$1::uuid
-               and training_session_id=$2::uuid
-               and owner_user_id=$3::uuid
-            """,
-            setid,
-            sid,
-            owner,
-            float(total or 0),
-        )
-        await conn.execute(
-            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
-            sid,
-        )
-
-        return JSONResponse({"ok": True, "result": str(res)})
-    finally:
-        await conn.close()
+    _as_uuid(training_session_id, "training_session_id")
+    _as_uuid(training_set_log_id, "training_set_log_id")
+    _as_uuid(training_set_log_segment_id, "training_set_log_segment_id")
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="completed sessions are immutable; submit an aggregate correction",
+    )
 
 
 @router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/delete")
@@ -2746,33 +2500,10 @@ async def delete_training_set_log(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    sid = _as_uuid(training_session_id, "training_session_id")
-    setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
-
-    conn = await _db()
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.training_set_log
-               set is_active=false, updated_at=now()
-             where training_set_log_id=$1::uuid
-               and training_session_id=$2::uuid
-               and owner_user_id=$3::uuid
-            returning training_set_log_id, training_session_id, owner_user_id, is_active, updated_at
-            """,
-            setid,
-            sid,
-            owner,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="set not found")
-
-        await conn.execute(
-            f"update {SCHEMA}.training_session set updated_at=now() where training_session_id=$1::uuid",
-            sid,
-        )
-
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    _as_uuid(training_session_id, "training_session_id")
+    _as_uuid(training_set_log_id, "training_set_log_id")
+    require_actor_matches_owner(req, owner_user_id)
+    raise HTTPException(
+        status_code=410,
+        detail="completed sessions are immutable; submit an aggregate correction",
+    )

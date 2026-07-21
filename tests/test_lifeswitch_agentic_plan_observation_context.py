@@ -67,6 +67,8 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                 "strength_exercise_count": 4,
                 "rehab_set_count": 0,
                 "rehab_exercise_count": 0,
+                "unknown_role_set_count": 0,
+                "unknown_role_exercise_count": 0,
             }
             for offset in (1, 3, 8, 10, 15, 17)
         ]
@@ -222,6 +224,8 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                         "strength_exercise_count": 0,
                         "rehab_set_count": 3,
                         "rehab_exercise_count": 1,
+                        "unknown_role_set_count": 0,
+                        "unknown_role_exercise_count": 0,
                     },
                     {
                         "day": today - dt.timedelta(days=1),
@@ -231,6 +235,8 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                         "strength_exercise_count": 4,
                         "rehab_set_count": 0,
                         "rehab_exercise_count": 0,
+                        "unknown_role_set_count": 0,
+                        "unknown_role_exercise_count": 0,
                     },
                 ],
                 "lifeswitch_plan_context:conditioning_sessions": [],
@@ -251,6 +257,55 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
         self.assertEqual(training["strength_sessions_last_7_days"], 1)
         self.assertFalse(training["strength_adherence"]["target_met"])
         self.assertTrue(training["strength_adherence"]["rehab_exclusion_supported"])
+
+    async def test_training_reads_current_observations_and_never_promotes_unknown_roles(self) -> None:
+        today = dt.datetime.now(ZoneInfo("UTC")).date()
+        conn = FakeConnection(
+            {
+                "lifeswitch_plan_context:nutrition_daily_totals": [],
+                "lifeswitch_plan_context:measurements": [],
+                "lifeswitch_plan_context:resistance_sessions": [
+                    {
+                        "day": today,
+                        "active_set_count": 4,
+                        "exercise_count": 1,
+                        "strength_set_count": 0,
+                        "strength_exercise_count": 0,
+                        "rehab_set_count": 0,
+                        "rehab_exercise_count": 0,
+                        "unknown_role_set_count": 4,
+                        "unknown_role_exercise_count": 1,
+                    }
+                ],
+                "lifeswitch_plan_context:conditioning_sessions": [],
+            }
+        )
+        result = await CanonicalPlanObservationContextRepository().summarize(
+            conn,  # type: ignore[arg-type]
+            owner_user_id=uuid.uuid4(),
+            owner_timezone="UTC",
+            document=document(),
+            permissions=ObservationPermissions(True, True, True),
+        )
+
+        training = result["training"]
+        self.assertEqual(training["strength_sessions"], 0)
+        self.assertEqual(training["unknown_role_active_sets"], 4)
+        self.assertEqual(training["unknown_role_exercises"], 1)
+        resistance_query = next(
+            query for query, _args in conn.calls
+            if "lifeswitch_plan_context:resistance_sessions" in query
+        )
+        self.assertIn("training_session_current_v", resistance_query)
+        self.assertIn("l.capture_role = 'strength'", resistance_query)
+        self.assertNotIn("my_exercise", resistance_query)
+        self.assertNotIn("'strength')", resistance_query)
+
+        conditioning_query = next(
+            query for query, _args in conn.calls
+            if "lifeswitch_plan_context:conditioning_sessions" in query
+        )
+        self.assertIn("conditioning_session_current_v", conditioning_query)
 
 
 if __name__ == "__main__":

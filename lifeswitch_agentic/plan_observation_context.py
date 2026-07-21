@@ -432,10 +432,12 @@ class CanonicalPlanObservationContextRepository:
                 ],
                 "measurements": ["public.lifeswitch_measurement_entries"],
                 "training": [
-                    "lifeswitch_training.training_session",
+                    "lifeswitch_training.training_session_current_v",
                     "lifeswitch_training.training_set_log",
                 ],
-                "conditioning": ["lifeswitch_training.conditioning_session_log"],
+                "conditioning": [
+                    "lifeswitch_training.conditioning_session_current_v"
+                ],
             },
             "writes_performed": False,
         }
@@ -757,26 +759,28 @@ class CanonicalPlanObservationContextRepository:
                    count(l.training_set_log_id)::int as active_set_count,
                    count(distinct l.exercise_id)::int as exercise_count,
                    count(l.training_set_log_id) filter (
-                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'strength'
+                     where l.capture_role = 'strength'
                    )::int as strength_set_count,
                    count(distinct l.exercise_id) filter (
-                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'strength'
+                     where l.capture_role = 'strength'
                    )::int as strength_exercise_count,
                    count(l.training_set_log_id) filter (
-                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'rehab'
+                     where l.capture_role = 'rehab'
                    )::int as rehab_set_count,
                    count(distinct l.exercise_id) filter (
-                     where coalesce(l.exercise_role_snapshot, me.exercise_role, 'strength') = 'rehab'
-                   )::int as rehab_exercise_count
-            from lifeswitch_training.training_session s
+                     where l.capture_role = 'rehab'
+                   )::int as rehab_exercise_count,
+                   count(l.training_set_log_id) filter (
+                     where l.capture_role = 'unknown'
+                   )::int as unknown_role_set_count,
+                   count(distinct l.exercise_id) filter (
+                     where l.capture_role = 'unknown'
+                   )::int as unknown_role_exercise_count
+            from lifeswitch_training.training_session_current_v s
             join lifeswitch_training.training_set_log l
               on l.training_session_id = s.training_session_id
              and l.is_active = true
-            left join lifeswitch_training.my_exercise me
-              on me.owner_user_id = s.owner_user_id
-             and me.exercise_id = l.exercise_id
             where s.owner_user_id = $1
-              and s.is_active = true
               and s.finished_at is not null
               and s.day between $2 and $3
             group by s.training_session_id, s.day
@@ -840,6 +844,12 @@ class CanonicalPlanObservationContextRepository:
             "strength_sessions_prior_7_days": strength_prior,
             "rehab_sessions": len(rehab_rows),
             "rehab_active_sets": sum(int(row["rehab_set_count"] or 0) for row in rows),
+            "unknown_role_active_sets": sum(
+                int(row["unknown_role_set_count"] or 0) for row in rows
+            ),
+            "unknown_role_exercises": sum(
+                int(row["unknown_role_exercise_count"] or 0) for row in rows
+            ),
             "rehab_only_sessions": sum(
                 int(row["rehab_set_count"] or 0) > 0
                 and int(row["strength_set_count"] or 0) == 0
@@ -870,9 +880,8 @@ class CanonicalPlanObservationContextRepository:
             """
             /* lifeswitch_plan_context:conditioning_sessions */
             select day, duration_min
-            from lifeswitch_training.conditioning_session_log
+            from lifeswitch_training.conditioning_session_current_v
             where owner_user_id = $1
-              and is_active = true
               and day between $2 and $3
             order by day
             """,
