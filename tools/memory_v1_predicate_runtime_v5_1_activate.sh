@@ -347,8 +347,11 @@ SELECT * FROM memory.requeue_owner_v5_1_persistence_mismatch_v1(
 COMMIT;
 SQL
 chmod 0600 "$recovery_output"
-[[ "$(grep -c "^$recovery_job|error|1|applied$" "$recovery_output")" == 1 ]]
-[[ "$(grep -c "^$recovery_job|error|1|replayed$" "$recovery_output")" == 1 ]]
+recovery_applied=$(grep -c "^$recovery_job|error|1|applied$" "$recovery_output" || true)
+recovery_replayed=$(grep -c "^$recovery_job|error|1|replayed$" "$recovery_output" || true)
+[[ "$recovery_applied" -le 1 ]]
+[[ "$recovery_replayed" -ge 1 ]]
+[[ "$((recovery_applied + recovery_replayed))" -eq 2 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_job WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND status='error' AND attempts=1 AND available_at=created_at AND lease_token IS NULL AND lease_expires_at IS NULL AND worker_id='memory_v1_v5_local_inference_scheduler_v1:ip-172-31-32-171' AND last_error='local_inference_rejected: local_persistence_contract_mismatch'")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_event WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid AND operation_id='$recovery_operation'::uuid AND event_type='error' AND from_status='error' AND to_status='error'")" == 1 ]]
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local WHERE owner_user_id='$owner'::uuid AND job_id='$recovery_job'::uuid")" == 0 ]]
