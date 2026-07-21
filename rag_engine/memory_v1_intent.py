@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v8"
+VERSION = "memory_intent_adapter_v9"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -311,6 +311,21 @@ FAMILY_MEMBER_RECALL_RE = re.compile(
     r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
     r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent)\b"
 )
+DIRECT_FAMILY_RELATION_RE = re.compile(
+    r"\b(?:who (?:is|was|are|were) my "
+    r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
+    r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent)|"
+    r"do you (?:know|remember) who my "
+    r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
+    r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent) "
+    r"(?:is|was)|"
+    r"how (?:is|was|are|were) [a-z][a-z .'-]{0,80} related to me|"
+    r"what (?:is|was) (?:my relationship (?:to|with) [a-z][a-z .'-]{0,80}|"
+    r"[a-z][a-z .'-]{0,80}(?:'s|’s) relationship to me)|"
+    r"(?:is|was) [a-z][a-z .'-]{0,80} my "
+    r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
+    r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent))\b"
+)
 NAME_RECALL_RE = re.compile(
     r"\b(?:was it nemo or neko|nemo or neko|"
     r"what was (?:the )?(?:correct )?(?:spelling|name)|"
@@ -450,8 +465,12 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     broad_parent_recall = bool(BROAD_PARENT_RECALL_RE.search(text))
     broad_family_profile_recall = bool(FAMILY_PROFILE_RECALL_RE.search(text))
     family_member_recall = bool(FAMILY_MEMBER_RECALL_RE.search(text))
+    direct_family_relation_recall = bool(DIRECT_FAMILY_RELATION_RE.search(text))
     broad_family_recall = (
-        broad_parent_recall or broad_family_profile_recall or family_member_recall
+        broad_parent_recall
+        or broad_family_profile_recall
+        or family_member_recall
+        or direct_family_relation_recall
     )
     has_pet_signal = bool(PET_SIGNAL_RE.search(text))
     pet_event = has_pet_signal and (

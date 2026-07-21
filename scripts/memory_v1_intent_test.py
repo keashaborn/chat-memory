@@ -293,6 +293,13 @@ def main() -> int:
         "Can you tell me anything about my family members?",
         "What do you remember about my mother?",
         "Tell me about my sister.",
+        "Who is my dad?",
+        "Who was my mother?",
+        "Do you remember who my dad is?",
+        "How is Jerry related to me?",
+        "What is my relationship to Jerry?",
+        "What is Jerry's relationship to me?",
+        "Is Jerry my father?",
     ):
         result = classify_memory_intent(
             message,
@@ -306,6 +313,17 @@ def main() -> int:
             raise AssertionError(f"{message!r}: {result}")
         if not result["claim_context"]["allowed_predicates"]:
             raise AssertionError(f"{message!r}: {result}")
+        if not result["claim_context"]["explicit_recall"]:
+            raise AssertionError(f"family relationship recall is not explicit: {result}")
+
+    information_result = classify_memory_intent(
+        "Jerry is my father.",
+        request_classification="GENERAL",
+    )
+    if information_result["routes"]["governed_claims"]:
+        raise AssertionError(f"information statement entered governed recall: {information_result}")
+    if information_result["domains"] == ["family_profile"]:
+        raise AssertionError(f"information statement became family recall: {information_result}")
 
     for message in (
         "What is the name of my dog?",
