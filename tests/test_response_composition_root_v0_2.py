@@ -12,6 +12,7 @@ from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     GovernedMemoryAssemblyV1,
     InactiveResponseCompositionRootV0_2,
+    ResponseCompositionError,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from tests.test_openai_chat_provider_v1 import provider_response
@@ -141,6 +142,12 @@ class CapturingMemoryProvider:
         return GovernedMemoryAssemblyV1()
 
 
+class FailingMemoryProvider:
+    def prepare(self, **kwargs: Any) -> GovernedMemoryAssemblyV1:
+        del kwargs
+        raise RuntimeError("private provider detail")
+
+
 def command(message: str) -> AuthenticatedResponseCommandV0_2:
     return AuthenticatedResponseCommandV0_2(
         authenticated_actor_user_id=ACTOR,
@@ -152,6 +159,19 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
 
 
 class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_failure_reports_only_the_composition_stage(self) -> None:
+        root = InactiveResponseCompositionRootV0_2(
+            openai_client=CombinedOpenAIClient(),
+            classifier_model="gpt-5.1",
+            memory_provider=FailingMemoryProvider(),
+        )
+
+        with self.assertRaises(ResponseCompositionError) as raised:
+            await root.execute(SnapshotConn(), command("Who is my dad?"))
+
+        self.assertEqual(raised.exception.stage, "memory_selection")
+        self.assertNotIn("private provider detail", str(raised.exception))
+
     async def test_trusted_response_signals_reach_memory_provider(self) -> None:
         for signal_values in (
             {"technical": True},

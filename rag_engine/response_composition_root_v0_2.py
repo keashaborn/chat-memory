@@ -53,7 +53,9 @@ _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,119}$")
 
 
 class ResponseCompositionError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, stage: str = "not_applicable") -> None:
+        self.stage = stage
+        super().__init__(message)
 
 
 class _StrictFrozenModel(BaseModel):
@@ -213,12 +215,14 @@ class InactiveResponseCompositionRootV0_2:
     ) -> TrustedResponseExecutionV0_2:
         """Execute and retain private typed artifacts for trusted adapters."""
 
+        stage = "command_validation"
         try:
             if not isinstance(command, AuthenticatedResponseCommandV0_2):
                 raise TypeError("authenticated command type mismatch")
             command = AuthenticatedResponseCommandV0_2.model_validate_json(
                 command.model_dump_json()
             )
+            stage = "conversation_snapshot"
             if command.stateless:
                 snapshot = create_current_only_conversation_snapshot_v1(
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
@@ -234,12 +238,14 @@ class InactiveResponseCompositionRootV0_2:
                     current_request_id=command.request_id,
                     current_message=command.current_message,
                 )
+            stage = "policy_input"
             policy_input = ResponsePolicyInputV0_2.create(
                 request_id=snapshot.current_request_id,
                 conversation=snapshot.messages,
                 requested_assistant_profile_id=None,
                 request_field_names=command.request_field_names,
             )
+            stage = "signal_classification"
             classifier = OpenAIServerResponseSignalClassifierV0_2(
                 self._openai_client,
                 model=self._classifier_model,
@@ -248,10 +254,12 @@ class InactiveResponseCompositionRootV0_2:
                 ),
             )
             classification = classifier.classify(policy_input)
+            stage = "signal_binding"
             signal_envelope = TrustedPolicySignalsEnvelopeV0_2.create(
                 conversation_snapshot=snapshot,
                 signals=classification.signals,
             )
+            stage = "memory_selection"
             memory = await _await_memory(
                 self._memory_provider.prepare(
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
@@ -259,6 +267,7 @@ class InactiveResponseCompositionRootV0_2:
                     trusted_policy_signals=classification.signals,
                 )
             )
+            stage = "trusted_request"
             trusted_request = TrustedResponseRequestV0_2.create_from_snapshot(
                 authenticated_actor_user_id=command.authenticated_actor_user_id,
                 conversation_snapshot=snapshot,
@@ -268,18 +277,21 @@ class InactiveResponseCompositionRootV0_2:
                 memory_application=memory.memory_application,
                 fm_token_budget=command.fm_token_budget,
             )
+            stage = "orchestration"
             orchestrator = TrustedResponseOrchestratorV0_2(
                 OpenAIModerationAdapterV0_2(self._openai_client),
                 clock=self._clock,
                 correlation_id_factory=self._correlation_id_factory,
             )
             plan = await orchestrator.build_plan(trusted_request)
+            stage = "answer_generation"
             response = await OpenAIChatCompletionsAdapterV1(
                 self._openai_client
             ).complete_async(
                 plan,
                 generation_config=self._generation_config,
             )
+            stage = "finalization"
             finalized = finalize_trusted_response_v1(
                 trusted_plan=plan,
                 provider_response=response,
@@ -287,15 +299,21 @@ class InactiveResponseCompositionRootV0_2:
                 answer_id=self._answer_id_factory(),
                 created_at=self._clock(),
             )
+            stage = "execution_binding"
             return TrustedResponseExecutionV0_2(
                 trusted_plan=plan,
                 provider_response=response,
                 finalized=finalized,
             )
-        except ResponseCompositionError:
+        except ResponseCompositionError as exc:
+            if exc.stage == "not_applicable":
+                raise ResponseCompositionError(str(exc), stage=stage) from None
             raise
         except Exception:
-            raise ResponseCompositionError("inactive response composition failed") from None
+            raise ResponseCompositionError(
+                "inactive response composition failed",
+                stage=stage,
+            ) from None
 
 
 __all__ = [

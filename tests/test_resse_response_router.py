@@ -38,6 +38,7 @@ class ResseResponseRouterTests(unittest.TestCase):
                 "message": "Hello.",
                 "thread_id": None,
                 "no_store": True,
+                "include_inspection": False,
             },
         )
 
