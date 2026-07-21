@@ -9,7 +9,10 @@ from rag_engine.memory_prompt_renderer_v1 import (
     MEMORY_PROMPT_AUTHORITY,
     MEMORY_PROMPT_CONTENT_FORMAT,
     MEMORY_PROMPT_RENDERER_VERSION,
+    MemoryControlApplicationDecisionV1,
+    MemoryPromptApplicationResultV1,
     MemoryPromptRendererError,
+    apply_memory_control_decision_v1,
     render_governed_memory_v1,
 )
 from rag_engine.memory_v1_selection_envelope import (
@@ -57,6 +60,9 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
             select_governed_memory_v1(selector(), request())
         )
         self.memory_input = self._assembly_input(self.envelope)
+        self.rendered = render_governed_memory_v1(
+            memory_input=self.memory_input
+        )
 
     def _assembly_input(
         self,
@@ -76,16 +82,52 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
             envelope=envelope,
         )
 
+    def _apply(
+        self,
+        rendered=None,
+        *,
+        confirmed: bool,
+    ) -> MemoryPromptApplicationResultV1:
+        source = rendered or self.rendered
+        decision = MemoryControlApplicationDecisionV1.create(
+            render_result=source,
+            direct_relevance_confirmed=confirmed,
+        )
+        return apply_memory_control_decision_v1(
+            render_result=source,
+            decision=decision,
+        )
+
+    def test_renderer_reports_candidates_not_injection_or_application(self) -> None:
+        result = self.rendered
+        self.assertFalse(hasattr(result, "injected_records"))
+        self.assertFalse(hasattr(result, "injected_record_refs"))
+        self.assertFalse(hasattr(result, "applied_controls"))
+        self.assertFalse(hasattr(result, "applied_control_refs"))
+        self.assertEqual(
+            result.rendered_record_refs,
+            result.selected_record_refs,
+        )
+        self.assertEqual(
+            tuple(item.record for item in result.rendered_fragments),
+            result.selected_record_refs,
+        )
+        self.assertEqual(
+            result.selected_control_refs,
+            tuple(item.control for item in result.selected_controls),
+        )
+
     def test_renders_all_lanes_in_canonical_rank_with_exact_policies(self) -> None:
-        result = render_governed_memory_v1(memory_input=self.memory_input)
         payloads = [
             json.loads(fragment.content)
-            for fragment in result.fragments
+            for fragment in self.rendered.rendered_fragments
         ]
-
-        self.assertEqual(result.kind, "memory")
-        self.assertEqual(result.authority, MEMORY_PROMPT_AUTHORITY)
-        self.assertEqual(result.content_format, MEMORY_PROMPT_CONTENT_FORMAT)
+        self.assertEqual(self.rendered.kind, "memory")
+        self.assertEqual(self.rendered.authority, MEMORY_PROMPT_AUTHORITY)
+        self.assertEqual(
+            self.rendered.content_format,
+            MEMORY_PROMPT_CONTENT_FORMAT,
+        )
         self.assertEqual(
             [item["rank"] for item in payloads],
             [item.rank for item in self.envelope.records],
@@ -106,20 +148,34 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
             [item["policy"]["sensitivity"] for item in payloads],
             [item.sensitivity.value for item in self.envelope.records],
         )
+
+    def test_render_preserves_request_and_assembly_bindings(self) -> None:
+        context = self.memory_input.context
+        result = self.rendered
+        self.assertEqual(result.selection_trace_id, context.selection_trace_id)
         self.assertEqual(
-            result.injected_record_refs,
-            result.selected_record_refs,
+            result.assembly_context_sha256,
+            context.context_sha256,
         )
         self.assertEqual(
-            tuple(item.record for item in result.injected_records),
-            result.selected_record_refs,
+            result.assembly_input_sha256,
+            self.memory_input.assembly_input_sha256,
         )
+        self.assertEqual(result.envelope_sha256, context.envelope_sha256)
+        self.assertEqual(
+            result.request_binding_sha256,
+            context.request_binding_sha256,
+        )
+        self.assertEqual(result.request_id_sha256, context.request_id_sha256)
+        self.assertEqual(result.thread_id_sha256, context.thread_id_sha256)
+        self.assertEqual(result.query_sha256, context.query_sha256)
 
     def test_lane_projection_retains_typed_semantics_only(self) -> None:
-        result = render_governed_memory_v1(memory_input=self.memory_input)
-        payloads = [json.loads(item.content) for item in result.fragments]
+        payloads = [
+            json.loads(item.content)
+            for item in self.rendered.rendered_fragments
+        ]
         claim_payload, preference_payload, project_payload = payloads
-
         self.assertEqual(claim_payload["record"]["type"], "claim")
         self.assertEqual(
             claim_payload["record"]["epistemic_status"],
@@ -142,43 +198,56 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
             "approved_spec",
         )
         for record in self.envelope.records:
-            self.assertNotIn(str(record.owner_user_id), result.content)
-            self.assertNotIn(str(record.record_id), result.content)
+            self.assertNotIn(str(record.owner_user_id), self.rendered.rendered_content)
+            self.assertNotIn(str(record.record_id), self.rendered.rendered_content)
             if record.revision_id is not None:
-                self.assertNotIn(str(record.revision_id), result.content)
-            self.assertNotIn(record.source_content_sha256, result.content)
+                self.assertNotIn(
+                    str(record.revision_id),
+                    self.rendered.rendered_content,
+                )
+            self.assertNotIn(
+                record.source_content_sha256,
+                self.rendered.rendered_content,
+            )
             for ref in record.evidence_refs + record.observation_refs:
-                self.assertNotIn(str(ref), result.content)
+                self.assertNotIn(str(ref), self.rendered.rendered_content)
 
-    def test_compact_json_lines_hashes_and_tokens_are_exact(self) -> None:
-        first = render_governed_memory_v1(memory_input=self.memory_input)
-        second = render_governed_memory_v1(memory_input=self.memory_input)
-        self.assertEqual(first, second)
+    def test_compact_json_lines_hashes_tokens_and_manifest_are_exact(self) -> None:
+        replay = render_governed_memory_v1(memory_input=self.memory_input)
+        self.assertEqual(self.rendered, replay)
         self.assertEqual(
-            first.content,
-            "".join(item.content for item in first.fragments),
+            self.rendered.rendered_content,
+            "".join(item.content for item in self.rendered.rendered_fragments),
         )
-        self.assertEqual(first.content_sha256, content_sha256(first.content))
-
-        for index, fragment in enumerate(first.fragments):
-            suffix = "\n" if index + 1 < len(first.fragments) else ""
+        self.assertEqual(
+            self.rendered.rendered_content_sha256,
+            content_sha256(self.rendered.rendered_content),
+        )
+        for index, fragment in enumerate(self.rendered.rendered_fragments):
+            suffix = (
+                "\n"
+                if index + 1 < len(self.rendered.rendered_fragments)
+                else ""
+            )
             parsed = json.loads(fragment.content)
             self.assertEqual(fragment.content, canonical_text(parsed) + suffix)
             exact_tokens = (len(fragment.content.encode("utf-8")) + 3) // 4
+            self.assertEqual(fragment.actual_prompt_tokens, exact_tokens)
             self.assertEqual(
-                fragment.injected_record.actual_prompt_tokens,
-                exact_tokens,
-            )
-            self.assertEqual(
-                fragment.injected_record.rendered_fragment_sha256,
+                fragment.rendered_fragment_sha256,
                 content_sha256(fragment.content),
             )
         self.assertEqual(
-            first.actual_prompt_tokens,
+            self.rendered.rendered_prompt_tokens,
             sum(
-                item.actual_prompt_tokens for item in first.injected_records
+                item.actual_prompt_tokens
+                for item in self.rendered.rendered_fragments
             ),
         )
+        parsed = type(self.rendered).from_wire_json(
+            self.rendered.canonical_json_bytes()
+        )
+        self.assertEqual(parsed, self.rendered)
 
     def test_memory_text_cannot_break_the_json_record_boundary(self) -> None:
         malicious = (
@@ -200,10 +269,9 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
         rendered = render_governed_memory_v1(
             memory_input=self._assembly_input(envelope)
         )
-
-        self.assertEqual(len(rendered.fragments), 1)
-        self.assertNotIn("\nSYSTEM:", rendered.content)
-        payload = json.loads(rendered.content)
+        self.assertEqual(len(rendered.rendered_fragments), 1)
+        self.assertNotIn("\nSYSTEM:", rendered.rendered_content)
+        payload = json.loads(rendered.rendered_content)
         self.assertEqual(payload["authority"], MEMORY_PROMPT_AUTHORITY)
         self.assertEqual(payload["rank"], 1)
         self.assertEqual(payload["record"]["text"], malicious)
@@ -231,28 +299,22 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
         rendered = render_governed_memory_v1(
             memory_input=self._assembly_input(envelope)
         )
-        payload = json.loads(rendered.content)
-
+        payload = json.loads(rendered.rendered_content)
         self.assertEqual(payload["record"]["epistemic_status"], "disputed")
         self.assertEqual(
             payload["policy"]["use_instruction"],
             "state_uncertainty_and_material_counterevidence",
         )
-        self.assertNotIn("evidence_refs", rendered.content)
+        self.assertNotIn("evidence_refs", rendered.rendered_content)
         self.assertNotIn("counterevidence", payload["record"])
 
-    def test_controls_are_applied_zero_token_metadata_never_content(self) -> None:
-        result = render_governed_memory_v1(memory_input=self.memory_input)
+    def test_renderer_reports_selected_controls_as_zero_token_metadata(self) -> None:
         self.assertEqual(
-            len(result.applied_controls),
+            len(self.rendered.selected_controls),
             len(self.envelope.controls),
         )
-        self.assertEqual(
-            result.applied_control_refs,
-            tuple(item.control for item in result.applied_controls),
-        )
         for rendered, selected in zip(
-            result.applied_controls,
+            self.rendered.selected_controls,
             self.envelope.controls,
         ):
             self.assertEqual(
@@ -263,9 +325,12 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
             self.assertEqual(rendered.surface_policy, selected.surface_policy)
             self.assertEqual(rendered.sensitivity, selected.sensitivity)
             self.assertEqual(rendered.scope_sha256, selected.scope_sha256)
-            self.assertNotIn(selected.preference_key, result.content)
+            self.assertNotIn(
+                selected.preference_key,
+                self.rendered.rendered_content,
+            )
 
-    def test_controls_only_succeeds_at_zero_prompt_token_cap(self) -> None:
+    def test_controls_only_renders_candidates_without_application_claims(self) -> None:
         selected_control = control(30, preference_key="response:private-control")
         result_value = lane_result(
             MemoryLane.PREFERENCE,
@@ -282,15 +347,13 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
         rendered = render_governed_memory_v1(
             memory_input=self._assembly_input(envelope, cap=0)
         )
+        self.assertEqual(rendered.rendered_content, "")
+        self.assertEqual(rendered.rendered_prompt_tokens, 0)
+        self.assertEqual(rendered.rendered_record_refs, ())
+        self.assertEqual(len(rendered.selected_controls), 1)
+        self.assertFalse(hasattr(rendered, "applied_control_refs"))
 
-        self.assertEqual(rendered.content, "")
-        self.assertEqual(rendered.actual_prompt_tokens, 0)
-        self.assertEqual(rendered.content_sha256, content_sha256(""))
-        self.assertEqual(rendered.injected_records, ())
-        self.assertEqual(len(rendered.applied_controls), 1)
-        self.assertEqual(rendered.applied_controls[0].content_tokens, 0)
-
-    def test_empty_suppressed_envelope_renders_empty_without_fallback(self) -> None:
+    def test_empty_suppressed_envelope_has_no_candidates_or_fallback(self) -> None:
         envelope = asyncio.run(
             select_governed_memory_v1(
                 selector(),
@@ -300,24 +363,25 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
         rendered = render_governed_memory_v1(
             memory_input=self._assembly_input(envelope, cap=0)
         )
-        self.assertEqual(rendered.content, "")
-        self.assertEqual(rendered.fragments, ())
-        self.assertEqual(rendered.injected_records, ())
-        self.assertEqual(rendered.applied_controls, ())
-        self.assertEqual(rendered.actual_prompt_tokens, 0)
+        self.assertEqual(rendered.rendered_content, "")
+        self.assertEqual(rendered.rendered_fragments, ())
+        self.assertEqual(rendered.selected_record_refs, ())
+        self.assertEqual(rendered.selected_controls, ())
+        self.assertEqual(rendered.rendered_prompt_tokens, 0)
 
     def test_exact_cap_succeeds_and_one_token_less_fails_atomically(self) -> None:
-        initial = render_governed_memory_v1(memory_input=self.memory_input)
         exact_input = self._assembly_input(
             self.envelope,
-            cap=initial.actual_prompt_tokens,
+            cap=self.rendered.rendered_prompt_tokens,
         )
         exact = render_governed_memory_v1(memory_input=exact_input)
-        self.assertEqual(exact.actual_prompt_tokens, initial.actual_prompt_tokens)
-
+        self.assertEqual(
+            exact.rendered_prompt_tokens,
+            self.rendered.rendered_prompt_tokens,
+        )
         under_input = self._assembly_input(
             self.envelope,
-            cap=initial.actual_prompt_tokens - 1,
+            cap=self.rendered.rendered_prompt_tokens - 1,
         )
         with self.assertRaisesRegex(
             MemoryPromptRendererError,
@@ -336,63 +400,274 @@ class MemoryPromptRendererV1Tests(unittest.TestCase):
         ):
             render_governed_memory_v1(memory_input=memory_input)
 
-    def test_forged_input_manifest_and_nested_record_fail_closed(self) -> None:
-        forged_manifest = self.memory_input.model_copy(
+    def test_forged_input_and_render_manifests_fail_closed(self) -> None:
+        forged_input = self.memory_input.model_copy(
             update={"assembly_input_sha256": "0" * 64}
         )
-        forged_record = self.memory_input.envelope.records[0].model_copy(
-            update={"text": "forged content"}
+        with self.assertRaisesRegex(
+            MemoryPromptRendererError,
+            "invalid MemoryPromptAssemblyInputV1",
+        ):
+            render_governed_memory_v1(memory_input=forged_input)
+        forged_render = self.rendered.model_copy(
+            update={"rendered_content_sha256": "0" * 64}
         )
-        forged_envelope = self.memory_input.envelope.model_copy(
-            update={
-                "records": (
-                    forged_record,
-                    *self.memory_input.envelope.records[1:],
-                )
-            }
-        )
-        forged_nested = self.memory_input.model_copy(
-            update={"envelope": forged_envelope}
-        )
-        for candidate in (forged_manifest, forged_nested):
-            with self.subTest(candidate=candidate):
-                with self.assertRaisesRegex(
-                    MemoryPromptRendererError,
-                    "invalid MemoryPromptAssemblyInputV1",
-                ):
-                    render_governed_memory_v1(memory_input=candidate)
+        with self.assertRaisesRegex(
+            MemoryPromptRendererError,
+            "invalid MemoryPromptRenderResultV1",
+        ):
+            MemoryControlApplicationDecisionV1.create(
+                render_result=forged_render,
+                direct_relevance_confirmed=True,
+            )
 
-    def test_result_is_directly_compatible_with_final_memory_binding(self) -> None:
-        result = render_governed_memory_v1(memory_input=self.memory_input)
+    def test_control_decision_is_manifest_bound_to_exact_input_and_render(self) -> None:
+        decision = MemoryControlApplicationDecisionV1.create(
+            render_result=self.rendered,
+            direct_relevance_confirmed=True,
+        )
+        self.assertEqual(
+            decision.assembly_input_sha256,
+            self.memory_input.assembly_input_sha256,
+        )
+        self.assertEqual(
+            decision.render_manifest_sha256,
+            self.rendered.render_manifest_sha256,
+        )
+        parsed = MemoryControlApplicationDecisionV1.from_wire_json(
+            decision.canonical_json_bytes()
+        )
+        self.assertEqual(parsed, decision)
+        forged = decision.model_copy(
+            update={"direct_relevance_confirmed": False}
+        )
+        with self.assertRaisesRegex(
+            MemoryPromptRendererError,
+            "invalid MemoryControlApplicationDecisionV1",
+        ):
+            apply_memory_control_decision_v1(
+                render_result=self.rendered,
+                decision=forged,
+            )
+
+    def test_confirmed_direct_relevance_produces_binding_inputs(self) -> None:
+        applied = self._apply(confirmed=True)
+        self.assertTrue(applied.direct_relevance_gate_required)
+        self.assertTrue(applied.memory_content_included)
+        self.assertEqual(applied.outcome, "included")
+        self.assertEqual(applied.content, self.rendered.rendered_content)
+        self.assertEqual(
+            applied.fragments,
+            self.rendered.rendered_fragments,
+        )
+        self.assertEqual(
+            applied.injected_record_refs,
+            self.rendered.rendered_record_refs,
+        )
+        self.assertEqual(
+            applied.applied_control_refs,
+            self.rendered.selected_control_refs,
+        )
+        for fragment, injected in zip(
+            self.rendered.rendered_fragments,
+            applied.injected_records,
+        ):
+            self.assertEqual(injected.record, fragment.record)
+            self.assertEqual(
+                injected.actual_prompt_tokens,
+                fragment.actual_prompt_tokens,
+            )
+            self.assertEqual(
+                injected.rendered_fragment_sha256,
+                fragment.rendered_fragment_sha256,
+            )
         binding = FinalAnswerMemoryBindingV1.create(
             assembly_input=self.memory_input,
             owner_user_id=OWNER,
             answer_id=ANSWER,
-            injected=result.injected_records,
-            answer_model_exposed=result.injected_record_refs,
-            applied_controls=result.applied_control_refs,
+            injected=applied.injected_records,
+            answer_model_exposed=applied.injected_record_refs,
+            applied_controls=applied.applied_control_refs,
             created_at=NOW,
         )
+        self.assertEqual(binding.outcome, "exposed")
         self.assertEqual(
             binding.actual_prompt_memory_tokens,
-            result.actual_prompt_tokens,
-        )
-        self.assertEqual(binding.injected_count, len(result.injected_records))
-        self.assertEqual(binding.exposed_count, len(result.injected_record_refs))
-        self.assertEqual(
-            binding.applied_control_count,
-            len(result.applied_control_refs),
+            applied.actual_prompt_tokens,
         )
 
-    def test_sanitized_report_excludes_content_and_stable_handles(self) -> None:
-        result = render_governed_memory_v1(memory_input=self.memory_input)
-        report = result.sanitized_report()
-        serialized = canonical_text(report)
-        self.assertNotIn("content", report)
-        self.assertNotIn("fragments", report)
-        self.assertNotIn(str(OWNER), serialized)
-        for record in self.envelope.records:
-            self.assertNotIn(str(record.record_id), serialized)
+    def test_false_direct_relevance_suppresses_content_but_applies_control(self) -> None:
+        applied = self._apply(confirmed=False)
+        self.assertTrue(applied.direct_relevance_gate_required)
+        self.assertFalse(applied.memory_content_included)
+        self.assertEqual(
+            applied.outcome,
+            "suppressed_by_direct_relevance_control",
+        )
+        self.assertEqual(applied.content, "")
+        self.assertEqual(applied.actual_prompt_tokens, 0)
+        self.assertEqual(applied.injected_records, ())
+        self.assertEqual(applied.injected_record_refs, ())
+        self.assertEqual(
+            applied.applied_control_refs,
+            self.rendered.selected_control_refs,
+        )
+        binding = FinalAnswerMemoryBindingV1.create(
+            assembly_input=self.memory_input,
+            owner_user_id=OWNER,
+            answer_id=ANSWER,
+            injected=applied.injected_records,
+            applied_controls=applied.applied_control_refs,
+            created_at=NOW,
+        )
+        self.assertEqual(binding.outcome, "selected_not_injected")
+        self.assertEqual(
+            binding.applied_control_count,
+            len(self.rendered.selected_control_refs),
+        )
+
+    def test_controls_only_records_control_applied_for_either_decision(self) -> None:
+        result_value = lane_result(
+            MemoryLane.PREFERENCE,
+            records=(),
+            controls=(control(31),),
+            candidate_count=0,
+            visible_count=0,
+            eligible_count=0,
+            primary=(),
+            control_candidate_count=1,
+            control_primary=(),
+        )
+        envelope = single_lane_envelope(MemoryLane.PREFERENCE, result_value)
+        rendered = render_governed_memory_v1(
+            memory_input=self._assembly_input(envelope, cap=0)
+        )
+        for confirmed in (False, True):
+            with self.subTest(confirmed=confirmed):
+                applied = self._apply(rendered, confirmed=confirmed)
+                self.assertEqual(applied.outcome, "no_rendered_content")
+                self.assertFalse(applied.memory_content_included)
+                self.assertEqual(applied.content, "")
+                self.assertEqual(
+                    applied.applied_control_refs,
+                    rendered.selected_control_refs,
+                )
+
+    def test_false_relevance_without_control_does_not_suppress_memory(self) -> None:
+        result_value = lane_result(
+            MemoryLane.CLAIM,
+            records=(claim(),),
+            controls=(),
+            candidate_count=1,
+            visible_count=1,
+            eligible_count=1,
+            primary=(),
+            control_candidate_count=0,
+            control_primary=(),
+        )
+        envelope = single_lane_envelope(MemoryLane.CLAIM, result_value)
+        rendered = render_governed_memory_v1(
+            memory_input=self._assembly_input(envelope)
+        )
+        applied = self._apply(rendered, confirmed=False)
+        self.assertFalse(applied.direct_relevance_gate_required)
+        self.assertTrue(applied.memory_content_included)
+        self.assertEqual(applied.outcome, "included")
+        self.assertEqual(len(applied.injected_records), 1)
+        self.assertEqual(applied.applied_control_refs, ())
+
+    def test_decision_for_another_render_fails_closed(self) -> None:
+        alternate_input = self._assembly_input(
+            self.envelope,
+            cap=self.rendered.rendered_prompt_tokens,
+        )
+        alternate_render = render_governed_memory_v1(
+            memory_input=alternate_input
+        )
+        decision = MemoryControlApplicationDecisionV1.create(
+            render_result=alternate_render,
+            direct_relevance_confirmed=True,
+        )
+        with self.assertRaisesRegex(
+            MemoryPromptRendererError,
+            "binding mismatch",
+        ):
+            apply_memory_control_decision_v1(
+                render_result=self.rendered,
+                decision=decision,
+            )
+
+    def test_application_preserves_bindings_and_has_a_verified_manifest(self) -> None:
+        applied = self._apply(confirmed=True)
+        self.assertEqual(
+            applied.assembly_input_sha256,
+            self.rendered.assembly_input_sha256,
+        )
+        self.assertEqual(
+            applied.request_binding_sha256,
+            self.rendered.request_binding_sha256,
+        )
+        self.assertEqual(
+            applied.render_manifest_sha256,
+            self.rendered.render_manifest_sha256,
+        )
+        parsed = MemoryPromptApplicationResultV1.from_wire_json(
+            applied.canonical_json_bytes()
+        )
+        self.assertEqual(parsed, applied)
+
+    def test_wire_parsers_reject_duplicate_keys_at_every_stage(self) -> None:
+        decision = MemoryControlApplicationDecisionV1.create(
+            render_result=self.rendered,
+            direct_relevance_confirmed=True,
+        )
+        applied = apply_memory_control_decision_v1(
+            render_result=self.rendered,
+            decision=decision,
+        )
+        cases = (
+            (
+                type(self.rendered),
+                self.rendered.canonical_json_bytes(),
+                '"kind":"memory"',
+            ),
+            (
+                MemoryControlApplicationDecisionV1,
+                decision.canonical_json_bytes(),
+                '"direct_relevance_confirmed":true',
+            ),
+            (
+                MemoryPromptApplicationResultV1,
+                applied.canonical_json_bytes(),
+                '"outcome":"included"',
+            ),
+        )
+        for model_type, wire, duplicate in cases:
+            with self.subTest(model_type=model_type.__name__):
+                forged = wire[:-1] + b"," + duplicate.encode("utf-8") + b"}"
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "duplicate JSON object key",
+                ):
+                    model_type.from_wire_json(forged)
+
+    def test_private_content_is_hidden_from_model_representations(self) -> None:
+        marker = "Dahlia was Eric's dog."
+        applied = self._apply(confirmed=True)
+        self.assertNotIn(marker, repr(self.rendered))
+        self.assertNotIn(marker, repr(applied))
+
+    def test_sanitized_reports_exclude_content_and_stable_handles(self) -> None:
+        for report in (
+            self.rendered.sanitized_report(),
+            self._apply(confirmed=True).sanitized_report(),
+        ):
+            serialized = canonical_text(report)
+            self.assertNotIn("content", report)
+            self.assertNotIn("fragments", report)
+            self.assertNotIn(str(OWNER), serialized)
+            for record in self.envelope.records:
+                self.assertNotIn(str(record.record_id), serialized)
 
 
 if __name__ == "__main__":
