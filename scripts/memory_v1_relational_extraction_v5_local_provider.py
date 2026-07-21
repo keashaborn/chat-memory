@@ -1115,6 +1115,13 @@ _PET_WEIGHT_RE = re.compile(
     r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_PET_PRONOUN_WEIGHT_RE = re.compile(
+    r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b"
+    r".{0,180}\b(?:he|she|it)(?:['’]s|\s+is)?\s+"
+    r"(?:currently\s+)?(?:about\s+|approximately\s+)?"
+    r"\d+(?:\.\d+)?\s*(?:pounds?|lbs?|kilograms?|kg)\b",
+    re.IGNORECASE | re.DOTALL,
+)
 _PET_HEARING_PATTERNS = (
     (re.compile(r"\bhard(?:\s+of\s+hearing|-of-hearing)\b", re.IGNORECASE),
      "hard_of_hearing"),
@@ -1480,6 +1487,7 @@ def _deterministic_policy_packet(
         _STRUCTURED_DOMAIN_RE.search(content)
         and _STRUCTURED_ACTION_RE.search(content)
         and not _PET_WEIGHT_RE.search(content)
+        and not _PET_PRONOUN_WEIGHT_RE.search(content)
     )
     question = content.endswith("?") or bool(
         re.match(
@@ -3292,6 +3300,7 @@ class LocalStructuredResult:
     response_sha256: str
     prompt_tokens: int | None
     completion_tokens: int | None
+    content_normalization: str = "exact_json"
 
 
 class LocalStructuredTransport(Protocol):
@@ -3579,6 +3588,9 @@ class LocalLlamaCppProvider:
                 "response_sha256": result.response_sha256,
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
+                "structured_content_normalization": (
+                    result.content_normalization
+                ),
             }
         )
         if result.model != self._model:
@@ -3838,15 +3850,6 @@ def _structured_result(value: Any) -> LocalStructuredResult:
             "local_response_content_invalid",
             retryable=False,
         )
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise LocalProviderAdapterError(
-            "local_structured_content_invalid",
-            retryable=False,
-        ) from exc
-    usage = value.get("usage")
-    usage = usage if isinstance(usage, dict) else {}
     response_id = value.get("id")
     model = value.get("model")
     finish_reason = choice.get("finish_reason")
@@ -3855,6 +3858,34 @@ def _structured_result(value: Any) -> LocalStructuredResult:
             "local_response_metadata_invalid",
             retryable=False,
         )
+    # A length-limited response is expected to contain incomplete JSON. Classify
+    # it as retryable before parsing so it is never mistaken for a permanent
+    # structured-output failure.
+    if finish_reason != "stop":
+        raise LocalProviderAdapterError(
+            "local_incomplete_response",
+            retryable=True,
+        )
+    normalized_content = content.strip()
+    content_normalization = "exact_json"
+    if normalized_content.startswith("```") and normalized_content.endswith("```"):
+        lines = normalized_content.splitlines()
+        if (
+            len(lines) >= 3
+            and lines[0].strip().casefold() in {"```", "```json"}
+            and lines[-1].strip() == "```"
+        ):
+            normalized_content = "\n".join(lines[1:-1]).strip()
+            content_normalization = "markdown_json_fence_removed"
+    try:
+        parsed = json.loads(normalized_content)
+    except json.JSONDecodeError as exc:
+        raise LocalProviderAdapterError(
+            "local_structured_content_invalid",
+            retryable=False,
+        ) from exc
+    usage = value.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
     return LocalStructuredResult(
         response_id=str(response_id) if response_id else None,
         model=model,
@@ -3865,6 +3896,7 @@ def _structured_result(value: Any) -> LocalStructuredResult:
         completion_tokens=_optional_nonnegative_int(
             usage.get("completion_tokens")
         ),
+        content_normalization=content_normalization,
     )
 
 
