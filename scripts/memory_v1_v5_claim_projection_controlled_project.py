@@ -35,6 +35,7 @@ MAX_CLAIMS_PER_CONTROLLED_RUN = 4
 QUERY_BY_PREDICATE = {
     "relationship.has_pet": "Do you remember my pet?",
     "relationship.parent_of": "Do you remember who my dad is?",
+    "life_event.died": "Have I had any deaths in the family?",
     "identity.name": "What was my pet's name?",
     "pet.sex": "Was Dahlia female or male?",
     "pet.breed": "What breed was Dahlia?",

@@ -56,6 +56,12 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
     def test_parent_relationship_has_an_approved_shadow_query(self) -> None:
         self.assertIn("relationship.parent_of", QUERY_BY_PREDICATE)
 
+    def test_death_event_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["life_event.died"],
+            "Have I had any deaths in the family?",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
