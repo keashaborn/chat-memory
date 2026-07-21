@@ -848,7 +848,13 @@ def _ranked_records(
             )
         )
     scored.sort(key=lambda item: item[:4])
-    return [item[4] for item in scored]
+    ranked = [item[4] for item in scored]
+    if not ranked and request.policy_decision.response_mode is PolicyResponseMode.FM_EXPLICIT:
+        # An explicit FM request must always receive bounded canonical content.
+        # Narrow lexical matches remain preferred; the fixed overview is the
+        # authoritative fallback for broad or previously unseen wording.
+        return [index[record_id] for record_id in FM_EXPLICIT_OVERVIEW_IDS]
+    return ranked
 
 
 def _selected_records(

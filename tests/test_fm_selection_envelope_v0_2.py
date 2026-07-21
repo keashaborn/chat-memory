@@ -161,6 +161,17 @@ class FMSelectionEnvelopeV02Tests(unittest.TestCase):
         self.assertIn("FM-AG-001", envelope.application_boundary_ids)
         self.assertIn("FM-C-034", envelope.application_boundary_ids)
 
+    def test_broad_explicit_internal_philosophy_query_uses_overview(self) -> None:
+        envelope = self.select(
+            query_text=(
+                "Could you tell me about Fractal Monism, an internal philosophy "
+                "that is attached to this chat?"
+            )
+        )
+        self.assertEqual(envelope.status, "SELECTED")
+        self.assertEqual(envelope.reason_codes, ("selected",))
+        self.assertEqual(envelope.selected_record_ids, FM_EXPLICIT_OVERVIEW_IDS)
+
     def test_explicit_local_access_question_selects_boundary_not_history(self) -> None:
         envelope = self.select(
             query_text=(
