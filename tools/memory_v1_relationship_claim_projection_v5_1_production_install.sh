@@ -126,9 +126,18 @@ capture_memory_state() {
 }
 
 service_health() {
+  set -a
+  source "$repo_root/.env"
+  set +a
+  [[ -n "${VS_SERVICE_TOKEN:-}" ]]
   [[ "$(systemctl is-active brains.service)" == active ]]
   curl --fail --silent --show-error --max-time 15 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
     http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
+  curl --fail --silent --show-error --max-time 15 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/readyz \
+    | jq -e '.ok==true and .postgres==true' >/dev/null
 }
 
 phase=preflight
