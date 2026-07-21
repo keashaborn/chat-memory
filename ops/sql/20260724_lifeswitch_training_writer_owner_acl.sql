@@ -17,6 +17,21 @@ $role_check$;
 -- SECURITY DEFINER writers execute as this NOLOGIN owner.  Keep raw write
 -- privileges away from application roles while granting the owner only the
 -- operations required by the governed create/correct/void functions.
+REVOKE DELETE, TRUNCATE
+  ON TABLE lifeswitch_training.training_session
+  FROM lifeswitch_training_observation_owner;
+
+REVOKE UPDATE, DELETE, TRUNCATE
+  ON TABLE
+    lifeswitch_training.training_set_log,
+    lifeswitch_training.training_set_log_segment,
+    lifeswitch_training.training_observation_event
+  FROM lifeswitch_training_observation_owner;
+
+REVOKE DELETE, TRUNCATE
+  ON TABLE lifeswitch_training.conditioning_session_log
+  FROM lifeswitch_training_observation_owner;
+
 GRANT SELECT, INSERT, UPDATE
   ON TABLE lifeswitch_training.training_session
   TO lifeswitch_training_observation_owner;
