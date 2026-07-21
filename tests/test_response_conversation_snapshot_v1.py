@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 
 from rag_engine.response_conversation_snapshot_v1 import (
     ASSISTANT_SOURCE,
+    ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotError,
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,
@@ -104,13 +106,13 @@ class FakeConnection:
         self.fetch_calls.append((sql, args))
         if "AND source=$4" in sql:
             return list(self.current_rows)
-        if "source=ANY" in sql:
+        if "assistant_transcript_attestation_v1" in sql:
             return list(self.prior_rows)
         raise AssertionError(f"unexpected fetch query: {sql}")
 
 
 def current_row(text: str = "Current message") -> dict[str, Any]:
-    return {
+    row = {
         "id": CURRENT_ID,
         "owner_user_id": ACTOR,
         "thread_id": THREAD,
@@ -137,10 +139,14 @@ def prior_row(
         "request_id": request_id or f"prior-{number}",
         "created_at": NOW - timedelta(minutes=number),
     }
+    if source == ATTESTED_ASSISTANT_SOURCE:
+        row["assistant_text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        row["attestation_sha256"] = "a" * 64
+    return row
 
 
 class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
-    def test_snapshot_contract_rejects_request_authored_assistant_history(self) -> None:
+    def test_snapshot_contract_accepts_typed_assistant_history(self) -> None:
         messages = (
             ResponsePolicyConversationMessageV0_2(
                 role=ConversationRole.ASSISTANT,
@@ -151,19 +157,19 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 content="Current message",
             ),
         )
-        with self.assertRaises(ValidationError):
-            _snapshot(
-                actor=ACTOR,
-                thread=THREAD,
-                request_id=REQUEST_ID,
-                outcome=ConversationSnapshotOutcome.CURRENT_REQUEST_BOUND,
-                current_log_id=CURRENT_ID,
-                cutoff=NOW,
-                messages=messages,
-                candidate_count=1,
-                dropped_count=0,
-                message_limit_truncated=False,
-            )
+        snapshot = _snapshot(
+            actor=ACTOR,
+            thread=THREAD,
+            request_id=REQUEST_ID,
+            outcome=ConversationSnapshotOutcome.CURRENT_REQUEST_BOUND,
+            current_log_id=CURRENT_ID,
+            cutoff=NOW,
+            messages=messages,
+            candidate_count=1,
+            dropped_count=0,
+            message_limit_truncated=False,
+        )
+        self.assertEqual(snapshot.messages[0].role, ConversationRole.ASSISTANT)
 
     def test_absent_snapshot_contract_rejects_any_prior_history(self) -> None:
         messages = (
@@ -240,9 +246,30 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         history_query, args = conn.fetch_calls[1]
         self.assertIn("request_id IS DISTINCT FROM $3", history_query)
         self.assertEqual(args[2], REQUEST_ID)
-        self.assertEqual(args[3], [USER_SOURCE])
-        self.assertEqual(args[4], NOW)
-        self.assertEqual(args[5], CURRENT_ID)
+        self.assertEqual(args[3], USER_SOURCE)
+        self.assertEqual(args[4], ATTESTED_ASSISTANT_SOURCE)
+        self.assertEqual(args[5], NOW)
+        self.assertEqual(args[6], CURRENT_ID)
+
+    async def test_attested_backend_assistant_history_is_admitted(self) -> None:
+        conn = FakeConnection(
+            current_rows=[current_row()],
+            prior_rows=[
+                prior_row(
+                    number=1,
+                    source=ATTESTED_ASSISTANT_SOURCE,
+                    text="server answer",
+                )
+            ],
+        )
+        snapshot = await load_response_conversation_snapshot_v1(
+            conn,
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id=REQUEST_ID,
+            current_message="Current message",
+        )
+        self.assertEqual(snapshot.messages[0].role, ConversationRole.ASSISTANT)
 
     async def test_budget_drops_oldest_candidates_without_truncating_text(self) -> None:
         newer = "n" * 30_000
