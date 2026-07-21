@@ -10,7 +10,9 @@ from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
 
 
 class ResponsePersistenceError(RuntimeError):
-    pass
+    def __init__(self, stage: str) -> None:
+        self.stage = stage
+        super().__init__("finalized response persistence failed")
 
 
 async def persist_finalized_response_v1(
@@ -21,6 +23,7 @@ async def persist_finalized_response_v1(
     request_id: str,
     finalized: FinalizedTrustedResponseV1,
 ) -> None:
+    stage = "validation"
     try:
         value = FinalizedTrustedResponseV1.model_validate_json(
             finalized.model_dump_json()
@@ -30,8 +33,11 @@ async def persist_finalized_response_v1(
         if value.attestation.thread_id != thread_id:
             raise ValueError("attestation thread mismatch")
 
+        stage = "transaction"
         async with conn.transaction():
+            stage = "actor_scope"
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner_user_id))
+            stage = "thread_owner_check"
             owns_thread = await conn.fetchval(
                 """
                 SELECT EXISTS(
@@ -46,6 +52,7 @@ async def persist_finalized_response_v1(
                 raise ValueError("owner thread is absent")
 
             attestation = value.attestation
+            stage = "chat_log_insert"
             await conn.execute(
                 """
                 INSERT INTO public.chat_log(
@@ -63,6 +70,7 @@ async def persist_finalized_response_v1(
                 request_id,
                 attestation.created_at,
             )
+            stage = "attestation_insert"
             await conn.execute(
                 """
                 INSERT INTO memory.assistant_transcript_attestation_v1(
@@ -89,6 +97,7 @@ async def persist_finalized_response_v1(
                 attestation.created_at,
             )
             if value.memory_binding is not None:
+                stage = "memory_binding_insert"
                 binding = value.memory_binding
                 await conn.execute(
                     """
@@ -105,13 +114,14 @@ async def persist_finalized_response_v1(
                     json.dumps(binding.model_dump(mode="json"), separators=(",", ":"), sort_keys=True),
                     binding.created_at,
                 )
+            stage = "thread_touch"
             await conn.execute(
                 "UPDATE public.threads SET updated_at=now() WHERE owner_user_id=$1 AND id=$2",
                 owner_user_id,
                 thread_id,
             )
     except Exception:
-        raise ResponsePersistenceError("finalized response persistence failed") from None
+        raise ResponsePersistenceError(stage) from None
 
 
 __all__ = ["ResponsePersistenceError", "persist_finalized_response_v1"]

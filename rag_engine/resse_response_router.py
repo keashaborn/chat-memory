@@ -3,6 +3,7 @@ from __future__ import annotations
 """Authenticated, backend-owned RESSE response endpoint."""
 
 import os
+import logging
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -21,6 +22,7 @@ from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
 
 
@@ -94,7 +96,11 @@ async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
     except HTTPException:
         raise
     except Exception as exc:
-        print(f"[resse_response] request failed error_type={type(exc).__name__}")
+        logger.error(
+            "[resse_response] request failed error_type=%s persistence_stage=%s",
+            type(exc).__name__,
+            str(getattr(exc, "stage", "not_applicable")),
+        )
         raise HTTPException(status_code=503, detail="response_generation_unavailable") from None
     finally:
         await conn.close()

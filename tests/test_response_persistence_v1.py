@@ -103,7 +103,7 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
             ResponsePersistenceError,
             "finalized response persistence failed",
-        ):
+        ) as raised:
             await persist_finalized_response_v1(
                 conn,
                 owner_user_id=ACTOR,
@@ -111,6 +111,8 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
                 request_id="persistence-request",
                 finalized=finalized,
             )
+
+        self.assertEqual(raised.exception.stage, "thread_owner_check")
 
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertNotIn("INSERT INTO public.chat_log", sql)
