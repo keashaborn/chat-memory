@@ -18,9 +18,12 @@ CONTRACT_VERSION = "memory_v1_relational_extraction_v5"
 REGISTRY_VERSION = "memory_predicate_registry_v5"
 CONTRACT_VERSION_V5_1 = "memory_v1_relational_extraction_v5_1"
 REGISTRY_VERSION_V5_1 = "memory_predicate_registry_v5_1"
+CONTRACT_VERSION_V5_2 = "memory_v1_relational_extraction_v5_2"
+REGISTRY_VERSION_V5_2 = "memory_predicate_registry_v5_2"
 SUPPORTED_CONTRACT_PROFILES = {
     REGISTRY_VERSION: CONTRACT_VERSION,
     REGISTRY_VERSION_V5_1: CONTRACT_VERSION_V5_1,
+    REGISTRY_VERSION_V5_2: CONTRACT_VERSION_V5_2,
 }
 TEMPORAL_POLICY_VERSION = "memory_temporal_normalization_v5"
 SYNTHETIC_PROVIDER_ID = "synthetic_fixture"
@@ -93,6 +96,7 @@ ProjectionClass = Literal[
     "life_preference",
     "response_preference",
     "project_knowledge",
+    "reported_stance",
     "never_surface",
 ]
 Sensitivity = Literal["low", "medium", "high", "restricted"]
@@ -162,12 +166,21 @@ class ResponsePreferenceValue(StrictModel):
     value: str = Field(min_length=1, max_length=500)
 
 
+class ReportedStanceValue(StrictModel):
+    topic_key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,99}$")
+    topic_text: str = Field(min_length=1, max_length=300)
+    position: str = Field(min_length=1, max_length=1500)
+    orientation: Literal["supports", "opposes", "mixed", "uncertain"]
+    context: str | None = Field(max_length=500)
+
+
 LiteralValue = (
     str
     | float
     | bool
     | LifePreferenceValue
     | ResponsePreferenceValue
+    | ReportedStanceValue
 )
 
 
@@ -278,6 +291,7 @@ class ProviderObservation(StrictModel):
         "planned",
         "endorsed",
         "reported_observation",
+        "reported_belief",
     ]
     projection_class: ProjectionClass
     surface_policy: Literal[
@@ -287,6 +301,7 @@ class ProviderObservation(StrictModel):
         "normalization_only",
         "exact_project_scope_only",
         "relevant_recommendation_or_explicit_recall",
+        "relevant_recall_or_explicit_recall",
         "zero_token_control_only",
         "never",
     ]
@@ -313,6 +328,7 @@ class NormalizedObservation(StrictModel):
         "planned",
         "endorsed",
         "reported_observation",
+        "reported_belief",
     ]
     projection_class: ProjectionClass
     surface_policy: Literal[
@@ -322,6 +338,7 @@ class NormalizedObservation(StrictModel):
         "normalization_only",
         "exact_project_scope_only",
         "relevant_recommendation_or_explicit_recall",
+        "relevant_recall_or_explicit_recall",
         "zero_token_control_only",
         "never",
     ]
@@ -375,6 +392,7 @@ class ProviderDeferral(StrictModel):
         "life_preference",
         "response_preference",
         "project_knowledge",
+        "reported_stance",
         "never_surface",
     ]
     source_spans: list[ProposedSourceSpan] = Field(max_length=8)
@@ -404,6 +422,7 @@ class NormalizedDeferral(StrictModel):
         "life_preference",
         "response_preference",
         "project_knowledge",
+        "reported_stance",
         "never_surface",
     ]
     source_spans: list[NormalizedSourceSpan] = Field(max_length=8)
@@ -431,11 +450,13 @@ class NormalizedPacket(StrictModel):
     contract_version: Literal[
         "memory_v1_relational_extraction_v5",
         "memory_v1_relational_extraction_v5_1",
+        "memory_v1_relational_extraction_v5_2",
     ]
     source_envelope: SourceEnvelope
     predicate_registry_version: Literal[
         "memory_predicate_registry_v5",
         "memory_predicate_registry_v5_1",
+        "memory_predicate_registry_v5_2",
     ]
     entity_mentions: list[NormalizedEntityMention] = Field(max_length=24)
     observations: list[NormalizedObservation] = Field(max_length=32)

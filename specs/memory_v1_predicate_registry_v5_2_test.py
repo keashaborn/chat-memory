@@ -72,6 +72,10 @@ def main() -> int:
         "memory_v1_relational_extraction_v5_2"
     ):
         raise AssertionError("schema contract mismatch")
+    if schema["properties"]["predicate_registry_version"] != {
+        "const": "memory_predicate_registry_v5_2"
+    }:
+        raise AssertionError("schema registry binding mismatch")
     if registry["runtime_active"] is not False or registry["status"] != "proposed":
         raise AssertionError("V5.2 must remain inactive and proposed")
     if registry["unknown_predicate_action"] != "defer_unregistered_predicate":

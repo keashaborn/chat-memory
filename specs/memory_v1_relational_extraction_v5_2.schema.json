@@ -22,9 +22,7 @@
       "$ref": "#/$defs/source_envelope"
     },
     "predicate_registry_version": {
-      "type": "string",
-      "pattern": "^memory_predicate_registry_v[0-9]+$",
-      "maxLength": 100
+      "const": "memory_predicate_registry_v5_2"
     },
     "entity_mentions": {
       "type": "array",
@@ -756,9 +754,10 @@
             "supportive_context",
             "correction",
             "life_preference",
-            "response_preference",
-            "project_knowledge",
-            "never_surface"
+        "response_preference",
+        "project_knowledge",
+        "reported_stance",
+        "never_surface"
           ]
         },
         "source_spans": {

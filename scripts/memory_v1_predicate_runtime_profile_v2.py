@@ -10,7 +10,7 @@ from typing import Any
 MANIFEST_CONTRACT = "memory_v1_predicate_runtime_profiles_v2"
 MANIFEST_PATH = "specs/memory_v1_predicate_runtime_profiles_v2.json"
 MANIFEST_SHA256 = (
-    "ba5593ac6fdf3ee906d7f2bc8785186482e5e9c47ceb301d833a11bf7cbc3ce3"
+    "a378075fd588eea5adda4be37e257909ba623a5a201c7648bfb9cada4ff19275"
 )
 PROFILE_NAMES = frozenset({"v5", "v5_1", "v5_2"})
 REVIEW_ONLY_PROFILES = ("v5_2",)
