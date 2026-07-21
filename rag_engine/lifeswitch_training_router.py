@@ -2221,27 +2221,27 @@ async def list_training_sessions(
                 coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
                 coalesce(count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
                 ), 0)::int as strength_set_count,
                 coalesce(count(distinct l.exercise_id) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
                 ), 0)::int as strength_exercise_count,
                 coalesce(sum(l.volume) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
                 ), 0)::float as strength_volume,
                 coalesce(count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
                 ), 0)::int as rehab_set_count,
                 coalesce(count(distinct l.exercise_id) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
                 ), 0)::int as rehab_exercise_count,
                 coalesce(sum(l.volume) filter (
                   where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
+                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
                 ), 0)::float as rehab_volume
               from {SCHEMA}.{session_source} s
               join {SCHEMA}.training_session base
