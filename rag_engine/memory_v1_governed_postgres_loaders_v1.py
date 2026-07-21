@@ -103,12 +103,12 @@ async def load_governed_v5_claim_rows_v1(
         controls = await _establish_read_controls(conn, actor)
         await _verify_restricted_read_function(
             conn,
-            "memory.read_v5_shadow_claims(uuid[])",
+            "memory.read_governed_claims_v1(uuid[])",
         )
         controls["restricted_read_contract"] = True
         rows = list(
             await conn.fetch(
-                "SELECT * FROM memory.read_v5_shadow_claims($1::uuid[])",
+                "SELECT * FROM memory.read_governed_claims_v1($1::uuid[])",
                 list(requested),
             )
         )

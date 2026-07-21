@@ -25,6 +25,7 @@ from rag_engine.openai_chat_provider_v1 import (
 from rag_engine.openai_moderation_adapter_v0_2 import OpenAIModerationAdapterV0_2
 from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotV1,
+    create_current_only_conversation_snapshot_v1,
     load_response_conversation_snapshot_v1,
 )
 from rag_engine.response_finalization_v1 import (
@@ -69,6 +70,7 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
     current_message: str = Field(min_length=1, max_length=32_768, repr=False)
     request_field_names: tuple[str, ...] = ()
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
+    stateless: bool = False
 
     @field_validator("request_id")
     @classmethod
@@ -181,13 +183,21 @@ class InactiveResponseCompositionRootV0_2:
             command = AuthenticatedResponseCommandV0_2.model_validate_json(
                 command.model_dump_json()
             )
-            snapshot = await load_response_conversation_snapshot_v1(
-                conn,
-                authenticated_actor_user_id=command.authenticated_actor_user_id,
-                thread_id=command.thread_id,
-                current_request_id=command.request_id,
-                current_message=command.current_message,
-            )
+            if command.stateless:
+                snapshot = create_current_only_conversation_snapshot_v1(
+                    authenticated_actor_user_id=command.authenticated_actor_user_id,
+                    thread_id=command.thread_id,
+                    current_request_id=command.request_id,
+                    current_message=command.current_message,
+                )
+            else:
+                snapshot = await load_response_conversation_snapshot_v1(
+                    conn,
+                    authenticated_actor_user_id=command.authenticated_actor_user_id,
+                    thread_id=command.thread_id,
+                    current_request_id=command.request_id,
+                    current_message=command.current_message,
+                )
             policy_input = ResponsePolicyInputV0_2.create(
                 request_id=snapshot.current_request_id,
                 conversation=snapshot.messages,

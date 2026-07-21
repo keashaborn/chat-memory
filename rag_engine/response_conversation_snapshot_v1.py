@@ -2,12 +2,10 @@ from __future__ import annotations
 
 """Owner-scoped, request-cutoff transcript snapshot for response policy.
 
-The current Verbal Sage flow records the user turn before calling Brains.  This
-reader binds history to that exact request row and uses its `(created_at, id)`
-as the cutoff.  Legacy ``chat_log.source`` is request-authored, so this reader
-admits only legacy user rows at user authority.  Assistant history remains
-withheld until a server-attested capture contract exists.  If the current
-request row is absent, the safe result contains only the current message.
+The Verbal Sage flow records the user turn before calling Brains. This reader
+binds history to that exact request row and uses its ``(created_at, id)`` as the
+cutoff. User rows retain user authority. Assistant rows are admitted only when
+they were written by the backend and have an exact append-only attestation.
 """
 
 import hashlib
@@ -29,8 +27,10 @@ from rag_engine.response_policy_v0_2 import (
 SNAPSHOT_VERSION = "response_conversation_snapshot_v1"
 USER_SOURCE = "frontend/chat:user"
 ASSISTANT_SOURCE = "frontend/chat:assistant"
+ATTESTED_ASSISTANT_SOURCE = "backend/resse:assistant:v1"
 SOURCE_ROLE = {
     USER_SOURCE: ConversationRole.USER,
+    ATTESTED_ASSISTANT_SOURCE: ConversationRole.ASSISTANT,
 }
 
 MAX_PRIOR_MESSAGES = 23
@@ -132,10 +132,6 @@ class ConversationSnapshotV1(_StrictFrozenModel):
     def exact_snapshot(self) -> "ConversationSnapshotV1":
         if self.messages[-1].role is not ConversationRole.USER:
             raise ValueError("snapshot must end with the current user message")
-        if any(item.role is not ConversationRole.USER for item in self.messages):
-            raise ValueError(
-                "legacy transcript snapshot may contain only user-authority rows"
-            )
         if self.outcome is ConversationSnapshotOutcome.CURRENT_REQUEST_BOUND:
             if self.current_log_id is None or self.cutoff_created_at is None:
                 raise ValueError("bound snapshot requires current row cutoff")
@@ -393,21 +389,36 @@ async def load_response_conversation_snapshot_v1(
             prior_rows = list(
                 await conn.fetch(
                     """
-                    SELECT id,owner_user_id,thread_id,source,text,request_id,created_at
-                    FROM public.chat_log
-                    WHERE owner_user_id=$1
-                      AND thread_id=$2
-                      AND request_id IS DISTINCT FROM $3
-                      AND request_id IS NOT NULL
-                      AND source=ANY($4::text[])
-                      AND (created_at,id)<($5,$6)
-                    ORDER BY created_at DESC,id DESC
-                    LIMIT $7
+                    SELECT log.id,log.owner_user_id,log.thread_id,log.source,
+                           log.text,log.request_id,log.created_at,
+                           attestation.assistant_text_sha256,
+                           attestation.attestation_sha256
+                    FROM public.chat_log AS log
+                    LEFT JOIN memory.assistant_transcript_attestation_v1 AS attestation
+                      ON attestation.owner_user_id=log.owner_user_id
+                     AND attestation.thread_id=log.thread_id
+                     AND attestation.chat_log_id=log.id
+                     AND attestation.answer_id=log.id
+                    WHERE log.owner_user_id=$1
+                      AND log.thread_id=$2
+                      AND log.request_id IS DISTINCT FROM $3
+                      AND log.request_id IS NOT NULL
+                      AND (
+                        log.source=$4
+                        OR (
+                          log.source=$5
+                          AND attestation.answer_id IS NOT NULL
+                        )
+                      )
+                      AND (log.created_at,log.id)<($6,$7)
+                    ORDER BY log.created_at DESC,log.id DESC
+                    LIMIT $8
                     """,
                     authenticated_actor_user_id,
                     thread_id,
                     current_request_id,
-                    [USER_SOURCE],
+                    USER_SOURCE,
+                    ATTESTED_ASSISTANT_SOURCE,
                     cutoff,
                     current_log_id,
                     MAX_PRIOR_MESSAGES + 1,
@@ -467,6 +478,17 @@ async def load_response_conversation_snapshot_v1(
         text = row.get("text")
         if not isinstance(text, str) or not text:
             raise ConversationSnapshotError("prior transcript text is empty")
+        if source == ATTESTED_ASSISTANT_SOURCE:
+            expected_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if row.get("assistant_text_sha256") != expected_text_hash:
+                raise ConversationSnapshotError(
+                    "assistant transcript differs from its attestation"
+                )
+            attestation_hash = str(row.get("attestation_sha256") or "")
+            if len(attestation_hash) != 64 or any(
+                char not in "0123456789abcdef" for char in attestation_hash
+            ):
+                raise ConversationSnapshotError("assistant attestation is invalid")
         size = len(text.encode("utf-8"))
         if size > MAX_CURRENT_MESSAGE_BYTES:
             raise ConversationSnapshotError("one prior message exceeds snapshot budget")
@@ -497,6 +519,7 @@ async def load_response_conversation_snapshot_v1(
 
 __all__ = [
     "ASSISTANT_SOURCE",
+    "ATTESTED_ASSISTANT_SOURCE",
     "ConversationSnapshotError",
     "ConversationSnapshotOutcome",
     "ConversationSnapshotV1",

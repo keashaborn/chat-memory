@@ -87,6 +87,12 @@ def _get_client(provider: str = "openai") -> OpenAI:
     return c
 
 
+def get_openai_client() -> OpenAI:
+    """Return the process-wide OpenAI client without exposing credentials."""
+
+    return _get_client("openai")
+
+
 # ----------------------------
 # Public helpers
 # ----------------------------

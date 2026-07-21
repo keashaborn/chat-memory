@@ -14,6 +14,7 @@ from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from pydantic import BaseModel
 from rag_engine.vantage_router import router as vantage_router
+from rag_engine.resse_response_router import router as resse_response_router
 from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
 from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutrition_log_router
@@ -44,6 +45,7 @@ from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(vantage_router, prefix="/vantage")
+app.include_router(resse_response_router, prefix="/response")
 app.include_router(telemetry_router)
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")

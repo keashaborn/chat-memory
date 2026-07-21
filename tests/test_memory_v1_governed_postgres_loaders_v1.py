@@ -79,7 +79,7 @@ class FakeConn:
 
     async def fetch(self, query: str, *args: Any) -> list[dict[str, Any]]:
         self.fetches.append((query, args))
-        if "read_v5_shadow_claims" in query:
+        if "read_governed_claims_v1" in query:
             return self.claim_rows
         if "read_v5_shadow_project_knowledge" in query:
             return self.project_rows
@@ -101,6 +101,10 @@ def claim_row(*, owner: UUID = OWNER) -> dict[str, Any]:
     return {
         "owner_user_id": owner,
         "claim_id": CLAIM,
+        "revision_id": None,
+        "superseded_by": None,
+        "component_key": None,
+        "source_content_sha256": "a" * 64,
         "metadata": {"memory_contract": "memory_projection_v5"},
         "retrieval_policy": {"surface_policy": "direct_or_relevant"},
         "evidence_by_stance": {
@@ -136,7 +140,8 @@ class GovernedPostgresLoadersV1Tests(unittest.IsolatedAsyncioTestCase):
             conn.transaction_entries,
             [{"isolation": "repeatable_read", "readonly": True}],
         )
-        self.assertNotIn("revision_id", batch["records"][0])
+        self.assertIsNone(batch["records"][0]["revision_id"])
+        self.assertEqual(batch["records"][0]["source_content_sha256"], "a" * 64)
 
     async def test_claim_loader_rejects_cross_owner_rows(self) -> None:
         with self.assertRaises(GovernedPostgresLoaderError):
