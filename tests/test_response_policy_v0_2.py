@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+import ast
+import hashlib
+import json
+from pathlib import Path
+import unittest
+
+from pydantic import ValidationError
+
+from rag_engine.response_policy_v0_2 import (
+    ASSISTANT_PROFILE_ID,
+    MODE_PRECEDENCE,
+    Closure,
+    FMLevel,
+    GateState,
+    ResponseMode,
+    ResponsePolicyDecisionV0_2,
+    ResponsePolicyInputV0_2,
+    ResponsePolicySignalsV0_2,
+    decide_response_policy_v0_2,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODULE = ROOT / "rag_engine" / "response_policy_v0_2.py"
+
+
+def request(message: str, **kwargs):
+    return ResponsePolicyInputV0_2(message=message, **kwargs)
+
+
+class ResponsePolicyV0_2Test(unittest.TestCase):
+    def test_precedence_constant_is_exact(self) -> None:
+        self.assertEqual(
+            MODE_PRECEDENCE,
+            (
+                ResponseMode.HIGH_STAKES,
+                ResponseMode.TECHNICAL,
+                ResponseMode.FM_EXPLICIT,
+                ResponseMode.COACHING,
+                ResponseMode.ORDINARY,
+            ),
+        )
+
+    def test_all_trusted_mode_signals_use_high_stakes_precedence(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("neutral text"),
+            signals=ResponsePolicySignalsV0_2(
+                high_stakes=True,
+                technical=True,
+                fm_explicit=True,
+                coaching=True,
+            ),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.high_stakes_gate, GateState.TRIGGERED)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+
+    def test_technical_precedes_fm_and_coaching(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("neutral text"),
+            signals=ResponsePolicySignalsV0_2(
+                technical=True,
+                fm_explicit=True,
+                coaching=True,
+            ),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(result.fm_default_level, FMLevel.OFF)
+
+    def test_fm_explicit_precedes_coaching(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("neutral text"),
+            signals=ResponsePolicySignalsV0_2(fm_explicit=True, coaching=True),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
+        self.assertEqual(result.fm_effective_level, FMLevel.EXPLICIT)
+
+    def test_local_detection_selects_each_nonordinary_mode(self) -> None:
+        cases = (
+            ("Implement the API patch in Python.", ResponseMode.TECHNICAL),
+            ("Explain Fractal Monism.", ResponseMode.FM_EXPLICIT),
+            ("Help me stop missing workouts.", ResponseMode.COACHING),
+            ("What time is it?", ResponseMode.ORDINARY),
+        )
+        for message, expected in cases:
+            with self.subTest(message=message):
+                self.assertEqual(
+                    decide_response_policy_v0_2(request(message)).response_mode,
+                    expected,
+                )
+
+    def test_local_high_stakes_rule_is_a_hard_veto(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "Use the Fractal Monism Python router, but I have crushing "
+                "chest pain and shortness of breath right now."
+            ),
+            signals=ResponsePolicySignalsV0_2(
+                high_stakes=False,
+                technical=True,
+                fm_explicit=True,
+                safety_action_required=False,
+            ),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.closure, Closure.SAFETY_ACTION)
+        self.assertEqual(result.fm_default_level, FMLevel.OFF)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertIn(
+            "local_high_stakes:acute_medical",
+            result.mode_reasons,
+        )
+
+    def test_local_reality_testing_risk_overrides_explicit_fm(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "Use Fractal Monism to explain this: I am paranoid and everyone "
+                "can hear my thoughts."
+            )
+        )
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertEqual(result.closure, Closure.SAFETY_ACTION)
+
+    def test_uncertain_high_stakes_fails_closed(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("Explain Fractal Monism."),
+            signals=ResponsePolicySignalsV0_2(high_stakes_uncertain=True),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.high_stakes_gate, GateState.UNCERTAIN)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+
+    def test_fm_application_gate_is_independent_of_mode(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "I am grieving. Explain how Fractal Monism says I should understand "
+                "my loss."
+            )
+        )
+        self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
+        self.assertEqual(result.fm_default_level, FMLevel.EXPLICIT)
+        self.assertEqual(result.fm_application_gate, GateState.TRIGGERED)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertIn("fm_ag_001:acute_grief_or_loss", result.fm_gate_reasons)
+
+    def test_trusted_uncertain_application_gate_fails_closed(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("Explain Fractal Monism."),
+            signals=ResponsePolicySignalsV0_2(
+                fm_application_gate=GateState.UNCERTAIN
+            ),
+        )
+        self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
+        self.assertEqual(result.fm_application_gate, GateState.UNCERTAIN)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+
+    def test_user_opt_out_vetoes_fm(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("Explain Fractal Monism."),
+            signals=ResponsePolicySignalsV0_2(user_fm_opt_out=True),
+        )
+        self.assertEqual(result.fm_default_level, FMLevel.EXPLICIT)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertTrue(result.user_opt_out_applied)
+        self.assertIn("fm_off_by_user_opt_out", result.fm_gate_reasons)
+
+    def test_ordinary_is_off_unless_trusted_relevance_enables_light(self) -> None:
+        ordinary = decide_response_policy_v0_2(request("Another way to see this?"))
+        light = decide_response_policy_v0_2(
+            request("Another way to see this?"),
+            signals=ResponsePolicySignalsV0_2(ordinary_fm_relevant=True),
+        )
+        self.assertEqual(ordinary.fm_effective_level, FMLevel.OFF)
+        self.assertEqual(light.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(light.fm_effective_level, FMLevel.LIGHT)
+
+    def test_coaching_defaults_to_light_subject_to_gate(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("Help me stop missing workouts.")
+        )
+        self.assertEqual(result.response_mode, ResponseMode.COACHING)
+        self.assertEqual(result.fm_default_level, FMLevel.LIGHT)
+        self.assertEqual(result.fm_effective_level, FMLevel.LIGHT)
+        self.assertEqual(result.closure, Closure.MATERIAL_CLARIFICATION)
+
+    def test_fixed_identity_legacy_fields_and_independent_memory(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "I have crushing chest pain.",
+                requested_assistant_profile_id="MORGAN",
+                request_field_names=(
+                    "assistant_profile_id",
+                    "mix",
+                    "response_mode",
+                    "vantage_id",
+                ),
+            )
+        )
+        self.assertEqual(result.assistant_profile_id, ASSISTANT_PROFILE_ID)
+        self.assertEqual(
+            result.ignored_legacy_request_fields,
+            ("assistant_profile_id", "mix", "response_mode", "vantage_id"),
+        )
+        self.assertIn("requested_assistant_profile_rejected", result.mode_reasons)
+        self.assertTrue(result.governed_memory_allowed)
+        self.assertTrue(result.structured_data_allowed)
+
+    def test_closure_variants_are_deterministic(self) -> None:
+        cases = (
+            (
+                "Walk me through the server restart one command at a time.",
+                Closure.TECHNICAL_PROCEDURE,
+            ),
+            (
+                "I want to test a change. Yes, let's track missed sessions.",
+                Closure.CONSENTED_COACHING,
+            ),
+            ("Give me next steps for organizing my desk.", Closure.EXPLICIT_NEXT_STEP),
+            ("What is the capital of France?", Closure.COMPLETE),
+        )
+        for message, expected in cases:
+            with self.subTest(message=message):
+                self.assertEqual(
+                    decide_response_policy_v0_2(request(message)).closure,
+                    expected,
+                )
+
+    def test_decision_hash_is_deterministic_and_manifest_bound(self) -> None:
+        policy_input = request("Explain Fractal Monism.")
+        first = decide_response_policy_v0_2(policy_input)
+        second = decide_response_policy_v0_2(policy_input)
+        self.assertEqual(first, second)
+        self.assertRegex(first.decision_sha256, r"^[0-9a-f]{64}$")
+
+        tampered = first.model_dump(mode="json")
+        tampered["fm_effective_level"] = "OFF"
+        with self.assertRaises(ValidationError):
+            ResponsePolicyDecisionV0_2.model_validate_json(
+                json.dumps(tampered, sort_keys=True)
+            )
+
+        rehashed_payload = first.model_dump(
+            mode="json", exclude={"decision_sha256"}
+        )
+        rehashed_payload["fm_effective_level"] = "OFF"
+        rehashed = dict(rehashed_payload)
+        rehashed["decision_sha256"] = hashlib.sha256(
+            json.dumps(
+                rehashed_payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        with self.assertRaises(ValidationError):
+            ResponsePolicyDecisionV0_2.model_validate_json(json.dumps(rehashed))
+
+    def test_strict_models_reject_unknown_and_coerced_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            ResponsePolicySignalsV0_2.model_validate(
+                {"technical": "true", "unknown": False}
+            )
+        with self.assertRaises(ValidationError):
+            ResponsePolicyInputV0_2(
+                message="hello",
+                request_field_names=("mix", "mix"),
+            )
+        with self.assertRaises(ValidationError):
+            ResponsePolicySignalsV0_2(
+                high_stakes=False,
+                high_stakes_uncertain=True,
+            )
+
+    def test_policy_contains_no_runtime_or_external_dependencies(self) -> None:
+        source = MODULE.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imported_roots: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_roots.add(node.module.split(".")[0])
+
+        forbidden = {
+            "asyncpg",
+            "httpx",
+            "openai",
+            "qdrant_client",
+            "requests",
+            "supabase",
+        }
+        self.assertTrue(imported_roots.isdisjoint(forbidden))
+        for module_name in (
+            "rag_engine.memory_v1",
+            "rag_engine.openai_client",
+            "rag_engine.prompt_builder",
+            "rag_engine.vantage_router",
+        ):
+            self.assertNotIn(module_name, source)
+
+
+if __name__ == "__main__":
+    unittest.main()
