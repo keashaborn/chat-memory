@@ -176,8 +176,12 @@ docker exec -e PGOPTIONS='-c lock_timeout=5s -c statement_timeout=180s' \
 chmod 0600 "$install_log"
 
 phase=rolled_back_functional_security_test
-docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
-  -U sage -d "$database" <"$repo_root/$security_test" \
+set -a
+source "$repo_root/.env"
+set +a
+[[ -n "${POSTGRES_DSN:-}" ]]
+psql "$POSTGRES_DSN" -X -v ON_ERROR_STOP=1 \
+  <"$repo_root/$security_test" \
   >>"$install_log" 2>&1
 
 phase=postflight
