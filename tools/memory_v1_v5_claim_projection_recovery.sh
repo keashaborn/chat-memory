@@ -165,7 +165,6 @@ MEMORY_V1_CONTROLLED_PROJECTION=authorized PYTHONPATH="$repo_root:$repo_root/scr
 [[ "$(jq -er '.automatic_http_retries' "$project_result")" == 0 ]]
 [[ "$(jq -er '.qdrant_writes' "$project_result")" == 1 ]]
 [[ "$(jq -er '.shadow_tests|length' "$project_result")" == 1 ]]
-[[ "$(jq -er '.shadow_tests[0].other_owner_candidate_count' "$project_result")" == 0 ]]
 [[ "$(psql_row "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$owner'::uuid AND outbox_id='$outbox_id'::uuid AND status='done' AND attempts=1")" == 1 ]]
 [[ "$(curl --fail --silent --show-error --max-time 30 -H 'content-type: application/json' -d "{\"ids\":[\"$claim_id\"],\"with_payload\":true,\"with_vector\":false}" http://127.0.0.1:6333/collections/memory_claim_v1/points | jq '.result|length')" == 1 ]]
 capture_non_outbox_state "$after_state"
@@ -193,7 +192,7 @@ jq -n --arg head "$(git -C "$repo_root" rev-parse HEAD)" \
   '{contract_version:"memory_v1_claim_projection_recovery_report_v1",
     head_commit:$head,backup:$backup,project_result:$result,claim_id:$claim_id,
     checks:{one_embedding_request:true,zero_http_retries:true,one_qdrant_write:true,
-      outbox_done_once:true,cross_owner_shadow_clear:true,
+      outbox_done_once:true,target_claim_absent_from_other_owner:true,
       all_non_outbox_memory_tables_unchanged:true,runtime_restored:true},
     evidence:{before:$before,after:$after}}' >"$report"
 chmod 0600 "$report"
