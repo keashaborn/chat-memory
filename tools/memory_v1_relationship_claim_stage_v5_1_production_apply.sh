@@ -192,7 +192,7 @@ git -C "$repo_root" merge-base --is-ancestor "$required_ancestor" HEAD
 [[ "$(sha256sum "$repo_root/$runner" | awk '{print $1}')" == "$expected_runner_sha" ]]
 [[ "$(sha256sum "$repo_root/$projector" | awk '{print $1}')" == "$expected_projector_sha" ]]
 head=$(git -C "$repo_root" rev-parse HEAD)
-[[ "$(jq -er '.contract_version' "$bundle")" == memory_v1_relationship_claim_bundle_v5_1 ]]
+[[ "$(jq -er '.contract_version' "$bundle")" == memory_v1_relationship_claim_stage_bundle_v5_1 ]]
 [[ "$(jq -er '.owner_user_id' "$bundle")" == "$target_owner" ]]
 [[ "$(jq -er '.required_head_commit' "$bundle")" == "$head" ]]
 [[ "$(jq -er '.expected_new_rows' "$bundle")" == 4 ]]
