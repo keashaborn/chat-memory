@@ -291,6 +291,7 @@ def main() -> int:
     )
     for message in (
         "Can you tell me anything about my family members?",
+        "Could you tell me anything about my family?",
         "What do you remember about my mother?",
         "Tell me about my sister.",
         "Who is my dad?",
@@ -315,6 +316,31 @@ def main() -> int:
             raise AssertionError(f"{message!r}: {result}")
         if not result["claim_context"]["explicit_recall"]:
             raise AssertionError(f"family relationship recall is not explicit: {result}")
+        if message.startswith(("Can you tell", "Could you tell")):
+            if not result["claim_context"]["broad_profile_recall"]:
+                raise AssertionError(f"broad family recall is not marked broad: {result}")
+        elif result["claim_context"]["broad_profile_recall"]:
+            raise AssertionError(f"specific family recall was marked broad: {result}")
+
+    for message in (
+        "Have I had any deaths in the family?",
+        "Has anyone in my family died?",
+        "Have there been any losses in my family?",
+    ):
+        result = classify_memory_intent(
+            message,
+            request_classification="GENERAL",
+        )
+        if result["memory_intent"] != "personal_recall":
+            raise AssertionError(f"{message!r}: {result}")
+        if result["domains"] != ["family_death"]:
+            raise AssertionError(f"{message!r}: {result}")
+        if not result["routes"]["governed_claims"]:
+            raise AssertionError(f"{message!r}: {result}")
+        if not result["claim_context"]["explicit_recall"]:
+            raise AssertionError(f"family death recall is not explicit: {result}")
+        if "life_event.died" not in result["claim_context"]["allowed_predicates"]:
+            raise AssertionError(f"family death policy omitted life_event.died: {result}")
 
     information_result = classify_memory_intent(
         "Jerry is my father.",

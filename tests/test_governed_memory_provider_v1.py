@@ -85,7 +85,7 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV1",
             return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
-        ):
+        ) as claim_adapter:
             result = await provider.prepare(
                 authenticated_actor_user_id=ACTOR,
                 conversation_snapshot=snapshot,
@@ -98,6 +98,47 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.memory_application.memory_content_included)
         self.assertGreater(len(result.memory_application.injected_records), 0)
         self.assertGreater(result.memory_application.actual_prompt_tokens, 0)
+        adapter_kwargs = claim_adapter.call_args.kwargs
+        self.assertEqual(adapter_kwargs["candidate_limit"], 100)
+        self.assertEqual(adapter_kwargs["minimum_semantic_score"], 0.0)
+        self.assertEqual(adapter_kwargs["relative_semantic_ratio"], 0.0)
+
+    async def test_specific_family_recall_retains_normal_semantic_budget(self) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id="specific-family-request",
+            current_message="Who is my dad?",
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+
+        with patch.dict(
+            os.environ,
+            {"QDRANT_URL": "http://qdrant.invalid"},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.embed_text",
+            return_value=[0.125, -0.25, 0.5],
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.make_qdrant_client",
+            return_value=FakeQdrant(),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.ClaimVectorIndex",
+            return_value=object(),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV1",
+            return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
+        ) as claim_adapter:
+            result = await provider.prepare(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
+
+        self.assertIsNotNone(result.memory_input)
+        adapter_kwargs = claim_adapter.call_args.kwargs
+        self.assertEqual(adapter_kwargs["candidate_limit"], 24)
+        self.assertEqual(adapter_kwargs["minimum_semantic_score"], 0.20)
+        self.assertEqual(adapter_kwargs["relative_semantic_ratio"], 0.40)
 
     async def test_trusted_suppression_signals_block_family_memory_before_external_access(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(

@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v9"
+VERSION = "memory_intent_adapter_v10"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -297,7 +297,7 @@ BROAD_PARENT_RECALL_RE = re.compile(
     r"more particularly do you know (?:anything )?about my (?:mother|mom|mum|father|dad))\b"
 )
 FAMILY_PROFILE_RECALL_RE = re.compile(
-    r"\b(?:(?:can you )?tell me (?:anything |what you (?:know|remember) )?about my "
+    r"\b(?:(?:(?:can|could) you )?tell me (?:anything |what you (?:know|remember) )?about my "
     r"(?:family|family members?|relatives?)|"
     r"what do you (?:know|remember) about my (?:family|family members?|relatives?)|"
     r"do you (?:know|remember) (?:anything )?about my (?:family|family members?|relatives?)|"
@@ -325,6 +325,13 @@ DIRECT_FAMILY_RELATION_RE = re.compile(
     r"(?:is|was) [a-z][a-z .'-]{0,80} my "
     r"(?:mother|mom|mum|father|dad|parent|wife|husband|spouse|partner|son|"
     r"daughter|child|brother|sister|sibling|cousin|aunt|uncle|grandparent))\b"
+)
+FAMILY_DEATH_RECALL_RE = re.compile(
+    r"\b(?:have i (?:had|experienced) (?:any )?(?:deaths?|losses?) in (?:my|the) family|"
+    r"has anyone in my family (?:died|passed away)|"
+    r"have there been (?:any )?(?:deaths?|losses?) in (?:my|the) family|"
+    r"do you (?:know|remember) (?:whether |if )?anyone in my family "
+    r"(?:died|passed away))\b"
 )
 NAME_RECALL_RE = re.compile(
     r"\b(?:was it nemo or neko|nemo or neko|"
@@ -456,7 +463,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             "reason": f"turn_intent:{request_classification.lower()}",
         }
 
-    recall_requested = _looks_like_personal_recall(text)
+    family_death_recall = bool(FAMILY_DEATH_RECALL_RE.search(text))
+    recall_requested = _looks_like_personal_recall(text) or family_death_recall
     normalization_requested = _contains(text, NAME_TERMS) and _contains(
         text, NORMALIZATION_TERMS
     )
@@ -482,8 +490,9 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         and has_pet_signal
         and (named_pet_recall or bool(PET_PROFILE_QUERY_RE.search(text)))
     )
-    family_event = bool(FAMILY_SIGNAL_RE.search(text)) and (
-        _contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS)
+    family_event = family_death_recall or (
+        bool(FAMILY_SIGNAL_RE.search(text))
+        and (_contains(text, LOSS_TERMS) or _contains(text, EVENT_RECALL_TERMS))
     )
     caregiving_context = _contains(text, CAREGIVING_TERMS)
     alcohol_context = _contains(text, ALCOHOL_TERMS)
@@ -587,6 +596,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         ),
         "entity_hints": entity_hints,
         "allowed_predicates": allowed_predicates,
+        "broad_profile_recall": bool(broad_family_profile_recall),
     }
 
 

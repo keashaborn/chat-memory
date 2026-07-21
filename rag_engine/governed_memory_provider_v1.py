@@ -90,6 +90,7 @@ class LiveGovernedMemoryAssemblyProviderV1:
                 }
             )
         )
+        broad_profile_recall = bool(claim_context.get("broad_profile_recall"))
 
         requested: list[MemoryLane] = []
         if intent.get("routes", {}).get("governed_claims"):
@@ -136,6 +137,9 @@ class LiveGovernedMemoryAssemblyProviderV1:
                         self._conn, owner, claim_ids
                     ),
                     predicate_prefix_resolver=lambda _request: allowed_predicates,
+                    candidate_limit=100 if broad_profile_recall else 24,
+                    minimum_semantic_score=0.0 if broad_profile_recall else 0.20,
+                    relative_semantic_ratio=0.0 if broad_profile_recall else 0.40,
                 )
             if MemoryLane.PREFERENCE in requested:
                 providers[MemoryLane.PREFERENCE] = GovernedPreferenceLaneAdapterV1(
