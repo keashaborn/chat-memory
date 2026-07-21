@@ -10,6 +10,7 @@ SQL_DIR = ROOT / "ops" / "sql"
 EXPAND = SQL_DIR / "20260721_lifeswitch_training_observation_expand.sql"
 ENFORCE = SQL_DIR / "20260722_lifeswitch_training_observation_enforce.sql"
 WRITER = SQL_DIR / "20260723_lifeswitch_training_writer_api.sql"
+WRITER_OWNER_ACL = SQL_DIR / "20260724_lifeswitch_training_writer_owner_acl.sql"
 WRITER_RUNTIME = ROOT / "tests" / "test_lifeswitch_training_writer_api.sql"
 
 
@@ -22,6 +23,8 @@ class TrainingObservationIntegrityMigrationTest(unittest.TestCase):
         cls.enforce_lower = cls.enforce.lower()
         cls.writer = WRITER.read_text(encoding="utf-8")
         cls.writer_lower = cls.writer.lower()
+        cls.writer_owner_acl = WRITER_OWNER_ACL.read_text(encoding="utf-8")
+        cls.writer_owner_acl_lower = cls.writer_owner_acl.lower()
         cls.writer_runtime = WRITER_RUNTIME.read_text(encoding="utf-8")
         cls.writer_runtime_lower = cls.writer_runtime.lower()
 
@@ -258,6 +261,23 @@ class TrainingObservationIntegrityMigrationTest(unittest.TestCase):
         self.assertIn("'captured'", self.writer_lower)
         self.assertIn("distance_value", self.writer_lower)
         self.assertIn("distance_unit", self.writer_lower)
+
+    def test_writer_owner_acl_is_narrow_and_keeps_app_execute_only(self) -> None:
+        self.assertIn(
+            "lifeswitch_training_observation_owner must exist as a nologin role",
+            self.writer_owner_acl_lower,
+        )
+        self.assertIn("grant select, insert, update", self.writer_owner_acl_lower)
+        self.assertIn("grant select, insert", self.writer_owner_acl_lower)
+        self.assertIn("revoke update, delete, truncate", self.writer_owner_acl_lower)
+        self.assertIn(
+            "brains_app retains a raw training write privilege",
+            self.writer_owner_acl_lower,
+        )
+        self.assertNotRegex(
+            self.writer_owner_acl_lower,
+            r"grant\s+[^;]*\bto\s+brains_app",
+        )
 
     def test_runtime_contract_covers_security_and_lifecycle(self) -> None:
         for expected in (
