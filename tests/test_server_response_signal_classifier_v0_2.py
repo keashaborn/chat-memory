@@ -17,6 +17,7 @@ from rag_engine.server_response_signal_classifier_v0_2 import (
     ClassificationOutcome,
     DomainRiskCategory,
     OpenAIServerResponseSignalClassifierV0_2,
+    _CLASSIFIER_INSTRUCTIONS,
 )
 
 
@@ -154,6 +155,29 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
         self.assertFalse(call["store"])
         self.assertEqual(call["max_output_tokens"], 500)
         self.assertEqual(call["safety_identifier"], "vs1_" + "a" * 60)
+
+    def test_provider_contract_requires_empty_categories_for_pass(self) -> None:
+        self.assertIn(
+            "When domain_risk_gate=pass, categories must be an empty list",
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+        self.assertIn(
+            "A direct informational request about Fractal Monism is not domain risk",
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+
+    def test_inconsistent_pass_category_still_fails_closed(self) -> None:
+        client = FakeClient(output(categories=["other_material_risk"]))
+        result = classifier(client).classify(
+            request("Could you tell me about Fractal Monism?")
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
+        self.assertEqual(result.signals.fm_application_gate, GateState.UNCERTAIN)
+        self.assertEqual(
+            result.assessment.reason_codes,
+            ("domain_classifier_provider_error",),
+        )
 
     def test_provider_domain_risk_routes_high_stakes_and_fm_off(self) -> None:
         client = FakeClient(

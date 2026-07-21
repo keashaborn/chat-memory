@@ -246,6 +246,15 @@ to distinguish those cases. safety_action_required is true only for imminent or
 active danger requiring immediate practical action. High-stakes classification is
 not a diagnosis and does not decide the substantive answer.
 
+The domain fields must obey these exact invariants:
+- When domain_risk_gate=pass, categories must be an empty list,
+  safety_action_required must be false, and fm_application_gate must be pass.
+- When domain_risk_gate=triggered or uncertain, categories must contain only the
+  categories that caused the non-pass result, and fm_application_gate must not pass.
+- Never select other_material_risk merely because a topic is philosophical,
+  unfamiliar, specific to this product, or described as internal to the chat.
+A direct informational request about Fractal Monism is not domain risk by itself.
+
 Set technical only for concrete computing, code, infrastructure, or device work.
 Set fm_explicit only when the user explicitly asks about or requests Fractal Monism.
 Set coaching for user-requested behavior change, tracking, planning, or habit work.
