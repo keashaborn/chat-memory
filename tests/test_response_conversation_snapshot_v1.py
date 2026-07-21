@@ -121,6 +121,7 @@ def current_row(text: str = "Current message") -> dict[str, Any]:
         "text": text,
         "created_at": NOW,
     }
+    return row
 
 
 def prior_row(
@@ -130,7 +131,7 @@ def prior_row(
     text: str,
     request_id: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "id": UUID(f"00000000-0000-4000-8000-{number:012d}"),
         "owner_user_id": ACTOR,
         "thread_id": THREAD,
