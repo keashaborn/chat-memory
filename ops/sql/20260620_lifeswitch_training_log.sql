@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS lifeswitch_training.training_session (
 
   day                 date NOT NULL,
   workout_template_id uuid,
+  workout_role_snapshot text CHECK (workout_role_snapshot IS NULL OR workout_role_snapshot IN ('strength', 'rehab')),
   name                text NOT NULL,
   notes               text,
 

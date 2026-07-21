@@ -110,6 +110,7 @@ DECLARE
   v_session_id uuid;
   v_day date;
   v_workout_template_id uuid;
+  v_workout_role text;
   v_template jsonb;
   v_name text;
   v_notes text;
@@ -210,6 +211,12 @@ BEGIN
         ERRCODE = '42501',
         MESSAGE = 'workout template is unavailable to the authenticated owner';
     END IF;
+    v_workout_role := nullif(v_template->>'workout_role', '');
+    IF v_workout_role NOT IN ('strength', 'rehab') THEN
+      RAISE EXCEPTION USING
+        ERRCODE = '22023',
+        MESSAGE = 'workout template must be classified before completing a session';
+    END IF;
   END IF;
 
   v_name := coalesce(
@@ -233,11 +240,13 @@ BEGIN
   BEGIN
     INSERT INTO lifeswitch_training.training_session (
       owner_user_id, recorded_by_user_id, day, workout_template_id,
+      workout_role_snapshot,
       name, notes, started_at, finished_at, is_active, idempotency_key,
       source_snapshot, snapshot_schema_version, snapshot_quality,
       supersedes_training_session_id
     ) VALUES (
       p_owner_user_id, p_actor_user_id, v_day, v_workout_template_id,
+      v_workout_role,
       v_name, v_notes, v_started_at, v_finished_at, true, v_idempotency_key,
       jsonb_build_object(
         'kind', 'training_session',

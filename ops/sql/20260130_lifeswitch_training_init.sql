@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS lifeswitch_training.workout_template (
 
   name                text NOT NULL,
   notes               text,
+  workout_role        text CHECK (workout_role IS NULL OR workout_role IN ('strength', 'rehab')),
 
   is_active           boolean NOT NULL DEFAULT true,
 

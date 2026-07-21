@@ -179,7 +179,7 @@ async def list_my_exercises(
     owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
-        where_active = "" if include_inactive else "and is_active=true"
+        where_active = "" if include_inactive else "and wt.is_active=true"
         rows = await conn.fetch(
             f"""
             select
@@ -189,7 +189,7 @@ async def list_my_exercises(
               exercise_role,
               is_active, created_at, updated_at
             from {SCHEMA}.my_exercise
-            where owner_user_id=$1::uuid
+            where wt.owner_user_id=$1::uuid
               {where_active}
             order by lower(display_name) asc
             """,
@@ -1518,8 +1518,27 @@ async def list_workout_templates(
             f"""
             select
               workout_template_id, owner_user_id,
-              name, notes, is_active, created_at, updated_at
-            from {SCHEMA}.workout_template
+              name, notes, workout_role, is_active, created_at, updated_at,
+              (
+                select count(*)::int
+                from {SCHEMA}.training_session s
+                where s.owner_user_id=wt.owner_user_id
+                  and s.workout_template_id=wt.workout_template_id
+                  and s.finished_at is not null
+                  and s.is_active=true
+                  and s.workout_role_snapshot is null
+                  and not exists (
+                    select 1 from {SCHEMA}.training_session_role_event re
+                    where re.training_session_id=s.training_session_id
+                  )
+                  and not exists (
+                    select 1 from {SCHEMA}.training_set_log l
+                    where l.training_session_id=s.training_session_id
+                      and l.is_active=true
+                      and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') in ('strength', 'rehab')
+                  )
+              ) as unclassified_session_count
+            from {SCHEMA}.workout_template wt
             where owner_user_id=$1::uuid
               {where_active}
             order by updated_at desc
@@ -1537,52 +1556,115 @@ async def upsert_workout_template(
     workout_template_id: str | None = Query(None),
     name: str = Query(..., min_length=1, max_length=120),
     notes: str | None = Query(None, max_length=400),
+    workout_role: str | None = Query(None),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
+    role = _clean_text(workout_role, 16).lower()
+    if role not in {"strength", "rehab"}:
+        raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
+    write_key = _require_idempotency_key(idempotency_key)
 
     conn = await _db()
     try:
-        if wid:
-            existing_owner = await conn.fetchval(
-                f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
-                wid,
-            )
-            if existing_owner and str(existing_owner) != owner:
-                raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            if wid:
+                existing_owner = await conn.fetchval(
+                    f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
+                    wid,
+                )
+                if existing_owner and str(existing_owner) != owner:
+                    raise HTTPException(status_code=403, detail="actor_owner_mismatch")
 
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.workout_template
-                  (workout_template_id, owner_user_id, name, notes, is_active)
-                values
-                  ($1::uuid, $2::uuid, $3, $4, true)
-                on conflict (workout_template_id) do update
-                  set name=excluded.name,
-                      notes=excluded.notes,
-                      updated_at=now(),
-                      is_active=true
-                returning workout_template_id, owner_user_id, name, notes, is_active, created_at, updated_at
-                """,
-                wid, owner, name.strip(), (notes or "").strip()
+                row = await conn.fetchrow(
+                    f"""
+                    insert into {SCHEMA}.workout_template
+                      (workout_template_id, owner_user_id, name, notes, is_active)
+                    values
+                      ($1::uuid, $2::uuid, $3, $4, true)
+                    on conflict (workout_template_id) do update
+                      set name=excluded.name,
+                          notes=excluded.notes,
+                          updated_at=now(),
+                          is_active=true
+                    returning workout_template_id
+                    """,
+                    wid, owner, name.strip(), (notes or "").strip()
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"""
+                    insert into {SCHEMA}.workout_template
+                      (owner_user_id, name, notes, is_active)
+                    values
+                      ($1::uuid, $2, $3, true)
+                    on conflict (owner_user_id, name) do update
+                      set notes=excluded.notes,
+                          updated_at=now(),
+                          is_active=true
+                    returning workout_template_id
+                    """,
+                    owner, name.strip(), (notes or "").strip()
+                )
+            if not row:
+                raise HTTPException(status_code=500, detail="upsert_failed")
+            saved_id = str(row["workout_template_id"])
+            current_role = await conn.fetchval(
+                f"select workout_role from {SCHEMA}.workout_template where owner_user_id=$1::uuid and workout_template_id=$2::uuid",
+                owner,
+                saved_id,
             )
-        else:
-            # name-unique per owner (matches nutrition pattern)
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.workout_template
-                  (owner_user_id, name, notes, is_active)
-                values
-                  ($1::uuid, $2, $3, true)
-                on conflict (owner_user_id, name) do update
-                  set notes=excluded.notes,
-                      updated_at=now(),
-                      is_active=true
-                returning workout_template_id, owner_user_id, name, notes, is_active, created_at, updated_at
-                """,
-                owner, name.strip(), (notes or "").strip()
+            if current_role == role:
+                final_row = await conn.fetchrow(
+                    f"select * from {SCHEMA}.workout_template where owner_user_id=$1::uuid and workout_template_id=$2::uuid",
+                    owner,
+                    saved_id,
+                )
+            else:
+                final_row = await conn.fetchrow(
+                    f"select * from {SCHEMA}.set_workout_template_role($1::uuid, $2::uuid, $3, $4, $5)",
+                    owner,
+                    saved_id,
+                    role,
+                    "Workout role selected in Workouts",
+                    write_key,
+                )
+            return JSONResponse(_row_to_jsonable(final_row))
+    finally:
+        await conn.close()
+
+
+@router.post("/workout_templates/{workout_template_id}/classify_historical_sessions")
+async def classify_historical_workout_sessions(
+    workout_template_id: str,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    workout_role: str = Query(..., min_length=1, max_length=16),
+    reason: str | None = Query(None, max_length=240),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+):
+    owner = require_actor_matches_owner(req, owner_user_id)
+    wid = _as_uuid(workout_template_id, "workout_template_id")
+    role = _clean_text(workout_role, 16).lower()
+    if role not in {"strength", "rehab"}:
+        raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
+    write_key = _require_idempotency_key(idempotency_key)
+
+    conn = await _db()
+    try:
+        async with conn.transaction():
+            await set_transaction_actor(conn, actor_user_id=owner)
+            count = await conn.fetchval(
+                f"select {SCHEMA}.classify_unclassified_training_sessions($1::uuid, $2::uuid, $3, $4, $5)",
+                owner,
+                wid,
+                role,
+                _clean_text(reason, 240) or "User applied workout role to older unclassified sessions",
+                write_key,
             )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+        return JSONResponse({"ok": True, "classified_session_count": int(count or 0)})
     finally:
         await conn.close()
 
@@ -2127,71 +2209,74 @@ async def list_training_sessions(
 
         rows = await conn.fetch(
             f"""
-            select
-              s.training_session_id, s.owner_user_id, s.day, s.workout_template_id,
-              s.name, s.notes, s.started_at, s.finished_at, s.is_active,
-              s.created_at, s.updated_at,
+            with session_rollup as (
+              select
+                s.training_session_id, s.owner_user_id, s.day, s.workout_template_id,
+                s.name, s.notes, s.started_at, s.finished_at, s.is_active,
+                s.created_at, s.updated_at,
+                base.workout_role_snapshot,
+                role_event.assigned_role as historical_workout_role,
+                coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
+                coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
+                coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
+                ), 0)::int as strength_set_count,
+                coalesce(count(distinct l.exercise_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
+                ), 0)::int as strength_exercise_count,
+                coalesce(sum(l.volume) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
+                ), 0)::float as strength_volume,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
+                ), 0)::int as rehab_set_count,
+                coalesce(count(distinct l.exercise_id) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
+                ), 0)::int as rehab_exercise_count,
+                coalesce(sum(l.volume) filter (
+                  where l.is_active=true
+                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
+                ), 0)::float as rehab_volume
+              from {SCHEMA}.{session_source} s
+              join {SCHEMA}.training_session base
+                on base.training_session_id=s.training_session_id
+               and base.owner_user_id=s.owner_user_id
+              left join {SCHEMA}.training_session_role_event role_event
+                on role_event.training_session_id=s.training_session_id
+               and role_event.owner_user_id=s.owner_user_id
+              left join {SCHEMA}.training_set_log l
+                on l.training_session_id=s.training_session_id
+              where {' and '.join(where)}
+              group by
+                s.training_session_id, s.owner_user_id, s.day,
+                s.workout_template_id, s.name, s.notes, s.started_at,
+                s.finished_at, s.is_active, s.created_at, s.updated_at,
+                base.workout_role_snapshot, role_event.assigned_role
+              {having}
+            ), classified as (
+              select session_rollup.*,
+                case
+                  when historical_workout_role in ('strength', 'rehab') then historical_workout_role
+                  when workout_role_snapshot in ('strength', 'rehab') then workout_role_snapshot
+                  when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'
+                  when strength_set_count > 0 then 'strength'
+                  when rehab_set_count > 0 then 'rehab'
+                  else 'unclassified'
+                end as session_role
+              from session_rollup
+            )
+            select classified.*,
               $1::uuid as _target_user_id,
               $2::boolean as _delegated_view,
-              coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
-              coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
-              coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
-              coalesce(count(l.training_set_log_id) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-              ), 0)::int as strength_set_count,
-              coalesce(count(distinct l.exercise_id) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-              ), 0)::int as strength_exercise_count,
-              coalesce(sum(l.volume) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-              ), 0)::float as strength_volume,
-              coalesce(count(l.training_set_log_id) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
-              ), 0)::int as rehab_set_count,
-              coalesce(count(distinct l.exercise_id) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
-              ), 0)::int as rehab_exercise_count,
-              coalesce(sum(l.volume) filter (
-                where l.is_active=true
-                  and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
-              ), 0)::float as rehab_volume,
-              case
-                when count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-                ) > 0
-                and count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
-                ) > 0 then 'mixed'
-                when count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-                ) > 0 then 'strength'
-                when count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='rehab'
-                ) > 0 then 'rehab'
-                else 'unclassified'
-              end as session_role,
-              coalesce(bool_or(
-                coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')='strength'
-              ) filter (where l.is_active=true), false) as counts_toward_strength
-            from {SCHEMA}.{session_source} s
-            left join {SCHEMA}.training_set_log l
-              on l.training_session_id=s.training_session_id
-            where {' and '.join(where)}
-            group by
-              s.training_session_id, s.owner_user_id, s.day,
-              s.workout_template_id, s.name, s.notes, s.started_at,
-              s.finished_at, s.is_active, s.created_at, s.updated_at
-            {having}
-            order by s.day desc, s.created_at desc
+              session_role in ('strength', 'mixed') as counts_toward_strength
+            from classified
+            order by day desc, created_at desc
             limit {int(limit)}
             """,
             *args,
