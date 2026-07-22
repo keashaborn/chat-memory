@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import Any
 
 VERSION = "memory_v1_v5_1_stage_preflight_v1"
+V5_1_EXTRACTION_CONTRACT = "memory_v1_relational_extraction_v5_1"
+V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
+V5_1_RESOLUTION_CONTRACT = "memory_v1_entity_resolution_review_v5_1"
+V5_2_EXTRACTION_CONTRACT = "memory_v1_relational_extraction_v5_2"
+V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
+V5_2_RESOLUTION_CONTRACT = "memory_v1_entity_resolution_review_v5_2"
 LIVE_REPORT_MODE = "zero_write_relational_v5_specialized_live_evaluation"
 MATERIALIZED_REPORT_MODE = (
     "zero_write_relational_v5_specialized_materialized_evaluation"
@@ -245,12 +251,17 @@ def _temporal_persistence_compatible(value: dict[str, Any]) -> bool:
     return False
 
 
-def _validate_extraction_packet(value: dict[str, Any]) -> None:
+def _validate_extraction_packet(
+    value: dict[str, Any],
+    *,
+    extraction_contract: str = V5_1_EXTRACTION_CONTRACT,
+    registry_version: str = V5_1_REGISTRY_VERSION,
+) -> None:
     if set(value) != EXTRACTION_KEYS:
         raise RuntimeError("extraction packet fields mismatch")
-    if value["contract_version"] != "memory_v1_relational_extraction_v5_1":
+    if value["contract_version"] != extraction_contract:
         raise RuntimeError("extraction contract version mismatch")
-    if value["predicate_registry_version"] != "memory_predicate_registry_v5_1":
+    if value["predicate_registry_version"] != registry_version:
         raise RuntimeError("predicate registry version mismatch")
     source = value["source_envelope"]
     if not isinstance(source, dict) or set(source) != SOURCE_KEYS:
@@ -304,15 +315,19 @@ def _validate_extraction_packet(value: dict[str, Any]) -> None:
 
 
 def _validate_resolution_packet(
-    value: dict[str, Any], extraction_packet: dict[str, Any]
+    value: dict[str, Any],
+    extraction_packet: dict[str, Any],
+    *,
+    resolution_contract: str = V5_1_RESOLUTION_CONTRACT,
+    registry_version: str = V5_1_REGISTRY_VERSION,
 ) -> None:
     if set(value) != RESOLUTION_PACKET_KEYS:
         raise RuntimeError("resolution packet fields mismatch")
-    if value["contract_version"] != "memory_v1_entity_resolution_review_v5_1":
+    if value["contract_version"] != resolution_contract:
         raise RuntimeError("resolution contract version mismatch")
     if value["source_envelope"] != extraction_packet["source_envelope"]:
         raise RuntimeError("resolution source envelope mismatch")
-    if value["predicate_registry_version"] != "memory_predicate_registry_v5_1":
+    if value["predicate_registry_version"] != registry_version:
         raise RuntimeError("resolution registry version mismatch")
     if value["entity_normalization_version"] != "memory_entity_normalization_v5":
         raise RuntimeError("entity normalization version mismatch")

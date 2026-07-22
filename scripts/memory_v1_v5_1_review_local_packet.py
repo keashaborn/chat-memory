@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build one owner-scoped, zero-write review bundle from a local V5.1 packet."""
+"""Build one owner-scoped, zero-write review bundle from a local V5.1/V5.2 packet."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import copy
 import datetime as dt
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -27,6 +28,12 @@ from scripts.memory_v1_v5_1_stage_preflight import (
     REQUEST_NAMESPACE,
     RESOLVER,
     RESOLVER_VERSION,
+    V5_1_EXTRACTION_CONTRACT,
+    V5_1_REGISTRY_VERSION,
+    V5_1_RESOLUTION_CONTRACT,
+    V5_2_EXTRACTION_CONTRACT,
+    V5_2_REGISTRY_VERSION,
+    V5_2_RESOLUTION_CONTRACT,
     _candidates,
     _schema_hash,
     _validate_extraction_packet,
@@ -41,6 +48,7 @@ from scripts.memory_v1_v5_1_stage_preflight import (
 REVIEW_CONTRACT = "memory_v1_v5_1_local_packet_review_v1"
 BUNDLE_CONTRACT = "memory_v1_v5_1_stage_preflight_v1"
 REVIEW_NAMESPACE = uuid.UUID("d9bbc38c-812a-53f9-bfcb-c2185db1f7ca")
+V5_2_REVIEW_NAMESPACE = uuid.UUID("f2285012-c276-52c8-a919-452274ac8ca1")
 DEFAULT_REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 EXPLICIT_CALENDAR_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 HASH_FIELDS = (
@@ -60,10 +68,59 @@ class LocalPacketReviewError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ReviewProfile:
+    name: str
+    extraction_contract: str
+    registry_version: str
+    resolution_contract: str
+    review_contract: str
+    bundle_contract: str
+    review_namespace: uuid.UUID
+    extraction_schema: str
+    resolution_schema: str
+    extractor: str
+
+
+REVIEW_PROFILES = {
+    "v5_1": ReviewProfile(
+        name="v5_1",
+        extraction_contract=V5_1_EXTRACTION_CONTRACT,
+        registry_version=V5_1_REGISTRY_VERSION,
+        resolution_contract=V5_1_RESOLUTION_CONTRACT,
+        review_contract=REVIEW_CONTRACT,
+        bundle_contract=BUNDLE_CONTRACT,
+        review_namespace=REVIEW_NAMESPACE,
+        extraction_schema="specs/memory_v1_relational_extraction_v5_1.schema.json",
+        resolution_schema="specs/memory_v1_entity_resolution_review_v5_1.schema.json",
+        extractor="memory_v1_v5_1_local_packet_review",
+    ),
+    "v5_2": ReviewProfile(
+        name="v5_2",
+        extraction_contract=V5_2_EXTRACTION_CONTRACT,
+        registry_version=V5_2_REGISTRY_VERSION,
+        resolution_contract=V5_2_RESOLUTION_CONTRACT,
+        review_contract="memory_v1_v5_2_local_packet_review_v1",
+        bundle_contract="memory_v1_v5_2_stage_preflight_v1",
+        review_namespace=V5_2_REVIEW_NAMESPACE,
+        extraction_schema="specs/memory_v1_relational_extraction_v5_2.schema.json",
+        resolution_schema="specs/memory_v1_entity_resolution_review_v5_2.schema.json",
+        extractor="memory_v1_v5_2_local_packet_review",
+    ),
+}
+
+
+def review_profile(name: str) -> ReviewProfile:
+    try:
+        return REVIEW_PROFILES[name]
+    except KeyError as exc:
+        raise LocalPacketReviewError("review contract profile is not allowlisted") from exc
+
+
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Read one immutable local V5.1 packet through the owner-scoped API and "
+            "Read one immutable local V5.1/V5.2 packet through the owner-scoped API and "
             "emit a deterministic, zero-write entity-resolution review bundle."
         )
     )
@@ -72,13 +129,10 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--review-report", required=True)
     parser.add_argument("--stage-bundle", required=True)
     parser.add_argument(
-        "--extraction-schema",
-        default="specs/memory_v1_relational_extraction_v5_1.schema.json",
+        "--contract-profile", choices=sorted(REVIEW_PROFILES), default="v5_1"
     )
-    parser.add_argument(
-        "--resolution-schema",
-        default="specs/memory_v1_entity_resolution_review_v5_1.schema.json",
-    )
+    parser.add_argument("--extraction-schema")
+    parser.add_argument("--resolution-schema")
     parser.add_argument("--review-root", default=str(DEFAULT_REVIEW_ROOT))
     return parser.parse_args()
 
@@ -335,7 +389,10 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
         raise LocalPacketReviewError("POSTGRES_DSN is required")
     owner = uuid.UUID(args.owner_user_id)
     packet_id = uuid.UUID(args.packet_id)
+    profile = review_profile(args.contract_profile)
     repo_root, commit = _repository_state()
+    extraction_schema = args.extraction_schema or profile.extraction_schema
+    resolution_schema = args.resolution_schema or profile.resolution_schema
 
     conn = await asyncpg.connect(dsn, command_timeout=30)
     try:
@@ -352,6 +409,11 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
             row = dict(packet_rows[0])
             packet = _json_value(row["normalized_packet"], "normalized packet")
             _validate_row(row, packet)
+            _validate_extraction_packet(
+                packet,
+                extraction_contract=profile.extraction_contract,
+                registry_version=profile.registry_version,
+            )
             immutable = NormalizedPacket.model_validate(packet).model_dump(mode="json")
             if canonical_sha256(immutable) != row["validator_packet_sha256"]:
                 raise LocalPacketReviewError("validated packet differs from immutable packet")
@@ -366,7 +428,11 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
             reviewed, transformations = normalize_review_packet(
                 immutable, evidence["content"]
             )
-            _validate_extraction_packet(reviewed)
+            _validate_extraction_packet(
+                reviewed,
+                extraction_contract=profile.extraction_contract,
+                registry_version=profile.registry_version,
+            )
             validated = NormalizedPacket.model_validate(reviewed).model_dump(mode="json")
             resolutions = [
                 resolve_mention(
@@ -384,9 +450,9 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
         await conn.close()
 
     resolution_body = {
-        "contract_version": "memory_v1_entity_resolution_review_v5_1",
+        "contract_version": profile.resolution_contract,
         "source_envelope": validated["source_envelope"],
-        "predicate_registry_version": "memory_predicate_registry_v5_1",
+        "predicate_registry_version": profile.registry_version,
         "entity_normalization_version": "memory_entity_normalization_v5",
         "resolver": RESOLVER,
         "resolver_version": RESOLVER_VERSION,
@@ -394,7 +460,12 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
     }
     resolution = dict(resolution_body)
     resolution["packet_sha256"] = sha256_text(stable_json(resolution_body))
-    _validate_resolution_packet(resolution, validated)
+    _validate_resolution_packet(
+        resolution,
+        validated,
+        resolution_contract=profile.resolution_contract,
+        registry_version=profile.registry_version,
+    )
     extraction_text = stable_json(validated)
     resolution_text = stable_json(resolution)
     extraction_sha = sha256_text(extraction_text)
@@ -410,7 +481,7 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
     )
     review_id = str(
         uuid.uuid5(
-            REVIEW_NAMESPACE,
+            profile.review_namespace,
             "|".join(
                 (
                     str(owner), str(packet_id), row["packet_storage_sha256"],
@@ -429,7 +500,7 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
     blocking_codes = sorted({item["code"] for item in findings if item["blocking"]})
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     review = {
-        "contract_version": REVIEW_CONTRACT,
+        "contract_version": profile.review_contract,
         "mode": "owner_scoped_local_packet_review_zero_write",
         "generated_at": now,
         "owner_user_id": str(owner),
@@ -466,7 +537,7 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
         },
     }
     bundle = {
-        "contract_version": BUNDLE_CONTRACT,
+        "contract_version": profile.bundle_contract,
         "generated_at": now,
         "mode": "preflight_only_zero_write",
         "server": "seebx",
@@ -474,15 +545,15 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
         "case_id": f"local-packet-{packet_id}",
         "evidence_id": evidence_id,
         "request_id": request_id,
-        "extractor": "memory_v1_v5_1_local_packet_review",
+        "extractor": profile.extractor,
         "extractor_version": commit,
         "source_report": {},
         "schemas": {
             "extraction_sha256": _schema_hash(
-                (repo_root / args.extraction_schema).resolve()
+                (repo_root / extraction_schema).resolve()
             ),
             "resolution_sha256": _schema_hash(
-                (repo_root / args.resolution_schema).resolve()
+                (repo_root / resolution_schema).resolve()
             ),
         },
         "extraction_packet_text": extraction_text,
@@ -500,6 +571,7 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
 
 async def main() -> int:
     args = arguments()
+    profile = review_profile(args.contract_profile)
     root = _secure_root(args.review_root)
     report_path = _output_path(args.review_report, root)
     bundle_path = _output_path(args.stage_bundle, root)
@@ -517,7 +589,8 @@ async def main() -> int:
     print(
         stable_json(
             {
-                "contract_version": REVIEW_CONTRACT,
+                "contract_version": profile.review_contract,
+                "predicate_contract_profile": profile.name,
                 "review_report": str(report_path),
                 "review_report_sha256": report_sha,
                 "stage_bundle": str(bundle_path),
