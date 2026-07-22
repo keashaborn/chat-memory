@@ -17,14 +17,15 @@ registry_one=$(mktemp /tmp/memory-v5-2-registry-one.XXXXXX.sql)
 registry_two=$(mktemp /tmp/memory-v5-2-registry-two.XXXXXX.sql)
 protected_before=$(mktemp /tmp/memory-v5-2-protected-before.XXXXXX.dump)
 protected_after=$(mktemp /tmp/memory-v5-2-protected-after.XXXXXX.dump)
+protected_tables=$(mktemp /tmp/memory-v5-2-protected-tables.XXXXXX.txt)
 chmod 0600 "$backup" "$registry_one" "$registry_two" \
-  "$protected_before" "$protected_after"
+  "$protected_before" "$protected_after" "$protected_tables"
 
 cleanup() {
   docker exec "$container" dropdb -U sage --if-exists "$clone" \
     >/dev/null 2>&1 || true
   rm -f "$backup" "$registry_one" "$registry_two" \
-    "$protected_before" "$protected_after"
+    "$protected_before" "$protected_after" "$protected_tables"
 }
 trap cleanup EXIT
 
@@ -69,21 +70,19 @@ production_signature() {
   "
 }
 
-protected_dump() {
+capture_protected_state() {
   local output=$1
-  docker exec "$container" pg_dump -U sage -d "$clone" -a -n memory \
-    --no-owner --no-privileges \
-    --exclude-table=memory.predicate_registry_version \
-    --exclude-table=memory.predicate_registry_seed \
-    --exclude-table=memory.predicate_contract \
-    --exclude-table=memory.predicate_registry_source_binding_v5_2 \
-    --exclude-table=memory.relationship_predicate_contract_v5_2 \
-    >"$output"
-  sed -i \
-    -e '/^\\restrict /d' -e '/^\\unrestrict /d' \
-    -e '/^-- Dumped from database version /d' \
-    -e '/^-- Dumped by pg_dump version /d' \
-    -e '/^-- Started on /d' -e '/^-- Completed on /d' "$output"
+  : >"$output"
+  while IFS= read -r table; do
+    [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]]
+    state=$(clone_scalar "
+      SELECT count(*)::text || E'\\t' ||
+             encode(public.digest(coalesce(string_agg(row_json,E'\\n'
+               ORDER BY row_json),''),'sha256'),'hex')
+      FROM (SELECT to_jsonb(value)::text AS row_json
+        FROM memory.\"$table\" AS value) AS rows")
+    printf '%s\t%s\n' "$table" "$state" >>"$output"
+  done <"$protected_tables"
 }
 
 migrations=(
@@ -117,7 +116,16 @@ docker exec "$container" createdb -U sage -T template0 "$clone"
 docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --exit-on-error <"$backup"
 
-protected_dump "$protected_before"
+clone_scalar "
+  SELECT table_name
+  FROM information_schema.tables
+  WHERE table_schema='memory' AND table_type='BASE TABLE'
+    AND table_name NOT IN (
+      'predicate_registry_version','predicate_registry_seed','predicate_contract'
+    )
+  ORDER BY table_name
+" >"$protected_tables"
+capture_protected_state "$protected_before"
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$generator" \
   --emit-install-sql >"$registry_one"
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$generator" \
@@ -131,8 +139,45 @@ for migration in "${migrations[@]}"; do
   clone_sql <"$migration" >/dev/null
 done
 for test_file in "${tests[@]}"; do
+  [[ "$test_file" != tests/memory_v1_governed_claim_reader_v2.sql ]] || continue
   clone_sql <"$test_file" >/dev/null
 done
+
+fixture=$(clone_scalar "
+  SELECT concat_ws('|',claim.owner_user_id::text,claim.claim_id::text,
+    claim.subject_entity_id::text,subject_entity.entity_type,
+    coalesce(claim.object_entity_id::text,''),
+    coalesce(object_entity.entity_type,''),
+    coalesce((SELECT other.claim_id::text FROM memory.claim AS other
+      WHERE other.owner_user_id<>claim.owner_user_id
+      ORDER BY other.owner_user_id,other.claim_id LIMIT 1),'')
+  FROM memory.claim AS claim
+  JOIN memory.entity AS subject_entity
+    ON subject_entity.owner_user_id=claim.owner_user_id
+   AND subject_entity.entity_id=claim.subject_entity_id
+  LEFT JOIN memory.entity AS object_entity
+    ON object_entity.owner_user_id=claim.owner_user_id
+   AND object_entity.entity_id=claim.object_entity_id
+  WHERE claim.status::text IN ('supported','uncertain','disputed')
+    AND EXISTS (SELECT 1 FROM memory.projection_apply_event AS event
+      WHERE event.owner_user_id=claim.owner_user_id
+        AND event.resulting_claim_id=claim.claim_id AND event.outcome='applied')
+  ORDER BY claim.owner_user_id,claim.claim_id LIMIT 1
+")
+[[ -n "$fixture" ]]
+IFS='|' read -r target_owner target_claim subject_id subject_type \
+  object_id object_type other_claim <<<"$fixture"
+{
+  printf '%s\n' 'SET SESSION AUTHORIZATION brains_app;'
+  cat tests/memory_v1_governed_claim_reader_v2.sql
+} | clone_sql \
+  -v target_owner_user_id="$target_owner" \
+  -v target_claim_id="$target_claim" \
+  -v subject_entity_id="$subject_id" \
+  -v subject_entity_type="$subject_type" \
+  -v object_entity_id="$object_id" \
+  -v object_entity_type="$object_type" \
+  -v other_owner_claim_id="$other_claim" >/dev/null
 
 [[ "$(clone_scalar "
   SELECT (
@@ -154,7 +199,7 @@ done
   )::integer
 ")" == 1 ]]
 
-protected_dump "$protected_after"
+capture_protected_state "$protected_after"
 cmp -s "$protected_before" "$protected_after"
 [[ "$(production_signature)" == "$production_before" ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
