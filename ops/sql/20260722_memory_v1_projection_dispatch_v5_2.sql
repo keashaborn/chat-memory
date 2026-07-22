@@ -294,7 +294,7 @@ BEGIN
         value_text||' '||unit_text||'.';
     ELSIF source.predicate='stance.reported' THEN
       result_value := subject_label||' reports the position that '||
-        source.object_literal#>>'{value,position}'||'.';
+        (source.object_literal::jsonb#>>'{value,position}')||'.';
     ELSE
       RAISE EXCEPTION 'unsupported V5.2 literal renderer: %',source.predicate;
     END IF;
