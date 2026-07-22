@@ -6,7 +6,10 @@ BEGIN
      OR to_regprocedure('memory.require_v5_writer_context()') IS NULL
      OR to_regclass('memory.projection_plan') IS NULL
      OR to_regclass('memory.projection_plan_item') IS NULL
+     OR to_regclass('memory.projection_plan_observation') IS NULL
      OR to_regclass('memory.projection_claim_payload') IS NULL
+     OR to_regclass('memory.projection_preference_payload') IS NULL
+     OR to_regclass('memory.projection_project_payload') IS NULL
      OR to_regclass('memory.claim') IS NULL
      OR to_regclass('memory.preference_head_v5') IS NULL
      OR to_regclass('memory.project_knowledge_head_v5') IS NULL
@@ -16,7 +19,10 @@ BEGIN
        JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
        WHERE namespace.nspname='memory'
          AND relation.relname IN (
-           'claim','preference_head_v5','project_knowledge_head_v5'
+           'claim','preference_head_v5','project_knowledge_head_v5',
+           'projection_plan','projection_plan_item',
+           'projection_plan_observation','projection_claim_payload',
+           'projection_preference_payload','projection_project_payload'
          )
          AND (NOT relation.relrowsecurity OR NOT relation.relforcerowsecurity)
      )
@@ -831,6 +837,15 @@ ALTER FUNCTION memory.stage_projection_plan_v5_2(uuid,text,text)
 
 -- These are the same owner-filtered reads required by the existing V5 apply
 -- path.  FORCE RLS remains authoritative for the NOLOGIN writer role.
+GRANT SELECT, INSERT ON
+  memory.projection_plan,
+  memory.projection_plan_item,
+  memory.projection_plan_observation,
+  memory.projection_claim_payload,
+  memory.projection_preference_payload,
+  memory.projection_project_payload
+TO memory_v5_writer;
+
 GRANT SELECT ON
   memory.claim,
   memory.preference_head_v5,
