@@ -203,6 +203,22 @@ class ProjectionDispatchTests(unittest.TestCase):
         self.assertEqual(projection["temporal_policy"]["materialization"], "state_validity_only")
         self.assertEqual(projection["temporal_policy"]["source_observation_id"], OBSERVATION)
 
+    def test_database_json_text_is_normalized_at_dispatch_boundary(self) -> None:
+        entry = self.registry_by_name["project.current_state"]
+        value = source(entry)
+        for field in ("object_literal", "project_scope", "temporal"):
+            value[field] = json.dumps(value[field], sort_keys=True, separators=(",", ":"))
+        projection = build_packet(OWNER, value)["projections"][0]
+        self.assertEqual(projection["lane"], "project_knowledge")
+        self.assertEqual(projection["payload"]["component_key"], "memory-v1")
+
+    def test_malformed_database_json_text_is_rejected(self) -> None:
+        entry = self.registry_by_name["identity.name"]
+        value = source(entry)
+        value["object_literal"] = "{"
+        with self.assertRaisesRegex(ProjectionDispatchError, "not valid JSON"):
+            build_packet(OWNER, value)
+
     def test_cross_owner_source_is_rejected(self) -> None:
         entry = self.registry_by_name["relationship.parent_of"]
         value = source(entry)

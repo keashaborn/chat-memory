@@ -105,6 +105,31 @@ def _safe_text(value: Any, label: str, *, maximum: int = 2000) -> str:
     return normalized
 
 
+def _json_object(value: Any, label: str, *, allow_none: bool = False) -> dict[str, Any] | None:
+    if value is None and allow_none:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ProjectionDispatchError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ProjectionDispatchError(f"{label} must be a JSON object")
+    return value
+
+
+def _normalize_source(source: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(source)
+    normalized["object_literal"] = _json_object(
+        normalized.get("object_literal"), "object literal", allow_none=True
+    )
+    normalized["project_scope"] = _json_object(
+        normalized.get("project_scope"), "project scope"
+    )
+    normalized["temporal"] = _json_object(normalized.get("temporal"), "temporal")
+    return normalized
+
+
 def _entity_label(entity_type: str, canonical_name: Any) -> str:
     if entity_type == "self":
         return "The user"
@@ -332,6 +357,7 @@ def _project_payload(source: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def build_projection(owner_user_id: str, source: Mapping[str, Any]) -> dict[str, Any]:
+    source = _normalize_source(source)
     owner = str(uuid.UUID(owner_user_id))
     source_owner = source.get("owner_user_id")
     if source_owner is not None:
