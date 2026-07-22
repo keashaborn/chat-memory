@@ -2323,6 +2323,98 @@ async def get_training_session(
         await conn.close()
 
 
+@router.get("/progression")
+async def list_strength_progression(
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+    start_day: str = Query(..., min_length=10, max_length=10),
+    end_day: str = Query(..., min_length=10, max_length=10),
+    limit: int = Query(2000, ge=1, le=5000),
+    target_user_id: str = Query("", max_length=80),
+):
+    viewer = require_actor_matches_owner(req, owner_user_id)
+
+    try:
+        start_date = _dt.date.fromisoformat(start_day)
+        end_date = _dt.date.fromisoformat(end_day)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid progression date range")
+
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="end_day must be on or after start_day")
+    if (end_date - start_date).days > 366:
+        raise HTTPException(status_code=400, detail="progression range cannot exceed 367 days")
+
+    conn = await _db()
+    try:
+        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        rows = await conn.fetch(
+            f"""
+            select
+              s.training_session_id,
+              s.day,
+              s.name as session_name,
+              l.exercise_id,
+              max(l.exercise_name) as exercise_name,
+              count(l.training_set_log_id)::int as set_count,
+              coalesce(sum(l.reps), 0)::int as total_reps,
+              coalesce(max(l.weight), 0)::float as max_load,
+              coalesce(sum(l.volume), 0)::float as total_volume,
+              case
+                when count(distinct nullif(trim(l.load_unit), '')) = 0 then null
+                when count(distinct nullif(trim(l.load_unit), '')) = 1
+                  then max(nullif(trim(l.load_unit), ''))
+                else 'mixed'
+              end as load_unit,
+              $4::uuid as _target_user_id,
+              $5::boolean as _delegated_view
+            from {SCHEMA}.training_session_current_v s
+            join {SCHEMA}.training_session base
+              on base.training_session_id=s.training_session_id
+             and base.owner_user_id=s.owner_user_id
+            left join {SCHEMA}.training_session_role_event role_event
+              on role_event.training_session_id=s.training_session_id
+             and role_event.owner_user_id=s.owner_user_id
+            join {SCHEMA}.training_set_log l
+              on l.training_session_id=s.training_session_id
+             and l.owner_user_id=s.owner_user_id
+            where s.owner_user_id=$1::uuid
+              and s.day between $2::date and $3::date
+              and s.is_active=true
+              and s.finished_at is not null
+              and l.is_active=true
+              and coalesce(
+                nullif(l.capture_role, 'unknown'),
+                nullif(l.exercise_role_snapshot, 'unknown'),
+                role_event.assigned_role,
+                base.workout_role_snapshot,
+                'unknown'
+              )='strength'
+            group by
+              s.training_session_id,
+              s.day,
+              s.name,
+              s.created_at,
+              l.exercise_id,
+              l.exercise_sort_order
+            order by
+              s.day desc,
+              s.created_at desc,
+              l.exercise_sort_order asc,
+              exercise_name asc
+            limit {int(limit)}
+            """,
+            owner,
+            start_date,
+            end_date,
+            owner,
+            delegated,
+        )
+        return JSONResponse([_row_to_jsonable(row) for row in rows])
+    finally:
+        await conn.close()
+
+
 
 @router.post("/sessions/{training_session_id}/deactivate")
 async def deactivate_training_session(
