@@ -28,6 +28,9 @@
         "maximum": 4
       }
     },
+    "allowed_predicates": [
+      "stance.reported"
+    ],
     "required_stance_contract": {
       "modality": "reported_belief",
       "projection_class": "reported_stance",

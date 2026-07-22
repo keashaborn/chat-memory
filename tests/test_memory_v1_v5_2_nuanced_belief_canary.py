@@ -63,6 +63,7 @@ class NuancedBeliefCanaryRubricTest(unittest.TestCase):
             packet["predicate_counts"]["stance.reported"],
             {"minimum": 2, "maximum": 4},
         )
+        self.assertEqual(packet["allowed_predicates"], ["stance.reported"])
         self.assertIn(
             "health.user_reported_observation", packet["forbidden_predicates"]
         )
