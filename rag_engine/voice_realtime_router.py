@@ -12,6 +12,13 @@ from fastapi.responses import Response
 
 router = APIRouter()
 
+# Direct speech-to-speech generation bypasses the governed /response/query
+# contract. It is disabled unless an operator explicitly enables the legacy
+# rollback path while the governed voice implementation is being deployed.
+ALLOW_UNGOVERNED_REALTIME_VOICE = (
+    os.getenv("ALLOW_UNGOVERNED_REALTIME_VOICE") or ""
+).strip() == "1"
+
 CURRENT_REALTIME_MODEL = "gpt-realtime-2.1"
 ROLLBACK_REALTIME_MODEL = "gpt-realtime-2"
 
@@ -91,6 +98,14 @@ def _require_actor(req: Request) -> str:
         return str(uuid.UUID(actor))
     except Exception:
         raise HTTPException(status_code=400, detail="invalid_actor_user_id")
+
+
+def _require_ungoverned_realtime_enabled() -> None:
+    if not ALLOW_UNGOVERNED_REALTIME_VOICE:
+        raise HTTPException(
+            status_code=410,
+            detail="direct_realtime_generation_retired_use_governed_voice",
+        )
 
 
 def _clean_model(raw: Any) -> str:
@@ -174,6 +189,8 @@ def get_realtime_capabilities() -> dict[str, Any]:
         "default_model": DEFAULT_REALTIME_MODEL,
         "default_voice": DEFAULT_REALTIME_VOICE,
         "managed_model": True,
+        "conversation_generation_enabled": ALLOW_UNGOVERNED_REALTIME_VOICE,
+        "deprecated": True,
         "models": models,
     }
 
@@ -202,6 +219,7 @@ async def create_realtime_client_secret(req: Request):
     """
 
     actor_user_id = _require_actor(req)
+    _require_ungoverned_realtime_enabled()
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
@@ -267,6 +285,7 @@ async def create_realtime_webrtc_offer(req: Request):
     """
 
     actor_user_id = _require_actor(req)
+    _require_ungoverned_realtime_enabled()
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:

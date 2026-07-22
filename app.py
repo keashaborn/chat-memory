@@ -33,6 +33,7 @@ class NewThreadReq(BaseModel):
     vantage_id: Optional[str] = "default"
 from rag_engine.voice_realtime_router import router as voice_realtime_router
 from rag_engine.voice_tts_router import router as voice_tts_router
+from rag_engine.voice_transcription_router import router as voice_transcription_router
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from rag_engine.raw_memory_ownership import (
     RawMemoryOwnershipError,
@@ -73,6 +74,7 @@ app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measureme
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
 app.include_router(voice_realtime_router)
 app.include_router(voice_tts_router)
+app.include_router(voice_transcription_router)
 
 # ---------- request correlation ----------
 def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:
