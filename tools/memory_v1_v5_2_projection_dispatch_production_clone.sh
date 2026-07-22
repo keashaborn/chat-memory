@@ -472,6 +472,15 @@ run_sql -c "
     memory.projection_apply_event,
     memory.preference_revision_observation,
     memory.project_knowledge_revision_observation
+  TO memory_v5_writer;
+  GRANT SELECT ON
+    memory.claim,
+    memory.claim_revision,
+    memory.preference_head_v5,
+    memory.preference_revision_v5,
+    memory.project_space,
+    memory.project_knowledge_head_v5,
+    memory.project_knowledge_revision_v5
   TO memory_v5_writer"
 projection_acl_state=$(scalar "
   SELECT concat_ws('|',
