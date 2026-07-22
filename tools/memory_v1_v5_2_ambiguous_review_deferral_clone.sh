@@ -17,6 +17,8 @@ migration=ops/sql/20260722_memory_v1_v5_2_ambiguous_review_deferral.sql
 rollback=ops/sql/20260722_memory_v1_v5_2_ambiguous_review_deferral_rollback.sql
 builder=scripts/memory_v1_v5_build_local_review_deferral.py
 worker=scripts/memory_v1_v5_local_review_deferral.py
+security_test=tests/memory_v1_v5_2_ambiguous_review_deferral.sql
+stage_guard_test=tests/memory_v1_v5_2_ambiguous_review_deferral_stage_guard.sql
 backup=$(mktemp /tmp/memory-v5-2-review-deferral.XXXXXX.dump)
 review_dir=$(mktemp -d /home/ubuntu/memory-v1-reviews/v5-2-deferral-clone.XXXXXX)
 decision="$review_dir/decision.json"
@@ -54,6 +56,7 @@ qdrant_signature() {
 }
 
 for file in "$migration" "$rollback" "$builder" "$worker" \
+  "$security_test" "$stage_guard_test" \
   tests/test_memory_v1_v5_2_local_review_deferral.py \
   tests/test_memory_v1_local_provider_v5_2.py; do
   [[ -f "$file" ]]
@@ -111,6 +114,17 @@ print(urlunsplit((value.scheme, value.netloc, "/" + os.environ["CLONE_DB"], valu
 PY
 )
 
+packet_storage_sha256=$(clone_scalar "SELECT packet_storage_sha256
+  FROM memory.evidence_extraction_packet_v5_local
+  WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid")
+psql "$clone_dsn" -X -v ON_ERROR_STOP=1 \
+  -v target_owner="$owner" -v other_owner="$other" \
+  -v packet_id="$packet" \
+  -v packet_storage_sha256="$packet_storage_sha256" \
+  <"$security_test" >/dev/null
+[[ "$(clone_scalar "SELECT count(*) FROM memory.v5_local_packet_disposition
+  WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid")" == 0 ]]
+
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python -m unittest \
   tests.test_memory_v1_v5_2_local_review_deferral \
   tests.test_memory_v1_local_provider_v5_2 >/dev/null
@@ -159,6 +173,10 @@ jq -e '.apply==true and .outcome=="deferred" and
 [[ "$(clone_scalar 'SELECT count(*) FROM memory.v5_local_packet_disposition')" == "$((rows_before+1))" ]]
 [[ "$(clone_scalar 'SELECT count(*) FROM memory.relational_stage_batch')" == "$stage_before" ]]
 [[ "$(clone_scalar 'SELECT count(*) FROM memory.claim')" == "$claims_before" ]]
+
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" -v target_owner="$owner" -v evidence_id="$evidence" \
+  <"$stage_guard_test" >/dev/null
 
 # The database guard blocks every staging path, not only the current worker.
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
