@@ -20,10 +20,6 @@ from scripts.memory_v1_v5_2_projection_dispatch import build_packet, stable_json
 
 OWNER_A = uuid.UUID("11111111-1111-4111-8111-111111111111")
 OWNER_B = uuid.UUID("22222222-2222-4222-8222-222222222222")
-OBSERVATION_EVIDENCE = {
-    "name": uuid.UUID("aeeeeeee-1111-4111-8111-111111111112"),
-    "stance": uuid.UUID("aeeeeeee-1111-4111-8111-111111111115"),
-}
 PLAN_IDS = {
     "name": uuid.UUID("a3000000-0000-4000-8000-000000000001"),
     "stance": uuid.UUID("a3000000-0000-4000-8000-000000000002"),
@@ -35,20 +31,9 @@ async def actor(conn: asyncpg.Connection, owner: uuid.UUID) -> None:
     await conn.execute("SELECT set_config('app.user_id',$1,false)", str(owner))
 
 
-async def source_for_evidence(
-    conn: asyncpg.Connection, evidence_id: uuid.UUID
+async def source_for_observation(
+    conn: asyncpg.Connection, observation_id: uuid.UUID
 ) -> dict:
-    observation_id = await conn.fetchval(
-        """
-        SELECT observation_id FROM memory.observation
-        WHERE owner_user_id=$1 AND evidence_id=$2
-          AND predicate_registry_version='memory_predicate_registry_v5_2'
-        """,
-        OWNER_A,
-        evidence_id,
-    )
-    if observation_id is None:
-        raise RuntimeError("V5.2 observation is absent")
     row = await conn.fetchrow(
         "SELECT * FROM memory.preflight_projection_source_v5_2($1)", observation_id
     )
@@ -72,9 +57,13 @@ async def main() -> int:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("clone DSN must use brains_app")
         await actor(conn, OWNER_A)
+        observation_ids = {
+            "name": uuid.UUID(os.environ["V5_2_NAME_OBSERVATION_ID"]),
+            "stance": uuid.UUID(os.environ["V5_2_STANCE_OBSERVATION_ID"]),
+        }
         packets: dict[str, tuple[dict, str]] = {}
-        for name, evidence_id in OBSERVATION_EVIDENCE.items():
-            source = await source_for_evidence(conn, evidence_id)
+        for name, observation_id in observation_ids.items():
+            source = await source_for_observation(conn, observation_id)
             packet = build_packet(str(OWNER_A), source)
             validate_packet(packet, str(OWNER_A), registry_by_name)
             packet_text = stable_json(packet)

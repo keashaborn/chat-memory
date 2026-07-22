@@ -452,7 +452,21 @@ MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
 
 run_sql <"$projection_migration"
 run_sql <"$projection_migration"
-POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
+name_observation=$(scalar "
+  SELECT observation_id FROM memory.observation
+  WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+    AND evidence_id='aeeeeeee-1111-4111-8111-111111111112'::uuid
+    AND predicate_registry_version='memory_predicate_registry_v5_2'")
+stance_observation=$(scalar "
+  SELECT observation_id FROM memory.observation
+  WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+    AND evidence_id='aeeeeeee-1111-4111-8111-111111111115'::uuid
+    AND predicate_registry_version='memory_predicate_registry_v5_2'")
+[[ -n "$name_observation" && -n "$stance_observation" ]]
+POSTGRES_DSN="$dsn" \
+  V5_2_NAME_OBSERVATION_ID="$name_observation" \
+  V5_2_STANCE_OBSERVATION_ID="$stance_observation" \
+  PYTHONPATH="$repo_root/scripts:$repo_root" \
   /opt/chat-memory/venv/bin/python "$projection_clone"
 
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
