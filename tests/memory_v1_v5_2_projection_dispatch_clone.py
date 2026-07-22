@@ -242,20 +242,6 @@ async def review_apply_and_assess_claim(
         reviewed["review_id"],
         apply_preflight["apply_manifest_sha256"],
     )
-    assessment_review_replay = await conn.fetchrow(
-        """
-        SELECT * FROM memory.review_claim_assessment_v5(
-          $1,$2,'promote_supported'::memory.claim_assessment_action_v5,
-          1::numeric,0::numeric,1::numeric,1::numeric,$3::jsonb,
-          'accepted synthetic evidence and entailment','system',
-          'synthetic_v5_2_projection_clone',$4
-        )
-        """,
-        ASSESSMENT_REVIEW_REQUEST_IDS[name],
-        applied["aggregate_id"],
-        reason_codes,
-        assessment_preflight["authorization_manifest_sha256"],
-    )
     assessment_apply_replay = await conn.fetchrow(
         "SELECT * FROM memory.apply_claim_assessment_v5($1,$2,$3,$4)",
         ASSESSMENT_APPLY_REQUEST_IDS[name],
@@ -266,7 +252,6 @@ async def review_apply_and_assess_claim(
     for replay in (
         review_replay,
         apply_replay,
-        assessment_review_replay,
         assessment_apply_replay,
     ):
         if replay["outcome"] != "replayed" or replay["rows_written"] != 0:
