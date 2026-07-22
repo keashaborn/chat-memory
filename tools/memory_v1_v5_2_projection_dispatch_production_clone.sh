@@ -37,6 +37,7 @@ profile_unit_test=tests/test_memory_v1_v5_2_review_profile.py
 entity_runner=scripts/memory_v1_v5_2_entity_resolution_batch.py
 entity_fixture=tests/memory_v1_v5_2_entity_resolution_batch_fixture.py
 entity_unit_test=tests/test_memory_v1_v5_2_entity_resolution_batch.py
+projection_apply_migration=ops/sql/20260715_memory_v1_projection_apply_v5.sql
 projection_migration=ops/sql/20260722_memory_v1_projection_dispatch_v5_2.sql
 projection_unit_test=tests/test_memory_v1_v5_2_projection_dispatch.py
 projection_clone=tests/memory_v1_v5_2_projection_dispatch_clone.py
@@ -453,6 +454,8 @@ MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
       WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=0
   )::int")" == 1 ]]
 
+run_sql <"$projection_apply_migration"
+run_sql <"$projection_apply_migration"
 run_sql <"$projection_migration"
 run_sql <"$projection_migration"
 name_observation=$(scalar "
