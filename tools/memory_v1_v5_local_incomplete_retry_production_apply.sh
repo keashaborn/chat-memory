@@ -270,6 +270,7 @@ cmp -s "$protected_before" "$protected_after"
   WHERE owner_user_id='$owner'::uuid AND job_id='$job'::uuid")" == 0 ]]
 restore_timers
 curl --fail --silent --show-error --max-time 10 \
+  -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
   http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
 
 phase=report

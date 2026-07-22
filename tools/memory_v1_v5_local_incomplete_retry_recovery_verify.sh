@@ -90,6 +90,7 @@ SQL
 
 [[ "$(qdrant_signature)" == "$expected_qdrant_sha" ]]
 curl --fail --silent --show-error --max-time 10 \
+  -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
   http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
 [[ "$(systemctl list-timers 'memory-v1-*.timer' --all --no-legend --no-pager \
   | awk 'NF{count++} END{print count+0}')" == 13 ]]
