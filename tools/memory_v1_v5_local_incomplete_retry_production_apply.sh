@@ -269,7 +269,8 @@ cmp -s "$protected_before" "$protected_after"
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$owner'::uuid AND job_id='$job'::uuid")" == 0 ]]
 restore_timers
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8000/health >/dev/null
+curl --fail --silent --show-error --max-time 10 \
+  http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
 
 phase=report
 report="$snapshot_dir/memory_v1_v5_local_incomplete_retry_${run_tag}.json"
