@@ -333,8 +333,14 @@ def _project_payload(source: Mapping[str, Any]) -> dict[str, Any]:
 
 def build_projection(owner_user_id: str, source: Mapping[str, Any]) -> dict[str, Any]:
     owner = str(uuid.UUID(owner_user_id))
-    if source.get("owner_user_id") not in {None, owner}:
-        raise ProjectionDispatchError("source owner mismatch")
+    source_owner = source.get("owner_user_id")
+    if source_owner is not None:
+        try:
+            normalized_source_owner = str(uuid.UUID(str(source_owner)))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ProjectionDispatchError("source owner mismatch") from exc
+        if normalized_source_owner != owner:
+            raise ProjectionDispatchError("source owner mismatch")
     if source.get("predicate_registry_version") != REGISTRY_VERSION:
         raise ProjectionDispatchError("source registry mismatch")
     if source.get("evidence_status") != "active" or source.get("subject_entity_status") != "active":
