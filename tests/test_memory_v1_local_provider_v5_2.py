@@ -8,9 +8,11 @@ from pathlib import Path
 from scripts.memory_v1_predicate_runtime_profile_v2 import load_runtime_profile_v2
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalLlamaCppProvider,
+    LocalProviderAdapterError,
     SEMANTIC_V5_2_REGISTRY_VERSION,
     SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
     _deterministic_policy_packet,
+    _structured_result,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
@@ -53,19 +55,67 @@ class LocalProviderV52Test(unittest.TestCase):
             content=content,
         )
         request = provider.request(source)
-        self.assertIn("RELATIONSHIP_V5_1_RULES", request.instructions)
         self.assertIn("SEMANTIC_V5_2_RULES", request.instructions)
+        self.assertIn("SEMANTIC_STANCE_COMPACT_V1", request.instructions)
         self.assertIn("stance.reported", request.instructions)
+        self.assertEqual(request.prompt_profile, "semantic_stance_compact_v1")
+        self.assertLess(len(request.instructions), 15_000)
         predicate = request.output_schema["$defs"]["ProviderObservation"][
             "properties"
         ]["predicate"]
-        self.assertIn("stance.reported", predicate["enum"])
-        self.assertIn("education.attended", predicate["enum"])
-        self.assertIn("employment.worked_for", predicate["enum"])
+        self.assertEqual(predicate["enum"], ["stance.reported"])
         self.assertEqual(
             provider._policy_compiler_version,
             SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
         )
+
+    def test_non_stance_v5_2_source_retains_full_registry_profile(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source("I attended the University of Wisconsin.")
+        )
+        self.assertEqual(request.prompt_profile, "full_registry_v1")
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertIn("education.attended", predicate["enum"])
+        self.assertIn("employment.worked_for", predicate["enum"])
+
+    def test_incomplete_response_retains_sanitized_usage_diagnostics(self) -> None:
+        with self.assertRaises(LocalProviderAdapterError) as caught:
+            _structured_result(
+                {
+                    "id": "local-test",
+                    "model": "qwen3-14b-local-extractor",
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "{",
+                                "reasoning_content": None,
+                            },
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 7_000,
+                        "completion_tokens": 4_000,
+                    },
+                }
+            )
+        error = caught.exception
+        self.assertEqual(error.code, "local_incomplete_response")
+        self.assertTrue(error.retryable)
+        self.assertEqual(error.finish_reason, "length")
+        self.assertEqual(error.prompt_tokens, 7_000)
+        self.assertEqual(error.completion_tokens, 4_000)
 
     def test_malformed_general_health_belief_defers_without_health_fact(self) -> None:
         content = (
@@ -127,6 +177,21 @@ class LocalProviderV52Test(unittest.TestCase):
                 registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
             )
         )
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(self.source(content))
+        self.assertEqual(request.prompt_profile, "full_registry_v1")
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertIn("health.user_reported_observation", predicate["enum"])
 
 
 if __name__ == "__main__":

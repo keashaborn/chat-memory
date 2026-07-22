@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v2"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v3"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -958,7 +958,56 @@ LOCAL_FEW_SHOT_EXAMPLES = "\n\n".join(
     f"{source}\nSTRUCTURE_EXAMPLE_PROVIDER_PACKET={canonical_json(packet)}"
     for source, packet in _local_examples() + _additional_local_examples()
 )
-LOCAL_EXTRACTION_INSTRUCTIONS = (
+SEMANTIC_STANCE_EXAMPLE_SOURCE = (
+    "I think public opinion is not the same as evidence."
+)
+SEMANTIC_STANCE_EXAMPLE_PACKET = canonical_json(
+    _packet(
+        entities=[
+            _example_entity(
+                SEMANTIC_STANCE_EXAMPLE_SOURCE,
+                entity_ref="e00",
+                entity_type="self",
+                mention_kind="self_reference",
+                name_text=None,
+                relationship_role="user:self",
+                reason_code="explicit_self_reference",
+            )
+        ],
+        observations=[
+            _example_observation(
+                SEMANTIC_STANCE_EXAMPLE_SOURCE,
+                observation_ref="o00",
+                subject_entity_ref="e00",
+                predicate="stance.reported",
+                object_value=_literal(
+                    "json",
+                    {
+                        "topic_key": "epistemology.evidence_and_public_opinion",
+                        "topic_text": "public opinion and evidence",
+                        "position": (
+                            "public opinion is not the same as evidence"
+                        ),
+                        "orientation": "supports",
+                        "context": None,
+                    },
+                ),
+                projection_class="reported_stance",
+                surface_policy="relevant_recall_or_explicit_recall",
+                sensitivity="medium",
+                reason_code="explicit_reported_stance",
+                modality="reported_belief",
+            )
+        ],
+    )
+)
+SEMANTIC_STANCE_EXAMPLE = (
+    "STRUCTURE_EXAMPLE_SOURCE_CONTENT="
+    f"{SEMANTIC_STANCE_EXAMPLE_SOURCE}\n"
+    "STRUCTURE_EXAMPLE_PROVIDER_PACKET="
+    f"{SEMANTIC_STANCE_EXAMPLE_PACKET}"
+)
+LOCAL_CORE_INSTRUCTIONS = (
     f"{EXTRACTION_INSTRUCTIONS}\n"
     "Within each reason_codes array, values must be unique. "
     "packet_findings values must also be unique. For simple source records, "
@@ -990,9 +1039,12 @@ LOCAL_EXTRACTION_INSTRUCTIONS = (
     "life_event.died uses occurrence time.\n\n"
     f"STRUCTURE_EXAMPLE_SOURCE_CONTENT={LOCAL_IDENTITY_EXAMPLE_SOURCE}\n"
     f"STRUCTURE_EXAMPLE_PROVIDER_PACKET={LOCAL_IDENTITY_EXAMPLE_PACKET}\n"
-    f"{LOCAL_FEW_SHOT_EXAMPLES}\n"
     "These examples demonstrate structure only. Extract values and exact Python "
     "Unicode offsets from the actual SOURCE_CONTENT, never from an example."
+)
+LOCAL_EXTRACTION_INSTRUCTIONS = (
+    f"{LOCAL_CORE_INSTRUCTIONS}\n"
+    f"{LOCAL_FEW_SHOT_EXAMPLES}\n"
 )
 
 RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS = (
@@ -1059,6 +1111,57 @@ SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS = (
     "questions, transient states, structured application data, ambiguity, and "
     "unsupported inference."
 )
+
+
+def _registry_contract_for_predicates(
+    registry: dict[str, Any],
+    allowed_predicates: tuple[str, ...],
+) -> str:
+    allowed = set(allowed_predicates)
+    predicates = [
+        item
+        for item in registry["predicates"]
+        if item["predicate"] in allowed
+    ]
+    if {item["predicate"] for item in predicates} != allowed:
+        raise ValueError("prompt predicate subset is not registered")
+    contract_names = {item["object_contract"] for item in predicates}
+    contracts = {
+        name: registry["object_contracts"][name]
+        for name in sorted(contract_names)
+    }
+    return _registry_contract(
+        {
+            "registry_version": registry.get("registry_version"),
+            "predicates": predicates,
+            "object_contracts": contracts,
+        }
+    )
+
+
+def _semantic_stance_prompt_enabled(
+    registry: dict[str, Any],
+    content: str,
+) -> bool:
+    return bool(
+        registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION
+        and _REPORTED_BELIEF_CUE_RE.search(content)
+        and not _PERSONAL_HEALTH_REPORT_RE.search(content)
+    )
+
+
+def _semantic_stance_prompt_instructions() -> str:
+    return (
+        f"{LOCAL_CORE_INSTRUCTIONS}"
+        f"{SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS}\n\n"
+        "SEMANTIC_STANCE_COMPACT_V1\n"
+        "The governed prompt registry contains only stance.reported. Extract "
+        "one to four distinct explicitly attributed positions as separate "
+        "atomic observations. Do not encode a reported belief as a health, "
+        "biographical, relationship, preference, or project fact. If the "
+        "wording cannot support an attributed position, defer it.\n\n"
+        f"{SEMANTIC_STANCE_EXAMPLE}\n"
+    )
 
 
 def _relationship_contract_enabled(registry: dict[str, Any]) -> bool:
@@ -3405,11 +3508,17 @@ class LocalProviderAdapterError(RuntimeError):
         *,
         retryable: bool,
         http_status: int | None = None,
+        finish_reason: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> None:
         super().__init__(code)
         self.code = code
         self.retryable = retryable
         self.http_status = http_status
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
 
 
 @dataclass(frozen=True)
@@ -3420,6 +3529,7 @@ class LocalStructuredRequest:
     output_schema: dict[str, Any]
     max_output_tokens: int
     timeout_seconds: float
+    prompt_profile: str = "full_registry_v1"
     seed: int = 1
     temperature: float = 0.2
     top_k: int = 20
@@ -3662,33 +3772,49 @@ class LocalLlamaCppProvider:
             f"{source.content}\n"
             "SOURCE_CONTENT_END"
         )
-        relationship_instructions = (
-            RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
-            if _relationship_contract_enabled(self._registry)
-            else ""
-        )
-        semantic_instructions = (
-            SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS
-            if self._registry.get("registry_version")
-            == SEMANTIC_V5_2_REGISTRY_VERSION
-            else ""
-        )
+        prompt_profile = "full_registry_v1"
+        allowed_predicates = self._allowed_predicates
+        registry_contract = self._registry_contract
+        if _semantic_stance_prompt_enabled(self._registry, source.content):
+            prompt_profile = "semantic_stance_compact_v1"
+            allowed_predicates = ("stance.reported",)
+            registry_contract = _registry_contract_for_predicates(
+                self._registry,
+                allowed_predicates,
+            )
+            instructions = _semantic_stance_prompt_instructions()
+        else:
+            relationship_instructions = (
+                RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
+                if _relationship_contract_enabled(self._registry)
+                else ""
+            )
+            semantic_instructions = (
+                SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS
+                if self._registry.get("registry_version")
+                == SEMANTIC_V5_2_REGISTRY_VERSION
+                else ""
+            )
+            instructions = (
+                f"{LOCAL_EXTRACTION_INSTRUCTIONS}"
+                f"{relationship_instructions}"
+                f"{semantic_instructions}"
+            )
         return LocalStructuredRequest(
             model=self._model,
             instructions=(
-                f"{LOCAL_EXTRACTION_INSTRUCTIONS}"
-                f"{relationship_instructions}"
-                f"{semantic_instructions}\n\n"
+                f"{instructions}\n\n"
                 "GOVERNED_PREDICATE_REGISTRY\n"
-                f"{self._registry_contract}"
+                f"{registry_contract}"
             ),
             input_text=input_text,
             output_schema=_llama_cpp_output_schema(
                 ProviderPacket.model_json_schema(),
-                allowed_predicates=self._allowed_predicates,
+                allowed_predicates=allowed_predicates,
             ),
             max_output_tokens=self._max_output_tokens,
             timeout_seconds=self._timeout_seconds,
+            prompt_profile=prompt_profile,
         )
 
     def extract(self, source: TrustedExtractionSource) -> ProviderPacket:
@@ -3746,6 +3872,7 @@ class LocalLlamaCppProvider:
             "prompt_tokens": None,
             "completion_tokens": None,
             "error_code": None,
+            "prompt_profile": request.prompt_profile,
         }
         try:
             result = self._transport.complete(request)
@@ -3754,6 +3881,9 @@ class LocalLlamaCppProvider:
                 {
                     "response_status": "request_error",
                     "error_code": exc.code,
+                    "finish_reason": exc.finish_reason,
+                    "prompt_tokens": exc.prompt_tokens,
+                    "completion_tokens": exc.completion_tokens,
                 }
             )
             raise
@@ -4030,6 +4160,12 @@ def _structured_result(value: Any) -> LocalStructuredResult:
             "local_response_metadata_invalid",
             retryable=False,
         )
+    usage = value.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    prompt_tokens = _optional_nonnegative_int(usage.get("prompt_tokens"))
+    completion_tokens = _optional_nonnegative_int(
+        usage.get("completion_tokens")
+    )
     # A length-limited response is expected to contain incomplete JSON. Classify
     # it as retryable before parsing so it is never mistaken for a permanent
     # structured-output failure.
@@ -4037,6 +4173,9 @@ def _structured_result(value: Any) -> LocalStructuredResult:
         raise LocalProviderAdapterError(
             "local_incomplete_response",
             retryable=True,
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
     normalized_content = content.strip()
     content_normalization = "exact_json"
@@ -4056,18 +4195,14 @@ def _structured_result(value: Any) -> LocalStructuredResult:
             "local_structured_content_invalid",
             retryable=False,
         ) from exc
-    usage = value.get("usage")
-    usage = usage if isinstance(usage, dict) else {}
     return LocalStructuredResult(
         response_id=str(response_id) if response_id else None,
         model=model,
         finish_reason=finish_reason,
         parsed=parsed,
         response_sha256=canonical_sha256(value),
-        prompt_tokens=_optional_nonnegative_int(usage.get("prompt_tokens")),
-        completion_tokens=_optional_nonnegative_int(
-            usage.get("completion_tokens")
-        ),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         content_normalization=content_normalization,
     )
 
