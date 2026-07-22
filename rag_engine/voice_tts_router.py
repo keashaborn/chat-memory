@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from rag_engine.voice_realtime_router import get_realtime_capabilities
 from rag_engine.voice_observability_v1 import (
@@ -175,6 +175,8 @@ async def create_tts(req: Request):
                 "voice": voice,
                 "speed": speed,
                 "chars": len(text),
+                "audio_format": "pcm_s16le",
+                "audio_sample_rate": 24000,
                 "dry_run": True,
             }
         )
@@ -187,30 +189,37 @@ async def create_tts(req: Request):
         "model": model,
         "voice": voice,
         "input": text,
-        "response_format": "mp3",
+        "response_format": "pcm",
+        "stream_format": "audio",
         "speed": speed,
     }
 
     if instructions and model == "gpt-4o-mini-tts":
         payload["instructions"] = instructions[:2000]
 
+    client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
-            upstream = await client.post(
-                OPENAI_TTS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
-                },
-                json=payload,
-            )
+        request = client.build_request(
+            "POST",
+            OPENAI_TTS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
+            },
+            json=payload,
+        )
+        upstream = await client.send(request, stream=True)
     except Exception as exc:
+        await client.aclose()
         raise HTTPException(status_code=502, detail={"error": "openai_tts_unreachable"}) from exc
 
     if upstream.status_code >= 400:
         provider_request_id = upstream.headers.get("x-request-id") or upstream.headers.get("openai-request-id")
         public_status = 429 if upstream.status_code == 429 else 503 if upstream.status_code >= 500 else 502
+        await upstream.aread()
+        await upstream.aclose()
+        await client.aclose()
         raise HTTPException(
             status_code=public_status,
             detail={
@@ -224,12 +233,24 @@ async def create_tts(req: Request):
         upstream.headers.get("x-request-id")
         or upstream.headers.get("openai-request-id")
     )
-    return Response(
-        content=upstream.content,
-        media_type="audio/mpeg",
+
+    async def stream_audio():
+        try:
+            async for chunk in upstream.aiter_raw():
+                if chunk:
+                    yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_audio(),
+        media_type="audio/pcm",
         headers={
             "x-vs-voice-provider": "openai",
             "x-vs-voice-model": model,
+            "x-vs-audio-format": "pcm_s16le",
+            "x-vs-audio-sample-rate": "24000",
             **(
                 {"x-vs-provider-request-id": provider_request_id}
                 if provider_request_id

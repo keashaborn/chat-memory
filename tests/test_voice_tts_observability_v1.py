@@ -18,29 +18,48 @@ VOICE_TURN = "0fc3d70a-a6d0-4e55-9e39-20e060b416c8"
 class FakeResponse:
     status_code = 200
     headers = {"x-request-id": "openai-request-tts-001"}
-    content = b"fake-mp3"
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aiter_raw(self):
+        yield b"fake-"
+        yield b"pcm"
+
+    async def aread(self) -> bytes:
+        return b""
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class FakeAsyncClient:
     calls: list[dict[str, Any]] = []
+    instances: list["FakeAsyncClient"] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        self.closed = False
+        self.response = FakeResponse()
+        self.__class__.instances.append(self)
 
-    async def __aenter__(self) -> "FakeAsyncClient":
-        return self
+    def build_request(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        request = {"method": method, "url": url, **kwargs}
+        self.__class__.calls.append(request)
+        return request
 
-    async def __aexit__(self, *args: Any) -> None:
-        return None
+    async def send(self, request: dict[str, Any], **kwargs: Any) -> FakeResponse:
+        self.__class__.calls[-1]["send"] = kwargs
+        return self.response
 
-    async def post(self, url: str, **kwargs: Any) -> FakeResponse:
-        self.__class__.calls.append({"url": url, **kwargs})
-        return FakeResponse()
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class VoiceTTSObservabilityV1Tests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAsyncClient.calls = []
+        FakeAsyncClient.instances = []
         app = FastAPI()
         app.include_router(tts.router)
         self.client = TestClient(app)
@@ -64,13 +83,21 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, b"fake-mp3")
+        self.assertEqual(response.content, b"fake-pcm")
+        self.assertEqual(response.headers["content-type"], "audio/pcm")
+        self.assertEqual(response.headers["x-vs-audio-format"], "pcm_s16le")
+        self.assertEqual(response.headers["x-vs-audio-sample-rate"], "24000")
         self.assertEqual(response.headers["x-vs-voice-turn-id"], VOICE_TURN)
         self.assertEqual(
             response.headers["x-vs-provider-request-id"],
             "openai-request-tts-001",
         )
         self.assertEqual(len(FakeAsyncClient.calls), 1)
+        self.assertEqual(FakeAsyncClient.calls[0]["json"]["response_format"], "pcm")
+        self.assertEqual(FakeAsyncClient.calls[0]["json"]["stream_format"], "audio")
+        self.assertEqual(FakeAsyncClient.calls[0]["send"], {"stream": True})
+        self.assertTrue(FakeAsyncClient.instances[0].response.closed)
+        self.assertTrue(FakeAsyncClient.instances[0].closed)
 
     def test_rejects_invalid_voice_turn_before_openai(self) -> None:
         response = self.client.post(
