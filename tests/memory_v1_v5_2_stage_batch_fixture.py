@@ -332,10 +332,15 @@ def stance_bundle() -> dict[str, Any]:
         "predicate_registry_status": "governed",
         "object": {
             "kind": "literal",
-            "datatype": "text",
-            "value": (
-                "expert consensus should be treated as evidence, not absolute fact"
-            ),
+            "datatype": "json",
+            "value": {
+                "topic_key": "evidence.expert_consensus",
+                "position": (
+                    "expert consensus should be treated as evidence, not absolute fact"
+                ),
+                "orientation": "qualified_support",
+                "context": "epistemic evaluation",
+            },
             "unit": None,
             "approximate": False,
         },
