@@ -290,7 +290,8 @@ if [[ "$resume_mode" == 0 && "$completed_replay_mode" == 0 ]]; then
           'local_transport_rate_limited',
           'local_transport_server_error',
           'local_validation_rejected',
-          'local_incomplete_response'
+          'local_incomplete_response',
+          'local_persistence_contract_mismatch'
         )
     ) = $prior_attempts
   )::integer
