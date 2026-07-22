@@ -97,6 +97,13 @@ def effective_policy_compiler_version(profile: Any) -> str:
     raise RuntimeError("unsupported local inference contract profile")
 
 
+def effective_policy_compiler_sha256(profile: Any) -> str:
+    version = effective_policy_compiler_version(profile)
+    if profile.name == "v5":
+        return canonical_sha256(version)
+    return sha256_text(version)
+
+
 def loopback_dsn(value: str) -> str:
     parsed = urlparse(value)
     if parsed.scheme not in {"postgres", "postgresql"}:
@@ -305,7 +312,7 @@ async def claim_exact(
             canonical_sha256(args.model),
             args.model_file_sha256,
             canonical_sha256(args.runtime_revision),
-            canonical_sha256(effective_policy_compiler_version(profile)),
+            effective_policy_compiler_sha256(profile),
             args.rolling_window_seconds,
             args.max_reserved_jobs,
             args.failure_threshold,
@@ -365,7 +372,7 @@ async def persist_packet(
             canonical_sha256(args.model),
             args.model_file_sha256,
             canonical_sha256(args.runtime_revision),
-            canonical_sha256(effective_policy_compiler_version(profile)),
+            effective_policy_compiler_sha256(profile),
             validated.provider_output_sha256,
             validated.normalized_packet_sha256,
             stable_json(validated.normalized_packet),

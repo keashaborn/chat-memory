@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 from scripts.memory_v1_v5_local_inference_canary import (
     canonical_source_external_id,
+    effective_policy_compiler_sha256,
     loopback_dsn,
+    sha256_text,
 )
+from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    LOCAL_POLICY_COMPILER_VERSION,
+    RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION,
+    SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+)
+from scripts.memory_v1_relational_extraction_v5_provider import canonical_sha256
 
 
 def main() -> int:
@@ -41,6 +50,18 @@ def main() -> int:
             pass
         else:
             raise AssertionError("non-loopback database DSN was accepted")
+    if effective_policy_compiler_sha256(SimpleNamespace(name="v5")) != (
+        canonical_sha256(LOCAL_POLICY_COMPILER_VERSION)
+    ):
+        raise AssertionError("legacy V5 compiler hash compatibility changed")
+    if effective_policy_compiler_sha256(SimpleNamespace(name="v5_1")) != (
+        sha256_text(RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION)
+    ):
+        raise AssertionError("V5.1 compiler hash is not database compatible")
+    if effective_policy_compiler_sha256(SimpleNamespace(name="v5_2")) != (
+        sha256_text(SEMANTIC_V5_2_POLICY_COMPILER_VERSION)
+    ):
+        raise AssertionError("V5.2 compiler hash is not database compatible")
     print("memory_v1_v5_local_inference_canary_test: PASS")
     return 0
 
