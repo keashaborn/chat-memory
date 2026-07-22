@@ -1,0 +1,23 @@
+{
+  "contract_version": "memory_v1_v5_local_circuit_fingerprint_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "job_id": "20ba21a9-855b-4606-93fb-28065e2e13d1",
+  "evidence_id": "22bd0732-3539-4180-8f89-8f84114131c0",
+  "evidence_content_sha256": "70a0cef5245b571bc8fceaa4c744cc273b488bbacac08acb2718f831a2b920a1",
+  "blocked_run_id": "d8d9ddb5-d6f4-4092-b489-d4d1c1ec8fc8",
+  "blocked_event_id": "1365a304-d972-48a6-8a7b-9bec2ffff46b",
+  "blocked_operation_id": "b7cac63f-9918-5da7-9b2c-7b05152b4b0b",
+  "blocked_policy_compiler_sha256": "fb7d46cbc52f16c0cb38c74cda2fc46c7f3343fda68dde1aed88ace4ab4b378e",
+  "prior_function_sha256": "9d10f1507b2a619ad011c7033076af8c52b811fc3cdaae5c2f9b79a6f3fb56fb",
+  "installed_function_sha256": "01052eb7ea5a2add2a9795bcc960408a7702fdc1baee83e17b12722889307970",
+  "next_canary_run_id": "a2dcaa50-4054-4e83-989e-84ddbc35f167",
+  "next_canary_max_output_tokens": 4096,
+  "expected_effects": {
+    "schema_functions_replaced": 1,
+    "memory_rows_written": 0,
+    "model_calls": 0,
+    "qdrant_writes": 0,
+    "retrieval_changes": 0,
+    "prompt_influence_changes": 0
+  }
+}
