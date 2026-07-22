@@ -7,8 +7,19 @@ BEGIN
      OR to_regclass('memory.projection_plan') IS NULL
      OR to_regclass('memory.projection_plan_item') IS NULL
      OR to_regclass('memory.projection_claim_payload') IS NULL
+     OR to_regclass('memory.claim') IS NULL
      OR to_regclass('memory.preference_head_v5') IS NULL
      OR to_regclass('memory.project_knowledge_head_v5') IS NULL
+     OR EXISTS (
+       SELECT 1
+       FROM pg_class AS relation
+       JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+       WHERE namespace.nspname='memory'
+         AND relation.relname IN (
+           'claim','preference_head_v5','project_knowledge_head_v5'
+         )
+         AND (NOT relation.relrowsecurity OR NOT relation.relforcerowsecurity)
+     )
      OR NOT EXISTS (
        SELECT 1 FROM pg_roles
        WHERE rolname='memory_v5_writer' AND NOT rolcanlogin
@@ -813,6 +824,14 @@ ALTER FUNCTION memory.preflight_projection_packet_v5_2(uuid,text)
   OWNER TO memory_v5_writer;
 ALTER FUNCTION memory.stage_projection_plan_v5_2(uuid,text,text)
   OWNER TO memory_v5_writer;
+
+-- These are the same owner-filtered reads required by the existing V5 apply
+-- path.  FORCE RLS remains authoritative for the NOLOGIN writer role.
+GRANT SELECT ON
+  memory.claim,
+  memory.preference_head_v5,
+  memory.project_knowledge_head_v5
+TO memory_v5_writer;
 
 REVOKE ALL ON FUNCTION memory.v5_2_projection_sentence(
   text,text,text,memory.observation_polarity,memory.observation_modality
