@@ -81,8 +81,14 @@ CONTENT_SURFACES = frozenset(
         SurfacePolicy.DIRECT_OR_RELEVANT,
         SurfacePolicy.RELEVANT_RECOMMENDATION_OR_EXPLICIT_RECALL,
         SurfacePolicy.EXACT_PROJECT_SCOPE_ONLY,
+        SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT,
     }
 )
+STORED_SURFACE_ALIASES = {
+    "relevant_recall_or_explicit_recall": (
+        SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT
+    ),
+}
 _PREDICATE_PERMISSION_RE = re.compile(
     r"^[a-z0-9_]+(?:\.[a-z0-9_]+)*(?:\.)?$"
 )
@@ -142,6 +148,10 @@ def _surface_is_eligible(
 ) -> bool:
     if surface == SurfacePolicy.DIRECT_OR_RELEVANT:
         return True
+    if surface == SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT:
+        # The bounded semantic candidate gate establishes direct relevance;
+        # V2 adds exact entity-scope enforcement before this check.
+        return True
     if surface == SurfacePolicy.RELEVANT_RECOMMENDATION_OR_EXPLICIT_RECALL:
         return request.explicit_recall or request.memory_intent in {
             "life_preference_recall",
@@ -164,6 +174,8 @@ def _use_instruction(status: EpistemicStatus, surface: SurfacePolicy) -> UseInst
         return UseInstruction.USE_ONLY_FOR_RELEVANT_RECOMMENDATION_OR_EXPLICIT_RECALL
     if surface == SurfacePolicy.EXACT_PROJECT_SCOPE_ONLY:
         return UseInstruction.USE_ONLY_INSIDE_EXACT_PROJECT_SCOPE
+    if surface == SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT:
+        return UseInstruction.MENTION_ONLY_WHEN_DIRECTLY_RELEVANT
     return UseInstruction.ANSWER_DIRECTLY_ONLY_WHEN_RELEVANT
 
 
@@ -218,10 +230,12 @@ def _typed_record(
         row["retrieval_policy"], field="claim.retrieval_policy"
     )
     surface_value = str(retrieval_policy.get("surface_policy") or "").casefold()
-    try:
-        surface = SurfacePolicy(surface_value)
-    except ValueError:
-        surface = SurfacePolicy.NEVER
+    surface = STORED_SURFACE_ALIASES.get(surface_value)
+    if surface is None:
+        try:
+            surface = SurfacePolicy(surface_value)
+        except ValueError:
+            surface = SurfacePolicy.NEVER
 
     evidence_raw = parse_mapping(
         row["evidence_by_stance"], field="claim.evidence_by_stance"

@@ -32,6 +32,8 @@ from rag_engine.memory_v1_selection_envelope import (
     SelectionDirective,
     Sensitivity,
     SourceContractVersionV1,
+    SurfacePolicy,
+    UseInstruction,
 )
 from rag_engine.memory_v1_v5_claim_lane_adapter_v2 import V5ClaimLaneAdapterV2
 
@@ -245,6 +247,27 @@ def pet_relationship_row() -> dict[str, object]:
     return row
 
 
+def reported_stance_row() -> dict[str, object]:
+    row = enriched_claim_row(uid(1))
+    row.update(
+        {
+            "canonical_key": "v5:stance:reported:public_opinion_evidence",
+            "canonical_text": (
+                "Eric reports that public opinion is not the same as evidence."
+            ),
+            "predicate": "stance.reported",
+            "retrieval_policy": {
+                "surface_policy": "relevant_recall_or_explicit_recall"
+            },
+            "subject_entity_id": SELF,
+            "subject_entity_type": "self",
+            "object_entity_id": None,
+            "object_entity_type": None,
+        }
+    )
+    return row
+
+
 class ClaimLaneAdapterV2Test(unittest.TestCase):
     def claim_request(self) -> MemorySelectionRequestV1:
         return claim_request()
@@ -266,6 +289,52 @@ class ClaimLaneAdapterV2Test(unittest.TestCase):
         )
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0].predicate, "relationship.has_pet")
+
+    def test_reported_stance_alias_maps_to_frozen_direct_relevance_policy(self) -> None:
+        selection_request = self.claim_request()
+        value = selector_context(
+            selection_request,
+            subject=SELF,
+            object_entity=None,
+            predicate="stance.reported",
+        )
+        result = asyncio.run(
+            adapter(
+                reported_stance_row(),
+                lambda _: value,
+                predicate="stance.reported",
+            ).select(selection_request, lane_limit())
+        )
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(
+            result.records[0].surface_policy,
+            SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT,
+        )
+        self.assertEqual(
+            result.records[0].use_instruction,
+            UseInstruction.MENTION_ONLY_WHEN_DIRECTLY_RELEVANT,
+        )
+
+    def test_unknown_stored_surface_alias_fails_closed(self) -> None:
+        selection_request = self.claim_request()
+        value = selector_context(
+            selection_request,
+            subject=SELF,
+            object_entity=None,
+            predicate="stance.reported",
+        )
+        row = reported_stance_row()
+        row["retrieval_policy"] = {"surface_policy": "unreviewed_surface"}
+        result = asyncio.run(
+            adapter(
+                row,
+                lambda _: value,
+                predicate="stance.reported",
+            ).select(selection_request, lane_limit())
+        )
+        self.assertEqual(result.records, ())
+        counts = {item.code: item.count for item in result.reason_counts}
+        self.assertEqual(counts[RejectionCode.SURFACE_POLICY], 1)
 
     def test_wrong_subject_is_rejected_as_entity_scope(self) -> None:
         selection_request = self.claim_request()
