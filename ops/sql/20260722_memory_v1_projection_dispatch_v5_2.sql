@@ -689,7 +689,7 @@ AS $function$
 DECLARE
   actor uuid;
   packet jsonb;
-  projection jsonb;
+  projection_value jsonb;
   identity jsonb;
   payload jsonb;
   input jsonb;
@@ -703,10 +703,10 @@ BEGIN
     RAISE EXCEPTION 'V5.2 projection stage identifiers are invalid';
   END IF;
   packet := p_packet_text::jsonb;
-  projection := packet->'projections'->0;
-  identity := projection->'identity';
-  payload := projection->'payload';
-  input := projection->'observation_inputs'->0;
+  projection_value := packet->'projections'->0;
+  identity := projection_value->'identity';
+  payload := projection_value->'payload';
+  input := projection_value->'observation_inputs'->0;
   PERFORM pg_advisory_xact_lock(hashtextextended(
     actor::text||'|projection-v5-2|'||p_plan_id::text,0
   ));
@@ -719,7 +719,8 @@ BEGIN
        OR NOT EXISTS (
          SELECT 1 FROM memory.projection_plan_item AS item
          WHERE item.owner_user_id=actor AND item.plan_id=p_plan_id
-           AND item.projection_ref='p01' AND item.projection=projection
+           AND item.projection_ref='p01'
+           AND item.projection=projection_value
        )
        OR NOT EXISTS (
          SELECT 1 FROM memory.projection_plan_observation AS link
@@ -765,7 +766,8 @@ BEGIN
     review_state,authorization_required,review_reason_codes
   ) VALUES (
     actor,p_plan_id,'p01','memory_predicate_registry_v5_2',expected.lane,
-    projection,preflight.projection_sha256,(identity->>'subject_entity_id')::uuid,
+    projection_value,preflight.projection_sha256,
+    (identity->>'subject_entity_id')::uuid,
     identity->>'predicate',identity->>'object_kind',
     NULLIF(identity->>'object_entity_id','')::uuid,
     NULLIF(identity->>'object_literal_sha256',''),
@@ -773,7 +775,7 @@ BEGIN
     (identity->>'modality')::memory.observation_modality,
     expected.lane_scope,preflight.semantic_key_sha256,'create',NULL,'[]'::jsonb,
     expected.temporal_materialization,expected.temporal_source_observation_id,
-    'manual_review_required',true,projection#>'{review,reason_codes}'
+    'manual_review_required',true,projection_value#>'{review,reason_codes}'
   );
   IF expected.lane='claim' THEN
     INSERT INTO memory.projection_claim_payload(
