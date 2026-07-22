@@ -472,6 +472,27 @@ POSTGRES_DSN="$dsn" \
   PYTHONPATH="$repo_root/scripts:$repo_root" \
   /opt/chat-memory/venv/bin/python "$projection_clone"
 
+[[ "$(scalar "
+  SELECT (
+    (SELECT count(*) FROM memory.projection_plan
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND predicate_registry_version='memory_predicate_registry_v5_2')=2
+    AND (SELECT count(*) FROM memory.projection_plan_item
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND predicate_registry_version='memory_predicate_registry_v5_2')=2
+    AND (SELECT count(*) FROM memory.projection_claim_payload
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND claim_class='reported_stance')=1
+    AND (SELECT count(*) FROM memory.observation_entailment_v5
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND observation_id IN ('$name_observation'::uuid,'$stance_observation'::uuid)
+        AND decision='accepted')=2
+    AND (SELECT count(*) FROM memory.claim
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=0
+    AND (SELECT count(*) FROM memory.projection_plan
+      WHERE owner_user_id='22222222-2222-4222-8222-222222222222'::uuid)=0
+  )::int")" == "1" ]]
+
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 [[ "$(docker exec brains-postgres-1 psql -X -A -t \
   -U sage -d memory -c "

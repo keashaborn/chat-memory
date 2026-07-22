@@ -176,30 +176,6 @@ async def main() -> int:
             pass
         else:
             raise RuntimeError("cross-owner V5.2 projection preflight passed")
-        await actor(conn, OWNER_A)
-        counts = await conn.fetchrow(
-            """
-            SELECT
-              (SELECT count(*) FROM memory.projection_plan
-               WHERE owner_user_id=$1 AND predicate_registry_version='memory_predicate_registry_v5_2') AS plans,
-              (SELECT count(*) FROM memory.projection_plan_item
-               WHERE owner_user_id=$1 AND predicate_registry_version='memory_predicate_registry_v5_2') AS items,
-              (SELECT count(*) FROM memory.projection_claim_payload
-               WHERE owner_user_id=$1 AND claim_class='reported_stance') AS stances,
-              (SELECT count(*) FROM memory.observation_entailment_v5
-               WHERE owner_user_id=$1 AND decision='accepted') AS entailed,
-              (SELECT count(*) FROM memory.claim WHERE owner_user_id=$1) AS claims
-            """,
-            OWNER_A,
-        )
-        if dict(counts) != {
-            "plans": 2,
-            "items": 2,
-            "stances": 1,
-            "entailed": 2,
-            "claims": 0,
-        }:
-            raise RuntimeError(f"unexpected V5.2 projection counts: {dict(counts)}")
     finally:
         await conn.close()
     print("memory_v1_v5_2_projection_dispatch_clone: PASS")
