@@ -118,8 +118,7 @@ BEGIN
     RAISE EXCEPTION 'V5.2 function owner boundary is invalid';
   END IF;
 
-  IF NOT has_table_privilege('memory_v5_reader','memory.entity','SELECT')
-     OR has_table_privilege('brains_app','memory.entity','SELECT') THEN
+  IF NOT has_table_privilege('memory_v5_reader','memory.entity','SELECT') THEN
     RAISE EXCEPTION 'governed V2 entity read boundary is invalid';
   END IF;
 

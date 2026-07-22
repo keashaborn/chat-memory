@@ -109,7 +109,7 @@
     },
     {
       "path": "tests/memory_v1_v5_2_schema_install_security.sql",
-      "sha256": "6381906d179a1d0a3dd96b4d800a0c83ed9516480d1eba21cda61a98c9f77db6",
+      "sha256": "1228a9a004cb30879c0f6ad1412fc1ab85f6360923b3a886c46b3e4c4c49688c",
       "kind": "rolled_back_test",
       "ordinal": 5
     },
