@@ -15,9 +15,9 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import load_runtime_profile_
 
 
 class PredicateRuntimeProfileV2Test(unittest.TestCase):
-    def test_v5_2_is_bound_but_review_only(self) -> None:
+    def test_v5_2_is_bound_for_private_shadow_staging(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
-        self.assertEqual(profile.lifecycle, "offline_review_only")
+        self.assertEqual(profile.lifecycle, "shadow_review_staging")
         self.assertEqual(
             profile.contract_version,
             "memory_v1_relational_extraction_v5_2",
@@ -26,7 +26,7 @@ class PredicateRuntimeProfileV2Test(unittest.TestCase):
             profile.registry_version,
             "memory_predicate_registry_v5_2",
         )
-        self.assertTrue(profile.review_only)
+        self.assertFalse(profile.review_only)
 
     def test_existing_runtime_loader_cannot_select_v5_2(self) -> None:
         with self.assertRaisesRegex(ValueError, "not allowlisted"):

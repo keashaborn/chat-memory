@@ -21,6 +21,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_PROVIDER_ID,
     LOCAL_PROVIDER_VERSION,
     RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION,
+    SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
     LlamaCppSecureTransport,
     LocalLlamaCppProvider,
     LocalProviderAdapterError,
@@ -37,9 +38,9 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     load_schema,
     validate_and_normalize,
 )
-from scripts.memory_v1_predicate_runtime_profile import (
+from scripts.memory_v1_predicate_runtime_profile_v2 import (
     PROFILE_NAMES,
-    load_runtime_profile,
+    load_runtime_profile_v2,
 )
 
 
@@ -91,6 +92,8 @@ def effective_policy_compiler_version(profile: Any) -> str:
         return LOCAL_POLICY_COMPILER_VERSION
     if profile.name == "v5_1":
         return RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION
+    if profile.name == "v5_2":
+        return SEMANTIC_V5_2_POLICY_COMPILER_VERSION
     raise RuntimeError("unsupported local inference contract profile")
 
 
@@ -339,6 +342,13 @@ async def persist_packet(
               $15,$16
             )
             """
+    elif profile.name == "v5_2":
+        persist_sql = """
+            SELECT * FROM memory.persist_owner_v5_2_local_packet_v1(
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,
+              $15,$16
+            )
+            """
     else:
         raise RuntimeError("unsupported local inference contract profile")
     async with conn.transaction():
@@ -477,7 +487,9 @@ async def run() -> int:
     ids = validated_arguments(args)
     worker_id = worker_reference(args.worker_id)
     root = Path(__file__).resolve().parents[1]
-    profile = load_runtime_profile(root, args.contract_profile)
+    profile = load_runtime_profile_v2(root, args.contract_profile)
+    if args.apply and profile.lifecycle == "offline_review_only":
+        raise RuntimeError("review-only predicate profile cannot persist packets")
     registry = load_registry(
         profile.registry_path,
         profile.registry_artifact_sha256,

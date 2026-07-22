@@ -1,6 +1,7 @@
 # Memory V1 V5.2 Semantic Coverage Contract
 
-Status: design freeze candidate; no production activation.
+Status: accepted for private shadow extraction and append-only review staging;
+no downstream staging, projection, retrieval, or prompt activation.
 
 ## Purpose
 
@@ -145,6 +146,11 @@ sensitivity ceiling, record budget, and token budget. Broad recall is still
 bounded and never means inject every known record.
 
 ## Extraction and projection gates
+
+The V5.2 runtime profile may create only immutable, owner-scoped extraction
+packets in `review_required` state. Existing V5/V5.1 relational staging,
+entity-resolution, projection, Qdrant publication, and prompt paths must reject
+V5.2 until their own V5.2 compatibility contracts pass clone testing.
 
 Automatic progression is allowed only when all applicable conditions hold:
 

@@ -19,9 +19,9 @@ from urllib.parse import urlparse
 
 import asyncpg
 
-from scripts.memory_v1_predicate_runtime_profile import (
+from scripts.memory_v1_predicate_runtime_profile_v2 import (
     PROFILE_NAMES,
-    load_runtime_profile,
+    load_runtime_profile_v2,
 )
 
 
@@ -563,7 +563,9 @@ async def run() -> int:
     args = arguments()
     run_id = validate_arguments(args)
     root = Path(__file__).resolve().parents[1]
-    profile = load_runtime_profile(root, args.contract_profile)
+    profile = load_runtime_profile_v2(root, args.contract_profile)
+    if args.apply and profile.lifecycle == "offline_review_only":
+        raise RuntimeError("review-only predicate profile cannot run scheduler")
     owners = canonical_owners(args.owner_user_id)
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:

@@ -421,8 +421,10 @@ class SemanticCoverageV52Test(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
-        if not profile.review_only:
-            raise AssertionError("V5.2 semantic eval must remain review-only")
+        if profile.review_only or profile.lifecycle != "shadow_review_staging":
+            raise AssertionError(
+                "V5.2 semantic eval must be bound to private shadow staging"
+            )
         cls.registry = load_registry(
             profile.registry_path,
             profile.registry_artifact_sha256,

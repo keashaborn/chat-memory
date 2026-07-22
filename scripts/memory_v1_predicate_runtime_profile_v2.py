@@ -10,10 +10,10 @@ from typing import Any
 MANIFEST_CONTRACT = "memory_v1_predicate_runtime_profiles_v2"
 MANIFEST_PATH = "specs/memory_v1_predicate_runtime_profiles_v2.json"
 MANIFEST_SHA256 = (
-    "a378075fd588eea5adda4be37e257909ba623a5a201c7648bfb9cada4ff19275"
+    "5786269a2cda01045cc0f729ed2f7239da95da03e0dab2d074df761de80b24a4"
 )
 PROFILE_NAMES = frozenset({"v5", "v5_1", "v5_2"})
-REVIEW_ONLY_PROFILES = ("v5_2",)
+REVIEW_ONLY_PROFILES: tuple[str, ...] = ()
 PROFILE_KEYS = frozenset(
     {
         "contract_version",
@@ -92,9 +92,9 @@ def load_runtime_profile_v2(
         raise ValueError("predicate runtime profile manifest shape changed")
     if (
         manifest["contract_version"] != MANIFEST_CONTRACT
-        or manifest["status"] != "proposed"
+        or manifest["status"] != "accepted_for_private_shadow"
         or manifest["scheduler_default_profile"] != "v5"
-        or manifest["target_scheduled_profile"] != "v5_1"
+        or manifest["target_scheduled_profile"] != "v5_2"
         or set(manifest["profiles"]) != PROFILE_NAMES
         or tuple(manifest["review_only_profiles"]) != REVIEW_ONLY_PROFILES
     ):
@@ -105,6 +105,12 @@ def load_runtime_profile_v2(
     review_only = profile_name in REVIEW_ONLY_PROFILES
     if review_only != (value["lifecycle"] == "offline_review_only"):
         raise ValueError("review-only lifecycle binding changed")
+    if value["lifecycle"] not in {
+        "legacy_replay",
+        "shadow_review_staging",
+        "offline_review_only",
+    }:
+        raise ValueError("predicate runtime lifecycle is invalid")
     registry_path = _bound_path(root_path, value["registry_path"])
     schema_path = _bound_path(root_path, value["schema_path"])
     registry_raw = registry_path.read_bytes()

@@ -47,6 +47,11 @@ RELATIONSHIP_V5_1_REGISTRY_VERSION = "memory_predicate_registry_v5_1"
 RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
+SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v1"
+RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
+    {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
+)
 PROVIDER_DEFERRAL_REASON_CODES = frozenset(
     {
         "question_only",
@@ -1030,6 +1035,34 @@ RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS = (
     "questions, fiction, quoted "
     "assistant statements, and non-person metaphors do not create a relationship."
 )
+
+SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS = (
+    "\n\nSEMANTIC_V5_2_RULES\n"
+    "These rules apply because the supplied registry is "
+    "memory_predicate_registry_v5_2. Preserve the V5.1 relationship rules. "
+    "Distinguish what the user reports observing from what the user believes. "
+    "Use stance.reported only for an explicitly attributed opinion, belief, "
+    "interpretation, or evidentiary judgment. Its modality is reported_belief, "
+    "projection_class is reported_stance, surface_policy is "
+    "relevant_recall_or_explicit_recall, and its literal JSON object contains "
+    "exactly topic_key, topic_text, position, orientation, and context. Never "
+    "turn a measurement, biographical statement, relationship, preference, "
+    "response instruction, or transient feeling into a stance. Use "
+    "occupation.works_as for a role or profession and employment.worked_for "
+    "only for an employer organization. 'Used to', 'formerly', and other "
+    "explicit past-state wording require state_validity with a closed past "
+    "interval; never render a former occupation as current. Use "
+    "education.attended for a school or educational organization the user "
+    "explicitly reports attending. Preserve organization entities separately "
+    "from self. A credential such as BCBA is credential.reported unless the "
+    "source separately says it is the user's occupation. Continue to defer "
+    "questions, transient states, structured application data, ambiguity, and "
+    "unsupported inference."
+)
+
+
+def _relationship_contract_enabled(registry: dict[str, Any]) -> bool:
+    return registry.get("registry_version") in RELATIONSHIP_REGISTRY_VERSIONS
 
 
 _INJECTION_RE = re.compile(
@@ -2508,8 +2541,7 @@ def _compile_entity_links(
             or "relationship.parent_of" in predicates
             or "relationship.sibling_of" in predicates
             or (
-                registry.get("registry_version")
-                == RELATIONSHIP_V5_1_REGISTRY_VERSION
+                _relationship_contract_enabled(registry)
                 and any(
                     predicate.startswith(("relationship.", "social."))
                     for predicate in predicates
@@ -2631,8 +2663,7 @@ def _compile_entity_links(
     unsupported_relationship_refs: set[str] = set()
     for observation in observations:
         if (
-            registry.get("registry_version")
-            == RELATIONSHIP_V5_1_REGISTRY_VERSION
+            _relationship_contract_enabled(registry)
         ):
             continue
         obj = observation["object"]
@@ -2720,7 +2751,7 @@ def _compile_entity_links(
             if item["observation_ref"] not in unsupported_relationship_refs
         ]
 
-    if registry.get("registry_version") == RELATIONSHIP_V5_1_REGISTRY_VERSION:
+    if _relationship_contract_enabled(registry):
         repairs.extend(
             _relationship_v5_1_complete_explicit_assertions(
                 source,
@@ -3465,12 +3496,13 @@ class LocalLlamaCppProvider:
         self._runtime_revision = runtime_revision
         self._registry_contract = _registry_contract(registry)
         self._registry = deepcopy(registry)
-        self._policy_compiler_version = (
-            RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION
-            if registry.get("registry_version")
-            == RELATIONSHIP_V5_1_REGISTRY_VERSION
-            else LOCAL_POLICY_COMPILER_VERSION
-        )
+        registry_version = registry.get("registry_version")
+        if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+            self._policy_compiler_version = SEMANTIC_V5_2_POLICY_COMPILER_VERSION
+        elif registry_version == RELATIONSHIP_V5_1_REGISTRY_VERSION:
+            self._policy_compiler_version = RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION
+        else:
+            self._policy_compiler_version = LOCAL_POLICY_COMPILER_VERSION
         self._allowed_predicates = tuple(
             sorted(item["predicate"] for item in registry["predicates"])
         )
@@ -3498,15 +3530,21 @@ class LocalLlamaCppProvider:
         )
         relationship_instructions = (
             RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
+            if _relationship_contract_enabled(self._registry)
+            else ""
+        )
+        semantic_instructions = (
+            SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS
             if self._registry.get("registry_version")
-            == RELATIONSHIP_V5_1_REGISTRY_VERSION
+            == SEMANTIC_V5_2_REGISTRY_VERSION
             else ""
         )
         return LocalStructuredRequest(
             model=self._model,
             instructions=(
                 f"{LOCAL_EXTRACTION_INSTRUCTIONS}"
-                f"{relationship_instructions}\n\n"
+                f"{relationship_instructions}"
+                f"{semantic_instructions}\n\n"
                 "GOVERNED_PREDICATE_REGISTRY\n"
                 f"{self._registry_contract}"
             ),
@@ -3608,10 +3646,7 @@ class LocalLlamaCppProvider:
         try:
             parsed = result.parsed
             boundary_audit: dict[str, Any] = {}
-            if (
-                self._registry.get("registry_version")
-                == RELATIONSHIP_V5_1_REGISTRY_VERSION
-            ):
+            if _relationship_contract_enabled(self._registry):
                 parsed, boundary_audit = (
                     _relationship_v5_1_raw_packet_boundary(
                         parsed,

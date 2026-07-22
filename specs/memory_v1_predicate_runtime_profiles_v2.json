@@ -23,7 +23,7 @@
     },
     "v5_2": {
       "contract_version": "memory_v1_relational_extraction_v5_2",
-      "lifecycle": "offline_review_only",
+      "lifecycle": "shadow_review_staging",
       "registry_artifact_sha256": "e6ac5dfe7d7939aac23223ae76272b2e4f67777decde814d9bf0b8eee82b277e",
       "registry_canonical_sha256": "446c0f9df2e3f12bab90cea5b056c5dc3da09a81c6d7ffd9c62252cdcf6c4876",
       "registry_path": "specs/memory_v1_predicate_registry_v5_2.json",
@@ -32,10 +32,8 @@
       "schema_path": "specs/memory_v1_relational_extraction_v5_2.schema.json"
     }
   },
-  "review_only_profiles": [
-    "v5_2"
-  ],
+  "review_only_profiles": [],
   "scheduler_default_profile": "v5",
-  "status": "proposed",
-  "target_scheduled_profile": "v5_1"
+  "status": "accepted_for_private_shadow",
+  "target_scheduled_profile": "v5_2"
 }
