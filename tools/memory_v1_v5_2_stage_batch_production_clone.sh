@@ -24,6 +24,7 @@ source_id_test=tests/memory_v1_v5_stage_source_id_compat.sql
 v5_2_migration=ops/sql/20260722_memory_v1_relational_stage_v5_2.sql
 v5_2_rollback=ops/sql/20260722_memory_v1_relational_stage_v5_2_rollback.sql
 v5_2_security_test=tests/memory_v1_v5_2_stage_preflight_api.sql
+registry_installer=scripts/memory_v1_predicate_registry_v5_2.py
 seed_sql=tests/memory_v1_v5_stage_batch_seed.sql
 runner=scripts/memory_v1_v5_2_stage_batch.py
 fixture=tests/memory_v1_v5_2_stage_batch_fixture.py
@@ -37,6 +38,7 @@ reviews="$work/reviews"
 plan="$reviews/plan.json"
 authorization="$reviews/authorization.json"
 report="$reviews/apply-report.json"
+registry_sql="$work/predicate-registry-v5-2.sql"
 forged_plan="$reviews/forged-component-plan.json"
 forged_authorization="$reviews/forged-component-authorization.json"
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
@@ -113,6 +115,10 @@ run_sql <"$preflight_migration"
 run_sql <"$preflight_test"
 run_sql <"$source_id_migration"
 run_sql <"$source_id_migration"
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$registry_installer" \
+  --emit-install-sql >"$registry_sql"
+run_sql <"$registry_sql"
+run_sql <"$registry_sql"
 run_sql <"$v5_2_migration"
 run_sql <"$v5_2_migration"
 run_sql <"$v5_2_security_test"
