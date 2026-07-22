@@ -7,7 +7,7 @@ import logging
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
@@ -20,6 +20,10 @@ from rag_engine.response_composition_root_v0_2 import (
 )
 from rag_engine.response_inspection_v1 import build_response_inspection_v1
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
+from rag_engine.voice_observability_v1 import (
+    voice_turn_id_from_request,
+    voice_turn_response_headers,
+)
 
 
 router = APIRouter()
@@ -50,11 +54,16 @@ class ResseResponseRequestV1(BaseModel):
 
 
 @router.post("/query")
-async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
+async def resse_response_query(
+    payload: ResseResponseRequestV1, req: Request, response: Response
+):
     if not DSN:
         raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
     owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
+    voice_turn_id = voice_turn_id_from_request(req)
+    for name, value in voice_turn_response_headers(voice_turn_id).items():
+        response.headers[name] = value
     stateless = payload.thread_id is None
     thread_id = payload.thread_id or uuid4()
     if not payload.no_store and stateless:
@@ -107,6 +116,7 @@ async def resse_response_query(payload: ResseResponseRequestV1, req: Request):
                     transcript_persistence=(
                         "skipped" if payload.no_store else "persisted"
                     ),
+                    voice_turn_id=voice_turn_id,
                 ).model_dump(mode="json")
             except Exception:
                 logger.error(

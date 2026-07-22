@@ -15,6 +15,7 @@ from rag_engine import voice_transcription_router as transcription
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER_ACTOR = "557ea042-cb82-48f8-9429-472e96c957ef"
+VOICE_TURN = "0fc3d70a-a6d0-4e55-9e39-20e060b416c8"
 
 
 class FakeResponse:
@@ -63,6 +64,7 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
             "x-vs-actor-user-id": ACTOR,
             "x-vs-owner-user-id": owner,
             "content-type": content_type,
+            "x-vs-voice-turn-id": VOICE_TURN,
         }
 
     def test_requires_owner_and_actor_equality(self) -> None:
@@ -103,6 +105,7 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["transcript"], "What should I prioritize today?")
         self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.headers["x-vs-voice-turn-id"], VOICE_TURN)
 
         call = FakeAsyncClient.calls[0]
         self.assertEqual(call["data"]["model"], "gpt-4o-transcribe")
@@ -114,6 +117,19 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
             call["headers"]["OpenAI-Safety-Identifier"].startswith("vs1_")
         )
         self.assertNotIn(ACTOR, call["headers"]["OpenAI-Safety-Identifier"])
+
+    def test_rejects_invalid_voice_turn_id_before_openai(self) -> None:
+        headers = self._headers()
+        headers["x-vs-voice-turn-id"] = "not-a-uuid"
+        response = self.client.post(
+            "/voice/openai/transcribe",
+            headers=headers,
+            content=b"audio",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "invalid_voice_turn_id")
+        self.assertEqual(FakeAsyncClient.calls, [])
 
     def test_direct_realtime_generation_is_retired_by_default(self) -> None:
         with patch.object(realtime, "ALLOW_UNGOVERNED_REALTIME_VOICE", False):

@@ -71,8 +71,14 @@ class AfterOpenAIInspectionV1(_StrictFrozenModel):
     memory_binding: Literal["bound", "none"]
 
 
+class VoiceDeliveryInspectionV1(_StrictFrozenModel):
+    channel: Literal["voice"] = "voice"
+    voice_turn_id: UUID
+
+
 class ResponseInspectionV1(_StrictFrozenModel):
     contract_version: Literal["response_inspection_v1"] = RESPONSE_INSPECTION_VERSION
+    delivery: VoiceDeliveryInspectionV1 | None = None
     before_openai: BeforeOpenAIInspectionV1
     openai: OpenAIInspectionV1
     after_openai: AfterOpenAIInspectionV1
@@ -84,6 +90,7 @@ def build_response_inspection_v1(
     provider_response: OpenAIChatResponseV1,
     finalized: FinalizedTrustedResponseV1,
     transcript_persistence: Literal["persisted", "skipped"],
+    voice_turn_id: UUID | None = None,
 ) -> ResponseInspectionV1:
     """Build a concise audit view from already-validated typed artifacts."""
 
@@ -108,6 +115,11 @@ def build_response_inspection_v1(
     memory_included = bool(application and application.memory_content_included)
 
     return ResponseInspectionV1(
+        delivery=(
+            VoiceDeliveryInspectionV1(voice_turn_id=voice_turn_id)
+            if voice_turn_id
+            else None
+        ),
         before_openai=BeforeOpenAIInspectionV1(
             response_mode=trace.response_mode,
             closure=trace.closure,

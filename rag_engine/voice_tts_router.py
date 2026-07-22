@@ -11,6 +11,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from rag_engine.voice_realtime_router import get_realtime_capabilities
+from rag_engine.voice_observability_v1 import (
+    voice_turn_id_from_request,
+    voice_turn_response_headers,
+)
 
 router = APIRouter()
 
@@ -140,6 +144,7 @@ def _clean_speed(raw: Any) -> float:
 @router.post("/voice/tts")
 async def create_tts(req: Request):
     actor_user_id = _require_actor(req)
+    voice_turn_id = voice_turn_id_from_request(req)
 
     try:
         body = await req.json()
@@ -215,12 +220,22 @@ async def create_tts(req: Request):
             },
         )
 
+    provider_request_id = (
+        upstream.headers.get("x-request-id")
+        or upstream.headers.get("openai-request-id")
+    )
     return Response(
         content=upstream.content,
         media_type="audio/mpeg",
         headers={
             "x-vs-voice-provider": "openai",
             "x-vs-voice-model": model,
+            **(
+                {"x-vs-provider-request-id": provider_request_id}
+                if provider_request_id
+                else {}
+            ),
+            **voice_turn_response_headers(voice_turn_id),
         },
     )
 

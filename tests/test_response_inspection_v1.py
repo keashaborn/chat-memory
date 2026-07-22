@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from uuid import UUID
 
 from rag_engine.response_composition_root_v0_2 import (
     InactiveResponseCompositionRootV0_2,
@@ -33,9 +34,15 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
             provider_response=execution.provider_response,
             finalized=execution.finalized,
             transcript_persistence="persisted",
+            voice_turn_id=UUID("0fc3d70a-a6d0-4e55-9e39-20e060b416c8"),
         )
 
         self.assertEqual(inspection.contract_version, "response_inspection_v1")
+        self.assertEqual(inspection.delivery.channel, "voice")
+        self.assertEqual(
+            inspection.delivery.voice_turn_id,
+            UUID("0fc3d70a-a6d0-4e55-9e39-20e060b416c8"),
+        )
         self.assertEqual(inspection.before_openai.response_mode, "FM_EXPLICIT")
         self.assertEqual(inspection.before_openai.fm_level, "EXPLICIT")
         self.assertGreater(inspection.before_openai.fm_record_count, 0)
@@ -78,6 +85,7 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
             inspection.after_openai.transcript_persistence, "skipped"
         )
         self.assertEqual(inspection.after_openai.memory_binding, "none")
+        self.assertIsNone(inspection.delivery)
 
 
 if __name__ == "__main__":
