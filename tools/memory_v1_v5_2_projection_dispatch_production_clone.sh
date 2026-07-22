@@ -488,8 +488,22 @@ POSTGRES_DSN="$dsn" \
         AND observation_id IN ('$name_observation'::uuid,'$stance_observation'::uuid)
         AND decision='accepted')=2
     AND (SELECT count(*) FROM memory.claim
-      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=0
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND status='supported')=2
+    AND (SELECT count(*) FROM memory.claim_revision
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=4
+    AND (SELECT count(*) FROM memory.claim_observation
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
+    AND (SELECT count(*) FROM memory.projection_review
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid
+        AND decision='authorized')=2
+    AND (SELECT count(*) FROM memory.projection_apply_event
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
+    AND (SELECT count(*) FROM memory.claim_assessment
+      WHERE owner_user_id='11111111-1111-4111-8111-111111111111'::uuid)=2
     AND (SELECT count(*) FROM memory.projection_plan
+      WHERE owner_user_id='22222222-2222-4222-8222-222222222222'::uuid)=0
+    AND (SELECT count(*) FROM memory.claim
       WHERE owner_user_id='22222222-2222-4222-8222-222222222222'::uuid)=0
   )::int")" == "1" ]]
 
