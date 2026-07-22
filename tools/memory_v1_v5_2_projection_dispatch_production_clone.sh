@@ -21,6 +21,7 @@ preflight_test=tests/memory_v1_v5_stage_preflight_api.sql
 source_id_migration=ops/sql/20260718_memory_v1_v5_stage_source_id_compat.sql
 source_id_rollback=ops/sql/20260718_memory_v1_v5_stage_source_id_compat_rollback.sql
 source_id_test=tests/memory_v1_v5_stage_source_id_compat.sql
+entailment_migration=ops/sql/20260716_memory_v1_observation_entailment_v5_1.sql
 v5_2_migration=ops/sql/20260722_memory_v1_relational_stage_v5_2.sql
 v5_2_rollback=ops/sql/20260722_memory_v1_relational_stage_v5_2_rollback.sql
 v5_2_security_test=tests/memory_v1_v5_2_stage_preflight_api.sql
@@ -128,6 +129,8 @@ run_sql <"$preflight_migration"
 run_sql <"$preflight_test"
 run_sql <"$source_id_migration"
 run_sql <"$source_id_migration"
+run_sql <"$entailment_migration"
+run_sql <"$entailment_migration"
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$registry_installer" \
   --emit-install-sql >"$registry_sql"
 run_sql <"$registry_sql"

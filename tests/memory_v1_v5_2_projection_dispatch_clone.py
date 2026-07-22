@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,14 @@ PLAN_IDS = {
     "name": uuid.UUID("a3000000-0000-4000-8000-000000000001"),
     "stance": uuid.UUID("a3000000-0000-4000-8000-000000000002"),
 }
+ENTAILMENT_REQUEST_IDS = {
+    "name": uuid.UUID("a4000000-0000-4000-8000-000000000001"),
+    "stance": uuid.UUID("a4000000-0000-4000-8000-000000000002"),
+}
+SOURCE_TEXT = {
+    "name": "My name is Avery.",
+    "stance": "I think expert consensus should be treated as evidence, not absolute fact.",
+}
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -40,6 +49,63 @@ async def source_for_observation(
     if row is None:
         raise RuntimeError("V5.2 source preflight returned no row")
     return dict(row)
+
+
+def source_spans(name: str) -> list[dict[str, object]]:
+    value = SOURCE_TEXT[name]
+    return [
+        {
+            "start": 0,
+            "end": len(value),
+            "span_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+        }
+    ]
+
+
+async def record_entailment(
+    conn: asyncpg.Connection, name: str, observation_id: uuid.UUID
+) -> None:
+    spans_text = stable_json(source_spans(name))
+    preflight = await conn.fetchrow(
+        """
+        SELECT * FROM memory.preflight_observation_entailment_v5(
+          $1,'accepted','predicate_entailment_v5_1_accepted',$2::jsonb,
+          'admin','synthetic_v5_2_projection_clone'
+        )
+        """,
+        observation_id,
+        spans_text,
+    )
+    if preflight is None:
+        raise RuntimeError("entailment preflight returned no row")
+    result = await conn.fetchrow(
+        """
+        SELECT * FROM memory.record_observation_entailment_v5(
+          $1,$2,'accepted','predicate_entailment_v5_1_accepted',$3::jsonb,
+          'admin','synthetic_v5_2_projection_clone',$4
+        )
+        """,
+        ENTAILMENT_REQUEST_IDS[name],
+        observation_id,
+        spans_text,
+        preflight["authorization_manifest_sha256"],
+    )
+    if result is None or result["outcome"] != "applied" or result["rows_written"] != 2:
+        raise RuntimeError("synthetic V5.2 entailment did not apply exactly two rows")
+    replay = await conn.fetchrow(
+        """
+        SELECT * FROM memory.record_observation_entailment_v5(
+          $1,$2,'accepted','predicate_entailment_v5_1_accepted',$3::jsonb,
+          'admin','synthetic_v5_2_projection_clone',$4
+        )
+        """,
+        ENTAILMENT_REQUEST_IDS[name],
+        observation_id,
+        spans_text,
+        preflight["authorization_manifest_sha256"],
+    )
+    if replay is None or replay["outcome"] != "replayed" or replay["rows_written"] != 0:
+        raise RuntimeError("synthetic V5.2 entailment replay wrote rows")
 
 
 async def main() -> int:
@@ -63,6 +129,7 @@ async def main() -> int:
         }
         packets: dict[str, tuple[dict, str]] = {}
         for name, observation_id in observation_ids.items():
+            await record_entailment(conn, name, observation_id)
             source = await source_for_observation(conn, observation_id)
             packet = build_packet(str(OWNER_A), source)
             validate_packet(packet, str(OWNER_A), registry_by_name)
@@ -119,11 +186,19 @@ async def main() -> int:
                WHERE owner_user_id=$1 AND predicate_registry_version='memory_predicate_registry_v5_2') AS items,
               (SELECT count(*) FROM memory.projection_claim_payload
                WHERE owner_user_id=$1 AND claim_class='reported_stance') AS stances,
+              (SELECT count(*) FROM memory.observation_entailment_v5
+               WHERE owner_user_id=$1 AND decision='accepted') AS entailed,
               (SELECT count(*) FROM memory.claim WHERE owner_user_id=$1) AS claims
             """,
             OWNER_A,
         )
-        if dict(counts) != {"plans": 2, "items": 2, "stances": 1, "claims": 0}:
+        if dict(counts) != {
+            "plans": 2,
+            "items": 2,
+            "stances": 1,
+            "entailed": 2,
+            "claims": 0,
+        }:
             raise RuntimeError(f"unexpected V5.2 projection counts: {dict(counts)}")
     finally:
         await conn.close()
