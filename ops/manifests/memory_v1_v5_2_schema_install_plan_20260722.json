@@ -151,7 +151,7 @@
     },
     {
       "path": "tools/memory_v1_v5_2_schema_install_production_clone.sh",
-      "sha256": "62eac49368e535de32538d030940f347b84cca2f29700dc3feed4ae30af8e06e",
+      "sha256": "c1a19f71b8a45f90321f685ed0f99438eb2072ae05f00e87f624a27f53597846",
       "kind": "clone_rehearsal",
       "ordinal": 1
     },

@@ -151,6 +151,7 @@ fixture=$(clone_scalar "
     coalesce((SELECT other.claim_id::text FROM memory.claim AS other
       WHERE other.owner_user_id<>claim.owner_user_id
       ORDER BY other.owner_user_id,other.claim_id LIMIT 1),'')
+  )
   FROM memory.claim AS claim
   JOIN memory.entity AS subject_entity
     ON subject_entity.owner_user_id=claim.owner_user_id
