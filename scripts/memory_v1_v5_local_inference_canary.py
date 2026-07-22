@@ -453,11 +453,15 @@ async def fail_job(
     return dict(row)
 
 
-def rejection_code(exc: BaseException) -> str:
+def rejection_code(exc: BaseException, *, phase: str = "validation") -> str:
     if isinstance(exc, LocalProviderAdapterError) and REJECTION_RE.fullmatch(
         exc.code
     ):
         return exc.code
+    if phase == "persistence":
+        return "local_persistence_rejected"
+    if phase == "completion":
+        return "local_completion_rejected"
     return "local_validation_rejected"
 
 
@@ -652,6 +656,7 @@ async def run() -> int:
             if args.diagnostic_replay
             else None
         )
+        phase = "validation"
         try:
             validated = validate_and_normalize(
                 capturing if capturing is not None else provider,
@@ -666,6 +671,93 @@ async def run() -> int:
             local_calls = provider.local_model_calls
             if provider.external_model_calls != 0 or local_calls not in {0, 1}:
                 raise RuntimeError("local/external call accounting changed")
+
+            if args.diagnostic_replay:
+                packet = (
+                    capturing.last_packet
+                    if capturing is not None
+                    else None
+                )
+                if packet is None:
+                    raise RuntimeError(
+                        "diagnostic replay lost the provider packet"
+                    )
+                print(
+                    stable_json(
+                        {
+                            "contract_version": (
+                                "memory_v1_v5_local_diagnostic_replay_v1"
+                            ),
+                            **runtime_profile_audit(profile),
+                            "apply": False,
+                            "outcome": "accepted",
+                            "external_model_calls": (
+                                provider.external_model_calls
+                            ),
+                            "local_model_calls": provider.local_model_calls,
+                            "provider_output_sha256": (
+                                validated.provider_output_sha256
+                            ),
+                            "validator_packet_sha256": (
+                                validated.normalized_packet_sha256
+                            ),
+                            "manual_review_required": (
+                                validated.manual_review_required
+                            ),
+                            "sanitized_provider_packet": (
+                                sanitize_provider_packet(packet)
+                            ),
+                            "audit": sanitized_audit(provider),
+                            "claim_replay_proved": True,
+                            "write_counts": {
+                                "queue": 0,
+                                "ledger": 0,
+                                "packets": 0,
+                                "claims": 0,
+                                "qdrant": 0,
+                                "prompt_influence": 0,
+                            },
+                        }
+                    )
+                )
+                return 0
+
+            packet_id = uuid.uuid5(PERSIST_NAMESPACE, f"packet:{job_id}")
+            persist_operation_id = uuid.uuid5(
+                PERSIST_NAMESPACE, f"persist:{run_id}:{job_id}"
+            )
+            completion_operation_id = uuid.uuid5(
+                PERSIST_NAMESPACE, f"complete:{run_id}:{job_id}"
+            )
+            async with conn.transaction():
+                phase = "persistence"
+                persisted = await persist_packet(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=persist_operation_id,
+                    packet_id=packet_id,
+                    job=claim,
+                    worker_id=worker_id,
+                    args=args,
+                    profile=profile,
+                    validated=validated,
+                    local_model_calls=local_calls,
+                )
+                phase = "completion"
+                completed = await complete(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=completion_operation_id,
+                    reservation_event_id=claim["reservation_event_id"],
+                    run_id=run_id,
+                    job_id=job_id,
+                    outcome="accepted",
+                    local_model_calls=local_calls,
+                    rejection_code=None,
+                    provider_output_sha256=validated.provider_output_sha256,
+                    validator_packet_sha256=validated.normalized_packet_sha256,
+                    packet_storage_sha256=persisted["packet_storage_sha256"],
+                )
         except Exception as exc:
             if args.diagnostic_replay:
                 if isinstance(exc, LocalProviderAdapterError):
@@ -715,35 +807,36 @@ async def run() -> int:
                 )
                 return 1
             local_calls = provider.local_model_calls
-            code = rejection_code(exc)
+            code = rejection_code(exc, phase=phase)
             fail_operation_id = uuid.uuid5(
                 PERSIST_NAMESPACE, f"fail:{run_id}:{job_id}"
-            )
-            failed = await fail_job(
-                conn,
-                owner=ids["owner"],
-                operation_id=fail_operation_id,
-                job=claim,
-                worker_id=worker_id,
-                code=code,
             )
             completion_operation_id = uuid.uuid5(
                 PERSIST_NAMESPACE, f"complete:{run_id}:{job_id}"
             )
-            completed = await complete(
-                conn,
-                owner=ids["owner"],
-                operation_id=completion_operation_id,
-                reservation_event_id=claim["reservation_event_id"],
-                run_id=run_id,
-                job_id=job_id,
-                outcome="rejected",
-                local_model_calls=local_calls,
-                rejection_code=code,
-                provider_output_sha256=None,
-                validator_packet_sha256=None,
-                packet_storage_sha256=None,
-            )
+            async with conn.transaction():
+                failed = await fail_job(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=fail_operation_id,
+                    job=claim,
+                    worker_id=worker_id,
+                    code=code,
+                )
+                completed = await complete(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=completion_operation_id,
+                    reservation_event_id=claim["reservation_event_id"],
+                    run_id=run_id,
+                    job_id=job_id,
+                    outcome="rejected",
+                    local_model_calls=local_calls,
+                    rejection_code=code,
+                    provider_output_sha256=None,
+                    validator_packet_sha256=None,
+                    packet_storage_sha256=None,
+                )
             failed_replay = await fail_job(
                 conn,
                 owner=ids["owner"],
@@ -797,90 +890,6 @@ async def run() -> int:
                 )
             )
             return 1
-
-        if args.diagnostic_replay:
-            packet = (
-                capturing.last_packet
-                if capturing is not None
-                else None
-            )
-            if packet is None:
-                raise RuntimeError(
-                    "diagnostic replay lost the provider packet"
-                )
-            print(
-                stable_json(
-                    {
-                        "contract_version": (
-                            "memory_v1_v5_local_diagnostic_replay_v1"
-                        ),
-                        **runtime_profile_audit(profile),
-                        "apply": False,
-                        "outcome": "accepted",
-                        "external_model_calls": (
-                            provider.external_model_calls
-                        ),
-                        "local_model_calls": provider.local_model_calls,
-                        "provider_output_sha256": (
-                            validated.provider_output_sha256
-                        ),
-                        "validator_packet_sha256": (
-                            validated.normalized_packet_sha256
-                        ),
-                        "manual_review_required": (
-                            validated.manual_review_required
-                        ),
-                        "sanitized_provider_packet": (
-                            sanitize_provider_packet(packet)
-                        ),
-                        "audit": sanitized_audit(provider),
-                        "claim_replay_proved": True,
-                        "write_counts": {
-                            "queue": 0,
-                            "ledger": 0,
-                            "packets": 0,
-                            "claims": 0,
-                            "qdrant": 0,
-                            "prompt_influence": 0,
-                        },
-                    }
-                )
-            )
-            return 0
-
-        packet_id = uuid.uuid5(PERSIST_NAMESPACE, f"packet:{job_id}")
-        persist_operation_id = uuid.uuid5(
-            PERSIST_NAMESPACE, f"persist:{run_id}:{job_id}"
-        )
-        persisted = await persist_packet(
-            conn,
-            owner=ids["owner"],
-            operation_id=persist_operation_id,
-            packet_id=packet_id,
-            job=claim,
-            worker_id=worker_id,
-            args=args,
-            profile=profile,
-            validated=validated,
-            local_model_calls=local_calls,
-        )
-        completion_operation_id = uuid.uuid5(
-            PERSIST_NAMESPACE, f"complete:{run_id}:{job_id}"
-        )
-        completed = await complete(
-            conn,
-            owner=ids["owner"],
-            operation_id=completion_operation_id,
-            reservation_event_id=claim["reservation_event_id"],
-            run_id=run_id,
-            job_id=job_id,
-            outcome="accepted",
-            local_model_calls=local_calls,
-            rejection_code=None,
-            provider_output_sha256=validated.provider_output_sha256,
-            validator_packet_sha256=validated.normalized_packet_sha256,
-            packet_storage_sha256=persisted["packet_storage_sha256"],
-        )
 
         if ids["expected_job_id"] is None:
             enqueued_replay = await enqueue_exact(

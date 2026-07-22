@@ -8,6 +8,7 @@ from scripts.memory_v1_v5_local_inference_canary import (
     canonical_source_external_id,
     effective_policy_compiler_sha256,
     loopback_dsn,
+    rejection_code,
     sha256_text,
 )
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
@@ -50,6 +51,16 @@ def main() -> int:
             pass
         else:
             raise AssertionError("non-loopback database DSN was accepted")
+    if rejection_code(RuntimeError("validation")) != "local_validation_rejected":
+        raise AssertionError("validation rejection code changed")
+    if rejection_code(RuntimeError("persistence"), phase="persistence") != (
+        "local_persistence_rejected"
+    ):
+        raise AssertionError("persistence rejection code changed")
+    if rejection_code(RuntimeError("completion"), phase="completion") != (
+        "local_completion_rejected"
+    ):
+        raise AssertionError("completion rejection code changed")
     if effective_policy_compiler_sha256(SimpleNamespace(name="v5")) != (
         canonical_sha256(LOCAL_POLICY_COMPILER_VERSION)
     ):
