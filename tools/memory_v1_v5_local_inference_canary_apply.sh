@@ -27,8 +27,8 @@ if [[ "$contract_profile" == v5_2 \
   echo 'MEMORY_V1_V5_2_LOCAL_INFERENCE_CANARY=authorized is required' >&2
   exit 1
 fi
-if [[ $# -lt 4 || $# -gt 5 ]]; then
-  echo 'usage: canary_apply.sh JOB_ID EVIDENCE_ID CONTENT_SHA256 RUN_ID [PRIOR_ATTEMPTS]' >&2
+if [[ $# -lt 4 || $# -gt 6 ]]; then
+  echo 'usage: canary_apply.sh JOB_ID EVIDENCE_ID CONTENT_SHA256 RUN_ID [PRIOR_ATTEMPTS] [MAX_OUTPUT_TOKENS]' >&2
   exit 2
 fi
 
@@ -38,6 +38,7 @@ target_evidence=$2
 target_content_sha=$3
 run_id=$4
 prior_attempts=${5:-0}
+max_output_tokens=${6:-4096}
 uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 sha_re='^[0-9a-f]{64}$'
 [[ "$target_job" =~ $uuid_re ]]
@@ -46,6 +47,8 @@ sha_re='^[0-9a-f]{64}$'
 [[ "$target_content_sha" =~ $sha_re ]]
 [[ "$prior_attempts" =~ ^[0-9]+$ ]]
 [[ "$prior_attempts" -ge 0 && "$prior_attempts" -le 19 ]]
+[[ "$max_output_tokens" =~ ^[0-9]+$ ]]
+[[ "$max_output_tokens" -ge 1000 && "$max_output_tokens" -le 20000 ]]
 max_attempts=$((prior_attempts+1))
 
 repo_root=$(git rev-parse --show-toplevel)
@@ -286,7 +289,8 @@ if [[ "$resume_mode" == 0 && "$completed_replay_mode" == 0 ]]; then
           'local_transport_unavailable',
           'local_transport_rate_limited',
           'local_transport_server_error',
-          'local_validation_rejected'
+          'local_validation_rejected',
+          'local_incomplete_response'
         )
     ) = $prior_attempts
   )::integer
@@ -376,6 +380,7 @@ PYTHONPATH="$repo_root" \
     --expected-content-sha256 "$target_content_sha" \
     --contract-profile "$contract_profile" \
     --max-attempts "$max_attempts" \
+    --max-output-tokens "$max_output_tokens" \
     --max-reserved-jobs "$canary_reserved_budget" \
     --failure-threshold "$canary_failure_threshold" \
     --run-id "$run_id" --apply >"$canary_output" 2>"$canary_log"
@@ -490,6 +495,7 @@ jq -n \
   --arg contract_profile "$contract_profile" \
   --argjson reserved_jobs_before "$reserved_jobs_before" \
   --argjson canary_reserved_budget "$canary_reserved_budget" \
+  --argjson max_output_tokens "$max_output_tokens" \
   --arg backup "$backup" --arg backup_sha256 "$backup_sha256" \
   --arg qdrant_sha256 "$qdrant_after" \
   --arg before_static "$before_static" --arg after_static "$after_static" \
@@ -501,6 +507,7 @@ jq -n \
     predicate_contract_profile:$contract_profile,
     quota:{reserved_jobs_before:$reserved_jobs_before,
       canary_reserved_budget:$canary_reserved_budget,
+      max_output_tokens:$max_output_tokens,
       recurring_scheduler_budget_unchanged:true},
     target:{owner_user_id_sha256:$owner_sha256,job_id_sha256:$job_sha256,
       evidence_id_sha256:$evidence_sha256,evidence_content_sha256:$content_sha256},
