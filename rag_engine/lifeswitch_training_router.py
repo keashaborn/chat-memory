@@ -179,7 +179,7 @@ async def list_my_exercises(
     owner = require_actor_matches_owner(req, owner_user_id)
     conn = await _db()
     try:
-        where_active = "" if include_inactive else "and wt.is_active=true"
+        where_active = "" if include_inactive else "and me.is_active=true"
         rows = await conn.fetch(
             f"""
             select
@@ -188,8 +188,8 @@ async def list_my_exercises(
               brand_name, model_name, matched_text, matched_source,
               exercise_role,
               is_active, created_at, updated_at
-            from {SCHEMA}.my_exercise
-            where wt.owner_user_id=$1::uuid
+            from {SCHEMA}.my_exercise as me
+            where me.owner_user_id=$1::uuid
               {where_active}
             order by lower(display_name) asc
             """,
