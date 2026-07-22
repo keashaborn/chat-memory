@@ -646,17 +646,21 @@ BEGIN
     RAISE EXCEPTION 'V5.2 projection hash mismatch';
   END IF;
   IF expected.lane='claim' THEN
-    SELECT count(*) INTO aggregate_count FROM memory.claim
-    WHERE owner_user_id=actor AND canonical_key='v5:'||semantic_value;
+    SELECT count(*) INTO aggregate_count FROM memory.claim AS aggregate
+    WHERE aggregate.owner_user_id=actor
+      AND aggregate.canonical_key='v5:'||semantic_value;
   ELSIF expected.lane='preference' THEN
-    SELECT count(*) INTO aggregate_count FROM memory.preference_head_v5
-    WHERE owner_user_id=actor AND semantic_key_sha256=semantic_value;
+    SELECT count(*) INTO aggregate_count FROM memory.preference_head_v5 AS aggregate
+    WHERE aggregate.owner_user_id=actor
+      AND aggregate.semantic_key_sha256=semantic_value;
   ELSE
-    SELECT count(*) INTO aggregate_count FROM memory.project_knowledge_head_v5
-    WHERE owner_user_id=actor AND semantic_key_sha256=semantic_value;
+    SELECT count(*) INTO aggregate_count FROM memory.project_knowledge_head_v5 AS aggregate
+    WHERE aggregate.owner_user_id=actor
+      AND aggregate.semantic_key_sha256=semantic_value;
   END IF;
-  SELECT count(*) INTO plan_count FROM memory.projection_plan
-  WHERE owner_user_id=actor AND (plan_id=p_plan_id OR packet_sha256=packet_hash);
+  SELECT count(*) INTO plan_count FROM memory.projection_plan AS stored_plan
+  WHERE stored_plan.owner_user_id=actor
+    AND (stored_plan.plan_id=p_plan_id OR stored_plan.packet_sha256=packet_hash);
   RETURN QUERY SELECT
     memory.v5_digest_text(p_packet_text),semantic_value,projection_hash,
     packet_hash,memory.v5_projection_owner_manifest_sha256(actor,packet_hash),
