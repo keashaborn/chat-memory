@@ -133,6 +133,22 @@ qdrant_signature() {
     | sha256sum | awk '{print $1}'
 }
 
+failed_units_signature() {
+  systemctl --failed --no-legend --no-pager \
+    | awk '{print $1}' | sort -u | sha256sum | awk '{print $1}'
+}
+
+authenticated_health() {
+  [[ "$(systemctl is-active brains.service)" == active ]]
+  curl --fail --silent --show-error --max-time 10 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
+  curl --fail --silent --show-error --max-time 10 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/readyz \
+    | jq -e '.ok==true and .postgres==true' >/dev/null
+}
+
 for artifact in "${!expected_sha256[@]}"; do
   [[ -f "$artifact" ]]
   [[ "$(sha256sum "$artifact" | awk '{print $1}')" == \
@@ -142,7 +158,8 @@ done
 git merge-base --is-ancestor "$required_ancestor" HEAD
 "$python_bin" -m py_compile "$worker"
 PYTHONPATH="$repo_root" "$python_bin" "$provider_test" >/dev/null
-[[ "$(systemctl --failed --no-legend --no-pager | wc -l)" -eq 0 ]]
+failed_units_before=$(failed_units_signature)
+authenticated_health
 
 phase=production_clone
 bash "$clone_test" >"$clone_output"
@@ -280,6 +297,8 @@ while IFS=$'\t' read -r unit enabled active; do
   [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
   [[ "$(systemctl is-active "$unit")" == "$active" ]]
 done <"$timer_state"
+[[ "$(failed_units_signature)" == "$failed_units_before" ]]
+authenticated_health
 
 phase=report
 dry_sha=$(sha256sum "$dry" | awk '{print $1}')
@@ -301,7 +320,8 @@ jq -n --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       rollback_only_security_passed:true,transactional_apply:true,
       zero_write_replay:true,owner_isolation:true,
       original_packet_unchanged:true,all_non_target_rows_unchanged:true,
-      qdrant_unchanged:true,exact_timer_states_restored:true},
+      qdrant_unchanged:true,exact_timer_states_restored:true,
+      failed_unit_state_unchanged:true,service_health:true},
     metrics:{discovered_timer_count:$timer_count},plan_sha256:$plan_sha256,
     qdrant_sha256:$qdrant_sha256,
     hard_stop:"before_private_inference_on_reextract_job"}' >"$report"
