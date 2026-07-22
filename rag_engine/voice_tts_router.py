@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import uuid
@@ -14,27 +15,55 @@ router = APIRouter()
 OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL") or "https://api.openai.com/v1/audio/speech"
 
 DEFAULT_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts"
-DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "sage"
-MAX_TTS_CHARS = int(os.getenv("OPENAI_TTS_MAX_CHARS") or "8000")
+DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
+MAX_TTS_CHARS = 4096
+TTS_CAPABILITIES_VERSION = "2026-07-22"
 
-ALLOWED_TTS_MODELS = {
-    "gpt-4o-mini-tts",
-    "tts-1",
-    "tts-1-hd",
+TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "gpt-4o-mini-tts": {
+        "label": "GPT-4o mini TTS",
+        "description": "Recommended: expressive, reliable speech with style instructions.",
+        "legacy": False,
+        "supports_instructions": True,
+        "default_voice": "marin",
+        "recommended_voices": ["marin", "cedar"],
+        "voices": [
+            "alloy",
+            "ash",
+            "ballad",
+            "coral",
+            "echo",
+            "fable",
+            "nova",
+            "onyx",
+            "sage",
+            "shimmer",
+            "verse",
+            "marin",
+            "cedar",
+        ],
+    },
+    "tts-1": {
+        "label": "TTS-1",
+        "description": "Legacy: lower latency with lower audio quality.",
+        "legacy": True,
+        "supports_instructions": False,
+        "default_voice": "sage",
+        "recommended_voices": [],
+        "voices": ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
+    },
+    "tts-1-hd": {
+        "label": "TTS-1 HD",
+        "description": "Legacy: higher quality than TTS-1, without style instructions.",
+        "legacy": True,
+        "supports_instructions": False,
+        "default_voice": "sage",
+        "recommended_voices": [],
+        "voices": ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
+    },
 }
 
-ALLOWED_TTS_VOICES = {
-    "alloy",
-    "ash",
-    "ballad",
-    "coral",
-    "echo",
-    "fable",
-    "nova",
-    "onyx",
-    "sage",
-    "shimmer",
-}
+ALLOWED_TTS_MODELS = set(TTS_MODEL_CAPABILITIES)
 
 
 def _require_actor(req: Request) -> str:
@@ -50,20 +79,48 @@ def _require_actor(req: Request) -> str:
 
 def _clean_model(raw: Any) -> str:
     fallback = DEFAULT_TTS_MODEL if DEFAULT_TTS_MODEL in ALLOWED_TTS_MODELS else "gpt-4o-mini-tts"
-    value = str(raw or fallback).strip()
-
-    # Do not allow stale provider-prefixed values like xai:...
-    if not value or ":" in value:
+    if raw is None or not str(raw).strip():
         return fallback
 
-    return value if value in ALLOWED_TTS_MODELS else fallback
+    value = str(raw).strip()
+
+    if ":" in value or value not in ALLOWED_TTS_MODELS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "unsupported_tts_model",
+                "field": "model",
+                "value": value[:120],
+                "allowed": sorted(ALLOWED_TTS_MODELS),
+            },
+        )
+
+    return value
 
 
-def _clean_voice(raw: Any) -> str:
-    fallback = DEFAULT_TTS_VOICE.lower() if DEFAULT_TTS_VOICE.lower() in ALLOWED_TTS_VOICES else "sage"
-    value = str(raw or fallback).strip().lower()
+def _clean_voice(raw: Any, model: str) -> str:
+    model_capabilities = TTS_MODEL_CAPABILITIES[model]
+    allowed = model_capabilities["voices"]
+    configured_default = DEFAULT_TTS_VOICE.strip().lower()
+    fallback = configured_default if configured_default in allowed else model_capabilities["default_voice"]
 
-    return value if value in ALLOWED_TTS_VOICES else fallback
+    if raw is None or not str(raw).strip():
+        return fallback
+
+    value = str(raw).strip().lower()
+    if value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "unsupported_tts_voice_for_model",
+                "field": "voice",
+                "value": value[:120],
+                "model": model,
+                "allowed": allowed,
+            },
+        )
+
+    return value
 
 
 def _clean_speed(raw: Any) -> float:
@@ -98,7 +155,7 @@ async def create_tts(req: Request):
         raise HTTPException(status_code=413, detail=f"text_too_large_max_{MAX_TTS_CHARS}")
 
     model = _clean_model(body.get("model"))
-    voice = _clean_voice(body.get("voice"))
+    voice = _clean_voice(body.get("voice"), model)
     speed = _clean_speed(body.get("speed", 1.0))
     instructions = str(body.get("instructions") or "").strip()
 
@@ -107,7 +164,6 @@ async def create_tts(req: Request):
             {
                 "status": "ok",
                 "provider": "openai",
-                "actor_user_id": actor_user_id,
                 "model": model,
                 "voice": voice,
                 "speed": speed,
@@ -138,20 +194,22 @@ async def create_tts(req: Request):
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
+                    "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
                 },
                 json=payload,
             )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"openai_tts_unreachable:{exc}") from exc
+        raise HTTPException(status_code=502, detail={"error": "openai_tts_unreachable"}) from exc
 
     if upstream.status_code >= 400:
-        body_text = upstream.text[:2000]
+        provider_request_id = upstream.headers.get("x-request-id") or upstream.headers.get("openai-request-id")
+        public_status = 429 if upstream.status_code == 429 else 503 if upstream.status_code >= 500 else 502
         raise HTTPException(
-            status_code=502,
+            status_code=public_status,
             detail={
                 "error": "openai_tts_error",
-                "status": upstream.status_code,
-                "body": body_text,
+                "upstream_status": upstream.status_code,
+                "provider_request_id": provider_request_id,
             },
         )
 
@@ -161,6 +219,32 @@ async def create_tts(req: Request):
         headers={
             "x-vs-voice-provider": "openai",
             "x-vs-voice-model": model,
-            "x-vs-voice-actor": actor_user_id,
         },
     )
+
+
+def _safety_identifier(actor_user_id: str) -> str:
+    return hashlib.sha256(actor_user_id.encode("utf-8")).hexdigest()
+
+
+@router.get("/voice/capabilities")
+async def get_voice_capabilities(req: Request):
+    _require_actor(req)
+
+    models = []
+    for model_id in ("gpt-4o-mini-tts", "tts-1", "tts-1-hd"):
+        capabilities = TTS_MODEL_CAPABILITIES[model_id]
+        models.append({"id": model_id, **capabilities})
+
+    default_model = DEFAULT_TTS_MODEL if DEFAULT_TTS_MODEL in ALLOWED_TTS_MODELS else "gpt-4o-mini-tts"
+    default_voice = _clean_voice(None, default_model)
+
+    return {
+        "version": TTS_CAPABILITIES_VERSION,
+        "tts": {
+            "default_model": default_model,
+            "default_voice": default_voice,
+            "maximum_input_characters": MAX_TTS_CHARS,
+            "models": models,
+        },
+    }
