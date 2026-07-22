@@ -491,7 +491,7 @@ projection_acl_state=$(scalar "
     )
   )")
 echo "projection_acl_state=$projection_acl_state"
-[[ "$projection_acl_state" == "true|true|memory_v5_writer" ]]
+[[ "$projection_acl_state" == "t|t|memory_v5_writer" ]]
 run_sql <"$projection_migration"
 run_sql <"$projection_migration"
 name_observation=$(scalar "
