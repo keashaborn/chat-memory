@@ -93,9 +93,36 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(literal_properties["unit"], {"type": "null"})
         self.assertEqual(literal_properties["approximate"]["const"], False)
+        self.assertEqual(request.output_schema["properties"]["observations"]["minItems"], 1)
         self.assertEqual(
             provider._policy_compiler_version,
             SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+        )
+
+    def test_multiple_explicit_stance_cues_require_atomic_split(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source(
+                "I think the future cannot be predicted. "
+                "I believe worrying about next month is not useful."
+            )
+        )
+        self.assertEqual(request.prompt_profile, "semantic_stance_compact_v1")
+        self.assertIn(
+            "Return at least two non-duplicate atomic stance observations",
+            request.instructions,
+        )
+        self.assertEqual(
+            request.output_schema["properties"]["observations"]["minItems"],
+            2,
         )
 
     def test_non_stance_v5_2_source_retains_full_registry_profile(self) -> None:

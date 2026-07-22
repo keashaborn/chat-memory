@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v4"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v5"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -1150,7 +1150,21 @@ def _semantic_stance_prompt_enabled(
     )
 
 
-def _semantic_stance_prompt_instructions() -> str:
+def _semantic_stance_minimum_observations(content: str) -> int:
+    cue_count = sum(1 for _ in _REPORTED_BELIEF_CUE_RE.finditer(content))
+    return 2 if cue_count >= 2 else 1
+
+
+def _semantic_stance_prompt_instructions(
+    minimum_observations: int = 1,
+) -> str:
+    atomicity = ""
+    if minimum_observations >= 2:
+        atomicity = (
+            "The trusted source contains multiple explicit stance cues. "
+            "Return at least two non-duplicate atomic stance observations; "
+            "do not collapse distinct positions into one observation.\n\n"
+        )
     return (
         f"{LOCAL_CORE_INSTRUCTIONS}"
         f"{SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS}\n\n"
@@ -1160,6 +1174,7 @@ def _semantic_stance_prompt_instructions() -> str:
         "atomic observations. Do not encode a reported belief as a health, "
         "biographical, relationship, preference, or project fact. If the "
         "wording cannot support an attributed position, defer it.\n\n"
+        f"{atomicity}"
         f"{SEMANTIC_STANCE_EXAMPLE}\n"
     )
 
@@ -3778,12 +3793,18 @@ class LocalLlamaCppProvider:
         if _semantic_stance_prompt_enabled(self._registry, source.content):
             prompt_profile = "semantic_stance_compact_v1"
             allowed_predicates = ("stance.reported",)
+            minimum_stance_observations = (
+                _semantic_stance_minimum_observations(source.content)
+            )
             registry_contract = _registry_contract_for_predicates(
                 self._registry,
                 allowed_predicates,
             )
-            instructions = _semantic_stance_prompt_instructions()
+            instructions = _semantic_stance_prompt_instructions(
+                minimum_stance_observations
+            )
         else:
+            minimum_stance_observations = 1
             relationship_instructions = (
                 RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
                 if _relationship_contract_enabled(self._registry)
@@ -3811,6 +3832,7 @@ class LocalLlamaCppProvider:
             output_schema=_llama_cpp_output_schema(
                 ProviderPacket.model_json_schema(),
                 allowed_predicates=allowed_predicates,
+                minimum_stance_observations=minimum_stance_observations,
             ),
             max_output_tokens=self._max_output_tokens,
             timeout_seconds=self._timeout_seconds,
@@ -4015,6 +4037,7 @@ def _llama_cpp_output_schema(
     value: dict[str, Any],
     *,
     allowed_predicates: tuple[str, ...] = (),
+    minimum_stance_observations: int = 1,
 ) -> dict[str, Any]:
     """Keep the canonical validator strict while avoiding unsafe GBNF repeats."""
     schema = deepcopy(value)
@@ -4050,6 +4073,7 @@ def _llama_cpp_output_schema(
         predicate["enum"] = list(allowed_predicates)
     if allowed_predicates == ("stance.reported",):
         definitions = schema.get("$defs", {})
+        packet_properties = schema.get("properties", {})
         observation_properties = observation.get("properties", {})
         literal = definitions.get("LiteralObject", {})
         literal_properties = literal.get("properties", {})
@@ -4057,12 +4081,19 @@ def _llama_cpp_output_schema(
             isinstance(item, dict)
             for item in (
                 observation_properties,
+                packet_properties,
                 literal,
                 literal_properties,
                 definitions.get("ReportedStanceValue"),
             )
         ):
             raise ValueError("stance output schema definitions are missing")
+        if minimum_stance_observations not in {1, 2}:
+            raise ValueError("stance observation minimum is invalid")
+        observations_schema = packet_properties.get("observations")
+        if not isinstance(observations_schema, dict):
+            raise ValueError("stance observations schema is missing")
+        observations_schema["minItems"] = minimum_stance_observations
         observation_properties["object"] = {
             "$ref": "#/$defs/LiteralObject"
         }
