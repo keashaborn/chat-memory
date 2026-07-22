@@ -107,6 +107,8 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         call = FakeAsyncClient.calls[0]
         self.assertEqual(call["data"]["model"], "gpt-4o-transcribe")
         self.assertEqual(call["data"]["response_format"], "json")
+        self.assertIn("Fractal Monism v0.2", call["data"]["prompt"])
+        self.assertIn("LifeSwitch", call["data"]["prompt"])
         self.assertEqual(call["files"]["file"][0], "voice.webm")
         self.assertTrue(
             call["headers"]["OpenAI-Safety-Identifier"].startswith("vs1_")

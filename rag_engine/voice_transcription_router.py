@@ -31,6 +31,11 @@ DEFAULT_TRANSCRIPTION_MODEL = (
 
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_CHARACTERS = 32_000
+TRANSCRIPTION_CONTEXT_PROMPT = (
+    "This is a conversation in LifeSwitch with the Verbal Sage assistant. "
+    "Relevant proper names and technical terms may include Fractal Monism v0.2, "
+    "FM v0.2, Sage, RESSE, Governed Memory V1, Qdrant, OpenAI, and Supabase."
+)
 SUPPORTED_AUDIO_TYPES = {
     "audio/mp4": "voice.m4a",
     "audio/mpeg": "voice.mp3",
@@ -109,6 +114,7 @@ async def transcribe_voice_audio(req: Request):
                 data={
                     "model": DEFAULT_TRANSCRIPTION_MODEL,
                     "response_format": "json",
+                    "prompt": TRANSCRIPTION_CONTEXT_PROMPT,
                 },
             )
     except Exception as exc:
