@@ -300,6 +300,15 @@ if [[ "$completed_replay_mode" == 1 ]]; then
 fi
 [[ "$(psql_scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$target_owner'::uuid AND job_id='$target_job'::uuid")" == "$expected_preflight_packets" ]]
+reserved_jobs_before=$(psql_scalar "SELECT count(*)
+  FROM memory.v5_local_inference_event
+  WHERE owner_user_id='$target_owner'::uuid
+    AND action='reserved'
+    AND created_at>=clock_timestamp()-interval '24 hours'")
+[[ "$reserved_jobs_before" =~ ^[0-9]+$ ]]
+canary_reserved_budget=$((reserved_jobs_before+1))
+[[ "$canary_reserved_budget" -ge 1 && "$canary_reserved_budget" -le 100 ]]
+canary_failure_threshold=3
 
 : >"$unit_state"
 while IFS= read -r unit; do
@@ -367,8 +376,8 @@ PYTHONPATH="$repo_root" \
     --expected-content-sha256 "$target_content_sha" \
     --contract-profile "$contract_profile" \
     --max-attempts "$max_attempts" \
-    --max-reserved-jobs "$max_attempts" \
-    --failure-threshold "$max_attempts" \
+    --max-reserved-jobs "$canary_reserved_budget" \
+    --failure-threshold "$canary_failure_threshold" \
     --run-id "$run_id" --apply >"$canary_output" 2>"$canary_log"
 canary_rc=$?
 set -e
@@ -479,6 +488,8 @@ jq -n \
   --arg evidence_sha256 "$(printf %s "$target_evidence" | sha256sum | awk '{print $1}')" \
   --arg content_sha256 "$target_content_sha" \
   --arg contract_profile "$contract_profile" \
+  --argjson reserved_jobs_before "$reserved_jobs_before" \
+  --argjson canary_reserved_budget "$canary_reserved_budget" \
   --arg backup "$backup" --arg backup_sha256 "$backup_sha256" \
   --arg qdrant_sha256 "$qdrant_after" \
   --arg before_static "$before_static" --arg after_static "$after_static" \
@@ -488,6 +499,9 @@ jq -n \
     contract_version:"memory_v1_v5_local_canary_apply_report_v2",
     completed_at:$completed_at,head_commit:$head_commit,
     predicate_contract_profile:$contract_profile,
+    quota:{reserved_jobs_before:$reserved_jobs_before,
+      canary_reserved_budget:$canary_reserved_budget,
+      recurring_scheduler_budget_unchanged:true},
     target:{owner_user_id_sha256:$owner_sha256,job_id_sha256:$job_sha256,
       evidence_id_sha256:$evidence_sha256,evidence_content_sha256:$content_sha256},
     canary:$canary[0],

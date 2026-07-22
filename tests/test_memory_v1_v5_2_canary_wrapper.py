@@ -32,6 +32,9 @@ class MemoryV1V52CanaryWrapperTest(unittest.TestCase):
         self.assertIn("cross_owner_claim_rejected:true", source)
         self.assertIn("fresh_postgres_backup:true", source)
         self.assertIn("database_role=sage", source)
+        self.assertIn("canary_reserved_budget=$((reserved_jobs_before+1))", source)
+        self.assertIn("recurring_scheduler_budget_unchanged:true", source)
+        self.assertIn('--max-reserved-jobs "$canary_reserved_budget"', source)
 
 
 if __name__ == "__main__":
