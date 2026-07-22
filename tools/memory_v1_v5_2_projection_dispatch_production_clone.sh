@@ -459,6 +459,20 @@ run_sql <"$projection_apply_migration"
 # Reapply the staging ACL after restore/apply compatibility has recreated
 # restricted functions and tables without their production object ownership.
 run_sql <"$staging_migration"
+run_sql -c "
+  GRANT SELECT, INSERT ON
+    memory.projection_plan,
+    memory.projection_plan_item,
+    memory.projection_claim_payload,
+    memory.projection_preference_payload,
+    memory.projection_project_payload,
+    memory.projection_plan_observation,
+    memory.projection_plan_relation,
+    memory.projection_review,
+    memory.projection_apply_event,
+    memory.preference_revision_observation,
+    memory.project_knowledge_revision_observation
+  TO memory_v5_writer"
 projection_acl_state=$(scalar "
   SELECT concat_ws('|',
     has_table_privilege(
