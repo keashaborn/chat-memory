@@ -64,6 +64,35 @@ class LocalProviderV52Test(unittest.TestCase):
             "properties"
         ]["predicate"]
         self.assertEqual(predicate["enum"], ["stance.reported"])
+        observation_properties = request.output_schema["$defs"][
+            "ProviderObservation"
+        ]["properties"]
+        self.assertEqual(
+            observation_properties["object"],
+            {"$ref": "#/$defs/LiteralObject"},
+        )
+        self.assertEqual(
+            observation_properties["modality"]["const"],
+            "reported_belief",
+        )
+        self.assertEqual(
+            observation_properties["projection_class"]["const"],
+            "reported_stance",
+        )
+        self.assertEqual(
+            observation_properties["surface_policy"]["const"],
+            "relevant_recall_or_explicit_recall",
+        )
+        literal_properties = request.output_schema["$defs"]["LiteralObject"][
+            "properties"
+        ]
+        self.assertEqual(literal_properties["datatype"]["const"], "json")
+        self.assertEqual(
+            literal_properties["value"],
+            {"$ref": "#/$defs/ReportedStanceValue"},
+        )
+        self.assertEqual(literal_properties["unit"], {"type": "null"})
+        self.assertEqual(literal_properties["approximate"]["const"], False)
         self.assertEqual(
             provider._policy_compiler_version,
             SEMANTIC_V5_2_POLICY_COMPILER_VERSION,

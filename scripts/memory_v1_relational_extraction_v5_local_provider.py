@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v3"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v4"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -4048,6 +4048,49 @@ def _llama_cpp_output_schema(
     if allowed_predicates and isinstance(predicate, dict):
         predicate.pop("pattern", None)
         predicate["enum"] = list(allowed_predicates)
+    if allowed_predicates == ("stance.reported",):
+        definitions = schema.get("$defs", {})
+        observation_properties = observation.get("properties", {})
+        literal = definitions.get("LiteralObject", {})
+        literal_properties = literal.get("properties", {})
+        if not all(
+            isinstance(item, dict)
+            for item in (
+                observation_properties,
+                literal,
+                literal_properties,
+                definitions.get("ReportedStanceValue"),
+            )
+        ):
+            raise ValueError("stance output schema definitions are missing")
+        observation_properties["object"] = {
+            "$ref": "#/$defs/LiteralObject"
+        }
+        for property_name, value_name in (
+            ("polarity", "affirmed"),
+            ("modality", "reported_belief"),
+            ("projection_class", "reported_stance"),
+            (
+                "surface_policy",
+                "relevant_recall_or_explicit_recall",
+            ),
+        ):
+            observation_properties[property_name] = {
+                "const": value_name,
+                "type": "string",
+            }
+        literal_properties["datatype"] = {
+            "const": "json",
+            "type": "string",
+        }
+        literal_properties["value"] = {
+            "$ref": "#/$defs/ReportedStanceValue"
+        }
+        literal_properties["unit"] = {"type": "null"}
+        literal_properties["approximate"] = {
+            "const": False,
+            "type": "boolean",
+        }
     return schema
 
 
