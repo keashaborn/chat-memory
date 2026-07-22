@@ -14,6 +14,19 @@ if [[ "${MEMORY_V1_V5_LOCAL_INFERENCE_CANARY:-}" != "authorized" ]]; then
   echo 'MEMORY_V1_V5_LOCAL_INFERENCE_CANARY=authorized is required' >&2
   exit 1
 fi
+contract_profile=${MEMORY_V1_PREDICATE_CONTRACT_PROFILE:-v5}
+case "$contract_profile" in
+  v5|v5_1|v5_2) ;;
+  *)
+    echo 'MEMORY_V1_PREDICATE_CONTRACT_PROFILE is invalid' >&2
+    exit 1
+    ;;
+esac
+if [[ "$contract_profile" == v5_2 \
+  && "${MEMORY_V1_V5_2_LOCAL_INFERENCE_CANARY:-}" != authorized ]]; then
+  echo 'MEMORY_V1_V5_2_LOCAL_INFERENCE_CANARY=authorized is required' >&2
+  exit 1
+fi
 if [[ $# -lt 4 || $# -gt 5 ]]; then
   echo 'usage: canary_apply.sh JOB_ID EVIDENCE_ID CONTENT_SHA256 RUN_ID [PRIOR_ATTEMPTS]' >&2
   exit 2
@@ -38,12 +51,15 @@ max_attempts=$((prior_attempts+1))
 repo_root=$(git rev-parse --show-toplevel)
 canary=scripts/memory_v1_v5_local_inference_canary.py
 provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
-expected_canary_sha=f914fad97468f46674f018f44e2b3f08205cd16823a568b17eb93c30be1a4db7
-expected_provider_sha=8cf1271fe5bdaa00aeaff55538d69af0d1d7ef977b3d56a730730b33f8c79fba
+profile_manifest=specs/memory_v1_predicate_runtime_profiles_v2.json
+expected_canary_sha=337a6fe1b963b2152f8c8eb703196fbeb8759e734be32b0c0cc274778ced64eb
+expected_provider_sha=86f21d219ba3d82c51d5e8a3918fdf6876f20977c9b0a5b81d8f19b7e9839697
+expected_profile_manifest_sha=5786269a2cda01045cc0f729ed2f7239da95da03e0dab2d074df761de80b24a4
 api_key_file=/etc/memory-v1-local-inference/api-key
 env_file=/opt/chat-memory/.env
 container=brains-postgres-1
 database=memory
+database_role=sage
 snapshot_dir=/home/ubuntu/brains/snapshots
 lock_file=/home/ubuntu/brains/.memory_v1_v5_local_inference_canary.lock
 phase=initialization
@@ -172,13 +188,15 @@ capture_isolation_state() {
   chmod 0600 "$output"
 }
 
-for file in "$repo_root/$canary" "$repo_root/$provider" "$api_key_file" \
-  "$env_file"; do
+for file in "$repo_root/$canary" "$repo_root/$provider" \
+  "$repo_root/$profile_manifest" "$api_key_file" "$env_file"; do
   [[ -f "$file" ]]
 done
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 [[ "$(sha256sum "$repo_root/$canary" | awk '{print $1}')" == "$expected_canary_sha" ]]
 [[ "$(sha256sum "$repo_root/$provider" | awk '{print $1}')" == "$expected_provider_sha" ]]
+[[ "$(sha256sum "$repo_root/$profile_manifest" | awk '{print $1}')" \
+  == "$expected_profile_manifest_sha" ]]
 [[ "$(stat -c %a "$api_key_file")" == 600 ]]
 [[ "$(stat -c %U:%G "$api_key_file")" == root:root ]]
 
@@ -187,6 +205,7 @@ flock -n 9
 umask 077
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git -C "$repo_root" rev-parse --short=12 HEAD)"
 status_file="$snapshot_dir/memory_v1_v5_local_canary_${run_tag}.status"
+backup="$snapshot_dir/memory_pre_${contract_profile}_canary_${run_tag}.dump"
 before_static="$snapshot_dir/memory_v1_v5_local_canary_static_before_${run_tag}.tsv"
 after_static="$snapshot_dir/memory_v1_v5_local_canary_static_after_${run_tag}.tsv"
 before_isolation="$snapshot_dir/memory_v1_v5_local_canary_isolation_before_${run_tag}.tsv"
@@ -199,6 +218,18 @@ phase=preflight
   to_regclass('memory.v5_local_inference_event') IS NOT NULL
   AND to_regclass('memory.evidence_extraction_packet_v5_local') IS NOT NULL
 )::integer")" == 1 ]]
+if [[ "$contract_profile" == v5_2 ]]; then
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.predicate_registry_version
+    WHERE registry_version='memory_predicate_registry_v5_2'
+      AND contract_version='memory_v1_relational_extraction_v5_2'
+      AND status='proposed' AND NOT runtime_active")" == 1 ]]
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.observation
+    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.entity_resolution_plan
+    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
+  [[ "$(psql_scalar "SELECT count(*) FROM memory.projection_plan
+    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
+fi
 resume_mode=$(psql_scalar "SELECT CASE WHEN EXISTS (
   SELECT 1
   FROM memory.evidence_extraction_job AS job
@@ -294,6 +325,13 @@ while IFS=$'\t' read -r unit _enabled _active; do
   ! systemctl is-active --quiet "$service"
 done <"$unit_state"
 
+phase=backup
+docker exec "$container" pg_dump -Fc -U "$database_role" -d "$database" \
+  >"$backup"
+chmod 0600 "$backup"
+backup_sha256=$(sha256sum "$backup" | awk '{print $1}')
+[[ "$backup_sha256" =~ $sha_re ]]
+
 phase=baseline
 psql_scalar "
   SELECT table_name FROM information_schema.tables
@@ -327,6 +365,7 @@ PYTHONPATH="$repo_root" \
     --evidence-id "$target_evidence" \
     --expected-job-id "$target_job" \
     --expected-content-sha256 "$target_content_sha" \
+    --contract-profile "$contract_profile" \
     --max-attempts "$max_attempts" \
     --max-reserved-jobs "$max_attempts" \
     --failure-threshold "$max_attempts" \
@@ -342,8 +381,9 @@ if [[ "$outcome" == accepted ]]; then
 else
   [[ "$canary_rc" -eq 1 ]]
 fi
-jq -e '
-  .external_model_calls==0
+jq -e --arg profile "$contract_profile" '
+  .predicate_contract_profile==$profile
+  and .external_model_calls==0
   and (.local_model_calls>=0 and .local_model_calls<=1)
   and .zero_write_replay_proved==true
   and .write_counts.claims==0
@@ -381,6 +421,16 @@ if [[ "$outcome" == accepted ]]; then
     expected_packet_delta=0
   fi
   [[ $((packets_after-packets_before)) -eq "$expected_packet_delta" ]]
+  if [[ "$contract_profile" == v5_2 ]]; then
+    [[ "$(psql_scalar "SELECT count(*)
+      FROM memory.evidence_extraction_packet_v5_local
+      WHERE owner_user_id='$target_owner'::uuid
+        AND job_id='$target_job'::uuid
+        AND normalized_packet->>'contract_version'
+          ='memory_v1_relational_extraction_v5_2'
+        AND normalized_packet->>'predicate_registry_version'
+          ='memory_predicate_registry_v5_2'")" == 1 ]]
+  fi
   expected_status=review_required
 else
   [[ $((packets_after-packets_before)) -eq 0 ]]
@@ -428,20 +478,25 @@ jq -n \
   --arg job_sha256 "$(printf %s "$target_job" | sha256sum | awk '{print $1}')" \
   --arg evidence_sha256 "$(printf %s "$target_evidence" | sha256sum | awk '{print $1}')" \
   --arg content_sha256 "$target_content_sha" \
+  --arg contract_profile "$contract_profile" \
+  --arg backup "$backup" --arg backup_sha256 "$backup_sha256" \
   --arg qdrant_sha256 "$qdrant_after" \
   --arg before_static "$before_static" --arg after_static "$after_static" \
   --arg before_isolation "$before_isolation" --arg after_isolation "$after_isolation" \
   --arg log "$canary_log" --slurpfile canary "$canary_output" \
   '{
-    contract_version:"memory_v1_v5_local_canary_apply_report_v1",
+    contract_version:"memory_v1_v5_local_canary_apply_report_v2",
     completed_at:$completed_at,head_commit:$head_commit,
+    predicate_contract_profile:$contract_profile,
     target:{owner_user_id_sha256:$owner_sha256,job_id_sha256:$job_sha256,
       evidence_id_sha256:$evidence_sha256,evidence_content_sha256:$content_sha256},
     canary:$canary[0],
     evidence:{static_before:$before_static,static_after:$after_static,
       isolation_before:$before_isolation,isolation_after:$after_isolation,
-      log:$log,qdrant_sha256:$qdrant_sha256},
-    checks:{private_local_endpoint:true,external_model_calls:0,
+      log:$log,qdrant_sha256:$qdrant_sha256,
+      backup:$backup,backup_sha256:$backup_sha256},
+    checks:{fresh_postgres_backup:true,private_local_endpoint:true,
+      external_model_calls:0,
       target_scoped_writes_only:true,other_owners_unchanged:true,
       same_owner_non_target_rows_unchanged:true,zero_write_replay:true,
       cross_owner_claim_rejected:true,qdrant_unchanged:true,
