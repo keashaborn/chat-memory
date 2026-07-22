@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import os
+import re
 from typing import Any
 
 import httpx
@@ -32,12 +34,20 @@ DEFAULT_TRANSCRIPTION_MODEL = (
     if _configured_model in ALLOWED_TRANSCRIPTION_MODELS
     else "gpt-4o-transcribe"
 )
+_LANGUAGE_RE = re.compile(r"^[a-z]{2}$")
+_configured_language = (
+    os.getenv("OPENAI_TRANSCRIPTION_LANGUAGE") or "en"
+).strip().lower()
+DEFAULT_TRANSCRIPTION_LANGUAGE = (
+    _configured_language if _LANGUAGE_RE.fullmatch(_configured_language) else "en"
+)
 
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_CHARACTERS = 32_000
 TRANSCRIPTION_CONTEXT_PROMPT = (
-    "This is a conversation in LifeSwitch with the Verbal Sage assistant. "
-    "Relevant proper names and technical terms may include Fractal Monism v0.2, "
+    "Natural conversational English in LifeSwitch with the Verbal Sage assistant. "
+    "Preserve short questions and incomplete phrases exactly; do not complete or "
+    "reinterpret them. Proper names may include Fractal Monism v0.2, "
     "FM v0.2, Sage, RESSE, Governed Memory V1, Qdrant, OpenAI, and Supabase."
 )
 SUPPORTED_AUDIO_TYPES = {
@@ -70,6 +80,33 @@ def _public_upstream_status(status_code: int) -> int:
     if status_code >= 500:
         return 503
     return 502
+
+
+def _confidence_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
+    raw_logprobs = payload.get("logprobs")
+    if not isinstance(raw_logprobs, list):
+        return None
+
+    logprobs: list[float] = []
+    for item in raw_logprobs:
+        if not isinstance(item, dict):
+            continue
+        try:
+            value = float(item.get("logprob"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            logprobs.append(max(-100.0, min(0.0, value)))
+
+    if not logprobs:
+        return None
+
+    return {
+        "token_count": len(logprobs),
+        "mean_logprob": round(sum(logprobs) / len(logprobs), 6),
+        "minimum_logprob": round(min(logprobs), 6),
+        "low_confidence_token_count": sum(value < -1.0 for value in logprobs),
+    }
 
 
 @router.post("/voice/openai/transcribe")
@@ -119,6 +156,9 @@ async def transcribe_voice_audio(req: Request):
                 data={
                     "model": DEFAULT_TRANSCRIPTION_MODEL,
                     "response_format": "json",
+                    "language": DEFAULT_TRANSCRIPTION_LANGUAGE,
+                    "temperature": "0",
+                    "include[]": "logprobs",
                     "prompt": TRANSCRIPTION_CONTEXT_PROMPT,
                 },
             )
@@ -155,12 +195,15 @@ async def transcribe_voice_audio(req: Request):
         raise HTTPException(status_code=422, detail="empty_transcript")
     if len(transcript) > MAX_TRANSCRIPT_CHARACTERS:
         raise HTTPException(status_code=502, detail="transcript_too_large")
+    confidence = _confidence_summary(payload)
 
     return JSONResponse(
         {
             "transcript": transcript,
             "provider": "openai",
             "model": DEFAULT_TRANSCRIPTION_MODEL,
+            "language": DEFAULT_TRANSCRIPTION_LANGUAGE,
+            "confidence": confidence,
             "provider_request_id": provider_request_id,
         },
         headers={

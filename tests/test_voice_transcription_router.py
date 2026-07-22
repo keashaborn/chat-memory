@@ -92,6 +92,16 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         self.assertEqual(FakeAsyncClient.calls, [])
 
     def test_transcribes_with_server_owned_model_and_safety_identifier(self) -> None:
+        FakeAsyncClient.response = FakeResponse(
+            payload={
+                "text": "What should I prioritize today?",
+                "logprobs": [
+                    {"token": "What", "logprob": -0.05},
+                    {"token": " should", "logprob": -1.25},
+                    {"token": " I", "logprob": -0.1},
+                ],
+            }
+        )
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
             patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
@@ -104,14 +114,29 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["transcript"], "What should I prioritize today?")
+        self.assertEqual(response.json()["language"], "en")
+        self.assertEqual(
+            response.json()["confidence"],
+            {
+                "token_count": 3,
+                "mean_logprob": -0.466667,
+                "minimum_logprob": -1.25,
+                "low_confidence_token_count": 1,
+            },
+        )
+        self.assertNotIn("logprobs", response.json())
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(response.headers["x-vs-voice-turn-id"], VOICE_TURN)
 
         call = FakeAsyncClient.calls[0]
         self.assertEqual(call["data"]["model"], "gpt-4o-transcribe")
         self.assertEqual(call["data"]["response_format"], "json")
+        self.assertEqual(call["data"]["language"], "en")
+        self.assertEqual(call["data"]["temperature"], "0")
+        self.assertEqual(call["data"]["include[]"], "logprobs")
         self.assertIn("Fractal Monism v0.2", call["data"]["prompt"])
         self.assertIn("LifeSwitch", call["data"]["prompt"])
+        self.assertIn("Preserve short questions", call["data"]["prompt"])
         self.assertEqual(call["files"]["file"][0], "voice.webm")
         self.assertTrue(
             call["headers"]["OpenAI-Safety-Identifier"].startswith("vs1_")
