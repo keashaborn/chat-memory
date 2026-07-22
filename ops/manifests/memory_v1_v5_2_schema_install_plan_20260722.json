@@ -61,7 +61,7 @@
     },
     {
       "path": "ops/sql/20260722_memory_v1_governed_claim_reader_v2.sql",
-      "sha256": "5b18db804dea24fcc2db554d6120530a4f051cac435e8168203c1ae32bb34c82",
+      "sha256": "0bf5e0560c4fff614194606b41015b7e89db4a5ae82015d798e3bee704739cc6",
       "kind": "migration",
       "ordinal": 2
     },
@@ -109,7 +109,7 @@
     },
     {
       "path": "tests/memory_v1_v5_2_schema_install_security.sql",
-      "sha256": "52ac6671b65970be57a1c5dbe891c9077590696d2ba41a529578b193b6638606",
+      "sha256": "6381906d179a1d0a3dd96b4d800a0c83ed9516480d1eba21cda61a98c9f77db6",
       "kind": "rolled_back_test",
       "ordinal": 5
     },

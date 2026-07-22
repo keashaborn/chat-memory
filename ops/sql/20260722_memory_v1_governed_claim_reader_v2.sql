@@ -100,6 +100,7 @@ END
 $function$;
 
 ALTER FUNCTION memory.read_governed_claims_v2(uuid[]) OWNER TO memory_v5_reader;
+GRANT SELECT ON memory.entity TO memory_v5_reader;
 REVOKE ALL ON FUNCTION memory.read_governed_claims_v2(uuid[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION memory.read_governed_claims_v2(uuid[]) TO brains_app;
 
