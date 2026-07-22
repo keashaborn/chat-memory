@@ -459,23 +459,25 @@ run_sql <"$projection_apply_migration"
 # Reapply the staging ACL after restore/apply compatibility has recreated
 # restricted functions and tables without their production object ownership.
 run_sql <"$staging_migration"
-[[ "$(scalar "
-  SELECT (
+projection_acl_state=$(scalar "
+  SELECT concat_ws('|',
     has_table_privilege(
       'memory_v5_writer','memory.projection_review','SELECT,INSERT'
-    )
-    AND has_table_privilege(
+    ),
+    has_table_privilege(
       'memory_v5_writer','memory.projection_plan_item','SELECT'
-    )
-    AND (
-      SELECT pg_get_userbyid(p.proowner)='memory_v5_writer'
+    ),
+    (
+      SELECT pg_get_userbyid(p.proowner)
       FROM pg_proc AS p
       JOIN pg_namespace AS n ON n.oid=p.pronamespace
       WHERE n.nspname='memory'
         AND p.proname='preflight_projection_review_v5'
       LIMIT 1
     )
-  )::int")" == "1" ]]
+  )")
+echo "projection_acl_state=$projection_acl_state"
+[[ "$projection_acl_state" == "true|true|memory_v5_writer" ]]
 run_sql <"$projection_migration"
 run_sql <"$projection_migration"
 name_observation=$(scalar "
