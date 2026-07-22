@@ -121,7 +121,8 @@ clone_scalar "
   FROM information_schema.tables
   WHERE table_schema='memory' AND table_type='BASE TABLE'
     AND table_name NOT IN (
-      'predicate_registry_version','predicate_registry_seed','predicate_contract'
+      'predicate','predicate_registry_version',
+      'predicate_registry_seed','predicate_contract'
     )
   ORDER BY table_name
 " >"$protected_tables"
@@ -184,6 +185,9 @@ IFS='|' read -r target_owner target_claim subject_id subject_type \
   SELECT (
     (SELECT count(*) FROM memory.predicate_contract
       WHERE registry_version='memory_predicate_registry_v5_2')=85
+    AND (SELECT count(*) FROM memory.predicate WHERE predicate IN (
+      'education.attended','employment.worked_for','stance.reported'
+    ))=3
     AND (SELECT count(*) FROM memory.relationship_predicate_contract_v5_2)=41
     AND (SELECT count(*) FROM memory.predicate_registry_source_binding_v5_2)=1
     AND NOT EXISTS (SELECT 1 FROM memory.observation
@@ -197,7 +201,11 @@ IFS='|' read -r target_owner target_claim subject_id subject_type \
 ")" == 1 ]]
 
 capture_protected_state "$protected_after"
-cmp -s "$protected_before" "$protected_after"
+cmp -s "$protected_before" "$protected_after" || {
+  diff -u "$protected_before" "$protected_after" >&2 || true
+  echo 'protected clone records changed during schema rehearsal' >&2
+  exit 1
+}
 [[ "$(production_signature)" == "$production_before" ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 [[ "$(production_scalar "

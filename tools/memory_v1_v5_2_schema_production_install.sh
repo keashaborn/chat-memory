@@ -213,7 +213,8 @@ psql_scalar "
   FROM information_schema.tables
   WHERE table_schema='memory' AND table_type='BASE TABLE'
     AND table_name NOT IN (
-      'predicate_registry_version','predicate_registry_seed','predicate_contract'
+      'predicate','predicate_registry_version',
+      'predicate_registry_seed','predicate_contract'
     )
   ORDER BY table_name
 " >"$table_list"
@@ -287,6 +288,9 @@ cmp -s "$before_state" "$after_state" || {
       WHERE registry_version='memory_predicate_registry_v5_2')=1
     AND (SELECT count(*) FROM memory.predicate_contract
       WHERE registry_version='memory_predicate_registry_v5_2')=85
+    AND (SELECT count(*) FROM memory.predicate WHERE predicate IN (
+      'education.attended','employment.worked_for','stance.reported'
+    ))=3
     AND (SELECT count(*) FROM memory.relationship_predicate_contract_v5_2)=41
     AND (SELECT count(*) FROM memory.predicate_registry_source_binding_v5_2)=1
     AND NOT EXISTS (SELECT 1 FROM memory.observation

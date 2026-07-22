@@ -16,6 +16,10 @@ BEGIN
       AND NOT runtime_active
   ) OR (SELECT count(*) FROM memory.predicate_contract
         WHERE registry_version='memory_predicate_registry_v5_2')<>85
+    OR (SELECT count(*) FROM memory.predicate
+        WHERE predicate IN (
+          'education.attended','employment.worked_for','stance.reported'
+        ))<>3
     OR (SELECT count(*) FROM memory.relationship_predicate_contract_v5_2)<>41
     OR (SELECT count(*) FROM memory.predicate_registry_source_binding_v5_2)<>1 THEN
     RAISE EXCEPTION 'V5.2 registry is incomplete or active';

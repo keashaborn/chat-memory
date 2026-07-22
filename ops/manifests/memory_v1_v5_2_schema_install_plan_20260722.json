@@ -109,7 +109,7 @@
     },
     {
       "path": "tests/memory_v1_v5_2_schema_install_security.sql",
-      "sha256": "1228a9a004cb30879c0f6ad1412fc1ab85f6360923b3a886c46b3e4c4c49688c",
+      "sha256": "9cc6ac83918a179b6995adbb09dd19a562e72c4491db778d4a645a39b7ec6555",
       "kind": "rolled_back_test",
       "ordinal": 5
     },
@@ -151,7 +151,7 @@
     },
     {
       "path": "tools/memory_v1_v5_2_schema_install_production_clone.sh",
-      "sha256": "c1a19f71b8a45f90321f685ed0f99438eb2072ae05f00e87f624a27f53597846",
+      "sha256": "62bb1c89dbd817ea530f5ef1ec07068aaff7858346c4ce9b09975039a488b636",
       "kind": "clone_rehearsal",
       "ordinal": 1
     },
@@ -169,7 +169,7 @@
     },
     {
       "path": "tools/memory_v1_v5_2_schema_production_install.sh",
-      "sha256": "6afaa1db50206e034a9148d545ca34a1658ed5b8a357ac9c0dd6948962c9836d",
+      "sha256": "3e24c8dbb4a3fe4a06b159b90c7d5832d1d689243f2f1f74b8b1f861d3bd4242",
       "kind": "production_tool",
       "ordinal": 1
     }
@@ -196,6 +196,7 @@
   ],
   "postinstall_requirements": {
     "predicate_registry_v5_2_rows": 85,
+    "base_predicate_rows_added": 3,
     "relationship_predicate_rows": 41,
     "source_binding_rows": 1,
     "governed_v5_2_rows_created": 0,
