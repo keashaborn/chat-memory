@@ -380,7 +380,7 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$entity_runner" plan \
   --manifest "$entity_manifest" --review-root "$reviews" \
   --output "$entity_plan"
-/opt/chat-memory/venv/bin/python "$entity_fixture" \
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$entity_fixture" \
   --plan "$entity_plan" --output "$entity_authorization" --head "$head"
 
 jq --arg owner '22222222-2222-4222-8222-222222222222' \
