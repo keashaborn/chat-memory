@@ -296,10 +296,6 @@ cmp -s "$before_state" "$after_state" || {
     AND NOT EXISTS (SELECT 1 FROM memory.projection_plan
       WHERE predicate_registry_version='memory_predicate_registry_v5_2')
     AND NOT EXISTS (SELECT 1 FROM memory.entity_resolution_reconciliation_v5_2)
-    AND NOT EXISTS (SELECT 1 FROM memory.claim_relation_v5)
-    AND NOT EXISTS (SELECT 1 FROM memory.preference_relation_v5)
-    AND NOT EXISTS (SELECT 1 FROM memory.project_knowledge_relation_v5)
-    AND NOT EXISTS (SELECT 1 FROM memory.projection_dispatch_v5)
     AND NOT EXISTS (SELECT 1 FROM memory.predicate_registry_version
       WHERE registry_version='memory_predicate_registry_v5_2' AND runtime_active)
   )::integer

@@ -109,7 +109,7 @@
     },
     {
       "path": "tests/memory_v1_v5_2_schema_install_security.sql",
-      "sha256": "5e8698056ce7b72f1e1c3cb29fffbb85bd2e750e1c0a4212677aa62a3b9a6353",
+      "sha256": "52ac6671b65970be57a1c5dbe891c9077590696d2ba41a529578b193b6638606",
       "kind": "rolled_back_test",
       "ordinal": 5
     },
@@ -151,7 +151,7 @@
     },
     {
       "path": "tools/memory_v1_v5_2_schema_install_production_clone.sh",
-      "sha256": "fbb72dc30fc60c859ecba0d180dd80fcacb610872fe59d0a99f7e596dc9a252b",
+      "sha256": "62eac49368e535de32538d030940f347b84cca2f29700dc3feed4ae30af8e06e",
       "kind": "clone_rehearsal",
       "ordinal": 1
     },
@@ -169,7 +169,7 @@
     },
     {
       "path": "tools/memory_v1_v5_2_schema_production_install.sh",
-      "sha256": "f58beb74ffa3284ab2727af36b41b542f4e8f0b5d8f700888a1a06fd4faad2fa",
+      "sha256": "6afaa1db50206e034a9148d545ca34a1658ed5b8a357ac9c0dd6948962c9836d",
       "kind": "production_tool",
       "ordinal": 1
     }
