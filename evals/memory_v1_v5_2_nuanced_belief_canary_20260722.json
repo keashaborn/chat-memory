@@ -1,0 +1,80 @@
+{
+  "contract_version": "memory_v1_v5_2_canary_rubric_v1",
+  "case_id": "owner-nuanced-belief-20260722",
+  "source_binding": {
+    "job_id": "20ba21a9-855b-4606-93fb-28065e2e13d1",
+    "evidence_id": "22bd0732-3539-4180-8f89-8f84114131c0",
+    "evidence_content_sha256": "70a0cef5245b571bc8fceaa4c744cc273b488bbacac08acb2718f831a2b920a1",
+    "owner_user_id_sha256": "9f5d6523a63c8ff7391ecf514fab572af530874832cddc9f56eb3db93cf45b15",
+    "source_prose_included": false
+  },
+  "preconditions": {
+    "job_status": "pending",
+    "attempts": 0,
+    "route": "relational_extraction",
+    "evidence_status": "active",
+    "contract_profile": "v5_2"
+  },
+  "expected_packet": {
+    "contract_version": "memory_v1_relational_extraction_v5_2",
+    "predicate_registry_version": "memory_predicate_registry_v5_2",
+    "entity_counts": {
+      "self": 1,
+      "other": 0
+    },
+    "predicate_counts": {
+      "stance.reported": {
+        "minimum": 2,
+        "maximum": 4
+      }
+    },
+    "required_stance_contract": {
+      "modality": "reported_belief",
+      "projection_class": "reported_stance",
+      "surface_policy": "relevant_recall_or_explicit_recall",
+      "minimum_sensitivity": "medium",
+      "object_datatype": "json",
+      "required_object_fields": [
+        "context",
+        "orientation",
+        "position",
+        "topic_key",
+        "topic_text"
+      ]
+    },
+    "forbidden_predicates": [
+      "health.user_reported_observation",
+      "health.user_reported_uncertain_label",
+      "life_context.active",
+      "personal_event.occurred",
+      "preference.life",
+      "preference.response"
+    ],
+    "forbidden_deferrals": [
+      "ambiguous_transcription",
+      "question_only",
+      "structured_domain"
+    ],
+    "allowed_deferrals": [
+      "compound_requires_split",
+      "sensitive_manual_review",
+      "transient_state"
+    ],
+    "interpretation": [
+      "Record explicit beliefs as attributed stances, not objective truth.",
+      "Do not turn ordinary sadness, nervousness, or motivation examples into durable health facts.",
+      "Do not convert a worldview or coping rationale into a life or response preference.",
+      "Keep distinct beliefs atomic instead of storing the full source as one memory."
+    ]
+  },
+  "write_boundary": {
+    "local_model_calls_maximum": 1,
+    "external_model_calls": 0,
+    "packet_writes_maximum": 1,
+    "staging_writes": 0,
+    "claim_writes": 0,
+    "qdrant_writes": 0,
+    "prompt_influence": 0
+  },
+  "hard_stop": "manual_review_before_staging_projection_retrieval_or_prompt_influence"
+}
