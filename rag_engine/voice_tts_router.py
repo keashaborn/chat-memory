@@ -10,6 +10,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from rag_engine.voice_realtime_router import get_realtime_capabilities
+
 router = APIRouter()
 
 OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL") or "https://api.openai.com/v1/audio/speech"
@@ -17,7 +19,7 @@ OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL") or "https://api.openai.com/v1/audio
 DEFAULT_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
 MAX_TTS_CHARS = 4096
-TTS_CAPABILITIES_VERSION = "2026-07-22"
+VOICE_CAPABILITIES_VERSION = "2026-07-22.2"
 
 TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "gpt-4o-mini-tts": {
@@ -240,11 +242,12 @@ async def get_voice_capabilities(req: Request):
     default_voice = _clean_voice(None, default_model)
 
     return {
-        "version": TTS_CAPABILITIES_VERSION,
+        "version": VOICE_CAPABILITIES_VERSION,
         "tts": {
             "default_model": default_model,
             "default_voice": default_voice,
             "maximum_input_characters": MAX_TTS_CHARS,
             "models": models,
         },
+        "realtime": get_realtime_capabilities(),
     }

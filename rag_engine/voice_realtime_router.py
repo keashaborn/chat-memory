@@ -12,8 +12,64 @@ from fastapi.responses import Response
 
 router = APIRouter()
 
-DEFAULT_REALTIME_MODEL = (os.getenv("OPENAI_REALTIME_MODEL") or "gpt-realtime-2").strip()
-DEFAULT_REALTIME_VOICE = (os.getenv("OPENAI_REALTIME_VOICE") or "marin").strip().lower()
+CURRENT_REALTIME_MODEL = "gpt-realtime-2.1"
+ROLLBACK_REALTIME_MODEL = "gpt-realtime-2"
+
+REALTIME_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
+    CURRENT_REALTIME_MODEL: {
+        "label": "GPT-Realtime 2.1",
+        "description": "Current managed model for live, low-latency voice conversations.",
+        "rollback": False,
+        "default_voice": "marin",
+        "recommended_voices": ["marin", "cedar"],
+        "voices": [
+            "alloy",
+            "ash",
+            "ballad",
+            "cedar",
+            "coral",
+            "echo",
+            "marin",
+            "sage",
+            "shimmer",
+            "verse",
+        ],
+    },
+    ROLLBACK_REALTIME_MODEL: {
+        "label": "GPT-Realtime 2",
+        "description": "Rollback model retained for controlled operational recovery.",
+        "rollback": True,
+        "default_voice": "marin",
+        "recommended_voices": ["marin", "cedar"],
+        "voices": [
+            "alloy",
+            "ash",
+            "ballad",
+            "cedar",
+            "coral",
+            "echo",
+            "marin",
+            "sage",
+            "shimmer",
+            "verse",
+        ],
+    },
+}
+
+ALLOWED_REALTIME_MODELS = set(REALTIME_MODEL_CAPABILITIES)
+_configured_realtime_model = (os.getenv("OPENAI_REALTIME_MODEL") or "").strip()
+DEFAULT_REALTIME_MODEL = (
+    _configured_realtime_model
+    if _configured_realtime_model in ALLOWED_REALTIME_MODELS
+    else CURRENT_REALTIME_MODEL
+)
+_configured_realtime_voice = (os.getenv("OPENAI_REALTIME_VOICE") or "").strip().lower()
+_default_model_voice = REALTIME_MODEL_CAPABILITIES[DEFAULT_REALTIME_MODEL]["default_voice"]
+DEFAULT_REALTIME_VOICE = (
+    _configured_realtime_voice
+    if _configured_realtime_voice in REALTIME_MODEL_CAPABILITIES[DEFAULT_REALTIME_MODEL]["voices"]
+    else _default_model_voice
+)
 
 # Current browser-first WebRTC unified interface.
 OPENAI_REALTIME_CALLS_URL = (
@@ -27,20 +83,6 @@ OPENAI_REALTIME_CLIENT_SECRETS_URL = (
     or "https://api.openai.com/v1/realtime/client_secrets"
 ).strip()
 
-ALLOWED_VOICES = {
-    "alloy",
-    "ash",
-    "ballad",
-    "cedar",
-    "coral",
-    "echo",
-    "marin",
-    "sage",
-    "shimmer",
-    "verse",
-}
-
-
 def _require_actor(req: Request) -> str:
     actor = (req.headers.get("x-vs-actor-user-id") or "").strip()
     if not actor:
@@ -52,16 +94,44 @@ def _require_actor(req: Request) -> str:
 
 
 def _clean_model(raw: Any) -> str:
-    model = str(raw or DEFAULT_REALTIME_MODEL or "gpt-realtime-2").strip()
-    # OpenAI-only rule: reject provider-prefixed stale values.
-    if not model or ":" in model:
-        return DEFAULT_REALTIME_MODEL or "gpt-realtime-2"
-    return model[:120]
+    if raw is None or not str(raw).strip():
+        return DEFAULT_REALTIME_MODEL
+
+    model = str(raw).strip()
+    if model not in ALLOWED_REALTIME_MODELS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "unsupported_realtime_model",
+                "field": "model",
+                "value": model[:120],
+                "allowed": sorted(ALLOWED_REALTIME_MODELS),
+            },
+        )
+    return model
 
 
-def _clean_voice(raw: Any) -> str:
-    voice = str(raw or DEFAULT_REALTIME_VOICE or "marin").strip().lower()
-    return voice if voice in ALLOWED_VOICES else (DEFAULT_REALTIME_VOICE if DEFAULT_REALTIME_VOICE in ALLOWED_VOICES else "marin")
+def _clean_voice(raw: Any, model: str) -> str:
+    capabilities = REALTIME_MODEL_CAPABILITIES[model]
+    allowed = capabilities["voices"]
+    fallback = DEFAULT_REALTIME_VOICE if DEFAULT_REALTIME_VOICE in allowed else capabilities["default_voice"]
+
+    if raw is None or not str(raw).strip():
+        return fallback
+
+    voice = str(raw).strip().lower()
+    if voice not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "unsupported_realtime_voice_for_model",
+                "field": "voice",
+                "value": voice[:120],
+                "model": model,
+                "allowed": allowed,
+            },
+        )
+    return voice
 
 
 def _clean_instructions(raw: Any) -> str:
@@ -76,7 +146,7 @@ def _clean_instructions(raw: Any) -> str:
 
 def _session_config(body: dict[str, Any]) -> dict[str, Any]:
     model = _clean_model(body.get("model"))
-    voice = _clean_voice(body.get("voice"))
+    voice = _clean_voice(body.get("voice"), model)
     instructions = _clean_instructions(body.get("instructions"))
 
     return {
@@ -93,6 +163,32 @@ def _session_config(body: dict[str, Any]) -> dict[str, Any]:
 
 def _safety_identifier(actor_user_id: str) -> str:
     return hashlib.sha256(actor_user_id.encode("utf-8")).hexdigest()
+
+
+def get_realtime_capabilities() -> dict[str, Any]:
+    models = []
+    for model_id in (CURRENT_REALTIME_MODEL, ROLLBACK_REALTIME_MODEL):
+        models.append({"id": model_id, **REALTIME_MODEL_CAPABILITIES[model_id]})
+
+    return {
+        "default_model": DEFAULT_REALTIME_MODEL,
+        "default_voice": DEFAULT_REALTIME_VOICE,
+        "managed_model": True,
+        "models": models,
+    }
+
+
+def _raise_upstream_error(response: httpx.Response, error: str) -> None:
+    provider_request_id = response.headers.get("x-request-id") or response.headers.get("openai-request-id")
+    public_status = 429 if response.status_code == 429 else 503 if response.status_code >= 500 else 502
+    raise HTTPException(
+        status_code=public_status,
+        detail={
+            "error": error,
+            "upstream_status": response.status_code,
+            "provider_request_id": provider_request_id,
+        },
+    )
 
 
 @router.post("/voice/openai/session")
@@ -126,7 +222,6 @@ async def create_realtime_client_secret(req: Request):
             "status": "ok",
             "provider": "openai",
             "mode": "client_secret",
-            "actor_user_id": actor_user_id,
             "session": session,
             "dry_run": True,
         }
@@ -139,19 +234,22 @@ async def create_realtime_client_secret(req: Request):
         "session": session,
     }
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.post(
-            OPENAI_REALTIME_CLIENT_SECRETS_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
-            },
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                OPENAI_REALTIME_CLIENT_SECRETS_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
+                },
+                json=payload,
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": "openai_realtime_unreachable"}) from exc
 
     if r.status_code >= 400:
-        raise HTTPException(status_code=502, detail=r.text)
+        _raise_upstream_error(r, "openai_realtime_session_error")
 
     return r.json()
 
@@ -204,7 +302,6 @@ async def create_realtime_webrtc_offer(req: Request):
             "status": "ok",
             "provider": "openai",
             "mode": "webrtc_unified",
-            "actor_user_id": actor_user_id,
             "session": session,
             "sdp_chars": len(sdp),
             "dry_run": True,
@@ -213,10 +310,7 @@ async def create_realtime_webrtc_offer(req: Request):
     if not sdp.strip():
         raise HTTPException(status_code=400, detail="missing_sdp")
 
-    print(
-        f"[voice-webrtc] offer actor={actor_user_id} raw_len={len(raw)} sdp_len={len(sdp)}",
-        flush=True,
-    )
+    print(f"[voice-webrtc] offer raw_len={len(raw)} sdp_len={len(sdp)}", flush=True)
 
     # OpenAI Realtime unified WebRTC expects multipart FormData string fields.
     # In httpx, filename=None creates normal multipart fields, equivalent to
@@ -226,19 +320,22 @@ async def create_realtime_webrtc_offer(req: Request):
         "session": (None, json.dumps(session)),
     }
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        r = await client.post(
-            OPENAI_REALTIME_CALLS_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
-            },
-            files=multipart_fields,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            r = await client.post(
+                OPENAI_REALTIME_CALLS_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
+                },
+                files=multipart_fields,
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": "openai_realtime_unreachable"}) from exc
 
     if r.status_code >= 400:
         print(f"[voice-webrtc] openai_error status={r.status_code}", flush=True)
-        raise HTTPException(status_code=502, detail=r.text[:4000])
+        _raise_upstream_error(r, "openai_realtime_call_error")
 
     answer_text = r.text
     print(
