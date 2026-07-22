@@ -7,6 +7,7 @@ BEGIN
      OR to_regclass('memory.projection_plan') IS NULL
      OR to_regclass('memory.projection_plan_item') IS NULL
      OR to_regclass('memory.projection_plan_observation') IS NULL
+     OR to_regclass('memory.projection_plan_relation') IS NULL
      OR to_regclass('memory.projection_claim_payload') IS NULL
      OR to_regclass('memory.projection_preference_payload') IS NULL
      OR to_regclass('memory.projection_project_payload') IS NULL
@@ -21,7 +22,8 @@ BEGIN
          AND relation.relname IN (
            'claim','preference_head_v5','project_knowledge_head_v5',
            'projection_plan','projection_plan_item',
-           'projection_plan_observation','projection_claim_payload',
+           'projection_plan_observation','projection_plan_relation',
+           'projection_claim_payload',
            'projection_preference_payload','projection_project_payload'
          )
          AND (NOT relation.relrowsecurity OR NOT relation.relforcerowsecurity)
@@ -841,6 +843,7 @@ GRANT SELECT, INSERT ON
   memory.projection_plan,
   memory.projection_plan_item,
   memory.projection_plan_observation,
+  memory.projection_plan_relation,
   memory.projection_claim_payload,
   memory.projection_preference_payload,
   memory.projection_project_payload
