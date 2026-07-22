@@ -8,7 +8,9 @@ from pathlib import Path
 from scripts.memory_v1_predicate_runtime_profile_v2 import load_runtime_profile_v2
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalLlamaCppProvider,
+    SEMANTIC_V5_2_REGISTRY_VERSION,
     SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+    _deterministic_policy_packet,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
     TrustedExtractionSource,
@@ -20,6 +22,17 @@ MODEL_SHA256 = "5" * 64
 
 
 class LocalProviderV52Test(unittest.TestCase):
+    @staticmethod
+    def source(content: str) -> TrustedExtractionSource:
+        return TrustedExtractionSource.create(
+            job_id="00000000-0000-4000-8000-000000000001",
+            source_system="public.chat_log",
+            source_external_id="00000000-0000-4000-8000-000000000002",
+            source_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            source_recorded_at="2026-07-21T12:00:00+00:00",
+            content=content,
+        )
+
     def test_v5_2_prompt_and_schema_are_bound_to_semantic_rules(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
         registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
@@ -52,6 +65,67 @@ class LocalProviderV52Test(unittest.TestCase):
         self.assertEqual(
             provider._policy_compiler_version,
             SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+        )
+
+    def test_malformed_general_health_belief_defers_without_health_fact(self) -> None:
+        content = (
+            "I see most mental illnesses being at the result of believing "
+            "in concepts like hell."
+        )
+        result = _deterministic_policy_packet(
+            self.source(content),
+            registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+        )
+        self.assertIsNotNone(result)
+        packet, guard_code = result
+        value = packet.model_dump(mode="json")
+        self.assertEqual(guard_code, "ambiguous_reported_belief_transcription")
+        self.assertEqual(value["entity_mentions"], [])
+        self.assertEqual(value["observations"], [])
+        self.assertEqual(
+            [item["reason_code"] for item in value["deferrals"]],
+            ["ambiguous_transcription"],
+        )
+        self.assertEqual(value["deferrals"][0]["memory_shape"], "none")
+        self.assertEqual(value["deferrals"][0]["sensitivity"], "medium")
+
+    def test_clear_unconventional_belief_is_attributed_as_stance(self) -> None:
+        content = (
+            "I believe many mental illnesses result from beliefs about hell."
+        )
+        result = _deterministic_policy_packet(
+            self.source(content),
+            registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+        )
+        self.assertIsNotNone(result)
+        packet, guard_code = result
+        value = packet.model_dump(mode="json")
+        self.assertEqual(guard_code, "explicit_reported_mental_health_stance")
+        self.assertEqual(len(value["observations"]), 1)
+        observation = value["observations"][0]
+        self.assertEqual(observation["predicate"], "stance.reported")
+        self.assertEqual(observation["modality"], "reported_belief")
+        self.assertEqual(observation["projection_class"], "reported_stance")
+        self.assertEqual(
+            observation["surface_policy"],
+            "relevant_recall_or_explicit_recall",
+        )
+        self.assertEqual(
+            observation["object"]["value"]["topic_key"],
+            "mental_health.causal_beliefs",
+        )
+        self.assertNotIn(
+            "health.user_reported_observation",
+            {item["predicate"] for item in value["observations"]},
+        )
+
+    def test_personal_health_report_is_not_routed_as_general_stance(self) -> None:
+        content = "I believe I have a mental illness because of these symptoms."
+        self.assertIsNone(
+            _deterministic_policy_packet(
+                self.source(content),
+                registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+            )
         )
 
 

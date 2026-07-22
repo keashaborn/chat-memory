@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v1"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v2"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -1116,6 +1116,33 @@ _DURABLE_ASSERTION_RE = re.compile(
     r"\w+\s+is\s+my\s+(?:father|mother|parent|brother|sister|sibling))\b",
     re.IGNORECASE,
 )
+_REPORTED_BELIEF_CUE_RE = re.compile(
+    r"\b(?:i\s+(?:believe|think|see|view|consider)|"
+    r"in\s+my\s+(?:view|opinion)|it\s+seems\s+to\s+me)\b",
+    re.IGNORECASE,
+)
+_GENERAL_MENTAL_HEALTH_CAUSAL_RE = re.compile(
+    r"\b(?:mental\s+illness(?:es)?|mental\s+health\s+"
+    r"(?:conditions?|problems?))\b.*\b(?:cause[ds]?|causal|result|"
+    r"because|due|stem(?:s|med)?|root|arise[sd]?|come[ds]?\s+from)\b|"
+    r"\b(?:cause[ds]?|causal|result|because|due|stem(?:s|med)?|root|"
+    r"arise[sd]?|come[ds]?\s+from)\b.*\b(?:mental\s+illness(?:es)?|"
+    r"mental\s+health\s+(?:conditions?|problems?))\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_PERSONAL_HEALTH_REPORT_RE = re.compile(
+    r"\b(?:i\s+(?:(?:believe|think)\s+(?:that\s+)?i\s+)?"
+    r"(?:have|had|may\s+have|might\s+have|experience|experienced|"
+    r"suffer\s+from)|i\s+(?:was|am|have\s+been)\s+diagnosed|"
+    r"my\s+(?:diagnosis|symptoms?|mental\s+health))\b",
+    re.IGNORECASE,
+)
+_AMBIGUOUS_CAUSAL_TRANSCRIPTION_RE = re.compile(
+    r"\b(?:being|be|been)\s+at\s+(?:a|the)\s+result\s+of\b|"
+    r"\b(?:being|be|been)\s+as\s+(?:a|the)\s+result\s+of\b|"
+    r"\bat\s+(?:a|the)\s+result\s+of\b",
+    re.IGNORECASE,
+)
 _FIRST_PERSON_RE = re.compile(
     r"\b(?:i|i'm|i’ve|i've|me|my|mine)\b",
     re.IGNORECASE,
@@ -1258,6 +1285,7 @@ def _guard_deferral_packet(
     deferrals = []
     for reason_code in reason_codes:
         sensitivity = "medium" if reason_code in {
+            "ambiguous_transcription",
             "mixed_authorship",
             "structured_domain",
         } else "low"
@@ -1353,6 +1381,63 @@ def _deterministic_self_entity(
         "extraction_confidence": 0.99,
         "reason_codes": ["deterministic_self_reference"],
     }
+
+
+def _mental_health_belief_profile(content: str) -> str | None:
+    """Classify only explicit general causal beliefs, never personal health."""
+    if (
+        not _REPORTED_BELIEF_CUE_RE.search(content)
+        or not _GENERAL_MENTAL_HEALTH_CAUSAL_RE.search(content)
+        or _PERSONAL_HEALTH_REPORT_RE.search(content)
+    ):
+        return None
+    if _AMBIGUOUS_CAUSAL_TRANSCRIPTION_RE.search(content):
+        return "ambiguous_transcription"
+    return "reported_stance"
+
+
+def _reported_mental_health_stance_packet(
+    source: TrustedExtractionSource,
+) -> ProviderPacket:
+    content = source.content.strip()
+    cue = _REPORTED_BELIEF_CUE_RE.search(content)
+    if cue is None:
+        raise ValueError("reported stance requires explicit attribution")
+    position = content[cue.start():].strip()
+    if not position or len(position) > 1500:
+        return _guard_deferral_packet(source, ("ambiguous_transcription",))
+    context = content[:cue.start()].strip() or None
+    if context is not None:
+        context = context[:500]
+    observation = _example_observation(
+        source.content,
+        observation_ref="o00",
+        subject_entity_ref="e00",
+        predicate="stance.reported",
+        object_value=_literal(
+            "json",
+            {
+                "topic_key": "mental_health.causal_beliefs",
+                "topic_text": "causes of mental illness",
+                "position": position,
+                "orientation": "supports",
+                "context": context,
+            },
+        ),
+        projection_class="reported_stance",
+        surface_policy="relevant_recall_or_explicit_recall",
+        sensitivity="medium",
+        reason_code="deterministic_explicit_reported_stance",
+        modality="reported_belief",
+        temporal_semantic="observation_time",
+    )
+    observation["source_spans"] = [_source_span(source)]
+    return ProviderPacket.model_validate(
+        _packet(
+            entities=[_deterministic_self_entity(source)],
+            observations=[observation],
+        )
+    )
 
 
 def _credential_packet(
@@ -1477,11 +1562,23 @@ def _project_current_packet(
 
 def _deterministic_policy_packet(
     source: TrustedExtractionSource,
+    *,
+    registry_version: str | None = None,
 ) -> tuple[ProviderPacket, str] | None:
     content = source.content.strip()
     response_packet = _response_preference_packet(source)
     if response_packet is not None:
         return response_packet, "response_preference"
+    if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+        belief_profile = _mental_health_belief_profile(content)
+        if belief_profile == "ambiguous_transcription":
+            return _guard_deferral_packet(
+                source, ("ambiguous_transcription",)
+            ), "ambiguous_reported_belief_transcription"
+        if belief_profile == "reported_stance":
+            return _reported_mental_health_stance_packet(
+                source
+            ), "explicit_reported_mental_health_stance"
     if _INJECTION_RE.search(content):
         return _guard_deferral_packet(
             source, ("insufficient_evidence",)
@@ -2516,9 +2613,46 @@ def _compile_entity_links(
     value = packet.model_dump(mode="json")
     entities = value["entity_mentions"]
     observations = value["observations"]
-    predicates = {item["predicate"] for item in observations}
     repairs: list[str] = []
     content = source.content
+    if (
+        registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION
+        and _REPORTED_BELIEF_CUE_RE.search(content)
+        and not _PERSONAL_HEALTH_REPORT_RE.search(content)
+    ):
+        rejected_health_refs = {
+            item["observation_ref"]
+            for item in observations
+            if item["predicate"] == "health.user_reported_observation"
+        }
+        if rejected_health_refs:
+            observations[:] = [
+                item
+                for item in observations
+                if item["observation_ref"] not in rejected_health_refs
+            ]
+            value["comparison_hints"] = [
+                item
+                for item in value["comparison_hints"]
+                if item["observation_ref"] not in rejected_health_refs
+            ]
+            reason_code = (
+                "ambiguous_transcription"
+                if _AMBIGUOUS_CAUSAL_TRANSCRIPTION_RE.search(content)
+                else "insufficient_evidence"
+            )
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code=reason_code,
+                memory_shape="none",
+                source_spans=[_source_span(source)],
+                sensitivity="medium",
+            )
+            repairs.append("reported_belief_blocked_from_personal_health")
+            if not observations:
+                value["entity_mentions"] = []
+                entities = value["entity_mentions"]
+    predicates = {item["predicate"] for item in observations}
     original_global_insufficient_ids = {
         id(item)
         for item in value["deferrals"]
@@ -3558,7 +3692,10 @@ class LocalLlamaCppProvider:
         )
 
     def extract(self, source: TrustedExtractionSource) -> ProviderPacket:
-        deterministic = _deterministic_policy_packet(source)
+        deterministic = _deterministic_policy_packet(
+            source,
+            registry_version=self._registry.get("registry_version"),
+        )
         if deterministic is not None:
             packet, guard_code = deterministic
             packet_sha256 = canonical_sha256(packet.model_dump(mode="json"))
