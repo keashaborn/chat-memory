@@ -10,6 +10,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from rag_engine.lifeswitch_auth import require_actor_matches_owner
+
 router = APIRouter()
 
 # Direct speech-to-speech generation bypasses the governed /response/query
@@ -89,6 +91,9 @@ OPENAI_REALTIME_CLIENT_SECRETS_URL = (
     os.getenv("OPENAI_REALTIME_CLIENT_SECRETS_URL")
     or "https://api.openai.com/v1/realtime/client_secrets"
 ).strip()
+
+REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
+REALTIME_TRANSCRIPTION_DELAY = "low"
 
 def _require_actor(req: Request) -> str:
     actor = (req.headers.get("x-vs-actor-user-id") or "").strip()
@@ -176,6 +181,25 @@ def _session_config(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _transcription_session_config() -> dict[str, Any]:
+    """Server-owned Realtime policy that can transcribe but cannot answer."""
+
+    return {
+        "type": "transcription",
+        "audio": {
+            "input": {
+                "transcription": {
+                    "model": REALTIME_TRANSCRIPTION_MODEL,
+                    "delay": REALTIME_TRANSCRIPTION_DELAY,
+                },
+                # gpt-realtime-whisper requires manual buffer commits. The
+                # browser performs local VAD and commits one bounded turn.
+                "turn_detection": None,
+            }
+        },
+    }
+
+
 def _safety_identifier(actor_user_id: str) -> str:
     return hashlib.sha256(actor_user_id.encode("utf-8")).hexdigest()
 
@@ -204,6 +228,60 @@ def _raise_upstream_error(response: httpx.Response, error: str) -> None:
             "error": error,
             "upstream_status": response.status_code,
             "provider_request_id": provider_request_id,
+        },
+    )
+
+
+async def _openai_webrtc_answer(
+    *,
+    actor_user_id: str,
+    sdp: str,
+    session: dict[str, Any],
+    mode: str,
+) -> Response:
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="missing_openai_key")
+
+    if not sdp.strip():
+        raise HTTPException(status_code=400, detail="missing_sdp")
+
+    multipart_fields = {
+        "sdp": (None, sdp, "application/sdp"),
+        "session": (None, json.dumps(session), "application/json"),
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as client:
+            upstream = await client.post(
+                OPENAI_REALTIME_CALLS_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "OpenAI-Safety-Identifier": _safety_identifier(
+                        actor_user_id
+                    ),
+                },
+                files=multipart_fields,
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "openai_realtime_unreachable"},
+        ) from exc
+
+    if upstream.status_code >= 400:
+        _raise_upstream_error(upstream, "openai_realtime_call_error")
+
+    return Response(
+        content=upstream.text,
+        status_code=200,
+        media_type="application/sdp",
+        headers={
+            "cache-control": "no-store",
+            "x-vs-voice-provider": "openai",
+            "x-vs-realtime-mode": mode,
         },
     )
 
@@ -287,10 +365,6 @@ async def create_realtime_webrtc_offer(req: Request):
     actor_user_id = _require_actor(req)
     _require_ungoverned_realtime_enabled()
 
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=500, detail="missing_openai_key")
-
     content_type = (req.headers.get("content-type") or "").lower()
     raw = await req.body()
 
@@ -326,48 +400,40 @@ async def create_realtime_webrtc_offer(req: Request):
             "dry_run": True,
         }
 
-    if not sdp.strip():
-        raise HTTPException(status_code=400, detail="missing_sdp")
-
-    print(f"[voice-webrtc] offer raw_len={len(raw)} sdp_len={len(sdp)}", flush=True)
-
-    # OpenAI Realtime unified WebRTC expects multipart FormData string fields.
-    # In httpx, filename=None creates normal multipart fields, equivalent to
-    # FormData.set("sdp", raw_sdp) and FormData.set("session", session_json).
-    multipart_fields = {
-        "sdp": (None, sdp),
-        "session": (None, json.dumps(session)),
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-            r = await client.post(
-                OPENAI_REALTIME_CALLS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
-                },
-                files=multipart_fields,
-            )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail={"error": "openai_realtime_unreachable"}) from exc
-
-    if r.status_code >= 400:
-        print(f"[voice-webrtc] openai_error status={r.status_code}", flush=True)
-        _raise_upstream_error(r, "openai_realtime_call_error")
-
-    answer_text = r.text
-    print(
-        f"[voice-webrtc] openai_ok status={r.status_code} answer_len={len(answer_text)}",
-        flush=True,
+    return await _openai_webrtc_answer(
+        actor_user_id=actor_user_id,
+        sdp=sdp,
+        session=session,
+        mode="webrtc_unified_legacy_generation",
     )
 
-    return Response(
-        content=answer_text,
-        status_code=200,
-        media_type="application/sdp",
-        headers={
-            "x-vs-voice-provider": "openai",
-            "x-vs-realtime-mode": "webrtc_unified",
-        },
+
+@router.post("/voice/openai/transcription-webrtc-offer")
+async def create_transcription_webrtc_offer(req: Request):
+    """Open a transcription-only WebRTC session for governed voice turns."""
+
+    owner_user_id = (req.headers.get("x-vs-owner-user-id") or "").strip()
+    if not owner_user_id:
+        raise HTTPException(status_code=400, detail="missing_owner_user_id")
+    actor_user_id = require_actor_matches_owner(req, owner_user_id)
+
+    raw = await req.body()
+    sdp = raw.decode("utf-8", "ignore")
+    session = _transcription_session_config()
+
+    if req.query_params.get("dry_run") == "1":
+        return {
+            "status": "ok",
+            "provider": "openai",
+            "mode": "webrtc_transcription_only",
+            "session": session,
+            "sdp_chars": len(sdp),
+            "dry_run": True,
+        }
+
+    return await _openai_webrtc_answer(
+        actor_user_id=actor_user_id,
+        sdp=sdp,
+        session=session,
+        mode="webrtc_transcription_only",
     )

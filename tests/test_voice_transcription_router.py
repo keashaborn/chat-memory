@@ -129,6 +129,36 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
             ]
         )
 
+    def test_realtime_transcription_policy_cannot_generate_answers(self) -> None:
+        session = realtime._transcription_session_config()
+
+        self.assertEqual(session["type"], "transcription")
+        self.assertEqual(
+            session["audio"]["input"]["transcription"]["model"],
+            "gpt-realtime-whisper",
+        )
+        self.assertIsNone(session["audio"]["input"]["turn_detection"])
+        self.assertNotIn("instructions", session)
+        self.assertNotIn("model", session)
+        self.assertNotIn("output", session["audio"])
+
+    def test_realtime_transcription_requires_owner_actor_equality(self) -> None:
+        app = FastAPI()
+        app.include_router(realtime.router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/voice/openai/transcription-webrtc-offer?dry_run=1",
+            headers={
+                "x-vs-actor-user-id": ACTOR,
+                "x-vs-owner-user-id": OTHER_ACTOR,
+                "content-type": "application/sdp",
+            },
+            content=b"v=0\r\n",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()
