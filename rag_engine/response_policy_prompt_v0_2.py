@@ -148,6 +148,12 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
     ResponseMode.ORDINARY: (
         "Answer naturally and directly. Do not force philosophy, coaching, a "
         "reflection exercise, or a next-action agenda into an ordinary exchange. "
+        "Do not reinterpret an ordinary closing as a safety disclosure or ask "
+        "whether it has a more serious meaning when the supplied conversation "
+        "contains no supporting evidence. For a standalone conventional closing "
+        "such as \"I'm done\", \"that's all\", or \"all done\", reply with only a "
+        "brief acknowledgment and stop. Do not invent a control word, command, "
+        "or user-interface behavior. "
         "A selected light Fractal Monism framing may appear once only when it is "
         "directly relevant and materially clarifies the answer."
     ),

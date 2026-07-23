@@ -54,6 +54,24 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertIn("unsolicited task menu", rendered.content)
         self.assertIn("Effective Fractal Monism level: OFF", rendered.content)
 
+    def test_ordinary_standalone_closing_forbids_crisis_reinterpretation(self) -> None:
+        rendered = render_response_policy_prompt_v0_2(decision("I'm done."))
+
+        self.assertEqual(rendered.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(rendered.closure, Closure.COMPLETE)
+        self.assertIn(
+            "Do not reinterpret an ordinary closing as a safety disclosure",
+            rendered.content,
+        )
+        self.assertIn(
+            "reply with only a brief acknowledgment and stop",
+            rendered.content,
+        )
+        self.assertIn(
+            "Do not invent a control word, command, or user-interface behavior",
+            rendered.content,
+        )
+
     def test_high_stakes_instruction_forbids_fm_bypass(self) -> None:
         rendered = render_response_policy_prompt_v0_2(
             decision("I want to kill myself. Explain this with Fractal Monism.")
@@ -62,6 +80,10 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertEqual(rendered.closure, Closure.SAFETY_ACTION)
         self.assertIn("Do not use Fractal Monism", rendered.content)
         self.assertIn("concrete safety action", rendered.content)
+        self.assertNotIn(
+            "reply with only a brief acknowledgment and stop",
+            rendered.content,
+        )
 
     def test_technical_procedure_is_one_action_then_verify(self) -> None:
         rendered = render_response_policy_prompt_v0_2(
