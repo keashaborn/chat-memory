@@ -11,6 +11,14 @@ if [[ "${MEMORY_V1_V5_2_EMPLOYMENT_CANARY:-}" != authorized ]] && \
 fi
 
 repo=/opt/chat-memory
+runtime_repo=${MEMORY_V1_V5_2_EMPLOYMENT_RUNTIME_REPO:-$repo}
+case "$runtime_repo" in
+  /opt/chat-memory|/home/ubuntu/chat-memory-v5-2-scheduler) ;;
+  *)
+    echo 'employment canary runtime repo is not allowlisted' >&2
+    exit 1
+    ;;
+esac
 container=brains-postgres-1
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 evidence=3163b69a-f8a8-5263-93d7-300915c2342c
@@ -226,6 +234,7 @@ fi
 phase=preflight
 cd "$repo"
 git merge-base --is-ancestor e05d3d8 HEAD
+git -C "$runtime_repo" merge-base --is-ancestor e05d3d8 HEAD
 [[ "$(systemctl is-active brains.service)" == active ]]
 [[ "$(systemctl is-active memory-v1-v5-local-inference-tunnel.service)" == active ]]
 [[ "$(systemctl is-active memory-v1-v5-local-inference-scheduler.timer)" == active ]]
@@ -260,7 +269,7 @@ exec 9>"$lock_file"
 flock -n 9
 umask 077
 run_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
-run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
+run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git -C "$runtime_repo" rev-parse --short=12 HEAD)"
 report="$snapshot_dir/memory_v1_v5_2_employment_canary_${run_tag}.json"
 
 phase=quiesce_production_timers
@@ -368,11 +377,11 @@ capture_clone_other_owners "$other_before"
 phase=one_private_local_call
 set +e
 POSTGRES_DSN="$clone_dsn" \
-PYTHONPATH="$repo" \
+PYTHONPATH="$runtime_repo" \
 MEMORY_V1_V5_LOCAL_INFERENCE_APPLY=memory_v1_v5_local_inference_canary_apply_v1 \
 MEMORY_V1_LOCAL_INFERENCE_API_KEY="$(<"$credential")" \
   "$repo/venv/bin/python" \
-  "$repo/scripts/memory_v1_v5_local_inference_canary.py" \
+  "$runtime_repo/scripts/memory_v1_v5_local_inference_canary.py" \
   --owner-user-id "$owner" \
   --evidence-id "$evidence" \
   --expected-job-id "$job" \
