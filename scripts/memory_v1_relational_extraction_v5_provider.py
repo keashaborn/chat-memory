@@ -1288,6 +1288,26 @@ def _normalize_temporal(
                 "anchored_to_source_time": True,
             }
         )
+    elif (
+        temporal["semantic"] == "state_validity"
+        and temporal["shape"] == "none"
+        and "state_currentness_unknown" in temporal["reason_codes"]
+    ):
+        temporal.update(
+            {
+                "shape": "none",
+                "basis": "none",
+                "source_form": "none",
+                "certainty": "unknown",
+                "precision": "unknown",
+                "instant": None,
+                "calendar_range": None,
+                "instant_range": None,
+                "relative_offset": None,
+                "recurrence": None,
+                "anchored_to_source_time": False,
+            }
+        )
     elif temporal["semantic"] == "state_validity" and (
         temporal["shape"] == "none"
         or (

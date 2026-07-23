@@ -1646,6 +1646,10 @@ def _explicit_started_employment_packet(
         temporal_semantic="state_validity",
     )
     observation["source_spans"] = [_source_span(source)]
+    observation["temporal"]["source_form"] = "none"
+    observation["temporal"]["reason_codes"] = [
+        "state_currentness_unknown"
+    ]
     return ProviderPacket.model_validate(
         _packet(
             entities=[self_entity, employer_entity],

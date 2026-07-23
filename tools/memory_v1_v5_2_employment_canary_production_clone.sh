@@ -436,7 +436,8 @@ if [[ "$canary_status" -eq 0 ]] && \
       FROM packet,jsonb_array_elements(
         normalized_packet->'entity_mentions') AS item
       WHERE item->>'entity_type'='organization'
-        AND item->>'name_text'='Wisconsin Early Autism Project'
+        AND lower(item->>'name_text')=
+          lower('Wisconsin Early Autism Project')
     ),
     observation AS (
       SELECT item
