@@ -165,6 +165,93 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             "A direct informational request about Fractal Monism is not domain risk",
             _CLASSIFIER_INSTRUCTIONS,
         )
+        self.assertIn(
+            'A conventional conversation closing or task-completion statement such as "I\'m done"',
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+
+    def test_standalone_benign_closing_passes_locally_without_provider(self) -> None:
+        client = FakeClient(error=AssertionError("provider must not be called"))
+        policy_input = request("I'm done.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.LOCAL_PASS,
+        )
+        self.assertEqual(result.assessment.gate, GateState.PASS)
+        self.assertEqual(result.assessment.provider_call_count, 0)
+        self.assertEqual(client.responses.calls, [])
+        self.assertEqual(decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(decision.high_stakes_gate, GateState.PASS)
+
+    def test_benign_closing_rule_does_not_mask_explicit_self_harm(self) -> None:
+        client = FakeClient(output())
+        policy_input = request("I'm done. I want to kill myself.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.PROVIDER_CLASSIFIED,
+        )
+        self.assertEqual(result.assessment.provider_call_count, 1)
+        self.assertEqual(len(client.responses.calls), 1)
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(decision.high_stakes_gate, GateState.TRIGGERED)
+
+    def test_benign_closing_rule_does_not_bypass_prior_risk_context(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="uncertain",
+                categories=["mental_health_crisis"],
+                fm_application_gate="uncertain",
+            )
+        )
+        policy_input = ResponsePolicyInputV0_2.create(
+            request_id="signal-classifier-context-test",
+            conversation=(
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.USER,
+                    content="I don't want to live.",
+                ),
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.ASSISTANT,
+                    content="Are you in immediate danger?",
+                ),
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.USER,
+                    content="I'm done.",
+                ),
+            ),
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.PROVIDER_UNCERTAIN,
+        )
+        self.assertEqual(result.assessment.provider_call_count, 1)
+        self.assertEqual(len(client.responses.calls), 1)
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(decision.high_stakes_gate, GateState.TRIGGERED)
 
     def test_inconsistent_pass_category_still_fails_closed(self) -> None:
         client = FakeClient(output(categories=["other_material_risk"]))
