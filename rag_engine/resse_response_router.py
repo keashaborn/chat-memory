@@ -29,6 +29,16 @@ from rag_engine.voice_observability_v1 import (
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
+NO_STORE_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+}
+
+
+def apply_no_store_headers(response: Response) -> None:
+    for name, value in NO_STORE_HEADERS.items():
+        response.headers[name] = value
 
 
 class ResseResponseRequestV1(BaseModel):
@@ -64,6 +74,8 @@ async def resse_response_query(
     voice_turn_id = voice_turn_id_from_request(req)
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
+    if payload.no_store:
+        apply_no_store_headers(response)
     stateless = payload.thread_id is None
     thread_id = payload.thread_id or uuid4()
     if not payload.no_store and stateless:

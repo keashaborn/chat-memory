@@ -3,9 +3,13 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
+from fastapi import Response
 from pydantic import ValidationError
 
-from rag_engine.resse_response_router import ResseResponseRequestV1
+from rag_engine.resse_response_router import (
+    ResseResponseRequestV1,
+    apply_no_store_headers,
+)
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -48,6 +52,13 @@ class ResseResponseRouterTests(unittest.TestCase):
                 '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
                 '"message":"Hello.","no_store":"true"}'
             )
+
+    def test_no_store_response_headers_are_explicit(self) -> None:
+        response = Response()
+        apply_no_store_headers(response)
+        self.assertIn("no-store", response.headers["cache-control"])
+        self.assertEqual(response.headers["pragma"], "no-cache")
+        self.assertEqual(response.headers["expires"], "0")
 
 
 if __name__ == "__main__":
