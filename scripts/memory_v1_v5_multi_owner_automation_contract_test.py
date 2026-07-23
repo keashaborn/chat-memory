@@ -49,7 +49,7 @@ def main() -> None:
     )
     assert len(scheduler) == 1
     assert values(scheduler[0], "--owner-user-id") == [ADMIN_OWNER]
-    assert values(scheduler[0], "--contract-profile") == ["v5_1"]
+    assert values(scheduler[0], "--contract-profile") == ["v5_2"]
     assert scheduler[0][-1] == "--apply"
 
     for service in sorted(LEGACY_SERVICES):

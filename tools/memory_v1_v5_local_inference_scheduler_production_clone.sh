@@ -122,11 +122,11 @@ qdrant_before=$(qdrant_signature)
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python -c \
   'import asyncio; from scripts.memory_v1_v5_local_inference_scheduler import run; raise SystemExit(asyncio.run(run()))' \
-  --owner-user-id "$owner" >"$plan"
+  --owner-user-id "$owner" --contract-profile v5_2 >"$plan"
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python -c \
   'import asyncio; from scripts.memory_v1_v5_local_inference_scheduler import run; raise SystemExit(asyncio.run(run()))' \
-  --owner-user-id "$other" >"$other_plan"
+  --owner-user-id "$other" --contract-profile v5_2 >"$other_plan"
 
 for outcome in accepted rejected; do
   output=$accepted
@@ -136,7 +136,7 @@ for outcome in accepted rejected; do
   MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY=memory_v1_v5_local_inference_scheduler_apply_v1 \
   FAKE_LOCAL_CANARY_OUTCOME="$outcome" \
     /opt/chat-memory/venv/bin/python "$repo_root/$worker" \
-    --owner-user-id "$owner" --canary "$repo_root/$fake_canary" --apply \
+    --owner-user-id "$owner" --contract-profile v5_2 --canary "$repo_root/$fake_canary" --apply \
     >"$output"
 done
 
@@ -146,7 +146,7 @@ CREDENTIALS_DIRECTORY="$credential_dir" \
 MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY=memory_v1_v5_local_inference_scheduler_apply_v1 \
 FAKE_LOCAL_CANARY_OUTCOME=invalid \
   /opt/chat-memory/venv/bin/python "$repo_root/$worker" \
-  --owner-user-id "$owner" --canary "$repo_root/$fake_canary" --apply \
+  --owner-user-id "$owner" --contract-profile v5_2 --canary "$repo_root/$fake_canary" --apply \
   >/dev/null 2>"$invalid"
 invalid_status=$?
 set -e
@@ -164,6 +164,12 @@ accepted=json.loads(Path(os.environ['ACCEPTED']).read_text())
 rejected=json.loads(Path(os.environ['REJECTED']).read_text())
 invalid=json.loads(Path(os.environ['INVALID']).read_text())
 assert plan['apply'] is False and plan['external_model_calls']==0
+assert plan['predicate_contract_profile']=='v5_2'
+assert plan['extraction_contract_version']=='memory_v1_relational_extraction_v5_2'
+assert plan['predicate_registry_version']=='memory_predicate_registry_v5_2'
+assert other['predicate_contract_profile']=='v5_2'
+assert accepted['predicate_contract_profile']=='v5_2'
+assert rejected['predicate_contract_profile']=='v5_2'
 assert plan['plans'][0]['status_counts']['pending']>0
 assert other['plans'][0]['status_counts']['pending']>0
 assert plan['plans'][0]['owner_user_id_sha256']!=other['plans'][0]['owner_user_id_sha256']
