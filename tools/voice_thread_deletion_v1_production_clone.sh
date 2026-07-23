@@ -320,6 +320,193 @@ async def main():
 asyncio.run(main())
 PY
 
+run_sql <<'SQL'
+SELECT set_config(
+  'app.user_id',
+  '10000000-0000-4000-8000-000000000001',
+  false
+);
+
+INSERT INTO public.threads(
+  id,owner_user_id,user_id,title
+) VALUES (
+  '20000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  'orphan repair clone fixture'
+);
+
+INSERT INTO public.chat_log(
+  id,owner_user_id,user_id,user_id_alias,source,text,thread_id
+) VALUES (
+  '30000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  'frontend/chat:user',
+  'clone-only orphan repair fixture',
+  '20000000-0000-4000-8000-000000000002'
+),(
+  '30000000-0000-4000-8000-000000000004',
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  'backend/response:assistant',
+  'clone-only orphan repair response',
+  '20000000-0000-4000-8000-000000000002'
+);
+
+INSERT INTO memory.evidence(
+  evidence_id,owner_user_id,kind,source_system,external_id,
+  content,content_sha256,status,metadata
+) VALUES (
+  '40000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000001',
+  'user_statement',
+  'public.chat_log',
+  '30000000-0000-4000-8000-000000000003',
+  'clone-only orphan repair fixture',
+  encode(public.digest('clone-only orphan repair fixture','sha256'),'hex'),
+  'active',
+  '{"thread_id":"20000000-0000-4000-8000-000000000002"}'::jsonb
+);
+
+INSERT INTO memory.assistant_transcript_attestation_v1(
+  answer_id,owner_user_id,thread_id,chat_log_id,
+  request_id_sha256,conversation_snapshot_sha256,trusted_plan_sha256,
+  provider_request_sha256,provider_response_sha256,provider_response_id,
+  output_kind,assistant_text_sha256,attestation_sha256,created_at
+) VALUES (
+  '30000000-0000-4000-8000-000000000004',
+  '10000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000002',
+  '30000000-0000-4000-8000-000000000004',
+  repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64),
+  repeat('e',64),'clone-orphan-provider-response','content',
+  repeat('f',64),repeat('1',64),clock_timestamp()
+);
+
+INSERT INTO memory.final_answer_memory_binding_v1(
+  answer_id,owner_user_id,thread_id,binding_manifest_sha256,binding,created_at
+) VALUES (
+  '30000000-0000-4000-8000-000000000004',
+  '10000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000002',
+  repeat('2',64),'{}'::jsonb,clock_timestamp()
+);
+
+INSERT INTO memory.retrieval_trace(
+  trace_id,owner_user_id,request_id,answer_id,thread_id,query_hash,
+  query_preview,intent,domain,token_budget,selected_count,metadata
+) VALUES (
+  '60000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000001',
+  'clone-orphan-request',
+  '30000000-0000-4000-8000-000000000004',
+  '20000000-0000-4000-8000-000000000002',
+  repeat('3',64),'clone-only orphan preview',
+  'ordinary','ordinary',100,0,'{}'::jsonb
+);
+
+INSERT INTO public.telemetry_event(
+  event_id,event_type,subject_type,subject_id,thread_id,turn_id,
+  payload,occurred_at,actor_user_id
+) VALUES (
+  '70000000-0000-4000-8000-000000000002',
+  'voice.turn.trace','user',
+  '10000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000002',
+  '80000000-0000-4000-8000-000000000002',
+  '{}'::jsonb,clock_timestamp(),
+  '10000000-0000-4000-8000-000000000001'
+);
+
+DELETE FROM public.chat_log
+WHERE thread_id='20000000-0000-4000-8000-000000000002';
+DELETE FROM public.threads
+WHERE id='20000000-0000-4000-8000-000000000002';
+SQL
+
+POSTGRES_DSN="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory" \
+PYTHONPATH="$repo_root" \
+/opt/chat-memory/venv/bin/python - <<'PY'
+import asyncio
+import os
+import uuid
+
+import asyncpg
+
+from rag_engine.thread_orphan_repair_v1 import repair_orphan_thread_v1
+
+
+class VerifiedEmptyQdrant:
+    def delete(self, **kwargs):
+        return None
+
+    def scroll(self, **kwargs):
+        return [], None
+
+
+async def main():
+    conn = await asyncpg.connect(os.environ["POSTGRES_DSN"])
+    try:
+        owner = uuid.UUID("10000000-0000-4000-8000-000000000001")
+        thread = uuid.UUID("20000000-0000-4000-8000-000000000002")
+        result = await repair_orphan_thread_v1(
+            conn,
+            VerifiedEmptyQdrant(),
+            owner_user_id=owner,
+            thread_id=thread,
+        )
+        assert result.governed_evidence_tombstoned == 1
+        assert result.retrieval_traces_deleted == 1
+        assert result.answer_bindings_deleted == 1
+        assert result.attestations_deleted == 1
+        assert result.telemetry_events_deleted == 1
+
+        async with conn.transaction(readonly=True):
+            await conn.execute(
+                "SELECT set_config('app.user_id',$1,true)",
+                str(owner),
+            )
+            remaining = await conn.fetchrow(
+                """
+                SELECT
+                  (SELECT count(*)
+                   FROM memory.assistant_transcript_attestation_v1
+                   WHERE thread_id=$1) AS attestations,
+                  (SELECT count(*)
+                   FROM memory.final_answer_memory_binding_v1
+                   WHERE thread_id=$1) AS bindings,
+                  (SELECT count(*)
+                   FROM memory.retrieval_trace
+                   WHERE thread_id=$1) AS traces,
+                  (SELECT count(*)
+                   FROM public.telemetry_event
+                   WHERE thread_id=$2) AS telemetry,
+                  (SELECT count(*)
+                   FROM memory.evidence
+                   WHERE evidence_id=
+                     '40000000-0000-4000-8000-000000000002'
+                     AND status='deleted' AND content IS NULL) AS tombstones
+                """,
+                thread,
+                str(thread),
+            )
+        assert dict(remaining) == {
+            "attestations": 0,
+            "bindings": 0,
+            "traces": 0,
+            "telemetry": 0,
+            "tombstones": 1,
+        }
+    finally:
+        await conn.close()
+
+
+asyncio.run(main())
+PY
+
 run_sql <"$repo_root/$rollback"
 [[ "$(scalar "
   SELECT (
