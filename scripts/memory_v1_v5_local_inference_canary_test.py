@@ -66,9 +66,13 @@ def main() -> int:
     ):
         raise AssertionError("legacy V5 compiler hash compatibility changed")
     if effective_policy_compiler_sha256(SimpleNamespace(name="v5_1")) != (
-        sha256_text(RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION)
+        canonical_sha256(RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION)
     ):
         raise AssertionError("V5.1 compiler hash is not database compatible")
+    if effective_policy_compiler_sha256(SimpleNamespace(name="v5_1")) != (
+        "af0e7b679480db10855cfb0ab2b705acd26a97238869e12b8b9a3f17bbc0024d"
+    ):
+        raise AssertionError("V5.1 compiler hash drifted from production contract")
     if effective_policy_compiler_sha256(SimpleNamespace(name="v5_2")) != (
         sha256_text(SEMANTIC_V5_2_POLICY_COMPILER_VERSION)
     ):

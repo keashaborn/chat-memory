@@ -99,7 +99,7 @@ def effective_policy_compiler_version(profile: Any) -> str:
 
 def effective_policy_compiler_sha256(profile: Any) -> str:
     version = effective_policy_compiler_version(profile)
-    if profile.name == "v5":
+    if profile.name in {"v5", "v5_1"}:
         return canonical_sha256(version)
     return sha256_text(version)
 
