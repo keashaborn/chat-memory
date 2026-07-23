@@ -1,0 +1,29 @@
+{
+  "contract_version": "memory_v1_v5_2_employment_compiler_v6_install_manifest_v1",
+  "required_ancestor": "9063183fb6262a2d2135fd9a95a56d5a367a9db5",
+  "migration": {
+    "path": "ops/sql/20260723_memory_v1_v5_2_employment_compiler_v6.sql",
+    "sha256": "52b8cf370be9c078ccc5d8440a4a65aa6777e942ede1e492d3e454023789c645"
+  },
+  "rollback": {
+    "path": "ops/sql/20260723_memory_v1_v5_2_employment_compiler_v6_rollback.sql",
+    "sha256": "38860994c1f5a5430367736355998cb166a415a920214114f628897eb528a4f3"
+  },
+  "security_test": {
+    "path": "tests/memory_v1_v5_2_employment_compiler_v6.sql",
+    "sha256": "c158ea238238d8d69ae8e80d551ddb4191581f0febd950e8591017ce1d86b297"
+  },
+  "allowed_changes": [
+    "add compiler-v6 hash to V5.2 local packet persistence input allowlist",
+    "deploy dormant V5.2 employment compact prompt code"
+  ],
+  "forbidden_changes": [
+    "memory data rows",
+    "Qdrant points",
+    "claims or projections",
+    "retrieval or prompt influence",
+    "other-owner processing",
+    "external model calls"
+  ],
+  "hard_stop": "before private V5.2 employment canary or scheduler profile change"
+}
