@@ -169,6 +169,10 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         event = telemetry_body["events"][0]
         self.assertIsNone(event["thread_id"])
         self.assertTrue(event["payload"]["synthetic"])
+        self.assertEqual(
+            event["payload"]["speech_to_first_audio_basis"],
+            "synthetic_turn_start_v1",
+        )
         serialized = json.dumps(event)
         self.assertNotIn("Operational voice canary", serialized)
         self.assertNotIn("Governed voice canary", serialized)

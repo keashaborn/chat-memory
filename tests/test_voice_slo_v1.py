@@ -106,6 +106,10 @@ class VoiceSloV1Tests(unittest.TestCase):
         self.assertEqual(conn.execute_calls[0][1], (ACTOR,))
         self.assertIn("actor_user_id=$1", conn.fetchrow_calls[0][0])
         self.assertEqual(conn.fetchrow_calls[0][1], (ACTOR, 7))
+        query = conn.fetchrow_calls[0][0]
+        self.assertIn("detected_speech_end_v1", query)
+        self.assertIn("synthetic_turn_start_v1", query)
+        self.assertIn("coalesce(", query)
 
     def test_contract_passes_only_after_minimum_samples(self) -> None:
         payload = telemetry._voice_slo_payload(

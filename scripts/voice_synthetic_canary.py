@@ -19,8 +19,9 @@ from typing import Any
 import httpx
 
 
-CONTRACT_VERSION = "voice_synthetic_canary_v1_1"
+CONTRACT_VERSION = "voice_synthetic_canary_v1_2"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
+SPEECH_TO_FIRST_AUDIO_BASIS = "synthetic_turn_start_v1"
 SYNTHETIC_PHRASE = "Operational voice canary."
 SYNTHETIC_EXPECTED_WORDS = frozenset({"operational", "voice", "canary"})
 MAX_RESPONSE_TTS_CHARACTERS = 1_000
@@ -283,6 +284,7 @@ async def run_canary(
         "response_ms": None,
         "tts_first_audio_ms": None,
         "speech_to_first_audio_ms": None,
+        "speech_to_first_audio_basis": SPEECH_TO_FIRST_AUDIO_BASIS,
         "tts_total_ms": None,
         "total_turn_ms": None,
         "tts_segment_count": 0,

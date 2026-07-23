@@ -577,7 +577,16 @@ async def voice_slo(
                       THEN (payload->>'tts_first_audio_ms')::double precision
                     END AS tts_first_audio_ms,
                     CASE
-                      WHEN payload->>'speech_to_first_audio_ms' ~ '^[0-9]+$'
+                      WHEN payload->>'speech_to_first_audio_basis'
+                           = 'detected_speech_end_v1'
+                       AND payload->>'speech_to_first_audio_ms' ~ '^[0-9]+$'
+                      THEN
+                        (payload->>'speech_to_first_audio_ms')::double precision
+                      WHEN coalesce(
+                             payload->>'speech_to_first_audio_basis',
+                             ''
+                           ) IN ('', 'synthetic_turn_start_v1')
+                       AND payload->>'speech_to_first_audio_ms' ~ '^[0-9]+$'
                        AND payload->>'speech_ms' ~ '^[0-9]+$'
                       THEN greatest(
                         (payload->>'speech_to_first_audio_ms')::double precision
