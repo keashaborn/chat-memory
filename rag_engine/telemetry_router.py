@@ -111,6 +111,13 @@ def _optional_float(row: Any, key: str) -> float | None:
     return float(value) if value is not None else None
 
 
+def _iso_utc_or_none(value: Any) -> str | None:
+    parsed = _parse_ts(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _voice_slo_payload(row: Any, window_days: int) -> dict[str, Any]:
     total = int(row["total"] or 0)
     completed = int(row["completed"] or 0)
@@ -170,6 +177,7 @@ def _voice_slo_payload(row: Any, window_days: int) -> dict[str, Any]:
         "window_days": window_days,
         "minimum_samples": VOICE_SLO_MINIMUM_SAMPLES,
         "overall_status": overall_status,
+        "latest_sample_at": _iso_utc_or_none(row["latest_sample_at"]),
         "sample": {
             "total": total,
             "evaluated_turns": evaluated_turns,
@@ -562,6 +570,7 @@ async def voice_slo(
                 """
                 WITH voice AS (
                   SELECT
+                    occurred_at,
                     payload->>'status' AS status,
                     payload->>'failure_stage' AS failure_stage,
                     CASE
@@ -601,6 +610,7 @@ async def voice_slo(
                       clock_timestamp()-make_interval(days => $2)
                 )
                 SELECT
+                  max(occurred_at) AS latest_sample_at,
                   count(*)::bigint AS total,
                   count(*) FILTER (
                     WHERE status='completed'

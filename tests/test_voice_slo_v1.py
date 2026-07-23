@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import patch
 
@@ -18,6 +19,14 @@ ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 
 def slo_row(**overrides: Any) -> dict[str, Any]:
     row = {
+        "latest_sample_at": datetime(
+            2026,
+            7,
+            23,
+            11,
+            30,
+            tzinfo=timezone.utc,
+        ),
         "total": 1,
         "completed": 1,
         "failed": 0,
@@ -96,6 +105,10 @@ class VoiceSloV1Tests(unittest.TestCase):
         self.assertEqual(payload["contract_version"], "voice_slo_v1")
         self.assertEqual(payload["window_days"], 7)
         self.assertEqual(payload["overall_status"], "insufficient_data")
+        self.assertEqual(
+            payload["latest_sample_at"],
+            "2026-07-23T11:30:00Z",
+        )
         self.assertEqual(payload["sample"]["completed"], 1)
         self.assertEqual(
             payload["latency_ms"]["end_of_speech_to_first_audio"]["p95"],
@@ -110,6 +123,7 @@ class VoiceSloV1Tests(unittest.TestCase):
         self.assertIn("detected_speech_end_v1", query)
         self.assertIn("synthetic_turn_start_v1", query)
         self.assertIn("coalesce(", query)
+        self.assertIn("max(occurred_at)", query)
 
     def test_contract_passes_only_after_minimum_samples(self) -> None:
         payload = telemetry._voice_slo_payload(
