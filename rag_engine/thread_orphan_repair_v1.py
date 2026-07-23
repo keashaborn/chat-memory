@@ -296,40 +296,8 @@ async def repair_orphan_thread_v1(
                 retryable=True,
             ) from exc
 
-        protected_trace_reference = await conn.fetchval(
-            """
-            SELECT EXISTS (
-              SELECT 1
-              FROM memory.retrieval_trace AS trace
-              WHERE trace.owner_user_id=$1
-                AND trace.thread_id=$2
-                AND (
-                  EXISTS (
-                    SELECT 1
-                    FROM memory.retrieval_outcome_signal_v5_1 AS signal
-                    WHERE signal.owner_user_id=trace.owner_user_id
-                      AND signal.trace_id=trace.trace_id
-                  )
-                  OR EXISTS (
-                    SELECT 1
-                    FROM memory.salience_feature_snapshot_v5_1 AS snapshot
-                    WHERE snapshot.owner_user_id=trace.owner_user_id
-                      AND snapshot.last_retrieval_trace_id=trace.trace_id
-                  )
-                )
-            )
-            """,
-            owner,
-            thread,
-        )
-        if protected_trace_reference:
-            raise ThreadDeletionV1Error(
-                "governed_retrieval_trace_reference_requires_review",
-                retryable=False,
-            )
-
-        retrieval_traces = _delete_count(
-            await conn.execute(
+        try:
+            retrieval_trace_command = await conn.execute(
                 """
                 DELETE FROM memory.retrieval_trace
                 WHERE owner_user_id=$1 AND thread_id=$2
@@ -337,7 +305,14 @@ async def repair_orphan_thread_v1(
                 owner,
                 thread,
             )
-        )
+        except Exception as exc:
+            if getattr(exc, "sqlstate", None) == "23503":
+                raise ThreadDeletionV1Error(
+                    "governed_retrieval_trace_reference_requires_review",
+                    retryable=False,
+                ) from exc
+            raise
+        retrieval_traces = _delete_count(retrieval_trace_command)
         answer_bindings = _delete_count(
             await conn.execute(
                 """
