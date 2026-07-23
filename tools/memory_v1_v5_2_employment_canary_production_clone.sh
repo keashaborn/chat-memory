@@ -436,8 +436,7 @@ if [[ "$canary_status" -eq 0 ]] && \
       FROM packet,jsonb_array_elements(
         normalized_packet->'entity_mentions') AS item
       WHERE item->>'entity_type'='organization'
-        AND lower(item->>'name_text')=
-          lower('Wisconsin Early Autism Project')
+        AND lower(item->>'name_text')=lower('Wisconsin Early Autism Project')
     ),
     observation AS (
       SELECT item
@@ -532,6 +531,7 @@ if [[ "$canary_status" -eq 0 ]] && \
       extraction_contract_version:"memory_v1_relational_extraction_v5_2",
       predicate_registry_version:"memory_predicate_registry_v5_2",
       policy_compiler_version:$result[0].audit.policy_compiler_version,
+      policy_guard_code:$result[0].audit.policy_guard_code,
       local_model_calls:$result[0].local_model_calls,
       external_model_calls:$result[0].external_model_calls,
       counts:{entity_mentions:$checks[0].entity_mentions,

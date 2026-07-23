@@ -145,8 +145,13 @@ cd "$repo"
   scripts/memory_v1_v5_local_inference_scheduler.py \
   scripts/memory_v1_v5_local_inference_canary.py \
   scripts/memory_v1_predicate_runtime_profile_v2.py \
+  scripts/memory_v1_relational_extraction_v5_local_provider.py \
+  scripts/memory_v1_relational_extraction_v5_provider.py \
   specs/memory_v1_predicate_runtime_profiles_v2.json \
+  tests/test_memory_v1_v5_2_explicit_employment_guard.py \
+  tests/test_memory_v1_v5_2_employment_normalization.py \
   tools/memory_v1_v5_local_inference_scheduler_production_clone.sh \
+  tools/memory_v1_v5_2_employment_canary_production_clone.sh \
   tools/memory_v1_v5_2_scheduler_activate.sh)" ]]
 sha256sum -c <<'HASHES'
 f807a72cb851e66e3a4bb7dd108a1f25775b4c458bd9f563dd0a70cf3601ca6f  ops/systemd/memory-v1-v5-local-inference-scheduler.service
@@ -155,13 +160,21 @@ da034629b1cc58ce942b34310731e04f70089dce829ea9b18908465849dd4440  scripts/memory
 0da89022b24453a3617a7d633cb019bc42de9de69c44f0c71011ae29b92e148e  scripts/memory_v1_v5_local_inference_scheduler.py
 05787c4e1bfc8a8f2107eef1ede4a07c6e105ef15ca58dbf036a85edeaa8b428  scripts/memory_v1_v5_local_inference_canary.py
 a211620badb08eb9aee2e30f9cf0219a368cb37f2c487a0cdbd52ad77caa2b80  scripts/memory_v1_predicate_runtime_profile_v2.py
+7dd13a2b7b9ac019324f70d68b085f07feb77b7f3432eea6e3dc1d4375ff7e37  scripts/memory_v1_relational_extraction_v5_local_provider.py
+2b07b0503eb1d4d206697fe6a32607a89398f93498099e3af3276af3cd9d79f6  scripts/memory_v1_relational_extraction_v5_provider.py
 5786269a2cda01045cc0f729ed2f7239da95da03e0dab2d074df761de80b24a4  specs/memory_v1_predicate_runtime_profiles_v2.json
+64ebf4a4d019f1a9c114c4716c89a02d736e0ce251a6960a10ac35fbcfdb8903  tests/test_memory_v1_v5_2_explicit_employment_guard.py
+b518132a9c322435dc51b71fac0eac322d4bc33ed1fdccfde3395de868293599  tests/test_memory_v1_v5_2_employment_normalization.py
 062478e3e1a5506549bb03fe366c0dd1628ac45bdf838017e309cc3e4a86a06f  tools/memory_v1_v5_local_inference_scheduler_production_clone.sh
+f62352b75f08b3b837639f25e8ee6956fe6ddbe77497dd38cd18024bdc6a347d  tools/memory_v1_v5_2_employment_canary_production_clone.sh
 HASHES
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python \
   scripts/memory_v1_v5_multi_owner_automation_contract_test.py >/dev/null
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python \
   scripts/memory_v1_v5_local_inference_scheduler_test.py >/dev/null
+PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python -m unittest -q \
+  tests.test_memory_v1_v5_2_explicit_employment_guard \
+  tests.test_memory_v1_v5_2_employment_normalization
 systemd-analyze verify "$service_source" "$timer_source"
 [[ "$(grep -o -- '--contract-profile v5_2' "$service_source" | wc -l)" == 1 ]]
 [[ "$(grep -o -- '--owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50' "$service_source" | wc -l)" == 1 ]]
@@ -181,7 +194,8 @@ jq -e '
   .extraction_contract_version=="memory_v1_relational_extraction_v5_2" and
   .predicate_registry_version=="memory_predicate_registry_v5_2" and
   .policy_compiler_version=="memory_v1_semantic_policy_compiler_v6" and
-  .local_model_calls==1 and .external_model_calls==0 and
+  .policy_guard_code=="explicit_started_employment" and
+  .local_model_calls==0 and .external_model_calls==0 and
   .counts.entity_mentions==2 and .counts.observations==1 and
   .observation_predicates==["employment.worked_for"] and
   .checks.self_entity==true and .checks.organization_entity==true and
