@@ -7,6 +7,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -18,9 +19,10 @@ from typing import Any
 import httpx
 
 
-CONTRACT_VERSION = "voice_synthetic_canary_v1"
+CONTRACT_VERSION = "voice_synthetic_canary_v1_1"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
 SYNTHETIC_PHRASE = "Operational voice canary."
+SYNTHETIC_EXPECTED_WORDS = frozenset({"operational", "voice", "canary"})
 MAX_RESPONSE_TTS_CHARACTERS = 1_000
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 PCM_SAMPLE_RATE = 24_000
@@ -117,6 +119,11 @@ def _bounded_tts_text(answer: str) -> str:
         return clean
     clipped = clean[:MAX_RESPONSE_TTS_CHARACTERS]
     return clipped.rsplit(" ", 1)[0] or clipped
+
+
+def _synthetic_transcript_matches(transcript: str) -> bool:
+    words = set(re.findall(r"[a-z]+", str(transcript or "").lower()))
+    return len(words & SYNTHETIC_EXPECTED_WORDS) >= 2
 
 
 async def _stream_tts(
@@ -321,8 +328,11 @@ async def run_canary(
             transcript = str(transcription_body.get("transcript") or "").strip()
             if not transcript:
                 raise CanaryFailure("transcription", "empty_transcript")
-            if "canary" not in transcript.lower():
-                raise CanaryFailure("transcription", "canary_phrase_not_recognized")
+            if not _synthetic_transcript_matches(transcript):
+                raise CanaryFailure(
+                    "transcription",
+                    "synthetic_phrase_mismatch",
+                )
             metrics["transcription_provider"] = transcription_body.get("provider")
             metrics["transcription_model"] = transcription_body.get("model")
             metrics["transcription_language"] = transcription_body.get("language")

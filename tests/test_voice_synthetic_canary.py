@@ -11,6 +11,7 @@ from scripts.voice_synthetic_canary import (
     CanaryConfig,
     CanaryFailure,
     _pcm_to_wav,
+    _synthetic_transcript_matches,
     _validate_config,
     run_canary,
 )
@@ -31,6 +32,17 @@ def no_store_headers(content_type: str = "application/json") -> dict[str, str]:
 
 
 class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
+    def test_transcript_match_tolerates_one_misrecognized_word(self) -> None:
+        self.assertTrue(
+            _synthetic_transcript_matches("Operational voice scanner.")
+        )
+        self.assertTrue(
+            _synthetic_transcript_matches("Voice canary is ready.")
+        )
+        self.assertFalse(
+            _synthetic_transcript_matches("Unrelated background noise.")
+        )
+
     def test_wav_wrapper_is_deterministic_and_valid(self) -> None:
         wrapped = _pcm_to_wav(pcm_bytes())
         self.assertEqual(wrapped[:4], b"RIFF")

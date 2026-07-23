@@ -5,8 +5,8 @@ installed.
 
 ## Purpose
 
-The canary verifies the production voice dependency chain without creating a
-user-visible chat:
+The `voice_synthetic_canary_v1_1` canary verifies the production voice
+dependency chain without creating a user-visible chat:
 
 1. Generate a fixed, non-user TTS phrase.
 2. Wrap the returned PCM as WAV and submit it to OpenAI transcription.
@@ -19,6 +19,11 @@ user-visible chat:
 The runner never logs or stores the transcript or answer. It outputs one
 aggregate-only JSON result. It exits nonzero on a current dependency failure or
 after a mature SLO window fails a threshold.
+
+The transcription check requires at least two of the fixed phrase's three
+expected words. This detects unrelated/empty transcription while tolerating one
+ordinary recognition substitution so the operational alert does not become a
+word-error-rate test.
 
 ## Boundaries
 
