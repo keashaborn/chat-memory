@@ -1,0 +1,65 @@
+{
+  "contract_version": "memory_v1_v5_2_scheduler_activation_plan_v1",
+  "created_at": "2026-07-23T12:00:00Z",
+  "status": "prepared_pending_employment_canary",
+  "scope": {
+    "server": "seebx",
+    "current_profile": "v5_1",
+    "target_profile": "v5_2",
+    "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+    "owners_allowed": 1,
+    "max_jobs_per_cycle": 1,
+    "rolling_24h_local_call_limit": 12,
+    "failure_threshold": 3
+  },
+  "prerequisite": {
+    "contract_version": "memory_v1_v5_2_employment_canary_report_v1",
+    "evidence_content_sha256": "48c3ea92b1c624634f20a54eb462c6953a11d700eeaa1a2b2cffa3c31f67929d",
+    "policy_compiler_version": "memory_v1_semantic_policy_compiler_v6",
+    "required_outcome": "pass"
+  },
+  "artifacts": {
+    "activation_script": {
+      "path": "tools/memory_v1_v5_2_scheduler_activate.sh",
+      "sha256": "5539aeb052bd3dee842c9a7a32efb3afb240134ec81510634941cf17e7106e25"
+    },
+    "service": {
+      "path": "ops/systemd/memory-v1-v5-local-inference-scheduler.service",
+      "sha256": "f807a72cb851e66e3a4bb7dd108a1f25775b4c458bd9f563dd0a70cf3601ca6f"
+    },
+    "timer": {
+      "path": "ops/systemd/memory-v1-v5-local-inference-scheduler.timer",
+      "sha256": "dc618a248d7103956ff2e671a2b08fa775f6e030bf383d4a68354382b38dc9a8"
+    },
+    "production_clone_test": {
+      "path": "tools/memory_v1_v5_local_inference_scheduler_production_clone.sh",
+      "sha256": "062478e3e1a5506549bb03fe366c0dd1628ac45bdf838017e309cc3e4a86a06f"
+    }
+  },
+  "activation_operations": [
+    "validate_hash_locked_sources",
+    "validate_sanitized_employment_canary_report",
+    "quiesce_and_record_memory_v1_timer_states",
+    "take_fresh_postgres_backup",
+    "capture_all_memory_table_signatures",
+    "capture_qdrant_memory_claim_signature",
+    "install_only_v5_2_scheduler_service_and_timer",
+    "prove_zero_memory_row_changes",
+    "prove_unchanged_qdrant",
+    "restore_exact_timer_states",
+    "verify_service_health",
+    "write_sanitized_activation_report"
+  ],
+  "forbidden_operations": [
+    "model_call_during_activation",
+    "other_owner_processing",
+    "claim_creation",
+    "qdrant_write",
+    "retrieval_change",
+    "prompt_influence",
+    "data_deletion",
+    "authentication_or_rls_weakening",
+    "frontend_change"
+  ],
+  "hard_stop": "before_v5_2_packet_review_stage_claim_projection_retrieval_or_prompt_influence"
+}
