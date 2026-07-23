@@ -41,6 +41,10 @@ from rag_engine.raw_memory_ownership import (
     assert_raw_points_owner,
     owned_raw_payload,
 )
+from rag_engine.thread_deletion_v1 import (
+    ThreadDeletionV1Error,
+    delete_thread_v1,
+)
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -838,11 +842,15 @@ async def threads_archive(thread_id: str, req: Request):
     finally:
         await conn.close()
 
+
 @app.delete("/threads/{thread_id}")
 async def threads_delete(thread_id: str, req: Request):
     tid = parse_uuid(thread_id)
     if not tid:
-        return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_thread_id"},
+            status_code=400,
+        )
 
     actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
     if actor_err:
@@ -850,43 +858,48 @@ async def threads_delete(thread_id: str, req: Request):
 
     conn = await asyncpg.connect(DSN)
     try:
-        await _set_connection_actor(conn, _actor_uid)
-        await conn.execute(
-            "DELETE FROM chat_log WHERE thread_id=$1 AND owner_user_id=$2",
-            tid,
-            _actor_uid,
+        result = await delete_thread_v1(
+            conn,
+            get_qdrant(),
+            owner_user_id=_actor_uid,
+            thread_id=tid,
         )
-        await conn.execute(
-            "DELETE FROM threads WHERE id=$1 AND owner_user_id=$2",
-            tid,
-            _actor_uid,
+    except ThreadDeletionV1Error as exc:
+        if exc.code == "thread_not_found":
+            return JSONResponse(
+                {"status": "not_found", "detail": "thread_not_found"},
+                status_code=404,
+            )
+        status_code = 503 if exc.retryable else 409
+        return JSONResponse(
+            {
+                "status": "retry_required" if exc.retryable else "conflict",
+                "detail": exc.code,
+                "thread_id": str(tid),
+                "deleted": False,
+            },
+            status_code=status_code,
+        )
+    except Exception:
+        print(
+            "[threads_delete] deletion contract failed",
+            str(getattr(req.state, "request_id", "")),
+        )
+        return JSONResponse(
+            {
+                "status": "retry_required",
+                "detail": "thread_deletion_failed",
+                "thread_id": str(tid),
+                "deleted": False,
+            },
+            status_code=503,
         )
     finally:
         await conn.close()
 
-    # Optional: remove Qdrant points for this thread IF thread_id is stored in payload
-    try:
-        get_qdrant().delete(
-            collection_name="memory_raw",
-            points_selector=qmodels.FilterSelector(
-                filter=qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(
-                            key="owner_user_id",
-                            match=qmodels.MatchValue(value=_actor_uid),
-                        ),
-                        qmodels.FieldCondition(
-                            key="thread_id",
-                            match=qmodels.MatchValue(value=str(tid))
-                        )
-                    ]
-                )
-            ),
-        )
-    except Exception as e:
-        print("[threads_delete] qdrant cleanup skipped/failed:", e)
-
-    return {"status": "ok", "thread_id": str(tid), "deleted": True}
+    payload = result.as_dict()
+    payload["deleted"] = True
+    return payload
 
 
 @app.get("/healthz")

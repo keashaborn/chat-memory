@@ -23,6 +23,7 @@ from rag_engine.memory_v1_consolidation import (
     persist_extraction,
 )
 from rag_engine.memory_v1_store import actor_uuid, record_evidence
+from rag_engine.thread_deletion_v1 import memory_source_lock_key_v1
 
 
 def arguments() -> argparse.Namespace:
@@ -69,6 +70,42 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 async def _set_actor(conn: asyncpg.Connection, owner: uuid.UUID) -> None:
     await conn.execute("SELECT set_config('app.user_id', $1, true)", str(owner))
+
+
+async def acquire_source_erasure_lock(
+    conn: asyncpg.Connection,
+    *,
+    owner: uuid.UUID,
+    source_system: str,
+    source_external_id: str,
+) -> None:
+    await conn.execute(
+        "SELECT pg_advisory_lock(hashtextextended($1,0))",
+        memory_source_lock_key_v1(
+            owner,
+            source_system,
+            source_external_id,
+        ),
+    )
+
+
+async def release_source_erasure_lock(
+    conn: asyncpg.Connection,
+    *,
+    owner: uuid.UUID,
+    source_system: str,
+    source_external_id: str,
+) -> None:
+    released = await conn.fetchval(
+        "SELECT pg_advisory_unlock(hashtextextended($1,0))",
+        memory_source_lock_key_v1(
+            owner,
+            source_system,
+            source_external_id,
+        ),
+    )
+    if released is not True:
+        raise RuntimeError("memory source erasure lock was not held")
 
 
 async def claim_job(
@@ -544,25 +581,41 @@ async def main() -> int:
                 )
                 if job is None:
                     break
+                source_system = str(job["source_system"])
+                source_external_id = str(job["source_external_id"])
+                await acquire_source_erasure_lock(
+                    conn,
+                    owner=owner,
+                    source_system=source_system,
+                    source_external_id=source_external_id,
+                )
                 try:
-                    await process_job(
+                    try:
+                        await process_job(
+                            conn,
+                            client,
+                            owner=owner,
+                            job=job,
+                            worker_id=worker_id,
+                            model=model,
+                            project_key=args.project_key,
+                            allow_auto_apply=allow_auto_apply,
+                        )
+                    except Exception as exc:
+                        await fail_job(
+                            conn,
+                            owner=owner,
+                            job=job,
+                            worker_id=worker_id,
+                            error=exc,
+                            max_attempts=args.max_attempts,
+                        )
+                finally:
+                    await release_source_erasure_lock(
                         conn,
-                        client,
                         owner=owner,
-                        job=job,
-                        worker_id=worker_id,
-                        model=model,
-                        project_key=args.project_key,
-                        allow_auto_apply=allow_auto_apply,
-                    )
-                except Exception as exc:
-                    await fail_job(
-                        conn,
-                        owner=owner,
-                        job=job,
-                        worker_id=worker_id,
-                        error=exc,
-                        max_attempts=args.max_attempts,
+                        source_system=source_system,
+                        source_external_id=source_external_id,
                     )
                 summary["processed"] += 1
         print(json.dumps(summary, sort_keys=True))
