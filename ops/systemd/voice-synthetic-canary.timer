@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the governed voice synthetic canary hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=voice-synthetic-canary.service
+
+[Install]
+WantedBy=timers.target

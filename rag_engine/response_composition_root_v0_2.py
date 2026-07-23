@@ -9,6 +9,7 @@ governed Memory, typed prompt assembly, provider execution, and final binding.
 """
 
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Protocol
 from uuid import UUID, uuid4
@@ -116,12 +117,29 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
         return self
 
 
+class ResponseStageTimingsV1(_StrictFrozenModel):
+    """Content-free wall timings for one governed response execution."""
+
+    command_validation_ms: int = Field(ge=0)
+    conversation_snapshot_ms: int = Field(ge=0)
+    policy_input_ms: int = Field(ge=0)
+    signal_classification_ms: int = Field(ge=0)
+    signal_binding_ms: int = Field(ge=0)
+    memory_selection_ms: int = Field(ge=0)
+    trusted_request_ms: int = Field(ge=0)
+    orchestration_ms: int = Field(ge=0)
+    answer_generation_ms: int = Field(ge=0)
+    finalization_ms: int = Field(ge=0)
+    pipeline_total_ms: int = Field(ge=0)
+
+
 class TrustedResponseExecutionV0_2(_StrictFrozenModel):
     """Private execution result used by trusted post-generation adapters."""
 
     trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
     provider_response: OpenAIChatResponseV1 = Field(repr=False)
     finalized: FinalizedTrustedResponseV1 = Field(repr=False)
+    stage_timings: ResponseStageTimingsV1
 
     @model_validator(mode="after")
     def bound(self) -> "TrustedResponseExecutionV0_2":
@@ -134,6 +152,10 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
         ):
             raise ValueError("execution finalization differs from its provider response")
         return self
+
+
+def _elapsed_ms(start_ns: int) -> int:
+    return max(0, round((time.monotonic_ns() - start_ns) / 1_000_000))
 
 
 class GovernedMemoryAssemblyProviderV1(Protocol):
@@ -216,13 +238,18 @@ class InactiveResponseCompositionRootV0_2:
         """Execute and retain private typed artifacts for trusted adapters."""
 
         stage = "command_validation"
+        pipeline_started_ns = time.monotonic_ns()
+        stage_started_ns = pipeline_started_ns
+        stage_timings: dict[str, int] = {}
         try:
             if not isinstance(command, AuthenticatedResponseCommandV0_2):
                 raise TypeError("authenticated command type mismatch")
             command = AuthenticatedResponseCommandV0_2.model_validate_json(
                 command.model_dump_json()
             )
+            stage_timings["command_validation_ms"] = _elapsed_ms(stage_started_ns)
             stage = "conversation_snapshot"
+            stage_started_ns = time.monotonic_ns()
             if command.stateless:
                 snapshot = create_current_only_conversation_snapshot_v1(
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
@@ -238,14 +265,18 @@ class InactiveResponseCompositionRootV0_2:
                     current_request_id=command.request_id,
                     current_message=command.current_message,
                 )
+            stage_timings["conversation_snapshot_ms"] = _elapsed_ms(stage_started_ns)
             stage = "policy_input"
+            stage_started_ns = time.monotonic_ns()
             policy_input = ResponsePolicyInputV0_2.create(
                 request_id=snapshot.current_request_id,
                 conversation=snapshot.messages,
                 requested_assistant_profile_id=None,
                 request_field_names=command.request_field_names,
             )
+            stage_timings["policy_input_ms"] = _elapsed_ms(stage_started_ns)
             stage = "signal_classification"
+            stage_started_ns = time.monotonic_ns()
             classifier = OpenAIServerResponseSignalClassifierV0_2(
                 self._openai_client,
                 model=self._classifier_model,
@@ -254,12 +285,16 @@ class InactiveResponseCompositionRootV0_2:
                 ),
             )
             classification = classifier.classify(policy_input)
+            stage_timings["signal_classification_ms"] = _elapsed_ms(stage_started_ns)
             stage = "signal_binding"
+            stage_started_ns = time.monotonic_ns()
             signal_envelope = TrustedPolicySignalsEnvelopeV0_2.create(
                 conversation_snapshot=snapshot,
                 signals=classification.signals,
             )
+            stage_timings["signal_binding_ms"] = _elapsed_ms(stage_started_ns)
             stage = "memory_selection"
+            stage_started_ns = time.monotonic_ns()
             memory = await _await_memory(
                 self._memory_provider.prepare(
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
@@ -267,7 +302,9 @@ class InactiveResponseCompositionRootV0_2:
                     trusted_policy_signals=classification.signals,
                 )
             )
+            stage_timings["memory_selection_ms"] = _elapsed_ms(stage_started_ns)
             stage = "trusted_request"
+            stage_started_ns = time.monotonic_ns()
             trusted_request = TrustedResponseRequestV0_2.create_from_snapshot(
                 authenticated_actor_user_id=command.authenticated_actor_user_id,
                 conversation_snapshot=snapshot,
@@ -277,21 +314,27 @@ class InactiveResponseCompositionRootV0_2:
                 memory_application=memory.memory_application,
                 fm_token_budget=command.fm_token_budget,
             )
+            stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)
             stage = "orchestration"
+            stage_started_ns = time.monotonic_ns()
             orchestrator = TrustedResponseOrchestratorV0_2(
                 OpenAIModerationAdapterV0_2(self._openai_client),
                 clock=self._clock,
                 correlation_id_factory=self._correlation_id_factory,
             )
             plan = await orchestrator.build_plan(trusted_request)
+            stage_timings["orchestration_ms"] = _elapsed_ms(stage_started_ns)
             stage = "answer_generation"
+            stage_started_ns = time.monotonic_ns()
             response = await OpenAIChatCompletionsAdapterV1(
                 self._openai_client
             ).complete_async(
                 plan,
                 generation_config=self._generation_config,
             )
+            stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
             stage = "finalization"
+            stage_started_ns = time.monotonic_ns()
             finalized = finalize_trusted_response_v1(
                 trusted_plan=plan,
                 provider_response=response,
@@ -299,11 +342,16 @@ class InactiveResponseCompositionRootV0_2:
                 answer_id=self._answer_id_factory(),
                 created_at=self._clock(),
             )
+            stage_timings["finalization_ms"] = _elapsed_ms(stage_started_ns)
             stage = "execution_binding"
             return TrustedResponseExecutionV0_2(
                 trusted_plan=plan,
                 provider_response=response,
                 finalized=finalized,
+                stage_timings=ResponseStageTimingsV1(
+                    **stage_timings,
+                    pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
+                ),
             )
         except ResponseCompositionError as exc:
             if exc.stage == "not_applicable":
@@ -323,5 +371,6 @@ __all__ = [
     "InactiveResponseCompositionRootV0_2",
     "NoGovernedMemoryAssemblyProviderV1",
     "ResponseCompositionError",
+    "ResponseStageTimingsV1",
     "TrustedResponseExecutionV0_2",
 ]

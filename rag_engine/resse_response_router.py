@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -29,6 +30,16 @@ from rag_engine.voice_observability_v1 import (
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
+NO_STORE_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+}
+
+
+def apply_no_store_headers(response: Response) -> None:
+    for name, value in NO_STORE_HEADERS.items():
+        response.headers[name] = value
 
 
 class ResseResponseRequestV1(BaseModel):
@@ -57,6 +68,7 @@ class ResseResponseRequestV1(BaseModel):
 async def resse_response_query(
     payload: ResseResponseRequestV1, req: Request, response: Response
 ):
+    request_started_ns = time.monotonic_ns()
     if not DSN:
         raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
     owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
@@ -64,6 +76,8 @@ async def resse_response_query(
     voice_turn_id = voice_turn_id_from_request(req)
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
+    if payload.no_store:
+        apply_no_store_headers(response)
     stateless = payload.thread_id is None
     thread_id = payload.thread_id or uuid4()
     if not payload.no_store and stateless:
@@ -93,6 +107,7 @@ async def resse_response_query(
             ),
         )
         finalized = execution.finalized
+        persistence_started_ns = time.monotonic_ns()
         if not payload.no_store:
             await persist_finalized_response_v1(
                 conn,
@@ -101,11 +116,23 @@ async def resse_response_query(
                 request_id=request_id,
                 finalized=finalized,
             )
+        persistence_ms = max(
+            0,
+            round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
+        )
         result = {
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
             "runtime": "resse_response_v0_2",
+            "timings": {
+                **execution.stage_timings.model_dump(mode="json"),
+                "persistence_ms": persistence_ms,
+                "backend_total_ms": max(
+                    0,
+                    round((time.monotonic_ns() - request_started_ns) / 1_000_000),
+                ),
+            },
         }
         if payload.include_inspection:
             try:

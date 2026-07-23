@@ -246,6 +246,30 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
             execution.finalized.attestation.provider_response_sha256,
             execution.provider_response.response_sha256,
         )
+        timings = execution.stage_timings.model_dump()
+        self.assertEqual(
+            set(timings),
+            {
+                "command_validation_ms",
+                "conversation_snapshot_ms",
+                "policy_input_ms",
+                "signal_classification_ms",
+                "signal_binding_ms",
+                "memory_selection_ms",
+                "trusted_request_ms",
+                "orchestration_ms",
+                "answer_generation_ms",
+                "finalization_ms",
+                "pipeline_total_ms",
+            },
+        )
+        self.assertTrue(
+            all(isinstance(value, int) and value >= 0 for value in timings.values())
+        )
+        self.assertGreaterEqual(
+            timings["pipeline_total_ms"],
+            max(value for key, value in timings.items() if key != "pipeline_total_ms"),
+        )
 
     async def test_local_domain_danger_skips_classifier_call_and_suppresses_fm(self) -> None:
         client = CombinedOpenAIClient(classifier_output(fm_explicit=True))

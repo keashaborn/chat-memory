@@ -1,0 +1,39 @@
+[Unit]
+Description=Run the privacy-safe governed voice synthetic canary
+After=network-online.target brains.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/chat-memory
+EnvironmentFile=/etc/verbalsage/voice-canary.env
+Environment=PYTHONPATH=/opt/chat-memory
+ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/voice_synthetic_canary.py
+TimeoutStartSec=4min
+UMask=0077
+Nice=10
+CPUQuota=20%
+MemoryMax=256M
+TasksMax=32
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+RemoveIPC=true
+SystemCallArchitectures=native
