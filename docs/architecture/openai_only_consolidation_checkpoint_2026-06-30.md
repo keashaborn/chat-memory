@@ -8,8 +8,8 @@ Completed:
 
 - Backend model gateway constrained to OpenAI.
 - Provider-prefixed or stale models such as `xai:grok-*` normalize/fallback to approved OpenAI models.
-- Added backend OpenAI realtime session endpoint:
-  - `POST /voice/openai/session`
+- Retired all direct Realtime generation and transcription-only WebRTC endpoints.
+- Governed voice transcription remains at `POST /voice/openai/transcribe`.
 - Added canonical backend OpenAI TTS endpoint:
   - `POST /voice/tts`
 - Removed legacy xAI/Grok WebSocket bridge:
@@ -29,7 +29,7 @@ Validated:
   - no `/ws/voice`
   - no `@app.websocket`
 - `/voice/tts` dry-run returns 200.
-- `/voice/openai/session` dry-run returns 200.
+- `/voice/openai/transcribe` is owner-bound and preserves voice-turn correlation.
 
 Relevant commits:
 
@@ -38,6 +38,12 @@ Relevant commits:
 - `91f735b Add backend OpenAI TTS endpoint`
 - `25f96a6 Remove legacy xAI voice bridge`
 - `ac59b61 Remove duplicate legacy TTS route`
+
+2026-07-23 retirement update:
+
+- Removed `voice_realtime_router.py` and its application registration.
+- Removed the unused direct `websockets` dependency/imports.
+- Voice capabilities now describe only active TTS models.
 
 ## Desired Runtime Shape
 

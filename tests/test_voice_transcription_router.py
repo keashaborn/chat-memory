@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from rag_engine import voice_realtime_router as realtime
 from rag_engine import voice_transcription_router as transcription
 
 
@@ -156,53 +155,18 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "invalid_voice_turn_id")
         self.assertEqual(FakeAsyncClient.calls, [])
 
-    def test_direct_realtime_generation_routes_are_absent(self) -> None:
+    def test_only_governed_batch_transcription_is_exposed(self) -> None:
         app = FastAPI()
-        app.include_router(realtime.router)
+        app.include_router(transcription.router)
         paths = {route.path for route in app.routes}
 
+        self.assertIn("/voice/openai/transcribe", paths)
         self.assertNotIn("/voice/openai/session", paths)
         self.assertNotIn("/voice/openai/webrtc-offer", paths)
-        self.assertIn("/voice/openai/transcription-webrtc-offer", paths)
-        self.assertEqual(
-            realtime.get_realtime_capabilities(),
-            {
-                "conversation_generation_enabled": False,
-                "retired": True,
-                "transcription_only": True,
-                "models": [],
-            },
+        self.assertNotIn(
+            "/voice/openai/transcription-webrtc-offer",
+            paths,
         )
-
-    def test_realtime_transcription_policy_cannot_generate_answers(self) -> None:
-        session = realtime._transcription_session_config()
-
-        self.assertEqual(session["type"], "transcription")
-        self.assertEqual(
-            session["audio"]["input"]["transcription"]["model"],
-            "gpt-realtime-whisper",
-        )
-        self.assertIsNone(session["audio"]["input"]["turn_detection"])
-        self.assertNotIn("instructions", session)
-        self.assertNotIn("model", session)
-        self.assertNotIn("output", session["audio"])
-
-    def test_realtime_transcription_requires_owner_actor_equality(self) -> None:
-        app = FastAPI()
-        app.include_router(realtime.router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/voice/openai/transcription-webrtc-offer?dry_run=1",
-            headers={
-                "x-vs-actor-user-id": ACTOR,
-                "x-vs-owner-user-id": OTHER_ACTOR,
-                "content-type": "application/sdp",
-            },
-            content=b"v=0\r\n",
-        )
-
-        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":

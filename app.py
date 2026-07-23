@@ -1,11 +1,9 @@
 from typing import Any, Dict, List, Optional
 import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
-import websockets
 import socket
 from datetime import datetime
-from fastapi import FastAPI, Body, Request, WebSocket
-from starlette.websockets import WebSocketDisconnect
+from fastapi import FastAPI, Body, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
 from qdrant_client import QdrantClient
@@ -31,7 +29,6 @@ class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
     vantage_id: Optional[str] = "default"
-from rag_engine.voice_realtime_router import router as voice_realtime_router
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
@@ -76,7 +73,6 @@ app.include_router(
 )
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
-app.include_router(voice_realtime_router)
 app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
 
