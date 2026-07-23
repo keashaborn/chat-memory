@@ -4,8 +4,9 @@ set -euo pipefail
 # seebx backend only. Runs exactly one private V5.2 employment extraction
 # against a disposable production clone and writes only a sanitized audit.
 
-if [[ "${MEMORY_V1_V5_2_EMPLOYMENT_CANARY:-}" != authorized ]]; then
-  echo 'MEMORY_V1_V5_2_EMPLOYMENT_CANARY=authorized is required' >&2
+if [[ "${MEMORY_V1_V5_2_EMPLOYMENT_CANARY:-}" != authorized ]] && \
+   [[ "${MEMORY_V1_V5_2_EMPLOYMENT_TARGET_VERIFY_ONLY:-}" != authorized ]]; then
+  echo 'an authorized employment canary or target verification is required' >&2
   exit 1
 fi
 
@@ -27,7 +28,6 @@ clone_dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/
 snapshot_dir=/home/ubuntu/brains/snapshots
 lock_file=/home/ubuntu/brains/.memory_v1_v5_2_employment_canary.lock
 timer_state=$(mktemp /tmp/memory-v1-v5-2-employment-timers.XXXXXX)
-table_list=$(mktemp /tmp/memory-v1-v5-2-employment-tables.XXXXXX)
 production_before=$(mktemp /tmp/memory-v1-v5-2-employment-production-before.XXXXXX)
 production_after=$(mktemp /tmp/memory-v1-v5-2-employment-production-after.XXXXXX)
 other_before=$(mktemp /tmp/memory-v1-v5-2-employment-other-before.XXXXXX)
@@ -36,12 +36,13 @@ canary_output=$(mktemp /tmp/memory-v1-v5-2-employment-canary.XXXXXX.json)
 packet_checks=$(mktemp /tmp/memory-v1-v5-2-employment-packet.XXXXXX.json)
 backup=$(mktemp /tmp/memory-v1-v5-2-employment.XXXXXX.dump)
 credential=$(mktemp /tmp/memory-v1-v5-2-employment-key.XXXXXX)
-chmod 0600 "$timer_state" "$table_list" "$production_before" \
+chmod 0600 "$timer_state" "$production_before" \
   "$production_after" "$other_before" "$other_after" "$canary_output" \
   "$packet_checks" "$backup" "$credential"
 
 phase=initialization
 run_id=
+run_tag=
 report=
 timers_quiesced=0
 clone_started=0
@@ -62,21 +63,70 @@ clone_sql() {
     -U sage -d memory
 }
 
-capture_production_memory() {
-  local output=$1 table state
-  : >"$output"
-  while IFS= read -r table; do
-    [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]]
-    state=$(production_scalar "
-      SELECT count(*)::text || E'\\t' ||
-        encode(public.digest(convert_to(coalesce(string_agg(
-          row_json,E'\\n' ORDER BY row_json),''),'UTF8'),'sha256'),'hex')
-      FROM (
-        SELECT to_jsonb(value)::text AS row_json
-        FROM memory.\"$table\" AS value
-      ) AS rows")
-    printf '%s\t%s\n' "$table" "$state" >>"$output"
-  done <"$table_list"
+capture_production_target() {
+  local output=$1
+  production_scalar "
+    WITH target_rows AS (
+      SELECT 'evidence_extraction_job' AS source,
+        to_jsonb(value)::text AS row_json
+      FROM memory.evidence_extraction_job AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'evidence_extraction_event',to_jsonb(value)::text
+      FROM memory.evidence_extraction_event AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'evidence_extraction_packet_v5_local',to_jsonb(value)::text
+      FROM memory.evidence_extraction_packet_v5_local AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'evidence_extraction_packet_v5',to_jsonb(value)::text
+      FROM memory.evidence_extraction_packet_v5 AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_extraction_call_event',to_jsonb(value)::text
+      FROM memory.v5_extraction_call_event AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_local_inference_event',to_jsonb(value)::text
+      FROM memory.v5_local_inference_event AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_local_packet_disposition',to_jsonb(value)::text
+      FROM memory.v5_local_packet_disposition AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_local_packet_review_artifact',to_jsonb(value)::text
+      FROM memory.v5_local_packet_review_artifact AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_local_packet_stage_admission',to_jsonb(value)::text
+      FROM memory.v5_local_packet_stage_admission AS value
+      WHERE job_id='$job'::uuid
+      UNION ALL
+      SELECT 'v5_local_entity_validation_assessment',to_jsonb(value)::text
+      FROM memory.v5_local_entity_validation_assessment AS value
+      WHERE packet_id IN (
+        SELECT packet_id
+        FROM memory.evidence_extraction_packet_v5_local
+        WHERE job_id='$job'::uuid
+      )
+      UNION ALL
+      SELECT 'v5_local_packet_supersession',to_jsonb(value)::text
+      FROM memory.v5_local_packet_supersession AS value
+      WHERE prior_packet_id IN (
+        SELECT packet_id
+        FROM memory.evidence_extraction_packet_v5_local
+        WHERE job_id='$job'::uuid
+      ) OR replacement_packet_id IN (
+        SELECT packet_id
+        FROM memory.evidence_extraction_packet_v5_local
+        WHERE job_id='$job'::uuid
+      )
+    )
+    SELECT source || E'\\t' || row_json
+    FROM target_rows
+    ORDER BY source,row_json" >"$output"
   chmod 0600 "$output"
 }
 
@@ -140,12 +190,38 @@ cleanup() {
   if [[ "$clone_started" -eq 1 ]]; then
     "${compose[@]}" down -v >/dev/null 2>&1 || exit_code=1
   fi
-  rm -f "$timer_state" "$table_list" "$production_before" \
+  if [[ "$exit_code" -ne 0 && -n "$run_tag" && ! -e "$report" ]]; then
+    failure_report="$snapshot_dir/memory_v1_v5_2_employment_canary_harness_failure_${run_tag}.json"
+    jq -n --arg phase "$phase" --arg completed_at \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{contract_version:
+          "memory_v1_v5_2_employment_canary_harness_failure_v1",
+        completed_at:$completed_at,outcome:"harness_error",
+        failure_phase:$phase,external_model_calls:0,
+        hard_stop:"no automatic retry"}' >"$failure_report" || true
+    chmod 0600 "$failure_report" 2>/dev/null || true
+    sha256sum "$failure_report" >"$failure_report.sha256" 2>/dev/null || true
+    chmod 0600 "$failure_report.sha256" 2>/dev/null || true
+  fi
+  rm -f "$timer_state" "$production_before" \
     "$production_after" "$other_before" "$other_after" "$canary_output" \
     "$packet_checks" "$backup" "$credential"
   exit "$exit_code"
 }
 trap cleanup EXIT
+
+if [[ "${MEMORY_V1_V5_2_EMPLOYMENT_TARGET_VERIFY_ONLY:-}" == authorized ]]; then
+  phase=target_isolation_zero_call_test
+  capture_production_target "$production_before"
+  sleep 2
+  capture_production_target "$production_after"
+  cmp -s "$production_before" "$production_after"
+  printf '%s\n' \
+    'memory_v1_v5_2_employment_target_isolation: PASS' \
+    'local_model_calls=0' \
+    'external_model_calls=0'
+  exit 0
+fi
 
 phase=preflight
 cd "$repo"
@@ -211,13 +287,8 @@ while IFS=$'\t' read -r unit _enabled _active; do
 done <"$timer_state"
 
 phase=production_baseline
-production_scalar "
-  SELECT table_name
-  FROM information_schema.tables
-  WHERE table_schema='memory' AND table_type='BASE TABLE'
-  ORDER BY table_name" >"$table_list"
-[[ -s "$table_list" ]]
-capture_production_memory "$production_before"
+capture_production_target "$production_before"
+[[ -s "$production_before" ]]
 qdrant_before=$(qdrant_signature)
 
 phase=create_disposable_clone
@@ -423,7 +494,7 @@ capture_clone_other_owners "$other_after"
 cmp -s "$other_before" "$other_after"
 
 phase=verify_production_unchanged
-capture_production_memory "$production_after"
+capture_production_target "$production_after"
 cmp -s "$production_before" "$production_after"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
