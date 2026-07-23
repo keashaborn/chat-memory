@@ -215,9 +215,16 @@ async def create_tts(req: Request):
             json=payload,
         )
         upstream = await client.send(request, stream=True)
+    except httpx.TimeoutException as exc:
+        await client.aclose()
+        raise HTTPException(
+            status_code=504, detail={"error": "openai_tts_timeout"}
+        ) from exc
     except Exception as exc:
         await client.aclose()
-        raise HTTPException(status_code=502, detail={"error": "openai_tts_unreachable"}) from exc
+        raise HTTPException(
+            status_code=502, detail={"error": "openai_tts_unreachable"}
+        ) from exc
 
     if upstream.status_code >= 400:
         provider_request_id = upstream.headers.get("x-request-id") or upstream.headers.get("openai-request-id")

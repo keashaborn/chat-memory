@@ -162,6 +162,11 @@ async def transcribe_voice_audio(req: Request):
                     "prompt": TRANSCRIPTION_CONTEXT_PROMPT,
                 },
             )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={"error": "openai_transcription_timeout"},
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,

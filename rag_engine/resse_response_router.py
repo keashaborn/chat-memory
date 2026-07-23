@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Authenticated, backend-owned RESSE response endpoint."""
 
+import asyncio
 import os
 import logging
 import time
@@ -30,6 +31,7 @@ from rag_engine.voice_observability_v1 import (
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
+RESPONSE_QUERY_DEADLINE_SECONDS = 90.0
 NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
     "pragma": "no-cache",
@@ -93,18 +95,23 @@ async def resse_response_query(
                 model=normalize_chat_model(os.getenv("OPENAI_CHAT_MODEL")),
             ),
         )
-        execution = await root.execute_detailed(
-            conn,
-            AuthenticatedResponseCommandV0_2(
-                authenticated_actor_user_id=owner,
-                thread_id=thread_id,
-                request_id=request_id,
-                current_message=payload.message,
-                request_field_names=tuple(
-                    sorted(set(payload.model_fields_set) - {"include_inspection"})
+        execution = await asyncio.wait_for(
+            root.execute_detailed(
+                conn,
+                AuthenticatedResponseCommandV0_2(
+                    authenticated_actor_user_id=owner,
+                    thread_id=thread_id,
+                    request_id=request_id,
+                    current_message=payload.message,
+                    request_field_names=tuple(
+                        sorted(
+                            set(payload.model_fields_set) - {"include_inspection"}
+                        )
+                    ),
+                    stateless=stateless,
                 ),
-                stateless=stateless,
             ),
+            timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
         )
         finalized = execution.finalized
         persistence_started_ns = time.monotonic_ns()
@@ -153,6 +160,14 @@ async def resse_response_query(
         return result
     except HTTPException:
         raise
+    except asyncio.TimeoutError:
+        logger.error(
+            "[resse_response] request deadline exceeded timeout_seconds=%s",
+            RESPONSE_QUERY_DEADLINE_SECONDS,
+        )
+        raise HTTPException(
+            status_code=504, detail="response_generation_timeout"
+        ) from None
     except Exception as exc:
         logger.error(
             "[resse_response] request failed error_type=%s persistence_stage=%s",
