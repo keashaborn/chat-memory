@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -67,6 +68,7 @@ class ResseResponseRequestV1(BaseModel):
 async def resse_response_query(
     payload: ResseResponseRequestV1, req: Request, response: Response
 ):
+    request_started_ns = time.monotonic_ns()
     if not DSN:
         raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
     owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
@@ -105,6 +107,7 @@ async def resse_response_query(
             ),
         )
         finalized = execution.finalized
+        persistence_started_ns = time.monotonic_ns()
         if not payload.no_store:
             await persist_finalized_response_v1(
                 conn,
@@ -113,11 +116,23 @@ async def resse_response_query(
                 request_id=request_id,
                 finalized=finalized,
             )
+        persistence_ms = max(
+            0,
+            round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
+        )
         result = {
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
             "runtime": "resse_response_v0_2",
+            "timings": {
+                **execution.stage_timings.model_dump(mode="json"),
+                "persistence_ms": persistence_ms,
+                "backend_total_ms": max(
+                    0,
+                    round((time.monotonic_ns() - request_started_ns) / 1_000_000),
+                ),
+            },
         }
         if payload.include_inspection:
             try:
