@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v5"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v6"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -1007,6 +1007,53 @@ SEMANTIC_STANCE_EXAMPLE = (
     "STRUCTURE_EXAMPLE_PROVIDER_PACKET="
     f"{SEMANTIC_STANCE_EXAMPLE_PACKET}"
 )
+EMPLOYMENT_EXAMPLE_SOURCE = (
+    "I started working for the Wisconsin Early Autism Project."
+)
+EMPLOYMENT_EXAMPLE_PACKET = canonical_json(
+    _packet(
+        entities=[
+            _example_entity(
+                EMPLOYMENT_EXAMPLE_SOURCE,
+                entity_ref="e00",
+                entity_type="self",
+                mention_kind="self_reference",
+                name_text=None,
+                relationship_role="user:self",
+                reason_code="explicit_self_reference",
+            ),
+            _example_entity(
+                EMPLOYMENT_EXAMPLE_SOURCE,
+                entity_ref="e01",
+                entity_type="organization",
+                mention_kind="named",
+                name_text="Wisconsin Early Autism Project",
+                relationship_role="employer",
+                reason_code="explicit_employer_organization",
+            ),
+        ],
+        observations=[
+            _example_observation(
+                EMPLOYMENT_EXAMPLE_SOURCE,
+                observation_ref="o00",
+                subject_entity_ref="e00",
+                predicate="employment.worked_for",
+                object_value={"entity_ref": "e01", "kind": "entity"},
+                projection_class="direct_claim",
+                surface_policy="direct_or_relevant",
+                sensitivity="medium",
+                reason_code="explicit_employer_statement",
+                temporal_semantic="state_validity",
+            )
+        ],
+    )
+)
+EMPLOYMENT_EXAMPLE = (
+    "STRUCTURE_EXAMPLE_SOURCE_CONTENT="
+    f"{EMPLOYMENT_EXAMPLE_SOURCE}\n"
+    "STRUCTURE_EXAMPLE_PROVIDER_PACKET="
+    f"{EMPLOYMENT_EXAMPLE_PACKET}"
+)
 LOCAL_CORE_INSTRUCTIONS = (
     f"{EXTRACTION_INSTRUCTIONS}\n"
     "Within each reason_codes array, values must be unique. "
@@ -1179,6 +1226,37 @@ def _semantic_stance_prompt_instructions(
     )
 
 
+def _employment_prompt_enabled(
+    registry: dict[str, Any],
+    content: str,
+) -> bool:
+    return bool(
+        registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION
+        and _EMPLOYMENT_CUE_RE.search(content)
+        and not _NON_EMPLOYER_WORK_FOR_RE.search(content)
+    )
+
+
+def _employment_prompt_instructions() -> str:
+    return (
+        f"{LOCAL_CORE_INSTRUCTIONS}"
+        f"{SEMANTIC_V5_2_EXTRACTION_INSTRUCTIONS}\n\n"
+        "EMPLOYMENT_COMPACT_V1\n"
+        "The governed prompt registry contains only employment.worked_for. "
+        "Extract only an explicit employment relationship between a person "
+        "or self and a named employer organization. Create separate self and "
+        "organization entities and one atomic employment.worked_for "
+        "observation. Do not treat an occupation, client, project, school, "
+        "volunteer activity, self-employment, or the phrase 'work for a "
+        "living' as an employer organization. 'Started working for' proves "
+        "that the employment relationship occurred, but does not by itself "
+        "prove that it is still current. Preserve only temporal information "
+        "stated in the source; never invent a start date or end date. If the "
+        "employer organization is not explicit, defer the source.\n\n"
+        f"{EMPLOYMENT_EXAMPLE}\n"
+    )
+
+
 def _relationship_contract_enabled(registry: dict[str, Any]) -> bool:
     return registry.get("registry_version") in RELATIONSHIP_REGISTRY_VERSIONS
 
@@ -1237,6 +1315,22 @@ _DURABLE_ASSERTION_RE = re.compile(
 _REPORTED_BELIEF_CUE_RE = re.compile(
     r"\b(?:i\s+(?:believe|think|see|view|consider)|"
     r"in\s+my\s+(?:view|opinion)|it\s+seems\s+to\s+me)\b",
+    re.IGNORECASE,
+)
+_EMPLOYMENT_CUE_RE = re.compile(
+    r"\b(?:"
+    r"i\s+(?:currently\s+|formerly\s+|previously\s+)?"
+    r"(?:work|worked|started\s+working)\s+for|"
+    r"i\s+used\s+to\s+work\s+for|"
+    r"i\s+(?:am|was)\s+(?:currently\s+|formerly\s+|previously\s+)?"
+    r"employed\s+(?:by|at)|"
+    r"my\s+(?:current\s+|former\s+|previous\s+)?employer\s+(?:is|was)"
+    r")\b",
+    re.IGNORECASE,
+)
+_NON_EMPLOYER_WORK_FOR_RE = re.compile(
+    r"\b(?:work(?:ed|ing)?\s+for\s+(?:a\s+living|free|fun|myself)|"
+    r"self[-\s]?employ(?:ed|ment))\b",
     re.IGNORECASE,
 )
 _GENERAL_MENTAL_HEALTH_CAUSAL_RE = re.compile(
@@ -3790,7 +3884,16 @@ class LocalLlamaCppProvider:
         prompt_profile = "full_registry_v1"
         allowed_predicates = self._allowed_predicates
         registry_contract = self._registry_contract
-        if _semantic_stance_prompt_enabled(self._registry, source.content):
+        if _employment_prompt_enabled(self._registry, source.content):
+            prompt_profile = "employment_compact_v1"
+            allowed_predicates = ("employment.worked_for",)
+            minimum_stance_observations = 1
+            registry_contract = _registry_contract_for_predicates(
+                self._registry,
+                allowed_predicates,
+            )
+            instructions = _employment_prompt_instructions()
+        elif _semantic_stance_prompt_enabled(self._registry, source.content):
             prompt_profile = "semantic_stance_compact_v1"
             allowed_predicates = ("stance.reported",)
             minimum_stance_observations = (

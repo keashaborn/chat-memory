@@ -98,6 +98,10 @@ class LocalProviderV52Test(unittest.TestCase):
             provider._policy_compiler_version,
             SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
         )
+        self.assertEqual(
+            provider._policy_compiler_version,
+            "memory_v1_semantic_policy_compiler_v6",
+        )
 
     def test_multiple_explicit_stance_cues_require_atomic_split(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
@@ -144,6 +148,48 @@ class LocalProviderV52Test(unittest.TestCase):
         ]["predicate"]
         self.assertIn("education.attended", predicate["enum"])
         self.assertIn("employment.worked_for", predicate["enum"])
+
+    def test_employer_statement_uses_compact_governed_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source(
+                "I started working for the Wisconsin Early Autism Project."
+            )
+        )
+        self.assertEqual(request.prompt_profile, "employment_compact_v1")
+        self.assertIn("EMPLOYMENT_COMPACT_V1", request.instructions)
+        self.assertIn(
+            "does not by itself prove that it is still current",
+            request.instructions,
+        )
+        self.assertLess(len(request.instructions), 15_000)
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(predicate["enum"], ["employment.worked_for"])
+
+    def test_non_employer_work_phrase_does_not_use_employment_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source("I work for a living, but my real interest is music.")
+        )
+        self.assertEqual(request.prompt_profile, "full_registry_v1")
 
     def test_incomplete_response_retains_sanitized_usage_diagnostics(self) -> None:
         with self.assertRaises(LocalProviderAdapterError) as caught:

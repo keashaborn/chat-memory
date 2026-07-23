@@ -221,6 +221,32 @@ def fixture(case: dict[str, Any]) -> dict[str, Any]:
                 )
             ],
         )
+    if kind == "employment_worked_for":
+        organization = "Wisconsin Early Autism Project"
+        return packet(
+            [
+                self_entity(text),
+                entity(
+                    text,
+                    ref="e01",
+                    entity_type="organization",
+                    quote=organization,
+                    mention_kind="named",
+                    name_text=organization,
+                    relationship_role="employer",
+                ),
+            ],
+            [
+                observation(
+                    text,
+                    ref="o01",
+                    subject="e00",
+                    predicate="employment.worked_for",
+                    obj=entity_object("e01"),
+                    temporal=temporal_none("state_validity"),
+                )
+            ],
+        )
     if kind == "credential":
         return packet(
             [self_entity(text)],
