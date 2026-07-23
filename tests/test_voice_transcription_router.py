@@ -156,20 +156,22 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "invalid_voice_turn_id")
         self.assertEqual(FakeAsyncClient.calls, [])
 
-    def test_direct_realtime_generation_is_retired_by_default(self) -> None:
-        with patch.object(realtime, "ALLOW_UNGOVERNED_REALTIME_VOICE", False):
-            with self.assertRaises(HTTPException) as raised:
-                realtime._require_ungoverned_realtime_enabled()
+    def test_direct_realtime_generation_routes_are_absent(self) -> None:
+        app = FastAPI()
+        app.include_router(realtime.router)
+        paths = {route.path for route in app.routes}
 
-        self.assertEqual(raised.exception.status_code, 410)
+        self.assertNotIn("/voice/openai/session", paths)
+        self.assertNotIn("/voice/openai/webrtc-offer", paths)
+        self.assertIn("/voice/openai/transcription-webrtc-offer", paths)
         self.assertEqual(
-            raised.exception.detail,
-            "direct_realtime_generation_retired_use_governed_voice",
-        )
-        self.assertFalse(
-            realtime.get_realtime_capabilities()[
-                "conversation_generation_enabled"
-            ]
+            realtime.get_realtime_capabilities(),
+            {
+                "conversation_generation_enabled": False,
+                "retired": True,
+                "transcription_only": True,
+                "models": [],
+            },
         )
 
     def test_realtime_transcription_policy_cannot_generate_answers(self) -> None:

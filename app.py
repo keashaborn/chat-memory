@@ -168,6 +168,28 @@ async def service_token_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+SENSITIVE_NO_STORE_PREFIXES = (
+    "/voice/",
+    "/telemetry/",
+    "/metrics/",
+)
+SENSITIVE_NO_STORE_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+    "x-content-type-options": "nosniff",
+}
+
+
+@app.middleware("http")
+async def sensitive_no_store_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(SENSITIVE_NO_STORE_PREFIXES):
+        for name, value in SENSITIVE_NO_STORE_HEADERS.items():
+            response.headers[name] = value
+    return response
+
+
 def parse_uuid(s: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(str(s))

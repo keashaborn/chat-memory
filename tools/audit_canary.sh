@@ -112,6 +112,7 @@ curl -sfS "${BASE}/telemetry/event" \
   "${SERVICE_HEADERS[@]}" \
   -H "Content-Type: application/json" \
   -H "x-request-id: ${RID}" \
+  -H "x-vs-actor-user-id: ${ACTOR_UUID}" \
   -d "{\"events\":[{\"event_id\":\"${EVENT_ID}\",\"event_type\":\"audit.canary\",\"subject_type\":\"user\",\"subject_id\":\"audit_user\",\"payload\":{\"note\":\"canary\",\"request_id\":\"${RID}\"}}]}" \
   >/dev/null
 

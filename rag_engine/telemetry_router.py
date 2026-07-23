@@ -11,6 +11,11 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 DSN = os.environ["POSTGRES_DSN"]
+TELEMETRY_NO_STORE_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+}
 
 
 def _parse_uuid(s: Any) -> Optional[uuid.UUID]:
@@ -54,11 +59,38 @@ async def _connect() -> asyncpg.Connection:
     return conn
 
 
+def _require_actor(req: Request) -> str:
+    raw = (req.headers.get("x-vs-actor-user-id") or "").strip()
+    if not raw:
+        raise ValueError("missing_actor_user_id")
+    try:
+        return str(uuid.UUID(raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("invalid_actor_user_id") from exc
+
+
+async def _set_actor(conn: asyncpg.Connection, actor_user_id: str) -> None:
+    await conn.execute(
+        "SELECT set_config('app.user_id',$1,true)",
+        actor_user_id,
+    )
+
+
 @router.post("/telemetry/event")
 async def telemetry_event(req: Request):
     """
     Write-only telemetry sink. Idempotent by event_id.
     """
+    try:
+        actor_user_id = _require_actor(req)
+    except ValueError as exc:
+        status = 401 if str(exc) == "missing_actor_user_id" else 400
+        return JSONResponse(
+            {"accepted": 0, "rejected": 0, "errors": [{"reason": str(exc)}]},
+            status_code=status,
+            headers=TELEMETRY_NO_STORE_HEADERS,
+        )
+
     try:
         body = await req.json()
     except Exception:
@@ -71,11 +103,8 @@ async def telemetry_event(req: Request):
         return JSONResponse(
             {"accepted": 0, "rejected": 0, "errors": [{"reason": "missing events[]"}]},
             status_code=400,
+            headers=TELEMETRY_NO_STORE_HEADERS,
         )
-
-    actor_user_id = (req.headers.get("x-vs-actor-user-id") or "").strip() or None
-    if actor_user_id:
-        actor_user_id = actor_user_id[:128]
 
     conn = await _connect()
     accepted = 0
@@ -107,61 +136,66 @@ async def telemetry_event(req: Request):
     """
 
     try:
-        for i, e in enumerate(events):
-            if not isinstance(e, dict):
-                rejected += 1
-                errors.append({"index": i, "reason": "event not object"})
-                continue
+        async with conn.transaction():
+            await _set_actor(conn, actor_user_id)
+            for i, e in enumerate(events):
+                if not isinstance(e, dict):
+                    rejected += 1
+                    errors.append({"index": i, "reason": "event not object"})
+                    continue
 
-            event_id = _parse_uuid(e.get("event_id"))
-            if not event_id:
-                rejected += 1
-                errors.append({"index": i, "reason": "invalid/missing event_id (uuid)"})
-                continue
+                event_id = _parse_uuid(e.get("event_id"))
+                if not event_id:
+                    rejected += 1
+                    errors.append({"index": i, "reason": "invalid/missing event_id (uuid)"})
+                    continue
 
-            event_type = str(e.get("event_type") or "").strip()
-            subject_type = str(e.get("subject_type") or "").strip()
-            subject_id = str(e.get("subject_id") or "").strip()
-            if not event_type or not subject_type or not subject_id:
-                rejected += 1
-                errors.append({"index": i, "reason": "missing event_type/subject_type/subject_id"})
-                continue
+                event_type = str(e.get("event_type") or "").strip()
+                subject_type = str(e.get("subject_type") or "").strip()
+                subject_id = str(e.get("subject_id") or "").strip()
+                if not event_type or not subject_type or not subject_id:
+                    rejected += 1
+                    errors.append({"index": i, "reason": "missing event_type/subject_type/subject_id"})
+                    continue
 
-            occurred_at = _parse_ts(e.get("occurred_at")) or _parse_ts(e.get("created_at")) or datetime.now(timezone.utc)
+                occurred_at = _parse_ts(e.get("occurred_at")) or _parse_ts(e.get("created_at")) or datetime.now(timezone.utc)
 
-            payload = e.get("payload")
-            if not isinstance(payload, dict):
-                payload = {}
-            if req_request_id and "request_id" not in payload:
-                payload["request_id"] = str(req_request_id)
+                payload = e.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+                if req_request_id and "request_id" not in payload:
+                    payload["request_id"] = str(req_request_id)
 
-            target_model_id = (e.get("target_model_id") or None)
-            target_model_version = (e.get("target_model_version") or None)
-            judge_model_id = (e.get("judge_model_id") or None)
-            judge_model_version = (e.get("judge_model_version") or None)
-            vantage_id = (e.get("vantage_id") or None)
-            condition_id = (e.get("condition_id") or None)
-            thread_id = (e.get("thread_id") or None)
-            turn_id = (e.get("turn_id") or None)
+                target_model_id = (e.get("target_model_id") or None)
+                target_model_version = (e.get("target_model_version") or None)
+                judge_model_id = (e.get("judge_model_id") or None)
+                judge_model_version = (e.get("judge_model_version") or None)
+                vantage_id = (e.get("vantage_id") or None)
+                condition_id = (e.get("condition_id") or None)
+                thread_id = (e.get("thread_id") or None)
+                turn_id = (e.get("turn_id") or None)
 
-            r = await conn.execute(
-                sql,
-                event_id, event_type,
-                subject_type, subject_id,
-                target_model_id, target_model_version,
-                judge_model_id, judge_model_version,
-                vantage_id, condition_id,
-                thread_id, turn_id,
-                actor_user_id,
-                payload, occurred_at
-            )
+                await conn.execute(
+                    sql,
+                    event_id, event_type,
+                    subject_type, subject_id,
+                    target_model_id, target_model_version,
+                    judge_model_id, judge_model_version,
+                    vantage_id, condition_id,
+                    thread_id, turn_id,
+                    actor_user_id,
+                    payload, occurred_at
+                )
 
-            accepted += 1
+                accepted += 1
 
     finally:
         await conn.close()
 
-    return {"accepted": accepted, "rejected": rejected, "errors": errors}
+    return JSONResponse(
+        {"accepted": accepted, "rejected": rejected, "errors": errors},
+        headers=TELEMETRY_NO_STORE_HEADERS,
+    )
 
 
 def _metric_expr(metric_key: str) -> Tuple[str, str]:
@@ -215,68 +249,94 @@ async def metrics_timeseries(
     bucket: str = Query("day"),
     target_model_id: Optional[str] = Query(None),
 ):
+    try:
+        actor_user_id = _require_actor(req)
+    except ValueError as exc:
+        status = 401 if str(exc) == "missing_actor_user_id" else 400
+        return JSONResponse(
+            {"error": str(exc)},
+            status_code=status,
+            headers=TELEMETRY_NO_STORE_HEADERS,
+        )
+
     bucket = (bucket or "day").strip().lower()
     if bucket not in ("hour", "day"):
-        return JSONResponse({"error": "bucket must be 'hour' or 'day'"} , status_code=400)
+        return JSONResponse(
+            {"error": "bucket must be 'hour' or 'day'"},
+            status_code=400,
+            headers=TELEMETRY_NO_STORE_HEADERS,
+        )
 
     start = _parse_ts(from_ts)
     end = _parse_ts(to_ts)
     if not start or not end:
-        return JSONResponse({"error": "invalid from/to ISO timestamps"} , status_code=400)
+        return JSONResponse(
+            {"error": "invalid from/to ISO timestamps"},
+            status_code=400,
+            headers=TELEMETRY_NO_STORE_HEADERS,
+        )
 
     try:
         expr, default_where = _metric_expr(metric_key)
     except KeyError:
-        return JSONResponse({"error": f"unknown metric_key '{metric_key}'"}, status_code=400)
-
-    actor_user_id = (req.headers.get("x-vs-actor-user-id") or "").strip() or None
-    if actor_user_id:
-        actor_user_id = actor_user_id[:128]
+        return JSONResponse(
+            {"error": f"unknown metric_key '{metric_key}'"},
+            status_code=400,
+            headers=TELEMETRY_NO_STORE_HEADERS,
+        )
 
     conn = await _connect()
     try:
-        wh = ["subject_type=$1", "subject_id=$2", "occurred_at >= $3", "occurred_at < $4", default_where]
-        params: List[Any] = [subject_type, subject_id, start, end]
+        async with conn.transaction():
+            await _set_actor(conn, actor_user_id)
+            wh = [
+                "subject_type=$1",
+                "subject_id=$2",
+                "occurred_at >= $3",
+                "occurred_at < $4",
+                default_where,
+                "actor_user_id=$5",
+            ]
+            params: List[Any] = [
+                subject_type,
+                subject_id,
+                start,
+                end,
+                actor_user_id,
+            ]
 
-        idx = 5
-        if target_model_id:
-            wh.append(f"target_model_id=${idx}")
-            params.append(target_model_id)
-            idx += 1
+            idx = 6
+            if target_model_id:
+                wh.append(f"target_model_id=${idx}")
+                params.append(target_model_id)
 
-        if actor_user_id:
-            wh.append(f"actor_user_id=${idx}")
-            params.append(actor_user_id)
-            idx += 1
+            where_sql = " AND ".join(f"({w})" for w in wh)
+            dt_unit_param = "day" if bucket == "day" else "hour"
 
-        where_sql = " AND ".join(f"({w})" for w in wh)
-        dt_unit_param = "day" if bucket == "day" else "hour"
+            q = f"""
+                SELECT
+                  date_trunc('{dt_unit_param}', occurred_at) AS t,
+                  AVG({expr}) AS v,
+                  COUNT({expr}) AS n
+                FROM telemetry_event
+                WHERE {where_sql}
+                GROUP BY 1
+                ORDER BY 1
+            """
 
-        q = f"""
-            SELECT
-              date_trunc('{dt_unit_param}', occurred_at) AS t,
-              AVG({expr}) AS v,
-              COUNT({expr}) AS n
-            FROM telemetry_event
-            WHERE {where_sql}
-            GROUP BY 1
-            ORDER BY 1
-        """
+            rows = await conn.fetch(q, *params)
 
-        rows = await conn.fetch(q, *params)
+            points = []
+            for r in rows:
+                points.append({
+                    "t": r["t"].isoformat(),
+                    "v": float(r["v"]) if r["v"] is not None else None,
+                    "n": int(r["n"]) if r["n"] is not None else 0,
+                    "meta": {"method": "v0_jsonb_expr"},
+                })
 
-        points = []
-        for r in rows:
-            points.append({
-                "t": r["t"].isoformat(),
-                "v": float(r["v"]) if r["v"] is not None else None,
-                "n": int(r["n"]) if r["n"] is not None else 0,
-                "meta": {"method": "v0_jsonb_expr"},
-            })
+            phases = []
 
-        phases = []
-
-        if actor_user_id:
             base = await conn.fetchrow(
                 """
                 SELECT condition_id, occurred_at, payload
@@ -299,52 +359,40 @@ async def metrics_timeseries(
                 """,
                 subject_type, subject_id, actor_user_id, start, end
             )
-        else:
-            base = await conn.fetchrow(
-                """
-                SELECT condition_id, occurred_at, payload
-                FROM telemetry_event
-                WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set' AND occurred_at < $3
-                ORDER BY occurred_at DESC
-                LIMIT 1
-                """,
-                subject_type, subject_id, start
+            seq = []
+            if base:
+                seq.append(base)
+            seq.extend(within)
+
+            for seq_index, row in enumerate(seq):
+                cid = row["condition_id"]
+                st = row["occurred_at"]
+                nxt = (
+                    seq[seq_index + 1]["occurred_at"]
+                    if seq_index + 1 < len(seq)
+                    else None
+                )
+                payload = row["payload"] or {}
+                label = payload.get("label") or payload.get("phase") or cid
+                phases.append({
+                    "condition_id": cid,
+                    "label": label,
+                    "start_ts": st.isoformat(),
+                    "end_ts": nxt.isoformat() if nxt else None,
+                })
+
+            return JSONResponse(
+                {
+                    "metric_key": metric_key,
+                    "subject": {
+                        "subject_type": subject_type,
+                        "subject_id": subject_id,
+                    },
+                    "points": points,
+                    "phases": phases,
+                },
+                headers=TELEMETRY_NO_STORE_HEADERS,
             )
-            within = await conn.fetch(
-                """
-                SELECT condition_id, occurred_at, payload
-                FROM telemetry_event
-                WHERE subject_type=$1 AND subject_id=$2 AND event_type='condition.set'
-                AND occurred_at >= $3 AND occurred_at < $4
-                ORDER BY occurred_at ASC
-                """,
-                subject_type, subject_id, start, end
-            )
-
-        seq = []
-        if base:
-            seq.append(base)
-        seq.extend(within)
-
-        for idx, row in enumerate(seq):
-            cid = row["condition_id"]
-            st = row["occurred_at"]
-            nxt = seq[idx + 1]["occurred_at"] if idx + 1 < len(seq) else None
-            payload = row["payload"] or {}
-            label = payload.get("label") or payload.get("phase") or cid
-            phases.append({
-                "condition_id": cid,
-                "label": label,
-                "start_ts": st.isoformat(),
-                "end_ts": nxt.isoformat() if nxt else None,
-            })
-
-        return {
-            "metric_key": metric_key,
-            "subject": {"subject_type": subject_type, "subject_id": subject_id},
-            "points": points,
-            "phases": phases,
-        }
 
     finally:
         await conn.close()

@@ -70,6 +70,11 @@ TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
 }
 
 ALLOWED_TTS_MODELS = set(TTS_MODEL_CAPABILITIES)
+NO_STORE_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+}
 
 
 def _require_actor(req: Request) -> str:
@@ -178,7 +183,8 @@ async def create_tts(req: Request):
                 "audio_format": "pcm_s16le",
                 "audio_sample_rate": 24000,
                 "dry_run": True,
-            }
+            },
+            headers=NO_STORE_HEADERS,
         )
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -247,6 +253,7 @@ async def create_tts(req: Request):
         stream_audio(),
         media_type="audio/pcm",
         headers={
+            **NO_STORE_HEADERS,
             "x-vs-voice-provider": "openai",
             "x-vs-voice-model": model,
             "x-vs-audio-format": "pcm_s16le",
@@ -277,13 +284,16 @@ async def get_voice_capabilities(req: Request):
     default_model = DEFAULT_TTS_MODEL if DEFAULT_TTS_MODEL in ALLOWED_TTS_MODELS else "gpt-4o-mini-tts"
     default_voice = _clean_voice(None, default_model)
 
-    return {
-        "version": VOICE_CAPABILITIES_VERSION,
-        "tts": {
-            "default_model": default_model,
-            "default_voice": default_voice,
-            "maximum_input_characters": MAX_TTS_CHARS,
-            "models": models,
+    return JSONResponse(
+        {
+            "version": VOICE_CAPABILITIES_VERSION,
+            "tts": {
+                "default_model": default_model,
+                "default_voice": default_voice,
+                "maximum_input_characters": MAX_TTS_CHARS,
+                "models": models,
+            },
+            "realtime": get_realtime_capabilities(),
         },
-        "realtime": get_realtime_capabilities(),
-    }
+        headers=NO_STORE_HEADERS,
+    )
