@@ -1328,6 +1328,18 @@ _EMPLOYMENT_CUE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_EXPLICIT_STARTED_EMPLOYMENT_RE = re.compile(
+    r"^\s*i\s+started\s+working\s+for\s+"
+    r"(?P<employer>[^\n.!?]{2,200})\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_NON_NAMED_EMPLOYER_RE = re.compile(
+    r"^(?:my\s+(?:father|mother|parent|dad|mom|brother|sister|"
+    r"friend|client|customer)|(?:a|an|the)\s+(?:company|business|"
+    r"organization|client|customer|place)|myself|him|her|them|"
+    r"someone|somebody|free|fun|a\s+living)$",
+    re.IGNORECASE,
+)
 _NON_EMPLOYER_WORK_FOR_RE = re.compile(
     r"\b(?:work(?:ed|ing)?\s+for\s+(?:a\s+living|free|fun|myself)|"
     r"self[-\s]?employ(?:ed|ment))\b",
@@ -1595,6 +1607,53 @@ def _deterministic_self_entity(
     }
 
 
+def _explicit_started_employment_packet(
+    source: TrustedExtractionSource,
+) -> ProviderPacket | None:
+    match = _EXPLICIT_STARTED_EMPLOYMENT_RE.fullmatch(source.content.strip())
+    if match is None:
+        return None
+    employer_name = " ".join(match.group("employer").split()).strip()
+    if (
+        not employer_name
+        or _NON_NAMED_EMPLOYER_RE.fullmatch(employer_name)
+        or not any(character.isalpha() for character in employer_name)
+    ):
+        return None
+    if employer_name.casefold().startswith("the "):
+        employer_name = employer_name[4:].strip()
+    self_entity = _deterministic_self_entity(source)
+    employer_entity = {
+        "entity_ref": "e01",
+        "entity_type": "organization",
+        "mention_kind": "named",
+        "name_text": employer_name,
+        "relationship_role": "employer",
+        "source_spans": [_source_span(source)],
+        "extraction_confidence": 0.99,
+        "reason_codes": ["deterministic_explicit_employer"],
+    }
+    observation = _example_observation(
+        source.content,
+        observation_ref="o00",
+        subject_entity_ref="e00",
+        predicate="employment.worked_for",
+        object_value={"kind": "entity", "entity_ref": "e01"},
+        projection_class="direct_claim",
+        surface_policy="direct_or_relevant",
+        sensitivity="medium",
+        reason_code="deterministic_explicit_employment",
+        temporal_semantic="state_validity",
+    )
+    observation["source_spans"] = [_source_span(source)]
+    return ProviderPacket.model_validate(
+        _packet(
+            entities=[self_entity, employer_entity],
+            observations=[observation],
+        )
+    )
+
+
 def _mental_health_belief_profile(content: str) -> str | None:
     """Classify only explicit general causal beliefs, never personal health."""
     if (
@@ -1799,6 +1858,13 @@ def _deterministic_policy_packet(
         return _guard_deferral_packet(
             source, ("mixed_authorship",)
         ), "mixed_authorship"
+    if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+        employment_packet = _explicit_started_employment_packet(source)
+        if employment_packet is not None:
+            return (
+                employment_packet,
+                "explicit_started_employment",
+            )
     project_proposal = _PROJECT_PROPOSAL_RE.search(content)
     if project_proposal:
         return _project_proposal_packet(
