@@ -30,6 +30,11 @@ BEGIN
        'EXECUTE'
      )
      OR NOT has_function_privilege(
+       'memory_v5_2_local_router_maintainer',
+       'memory.plan_owner_v5_2_local_packet_route_v1(integer)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
        'brains_app',
        'memory.finalize_owner_v5_2_terminal_route_v1(uuid,uuid,uuid,text,text,text[])',
        'EXECUTE'

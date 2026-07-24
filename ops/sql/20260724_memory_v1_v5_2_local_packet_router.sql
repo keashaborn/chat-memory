@@ -670,7 +670,7 @@ REVOKE ALL ON FUNCTION memory.guard_v5_2_terminal_evidence_from_stage_v1()
   FROM PUBLIC,brains_app,memory_v5_2_local_router_maintainer;
 
 GRANT EXECUTE ON FUNCTION memory.plan_owner_v5_2_local_packet_route_v1(integer)
-  TO brains_app;
+  TO brains_app,memory_v5_2_local_router_maintainer;
 GRANT EXECUTE ON FUNCTION memory.finalize_owner_v5_2_terminal_route_v1(
   uuid,uuid,uuid,text,text,text[]
 ) TO brains_app;
