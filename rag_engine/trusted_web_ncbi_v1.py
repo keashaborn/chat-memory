@@ -68,6 +68,7 @@ def classify_publication_types(publication_types: Iterable[str]) -> str:
 _PUBMED_STOPWORDS = frozenset(
     {
         "about",
+        "before",
         "adult",
         "adults",
         "after",
@@ -76,6 +77,7 @@ _PUBMED_STOPWORDS = frozenset(
         "any",
         "are",
         "can",
+        "cause",
         "cite",
         "does",
         "effect",
@@ -91,7 +93,9 @@ _PUBMED_STOPWORDS = frozenset(
         "lifting",
         "people",
         "please",
+        "reasonably",
         "show",
+        "say",
         "taking",
         "that",
         "the",
@@ -108,6 +112,11 @@ _PUBMED_STOPWORDS = frozenset(
     }
 )
 _PUBMED_SYNONYMS = {
+    "caffeine": ("caffeine", "exercise performance"),
+    "beta-alanine": ("beta alanine", "exercise performance", "paresthesia"),
+    "alanine": ("beta alanine", "exercise performance", "paresthesia"),
+    "tingling": ("paresthesia", "adverse effects"),
+    "volume": ("training volume", "resistance training", "muscle hypertrophy"),
     "contraindication": ("safety", "kidney disease", "renal function", "adverse effects"),
     "contraindications": ("safety", "kidney disease", "renal function", "adverse effects"),
     "caution": ("safety", "kidney disease", "renal function", "adverse effects"),
@@ -128,9 +137,14 @@ _PUBMED_SYNONYMS = {
 
 
 def _normalize_pubmed_query(query: str) -> str:
+    raw_text = " ".join(str(query or "").lower().split())
+    if "beta-alanine" in raw_text or "beta alanine" in raw_text:
+        if any(term in raw_text for term in ("tingling", "paresthesia", "safe", "safety", "side effect", "adverse")):
+            return "beta alanine paresthesia"
+        return "beta alanine supplementation exercise performance"
     tokens = [
         token
-        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", str(query or "").lower())
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", raw_text)
         if token not in _PUBMED_STOPWORDS
     ]
     terms: list[str] = []
