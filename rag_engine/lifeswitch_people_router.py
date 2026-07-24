@@ -139,6 +139,51 @@ async def _grant_default_messaging_permissions(
     )
 
 
+async def _reset_reaccepted_relationship_permissions(
+    conn,
+    relationship_id: str,
+    user_a: str,
+    user_b: str,
+) -> None:
+    await conn.execute(
+        f"""
+        update {SCHEMA}.relationship_permission
+           set permission_level='none',
+               is_enabled=false,
+               updated_at=now()
+         where relationship_id=$1::uuid
+        """,
+        relationship_id,
+    )
+    await conn.execute(
+        f"""
+        insert into {SCHEMA}.relationship_permission as rp (
+          relationship_id,
+          grantor_user_id,
+          grantee_user_id,
+          permission_scope,
+          permission_level,
+          is_enabled,
+          notes
+        )
+        values
+          ($1::uuid, $2::uuid, $3::uuid, 'messages:send', 'comment', true,
+           'Default messaging permission for reaccepted relationship.'),
+          ($1::uuid, $3::uuid, $2::uuid, 'messages:send', 'comment', true,
+           'Default messaging permission for reaccepted relationship.')
+        on conflict (relationship_id, grantor_user_id, grantee_user_id, permission_scope)
+        do update set
+          permission_level=excluded.permission_level,
+          is_enabled=excluded.is_enabled,
+          notes=excluded.notes,
+          updated_at=now()
+        """,
+        relationship_id,
+        user_a,
+        user_b,
+    )
+
+
 async def _assert_message_send_authorized(
     conn,
     sender_user_id: str,
@@ -479,12 +524,20 @@ async def accept_invitation(
                 if not row:
                     raise HTTPException(status_code=409, detail="relationship cannot be accepted")
 
-                await _grant_default_messaging_permissions(
-                    conn,
-                    str(row["relationship_id"]),
-                    inviter,
-                    accepter,
-                )
+                if existing is not None:
+                    await _reset_reaccepted_relationship_permissions(
+                        conn,
+                        str(row["relationship_id"]),
+                        inviter,
+                        accepter,
+                    )
+                else:
+                    await _grant_default_messaging_permissions(
+                        conn,
+                        str(row["relationship_id"]),
+                        inviter,
+                        accepter,
+                    )
 
                 updated_inv = await conn.fetchrow(
                     f"""
@@ -911,6 +964,56 @@ async def upsert_relationship_permission(
             )
             grantee = str(rel["other_user_id"])
 
+            if bool(is_enabled) and permission_scope in {"plan:comment", "plan:edit"}:
+                await conn.execute(
+                    f"""
+                    insert into {SCHEMA}.relationship_permission (
+                      relationship_id,
+                      grantor_user_id,
+                      grantee_user_id,
+                      permission_scope,
+                      permission_level,
+                      is_enabled,
+                      notes
+                    )
+                    values (
+                      $1::uuid, $2::uuid, $3::uuid,
+                      'plan:view', 'view', true,
+                      'Automatically required by Plan collaboration access.'
+                    )
+                    on conflict (
+                      relationship_id,
+                      grantor_user_id,
+                      grantee_user_id,
+                      permission_scope
+                    )
+                    do update set
+                      permission_level='view',
+                      is_enabled=true,
+                      updated_at=now()
+                    """,
+                    rid,
+                    owner,
+                    grantee,
+                )
+
+            if not bool(is_enabled) and permission_scope == "plan:view":
+                await conn.execute(
+                    f"""
+                    update {SCHEMA}.relationship_permission
+                       set permission_level='none',
+                           is_enabled=false,
+                           updated_at=now()
+                     where relationship_id=$1::uuid
+                       and grantor_user_id=$2::uuid
+                       and grantee_user_id=$3::uuid
+                       and permission_scope in ('plan:comment', 'plan:edit')
+                    """,
+                    rid,
+                    owner,
+                    grantee,
+                )
+
             row = await conn.fetchrow(
                 f"""
                 insert into {SCHEMA}.relationship_permission (
@@ -1111,6 +1214,36 @@ async def list_conversations(
             limit,
         )
         return JSONResponse([_row_to_jsonable(r) for r in rows])
+    finally:
+        await conn.close()
+
+
+@router.delete("/conversations/{conversation_id}")
+async def remove_conversation_from_list(
+    conversation_id: str,
+    req: Request,
+    owner_user_id: str = Query(..., min_length=1),
+):
+    cid = _as_uuid(conversation_id, "conversation_id")
+    owner = require_actor_matches_owner(req, owner_user_id)
+    conn = await _db()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            update {SCHEMA}.conversation_member
+               set is_active=false,
+                   updated_at=now()
+             where conversation_id=$1::uuid
+               and user_id=$2::uuid
+               and is_active=true
+            returning conversation_member_id
+            """,
+            cid,
+            owner,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return JSONResponse({"removed": cid})
     finally:
         await conn.close()
 
