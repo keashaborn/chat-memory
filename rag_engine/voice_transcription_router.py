@@ -15,6 +15,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
+from rag_engine.voice_session_router import require_active_voice_session
 
 
 router = APIRouter()
@@ -113,6 +114,7 @@ def _confidence_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
 async def transcribe_voice_audio(req: Request):
     owner_user_id = _owner_from_request(req)
     voice_turn_id = voice_turn_id_from_request(req)
+    await require_active_voice_session(req, owner_user_id)
 
     content_type = _normalized_audio_type(req.headers.get("content-type"))
     filename = SUPPORTED_AUDIO_TYPES.get(content_type)

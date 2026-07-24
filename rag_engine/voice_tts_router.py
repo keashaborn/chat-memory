@@ -14,6 +14,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
+from rag_engine.voice_session_router import require_active_voice_session
 
 router = APIRouter()
 
@@ -149,6 +150,8 @@ def _clean_speed(raw: Any) -> float:
 async def create_tts(req: Request):
     actor_user_id = _require_actor(req)
     voice_turn_id = voice_turn_id_from_request(req)
+    if voice_turn_id is not None:
+        await require_active_voice_session(req, actor_user_id)
 
     try:
         body = await req.json()

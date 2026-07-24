@@ -26,6 +26,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
+from rag_engine.voice_session_router import require_active_voice_session
 
 
 router = APIRouter()
@@ -76,6 +77,8 @@ async def resse_response_query(
     owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
     voice_turn_id = voice_turn_id_from_request(req)
+    if voice_turn_id is not None:
+        await require_active_voice_session(req, str(owner))
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
     if payload.no_store:

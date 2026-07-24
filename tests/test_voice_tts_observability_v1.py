@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from rag_engine import voice_tts_router as tts
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 VOICE_TURN = "0fc3d70a-a6d0-4e55-9e39-20e060b416c8"
+VOICE_SESSION = "a872d3f2-2d5c-4ae3-9f02-d9f43a38899e"
 
 
 class FakeResponse:
@@ -63,6 +64,13 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         app = FastAPI()
         app.include_router(tts.router)
         self.client = TestClient(app)
+        self.active_lease = patch.object(
+            tts,
+            "require_active_voice_session",
+            AsyncMock(),
+        )
+        self.active_lease.start()
+        self.addCleanup(self.active_lease.stop)
 
     def test_echoes_voice_turn_and_provider_request_id(self) -> None:
         with (
@@ -74,6 +82,7 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
                 headers={
                     "x-vs-actor-user-id": ACTOR,
                     "x-vs-voice-turn-id": VOICE_TURN,
+                    "x-vs-voice-session-id": VOICE_SESSION,
                 },
                 json={
                     "text": "Bounded test phrase.",

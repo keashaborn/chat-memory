@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -15,6 +15,7 @@ from rag_engine import voice_transcription_router as transcription
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER_ACTOR = "557ea042-cb82-48f8-9429-472e96c957ef"
 VOICE_TURN = "0fc3d70a-a6d0-4e55-9e39-20e060b416c8"
+VOICE_SESSION = "a872d3f2-2d5c-4ae3-9f02-d9f43a38899e"
 
 
 class FakeResponse:
@@ -57,6 +58,13 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(transcription.router)
         self.client = TestClient(app)
+        self.active_lease = patch.object(
+            transcription,
+            "require_active_voice_session",
+            AsyncMock(),
+        )
+        self.active_lease.start()
+        self.addCleanup(self.active_lease.stop)
 
     def _headers(self, *, owner: str = ACTOR, content_type: str = "audio/webm") -> dict[str, str]:
         return {
@@ -64,6 +72,7 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
             "x-vs-owner-user-id": owner,
             "content-type": content_type,
             "x-vs-voice-turn-id": VOICE_TURN,
+            "x-vs-voice-session-id": VOICE_SESSION,
         }
 
     def test_requires_owner_and_actor_equality(self) -> None:

@@ -32,6 +32,11 @@ class NewThreadReq(BaseModel):
     vantage_id: Optional[str] = "default"
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
+from rag_engine.voice_session_router import (
+    require_active_voice_session,
+    router as voice_session_router,
+)
+from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from rag_engine.raw_memory_ownership import (
     RawMemoryOwnershipError,
@@ -81,6 +86,7 @@ app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measureme
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
 app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
+app.include_router(voice_session_router)
 
 # ---------- request correlation ----------
 def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:
@@ -512,6 +518,9 @@ async def log_chat(req: Request):
 
     text = body.get("text") or body.get("input") or ""
     user_id_alias = require_actor_matches_owner(req, body.get("user_id") or "")
+    voice_turn_id = voice_turn_id_from_request(req)
+    if voice_turn_id is not None:
+        await require_active_voice_session(req, user_id_alias)
     source = body.get("source") or "frontend"
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
