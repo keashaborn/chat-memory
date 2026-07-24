@@ -15,6 +15,7 @@ from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
     ControlledProjectionError,
     OWNER,
     QUERY_BY_PREDICATE,
+    load_admission,
     load_apply,
 )
 
@@ -61,6 +62,45 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
             QUERY_BY_PREDICATE["life_event.died"],
             "Have I had any deaths in the family?",
         )
+
+    def test_reported_stance_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["stance.reported"],
+            "What have I said about worrying about the future?",
+        )
+
+    def test_accepts_exact_deferred_admission_result(self) -> None:
+        claim_id = "8fb8b3ab-a627-4555-99c6-fe4dc9b0ca89"
+        outbox_id = "11111111-1111-4111-8111-111111111111"
+        apply = apply_result(1)
+        apply["outcomes"] = [{"claim_id": claim_id}]
+        apply["result_sha256"] = sha256(
+            {key: item for key, item in apply.items() if key != "result_sha256"}
+        )
+        admission: dict[str, object] = {
+            "contract_version": (
+                "memory_v1_v5_deferred_projection_admission_result_v1"
+            ),
+            "mode": "apply",
+            "owner_user_id": OWNER,
+            "source_apply_result_sha256": apply["result_sha256"],
+            "rows_written": 1,
+            "qdrant_writes": 0,
+            "outcomes": [
+                {
+                    "claim_id": claim_id,
+                    "outbox_id": outbox_id,
+                    "status": "pending",
+                    "predicate": "stance.reported",
+                }
+            ],
+        }
+        admission["result_sha256"] = sha256(admission)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "admission.json"
+            path.write_text(json.dumps(admission), encoding="utf-8")
+            loaded = load_admission(path, apply)
+        self.assertEqual(loaded[claim_id]["outbox_id"], outbox_id)
 
 
 if __name__ == "__main__":

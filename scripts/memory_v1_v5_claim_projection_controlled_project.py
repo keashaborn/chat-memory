@@ -28,6 +28,7 @@ from rag_engine.qdrant_compat import make_qdrant_client
 
 CONTRACT = "memory_v1_claim_projection_controlled_project_result_v1"
 APPLY_CONTRACT = "memory_v1_claim_projection_apply_batch_result_v1"
+ADMISSION_CONTRACT = "memory_v1_v5_deferred_projection_admission_result_v1"
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER_OWNER = "557ea042-cb82-48f8-9429-472e96c957ef"
@@ -39,6 +40,7 @@ QUERY_BY_PREDICATE = {
     "identity.name": "What was my pet's name?",
     "pet.sex": "Was Dahlia female or male?",
     "pet.breed": "What breed was Dahlia?",
+    "stance.reported": "What have I said about worrying about the future?",
 }
 
 
@@ -49,6 +51,7 @@ class ControlledProjectionError(RuntimeError):
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply-result", required=True)
+    parser.add_argument("--admission-result")
     parser.add_argument("--output", required=True)
     parser.add_argument("--collection", default="memory_claim_v1")
     parser.add_argument("--vector-size", type=int, default=3072)
@@ -86,6 +89,50 @@ def load_apply(path: Path) -> dict[str, Any]:
     ):
         raise ControlledProjectionError("apply result is outside the bounded claim boundary")
     return value
+
+
+def load_admission(
+    path: Path, apply: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    value = json.loads(path.read_text())
+    if value.get("result_sha256") != sha256(
+        {key: item for key, item in value.items() if key != "result_sha256"}
+    ):
+        raise ControlledProjectionError("admission result content hash mismatch")
+    outcomes = value.get("outcomes")
+    apply_outcomes = apply["outcomes"]
+    if (
+        value.get("contract_version") != ADMISSION_CONTRACT
+        or value.get("mode") != "apply"
+        or value.get("owner_user_id") != OWNER
+        or value.get("source_apply_result_sha256") != apply["result_sha256"]
+        or value.get("rows_written") != len(apply_outcomes)
+        or value.get("qdrant_writes") != 0
+        or not isinstance(outcomes, list)
+        or len(outcomes) != len(apply_outcomes)
+    ):
+        raise ControlledProjectionError(
+            "admission result is outside the bounded claim boundary"
+        )
+    by_claim: dict[str, dict[str, Any]] = {}
+    for item in outcomes:
+        try:
+            claim_id = str(uuid.UUID(item["claim_id"]))
+            outbox_id = str(uuid.UUID(item["outbox_id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ControlledProjectionError(
+                "admission result has invalid identifiers"
+            ) from exc
+        if (
+            claim_id in by_claim
+            or item.get("status") != "pending"
+            or item.get("predicate") not in QUERY_BY_PREDICATE
+        ):
+            raise ControlledProjectionError("admission result contains an invalid job")
+        by_claim[claim_id] = {**item, "claim_id": claim_id, "outbox_id": outbox_id}
+    if by_claim.keys() != {item["claim_id"] for item in apply_outcomes}:
+        raise ControlledProjectionError("admission and apply claim sets differ")
+    return by_claim
 
 
 async def set_actor(conn: asyncpg.Connection, actor: str) -> None:
@@ -258,9 +305,24 @@ async def shadow_tests(
 async def run() -> int:
     args = arguments()
     apply_path = private_path(args.apply_result)
+    admission_path = (
+        private_path(args.admission_result) if args.admission_result else None
+    )
     output = private_path(args.output, output=True)
     apply = load_apply(apply_path)
     items = sorted(apply["outcomes"], key=lambda item: item["claim_id"])
+    if apply.get("projection_outbox_deferred") is True:
+        if admission_path is None:
+            raise ControlledProjectionError(
+                "deferred projection requires an admission result"
+            )
+        admission = load_admission(admission_path, apply)
+        for item in items:
+            item["outbox_id"] = admission[item["claim_id"]]["outbox_id"]
+    elif admission_path is not None:
+        raise ControlledProjectionError(
+            "admission result is accepted only for deferred projection"
+        )
     for item in items:
         if item.get("claim_revision_number") != 2 or item.get("predicate") not in QUERY_BY_PREDICATE:
             raise ControlledProjectionError("apply outcome cannot be projected")
@@ -368,6 +430,14 @@ async def run() -> int:
         "owner_user_id": OWNER,
         "apply_result_file_sha256": hashlib.sha256(apply_path.read_bytes()).hexdigest(),
         "apply_result_sha256": apply["result_sha256"],
+        "admission_result_file_sha256": (
+            hashlib.sha256(admission_path.read_bytes()).hexdigest()
+            if admission_path is not None else None
+        ),
+        "admission_result_sha256": (
+            json.loads(admission_path.read_text())["result_sha256"]
+            if admission_path is not None else None
+        ),
         "apply_manifest_file_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "apply_manifest_sha256": manifest_sha,
         "collection": args.collection,
