@@ -16,6 +16,12 @@ dependency chain without creating a user-visible chat:
 5. Store only bounded timing/status telemetry under a dedicated synthetic actor.
 6. Evaluate the synthetic actor's rolling 30-day `voice_slo_v1` aggregate.
 
+The canary acquires a normal voice-session lease before the first protected
+voice request, renews it between stages, sends the session identifier through
+every protected stage, and releases it before recording telemetry. The
+synthetic path never receives an exemption from the production voice-session
+boundary.
+
 The runner never logs or stores the transcript or answer. It outputs one
 aggregate-only JSON result. It exits nonzero on a current dependency failure or
 after a mature SLO window fails a threshold.
@@ -33,6 +39,8 @@ word-error-rate test.
   thread or normal transcript/answer rows.
 - The telemetry record has `synthetic=true`, no thread ID, no text, and the
   `voice_turn_trace_v1` timing schema.
+- Stable failure stage/code fields may be retained for operational diagnosis;
+  upstream response bodies, transcript text, and answer text are never retained.
 - The systemd service reads only `/etc/verbalsage/voice-canary.env`; it does not
   receive the application database or OpenAI credentials.
 - A webhook is optional. Its payload contains only the contract version, stable

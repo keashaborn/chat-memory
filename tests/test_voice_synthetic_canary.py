@@ -31,6 +31,36 @@ def no_store_headers(content_type: str = "application/json") -> dict[str, str]:
     }
 
 
+def voice_session_response(
+    request: httpx.Request,
+) -> httpx.Response | None:
+    action = request.url.path.removeprefix("/voice/session/")
+    flag = {
+        "acquire": "acquired",
+        "heartbeat": "renewed",
+        "release": "released",
+    }.get(action)
+    if flag is None:
+        return None
+    body = json.loads(request.content)
+    session_id = body["session_id"]
+    if request.headers.get("x-vs-voice-session-id") != session_id:
+        return httpx.Response(
+            400,
+            headers=no_store_headers(),
+            json={"detail": "session header mismatch"},
+        )
+    return httpx.Response(
+        200,
+        headers=no_store_headers(),
+        json={
+            "ok": True,
+            "session_id": session_id,
+            flag: True,
+        },
+    )
+
+
 class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
     def test_transcript_match_tolerates_one_misrecognized_word(self) -> None:
         self.assertTrue(
@@ -69,6 +99,7 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_success_uses_no_store_and_records_synthetic_trace(self) -> None:
         calls: list[tuple[str, str, dict | None]] = []
+        protected_session_ids: list[str | None] = []
         tts_calls = 0
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -81,14 +112,23 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     body = None
             calls.append((request.method, request.url.path, body))
 
+            session_response = voice_session_response(request)
+            if session_response is not None:
+                return session_response
             if request.url.path == "/voice/tts":
                 tts_calls += 1
+                protected_session_ids.append(
+                    request.headers.get("x-vs-voice-session-id")
+                )
                 return httpx.Response(
                     200,
                     headers=no_store_headers("audio/pcm"),
                     content=pcm_bytes(),
                 )
             if request.url.path == "/voice/openai/transcribe":
+                protected_session_ids.append(
+                    request.headers.get("x-vs-voice-session-id")
+                )
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
@@ -100,6 +140,9 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
             if request.url.path == "/response/query":
+                protected_session_ids.append(
+                    request.headers.get("x-vs-voice-session-id")
+                )
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
@@ -151,6 +194,22 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["contract_version"], CONTRACT_VERSION)
         self.assertTrue(report["telemetry_recorded"])
         self.assertEqual(tts_calls, 2)
+        paths = [path for _, path, _ in calls]
+        self.assertEqual(paths.count("/voice/session/acquire"), 1)
+        self.assertEqual(paths.count("/voice/session/heartbeat"), 3)
+        self.assertEqual(paths.count("/voice/session/release"), 1)
+        self.assertEqual(
+            paths.index("/voice/session/acquire"),
+            0,
+        )
+        self.assertLess(
+            paths.index("/voice/session/release"),
+            paths.index("/telemetry/event"),
+        )
+        self.assertTrue(protected_session_ids)
+        self.assertEqual(len(set(protected_session_ids)), 1)
+        self.assertIsNotNone(protected_session_ids[0])
+        uuid.UUID(str(protected_session_ids[0]))
 
         response_body = next(
             body
@@ -182,6 +241,9 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal trace_payload
+            session_response = voice_session_response(request)
+            if session_response is not None:
+                return session_response
             if request.url.path == "/voice/tts":
                 return httpx.Response(
                     200,
@@ -252,6 +314,9 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slo_failure_fails_current_run_after_success(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
+            session_response = voice_session_response(request)
+            if session_response is not None:
+                return session_response
             if request.url.path == "/voice/tts":
                 return httpx.Response(
                     200,

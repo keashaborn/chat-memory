@@ -63,3 +63,15 @@ is not an initial latency SLO because it grows with answer length.
 The endpoint requires the same authenticated actor boundary as other telemetry
 metrics and returns explicit per-measure `pass`, `fail`, or
 `insufficient_data`.
+
+The response also separates current monitor health from the historical SLO:
+
+- `current.status` reports whether the latest synthetic dependency-chain run
+  completed.
+- `current.consecutive_successes` counts completed samples since the most recent
+  non-completed sample.
+- `current.latest_failure_*` exposes only the bounded timestamp, stage, and
+  stable failure code for the most recent failed sample.
+
+Historical failed samples remain in the rolling window until normal retention
+removes them; a repaired current canary does not rewrite or delete that evidence.

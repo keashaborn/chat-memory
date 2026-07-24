@@ -118,6 +118,14 @@ def _iso_utc_or_none(value: Any) -> str | None:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _optional_text(row: Any, key: str) -> str | None:
+    value = row[key]
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _voice_slo_payload(row: Any, window_days: int) -> dict[str, Any]:
     total = int(row["total"] or 0)
     completed = int(row["completed"] or 0)
@@ -171,6 +179,14 @@ def _voice_slo_payload(row: Any, window_days: int) -> dict[str, Any]:
         if "fail" in statuses
         else "pass"
     )
+    latest_status = _optional_text(row, "latest_status")
+    current_status = (
+        "pass"
+        if latest_status == "completed"
+        else "fail"
+        if latest_status == "failed"
+        else "insufficient_data"
+    )
 
     return {
         "contract_version": VOICE_SLO_CONTRACT_VERSION,
@@ -178,6 +194,23 @@ def _voice_slo_payload(row: Any, window_days: int) -> dict[str, Any]:
         "minimum_samples": VOICE_SLO_MINIMUM_SAMPLES,
         "overall_status": overall_status,
         "latest_sample_at": _iso_utc_or_none(row["latest_sample_at"]),
+        "current": {
+            "status": current_status,
+            "consecutive_successes": int(
+                row["consecutive_successes"] or 0
+            ),
+            "latest_failure_at": _iso_utc_or_none(
+                row["latest_failure_at"]
+            ),
+            "latest_failure_stage": _optional_text(
+                row,
+                "latest_failure_stage",
+            ),
+            "latest_failure_code": _optional_text(
+                row,
+                "latest_failure_code",
+            ),
+        },
         "sample": {
             "total": total,
             "evaluated_turns": evaluated_turns,
@@ -573,6 +606,7 @@ async def voice_slo(
                     occurred_at,
                     payload->>'status' AS status,
                     payload->>'failure_stage' AS failure_stage,
+                    payload->>'failure_code' AS failure_code,
                     CASE
                       WHEN payload->>'transcription_ms' ~ '^[0-9]+$'
                       THEN (payload->>'transcription_ms')::double precision
@@ -611,6 +645,46 @@ async def voice_slo(
                 )
                 SELECT
                   max(occurred_at) AS latest_sample_at,
+                  (
+                    SELECT status
+                    FROM voice
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                  ) AS latest_status,
+                  (
+                    SELECT count(*)::bigint
+                    FROM voice AS successful
+                    WHERE successful.status='completed'
+                      AND successful.occurred_at > coalesce(
+                        (
+                          SELECT max(interrupted.occurred_at)
+                          FROM voice AS interrupted
+                          WHERE interrupted.status <> 'completed'
+                        ),
+                        '-infinity'::timestamptz
+                      )
+                  ) AS consecutive_successes,
+                  (
+                    SELECT occurred_at
+                    FROM voice
+                    WHERE status='failed'
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                  ) AS latest_failure_at,
+                  (
+                    SELECT failure_stage
+                    FROM voice
+                    WHERE status='failed'
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                  ) AS latest_failure_stage,
+                  (
+                    SELECT failure_code
+                    FROM voice
+                    WHERE status='failed'
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                  ) AS latest_failure_code,
                   count(*)::bigint AS total,
                   count(*) FILTER (
                     WHERE status='completed'

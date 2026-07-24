@@ -19,8 +19,9 @@ from typing import Any
 import httpx
 
 
-CONTRACT_VERSION = "voice_synthetic_canary_v1_2"
+CONTRACT_VERSION = "voice_synthetic_canary_v1_3"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
+VOICE_SESSION_HEADER = "x-vs-voice-session-id"
 SPEECH_TO_FIRST_AUDIO_BASIS = "synthetic_turn_start_v1"
 SYNTHETIC_PHRASE = "Operational voice canary."
 SYNTHETIC_EXPECTED_WORDS = frozenset({"operational", "voice", "canary"})
@@ -75,12 +76,17 @@ def _validate_config(config: CanaryConfig) -> CanaryConfig:
     )
 
 
-def _headers(config: CanaryConfig, voice_turn_id: str) -> dict[str, str]:
+def _headers(
+    config: CanaryConfig,
+    voice_turn_id: str,
+    voice_session_id: str,
+) -> dict[str, str]:
     return {
         "x-vs-service-token": config.service_token,
         "x-vs-actor-user-id": config.actor_user_id,
         "x-vs-owner-user-id": config.actor_user_id,
         "x-vs-voice-turn-id": voice_turn_id,
+        VOICE_SESSION_HEADER: voice_session_id,
         "x-request-id": f"voice-canary-{voice_turn_id}",
     }
 
@@ -95,6 +101,34 @@ def _require_success(response: httpx.Response, stage: str) -> None:
     if response.status_code < 200 or response.status_code >= 300:
         raise CanaryFailure(stage, f"upstream_http_{response.status_code}")
     _require_no_store(response, stage)
+
+
+async def _voice_session_command(
+    client: httpx.AsyncClient,
+    *,
+    headers: dict[str, str],
+    voice_session_id: str,
+    action: str,
+) -> None:
+    response = await client.post(
+        f"/voice/session/{action}",
+        headers=headers,
+        json={"session_id": voice_session_id},
+    )
+    _require_success(response, "session")
+    body = response.json()
+    if body.get("session_id") != voice_session_id:
+        raise CanaryFailure("session", "voice_session_identity_mismatch")
+    expected_flag = {
+        "acquire": "acquired",
+        "heartbeat": "renewed",
+        "release": "released",
+    }[action]
+    if body.get(expected_flag) is not True:
+        raise CanaryFailure(
+            "session",
+            f"voice_session_{action}_failed",
+        )
 
 
 def _pcm_to_wav(pcm: bytes) -> bytes:
@@ -172,6 +206,7 @@ async def _post_trace(
     voice_turn_id: str,
     status: str,
     failure_stage: str,
+    failure_code: str,
     metrics: dict[str, Any],
 ) -> None:
     payload = {
@@ -180,6 +215,7 @@ async def _post_trace(
         "canary_contract_version": CONTRACT_VERSION,
         "status": status,
         "failure_stage": failure_stage,
+        "failure_code": failure_code or None,
         **metrics,
     }
     event = {
@@ -276,7 +312,8 @@ async def run_canary(
 ) -> tuple[dict[str, Any], int]:
     config = _validate_config(config)
     voice_turn_id = str(uuid.uuid4())
-    headers = _headers(config, voice_turn_id)
+    voice_session_id = str(uuid.uuid4())
+    headers = _headers(config, voice_turn_id, voice_session_id)
     metrics: dict[str, Any] = {
         "speech_ms": None,
         "audio_bytes": None,
@@ -301,6 +338,7 @@ async def run_canary(
     failure_code = "unknown_failure"
     slo_payload: dict[str, Any] | None = None
     telemetry_recorded = False
+    session_acquired = False
 
     async with httpx.AsyncClient(
         base_url=config.base_url,
@@ -308,6 +346,13 @@ async def run_canary(
         transport=transport,
     ) as client:
         try:
+            await _voice_session_command(
+                client,
+                headers=headers,
+                voice_session_id=voice_session_id,
+                action="acquire",
+            )
+            session_acquired = True
             seed_pcm, _, _ = await _stream_tts(
                 client,
                 headers=headers,
@@ -318,6 +363,12 @@ async def run_canary(
             wav_audio = _pcm_to_wav(seed_pcm)
             metrics["audio_bytes"] = len(wav_audio)
 
+            await _voice_session_command(
+                client,
+                headers=headers,
+                voice_session_id=voice_session_id,
+                action="heartbeat",
+            )
             transcription_started = time.perf_counter()
             transcription = await client.post(
                 "/voice/openai/transcribe",
@@ -339,6 +390,12 @@ async def run_canary(
             metrics["transcription_model"] = transcription_body.get("model")
             metrics["transcription_language"] = transcription_body.get("language")
 
+            await _voice_session_command(
+                client,
+                headers=headers,
+                voice_session_id=voice_session_id,
+                action="heartbeat",
+            )
             response_started = time.perf_counter()
             governed = await client.post(
                 "/response/query",
@@ -357,6 +414,12 @@ async def run_canary(
                 raise CanaryFailure("response", "unexpected_response_runtime")
             answer = _bounded_tts_text(governed_body.get("answer"))
 
+            await _voice_session_command(
+                client,
+                headers=headers,
+                voice_session_id=voice_session_id,
+                action="heartbeat",
+            )
             _, first_audio_ms, tts_total_ms = await _stream_tts(
                 client,
                 headers=headers,
@@ -389,6 +452,20 @@ async def run_canary(
             failure_stage = "internal"
             failure_code = "unexpected_internal_error"
             metrics["total_turn_ms"] = _elapsed_ms(started)
+        finally:
+            if session_acquired:
+                try:
+                    await _voice_session_command(
+                        client,
+                        headers=headers,
+                        voice_session_id=voice_session_id,
+                        action="release",
+                    )
+                except CanaryFailure as exc:
+                    if status == "completed":
+                        status = "failed"
+                        failure_stage = exc.stage
+                        failure_code = exc.code
 
         try:
             await _post_trace(
@@ -397,6 +474,7 @@ async def run_canary(
                 voice_turn_id=voice_turn_id,
                 status=status,
                 failure_stage=failure_stage,
+                failure_code=failure_code,
                 metrics=metrics,
             )
             telemetry_recorded = True

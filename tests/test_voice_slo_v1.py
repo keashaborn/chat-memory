@@ -27,6 +27,11 @@ def slo_row(**overrides: Any) -> dict[str, Any]:
             30,
             tzinfo=timezone.utc,
         ),
+        "latest_status": "completed",
+        "consecutive_successes": 1,
+        "latest_failure_at": None,
+        "latest_failure_stage": None,
+        "latest_failure_code": None,
         "total": 1,
         "completed": 1,
         "failed": 0,
@@ -110,6 +115,8 @@ class VoiceSloV1Tests(unittest.TestCase):
             "2026-07-23T11:30:00Z",
         )
         self.assertEqual(payload["sample"]["completed"], 1)
+        self.assertEqual(payload["current"]["status"], "pass")
+        self.assertEqual(payload["current"]["consecutive_successes"], 1)
         self.assertEqual(
             payload["latency_ms"]["end_of_speech_to_first_audio"]["p95"],
             9486.0,
@@ -124,6 +131,8 @@ class VoiceSloV1Tests(unittest.TestCase):
         self.assertIn("synthetic_turn_start_v1", query)
         self.assertIn("coalesce(", query)
         self.assertIn("max(occurred_at)", query)
+        self.assertIn("consecutive_successes", query)
+        self.assertIn("failure_code", query)
 
     def test_contract_passes_only_after_minimum_samples(self) -> None:
         payload = telemetry._voice_slo_payload(
@@ -155,6 +164,45 @@ class VoiceSloV1Tests(unittest.TestCase):
                 "end_of_speech_to_first_audio_ms_p95"
             ]["status"],
             "fail",
+        )
+
+    def test_current_health_is_separate_from_historical_slo(self) -> None:
+        latest_failure_at = datetime(
+            2026,
+            7,
+            24,
+            21,
+            2,
+            tzinfo=timezone.utc,
+        )
+        payload = telemetry._voice_slo_payload(
+            slo_row(
+                total=64,
+                completed=57,
+                failed=7,
+                latest_status="completed",
+                consecutive_successes=1,
+                latest_failure_at=latest_failure_at,
+                latest_failure_stage="tts",
+                latest_failure_code="upstream_http_409",
+            ),
+            30,
+        )
+
+        self.assertEqual(payload["overall_status"], "fail")
+        self.assertEqual(payload["current"]["status"], "pass")
+        self.assertEqual(payload["current"]["consecutive_successes"], 1)
+        self.assertEqual(
+            payload["current"]["latest_failure_at"],
+            "2026-07-24T21:02:00Z",
+        )
+        self.assertEqual(
+            payload["current"]["latest_failure_stage"],
+            "tts",
+        )
+        self.assertEqual(
+            payload["current"]["latest_failure_code"],
+            "upstream_http_409",
         )
 
 
