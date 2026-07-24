@@ -13,12 +13,20 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
+from .memory_v1_entity_scope_resolver_v2 import (
+    EntityScopeSnapshotEdgeV2,
+    EntityScopeSnapshotEntityV2,
+    MemoryEntityScopeSnapshotV2,
+)
+
 
 class GovernedPostgresLoaderError(RuntimeError):
     pass
 
 
 MAX_CLAIM_IDS = 100
+MAX_ENTITY_SCOPE_ENTITIES = 1000
+MAX_ENTITY_SCOPE_EDGES = 2000
 MAX_PROJECT_ROWS = 8
 MAX_PREFERENCE_ROWS = 200
 ENTITY_TYPES = frozenset(
@@ -214,6 +222,128 @@ async def load_governed_v5_claim_rows_v2(
         "owner_user_id": actor,
         "claim_ids": requested,
         "records": records,
+        "controls": controls,
+        "database_writes": 0,
+    }
+
+
+async def load_governed_entity_scope_snapshot_v2(
+    conn: Any,
+    owner_user_id: UUID,
+) -> Mapping[str, Any]:
+    actor = _uuid(owner_user_id, "owner_user_id")
+    async with conn.transaction(isolation="repeatable_read", readonly=True):
+        controls = await _establish_read_controls(conn, actor)
+        for identity in (
+            "memory.read_governed_entity_scope_entities_v1()",
+            "memory.read_governed_entity_scope_edges_v1()",
+        ):
+            await _verify_restricted_read_function(conn, identity)
+        controls["restricted_entity_scope_contract"] = True
+        entity_rows = list(
+            await conn.fetch(
+                "SELECT * FROM memory.read_governed_entity_scope_entities_v1()"
+            )
+        )
+        edge_rows = list(
+            await conn.fetch(
+                "SELECT * FROM memory.read_governed_entity_scope_edges_v1()"
+            )
+        )
+    if not 1 <= len(entity_rows) <= MAX_ENTITY_SCOPE_ENTITIES:
+        raise GovernedPostgresLoaderError(
+            "entity scope must contain 1 to 1000 entities"
+        )
+    if len(edge_rows) > MAX_ENTITY_SCOPE_EDGES:
+        raise GovernedPostgresLoaderError("entity scope exceeds 2000 edges")
+
+    entities: list[EntityScopeSnapshotEntityV2] = []
+    seen_entities: set[UUID] = set()
+    for row in entity_rows:
+        value = dict(row)
+        if _uuid(value.get("owner_user_id"), "entity.owner_user_id") != actor:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned a cross-owner entity"
+            )
+        entity_id = _uuid(value.get("entity_id"), "entity.entity_id")
+        if entity_id in seen_entities:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned a duplicate entity"
+            )
+        seen_entities.add(entity_id)
+        aliases = value.get("normalized_aliases")
+        if not isinstance(aliases, (list, tuple)) or any(
+            not isinstance(item, str) for item in aliases
+        ):
+            raise GovernedPostgresLoaderError(
+                "entity.normalized_aliases must be an array of strings"
+            )
+        try:
+            entities.append(
+                EntityScopeSnapshotEntityV2(
+                    entity_id=entity_id,
+                    entity_type=value.get("entity_type"),
+                    canonical_name=value.get("canonical_name"),
+                    normalized_name=value.get("normalized_name"),
+                    aliases=tuple(aliases),
+                    identity_state=value.get("identity_state"),
+                    relationship_role=value.get("relationship_role"),
+                )
+            )
+        except Exception as exc:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned an invalid entity"
+            ) from exc
+
+    edges: list[EntityScopeSnapshotEdgeV2] = []
+    seen_edges: set[UUID] = set()
+    for row in edge_rows:
+        value = dict(row)
+        if _uuid(value.get("owner_user_id"), "edge.owner_user_id") != actor:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned a cross-owner edge"
+            )
+        claim_id = _uuid(value.get("claim_id"), "edge.claim_id")
+        if claim_id in seen_edges:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned a duplicate edge"
+            )
+        seen_edges.add(claim_id)
+        try:
+            edges.append(
+                EntityScopeSnapshotEdgeV2(
+                    claim_id=claim_id,
+                    predicate=value.get("predicate"),
+                    subject_entity_id=_uuid(
+                        value.get("subject_entity_id"),
+                        "edge.subject_entity_id",
+                    ),
+                    subject_entity_type=value.get("subject_entity_type"),
+                    object_entity_id=_uuid(
+                        value.get("object_entity_id"),
+                        "edge.object_entity_id",
+                    ),
+                    object_entity_type=value.get("object_entity_type"),
+                )
+            )
+        except Exception as exc:
+            raise GovernedPostgresLoaderError(
+                "entity scope returned an invalid edge"
+            ) from exc
+
+    try:
+        snapshot = MemoryEntityScopeSnapshotV2.create(
+            owner_user_id=actor,
+            entities=tuple(entities),
+            edges=tuple(edges),
+        )
+    except Exception as exc:
+        raise GovernedPostgresLoaderError(
+            "entity scope snapshot failed reconciliation"
+        ) from exc
+    return {
+        "owner_user_id": actor,
+        "snapshot": snapshot,
         "controls": controls,
         "database_writes": 0,
     }
@@ -417,6 +547,7 @@ async def load_governed_preference_snapshot_v1(
 __all__ = [
     "GovernedPostgresLoaderError",
     "GovernedV5ProjectRowLoaderV1",
+    "load_governed_entity_scope_snapshot_v2",
     "load_governed_preference_snapshot_v1",
     "load_governed_v5_claim_rows_v1",
     "load_governed_v5_claim_rows_v2",
