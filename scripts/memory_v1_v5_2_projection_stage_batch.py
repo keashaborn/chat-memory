@@ -241,6 +241,11 @@ async def source_snapshot(
         raise ProjectionStageError("exact owner-scoped projection source not found")
     source = dict(source_row)
     spans = entailment_row["source_spans"]
+    for field in ("object_literal", "project_scope", "temporal"):
+        if isinstance(source.get(field), str):
+            source[field] = json.loads(source[field])
+    if isinstance(spans, str):
+        spans = json.loads(spans)
     if not isinstance(spans, list) or not spans:
         raise ProjectionStageError("source spans are absent")
     if (
