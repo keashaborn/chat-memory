@@ -39,6 +39,7 @@ from rag_engine.trusted_web_ncbi_v1 import (
 from rag_engine.trusted_web_ods_v1 import (
     NIHODSClientV1,
     ODSClientError,
+    load_cached_ods_creatine_guidance,
     trusted_web_query_uses_ods,
 )
 from rag_engine.trusted_web_policy_v1 import (
@@ -257,14 +258,10 @@ async def trusted_web_query(
         if trusted_web_topic_uses_ncbi(policy.topic):
             ods_records = ()
             if trusted_web_query_uses_ods(payload.query):
-                ods_records = (
-                    await asyncio.wait_for(
-                        asyncio.to_thread(
-                            NIHODSClientV1().creatine_exercise_performance,
-                        ),
-                        timeout=15.0,
-                    ),
-                )
+                ods_record = await load_cached_ods_creatine_guidance(conn)
+                if ods_record is None:
+                    ods_record = NIHODSClientV1().creatine_exercise_performance()
+                ods_records = (ods_record,)
             ncbi_client = NCBIPubMedClientV1.from_env()
             if ods_records:
                 ncbi_client = NCBIPubMedClientV1(

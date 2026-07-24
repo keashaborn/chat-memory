@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Deterministic NIH ODS guidance retrieval for supplement safety."""
 
+import html
 import re
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -114,6 +115,32 @@ def _html_to_text(raw_html: str) -> str:
     return value.strip()
 
 
+async def load_cached_ods_creatine_guidance(conn) -> ODSGuidanceRecordV1 | None:
+    row = await conn.fetchrow(
+        """
+        SELECT source_id, url, title, section_title, evidence_type, guidance_text
+        FROM trusted_web.source_cache
+        WHERE source_id = $1
+          AND status = 'active'
+          AND expires_at > now()
+        """,
+        "ExerciseAndAthleticPerformance:Creatine:Consumer",
+    )
+    if not row:
+        return None
+    try:
+        return ODSGuidanceRecordV1(
+            url=str(row["url"]),
+            title=str(row["title"]),
+            section_title=str(row["section_title"]),
+            source_id=str(row["source_id"]),
+            evidence_type=str(row["evidence_type"]),
+            guidance_text=str(row["guidance_text"]),
+        )
+    except Exception as exc:
+        raise ODSClientError("ods_cache_record_invalid") from exc
+
+
 def format_ods_guidance_for_model(records: tuple[ODSGuidanceRecordV1, ...]) -> str:
     if not records:
         return ""
@@ -140,5 +167,6 @@ __all__ = [
     "ODSClientError",
     "ODSGuidanceRecordV1",
     "format_ods_guidance_for_model",
+    "load_cached_ods_creatine_guidance",
     "trusted_web_query_uses_ods",
 ]

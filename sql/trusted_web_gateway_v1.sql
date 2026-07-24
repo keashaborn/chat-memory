@@ -41,6 +41,25 @@ CREATE INDEX IF NOT EXISTS retrieval_audit_actor_created_idx
 CREATE INDEX IF NOT EXISTS retrieval_audit_status_created_idx
     ON trusted_web.retrieval_audit (status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS trusted_web.source_cache (
+    source_id varchar(120) PRIMARY KEY,
+    authority_type varchar(80) NOT NULL,
+    evidence_type varchar(80) NOT NULL,
+    url text NOT NULL CHECK (url ~ '^https://'),
+    title varchar(500) NOT NULL,
+    section_title varchar(200) NOT NULL,
+    guidance_text text NOT NULL CHECK (char_length(guidance_text) >= 1 AND char_length(guidance_text) <= 5000),
+    content_sha256 char(64) NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+    fetched_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    status varchar(40) NOT NULL DEFAULT 'active',
+    error_code varchar(100),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS source_cache_status_expires_idx
+    ON trusted_web.source_cache (status, expires_at);
+
 REVOKE ALL ON ALL TABLES IN SCHEMA trusted_web FROM PUBLIC;
 
 DO $trusted_web_role_revokes$
