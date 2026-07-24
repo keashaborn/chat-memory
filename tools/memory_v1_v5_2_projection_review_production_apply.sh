@@ -238,6 +238,17 @@ restore_runtime
 [[ "$(docker inspect -f '{{.State.Running}}' "$container")" == true ]]
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
 [[ -n "${VS_SERVICE_TOKEN:-}" ]]
+for _attempt in $(seq 1 30); do
+  if curl --fail --silent --max-time 5 \
+      -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+      http://127.0.0.1:8088/healthz >/dev/null \
+    && curl --fail --silent --max-time 5 \
+      -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+      http://127.0.0.1:8088/readyz >/dev/null; then
+    break
+  fi
+  sleep 1
+done
 curl --fail --silent --show-error --max-time 30 \
   -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
   http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
