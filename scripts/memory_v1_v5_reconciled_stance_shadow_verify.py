@@ -128,18 +128,24 @@ async def run() -> int:
         await connection.close()
 
     expected_selection_sha256 = sha256([CLAIM_ID])
-    if (
-        trace.get("status") != "ok"
-        or trace.get("selected_count", 0) < 1
-        or trace.get("selection_set_sha256") != expected_selection_sha256
-        or trace.get("prompt_injection")
-        or trace.get("answer_model_exposure")
-        or trace.get("retrieval_activation")
-        or trace.get("database_writes") != 0
-        or trace.get("qdrant_writes") != 0
-        or other_records
-    ):
-        raise ShadowVerifyError("shadow trace did not remain isolated and read-only")
+    gates = {
+        "status_ok": trace.get("status") == "ok",
+        "selected": trace.get("selected_count", 0) >= 1,
+        "exact_selection": (
+            trace.get("selection_set_sha256") == expected_selection_sha256
+        ),
+        "no_prompt_injection": not trace.get("prompt_injection"),
+        "no_answer_exposure": not trace.get("answer_model_exposure"),
+        "no_retrieval_activation": not trace.get("retrieval_activation"),
+        "no_database_writes": trace.get("database_writes") == 0,
+        "no_qdrant_writes": trace.get("qdrant_writes") == 0,
+        "other_owner_empty": not other_records,
+    }
+    failed_gates = sorted(key for key, passed in gates.items() if not passed)
+    if failed_gates:
+        raise ShadowVerifyError(
+            "shadow trace gates failed:" + ",".join(failed_gates)
+        )
     points_after = qdrant.retrieve(
         collection_name=COLLECTION,
         ids=[CLAIM_ID],
