@@ -60,6 +60,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--review-manifest", required=True)
     parser.add_argument("--review-result", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--defer-projection-outbox", action="store_true")
     return parser.parse_args()
 
 
@@ -187,6 +188,8 @@ async def run() -> int:
         table: rows * len(items)
         for table, rows in EXPECTED_ROWS_PER_ITEM.items()
     }
+    if args.defer_projection_outbox:
+        expected_table_rows["projection_outbox"] = 0
     manifest = {
         "contract_version": CONTRACT,
         "owner_user_id": owner,
@@ -203,6 +206,8 @@ async def run() -> int:
         "expected_table_rows": expected_table_rows,
         "items": items,
     }
+    if args.defer_projection_outbox:
+        manifest["defer_projection_outbox"] = True
     manifest["manifest_sha256"] = sha256(manifest)
     output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     output.chmod(0o600)
