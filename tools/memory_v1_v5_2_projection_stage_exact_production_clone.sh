@@ -95,7 +95,7 @@ production_before=$(production_signature)
 production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 
 docker exec brains-postgres-1 pg_dump -U sage -d memory \
-  -Fc --no-owner >"$backup"
+  -Fc >"$backup"
 [[ -s "$backup" ]]
 docker exec brains-postgres-1 psql -X -A -t -U sage -d memory -c "
   SELECT format(
@@ -116,7 +116,7 @@ printf '%s\n' \
   "ALTER ROLE brains_app PASSWORD 'clone_only_brains_password';" \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
-  --clean --if-exists --no-owner <"$backup"
+  --clean --if-exists <"$backup"
 run_sql <"$migration"
 run_sql <"$migration"
 run_sql <"$security_test"
