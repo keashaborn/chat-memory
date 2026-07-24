@@ -33,9 +33,10 @@ compose=(
 backup=$(mktemp /tmp/memory-v1-v5-2-projection-stage.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-projection-stage-roles.XXXXXX.sql)
 work=$(mktemp -d /tmp/memory-v1-v5-2-projection-stage.XXXXXX)
-apply_result="$work/apply.json"
-replay_result="$work/replay.json"
-cross_result="$work/cross-owner.json"
+artifact_dir=$(dirname "$manifest")
+apply_result="$artifact_dir/clone-apply.json"
+replay_result="$artifact_dir/clone-replay.json"
+cross_result="$artifact_dir/clone-cross-owner.json"
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 
 cleanup() {
@@ -46,6 +47,9 @@ cleanup() {
 trap cleanup EXIT
 
 for output in "$manifest" "$authorization" "$report"; do
+  [[ "$output" == "$review_root"/* && ! -e "$output" ]]
+done
+for output in "$apply_result" "$replay_result" "$cross_result"; do
   [[ "$output" == "$review_root"/* && ! -e "$output" ]]
 done
 [[ "$report" == "$review_root"/* && ! -e "$report" ]]
