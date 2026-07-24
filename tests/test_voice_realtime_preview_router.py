@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+import json
+import os
+import unittest
+import uuid
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from rag_engine import voice_realtime_preview_router as preview
+from rag_engine.voice_realtime_session_manager import (
+    RealtimePreviewSessionRegistry,
+)
+
+
+ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+OTHER_ACTOR = "557ea042-cb82-48f8-9429-472e96c957ef"
+VOICE_SESSION = "a872d3f2-2d5c-4ae3-9f02-d9f43a38899e"
+OFFER_SDP = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+ANSWER_SDP = "v=0\r\no=- 2 3 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        *,
+        status_code: int = 201,
+        text: str = ANSWER_SDP,
+        location: str = "/v1/realtime/calls/rtc_test_123",
+    ) -> None:
+        self.status_code = status_code
+        self.text = text
+        self.headers = {
+            "location": location,
+            "x-request-id": "openai-request-realtime-001",
+        }
+
+
+class FakeAsyncClient:
+    response = FakeResponse()
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+    async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.__class__.calls.append({"url": url, **kwargs})
+        return self.__class__.response
+
+
+class VoiceRealtimePreviewRouterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        FakeAsyncClient.calls = []
+        FakeAsyncClient.response = FakeResponse()
+        app = FastAPI()
+        app.include_router(preview.router)
+        self.client = TestClient(app)
+        self.active_lease = patch.object(
+            preview,
+            "require_active_voice_session",
+            AsyncMock(),
+        )
+        self.active_lease.start()
+        self.addCleanup(self.active_lease.stop)
+        self.registry = RealtimePreviewSessionRegistry()
+        self.registry_patch = patch.object(
+            preview,
+            "preview_sessions",
+            self.registry,
+        )
+        self.registry_patch.start()
+        self.addCleanup(self.registry_patch.stop)
+
+    def _headers(
+        self,
+        *,
+        owner: str = ACTOR,
+        content_type: str = "application/sdp",
+    ) -> dict[str, str]:
+        return {
+            "x-vs-actor-user-id": ACTOR,
+            "x-vs-owner-user-id": owner,
+            "x-vs-voice-session-id": VOICE_SESSION,
+            "content-type": content_type,
+        }
+
+    def test_requires_owner_and_actor_equality(self) -> None:
+        missing = self.client.post(
+            "/voice/realtime-preview/call",
+            headers={
+                "x-vs-actor-user-id": ACTOR,
+                "content-type": "application/sdp",
+            },
+            content=OFFER_SDP,
+        )
+        self.assertEqual(missing.status_code, 400)
+
+        mismatch = self.client.post(
+            "/voice/realtime-preview/call",
+            headers=self._headers(owner=OTHER_ACTOR),
+            content=OFFER_SDP,
+        )
+        self.assertEqual(mismatch.status_code, 403)
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_rejects_non_sdp_before_openai(self) -> None:
+        response = self.client.post(
+            "/voice/realtime-preview/call",
+            headers=self._headers(content_type="application/json"),
+            content=OFFER_SDP,
+        )
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_rejects_invalid_sdp_before_openai(self) -> None:
+        response = self.client.post(
+            "/voice/realtime-preview/call",
+            headers=self._headers(),
+            content="not-sdp",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_creates_transcription_only_session_with_server_key(self) -> None:
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, ANSWER_SDP)
+        self.assertEqual(response.headers["content-type"], "application/sdp")
+        self.assertEqual(response.headers["cache-control"], preview.NO_STORE_HEADERS["cache-control"])
+        self.assertEqual(
+            response.headers["x-vs-realtime-preview-mode"],
+            "transcription-only",
+        )
+        self.assertNotIn("rtc_test_123", response.headers.values())
+        self.assertNotIn("test-only-key", response.text)
+        self.assertEqual(self.registry.size(), 1)
+
+        call = FakeAsyncClient.calls[0]
+        self.assertEqual(
+            call["url"],
+            "https://api.openai.com/v1/realtime/calls",
+        )
+        self.assertEqual(
+            call["headers"]["Authorization"],
+            "Bearer test-only-key",
+        )
+        self.assertTrue(
+            call["headers"]["OpenAI-Safety-Identifier"].startswith("vs1_")
+        )
+        self.assertNotIn(ACTOR, call["headers"]["OpenAI-Safety-Identifier"])
+        self.assertEqual(call["files"]["sdp"][1], OFFER_SDP)
+
+        session = json.loads(call["files"]["session"][1])
+        self.assertEqual(session["type"], "transcription")
+        self.assertEqual(
+            session["audio"]["input"]["transcription"]["model"],
+            "gpt-realtime-whisper",
+        )
+        self.assertEqual(
+            session["audio"]["input"]["turn_detection"],
+            None,
+        )
+        self.assertNotIn("output", session["audio"])
+        self.assertNotIn("instructions", session)
+        self.assertNotIn("tools", session)
+
+    def test_close_requires_matching_owner_and_voice_session(self) -> None:
+        registered = self.registry.register(
+            owner_user_id=ACTOR,
+            voice_session_id=uuid.UUID(VOICE_SESSION),
+            openai_call_id="rtc_test_close",
+        )
+        mismatch = self.client.delete(
+            f"/voice/realtime-preview/session/{registered.preview_session_id}",
+            headers=self._headers(owner=OTHER_ACTOR),
+        )
+        self.assertEqual(mismatch.status_code, 403)
+        self.assertEqual(self.registry.size(), 1)
+
+        closed = self.client.delete(
+            f"/voice/realtime-preview/session/{registered.preview_session_id}",
+            headers=self._headers(),
+        )
+        self.assertEqual(closed.status_code, 200)
+        self.assertTrue(closed.json()["removed"])
+        self.assertEqual(self.registry.size(), 0)
+
+    def test_openai_error_is_sanitized(self) -> None:
+        FakeAsyncClient.response = FakeResponse(
+            status_code=401,
+            text='{"error":{"message":"secret provider detail"}}',
+        )
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("secret provider detail", response.text)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "openai_realtime_error",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

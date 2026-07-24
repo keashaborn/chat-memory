@@ -32,6 +32,9 @@ class NewThreadReq(BaseModel):
     vantage_id: Optional[str] = "default"
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
+from rag_engine.voice_realtime_preview_router import (
+    router as voice_realtime_preview_router,
+)
 from rag_engine.voice_session_router import (
     require_active_voice_session,
     router as voice_session_router,
@@ -86,6 +89,7 @@ app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measureme
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
 app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
+app.include_router(voice_realtime_preview_router)
 app.include_router(voice_session_router)
 
 # ---------- request correlation ----------
