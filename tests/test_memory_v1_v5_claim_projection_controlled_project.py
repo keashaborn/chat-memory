@@ -20,13 +20,14 @@ from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
 )
 
 
-def apply_result(item_count: int) -> dict[str, object]:
+def apply_result(item_count: int, *, deferred: bool = False) -> dict[str, object]:
     value: dict[str, object] = {
         "contract_version": "memory_v1_claim_projection_apply_batch_result_v1",
         "mode": "apply",
         "owner_user_id": OWNER,
-        "insert_rows": 12 * item_count,
-        "mutated_rows": 13 * item_count,
+        "insert_rows": (11 if deferred else 12) * item_count,
+        "mutated_rows": (12 if deferred else 13) * item_count,
+        "projection_outbox_deferred": deferred,
         "outcomes": [{"claim_id": str(index)} for index in range(item_count)],
     }
     value["result_sha256"] = sha256(value)
@@ -45,6 +46,13 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
                 value = apply_result(item_count)
                 loaded = load_apply(self.write_result(directory, value))
                 self.assertEqual(len(loaded["outcomes"]), item_count)
+
+    def test_accepts_deferred_outbox_row_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for item_count in range(1, 5):
+                value = apply_result(item_count, deferred=True)
+                loaded = load_apply(self.write_result(directory, value))
+                self.assertTrue(loaded["projection_outbox_deferred"])
 
     def test_rejects_zero_or_more_than_four_claims(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

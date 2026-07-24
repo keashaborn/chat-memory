@@ -79,13 +79,16 @@ def load_apply(path: Path) -> dict[str, Any]:
     item_count = len(value.get("outcomes", [])) if isinstance(
         value.get("outcomes"), list
     ) else 0
+    deferred = value.get("projection_outbox_deferred") is True
+    expected_insert_rows = (11 if deferred else 12) * item_count
+    expected_mutated_rows = (12 if deferred else 13) * item_count
     if (
         value.get("contract_version") != APPLY_CONTRACT
         or value.get("mode") != "apply"
         or value.get("owner_user_id") != OWNER
         or not 1 <= item_count <= MAX_CLAIMS_PER_CONTROLLED_RUN
-        or value.get("insert_rows") != 12 * item_count
-        or value.get("mutated_rows") != 13 * item_count
+        or value.get("insert_rows") != expected_insert_rows
+        or value.get("mutated_rows") != expected_mutated_rows
     ):
         raise ControlledProjectionError("apply result is outside the bounded claim boundary")
     return value
