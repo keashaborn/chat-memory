@@ -223,7 +223,8 @@ async def run() -> int:
                 "revision_number": 2,
             }
             existing = await connection.fetchrow(
-                """SELECT outbox_id,payload,status::text,attempts
+                """SELECT outbox_id,payload,status::text,attempts,
+                          available_at='infinity'::timestamptz AS held
                    FROM memory.projection_outbox
                    WHERE owner_user_id=$1 AND aggregate_type='claim'
                      AND aggregate_id=$2 AND operation='upsert'""",
@@ -237,9 +238,13 @@ async def run() -> int:
             if args.mode == "apply":
                 inserted = await connection.fetchrow(
                     """INSERT INTO memory.projection_outbox(
-                         owner_user_id,aggregate_type,aggregate_id,operation,payload
-                       ) VALUES($1,'claim',$2,'upsert',$3::jsonb)
-                       RETURNING outbox_id,status::text,attempts""",
+                         owner_user_id,aggregate_type,aggregate_id,operation,
+                         payload,available_at
+                       ) VALUES(
+                         $1,'claim',$2,'upsert',$3::jsonb,'infinity'::timestamptz
+                       )
+                       RETURNING outbox_id,status::text,attempts,
+                         available_at='infinity'::timestamptz AS held""",
                     uuid.UUID(owner),
                     uuid.UUID(item["claim_id"]),
                     json.dumps(payload, sort_keys=True, separators=(",", ":")),
@@ -248,6 +253,7 @@ async def run() -> int:
                     inserted is None
                     or inserted["status"] != "pending"
                     or inserted["attempts"] != 0
+                    or inserted["held"] is not True
                 ):
                     raise DeferredProjectionAdmissionError(
                         "projection outbox admission did not create a pending job"
@@ -265,6 +271,7 @@ async def run() -> int:
                     or existing_payload != payload
                     or existing["status"] != "pending"
                     or existing["attempts"] != 0
+                    or existing["held"] is not True
                 ):
                     raise DeferredProjectionAdmissionError(
                         "projection outbox replay state differs"

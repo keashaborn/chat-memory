@@ -263,6 +263,7 @@ outbox_id=$(jq -er '.outcomes[0].outbox_id' "$apply")
     AND outbox_id='$outbox_id'::uuid
     AND aggregate_id='$claim_id'::uuid
     AND status='pending' AND attempts=0
+    AND available_at='infinity'::timestamptz
     AND payload=jsonb_build_object(
       'claim_id','$claim_id','revision_number',2
     )
