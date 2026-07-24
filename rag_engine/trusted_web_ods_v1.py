@@ -36,7 +36,7 @@ class ODSGuidanceRecordV1(BaseModel):
 
 def trusted_web_query_uses_ods(query: str) -> bool:
     text = " ".join(str(query or "").lower().split())
-    if "creatine" not in text:
+    if "creatine" not in text and "monohydrate" not in text:
         return False
     safety_terms = (
         "contraindication",

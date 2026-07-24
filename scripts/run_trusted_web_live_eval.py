@@ -57,6 +57,17 @@ SMOKE_CASES: tuple[EvalCase, ...] = (
         min_sources=3,
         required_source_authority="official_public_guidance",
     ),
+
+    EvalCase(
+        name="creatine_gummy_product_value",
+        query="I have been taking Nutra Champs monohydrate gummies 5,000 mg. 4 gummies 45 cal, 5,000 mg. Is this product worthwhile?",
+        expected_status=200,
+        expected_topic="supplements",
+        expected_searched=True,
+        min_sources=3,
+        required_source_authority="official_public_guidance",
+        required_answer_substring="[ODS:ExerciseAndAthleticPerformance:Creatine:Consumer]",
+    ),
     EvalCase(
         name="usda_food_composition_internal",
         query="How many calories are in this food barcode?",

@@ -77,6 +77,9 @@ _PUBMED_STOPWORDS = frozenset(
         "any",
         "are",
         "can",
+        "champs",
+        "calories",
+        "cal",
         "cause",
         "cite",
         "does",
@@ -92,7 +95,9 @@ _PUBMED_STOPWORDS = frozenset(
         "lift",
         "lifting",
         "people",
+        "nutra",
         "please",
+        "product",
         "reasonably",
         "show",
         "say",
@@ -103,9 +108,11 @@ _PUBMED_STOPWORDS = frozenset(
         "their",
         "this",
         "weight",
+        "worth",
         "weights",
         "what",
         "when",
+        "worthwhile",
         "whether",
         "with",
         "who",
@@ -138,6 +145,10 @@ _PUBMED_SYNONYMS = {
 
 def _normalize_pubmed_query(query: str) -> str:
     raw_text = " ".join(str(query or "").lower().split())
+    if "monohydrate" in raw_text and "creatine" not in raw_text:
+        raw_text = "creatine " + raw_text
+    if "creatine" in raw_text and any(term in raw_text for term in ("gummy", "gummies", "worth", "worthwhile", "product", "dose", "dosage", "monohydrate")):
+        return "creatine monohydrate supplementation safety resistance training"
     if "beta-alanine" in raw_text or "beta alanine" in raw_text:
         if any(term in raw_text for term in ("tingling", "paresthesia", "safe", "safety", "side effect", "adverse")):
             return "beta alanine paresthesia"

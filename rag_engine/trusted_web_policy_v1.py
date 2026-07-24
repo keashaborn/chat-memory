@@ -109,6 +109,12 @@ _SUPPLEMENT_TERMS = (
     "pre workout",
     "pre-workout",
     "ergogenic",
+    "worth it",
+    "worthwhile",
+    "gummy",
+    "gummies",
+    "creatine monohydrate",
+    "monohydrate",
 )
 
 _BEHAVIOR_TERMS = (
