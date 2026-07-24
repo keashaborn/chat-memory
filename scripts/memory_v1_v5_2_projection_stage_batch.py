@@ -574,12 +574,15 @@ async def run() -> int:
                 result = await cross_owner_probe(args, conn, manifest)
     finally:
         await conn.close()
-    result["result_sha256"] = sha256(result)
+    if args.command != "manifest":
+        result["result_sha256"] = sha256(result)
     write_private(output, result)
     print(f"mode={args.command}")
     print(f"rows_written={result.get('rows_written', 0)}")
     print(f"result={output}")
-    print(f"result_sha256={result['result_sha256']}")
+    print(
+        f"result_sha256={result.get('result_sha256', result['manifest_sha256'])}"
+    )
     return 0
 
 
