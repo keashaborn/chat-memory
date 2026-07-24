@@ -12,12 +12,12 @@ git -C "$repo_root" merge-base --is-ancestor \
   ab5a83e9c3f62c835a82e1742b2b2d003c3ee258 HEAD
 head=$(git -C "$repo_root" rev-parse HEAD)
 container=brains-postgres-1
+source_db=memory
 clone_db="memory_v5_deferred_projection_$(date -u +%Y%m%d%H%M%S)_$$"
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 claim_id=8fb8b3ab-a627-4555-99c6-fe4dc9b0ca89
 source_dir=/home/ubuntu/memory-v1-reviews/reconciled-production-20260724T185638Z_ab5a83e9c3f6
-source_backup=/home/ubuntu/brains/snapshots/memory_pre_deferred_projection_20260724T190850Z_e8eaa93ff96d.dump
 apply_result="$source_dir/materialize-apply.json"
 apply_manifest="$source_dir/apply-manifest.json"
 runner=scripts/memory_v1_v5_deferred_projection_admission.py
@@ -25,7 +25,6 @@ python_bin=/opt/chat-memory/venv/bin/python
 artifact_dir="/home/ubuntu/memory-v1-reviews/deferred-projection-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
 
 [[ -f "$apply_result" && -f "$apply_manifest" ]]
-[[ -s "$source_backup" ]]
 [[ "$(stat -c '%a' "$apply_result")" == 600 ]]
 [[ "$(stat -c '%a' "$apply_manifest")" == 600 ]]
 required_head=$(jq -er '.required_head_commit' "$apply_manifest")
@@ -55,7 +54,16 @@ qdrant_signature() {
 }
 
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
-docker exec -i "$container" pg_restore -U sage -d "$clone_db" <"$source_backup"
+docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
+  | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
+[[ "$(docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" -c \
+  "WITH removed AS (
+     DELETE FROM memory.projection_outbox
+     WHERE owner_user_id='$owner'::uuid
+       AND aggregate_id='$claim_id'::uuid
+     RETURNING 1
+   ) SELECT count(*) FROM removed")" == 1 ]]
 clone_dsn=$(SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone_db" python3 - <<'PY'
 import os
 from urllib.parse import urlsplit, urlunsplit
