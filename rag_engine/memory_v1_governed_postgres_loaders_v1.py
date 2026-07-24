@@ -250,12 +250,23 @@ async def load_governed_entity_scope_snapshot_v2(
                 "SELECT * FROM memory.read_governed_entity_scope_edges_v1()"
             )
         )
-    if not 1 <= len(entity_rows) <= MAX_ENTITY_SCOPE_ENTITIES:
+    if len(entity_rows) > MAX_ENTITY_SCOPE_ENTITIES:
         raise GovernedPostgresLoaderError(
-            "entity scope must contain 1 to 1000 entities"
+            "entity scope exceeds 1000 entities"
         )
     if len(edge_rows) > MAX_ENTITY_SCOPE_EDGES:
         raise GovernedPostgresLoaderError("entity scope exceeds 2000 edges")
+    if not entity_rows:
+        if edge_rows:
+            raise GovernedPostgresLoaderError(
+                "empty entity scope returned governed edges"
+            )
+        return {
+            "owner_user_id": actor,
+            "snapshot": None,
+            "controls": controls,
+            "database_writes": 0,
+        }
 
     entities: list[EntityScopeSnapshotEntityV2] = []
     seen_entities: set[UUID] = set()

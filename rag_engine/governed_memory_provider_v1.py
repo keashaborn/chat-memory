@@ -161,6 +161,8 @@ class LiveGovernedMemoryAssemblyProviderV1:
                     self._conn,
                     authenticated_actor_user_id,
                 )
+                if scope_batch["snapshot"] is None:
+                    return GovernedMemoryAssemblyV1()
                 try:
                     selector_context = resolve_memory_claim_selector_context_v2(
                         request=request,

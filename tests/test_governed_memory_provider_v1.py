@@ -99,6 +99,39 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.memory_input)
         self.assertIsNone(result.memory_application)
 
+    async def test_owner_without_v5_entities_returns_empty_before_qdrant(
+        self,
+    ) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id="empty-owner-request",
+            current_message="Do you know anything about my pets?",
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+
+        with patch.dict(
+            os.environ,
+            {"QDRANT_URL": "http://qdrant.invalid"},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.embed_text",
+            return_value=[0.125, -0.25, 0.5],
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.load_governed_entity_scope_snapshot_v2",
+            return_value={"snapshot": None},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.make_qdrant_client",
+            side_effect=AssertionError("Qdrant must not be opened"),
+        ):
+            result = await provider.prepare(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
+
+        self.assertIsNone(result.memory_input)
+        self.assertIsNone(result.memory_application)
+
     async def test_family_profile_recall_selects_and_applies_governed_claims(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(
             authenticated_actor_user_id=ACTOR,

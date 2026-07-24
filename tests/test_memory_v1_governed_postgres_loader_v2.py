@@ -91,6 +91,20 @@ def edge_row(*, owner: UUID = OWNER) -> dict[str, Any]:
 
 
 class GovernedPostgresLoaderV2Test(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_owner_returns_no_snapshot_without_cross_owner_fallback(
+        self,
+    ) -> None:
+        batch = await load_governed_entity_scope_snapshot_v2(
+            V2FakeConn(),
+            OWNER,
+        )
+
+        self.assertIsNone(batch["snapshot"])
+        self.assertEqual(batch["database_writes"], 0)
+        self.assertTrue(
+            batch["controls"]["restricted_entity_scope_contract"]
+        )
+
     async def test_entity_scope_loader_builds_hash_bound_snapshot(self) -> None:
         conn = V2FakeConn(
             entity_rows=[
