@@ -36,7 +36,7 @@ SMOKE_CASES: tuple[EvalCase, ...] = (
         expected_searched=True,
         min_sources=3,
         required_source_authority="official_public_guidance",
-        required_answer_substring="[ODS:ExerciseAndAthleticPerformance:Creatine:Consumer]",
+        required_answer_substring="[ODS]",
     ),
     EvalCase(
         name="creatine_strength_pubmed",
@@ -66,7 +66,7 @@ SMOKE_CASES: tuple[EvalCase, ...] = (
         expected_searched=True,
         min_sources=3,
         required_source_authority="official_public_guidance",
-        required_answer_substring="[ODS:ExerciseAndAthleticPerformance:Creatine:Consumer]",
+        required_answer_substring="[ODS]",
     ),
     EvalCase(
         name="usda_food_composition_internal",

@@ -31,7 +31,7 @@ class ODSGuidanceRecordV1(BaseModel):
 
     @property
     def citation_marker(self) -> str:
-        return f"[ODS:{self.source_id}]"
+        return "[ODS]"
 
 
 def trusted_web_query_uses_ods(query: str) -> bool:
@@ -146,7 +146,7 @@ def format_ods_guidance_for_model(records: tuple[ODSGuidanceRecordV1, ...]) -> s
         return ""
     blocks = [
         "Official public guidance records:",
-        "Use these as the first-line safety/plain-language reference. Cite material claims inline with [ODS:source_id].",
+        "Use these as the first-line safety/plain-language reference. Cite material claims inline with [ODS].",
     ]
     for record in records:
         blocks.extend(
