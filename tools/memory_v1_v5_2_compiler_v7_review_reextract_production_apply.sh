@@ -131,10 +131,13 @@ for artifact in "${!expected_sha256[@]}"; do
 done
 [[ -z "$(git status --porcelain)" ]]
 git merge-base --is-ancestor "$required_ancestor" HEAD
-[[ "$(jq -cS . "$manifest" | sha256sum | awk '{print $1}')" == \
+[[ "$(jq -cS . "$manifest" | tr -d '\n' | sha256sum | awk '{print $1}')" == \
   "$manifest_sha" ]]
 [[ "$(systemctl is-active brains.service)" == active ]]
-[[ "$(systemctl --failed --no-legend --no-pager | wc -l)" -eq 0 ]]
+failed_units_before=$(
+  systemctl list-units --state=failed --no-legend --no-pager --plain \
+    | awk '{print $1}' | sort | sha256sum | awk '{print $1}'
+)
 
 phase=production_clone
 bash "$clone_test" >"$clone_output"
@@ -309,6 +312,10 @@ cmp -s "$before" "$after"
   WHERE owner_user_id='$other'::uuid AND selector_version='$selector'")" == 0 ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 [[ "$(systemctl is-active brains.service)" == active ]]
+[[ "$(
+  systemctl list-units --state=failed --no-legend --no-pager --plain \
+    | awk '{print $1}' | sort | sha256sum | awk '{print $1}'
+)" == "$failed_units_before" ]]
 
 phase=restore_timers
 restore_timers
