@@ -299,7 +299,7 @@ review_preflight_after=$(function_sha \
   'memory.preflight_owner_v5_2_atom_review_v1(uuid,memory.v5_2_atom_review_decision,text,text,jsonb)')
 review_apply_after=$(function_sha \
   'memory.review_owner_v5_2_atom_proposal_v1(uuid,uuid,uuid,memory.v5_2_atom_review_decision,text,text,jsonb,text)')
-[[ "$review_preflight_after" != "$review_preflight_before" ]]
+[[ "$review_preflight_after" == "$review_preflight_before" ]]
 [[ "$review_apply_after" != "$review_apply_before" ]]
 run_sql <"$compat_migration" >>"$install_log" 2>&1
 [[ "$(function_sha \
