@@ -290,6 +290,8 @@ cmp -s "$non_target_after" "$non_target_replay"
 
 phase=postflight
 [[ "$(psql_row "SELECT count(*) FROM memory.projection_plan AS plan
+  JOIN memory.projection_plan_item AS item
+    ON item.owner_user_id=plan.owner_user_id AND item.plan_id=plan.plan_id
   JOIN memory.projection_plan_observation AS link
     ON link.owner_user_id=plan.owner_user_id AND link.plan_id=plan.plan_id
   JOIN memory.observation AS observation
@@ -297,7 +299,8 @@ phase=postflight
    AND observation.observation_id=link.observation_id
   WHERE plan.owner_user_id='$target_owner'::uuid
     AND observation.evidence_id='$target_evidence'::uuid
-    AND plan.status='pending_review'
+    AND item.review_state='manual_review_required'
+    AND item.authorization_required
     AND plan.predicate_registry_version='memory_predicate_registry_v5_2'")" == 4 ]]
 [[ "$(psql_row "SELECT count(*) FROM memory.claim_observation AS link
   JOIN memory.observation AS observation
