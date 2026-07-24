@@ -192,6 +192,44 @@ def _predicate_allowed(predicate: str, prefixes: Sequence[str]) -> bool:
     )
 
 
+def _evidence_by_stance(
+    evidence_raw: Mapping[str, Any],
+) -> EvidenceByStanceV1:
+    parsed = {
+        stance: parse_uuid_tuple(
+            evidence_raw[stance],
+            field=f"claim.evidence.{stance}",
+        )
+        for stance in sorted(EVIDENCE_STANCES)
+    }
+    epistemic_stances = ("opposes", "qualifies", "supports")
+    epistemic_membership: dict[UUID, str] = {}
+    for stance in epistemic_stances:
+        for evidence_id in parsed[stance]:
+            prior = epistemic_membership.get(evidence_id)
+            if prior is not None:
+                raise GovernedLaneAdapterError(
+                    "claim evidence cannot have multiple epistemic stances"
+                )
+            epistemic_membership[evidence_id] = stance
+
+    # A single utterance may support the primary observation while also
+    # supplying a contextual observation. Preserve its epistemic stance and
+    # remove only the redundant context reference. True epistemic conflicts
+    # remain fail-closed above.
+    context = tuple(
+        evidence_id
+        for evidence_id in parsed["context"]
+        if evidence_id not in epistemic_membership
+    )
+    return EvidenceByStanceV1(
+        context=context,
+        opposes=parsed["opposes"],
+        qualifies=parsed["qualifies"],
+        supports=parsed["supports"],
+    )
+
+
 def _typed_record(
     *,
     row: Mapping[str, Any],
@@ -244,14 +282,7 @@ def _typed_record(
         raise GovernedLaneAdapterError(
             "claim evidence_by_stance must contain the closed stance set"
         )
-    evidence = EvidenceByStanceV1(
-        context=parse_uuid_tuple(evidence_raw["context"], field="claim.evidence.context"),
-        opposes=parse_uuid_tuple(evidence_raw["opposes"], field="claim.evidence.opposes"),
-        qualifies=parse_uuid_tuple(
-            evidence_raw["qualifies"], field="claim.evidence.qualifies"
-        ),
-        supports=parse_uuid_tuple(evidence_raw["supports"], field="claim.evidence.supports"),
-    )
+    evidence = _evidence_by_stance(evidence_raw)
     observations = parse_uuid_tuple(
         row["observation_ids"], field="claim.observation_ids"
     )
