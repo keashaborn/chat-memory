@@ -134,27 +134,31 @@ def explicit_relationship_assertions(
             )
             seen.add(key)
 
+    named_person = (
+        rf"(?!(?:my|the|others?|people|someone|somebody)\b)"
+        rf"{PERSON_NAME_PATTERN}"
+    )
     caregiver_patterns = (
         (
             rf"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\s+"
-            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
-            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s*,?\s*)?"
+            rf"(?P<name>{named_person})\b"
         ),
         (
             rf"\bI\s+(?:care|cared|am\s+caring|have\s+been\s+caring)\s+"
-            rf"for\s+(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
-            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+            rf"for\s+(?:my\s+(?:father|mother|parent|wife|husband|spouse)"
+            rf"\s*,?\s*)?(?P<name>{named_person})\b"
         ),
         (
             rf"\bI\s+(?:take|took|have\s+taken)\s+care\s+of\s+"
-            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
-            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s*,?\s*)?"
+            rf"(?P<name>{named_person})\b"
         ),
         (
             rf"\bI\s+have\s+spent[^.!?]{{0,160}}\bcaring\s+for\s+"
             rf"(?:others[^.!?]{{0,80}}\bincluding\s+)?"
-            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
-            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s*,?\s*)?"
+            rf"(?P<name>{named_person})\b"
         ),
     )
     for caregiver_pattern in caregiver_patterns:
@@ -207,7 +211,7 @@ def explicit_relationship_assertions(
             or bool(re.search(r"\buntil\b", text, re.IGNORECASE)),
         )
     possessed_spouse = re.search(
-        rf"\bmy\s+(?P<role>wife|husband|spouse)\s+"
+        rf"\bmy\s+(?P<role>wife|husband|spouse)(?:\s*,\s*|\s+)"
         rf"(?P<name>{PERSON_NAME_PATTERN})\b",
         text,
         re.IGNORECASE,

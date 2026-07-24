@@ -44,6 +44,14 @@ class RelationshipSourceAssertionsV51Test(unittest.TestCase):
                     "relationship.spouse_of",
                 },
             ),
+            (
+                "I have spent a lot of time caring for others including "
+                "my wife, Monika after her psychotic break.",
+                {
+                    "relationship.caregiver_for",
+                    "relationship.spouse_of",
+                },
+            ),
             ("I currently live with Jordan.", {"relationship.lives_with"}),
             ("Nora is my sister, not my cousin.", {"relationship.sibling_of"}),
             ("Derek is my wife's brother.", {"relationship.in_law_of"}),

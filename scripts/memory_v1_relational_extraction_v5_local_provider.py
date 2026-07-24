@@ -1718,6 +1718,107 @@ def _corrected_pet_name_packet(
     )
 
 
+def _explicit_named_caregiving_packet(
+    source: TrustedExtractionSource,
+) -> ProviderPacket | None:
+    assertions = explicit_relationship_assertions(source.content)
+    caregivers = [
+        item
+        for item in assertions
+        if item.predicate == "relationship.caregiver_for"
+    ]
+    if len(caregivers) != 1:
+        return None
+    caregiver = caregivers[0]
+    caregiver_name_key = _relationship_person_name_key(
+        caregiver.name_text
+    )
+    spouses = [
+        item
+        for item in assertions
+        if item.predicate == "relationship.spouse_of"
+        and _relationship_person_name_key(item.name_text)
+        == caregiver_name_key
+    ]
+    role_parts = ["relationship:care_recipient"]
+    if len(spouses) == 1:
+        role_parts.append(f"relationship:{spouses[0].named_party_role}")
+    self_entity = _deterministic_self_entity(source)
+    person_entity = {
+        "entity_ref": "e01",
+        "entity_type": "person",
+        "mention_kind": "named",
+        "name_text": caregiver.name_text,
+        "relationship_role": "|".join(role_parts),
+        "source_spans": [_source_span(source)],
+        "extraction_confidence": 0.99,
+        "reason_codes": ["deterministic_named_care_recipient"],
+    }
+    caregiver_observation = _example_observation(
+        source.content,
+        observation_ref="o00",
+        subject_entity_ref="e00",
+        predicate="relationship.caregiver_for",
+        object_value={"kind": "entity", "entity_ref": "e01"},
+        projection_class="direct_claim",
+        surface_policy="explicit_recall_only",
+        sensitivity="high",
+        reason_code="deterministic_explicit_caregiving",
+        temporal_semantic="state_validity",
+    )
+    caregiver_observation["temporal"] = _relationship_v5_1_temporal(
+        source,
+        temporal_profile="active_interval",
+        historical_end=caregiver.historical_end,
+    )
+    observations = [caregiver_observation]
+    if len(spouses) == 1:
+        spouse_observation = _example_observation(
+            source.content,
+            observation_ref="o01",
+            subject_entity_ref="e00",
+            predicate="relationship.spouse_of",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="medium",
+            reason_code="deterministic_explicit_spouse",
+            temporal_semantic="state_validity",
+        )
+        spouse_observation["temporal"] = _relationship_v5_1_temporal(
+            source,
+            temporal_profile="active_interval",
+            historical_end=spouses[0].historical_end,
+        )
+        observations.append(spouse_observation)
+    deferrals = [
+        {
+            "reason_code": "sensitive_manual_review",
+            "memory_shape": "direct_claim",
+            "source_spans": [_source_span(source)],
+            "sensitivity": "high",
+        }
+    ]
+    if len(source.content) > 220 or len(
+        re.findall(r"[.!?](?:\s|$)", source.content)
+    ) > 1:
+        deferrals.append(
+            {
+                "reason_code": "compound_requires_split",
+                "memory_shape": "supportive_context",
+                "source_spans": [_source_span(source)],
+                "sensitivity": "high",
+            }
+        )
+    return ProviderPacket.model_validate(
+        _packet(
+            entities=[self_entity, person_entity],
+            observations=observations,
+            deferrals=deferrals,
+        )
+    )
+
+
 def _explicit_started_employment_packet(
     source: TrustedExtractionSource,
 ) -> ProviderPacket | None:
@@ -1961,6 +2062,12 @@ def _deterministic_policy_packet(
             return (
                 corrected_name_packet,
                 "explicit_corrected_pet_name",
+            )
+        caregiving_packet = _explicit_named_caregiving_packet(source)
+        if caregiving_packet is not None:
+            return (
+                caregiving_packet,
+                "explicit_named_caregiving",
             )
         belief_profile = _mental_health_belief_profile(content)
         if belief_profile == "ambiguous_transcription":

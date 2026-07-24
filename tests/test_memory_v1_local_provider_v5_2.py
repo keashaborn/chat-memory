@@ -334,6 +334,50 @@ class LocalProviderV52Test(unittest.TestCase):
             {"identity.name:nemo"},
         )
 
+    def test_compound_named_caregiving_uses_deterministic_split_path(self) -> None:
+        content = (
+            "Yes, I am doing fine, but there is a weight that comes with "
+            "all the loss. I have spent a lot of time caring for others "
+            "including my wife, Monika after her psychotic break about "
+            "five years ago. Taking care of others has been my life for "
+            "a while now. I enjoy working on the app and lifting weights."
+        )
+        result = _deterministic_policy_packet(
+            self.source(content),
+            registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+        )
+        self.assertIsNotNone(result)
+        packet, guard_code = result
+        value = packet.model_dump(mode="json")
+        self.assertEqual(guard_code, "explicit_named_caregiving")
+        self.assertEqual(
+            {item["predicate"] for item in value["observations"]},
+            {
+                "relationship.caregiver_for",
+                "relationship.spouse_of",
+            },
+        )
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        caregiving = next(
+            item
+            for item in value["observations"]
+            if item["predicate"] == "relationship.caregiver_for"
+        )
+        self.assertEqual(
+            entities[caregiving["subject_entity_ref"]]["entity_type"],
+            "self",
+        )
+        self.assertEqual(
+            entities[caregiving["object"]["entity_ref"]]["name_text"],
+            "Monika",
+        )
+        self.assertEqual(
+            {item["reason_code"] for item in value["deferrals"]},
+            {"sensitive_manual_review", "compound_requires_split"},
+        )
+
     def test_named_caregiving_compiles_owner_to_recipient(self) -> None:
         content = (
             "I have spent much of the last year caring for others, "
