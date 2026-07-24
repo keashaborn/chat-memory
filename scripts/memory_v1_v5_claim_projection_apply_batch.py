@@ -20,14 +20,12 @@ REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 EXPECTED_ROWS_PER_ITEM = {
     "claim": 1,
     "claim_revision": 2,
-    "claim_observation": 1,
     "projection_apply_event": 1,
     "projection_dispatch_v5": 1,
     "claim_assessment_review_v5": 1,
     "claim_assessment": 1,
     "claim_assessment_apply_v5": 1,
     "relational_operation_request": 2,
-    "projection_outbox": 1,
 }
 
 
@@ -82,16 +80,35 @@ def load_manifest(path: Path) -> dict[str, Any]:
         "assessment", "expected_insert_rows", "expected_mutated_rows",
         "expected_table_rows", "items", "manifest_sha256",
     }
-    if set(value) != keys or value.get("contract_version") != MANIFEST_CONTRACT:
+    allowed_keys = (keys, keys | {"defer_projection_outbox"})
+    if (
+        set(value) not in allowed_keys
+        or value.get("contract_version") != MANIFEST_CONTRACT
+        or not isinstance(value.get("defer_projection_outbox", False), bool)
+    ):
         raise ApplyBatchError("manifest contract or fields mismatch")
     uuid.UUID(value["owner_user_id"])
     item_count = len(value["items"]) if isinstance(value["items"], list) else 0
+    observation_counts = [
+        item.get("observation_count", 1)
+        for item in value["items"]
+        if isinstance(item, dict)
+    ]
     expected_table_rows = {
         table: rows * item_count
         for table, rows in EXPECTED_ROWS_PER_ITEM.items()
     }
+    expected_table_rows["claim_observation"] = sum(observation_counts)
+    expected_table_rows["projection_outbox"] = (
+        0 if value.get("defer_projection_outbox", False) else item_count
+    )
     if (
         not 1 <= item_count <= 32
+        or len(observation_counts) != item_count
+        or any(
+            not isinstance(count, int) or not 1 <= count <= 100
+            for count in observation_counts
+        )
         or value["expected_table_rows"] != expected_table_rows
         or value["expected_insert_rows"] != sum(expected_table_rows.values())
         or value["expected_mutated_rows"]
@@ -106,7 +123,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def validate_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    keys = {
+    base_keys = {
         "plan_id", "projection_ref", "predicate", "canonical_text_sha256",
         "projection_sha256", "semantic_key_sha256", "review_id",
         "projection_request_id", "projection_apply_manifest_sha256",
@@ -115,8 +132,13 @@ def validate_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     items: list[dict[str, Any]] = []
     for item in manifest["items"]:
-        if not isinstance(item, dict) or set(item) != keys:
+        if (
+            not isinstance(item, dict)
+            or set(item) not in (base_keys, base_keys | {"observation_count"})
+        ):
             raise ApplyBatchError("manifest item fields mismatch")
+        item = dict(item)
+        item.setdefault("observation_count", 1)
         plan_id = str(uuid.UUID(item["plan_id"]))
         if plan_id in seen or item["projection_ref"] != "p01":
             raise ApplyBatchError("duplicate or invalid apply identity")
@@ -254,7 +276,10 @@ async def run() -> int:
                     raise ApplyBatchError("projection apply outcome mismatch")
                 claim_id = str(projected["aggregate_id"])
                 if args.mode == "apply":
-                    if projected["rows_written"] != 5 or projected["revision_number"] != 1:
+                    if (
+                        projected["rows_written"] != 4 + item["observation_count"]
+                        or projected["revision_number"] != 1
+                    ):
                         raise ApplyBatchError("initial claim materialization row budget mismatch")
                     review_preflight = await conn.fetchrow(
                         """SELECT * FROM memory.preflight_claim_assessment_review_v5(
@@ -306,14 +331,20 @@ async def run() -> int:
                     or assessed["rows_written"] != (5 if args.mode == "apply" else 0)
                 ):
                     raise ApplyBatchError("claim assessment apply outcome mismatch")
-                outbox_id, outbox_rows = await insert_outbox(
-                    conn, manifest["owner_user_id"], claim_id, 2
-                )
-                if outbox_rows != (1 if args.mode == "apply" else 0):
-                    raise ApplyBatchError("projection outbox row budget mismatch")
+                if manifest.get("defer_projection_outbox", False):
+                    outbox_id, outbox_rows = None, 0
+                else:
+                    outbox_id, outbox_rows = await insert_outbox(
+                        conn, manifest["owner_user_id"], claim_id, 2
+                    )
+                    if outbox_rows != (1 if args.mode == "apply" else 0):
+                        raise ApplyBatchError("projection outbox row budget mismatch")
                 if args.mode == "apply":
-                    insert_rows += 12
-                    mutated_rows += 13
+                    inserted_for_item = 11 + item["observation_count"]
+                    if manifest.get("defer_projection_outbox", False):
+                        inserted_for_item -= 1
+                    insert_rows += inserted_for_item
+                    mutated_rows += inserted_for_item + 1
                 outcomes.append(
                     {
                         "plan_id": item["plan_id"], "predicate": item["predicate"],
@@ -355,6 +386,9 @@ async def run() -> int:
         "outcomes": outcomes,
         "external_model_calls": 0,
         "qdrant_writes": 0,
+        "projection_outbox_deferred": manifest.get(
+            "defer_projection_outbox", False
+        ),
         "claims_supported": len(items) if args.mode == "apply" else 0,
         "retrieval_activated": False,
         "prompt_influence_activated": False,

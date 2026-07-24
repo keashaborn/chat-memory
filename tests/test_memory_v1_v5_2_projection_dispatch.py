@@ -15,6 +15,7 @@ from memory_v1_projection_v5_2_contract import (
 from memory_v1_v5_2_projection_dispatch import (
     ProjectionDispatchError,
     build_packet,
+    build_reconciled_stance_packet,
 )
 
 
@@ -193,6 +194,48 @@ class ProjectionDispatchTests(unittest.TestCase):
         self.assertEqual(projection["identity"]["modality"], "reported_belief")
         packet = build_packet(OWNER, source(entry))
         self.assertEqual(packet["projector_version"], "semantic_dispatch_v2")
+
+
+    def test_reconciled_stance_uses_one_primary_and_one_context_source(self) -> None:
+        entry = self.registry_by_name["stance.reported"]
+        primary = source(entry)
+        primary["observation_id"] = "cccccccc-3333-4333-8333-333333333333"
+        primary["observation_sha256"] = "1" * 64
+        context = source(entry)
+        context["observation_id"] = "cccccccc-3333-4333-8333-333333333334"
+        context["observation_sha256"] = "3" * 64
+        context["object_literal"]["value"]["position"] = (
+            "I do not believe the future can be predicted"
+        )
+        context["object_literal_sha256"] = sha256(context["object_literal"])
+
+        packet = build_reconciled_stance_packet(OWNER, primary, context)
+        validate_packet(packet, OWNER, self.registry_by_name)
+        projection = packet["projections"][0]
+        self.assertEqual(packet["projector_version"], "stance_reconciliation_v1")
+        self.assertEqual(
+            [item["stance"] for item in projection["observation_inputs"]],
+            ["supports", "context"],
+        )
+        self.assertEqual(
+            projection["identity"]["object_literal_sha256"],
+            primary["object_literal_sha256"],
+        )
+        self.assertEqual(
+            projection["review"]["reason_codes"],
+            ["initial_v5_2_reconciled_stance_requires_review"],
+        )
+
+    def test_reconciled_stance_rejects_cross_evidence_context(self) -> None:
+        entry = self.registry_by_name["stance.reported"]
+        primary = source(entry)
+        context = source(entry)
+        context["observation_id"] = "cccccccc-3333-4333-8333-333333333334"
+        context["evidence_id"] = "eeeeeeee-5555-4555-8555-555555555556"
+        with self.assertRaisesRegex(
+            ProjectionDispatchError, "sources are incompatible"
+        ):
+            build_reconciled_stance_packet(OWNER, primary, context)
 
     def test_response_preference_never_becomes_content(self) -> None:
         entry = self.registry_by_name["preference.response"]

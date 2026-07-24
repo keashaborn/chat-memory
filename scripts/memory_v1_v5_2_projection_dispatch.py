@@ -15,6 +15,7 @@ CONTRACT_VERSION = "memory_v1_projection_plan_v5"
 POLICY_VERSION = "memory_projection_policy_v5"
 PROJECTOR = "memory_v1_deterministic_projection_v5_2"
 PROJECTOR_VERSION = "semantic_dispatch_v2"
+RECONCILIATION_PROJECTOR_VERSION = "stance_reconciliation_v1"
 CONTROL_CHARS = {chr(value) for value in range(32)} | {chr(127)}
 KEY_RE = re.compile(r"[^a-z0-9]+")
 
@@ -444,6 +445,78 @@ def build_packet(owner_user_id: str, source: Mapping[str, Any]) -> dict[str, Any
         "projection_policy_version": POLICY_VERSION,
         "projector": PROJECTOR,
         "projector_version": PROJECTOR_VERSION,
+        "projections": [projection],
+        "packet_sha256": "",
+    }
+    packet["packet_sha256"] = sha256(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    return packet
+
+
+def build_reconciled_stance_packet(
+    owner_user_id: str,
+    primary_source: Mapping[str, Any],
+    context_source: Mapping[str, Any],
+) -> dict[str, Any]:
+    primary = _normalize_source(primary_source)
+    context = _normalize_source(context_source)
+    owner = str(uuid.UUID(owner_user_id))
+    for label, source in (("primary", primary), ("context", context)):
+        try:
+            source_owner = str(uuid.UUID(str(source["owner_user_id"])))
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ProjectionDispatchError(f"{label} source owner mismatch") from exc
+        if source_owner != owner:
+            raise ProjectionDispatchError(f"{label} source owner mismatch")
+        if (
+            source.get("predicate_registry_version") != REGISTRY_VERSION
+            or source.get("predicate") != "stance.reported"
+            or source.get("projection_class") != "reported_stance"
+            or source.get("surface_policy")
+            != "relevant_recall_or_explicit_recall"
+            or source.get("polarity") != "affirmed"
+            or source.get("modality") != "reported_belief"
+            or source.get("object_kind") != "literal"
+            or source.get("subject_entity_type") != "self"
+            or source.get("subject_entity_status") != "active"
+            or source.get("evidence_status") != "active"
+        ):
+            raise ProjectionDispatchError(
+                f"{label} source is outside the reconciled stance boundary"
+            )
+    if (
+        str(uuid.UUID(str(primary["evidence_id"])))
+        != str(uuid.UUID(str(context["evidence_id"])))
+        or str(uuid.UUID(str(primary["subject_entity_id"])))
+        != str(uuid.UUID(str(context["subject_entity_id"])))
+        or str(uuid.UUID(str(primary["observation_id"])))
+        == str(uuid.UUID(str(context["observation_id"])))
+    ):
+        raise ProjectionDispatchError("reconciled stance sources are incompatible")
+
+    projection = build_projection(owner, primary)
+    projection["observation_inputs"] = [
+        {
+            "observation_id": str(uuid.UUID(str(primary["observation_id"]))),
+            "observation_sha256": str(primary["observation_sha256"]),
+            "stance": "supports",
+        },
+        {
+            "observation_id": str(uuid.UUID(str(context["observation_id"]))),
+            "observation_sha256": str(context["observation_sha256"]),
+            "stance": "context",
+        },
+    ]
+    projection["review"]["reason_codes"] = [
+        "initial_v5_2_reconciled_stance_requires_review"
+    ]
+    packet = {
+        "contract_version": CONTRACT_VERSION,
+        "predicate_registry_version": REGISTRY_VERSION,
+        "projection_policy_version": POLICY_VERSION,
+        "projector": PROJECTOR,
+        "projector_version": RECONCILIATION_PROJECTOR_VERSION,
         "projections": [projection],
         "packet_sha256": "",
     }
