@@ -472,6 +472,10 @@ async def apply_or_replay(
                 packet_text,
                 item["owner_manifest_sha256"],
             )
+            # The single-plan stage function validates by switching every
+            # deferred constraint to IMMEDIATE. Restore the transaction's
+            # deferred mode before the next plan in this atomic batch.
+            await conn.execute("SET CONSTRAINTS ALL DEFERRED")
             expected_outcome = "replayed" if replay else "applied"
             expected_rows = 0 if replay else 6
             item_rows = entailment["rows_written"] + staged["rows_written"]
