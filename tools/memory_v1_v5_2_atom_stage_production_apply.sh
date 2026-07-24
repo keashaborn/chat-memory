@@ -169,6 +169,9 @@ head=$(git -C "$repo_root" rev-parse HEAD)
 [[ "$(jq -er '.owner_user_id' "$plan")" == "$target_owner" ]]
 [[ "$(jq -er '.required_head_commit' "$plan")" == "$head" ]]
 [[ "$(jq -er '.mode' "$plan")" == preflight_only_zero_write ]]
+plan_review_root=$(jq -er '.review_root' "$plan")
+[[ "$plan_review_root" == "$review_root"/* ]]
+[[ -d "$plan_review_root" && "$(stat -c '%a' "$plan_review_root")" == 700 ]]
 expected_rows=$(jq -er '.expected_new_rows' "$plan")
 [[ "$expected_rows" =~ ^[0-9]+$ && "$expected_rows" -gt 0 && "$expected_rows" -le 1500 ]]
 
@@ -241,7 +244,7 @@ phase=apply
 MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
   PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$runner" apply \
   --plan "$plan" --authorization "$authorization" --output "$stage_report" \
-  --review-root "$review_root" \
+  --review-root "$plan_review_root" \
   --confirm STAGE_REVIEWED_OWNER_V5_2_PACKETS_ONLY
 [[ -f "$stage_report" && "$(stat -c '%a' "$stage_report")" == 600 ]]
 [[ "$(jq -er '.database_rows_created' "$stage_report")" == "$expected_rows" ]]
