@@ -2,23 +2,26 @@
 set -euo pipefail
 
 # seebx backend only. Restores the current production database into a
-# disposable clone, then applies and replays one exact four-item V5.2
-# reported-stance projection-stage manifest. Production remains read-only.
+# disposable clone, installs the additive restricted source function, creates
+# one exact four-item V5.2 reported-stance manifest, then applies and replays it.
+# Production remains read-only.
 
 if [[ "$#" -ne 3 ]]; then
-  echo 'usage: ..._exact_production_clone.sh MANIFEST AUTHORIZATION REPORT' >&2
+  echo 'usage: ..._exact_production_clone.sh MANIFEST_OUT AUTH_OUT REPORT_OUT' >&2
   exit 2
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
-manifest=$(realpath "$1")
-authorization=$(realpath "$2")
+manifest=$(realpath -m "$1")
+authorization=$(realpath -m "$2")
 report=$(realpath -m "$3")
 review_root=/home/ubuntu/memory-v1-reviews
 target_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 target_evidence=22bd0732-3539-4180-8f89-8f84114131c0
 runner=scripts/memory_v1_v5_2_projection_stage_batch.py
+migration=ops/sql/20260724_memory_v1_v5_2_projection_entailment_source.sql
+security_test=tests/memory_v1_v5_2_projection_entailment_source_security.sql
 port=${MEMORY_V1_V5_2_PROJECTION_STAGE_CLONE_PORT:-55495}
 export MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port"
 compose=(
@@ -42,18 +45,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for input in "$manifest" "$authorization"; do
-  [[ "$input" == "$review_root"/* ]]
-  [[ -f "$input" && "$(stat -c '%a' "$input")" == 600 ]]
+for output in "$manifest" "$authorization" "$report"; do
+  [[ "$output" == "$review_root"/* && ! -e "$output" ]]
 done
 [[ "$report" == "$review_root"/* && ! -e "$report" ]]
-[[ "$(jq -er '.target_server' "$manifest")" == seebx ]]
-[[ "$(jq -er '.owner_user_id' "$manifest")" == "$target_owner" ]]
-[[ "$(jq -er '.evidence_id' "$manifest")" == "$target_evidence" ]]
-[[ "$(jq -er '.items|length' "$manifest")" == 4 ]]
-[[ "$(jq -er '.expected_new_rows' "$manifest")" == 24 ]]
-[[ "$(jq -er '.required_head_commit' "$manifest")" == \
-  "$(git -C "$repo_root" rev-parse HEAD)" ]]
 
 chmod 0600 "$backup" "$role_sql"
 
@@ -122,9 +117,30 @@ printf '%s\n' \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists --no-owner <"$backup"
+run_sql <"$migration"
+run_sql <"$migration"
+run_sql <"$security_test"
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   "$repo_root/tests/test_memory_v1_v5_2_projection_dispatch.py"
+
+head=$(git -C "$repo_root" rev-parse HEAD)
+POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$runner" manifest \
+  --owner "$target_owner" --evidence "$target_evidence" \
+  --observation 560261e2-7ac6-435d-bcb6-934315b78472 \
+  --observation d2c1033d-96f2-4f86-af46-47daceda0c99 \
+  --observation b58b11c2-9dc7-4c1e-919c-10b9e24fb846 \
+  --observation 807fa195-669a-4a7d-bb60-d8a50ea22bbb \
+  --required-head "$head" --output "$manifest"
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$runner" \
+  authorize --manifest "$manifest" --output "$authorization"
+[[ "$(jq -er '.target_server' "$manifest")" == seebx ]]
+[[ "$(jq -er '.owner_user_id' "$manifest")" == "$target_owner" ]]
+[[ "$(jq -er '.evidence_id' "$manifest")" == "$target_evidence" ]]
+[[ "$(jq -er '.items|length' "$manifest")" == 4 ]]
+[[ "$(jq -er '.expected_new_rows' "$manifest")" == 24 ]]
+[[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
 
 before_requests=$(scalar "SELECT count(*) FROM memory.relational_operation_request
   WHERE owner_user_id='$target_owner'::uuid")
@@ -149,7 +165,6 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
 [[ "$(jq -er '.cross_owner_rejected' "$cross_result")" == true ]]
 [[ "$(jq -er '.rows_written' "$cross_result")" == 0 ]]
 
-head=$(git -C "$repo_root" rev-parse HEAD)
 MEMORY_V1_REQUIRED_HEAD="$head" \
 MEMORY_V1_V5_2_PROJECTION_STAGE_BATCH_APPLY=authorized \
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \

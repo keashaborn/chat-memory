@@ -52,6 +52,7 @@ def arguments() -> argparse.Namespace:
     manifest = subparsers.add_parser("manifest")
     manifest.add_argument("--owner", required=True)
     manifest.add_argument("--evidence", required=True)
+    manifest.add_argument("--observation", action="append", required=True)
     manifest.add_argument("--required-head", required=True)
     manifest.add_argument("--output", required=True)
 
@@ -232,23 +233,21 @@ async def source_snapshot(
         "SELECT * FROM memory.preflight_projection_source_v5_2($1)",
         uuid.UUID(observation_id),
     )
-    observation_row = await conn.fetchrow(
-        """SELECT observation_ref,source_spans
-             FROM memory.observation
-            WHERE owner_user_id=$1 AND observation_id=$2 AND evidence_id=$3""",
-        uuid.UUID(expected_owner),
+    entailment_row = await conn.fetchrow(
+        "SELECT * FROM memory.preflight_projection_entailment_source_v5_2($1)",
         uuid.UUID(observation_id),
-        uuid.UUID(expected_evidence),
     )
-    if source_row is None or observation_row is None:
+    if source_row is None or entailment_row is None:
         raise ProjectionStageError("exact owner-scoped projection source not found")
     source = dict(source_row)
-    spans = observation_row["source_spans"]
+    spans = entailment_row["source_spans"]
     if not isinstance(spans, list) or not spans:
         raise ProjectionStageError("source spans are absent")
     if (
         str(source["owner_user_id"]) != expected_owner
         or str(source["evidence_id"]) != expected_evidence
+        or str(entailment_row["evidence_id"]) != expected_evidence
+        or entailment_row["observation_sha256"] != source["observation_sha256"]
         or source["predicate_registry_version"] != REGISTRY_VERSION
         or source["predicate"] != "stance.reported"
         or source["projection_class"] != "reported_stance"
@@ -262,7 +261,7 @@ async def source_snapshot(
         or source["evidence_status"] != "active"
     ):
         raise ProjectionStageError("source is outside the exact reported-stance boundary")
-    return source, spans, observation_row["observation_ref"]
+    return source, spans, entailment_row["observation_ref"]
 
 
 async def prepare_item(
@@ -329,23 +328,13 @@ async def build_manifest(args: argparse.Namespace, conn: Any) -> dict[str, Any]:
     await transaction.start()
     try:
         await set_actor(conn, owner)
-        rows = await conn.fetch(
-            """SELECT observation_id,observation_ref
-                 FROM memory.observation
-                WHERE owner_user_id=$1 AND evidence_id=$2
-                  AND predicate_registry_version=$3
-                  AND predicate='stance.reported'
-                  AND projection_class='reported_stance'
-                ORDER BY observation_ref""",
-            uuid.UUID(owner),
-            uuid.UUID(evidence),
-            REGISTRY_VERSION,
-        )
-        if [row["observation_ref"] for row in rows] != ["o00", "o01", "o02", "o03"]:
-            raise ProjectionStageError("evidence does not contain the exact four stances")
+        if len(args.observation) != 4:
+            raise ProjectionStageError("exactly four observation IDs are required")
+        observations = [str(uuid.UUID(value)) for value in args.observation]
+        if len(set(observations)) != 4:
+            raise ProjectionStageError("observation IDs must be unique")
         items = []
-        for row in rows:
-            observation = str(row["observation_id"])
+        for observation in observations:
             items.append(
                 await prepare_item(
                     conn,
@@ -357,6 +346,9 @@ async def build_manifest(args: argparse.Namespace, conn: Any) -> dict[str, Any]:
                     registry,
                 )
             )
+        items.sort(key=lambda item: item["observation_ref"])
+        if [item["observation_ref"] for item in items] != ["o00", "o01", "o02", "o03"]:
+            raise ProjectionStageError("evidence does not contain the exact four stances")
     finally:
         await transaction.rollback()
     manifest = {

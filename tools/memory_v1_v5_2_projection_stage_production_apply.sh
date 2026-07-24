@@ -24,6 +24,8 @@ target_evidence=22bd0732-3539-4180-8f89-8f84114131c0
 container=brains-postgres-1
 database=memory
 runner=scripts/memory_v1_v5_2_projection_stage_batch.py
+migration=ops/sql/20260724_memory_v1_v5_2_projection_entailment_source.sql
+security_test=tests/memory_v1_v5_2_projection_entailment_source_security.sql
 lock_file=/home/ubuntu/brains/.memory_v1_v5_2_projection_stage_apply.lock
 phase=initialization
 run_tag=
@@ -234,6 +236,12 @@ chmod 0600 "$backup" "$catalog"
 backup_sha=$(sha256sum "$backup" | awk '{print $1}')
 printf '%s  %s\n' "$backup_sha" "$backup" >"$backup.sha256"
 chmod 0600 "$backup.sha256"
+
+phase=install_restricted_source
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$database" <"$repo_root/$migration"
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$database" <"$repo_root/$security_test"
 
 phase=baseline
 docker exec "$container" psql -X -A -t -F $'\t' -v ON_ERROR_STOP=1 \
