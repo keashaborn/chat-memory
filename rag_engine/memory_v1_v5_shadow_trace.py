@@ -24,7 +24,7 @@ SPECIALIZED_INTENTS = {"preference_recall", "recommendation", *PROJECT_INTENTS}
 PROFILE_RECALL_CLASSES = {"SPECIFIC_RECALL", "PROFILE_SUMMARY"}
 FIRST_PERSON_RE = re.compile(r"\b(?:i|me|my|mine)\b", re.IGNORECASE)
 DOMAIN_PREDICATES = {
-    "name_correction": ("identity.name", "identity.name_canonical"),
+    "name_correction": ("identity.name_canonical",),
     "pet_loss": (
         "identity.name",
         "identity.name_canonical",

@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v12"
+VERSION = "memory_intent_adapter_v13"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -51,7 +51,6 @@ FAMILY_DEATH_PREDICATES = (
     "life_event.died",
 )
 NAME_PREDICATES = (
-    "identity.name",
     "identity.name_canonical",
 )
 LIFE_CONTEXT_PREDICATES = (
@@ -550,10 +549,20 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             return {"eligible": False, "reason": "information_providing_turn"}
         return {"eligible": False, "reason": "unclassified_domain"}
 
-    allowed_predicates: list[str] = []
     if domain == "pet_loss":
-        allowed_predicates = ["life_event.died"]
-    elif domain == "stance_recall":
+        return {
+            "eligible": False,
+            "reason": "entity_scope_v2_required",
+            "domain": domain,
+            "intent": "personal_recall",
+            "explicit_recall": True,
+            "entity_hints": [],
+            "allowed_predicates": ["life_event.died"],
+            "broad_profile_recall": False,
+        }
+
+    allowed_predicates: list[str] = []
+    if domain == "stance_recall":
         allowed_predicates = ["stance.reported"]
     elif domain == "family_death":
         allowed_predicates = list(FAMILY_DEATH_PREDICATES)
@@ -687,6 +696,9 @@ def classify_memory_intent(
             memory_intent = str(claim["intent"])
             domains = [str(claim["domain"])]
             reasons.append("governed_claim_context")
+        elif claim.get("reason") == "entity_scope_v2_required":
+            domains = [str(claim["domain"])]
+            reasons.append("entity_scope_v2_required")
 
     specialized = memory_intent in {
         "preference_recall",

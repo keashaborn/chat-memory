@@ -47,17 +47,47 @@ class MemoryV1FamilyDeathRoutingTests(unittest.TestCase):
             ],
         )
 
-    def test_explicit_pet_loss_remains_a_loss_query(self) -> None:
+    def test_explicit_pet_loss_fails_closed_until_entity_scope_v2(self) -> None:
         plan = classify_memory_intent(
             "Do you remember when I lost my pet?",
             request_classification="GENERAL",
         )
 
         self.assertEqual(plan["domains"], ["pet_loss"])
+        self.assertEqual(plan["memory_intent"], "none")
+        self.assertFalse(plan["routes"]["governed_claims"])
+        self.assertFalse(plan["claim_context"]["eligible"])
+        self.assertEqual(
+            plan["claim_context"]["reason"],
+            "entity_scope_v2_required",
+        )
         self.assertFalse(plan["claim_context"]["broad_profile_recall"])
         self.assertEqual(
             plan["claim_context"]["allowed_predicates"],
             ["life_event.died"],
+        )
+        shadow = classify_v5_shadow_context(
+            "Do you remember when I lost my pet?",
+            "GENERAL",
+        )
+        self.assertFalse(shadow["eligible"])
+        self.assertEqual(shadow["reason"], "entity_scope_v2_required")
+
+    def test_name_correction_never_falls_back_to_generic_name(self) -> None:
+        query = "Was it Nemo or Neko?"
+        plan = classify_memory_intent(query, request_classification="GENERAL")
+
+        self.assertEqual(plan["domains"], ["name_correction"])
+        self.assertTrue(plan["routes"]["governed_claims"])
+        self.assertEqual(
+            plan["claim_context"]["allowed_predicates"],
+            ["identity.name_canonical"],
+        )
+        shadow = classify_v5_shadow_context(query, "GENERAL")
+        self.assertTrue(shadow["eligible"])
+        self.assertEqual(
+            shadow["allowed_predicate_prefixes"],
+            ["identity.name_canonical"],
         )
 
     def test_direct_family_death_recall_allows_only_death_claims(self) -> None:
