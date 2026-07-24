@@ -186,8 +186,13 @@ class ProjectionDispatchTests(unittest.TestCase):
         projection = build_packet(OWNER, source(entry))["projections"][0]
         self.assertEqual(projection["lane"], "claim")
         self.assertEqual(projection["payload"]["claim_class"], "reported_stance")
-        self.assertTrue(projection["payload"]["canonical_text"].startswith("The user reports the position that "))
+        self.assertEqual(
+            projection["payload"]["canonical_text"],
+            'The user reports this position: "claims should track evidence rather than absolute truth."',
+        )
         self.assertEqual(projection["identity"]["modality"], "reported_belief")
+        packet = build_packet(OWNER, source(entry))
+        self.assertEqual(packet["projector_version"], "semantic_dispatch_v2")
 
     def test_response_preference_never_becomes_content(self) -> None:
         entry = self.registry_by_name["preference.response"]

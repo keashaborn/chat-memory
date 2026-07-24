@@ -14,7 +14,7 @@ REGISTRY_VERSION = "memory_predicate_registry_v5_2"
 CONTRACT_VERSION = "memory_v1_projection_plan_v5"
 POLICY_VERSION = "memory_projection_policy_v5"
 PROJECTOR = "memory_v1_deterministic_projection_v5_2"
-PROJECTOR_VERSION = "semantic_dispatch_v1"
+PROJECTOR_VERSION = "semantic_dispatch_v2"
 CONTROL_CHARS = {chr(value) for value in range(32)} | {chr(127)}
 KEY_RE = re.compile(r"[^a-z0-9]+")
 
@@ -257,7 +257,11 @@ def render_claim_text(source: Mapping[str, Any]) -> str:
         }:
             raise ProjectionDispatchError("reported stance contract mismatch")
         position = _safe_text(value["position"], "reported position", maximum=1500)
-        return f"{subject} reports the position that {position}."
+        if position[-1] not in ".!?":
+            position = f"{position}."
+        # Preserve the owner's first-person wording as attributed evidence. Do not
+        # splice it into a third-person sentence or silently rewrite its meaning.
+        return f'{subject} reports this position: "{position}"'
     raise ProjectionDispatchError(f"no literal renderer for {predicate}")
 
 
