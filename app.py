@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import socket
@@ -815,6 +815,7 @@ async def threads_truncate_from_message(thread_id: str, message_id: str, req: Re
 
 class RenameThreadReq(BaseModel):
     title: str
+    title_source: Literal["automatic", "manual"] = "manual"
 
 @app.post("/threads/{thread_id}/rename")
 async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
@@ -831,11 +832,70 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, _actor_uid)
-        await conn.execute(
-            "UPDATE threads SET title=$1, updated_at=now() WHERE owner_user_id=$2 AND id=$3",
+        if body.title_source == "automatic":
+            updated = await conn.fetchrow(
+                """
+                UPDATE threads
+                SET title=$1, updated_at=now()
+                WHERE owner_user_id=$2
+                  AND id=$3
+                  AND title_source='automatic'
+                RETURNING title, title_source
+                """,
+                title, _actor_uid, tid
+            )
+            if updated:
+                return {
+                    "status": "ok",
+                    "thread_id": str(tid),
+                    "title": updated["title"],
+                    "title_source": updated["title_source"],
+                    "updated": True,
+                }
+
+            current = await conn.fetchrow(
+                """
+                SELECT title, title_source
+                FROM threads
+                WHERE owner_user_id=$1 AND id=$2
+                """,
+                _actor_uid, tid
+            )
+            if not current:
+                return JSONResponse(
+                    {"status": "not_found", "detail": "thread not found"},
+                    status_code=404,
+                )
+            return {
+                "status": "ok",
+                "thread_id": str(tid),
+                "title": current["title"],
+                "title_source": current["title_source"],
+                "updated": False,
+                "skipped": "manual_title_preserved",
+            }
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE threads
+            SET title=$1, title_source='manual', updated_at=now()
+            WHERE owner_user_id=$2 AND id=$3
+            RETURNING title, title_source
+            """,
             title, _actor_uid, tid
         )
-        return {"status": "ok", "thread_id": str(tid), "title": title}
+        if not updated:
+            return JSONResponse(
+                {"status": "not_found", "detail": "thread not found"},
+                status_code=404,
+            )
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "title": updated["title"],
+            "title_source": updated["title_source"],
+            "updated": True,
+        }
     finally:
         await conn.close()
 
