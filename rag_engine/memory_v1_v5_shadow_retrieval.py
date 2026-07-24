@@ -13,6 +13,7 @@ SENSITIVITY_RANK = {"low": 0, "medium": 1, "high": 2, "restricted": 3}
 CONTENT_SURFACES = {
     "direct_or_relevant",
     "relevant_recommendation_or_explicit_recall",
+    "relevant_recall_or_explicit_recall",
     "exact_project_scope_only",
 }
 NON_CONTENT_SURFACES = {"never", "zero_token_control_only"}
@@ -138,6 +139,12 @@ def _surface_allowed(
             "personal_recommendation",
             "life_preference_recall",
         }
+    if surface == "relevant_recall_or_explicit_recall":
+        return explicit_recall or intent in {
+            "specific_recall",
+            "personal_recall",
+            "profile_recall",
+        }
     if surface == "exact_project_scope_only":
         return bool(
             project_key
@@ -152,6 +159,8 @@ def _use_instruction(status: str, surface: str) -> str:
         return "state_uncertainty_and_material_counterevidence"
     if surface == "relevant_recommendation_or_explicit_recall":
         return "use_only_for_relevant_recommendation_or_explicit_recall"
+    if surface == "relevant_recall_or_explicit_recall":
+        return "use_only_for_relevant_or_explicit_recall"
     if surface == "exact_project_scope_only":
         return "use_only_inside_exact_project_scope"
     return "answer_directly_only_when_relevant"
