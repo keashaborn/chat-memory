@@ -36,6 +36,11 @@ from rag_engine.trusted_web_ncbi_v1 import (
     NCBIPubMedClientV1,
     trusted_web_topic_uses_ncbi,
 )
+from rag_engine.trusted_web_ods_v1 import (
+    NIHODSClientV1,
+    ODSClientError,
+    trusted_web_query_uses_ods,
+)
 from rag_engine.trusted_web_policy_v1 import (
     TrustedWebDispositionV1,
     TrustedWebPolicyDecisionV1,
@@ -250,9 +255,28 @@ async def trusted_web_query(
             settings,
         )
         if trusted_web_topic_uses_ncbi(policy.topic):
+            ods_records = ()
+            if trusted_web_query_uses_ods(payload.query):
+                ods_records = (
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            NIHODSClientV1().creatine_exercise_performance,
+                        ),
+                        timeout=15.0,
+                    ),
+                )
+            ncbi_client = NCBIPubMedClientV1.from_env()
+            if ods_records:
+                ncbi_client = NCBIPubMedClientV1(
+                    timeout_seconds=ncbi_client.timeout_seconds,
+                    max_records=2,
+                    api_key=ncbi_client.api_key,
+                    tool_email=ncbi_client.tool_email,
+                    tool_name=ncbi_client.tool_name,
+                )
             ncbi_records = await asyncio.wait_for(
                 asyncio.to_thread(
-                    NCBIPubMedClientV1.from_env().search,
+                    ncbi_client.search,
                     payload.query,
                 ),
                 timeout=35.0,
@@ -262,6 +286,7 @@ async def trusted_web_query(
                     provider.synthesize_from_pubmed_records,
                     query=payload.query,
                     records=ncbi_records,
+                    ods_records=ods_records,
                     actor_user_id=str(owner),
                     safety_secret=safety_secret,
                 ),
@@ -318,6 +343,18 @@ async def trusted_web_query(
                 error_code="trusted_web_timeout",
             )
         raise HTTPException(status_code=504, detail="trusted_web_timeout") from exc
+    except ODSClientError as exc:
+        if audit_started:
+            await finish_trusted_web_audit_v1(
+                conn,
+                search_id=search_id,
+                status="failed",
+                latency_ms=round(
+                    (time.monotonic_ns() - started_ns) / 1_000_000
+                ),
+                error_code=_safe_error_code(exc),
+            )
+        raise HTTPException(status_code=503, detail="trusted_web_ods_unavailable") from None
     except NCBIClientError as exc:
         if audit_started:
             await finish_trusted_web_audit_v1(

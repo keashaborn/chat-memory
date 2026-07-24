@@ -19,6 +19,10 @@ from rag_engine.trusted_web_ncbi_v1 import (
     classify_publication_types,
     format_ncbi_records_for_model,
 )
+from rag_engine.trusted_web_ods_v1 import (
+    ODSGuidanceRecordV1,
+    format_ods_guidance_for_model,
+)
 
 
 TRUSTED_WEB_INSTRUCTIONS_V1 = """\
@@ -330,6 +334,7 @@ class OpenAITrustedWebProviderV1:
         *,
         query: str,
         records: tuple[NCBIResearchRecordV1, ...],
+        ods_records: tuple[ODSGuidanceRecordV1, ...] = (),
         actor_user_id: str,
         safety_secret: str,
     ) -> TrustedWebProviderResultV1:
@@ -338,8 +343,15 @@ class OpenAITrustedWebProviderV1:
         response = self._client.responses.create(
             model=self._settings.model,
             instructions=TRUSTED_WEB_INSTRUCTIONS_V1
-            + "\nFor this request, do not use web search. Use only the supplied PubMed records.",
-            input=format_ncbi_records_for_model(query, records),
+            + "\nFor this request, do not use web search. Use only the supplied ODS and PubMed records. Prefer ODS for public safety guidance, then PubMed for research detail.",
+            input="\n\n".join(
+                part
+                for part in (
+                    format_ods_guidance_for_model(ods_records),
+                    format_ncbi_records_for_model(query, records),
+                )
+                if part
+            ),
             max_output_tokens=self._settings.max_output_tokens,
             reasoning={"effort": "low"},
             store=False,
@@ -361,14 +373,27 @@ class OpenAITrustedWebProviderV1:
             raise TrustedWebProviderError("trusted_web_provider_response_id_missing")
         if not answer:
             raise TrustedWebProviderError("trusted_web_provider_answer_missing")
-        if not any(record.citation_marker in answer for record in records):
-            raise TrustedWebProviderSecurityError("trusted_web_missing_inline_pubmed_citation")
+        required_markers = tuple(record.citation_marker for record in ods_records) + tuple(
+            record.citation_marker for record in records
+        )
+        if not any(marker in answer for marker in required_markers):
+            raise TrustedWebProviderSecurityError("trusted_web_missing_inline_citation")
         if len(answer) > 32_768:
             raise TrustedWebProviderError("trusted_web_provider_answer_too_large")
         return TrustedWebProviderResultV1(
             provider_response_id=response_id,
             answer_text=answer,
             sources=tuple(
+                TrustedWebSourceV1(
+                    url=record.url,
+                    title=record.title,
+                    authority_type="official_public_guidance",
+                    evidence_type=record.evidence_type,
+                    source_id=record.source_id,
+                )
+                for record in ods_records
+            )
+            + tuple(
                 TrustedWebSourceV1(
                     url=record.url,
                     title=record.title,
