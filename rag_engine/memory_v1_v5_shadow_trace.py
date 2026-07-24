@@ -40,6 +40,9 @@ DOMAIN_PREDICATES = {
     "family_death": (
         "life_event.died",
     ),
+    "stance_recall": (
+        "stance.reported",
+    ),
     "life_context": ("health.", "relationship.", "residence."),
     "health_behavior": ("health.",),
     "profile": (

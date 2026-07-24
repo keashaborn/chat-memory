@@ -281,6 +281,21 @@ PERSONAL_RECALL_CUE_RE = re.compile(
     r"what (?:happened|was|is|did)|when did|which (?:pet|dog|cat|name)|was it|"
     r"remind me|tell me what|more particularly do you know)\b"
 )
+STANCE_RECALL_RE = re.compile(
+    r"\b(?:what (?:have|did) i "
+    r"(?:say|said|tell you|told you|mention|mentioned|share|shared|state|stated|"
+    r"express|expressed) about|"
+    r"what (?:do|did) i (?:think|believe) about|"
+    r"what (?:are|were) (?:some )?(?:of )?my "
+    r"(?:beliefs?|opinions?|views?|positions?)|"
+    r"what (?:are|were) (?:some )?"
+    r"(?:beliefs?|opinions?|views?|positions?) i "
+    r"(?:have )?(?:shared|stated|expressed|mentioned)|"
+    r"what (?:beliefs?|opinions?|views?|positions?) "
+    r"(?:have|did) i (?:share|state|express|mention)|"
+    r"do you (?:know|remember) what i "
+    r"(?:think|believe|said|have said|shared))\b"
+)
 PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
 BROAD_PET_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:current )?pets|"
@@ -460,7 +475,12 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         }
 
     family_death_recall = bool(FAMILY_DEATH_RECALL_RE.search(text))
-    recall_requested = _looks_like_personal_recall(text) or family_death_recall
+    stance_recall = bool(STANCE_RECALL_RE.search(text))
+    recall_requested = (
+        _looks_like_personal_recall(text)
+        or family_death_recall
+        or stance_recall
+    )
     normalization_requested = _contains(text, NAME_TERMS) and _contains(
         text, NORMALIZATION_TERMS
     )
@@ -500,6 +520,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     domain = None
     if normalization_requested or name_recall_requested:
         domain = "name_correction"
+    elif stance_recall:
+        domain = "stance_recall"
     elif pet_event and recall_requested:
         domain = "pet_loss"
     elif broad_pet_recall or pet_profile_recall:
@@ -531,6 +553,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     allowed_predicates: list[str] = []
     if domain == "pet_loss":
         allowed_predicates = ["life_event.died"]
+    elif domain == "stance_recall":
+        allowed_predicates = ["stance.reported"]
     elif domain == "family_death":
         allowed_predicates = list(FAMILY_DEATH_PREDICATES)
     elif domain == "family_profile":
@@ -589,6 +613,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             or broad_pet_recall
             or broad_family_recall
             or pet_profile_recall
+            or stance_recall
         ),
         "entity_hints": entity_hints,
         "allowed_predicates": allowed_predicates,
