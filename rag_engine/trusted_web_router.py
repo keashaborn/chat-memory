@@ -255,7 +255,7 @@ async def trusted_web_query(
                     NCBIPubMedClientV1.from_env().search,
                     payload.query,
                 ),
-                timeout=17.0,
+                timeout=35.0,
             )
             result = await asyncio.wait_for(
                 asyncio.to_thread(

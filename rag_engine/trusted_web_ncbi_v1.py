@@ -3,6 +3,7 @@ from __future__ import annotations
 """Deterministic PubMed discovery through NCBI E-utilities."""
 
 import os
+import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -29,7 +30,7 @@ class NCBIResearchRecordV1(BaseModel):
     title: str = Field(min_length=1, max_length=600)
     journal: str = Field(default="", max_length=300)
     publication_date: str = Field(default="", max_length=80)
-    publication_types: tuple[str, ...] = Field(default=(), max_length=20)
+    publication_types: tuple[str, ...] = Field(default=())
     abstract: str = Field(default="", max_length=6000)
 
     @property
@@ -64,8 +65,73 @@ def classify_publication_types(publication_types: Iterable[str]) -> str:
     return "pubmed_record"
 
 
+_PUBMED_STOPWORDS = frozenset(
+    {
+        "about",
+        "adult",
+        "adults",
+        "after",
+        "also",
+        "and",
+        "are",
+        "can",
+        "cite",
+        "does",
+        "effect",
+        "evidence",
+        "for",
+        "from",
+        "have",
+        "how",
+        "improve",
+        "improves",
+        "into",
+        "lift",
+        "lifting",
+        "people",
+        "please",
+        "show",
+        "that",
+        "the",
+        "their",
+        "this",
+        "weight",
+        "weights",
+        "what",
+        "when",
+        "whether",
+        "with",
+        "who",
+    }
+)
+_PUBMED_SYNONYMS = {
+    "hypertrophy": ("muscle hypertrophy", "resistance training"),
+    "muscle": ("muscle strength",),
+    "strength": ("muscle strength", "resistance training"),
+    "creatine": ("creatine", "creatine supplementation"),
+    "protein": ("dietary protein",),
+}
+
+
+def _normalize_pubmed_query(query: str) -> str:
+    tokens = [
+        token
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", str(query or "").lower())
+        if token not in _PUBMED_STOPWORDS
+    ]
+    terms: list[str] = []
+    seen: set[str] = set()
+    for token in tokens[:12]:
+        mapped = _PUBMED_SYNONYMS.get(token, (token,))
+        for term in mapped:
+            if term not in seen:
+                seen.add(term)
+                terms.append(term)
+    return " ".join(terms or tokens or ["exercise nutrition"])[:240]
+
+
 def _build_term(query: str) -> str:
-    text = " ".join(str(query or "").split())[:500]
+    text = _normalize_pubmed_query(query)
     quality = "(systematic review[Publication Type] OR meta-analysis[Publication Type] OR randomized controlled trial[Publication Type] OR clinical trial[Publication Type] OR review[Publication Type])"
     humans = "humans[MeSH Terms]"
     return f"({text}) AND ({quality}) AND ({humans})"
@@ -73,8 +139,8 @@ def _build_term(query: str) -> str:
 
 @dataclass(frozen=True)
 class NCBIPubMedClientV1:
-    timeout_seconds: float = 12.0
-    max_records: int = 5
+    timeout_seconds: float = 15.0
+    max_records: int = 3
     api_key: str = ""
     tool_email: str = ""
     tool_name: str = "verbalsage-trusted-web"
