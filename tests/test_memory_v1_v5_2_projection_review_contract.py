@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -13,6 +14,7 @@ from memory_v1_v5_2_projection_review_manifest import (  # noqa: E402
     ManifestError,
     validate_decisions,
 )
+from memory_v1_v5_2_projection_review_batch import file_sha256  # noqa: E402
 
 
 OWNER = "11111111-1111-4111-8111-111111111111"
@@ -59,6 +61,15 @@ class ProjectionReviewContractTests(unittest.TestCase):
                 decision_value(),
                 "44444444-4444-4444-8444-444444444444",
                 EVIDENCE,
+            )
+
+    def test_batch_file_hash_is_available(self) -> None:
+        with tempfile.NamedTemporaryFile() as handle:
+            handle.write(b"review")
+            handle.flush()
+            self.assertEqual(
+                file_sha256(Path(handle.name)),
+                "c97ace4c8fef2cee8fa0f3c9f52aab18dbd4f42438afe362ffb8f75ce4c04b84",
             )
 
 
