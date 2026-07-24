@@ -42,6 +42,10 @@ from rag_engine.thread_deletion_v1 import (
     ThreadDeletionV1Error,
     delete_thread_v1,
 )
+from rag_engine.thread_title_v1 import (
+    generate_semantic_title,
+    select_first_meaningful_exchange,
+)
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -833,47 +837,13 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
     try:
         await _set_connection_actor(conn, _actor_uid)
         if body.title_source == "automatic":
-            updated = await conn.fetchrow(
-                """
-                UPDATE threads
-                SET title=$1, updated_at=now()
-                WHERE owner_user_id=$2
-                  AND id=$3
-                  AND title_source='automatic'
-                RETURNING title, title_source
-                """,
-                title, _actor_uid, tid
+            return JSONResponse(
+                {
+                    "status": "conflict",
+                    "detail": "automatic_title_is_backend_owned",
+                },
+                status_code=409,
             )
-            if updated:
-                return {
-                    "status": "ok",
-                    "thread_id": str(tid),
-                    "title": updated["title"],
-                    "title_source": updated["title_source"],
-                    "updated": True,
-                }
-
-            current = await conn.fetchrow(
-                """
-                SELECT title, title_source
-                FROM threads
-                WHERE owner_user_id=$1 AND id=$2
-                """,
-                _actor_uid, tid
-            )
-            if not current:
-                return JSONResponse(
-                    {"status": "not_found", "detail": "thread not found"},
-                    status_code=404,
-                )
-            return {
-                "status": "ok",
-                "thread_id": str(tid),
-                "title": current["title"],
-                "title_source": current["title_source"],
-                "updated": False,
-                "skipped": "manual_title_preserved",
-            }
 
         updated = await conn.fetchrow(
             """
@@ -898,6 +868,164 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
         }
     finally:
         await conn.close()
+
+
+@app.post("/threads/{thread_id}/auto-title")
+async def threads_auto_title(thread_id: str, req: Request):
+    tid = parse_uuid(thread_id)
+    if not tid:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_thread_id"},
+            status_code=400,
+        )
+
+    actor_err, actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, actor_uid)
+        current = await conn.fetchrow(
+            """
+            SELECT title, title_source
+            FROM threads
+            WHERE owner_user_id=$1 AND id=$2
+            """,
+            actor_uid,
+            tid,
+        )
+        if not current:
+            return JSONResponse(
+                {"status": "not_found", "detail": "thread_not_found"},
+                status_code=404,
+            )
+        if current["title_source"] != "placeholder":
+            return {
+                "status": "ok",
+                "thread_id": str(tid),
+                "title": current["title"],
+                "title_source": current["title_source"],
+                "updated": False,
+                "skipped": f"{current['title_source']}_title_preserved",
+            }
+
+        transcript = await conn.fetch(
+            """
+            SELECT source, text, created_at, id
+            FROM chat_log
+            WHERE owner_user_id=$1 AND thread_id=$2
+            ORDER BY created_at ASC, id ASC
+            LIMIT 40
+            """,
+            actor_uid,
+            tid,
+        )
+    finally:
+        await conn.close()
+
+    exchange = select_first_meaningful_exchange(transcript)
+    if exchange is None:
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "title": current["title"],
+            "title_source": "placeholder",
+            "updated": False,
+            "skipped": "no_meaningful_exchange",
+        }
+
+    if client is None:
+        return JSONResponse(
+            {"status": "unavailable", "detail": "title_generation_unavailable"},
+            status_code=503,
+        )
+
+    title_model = (
+        os.getenv("THREAD_TITLE_MODEL")
+        or "gpt-4.1-mini"
+    ).strip()
+    try:
+        title = await asyncio.wait_for(
+            asyncio.to_thread(
+                generate_semantic_title,
+                client,
+                title_model,
+                exchange[0],
+                exchange[1],
+            ),
+            timeout=12.0,
+        )
+    except Exception:
+        print(
+            "[threads_auto_title] generation unavailable",
+            str(getattr(req.state, "request_id", "")),
+        )
+        return JSONResponse(
+            {"status": "unavailable", "detail": "title_generation_unavailable"},
+            status_code=503,
+        )
+
+    if not title:
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "title": current["title"],
+            "title_source": "placeholder",
+            "updated": False,
+            "skipped": "no_meaningful_exchange",
+        }
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, actor_uid)
+        updated = await conn.fetchrow(
+            """
+            UPDATE threads
+            SET title=$1, title_source='automatic', updated_at=now()
+            WHERE owner_user_id=$2
+              AND id=$3
+              AND title_source='placeholder'
+            RETURNING title, title_source
+            """,
+            title,
+            actor_uid,
+            tid,
+        )
+        if updated:
+            return {
+                "status": "ok",
+                "thread_id": str(tid),
+                "title": updated["title"],
+                "title_source": updated["title_source"],
+                "updated": True,
+            }
+
+        current = await conn.fetchrow(
+            """
+            SELECT title, title_source
+            FROM threads
+            WHERE owner_user_id=$1 AND id=$2
+            """,
+            actor_uid,
+            tid,
+        )
+        if not current:
+            return JSONResponse(
+                {"status": "not_found", "detail": "thread_not_found"},
+                status_code=404,
+            )
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "title": current["title"],
+            "title_source": current["title_source"],
+            "updated": False,
+            "skipped": f"{current['title_source']}_title_preserved",
+        }
+    finally:
+        await conn.close()
+
 
 @app.post("/threads/{thread_id}/archive")
 async def threads_archive(thread_id: str, req: Request):

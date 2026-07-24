@@ -13,9 +13,9 @@ def test_rename_contract_distinguishes_automatic_and_manual_sources():
     assert 'title_source: Literal["automatic", "manual"] = "manual"' in APP_SOURCE
 
 
-def test_automatic_title_cannot_replace_manual_title():
-    assert "AND title_source='automatic'" in APP_SOURCE
-    assert '"skipped": "manual_title_preserved"' in APP_SOURCE
+def test_client_controlled_automatic_title_is_rejected():
+    assert '"detail": "automatic_title_is_backend_owned"' in APP_SOURCE
+    assert "status_code=409" in APP_SOURCE
 
 
 def test_manual_rename_sets_manual_provenance():
