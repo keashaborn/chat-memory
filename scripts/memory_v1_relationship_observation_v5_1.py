@@ -134,19 +134,42 @@ def explicit_relationship_assertions(
             )
             seen.add(key)
 
-    caregiver = re.search(
-        rf"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\s+"
-        rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
-        rf"(?P<name>{PERSON_NAME_PATTERN})\b",
-        text,
-        re.IGNORECASE,
+    caregiver_patterns = (
+        (
+            rf"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\s+"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
+            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+        ),
+        (
+            rf"\bI\s+(?:care|cared|am\s+caring|have\s+been\s+caring)\s+"
+            rf"for\s+(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
+            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+        ),
+        (
+            rf"\bI\s+(?:take|took|have\s+taken)\s+care\s+of\s+"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
+            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+        ),
+        (
+            rf"\bI\s+have\s+spent[^.!?]{{0,160}}\bcaring\s+for\s+"
+            rf"(?:others[^.!?]{{0,80}}\bincluding\s+)?"
+            rf"(?:my\s+(?:father|mother|parent|wife|husband|spouse)\s+)?"
+            rf"(?P<name>{PERSON_NAME_PATTERN})\b"
+        ),
     )
-    if caregiver:
-        add(
-            "relationship.caregiver_for",
-            "care_recipient",
-            caregiver.group("name"),
+    for caregiver_pattern in caregiver_patterns:
+        caregiver = re.search(
+            caregiver_pattern,
+            text,
+            re.IGNORECASE,
         )
+        if caregiver:
+            add(
+                "relationship.caregiver_for",
+                "care_recipient",
+                caregiver.group("name"),
+            )
+            break
 
     lives_with = re.search(
         rf"\bI\s+(?:currently\s+)?live\s+with\s+"
@@ -501,7 +524,12 @@ def directed_role_supported_by_source(predicate: str, text: str) -> str | None:
         return "supporter" if named_to_self else "supported_person"
     source_rules = {
         "relationship.caregiver_for": (
-            r"\bI\s+am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for\b",
+            r"\bI\s+(?:"
+            r"am\s+(?:the\s+)?(?:primary\s+)?caregiver\s+for|"
+            r"(?:care|cared|am\s+caring|have\s+been\s+caring)\s+for|"
+            r"(?:take|took|have\s+taken)\s+care\s+of|"
+            r"have\s+spent[^.!?]{0,160}\bcaring\s+for"
+            r")\b",
             "care_recipient",
         ),
         "relationship.manager_of": (

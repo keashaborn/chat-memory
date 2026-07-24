@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v6"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v7"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
@@ -1384,9 +1384,46 @@ _EXPLICIT_SELF_OCCUPATION_RE = re.compile(
     r"(?:an?\s+)?(?P<role>[^\n.!?]{1,160})",
     re.IGNORECASE,
 )
+_EXPLICIT_FORMER_SELF_OCCUPATION_RE = re.compile(
+    r"\b(?:as\s+(?:a\s+)?professional\s*,?\s*)?"
+    r"i\s+(?:formerly\s+|previously\s+)?was\s+(?:an?\s+)?"
+    r"(?P<role>[^\n.!?]{1,160})",
+    re.IGNORECASE,
+)
+_TRAILING_OCCUPATION_CREDENTIAL_RE = re.compile(
+    r"\s+and\s+(?:an?\s+)?(?:BCBA|board[\s-]+certified\s+"
+    r"behavior\s+analyst)\s*$",
+    re.IGNORECASE,
+)
+_CORRECTED_PET_NAME_PATTERNS = (
+    re.compile(
+        r"\bit\s+was\s+(?P<canonical>[^\W\d_][\w'’\-]{0,79})\b"
+        r"[^.!?]{0,160}\b(?:spell[\s-]?check|voice[\s-]?to[\s-]?text|"
+        r"speech[\s-]?to[\s-]?text|transcription)\b"
+        r"[^.!?]{0,160}\b(?:to|as)\s+"
+        r"(?P<rejected>[^\W\d_][\w'’\-]{0,79})\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:my\s+(?:first\s+)?(?:dog|cat|pet)(?:['’]s)?\s+)?"
+        r"(?:correct|actual)\s+name\s+(?:is|was)\s+"
+        r"(?P<canonical>[^\W\d_][\w'’\-]{0,79})\b"
+        r"[^.!?]{0,80}\b(?:not|rather\s+than)\s+"
+        r"(?P<rejected>[^\W\d_][\w'’\-]{0,79})\b",
+        re.IGNORECASE,
+    ),
+)
 _EXPLICIT_FREELANCE_OCCUPATION_RE = re.compile(
     r"\bi\s+(?:am|['’]m)\s+(?:currently\s+)?(?:an?\s+)?"
     r"(?P<role>freelance\s+[^\n.!?]{1,150})",
+    re.IGNORECASE,
+)
+_CORRECTED_PET_NAME_WITHOUT_ALIAS_RE = re.compile(
+    r"\bmy\s+(?:first\s+)?(?:dog|cat|pet)(?:['’]s)?\s+name\s+"
+    r"(?:is|was)\s+(?P<canonical>[^\W\d_][\w'’\-]{0,79})\b"
+    r"[^.!?]{0,180}\b(?:spell[\s-]?check|voice[\s-]?to[\s-]?text|"
+    r"speech[\s-]?to[\s-]?text|transcription)\b"
+    r"[^.!?]{0,100}\b(?:error|mistake|wrong)\b",
     re.IGNORECASE,
 )
 _PET_RE = re.compile(
@@ -1605,6 +1642,80 @@ def _deterministic_self_entity(
         "extraction_confidence": 0.99,
         "reason_codes": ["deterministic_self_reference"],
     }
+
+
+def _corrected_pet_name(
+    content: str,
+) -> tuple[str, str | None] | None:
+    for pattern in _CORRECTED_PET_NAME_PATTERNS:
+        match = pattern.search(content)
+        if match is None:
+            continue
+        canonical = match.group("canonical").strip()
+        rejected = match.group("rejected").strip()
+        if canonical.casefold() != rejected.casefold():
+            return canonical, rejected
+    match = _CORRECTED_PET_NAME_WITHOUT_ALIAS_RE.search(content)
+    if match is not None:
+        return match.group("canonical").strip(), None
+    return None
+
+
+def _corrected_pet_name_packet(
+    source: TrustedExtractionSource,
+) -> ProviderPacket | None:
+    correction = _corrected_pet_name(source.content)
+    if correction is None:
+        return None
+    canonical, rejected = correction
+    animal_entity = {
+        "entity_ref": "e00",
+        "entity_type": "animal",
+        "mention_kind": "named",
+        "name_text": canonical,
+        "relationship_role": "pet:corrected_name_subject",
+        "source_spans": [_source_span(source)],
+        "extraction_confidence": 0.99,
+        "reason_codes": ["deterministic_corrected_pet_name"],
+    }
+    observation = _example_observation(
+        source.content,
+        observation_ref="o00",
+        subject_entity_ref="e00",
+        predicate="identity.name_canonical",
+        object_value=_literal("text", canonical),
+        projection_class="correction",
+        surface_policy="normalization_only",
+        sensitivity="medium",
+        reason_code="explicit_name_correction",
+        modality="corrective",
+        temporal_semantic="state_validity",
+    )
+    observation["source_spans"] = [_source_span(source)]
+    comparisons: list[dict[str, Any]] = []
+    if rejected is not None:
+        lookup_key = f"identity.name:{rejected.casefold()}"
+        comparisons = [
+            {
+                "observation_ref": "o00",
+                "reason_codes": ["explicit_prior_name_rejected"],
+                "relation_type": "corrects",
+                "target_lookup_key": lookup_key,
+            },
+            {
+                "observation_ref": "o00",
+                "reason_codes": ["canonical_name_supersedes_prior"],
+                "relation_type": "supersedes",
+                "target_lookup_key": lookup_key,
+            },
+        ]
+    return ProviderPacket.model_validate(
+        _packet(
+            entities=[animal_entity],
+            observations=[observation],
+            comparisons=comparisons,
+        )
+    )
 
 
 def _explicit_started_employment_packet(
@@ -1845,6 +1956,12 @@ def _deterministic_policy_packet(
     if response_packet is not None:
         return response_packet, "response_preference"
     if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+        corrected_name_packet = _corrected_pet_name_packet(source)
+        if corrected_name_packet is not None:
+            return (
+                corrected_name_packet,
+                "explicit_corrected_pet_name",
+            )
         belief_profile = _mental_health_belief_profile(content)
         if belief_profile == "ambiguous_transcription":
             return _guard_deferral_packet(
@@ -2033,14 +2150,14 @@ def _explicit_self_occupation_supported(content: str, value: Any) -> bool:
     )
     return any(
         role_pattern.search(role) is not None
-        for role, _, _ in _explicit_self_occupation_matches(content)
+        for role, _, _, _ in _explicit_self_occupation_matches(content)
     )
 
 
 def _explicit_self_occupation_matches(
     content: str,
-) -> tuple[tuple[str, int, int], ...]:
-    matches: list[tuple[str, int, int]] = []
+) -> tuple[tuple[str, int, int, bool], ...]:
+    matches: list[tuple[str, int, int, bool]] = []
     for pattern in (
         _EXPLICIT_SELF_OCCUPATION_RE,
         _EXPLICIT_FREELANCE_OCCUPATION_RE,
@@ -2048,7 +2165,14 @@ def _explicit_self_occupation_matches(
         for match in pattern.finditer(content):
             role = match.group("role").strip(" \t\r\n\"'‘’“”.,;:")
             if role:
-                matches.append((role, match.start(), match.end()))
+                matches.append((role, match.start(), match.end(), False))
+    for match in _EXPLICIT_FORMER_SELF_OCCUPATION_RE.finditer(content):
+        role = match.group("role").strip(" \t\r\n\"'‘’“”.,;:")
+        role = _TRAILING_OCCUPATION_CREDENTIAL_RE.sub("", role).strip(
+            " \t\r\n\"'‘’“”.,;:"
+        )
+        if role:
+            matches.append((role, match.start(), match.end(), True))
     return tuple(matches)
 
 
@@ -2980,12 +3104,13 @@ def _compile_entity_links(
         )
         repairs.append("self_entity_link")
 
-    if (
-        self_ref is not None
-        and len(occupation_matches) == 1
-        and "occupation.works_as" not in predicates
-    ):
-        role, start, end = occupation_matches[0]
+    if self_ref is not None and len(occupation_matches) == 1:
+        role, start, end, historical = occupation_matches[0]
+        occupation_indexes = [
+            index
+            for index, item in enumerate(observations)
+            if item["predicate"] == "occupation.works_as"
+        ]
         matching_concepts = [
             item
             for item in entities
@@ -2994,35 +3119,81 @@ def _compile_entity_links(
             and item["name_text"].strip().casefold() == role.casefold()
             and _role_has_any(item.get("relationship_role"), {"occupation"})
         ]
-        if len(matching_concepts) == 1:
-            observations.append(
-                {
-                    "extraction_confidence": 0.98,
-                    "modality": "asserted",
-                    "object": {
-                        "kind": "entity",
-                        "entity_ref": matching_concepts[0]["entity_ref"],
-                    },
-                    "observation_ref": _next_observation_ref(observations),
-                    "polarity": "affirmed",
-                    "predicate": "occupation.works_as",
-                    "projection_class": "direct_claim",
-                    "reason_codes": ["explicit_occupation_statement"],
-                    "sensitivity": "medium",
-                    "source_spans": [
-                        {
-                            "start": start,
-                            "end": end,
-                            "quote": content[start:end],
-                        }
-                    ],
-                    "subject_entity_ref": self_ref,
-                    "surface_policy": "direct_or_relevant",
-                    "temporal": _example_temporal("state_validity"),
-                }
+        if not matching_concepts:
+            concept_ref = _add_compiler_entity(
+                source,
+                entities,
+                entity_type="concept",
+                name_text=role,
+                relationship_role="occupation:reported",
             )
+            matching_concepts = [
+                item
+                for item in entities
+                if item["entity_ref"] == concept_ref
+            ]
+            repairs.append("explicit_occupation_concept_entity")
+        if len(matching_concepts) == 1:
+            occupation_observation = {
+                "extraction_confidence": 0.98,
+                "modality": "asserted",
+                "object": {
+                    "kind": "entity",
+                    "entity_ref": matching_concepts[0]["entity_ref"],
+                },
+                "observation_ref": (
+                    observations[occupation_indexes[0]]["observation_ref"]
+                    if occupation_indexes
+                    else _next_observation_ref(observations)
+                ),
+                "polarity": "affirmed",
+                "predicate": "occupation.works_as",
+                "projection_class": "direct_claim",
+                "reason_codes": [
+                    "explicit_former_occupation_statement"
+                    if historical
+                    else "explicit_occupation_statement"
+                ],
+                "sensitivity": "medium",
+                "source_spans": [
+                    {
+                        "start": start,
+                        "end": end,
+                        "quote": content[start:end],
+                    }
+                ],
+                "subject_entity_ref": self_ref,
+                "surface_policy": "direct_or_relevant",
+                "temporal": _example_temporal("state_validity"),
+            }
+            if historical:
+                occupation_observation["temporal"] = (
+                    _relationship_v5_1_temporal(
+                        source,
+                        temporal_profile="active_interval",
+                        historical_end=True,
+                    )
+                )
+            if occupation_indexes:
+                observations[occupation_indexes[0]] = occupation_observation
+                for index in reversed(occupation_indexes[1:]):
+                    del observations[index]
+            else:
+                observations.append(occupation_observation)
             predicates.add("occupation.works_as")
-            repairs.append("explicit_occupation_observation_completed")
+            repairs.append(
+                (
+                    "explicit_former_occupation_observation_canonicalized"
+                    if historical
+                    else "explicit_occupation_observation_canonicalized"
+                )
+                if occupation_indexes
+                else (
+                    "explicit_former_occupation_observation_completed"
+                    if historical
+                    else "explicit_occupation_observation_completed"
+                )
+            )
 
     pet_source = bool(_PET_RE.search(content))
     pet_predicates = any(
@@ -3659,6 +3830,24 @@ def _compile_entity_links(
             value["deferrals"] = retained_deferrals
             repairs.append("redundant_global_insufficient_evidence_removed")
 
+    has_project_memory = any(
+        item["predicate"].startswith("project.")
+        or item["projection_class"] == "project_knowledge"
+        for item in observations
+    ) or any(
+        item.get("entity_type") == "project"
+        for item in value["entity_mentions"]
+    )
+    if not has_project_memory:
+        retained_deferrals = [
+            item
+            for item in value["deferrals"]
+            if item["reason_code"] != "project_scope_unresolved"
+        ]
+        if len(retained_deferrals) != len(value["deferrals"]):
+            value["deferrals"] = retained_deferrals
+            repairs.append("orphan_project_scope_deferral_removed")
+
     referenced_entity_refs = {
         item["subject_entity_ref"] for item in observations
     } | {
@@ -3675,6 +3864,16 @@ def _compile_entity_links(
         if len(retained_entities) != len(entities):
             value["entity_mentions"] = retained_entities
             repairs.append("orphan_entity_mentions_pruned")
+
+    for entity in value["entity_mentions"]:
+        relationship_role = entity.get("relationship_role")
+        if not isinstance(relationship_role, str) or "|" not in relationship_role:
+            continue
+        role_parts = relationship_role.split("|")
+        unique_role_parts = list(dict.fromkeys(role_parts))
+        if len(unique_role_parts) != len(role_parts):
+            entity["relationship_role"] = "|".join(unique_role_parts)
+            repairs.append("duplicate_relationship_roles_removed")
 
     compiled = ProviderPacket.model_validate(value)
     return compiled, tuple(sorted(set(repairs)))

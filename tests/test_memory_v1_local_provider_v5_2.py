@@ -11,10 +11,13 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalProviderAdapterError,
     SEMANTIC_V5_2_REGISTRY_VERSION,
     SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+    _compile_entity_links,
     _deterministic_policy_packet,
+    _packet,
     _structured_result,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
     TrustedExtractionSource,
 )
 
@@ -100,7 +103,7 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(
             provider._policy_compiler_version,
-            "memory_v1_semantic_policy_compiler_v6",
+            "memory_v1_semantic_policy_compiler_v7",
         )
 
     def test_multiple_explicit_stance_cues_require_atomic_split(self) -> None:
@@ -294,6 +297,157 @@ class LocalProviderV52Test(unittest.TestCase):
             "properties"
         ]["predicate"]
         self.assertIn("health.user_reported_observation", predicate["enum"])
+
+    def test_pet_name_correction_precedes_question_only_guard(self) -> None:
+        content = (
+            "Was it Nemo or Neko? It was Neko; the spell check changed "
+            "it accidentally to Nemo."
+        )
+        result = _deterministic_policy_packet(
+            self.source(content),
+            registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+        )
+        self.assertIsNotNone(result)
+        packet, guard_code = result
+        value = packet.model_dump(mode="json")
+        self.assertEqual(guard_code, "explicit_corrected_pet_name")
+        self.assertEqual(len(value["entity_mentions"]), 1)
+        self.assertEqual(value["entity_mentions"][0]["entity_type"], "animal")
+        self.assertEqual(value["entity_mentions"][0]["name_text"], "Neko")
+        self.assertEqual(len(value["observations"]), 1)
+        observation = value["observations"][0]
+        self.assertEqual(observation["predicate"], "identity.name_canonical")
+        self.assertEqual(observation["subject_entity_ref"], "e00")
+        self.assertEqual(observation["object"]["value"], "Neko")
+        self.assertEqual(observation["modality"], "corrective")
+        self.assertEqual(observation["projection_class"], "correction")
+        self.assertEqual(observation["surface_policy"], "normalization_only")
+        self.assertEqual(
+            {item["relation_type"] for item in value["comparison_hints"]},
+            {"corrects", "supersedes"},
+        )
+        self.assertEqual(
+            {
+                item["target_lookup_key"]
+                for item in value["comparison_hints"]
+            },
+            {"identity.name:nemo"},
+        )
+
+    def test_named_caregiving_compiles_owner_to_recipient(self) -> None:
+        content = (
+            "I have spent much of the last year caring for others, "
+            "including my wife Monika after her psychotic break."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        packet = ProviderPacket.model_validate(_packet())
+        compiled, repairs = _compile_entity_links(source, packet, registry)
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        caregiving = [
+            item
+            for item in value["observations"]
+            if item["predicate"] == "relationship.caregiver_for"
+        ]
+        self.assertEqual(len(caregiving), 1)
+        observation = caregiving[0]
+        self.assertEqual(
+            entities[observation["subject_entity_ref"]]["entity_type"],
+            "self",
+        )
+        self.assertEqual(
+            entities[observation["object"]["entity_ref"]]["name_text"],
+            "Monika",
+        )
+        role_parts = entities[observation["object"]["entity_ref"]][
+            "relationship_role"
+        ].split("|")
+        self.assertEqual(len(role_parts), len(set(role_parts)))
+        self.assertEqual(observation["sensitivity"], "high")
+        self.assertIn(
+            "explicit_relationship_observation:relationship.caregiver_for",
+            repairs,
+        )
+
+    def test_former_profession_compiles_historical_occupation(self) -> None:
+        content = (
+            "As a professional, I was a clinical psychologist and a BCBA."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        packet = ProviderPacket.model_validate(
+            _packet(
+                deferrals=[
+                    {
+                        "reason_code": "project_scope_unresolved",
+                        "memory_shape": "project_knowledge",
+                        "source_spans": [
+                            {
+                                "start": 0,
+                                "end": len(content),
+                                "quote": content,
+                            }
+                        ],
+                        "sensitivity": "medium",
+                    }
+                ]
+            )
+        )
+        compiled, repairs = _compile_entity_links(source, packet, registry)
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        occupations = [
+            item
+            for item in value["observations"]
+            if item["predicate"] == "occupation.works_as"
+        ]
+        self.assertEqual(len(occupations), 1)
+        observation = occupations[0]
+        self.assertEqual(
+            entities[observation["subject_entity_ref"]]["entity_type"],
+            "self",
+        )
+        self.assertEqual(
+            entities[observation["object"]["entity_ref"]]["name_text"],
+            "clinical psychologist",
+        )
+        self.assertEqual(observation["temporal"]["shape"], "open_interval")
+        self.assertIn(
+            "historical_relationship_ended_before_source",
+            observation["temporal"]["reason_codes"],
+        )
+        self.assertIn("explicit_occupation_concept_entity", repairs)
+        self.assertIn(
+            "explicit_former_occupation_observation_completed",
+            repairs,
+        )
+        self.assertIn("orphan_project_scope_deferral_removed", repairs)
+        self.assertNotIn(
+            "project_scope_unresolved",
+            {item.reason_code for item in compiled.deferrals},
+        )
+
+    def test_retirement_does_not_invent_current_occupation(self) -> None:
+        content = (
+            "I retired from psychology and applied behavior analysis and "
+            "now mainly build apps."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        packet = ProviderPacket.model_validate(_packet())
+        compiled, _ = _compile_entity_links(source, packet, registry)
+        self.assertNotIn(
+            "occupation.works_as",
+            {item.predicate for item in compiled.observations},
+        )
 
 
 if __name__ == "__main__":

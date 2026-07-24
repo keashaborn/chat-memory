@@ -29,6 +29,21 @@ class RelationshipSourceAssertionsV51Test(unittest.TestCase):
                 "I am the primary caregiver for my father Jerry.",
                 {"relationship.caregiver_for"},
             ),
+            (
+                "I care for my wife Monika.",
+                {
+                    "relationship.caregiver_for",
+                    "relationship.spouse_of",
+                },
+            ),
+            (
+                "I have spent much of the last year caring for others, "
+                "including my wife Monika after her psychotic break.",
+                {
+                    "relationship.caregiver_for",
+                    "relationship.spouse_of",
+                },
+            ),
             ("I currently live with Jordan.", {"relationship.lives_with"}),
             ("Nora is my sister, not my cousin.", {"relationship.sibling_of"}),
             ("Derek is my wife's brother.", {"relationship.in_law_of"}),
