@@ -1,0 +1,39 @@
+{
+  "contract_version": "memory_v1_v5_2_structured_domain_terminal_production_plan_v1",
+  "expected_base_commit": "3ab1594705241259045146d51deba1a92d7a3624",
+  "target": {
+    "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+    "packet_id": "a24c2166-ec0d-558c-ab96-9e1ca74c97a2",
+    "job_id": "f4409de8-3d64-4c7f-9991-497021d0bd40",
+    "evidence_id": "333def81-9c23-5c80-96ce-93f467323417",
+    "packet_storage_sha256": "b9016b1afbdbbf459f8871495ffe046a5288c306c44426a89d5f3c42596ac012"
+  },
+  "required_inputs": {
+    "ops/sql/20260723_memory_v1_v5_2_structured_domain_terminal.sql": "311c06a3528319d2b1d87b89115d0e711e32bf8c25e5e492dbe79960eb4dc73a",
+    "ops/sql/20260723_memory_v1_v5_2_structured_domain_terminal_rollback.sql": "07a799fadf5c2c02cd19904c18e49d2d69b9c1c2fc2f40b6de868cac766f2189",
+    "tests/memory_v1_v5_2_structured_domain_terminal.sql": "24db223967b0cf79b24901f67126b5776f6dce98261aee16b85c242fdfef4d3e",
+    "tests/memory_v1_predicate_runtime_v5_1_downstream_isolation.sql": "e3b497ced633b41d0432acb37a087d79314d6ad61cdd49e0ebc1c9fcf37b8468",
+    "tools/memory_v1_v5_2_structured_domain_terminal_clone.sh": "2cadebc17a3a5262b90c4894c1af14f97a13e9afa15f1af3af9d15e3eb5a9190",
+    "scripts/memory_v1_v5_local_packet_disposition.py": "c98459ff7d4ad6e0e1a10050e7037672ed479f9928872803d52c8b2738e96c65",
+    "scripts/memory_v1_v5_local_packet_disposition_test.py": "66a4a640582df11b7f24b07c80db4f4716a2222d453e998447062e7d68ee83a6"
+  },
+  "allowed_persistent_changes": {
+    "function_definitions": [
+      "memory.plan_owner_v5_local_packet_disposition_v1(integer)",
+      "memory.guard_v5_legacy_packet_lane_v1()"
+    ],
+    "rows": {
+      "memory.v5_local_packet_disposition": 1
+    }
+  },
+  "prohibited_changes": [
+    "other owner records",
+    "review artifacts",
+    "relational staging",
+    "claims",
+    "Qdrant",
+    "retrieval",
+    "prompt influence",
+    "external model calls"
+  ]
+}
