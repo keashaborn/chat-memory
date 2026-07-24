@@ -29,8 +29,7 @@ BEGIN
        'memory.preflight_projection_entailment_source_v5_2(uuid)',
        'EXECUTE'
      )
-     OR has_table_privilege('brains_app','memory.observation','SELECT')
-     OR has_table_privilege('brains_app','memory.evidence','SELECT') THEN
+     OR has_table_privilege('brains_app','memory.observation','SELECT') THEN
     RAISE EXCEPTION 'V5.2 entailment-source privilege boundary mismatch';
   END IF;
 END
