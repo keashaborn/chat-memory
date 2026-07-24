@@ -19,6 +19,7 @@ from rag_engine.voice_realtime_session_manager import (
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OTHER_ACTOR = "557ea042-cb82-48f8-9429-472e96c957ef"
 VOICE_SESSION = "a872d3f2-2d5c-4ae3-9f02-d9f43a38899e"
+THREAD_ID = "a401fdc5-92ee-4eeb-ad64-a98603c7dc69"
 OFFER_SDP = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
 ANSWER_SDP = "v=0\r\no=- 2 3 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
 
@@ -57,17 +58,38 @@ class FakeAsyncClient:
         return self.__class__.response
 
 
+class FakeSidebandController:
+    instances: list["FakeSidebandController"] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.started = False
+        self.commits = 0
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    def start(self) -> None:
+        self.started = True
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 class VoiceRealtimePreviewRouterTests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAsyncClient.calls = []
         FakeAsyncClient.response = FakeResponse()
+        FakeSidebandController.instances = []
         app = FastAPI()
         app.include_router(preview.router)
         self.client = TestClient(app)
         self.active_lease = patch.object(
             preview,
             "require_active_voice_session",
-            AsyncMock(),
+            AsyncMock(return_value=uuid.UUID(VOICE_SESSION)),
         )
         self.active_lease.start()
         self.addCleanup(self.active_lease.stop)
@@ -79,6 +101,13 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
         )
         self.registry_patch.start()
         self.addCleanup(self.registry_patch.stop)
+        self.controller_patch = patch.object(
+            preview,
+            "sideband_controller_factory",
+            FakeSidebandController,
+        )
+        self.controller_patch.start()
+        self.addCleanup(self.controller_patch.stop)
 
     def _headers(
         self,
@@ -90,6 +119,7 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
             "x-vs-actor-user-id": ACTOR,
             "x-vs-owner-user-id": owner,
             "x-vs-voice-session-id": VOICE_SESSION,
+            "x-vs-thread-id": THREAD_ID,
             "content-type": content_type,
         }
 
@@ -132,7 +162,13 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
 
     def test_creates_transcription_only_session_with_server_key(self) -> None:
         with (
-            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
             patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
         ):
             response = self.client.post(
@@ -152,6 +188,17 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
         self.assertNotIn("rtc_test_123", response.headers.values())
         self.assertNotIn("test-only-key", response.text)
         self.assertEqual(self.registry.size(), 1)
+        self.assertEqual(len(FakeSidebandController.instances), 1)
+        controller = FakeSidebandController.instances[0]
+        self.assertTrue(controller.started)
+        self.assertEqual(
+            controller.kwargs["session"].thread_id,
+            uuid.UUID(THREAD_ID),
+        )
+        self.assertEqual(
+            controller.kwargs["service_token"],
+            "test-service-token",
+        )
 
         call = FakeAsyncClient.calls[0]
         self.assertEqual(
@@ -186,6 +233,7 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
         registered = self.registry.register(
             owner_user_id=ACTOR,
             voice_session_id=uuid.UUID(VOICE_SESSION),
+            thread_id=uuid.UUID(THREAD_ID),
             openai_call_id="rtc_test_close",
         )
         mismatch = self.client.delete(
@@ -203,13 +251,68 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
         self.assertTrue(closed.json()["removed"])
         self.assertEqual(self.registry.size(), 0)
 
+    def test_commit_and_events_require_owned_active_session(self) -> None:
+        registered = self.registry.register(
+            owner_user_id=ACTOR,
+            voice_session_id=uuid.UUID(VOICE_SESSION),
+            thread_id=uuid.UUID(THREAD_ID),
+            openai_call_id="rtc_test_events",
+        )
+        controller = FakeSidebandController(
+            session=registered,
+            api_key="not-returned",
+            service_token="not-returned",
+        )
+        registered.controller = controller
+        registered.append_event(
+            "transcript.completed",
+            {"transcript": "governed transcript"},
+        )
+
+        committed = self.client.post(
+            (
+                "/voice/realtime-preview/session/"
+                f"{registered.preview_session_id}/commit"
+            ),
+            headers=self._headers(),
+        )
+        self.assertEqual(committed.status_code, 200)
+        self.assertEqual(controller.commits, 1)
+
+        events = self.client.get(
+            (
+                "/voice/realtime-preview/session/"
+                f"{registered.preview_session_id}/events?after=0"
+            ),
+            headers=self._headers(),
+        )
+        self.assertEqual(events.status_code, 200)
+        payload = events.json()
+        self.assertEqual(payload["next_cursor"], 1)
+        self.assertEqual(
+            payload["events"][0]["transcript"],
+            "governed transcript",
+        )
+
+        missing = self.client.get(
+            f"/voice/realtime-preview/session/{uuid.uuid4()}/events",
+            headers=self._headers(),
+        )
+        self.assertEqual(missing.status_code, 404)
+
     def test_openai_error_is_sanitized(self) -> None:
         FakeAsyncClient.response = FakeResponse(
             status_code=401,
             text='{"error":{"message":"secret provider detail"}}',
         )
         with (
-            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
             patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
         ):
             response = self.client.post(

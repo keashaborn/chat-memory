@@ -10,6 +10,7 @@ from rag_engine.voice_realtime_session_manager import (
 
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 VOICE_SESSION = uuid.UUID("a872d3f2-2d5c-4ae3-9f02-d9f43a38899e")
+THREAD_ID = uuid.UUID("a401fdc5-92ee-4eeb-ad64-a98603c7dc69")
 
 
 class RealtimePreviewSessionRegistryTests(unittest.TestCase):
@@ -22,6 +23,7 @@ class RealtimePreviewSessionRegistryTests(unittest.TestCase):
         session = registry.register(
             owner_user_id=OWNER,
             voice_session_id=VOICE_SESSION,
+            thread_id=THREAD_ID,
             openai_call_id="rtc_expiring",
         )
         self.assertIsNotNone(
@@ -47,6 +49,7 @@ class RealtimePreviewSessionRegistryTests(unittest.TestCase):
         session = registry.register(
             owner_user_id=OWNER,
             voice_session_id=VOICE_SESSION,
+            thread_id=THREAD_ID,
             openai_call_id="rtc_owned",
         )
         self.assertIsNone(
@@ -63,6 +66,34 @@ class RealtimePreviewSessionRegistryTests(unittest.TestCase):
                 voice_session_id=uuid.uuid4(),
             )
         )
+
+    def test_events_are_cursor_ordered_and_bounded(self) -> None:
+        registry = RealtimePreviewSessionRegistry()
+        session = registry.register(
+            owner_user_id=OWNER,
+            voice_session_id=VOICE_SESSION,
+            thread_id=THREAD_ID,
+            openai_call_id="rtc_events",
+        )
+        first = session.append_event("session.connected")
+        second = session.append_event(
+            "transcript.completed",
+            {"transcript": "hello"},
+        )
+
+        events, cursor = session.events_after(0)
+        self.assertEqual(first.cursor, 1)
+        self.assertEqual(second.cursor, 2)
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["session.connected", "transcript.completed"],
+        )
+        self.assertEqual(cursor, 2)
+
+        events, cursor = session.events_after(1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["transcript"], "hello")
+        self.assertEqual(cursor, 2)
 
 
 if __name__ == "__main__":

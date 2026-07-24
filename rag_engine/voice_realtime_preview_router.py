@@ -15,11 +15,16 @@ from rag_engine.openai_chat_provider_v1 import safety_identifier_v1
 from rag_engine.voice_realtime_session_manager import (
     RealtimePreviewSessionRegistry,
 )
+from rag_engine.voice_realtime_sideband_controller import (
+    RealtimePreviewSidebandController,
+    RealtimePreviewSidebandNotReady,
+)
 from rag_engine.voice_session_router import require_active_voice_session
 
 
 router = APIRouter()
 preview_sessions = RealtimePreviewSessionRegistry()
+sideband_controller_factory = RealtimePreviewSidebandController
 
 OPENAI_REALTIME_CALLS_URL = (
     os.getenv("OPENAI_REALTIME_CALLS_URL")
@@ -58,6 +63,17 @@ def _voice_session_id_from_request(req: Request) -> uuid.UUID:
         raise HTTPException(
             status_code=400,
             detail={"error": "invalid_voice_session_id"},
+        ) from None
+
+
+def _thread_id_from_request(req: Request) -> uuid.UUID:
+    raw = (req.headers.get("x-vs-thread-id") or "").strip()
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_thread_id"},
         ) from None
 
 
@@ -100,6 +116,7 @@ def _transcription_session_config() -> dict[str, Any]:
 async def create_realtime_preview_call(req: Request):
     owner_user_id = _owner_from_request(req)
     voice_session_id = await require_active_voice_session(req, owner_user_id)
+    thread_id = _thread_id_from_request(req)
 
     if _normalized_content_type(req.headers.get("content-type")) != "application/sdp":
         raise HTTPException(
@@ -131,6 +148,9 @@ async def create_realtime_preview_call(req: Request):
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="missing_openai_key")
+    service_token = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
+    if not service_token:
+        raise HTTPException(status_code=503, detail="missing_service_token")
 
     session_config = _transcription_session_config()
     try:
@@ -195,8 +215,27 @@ async def create_realtime_preview_call(req: Request):
     session = preview_sessions.register(
         owner_user_id=owner_user_id,
         voice_session_id=voice_session_id,
+        thread_id=thread_id,
         openai_call_id=call_id,
     )
+    try:
+        controller = sideband_controller_factory(
+            session=session,
+            api_key=api_key,
+            service_token=service_token,
+        )
+        session.controller = controller
+        controller.start()
+    except Exception as exc:
+        preview_sessions.remove_owned(
+            preview_session_id=session.preview_session_id,
+            owner_user_id=owner_user_id,
+            voice_session_id=voice_session_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "realtime_sideband_unavailable"},
+        ) from exc
 
     return Response(
         content=answer_sdp,
@@ -211,6 +250,102 @@ async def create_realtime_preview_call(req: Request):
     )
 
 
+def _owned_session_or_404(
+    *,
+    preview_session_id: uuid.UUID,
+    owner_user_id: str,
+    voice_session_id: uuid.UUID,
+):
+    session = preview_sessions.get_owned(
+        preview_session_id=preview_session_id,
+        owner_user_id=owner_user_id,
+        voice_session_id=voice_session_id,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "realtime_preview_session_not_found"},
+        )
+    return session
+
+
+@router.post("/voice/realtime-preview/session/{preview_session_id}/commit")
+async def commit_realtime_preview_audio(
+    preview_session_id: uuid.UUID,
+    req: Request,
+):
+    owner_user_id = _owner_from_request(req)
+    voice_session_id = await require_active_voice_session(
+        req,
+        owner_user_id,
+    )
+    session = _owned_session_or_404(
+        preview_session_id=preview_session_id,
+        owner_user_id=owner_user_id,
+        voice_session_id=voice_session_id,
+    )
+    controller = session.controller
+    if controller is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "realtime_sideband_not_ready"},
+        )
+    try:
+        await controller.commit()
+    except RealtimePreviewSidebandNotReady as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "realtime_sideband_not_ready"},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "realtime_sideband_unavailable"},
+        ) from exc
+    return JSONResponse(
+        {
+            "ok": True,
+            "preview_session_id": str(preview_session_id),
+            "committed": True,
+        },
+        headers=NO_STORE_HEADERS,
+    )
+
+
+@router.get("/voice/realtime-preview/session/{preview_session_id}/events")
+async def get_realtime_preview_events(
+    preview_session_id: uuid.UUID,
+    req: Request,
+    after: int = 0,
+    limit: int = 50,
+):
+    if after < 0 or limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_event_cursor"},
+        )
+    owner_user_id = _owner_from_request(req)
+    voice_session_id = await require_active_voice_session(
+        req,
+        owner_user_id,
+    )
+    session = _owned_session_or_404(
+        preview_session_id=preview_session_id,
+        owner_user_id=owner_user_id,
+        voice_session_id=voice_session_id,
+    )
+    events, next_cursor = session.events_after(after, limit=limit)
+    return JSONResponse(
+        {
+            "ok": True,
+            "preview_session_id": str(preview_session_id),
+            "events": events,
+            "next_cursor": next_cursor,
+        },
+        headers=NO_STORE_HEADERS,
+    )
+
+
 @router.delete("/voice/realtime-preview/session/{preview_session_id}")
 async def close_realtime_preview_session(
     preview_session_id: uuid.UUID,
@@ -218,16 +353,18 @@ async def close_realtime_preview_session(
 ):
     owner_user_id = _owner_from_request(req)
     voice_session_id = _voice_session_id_from_request(req)
-    removed = preview_sessions.remove_owned(
+    session = preview_sessions.pop_owned(
         preview_session_id=preview_session_id,
         owner_user_id=owner_user_id,
         voice_session_id=voice_session_id,
     )
+    if session is not None and session.controller is not None:
+        await session.controller.close()
     return JSONResponse(
         {
             "ok": True,
             "preview_session_id": str(preview_session_id),
-            "removed": removed,
+            "removed": session is not None,
         },
         headers=NO_STORE_HEADERS,
     )
