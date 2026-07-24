@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import UUID
 
 from rag_engine.governed_memory_provider_v1 import (
     LiveGovernedMemoryAssemblyProviderV1,
+)
+from rag_engine.memory_v1_entity_scope_resolver_v2 import (
+    EntityScopeResolutionError,
 )
 from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
@@ -61,6 +65,40 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.memory_input)
         self.assertIsNone(result.memory_application)
 
+    async def test_unresolved_entity_scope_returns_empty_before_qdrant(self) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id="unresolved-pet-request",
+            current_message="Do you remember when I lost my pet?",
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+
+        with patch.dict(
+            os.environ,
+            {"QDRANT_URL": "http://qdrant.invalid"},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.embed_text",
+            return_value=[0.125, -0.25, 0.5],
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.load_governed_entity_scope_snapshot_v2",
+            return_value={"snapshot": object()},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.resolve_memory_claim_selector_context_v2",
+            side_effect=EntityScopeResolutionError("no governed pet"),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.make_qdrant_client",
+            side_effect=AssertionError("Qdrant must not be opened"),
+        ):
+            result = await provider.prepare(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
+
+        self.assertIsNone(result.memory_input)
+        self.assertIsNone(result.memory_application)
+
     async def test_family_profile_recall_selects_and_applies_governed_claims(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(
             authenticated_actor_user_id=ACTOR,
@@ -83,7 +121,15 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
             "rag_engine.governed_memory_provider_v1.ClaimVectorIndex",
             return_value=object(),
         ), patch(
-            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV1",
+            "rag_engine.governed_memory_provider_v1.load_governed_entity_scope_snapshot_v2",
+            return_value={"snapshot": object()},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.resolve_memory_claim_selector_context_v2",
+            return_value=SimpleNamespace(
+                allowed_predicates=("identity.name", "relationship.parent_of")
+            ),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV2",
             return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
         ) as claim_adapter:
             result = await provider.prepare(
@@ -125,7 +171,15 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
             "rag_engine.governed_memory_provider_v1.ClaimVectorIndex",
             return_value=object(),
         ), patch(
-            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV1",
+            "rag_engine.governed_memory_provider_v1.load_governed_entity_scope_snapshot_v2",
+            return_value={"snapshot": object()},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.resolve_memory_claim_selector_context_v2",
+            return_value=SimpleNamespace(
+                allowed_predicates=("identity.name", "relationship.parent_of")
+            ),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV2",
             return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
         ) as claim_adapter:
             result = await provider.prepare(

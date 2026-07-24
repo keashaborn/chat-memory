@@ -6,6 +6,7 @@ compose=(docker compose -p memoryv1entityscopereader -f docker-compose.ci.yml)
 migration=ops/sql/20260724_memory_v1_governed_entity_scope_reader_v1.sql
 rollback=ops/sql/20260724_memory_v1_governed_entity_scope_reader_v1_rollback.sql
 test_sql=tests/memory_v1_governed_entity_scope_reader_v1.sql
+probe=scripts/memory_v1_entity_scope_v2_clone_probe.py
 backup=$(mktemp /tmp/memory-v1-entity-scope-reader.XXXXXX.dump)
 before=$(mktemp /tmp/memory-v1-entity-scope-reader-before.XXXXXX.tsv)
 after=$(mktemp /tmp/memory-v1-entity-scope-reader-after.XXXXXX.tsv)
@@ -60,7 +61,7 @@ capture_state() {
   ")
 }
 
-for required in "$migration" "$rollback" "$test_sql"; do
+for required in "$migration" "$rollback" "$test_sql" "$probe"; do
   [[ -f "$repo_root/$required" ]]
 done
 
@@ -119,6 +120,13 @@ run_as_brains \
   -v target_owner_user_id="1240822d-ac9a-4096-95aa-e2b24d36ef50" \
   -v other_owner_user_id="557ea042-cb82-48f8-9429-472e96c957ef" \
   <"$repo_root/$test_sql"
+
+"${compose[@]}" build brains >/dev/null
+"${compose[@]}" run --rm --no-deps -T \
+  -e POSTGRES_DSN=postgresql://brains_app:clone_only_brains_password@postgres:5432/memory \
+  brains python "$probe" \
+    --dsn postgresql://brains_app:clone_only_brains_password@postgres:5432/memory \
+    --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50
 
 capture_state "$after"
 diff -u "$before" "$after"

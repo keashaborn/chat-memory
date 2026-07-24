@@ -14,8 +14,13 @@ from rag_engine.memory_prompt_renderer_v1 import (
     render_governed_memory_v1,
 )
 from rag_engine.memory_v1_governed_postgres_loaders_v1 import (
+    load_governed_entity_scope_snapshot_v2,
     load_governed_preference_snapshot_v1,
-    load_governed_v5_claim_rows_v1,
+    load_governed_v5_claim_rows_v2,
+)
+from rag_engine.memory_v1_entity_scope_resolver_v2 import (
+    EntityScopeResolutionError,
+    resolve_memory_claim_selector_context_v2,
 )
 from rag_engine.memory_v1_intent import VERSION as INTENT_VERSION
 from rag_engine.memory_v1_intent import classify_memory_intent
@@ -35,7 +40,7 @@ from rag_engine.memory_v1_selection_envelope import (
     SourceContractVersionV1,
     select_governed_memory_v1,
 )
-from rag_engine.memory_v1_v5_claim_lane_adapter import V5ClaimLaneAdapterV1
+from rag_engine.memory_v1_v5_claim_lane_adapter_v2 import V5ClaimLaneAdapterV2
 from rag_engine.memory_v1_v5_shadow_candidate import discover_v5_shadow_candidates
 from rag_engine.openai_client import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
@@ -118,37 +123,6 @@ class LiveGovernedMemoryAssemblyProviderV1:
         providers: dict[MemoryLane, object] = {}
         qdrant = None
         try:
-            if MemoryLane.CLAIM in requested:
-                qdrant_url = (os.getenv("QDRANT_URL") or "").strip()
-                if not qdrant_url:
-                    raise RuntimeError("QDRANT_URL is required for governed claim selection")
-                qdrant = make_qdrant_client(url=qdrant_url, timeout=15.0)
-                index = ClaimVectorIndex(
-                    qdrant,
-                    collection_name=os.getenv("MEMORY_V1_COLLECTION", "memory_claim_v1"),
-                    vector_size=len(vector),
-                )
-                providers[MemoryLane.CLAIM] = V5ClaimLaneAdapterV1(
-                    source_contract=CLAIM_SOURCE,
-                    candidate_discoverer=lambda owner, values, limit: (
-                        discover_v5_shadow_candidates(index, owner, values, limit=limit)
-                    ),
-                    row_loader=lambda owner, claim_ids: load_governed_v5_claim_rows_v1(
-                        self._conn, owner, claim_ids
-                    ),
-                    predicate_prefix_resolver=lambda _request: allowed_predicates,
-                    candidate_limit=100 if broad_profile_recall else 24,
-                    minimum_semantic_score=0.0 if broad_profile_recall else 0.20,
-                    relative_semantic_ratio=0.0 if broad_profile_recall else 0.40,
-                )
-            if MemoryLane.PREFERENCE in requested:
-                providers[MemoryLane.PREFERENCE] = GovernedPreferenceLaneAdapterV1(
-                    source_contract=PREFERENCE_SOURCE,
-                    snapshot_loader=lambda owner: load_governed_preference_snapshot_v1(
-                        self._conn, owner
-                    ),
-                )
-
             request = MemorySelectionRequestV1.create(
                 intent_adapter_version=INTENT_VERSION,
                 source_contract_versions=tuple(
@@ -182,6 +156,52 @@ class LiveGovernedMemoryAssemblyProviderV1:
                 selected_at=datetime.now(timezone.utc),
                 budget_policy=MemorySelectionBudgetPolicyV1.standard(),
             )
+            if MemoryLane.CLAIM in requested:
+                scope_batch = await load_governed_entity_scope_snapshot_v2(
+                    self._conn,
+                    authenticated_actor_user_id,
+                )
+                try:
+                    selector_context = resolve_memory_claim_selector_context_v2(
+                        request=request,
+                        claim_context=claim_context,
+                        snapshot=scope_batch["snapshot"],
+                    )
+                except EntityScopeResolutionError:
+                    return GovernedMemoryAssemblyV1()
+                qdrant_url = (os.getenv("QDRANT_URL") or "").strip()
+                if not qdrant_url:
+                    raise RuntimeError("QDRANT_URL is required for governed claim selection")
+                qdrant = make_qdrant_client(url=qdrant_url, timeout=15.0)
+                index = ClaimVectorIndex(
+                    qdrant,
+                    collection_name=os.getenv("MEMORY_V1_COLLECTION", "memory_claim_v1"),
+                    vector_size=len(vector),
+                )
+                providers[MemoryLane.CLAIM] = V5ClaimLaneAdapterV2(
+                    source_contract=CLAIM_SOURCE,
+                    candidate_discoverer=lambda owner, values, limit: (
+                        discover_v5_shadow_candidates(index, owner, values, limit=limit)
+                    ),
+                    row_loader=lambda owner, claim_ids: load_governed_v5_claim_rows_v2(
+                        self._conn, owner, claim_ids
+                    ),
+                    predicate_prefix_resolver=lambda _request: (
+                        selector_context.allowed_predicates
+                    ),
+                    selector_context_resolver=lambda _request: selector_context,
+                    candidate_limit=100 if broad_profile_recall else 24,
+                    minimum_semantic_score=0.0 if broad_profile_recall else 0.20,
+                    relative_semantic_ratio=0.0 if broad_profile_recall else 0.40,
+                )
+            if MemoryLane.PREFERENCE in requested:
+                providers[MemoryLane.PREFERENCE] = GovernedPreferenceLaneAdapterV1(
+                    source_contract=PREFERENCE_SOURCE,
+                    snapshot_loader=lambda owner: load_governed_preference_snapshot_v1(
+                        self._conn, owner
+                    ),
+                )
+
             envelope = await select_governed_memory_v1(
                 AuthoritativeGovernedMemorySelectorV1(providers), request
             )

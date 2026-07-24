@@ -47,20 +47,16 @@ class MemoryV1FamilyDeathRoutingTests(unittest.TestCase):
             ],
         )
 
-    def test_explicit_pet_loss_fails_closed_until_entity_scope_v2(self) -> None:
+    def test_explicit_pet_loss_routes_only_to_entity_scoped_death(self) -> None:
         plan = classify_memory_intent(
             "Do you remember when I lost my pet?",
             request_classification="GENERAL",
         )
 
         self.assertEqual(plan["domains"], ["pet_loss"])
-        self.assertEqual(plan["memory_intent"], "none")
-        self.assertFalse(plan["routes"]["governed_claims"])
-        self.assertFalse(plan["claim_context"]["eligible"])
-        self.assertEqual(
-            plan["claim_context"]["reason"],
-            "entity_scope_v2_required",
-        )
+        self.assertEqual(plan["memory_intent"], "personal_recall")
+        self.assertTrue(plan["routes"]["governed_claims"])
+        self.assertTrue(plan["claim_context"]["eligible"])
         self.assertFalse(plan["claim_context"]["broad_profile_recall"])
         self.assertEqual(
             plan["claim_context"]["allowed_predicates"],
@@ -71,7 +67,7 @@ class MemoryV1FamilyDeathRoutingTests(unittest.TestCase):
             "GENERAL",
         )
         self.assertFalse(shadow["eligible"])
-        self.assertEqual(shadow["reason"], "entity_scope_v2_required")
+        self.assertEqual(shadow["reason"], "entity_scope_v2_live_only")
 
     def test_name_correction_never_falls_back_to_generic_name(self) -> None:
         query = "Was it Nemo or Neko?"

@@ -216,6 +216,11 @@ def classify_v5_shadow_context(
     claim = dict(plan.get("claim_context") or {})
     if claim.get("eligible"):
         domain = str(claim.get("domain") or "")
+        if domain == "pet_loss":
+            return {
+                "eligible": False,
+                "reason": "entity_scope_v2_live_only",
+            }
         predicates = DOMAIN_PREDICATES.get(domain)
         if not predicates:
             return {"eligible": False, "reason": "unmapped_claim_domain"}
