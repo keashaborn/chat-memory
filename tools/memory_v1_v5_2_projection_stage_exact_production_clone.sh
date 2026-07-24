@@ -188,9 +188,9 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   --confirm STAGE_OWNER_V5_2_REPORTED_STANCE_PROJECTIONS_ONLY \
   --output "$replay_result"
 [[ "$(jq -er '.rows_written' "$replay_result")" == 0 ]]
-[[ "$(jq -er '[.outcomes[].entailment_outcome]|unique|join(\",\")' \
+[[ "$(jq -er '[.outcomes[].entailment_outcome]|unique|join(",")' \
   "$replay_result")" == replayed ]]
-[[ "$(jq -er '[.outcomes[].projection_outcome]|unique|join(\",\")' \
+[[ "$(jq -er '[.outcomes[].projection_outcome]|unique|join(",")' \
   "$replay_result")" == replayed ]]
 
 [[ "$(scalar "SELECT count(*) FROM memory.relational_operation_request
