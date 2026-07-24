@@ -123,6 +123,8 @@ BEGIN
 END
 $owner_plan$;
 
+SELECT set_config('test.target_packet_id', :'target_packet_id', true);
+
 SELECT set_config(
   'app.user_id',
   '557ea042-cb82-48f8-9429-472e96c957ef',
@@ -131,7 +133,7 @@ SELECT set_config(
 
 DO $cross_owner$
 DECLARE
-  target uuid := :'target_packet_id'::uuid;
+  target uuid := current_setting('test.target_packet_id')::uuid;
   leaked boolean;
 BEGIN
   SELECT EXISTS (
