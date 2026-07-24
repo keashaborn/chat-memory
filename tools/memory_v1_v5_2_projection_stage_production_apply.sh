@@ -311,7 +311,8 @@ phase=postflight
 
 phase=restore
 restore_runtime
-[[ "$(systemctl is-active brains-postgres.service)" == active ]]
+[[ "$(docker inspect -f '{{.State.Running}}' "$container")" == true ]]
+docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
 curl --fail --silent --show-error --max-time 30 \
   http://127.0.0.1:8000/health >/dev/null
 
