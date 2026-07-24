@@ -55,6 +55,7 @@ def literal(contract: str) -> dict:
             "json",
             {
                 "topic_key": "evidence.truth",
+                "topic_text": "evidence and truth",
                 "position": "claims should track evidence rather than absolute truth",
                 "orientation": "supports",
                 "context": "memory architecture",

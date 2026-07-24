@@ -250,6 +250,7 @@ def render_claim_text(source: Mapping[str, Any]) -> str:
     if predicate == "stance.reported":
         if not isinstance(value, dict) or set(value) != {
             "topic_key",
+            "topic_text",
             "position",
             "orientation",
             "context",
