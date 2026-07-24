@@ -387,7 +387,7 @@ phase=postflight
         ON review.review_id=applied.review_id
       JOIN memory.v5_2_atom_admission_proposal AS proposal
         ON proposal.proposal_id=review.proposal_id
-      WHERE proposal.source_packet_id='$stance_packet'::uuid
+      WHERE proposal.packet_id='$stance_packet'::uuid
     ),
     (
       SELECT count(*)
@@ -396,7 +396,7 @@ phase=postflight
         ON review.review_id=applied.review_id
       JOIN memory.v5_2_atom_admission_proposal AS proposal
         ON proposal.proposal_id=review.proposal_id
-      WHERE proposal.source_packet_id='$preference_packet'::uuid
+      WHERE proposal.packet_id='$preference_packet'::uuid
     )
   )
 ")" == '1,0' ]]
