@@ -121,7 +121,7 @@ run_sql <"$migration"
 run_sql <"$migration"
 run_sql <"$security_test"
 
-PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python \
   "$repo_root/tests/test_memory_v1_v5_2_projection_dispatch.py"
 
 head=$(git -C "$repo_root" rev-parse HEAD)
