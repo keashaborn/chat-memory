@@ -101,7 +101,7 @@ set +a
 
 systemctl list-units --type=timer --state=active --no-legend \
   'memory-v1*.timer' \
-  | sed -n 's/^[[:space:]]*\\([^[:space:]]*\\.timer\\).*/\\1/p' \
+  | sed -n 's/^[[:space:]]*\([^[:space:]]*\.timer\).*/\1/p' \
   | sort -u >"$timer_state"
 while IFS= read -r timer; do
   [[ -z "$timer" ]] || systemctl stop "$timer"
@@ -111,8 +111,8 @@ for _ in $(seq 1 30); do
   running=$(
     systemctl list-units --type=service --state=running,activating \
       --no-legend 'memory-v1*.service' \
-      | sed -n 's/^[[:space:]]*\\([^[:space:]]*\\.service\\).*/\\1/p' \
-      | rg -v '^memory-v1-v5-local-inference-tunnel\\.service$' \
+      | sed -n 's/^[[:space:]]*\([^[:space:]]*\.service\).*/\1/p' \
+      | rg -v '^memory-v1-v5-local-inference-tunnel\.service$' \
       || true
   )
   [[ -z "$running" ]] && break
@@ -166,13 +166,12 @@ qdrant_after=$(qdrant_count)
 [[ "$(systemctl is-active brains.service)" == active ]]
 
 restore_timers
-active_after=$(
+diff -u "$timer_state" <(
   systemctl list-units --type=timer --state=active --no-legend \
     'memory-v1*.timer' \
-    | sed -n 's/^[[:space:]]*\\([^[:space:]]*\\.timer\\).*/\\1/p' \
+    | sed -n 's/^[[:space:]]*\([^[:space:]]*\.timer\).*/\1/p' \
     | sort -u
 )
-diff -u "$timer_state" <(printf '%s\n' "$active_after")
 
 printf 'PRODUCTION_INSTALL=pass\\n'
 printf 'HEAD=%s\\n' "$("${git_live[@]}" rev-parse HEAD)"
