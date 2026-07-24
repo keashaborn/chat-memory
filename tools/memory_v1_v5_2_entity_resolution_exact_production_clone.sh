@@ -164,7 +164,7 @@ if POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   exit 1
 fi
 
-/opt/chat-memory/venv/bin/python "$fixture" \
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$fixture" \
   --plan "$plan" --output "$authorization" --head "$head"
 MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
   POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
