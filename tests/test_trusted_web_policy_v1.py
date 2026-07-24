@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import unittest
+
+from rag_engine.trusted_web_policy_v1 import (
+    BACB_DOMAIN,
+    ODS_DOMAIN,
+    PMC_DOMAIN,
+    PUBMED_DOMAIN,
+    TrustedWebDispositionV1,
+    TrustedWebTopicV1,
+    route_trusted_web_query,
+    validate_allowed_source_url,
+)
+
+
+class TrustedWebPolicyV1Tests(unittest.TestCase):
+    def test_supplement_route_uses_only_approved_domains(self) -> None:
+        decision = route_trusted_web_query(
+            "What does the evidence say about creatine for strength?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.SUPPLEMENTS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertIn(ODS_DOMAIN, decision.allowed_domains)
+        self.assertIn(PUBMED_DOMAIN, decision.allowed_domains)
+        self.assertNotIn(BACB_DOMAIN, decision.allowed_domains)
+
+    def test_training_evidence_is_pubmed_and_pmc_only(self) -> None:
+        decision = route_trusted_web_query(
+            "What does evidence say about training volume for hypertrophy?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.TRAINING_EVIDENCE)
+        self.assertEqual(
+            decision.allowed_domains,
+            (PUBMED_DOMAIN, PMC_DOMAIN),
+        )
+
+    def test_behavior_route_keeps_bacb_off_by_default(self) -> None:
+        default = route_trusted_web_query(
+            "How can I use a baseline phase for training adherence?"
+        )
+        enabled = route_trusted_web_query(
+            "How can I use a baseline phase for training adherence?",
+            allow_bacb=True,
+        )
+        self.assertNotIn(BACB_DOMAIN, default.allowed_domains)
+        self.assertIn(BACB_DOMAIN, enabled.allowed_domains)
+
+    def test_general_trivia_is_declined(self) -> None:
+        decision = route_trusted_web_query(
+            "Who won the championship last night?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+        self.assertEqual(decision.allowed_domains, ())
+
+    def test_food_composition_routes_to_usda_integration(self) -> None:
+        decision = route_trusted_web_query(
+            "How many calories in this food barcode?"
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.USDA_FOOD_COMPOSITION,
+        )
+        self.assertEqual(
+            decision.disposition,
+            TrustedWebDispositionV1.ROUTE_INTERNAL,
+        )
+
+    def test_safety_signal_stops_search(self) -> None:
+        decision = route_trusted_web_query(
+            "Optimize my plan even though I have chest pain."
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.SAFETY_STOP)
+        self.assertEqual(
+            decision.disposition,
+            TrustedWebDispositionV1.SAFETY_STOP,
+        )
+
+    def test_query_with_unapproved_url_is_declined(self) -> None:
+        decision = route_trusted_web_query(
+            "Use https://example.com to answer my creatine question."
+        )
+        self.assertEqual(decision.reason, "unapproved_url_target")
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+
+    def test_source_validation_rejects_ssrf_and_non_allowlist_targets(self) -> None:
+        allowed = (PUBMED_DOMAIN,)
+        with self.assertRaisesRegex(ValueError, "ip_literal"):
+            validate_allowed_source_url("https://127.0.0.1/a", allowed)
+        with self.assertRaisesRegex(ValueError, "scheme"):
+            validate_allowed_source_url(
+                "http://pubmed.ncbi.nlm.nih.gov/a",
+                allowed,
+            )
+        with self.assertRaisesRegex(ValueError, "not_allowed"):
+            validate_allowed_source_url("https://example.com/a", allowed)
+
+    def test_source_validation_accepts_allowlisted_subdomain_and_drops_fragment(self) -> None:
+        result = validate_allowed_source_url(
+            "https://sub.pubmed.ncbi.nlm.nih.gov/a?q=1#fragment",
+            (PUBMED_DOMAIN,),
+        )
+        self.assertEqual(
+            result,
+            "https://sub.pubmed.ncbi.nlm.nih.gov/a?q=1",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

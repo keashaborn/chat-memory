@@ -1,0 +1,367 @@
+from __future__ import annotations
+
+"""Deterministic, server-owned routing and URL policy for trusted web search."""
+
+import ipaddress
+import re
+from enum import Enum
+from urllib.parse import urlsplit, urlunsplit
+
+from pydantic import BaseModel, ConfigDict
+
+
+POLICY_VERSION = "trusted_web_policy_v1_1"
+
+ODS_DOMAIN = "ods.od.nih.gov"
+MEDLINEPLUS_DOMAIN = "medlineplus.gov"
+DGA_DOMAIN = "dietaryguidelines.gov"
+REALFOOD_DOMAIN = "realfood.gov"
+ODPHP_DOMAIN = "odphp.health.gov"
+FDA_DOMAIN = "fda.gov"
+PUBMED_DOMAIN = "pubmed.ncbi.nlm.nih.gov"
+PMC_DOMAIN = "pmc.ncbi.nlm.nih.gov"
+BACB_DOMAIN = "bacb.com"
+
+CORE_ALLOWED_DOMAINS = frozenset(
+    {
+        ODS_DOMAIN,
+        MEDLINEPLUS_DOMAIN,
+        DGA_DOMAIN,
+        REALFOOD_DOMAIN,
+        ODPHP_DOMAIN,
+        FDA_DOMAIN,
+        PUBMED_DOMAIN,
+        PMC_DOMAIN,
+    }
+)
+
+
+class TrustedWebTopicV1(str, Enum):
+    SUPPLEMENTS = "supplements"
+    MEDICAL_ADJACENT = "medical_adjacent"
+    NUTRITION_EVIDENCE = "nutrition_evidence"
+    TRAINING_EVIDENCE = "training_evidence"
+    BEHAVIOR_CHANGE = "behavior_change"
+    USDA_FOOD_COMPOSITION = "usda_food_composition"
+    INTERNAL_EXERCISE_LIBRARY = "internal_exercise_library"
+    SAFETY_STOP = "safety_stop"
+    UNSUPPORTED = "unsupported"
+
+
+class TrustedWebDispositionV1(str, Enum):
+    SEARCH = "search"
+    DECLINE = "decline"
+    ROUTE_INTERNAL = "route_internal"
+    SAFETY_STOP = "safety_stop"
+
+
+class TrustedWebPolicyDecisionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    policy_version: str = POLICY_VERSION
+    topic: TrustedWebTopicV1
+    disposition: TrustedWebDispositionV1
+    reason: str
+    allowed_domains: tuple[str, ...] = ()
+
+
+_URL_RE = re.compile(r"https?://[^\s<>{}\[\]\"']+", re.IGNORECASE)
+
+_SAFETY_TERMS = (
+    "suicidal",
+    "suicide",
+    "self harm",
+    "self-harm",
+    "eating disorder",
+    "anorexia",
+    "bulimia",
+    "purging",
+    "vomiting after eating",
+    "compulsive exercise",
+    "exercise addiction",
+    "chest pain",
+    "cannot breathe",
+    "can't breathe",
+    "severe shortness of breath",
+    "fainted",
+    "fainting",
+    "severe bleeding",
+)
+
+_SUPPLEMENT_TERMS = (
+    "supplement",
+    "creatine",
+    "caffeine",
+    "beta alanine",
+    "beta-alanine",
+    "citrulline",
+    "fish oil",
+    "omega-3",
+    "multivitamin",
+    "vitamin",
+    "mineral",
+    "magnesium",
+    "zinc",
+    "pre workout",
+    "pre-workout",
+    "ergogenic",
+)
+
+_BEHAVIOR_TERMS = (
+    "baseline phase",
+    "change phase",
+    "self experiment",
+    "self-experiment",
+    "single case",
+    "single-case",
+    "self monitoring",
+    "self-monitoring",
+    "adherence",
+    "habit tracking",
+    "one change at a time",
+    "planned sets completed",
+)
+
+_MEDICAL_ADJACENT_TERMS = (
+    "contraindication",
+    "interaction",
+    "side effect",
+    "medication",
+    "prescription",
+    "medical condition",
+    "pregnant",
+    "pregnancy",
+    "breastfeeding",
+    "allergy",
+    "symptom",
+    "blood pressure",
+    "kidney disease",
+    "liver disease",
+)
+
+_USDA_TERMS = (
+    "fooddata central",
+    "fooddata",
+    "usda",
+    "barcode",
+    "nutrition facts",
+    "food composition",
+    "calories in",
+    "macros in",
+    "micronutrients in",
+    "nutrients in",
+)
+
+_TECHNIQUE_TERMS = (
+    "exercise technique",
+    "lifting technique",
+    "form check",
+    "how to squat",
+    "how to bench",
+    "how to deadlift",
+    "how to perform",
+    "exercise cues",
+)
+
+_NUTRITION_EVIDENCE_TERMS = (
+    "nutrition",
+    "diet",
+    "protein target",
+    "protein intake",
+    "energy balance",
+    "calorie deficit",
+    "fat loss",
+    "weight loss",
+    "dietary pattern",
+    "dietary guidelines",
+    "meal timing",
+    "nutrient timing",
+)
+
+_TRAINING_EVIDENCE_TERMS = (
+    "hypertrophy",
+    "muscle growth",
+    "strength training",
+    "resistance training",
+    "weightlifting",
+    "weight lifting",
+    "bodybuilding",
+    "physique",
+    "training volume",
+    "training frequency",
+    "repetitions in reserve",
+    "rir",
+    "estimated 1rm",
+    "one rep max",
+    "progressive overload",
+)
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
+def _canonical_host(host: str) -> str:
+    value = str(host or "").strip().lower().rstrip(".")
+    if not value or len(value) > 253:
+        raise ValueError("invalid_source_host")
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        raise ValueError("non_ascii_source_host") from None
+    if value == "localhost" or value.endswith(".localhost"):
+        raise ValueError("local_source_host")
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return value
+    raise ValueError("ip_literal_source_host")
+
+
+def host_is_allowed(host: str, allowed_domains: tuple[str, ...]) -> bool:
+    canonical = _canonical_host(host)
+    for allowed in allowed_domains:
+        domain = _canonical_host(allowed)
+        if canonical == domain or canonical.endswith(f".{domain}"):
+            return True
+    return False
+
+
+def validate_allowed_source_url(url: str, allowed_domains: tuple[str, ...]) -> str:
+    """Return a canonical HTTPS URL or fail closed."""
+
+    raw = str(url or "").strip()
+    if not raw or len(raw) > 4096:
+        raise ValueError("invalid_source_url")
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("source_scheme_not_https")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("source_userinfo_forbidden")
+    try:
+        if parsed.port is not None:
+            raise ValueError("source_port_forbidden")
+    except ValueError as exc:
+        if str(exc) == "source_port_forbidden":
+            raise
+        raise ValueError("invalid_source_port") from None
+    host = _canonical_host(parsed.hostname or "")
+    if not host_is_allowed(host, allowed_domains):
+        raise ValueError("source_domain_not_allowed")
+    if not parsed.path.startswith("/"):
+        raise ValueError("invalid_source_path")
+    return urlunsplit(("https", host, parsed.path or "/", parsed.query, ""))
+
+
+def _query_contains_forbidden_url(query: str) -> bool:
+    for match in _URL_RE.findall(query):
+        candidate = match.rstrip(".,;:!?)")
+        try:
+            parsed = urlsplit(candidate)
+            host = _canonical_host(parsed.hostname or "")
+            if parsed.scheme.lower() != "https":
+                return True
+            if not host_is_allowed(host, tuple(sorted(CORE_ALLOWED_DOMAINS | {BACB_DOMAIN}))):
+                return True
+        except ValueError:
+            return True
+    return False
+
+
+def route_trusted_web_query(
+    query: str,
+    *,
+    allow_bacb: bool = False,
+) -> TrustedWebPolicyDecisionV1:
+    """Conservatively route only the product's approved research topics."""
+
+    normalized = " ".join(str(query or "").lower().split())
+    if _query_contains_forbidden_url(normalized):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.UNSUPPORTED,
+            disposition=TrustedWebDispositionV1.DECLINE,
+            reason="unapproved_url_target",
+        )
+    if _contains_any(normalized, _SAFETY_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.SAFETY_STOP,
+            disposition=TrustedWebDispositionV1.SAFETY_STOP,
+            reason="safety_signal",
+        )
+    if _contains_any(normalized, _SUPPLEMENT_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.SUPPLEMENTS,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_supplement_evidence",
+            allowed_domains=(
+                ODS_DOMAIN,
+                MEDLINEPLUS_DOMAIN,
+                FDA_DOMAIN,
+                PUBMED_DOMAIN,
+                PMC_DOMAIN,
+            ),
+        )
+    if _contains_any(normalized, _BEHAVIOR_TERMS):
+        domains = [PUBMED_DOMAIN, PMC_DOMAIN]
+        if allow_bacb:
+            domains.append(BACB_DOMAIN)
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.BEHAVIOR_CHANGE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_self_experimentation_evidence",
+            allowed_domains=tuple(domains),
+        )
+    if _contains_any(normalized, _MEDICAL_ADJACENT_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.MEDICAL_ADJACENT,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_plain_language_safety",
+            allowed_domains=(ODS_DOMAIN, MEDLINEPLUS_DOMAIN, FDA_DOMAIN),
+        )
+    if _contains_any(normalized, _USDA_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.USDA_FOOD_COMPOSITION,
+            disposition=TrustedWebDispositionV1.ROUTE_INTERNAL,
+            reason="use_existing_usda_integration",
+        )
+    if _contains_any(normalized, _TECHNIQUE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.INTERNAL_EXERCISE_LIBRARY,
+            disposition=TrustedWebDispositionV1.ROUTE_INTERNAL,
+            reason="use_internal_exercise_library",
+        )
+    if _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.NUTRITION_EVIDENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_nutrition_evidence",
+            allowed_domains=(DGA_DOMAIN, REALFOOD_DOMAIN, ODPHP_DOMAIN, PUBMED_DOMAIN, PMC_DOMAIN),
+        )
+    if _contains_any(normalized, _TRAINING_EVIDENCE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.TRAINING_EVIDENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_training_evidence",
+            allowed_domains=(PUBMED_DOMAIN, PMC_DOMAIN),
+        )
+    return TrustedWebPolicyDecisionV1(
+        topic=TrustedWebTopicV1.UNSUPPORTED,
+        disposition=TrustedWebDispositionV1.DECLINE,
+        reason="topic_outside_trusted_web_scope",
+    )
+
+
+__all__ = [
+    "BACB_DOMAIN",
+    "FDA_DOMAIN",
+    "ODPHP_DOMAIN",
+    "REALFOOD_DOMAIN",
+    "CORE_ALLOWED_DOMAINS",
+    "POLICY_VERSION",
+    "TrustedWebDispositionV1",
+    "TrustedWebPolicyDecisionV1",
+    "TrustedWebTopicV1",
+    "host_is_allowed",
+    "route_trusted_web_query",
+    "validate_allowed_source_url",
+]

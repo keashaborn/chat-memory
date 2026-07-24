@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import json
+import unittest
+
+from rag_engine.trusted_web_ncbi_v1 import NCBIResearchRecordV1
+from rag_engine.trusted_web_policy_v1 import route_trusted_web_query
+from rag_engine.trusted_web_provider_v1 import (
+    OpenAITrustedWebProviderV1,
+    TrustedWebProviderSecurityError,
+    TrustedWebSettingsV1,
+)
+
+
+ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+SECRET = "test-service-token-with-at-least-32-bytes"
+
+
+class FakeResponse:
+    def __init__(self, source_url: str):
+        self.output_text = "Creatine improves some high-intensity performance outcomes."
+        self._payload = {
+            "id": "resp_test",
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "action": {
+                        "type": "search",
+                        "sources": [
+                            {
+                                "url": source_url,
+                                "title": "Creatine evidence review",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": self.output_text,
+                            "annotations": [],
+                        }
+                    ],
+                },
+            ],
+        }
+
+    def model_dump(self, mode: str):
+        self._payload["output_text"] = self.output_text
+        return self._payload
+
+
+class TextOnlyFakeResponse:
+    output_text = "Creatine evidence is mixed but generally favorable for resistance-training performance [PMID:123]."
+
+    def model_dump(self, mode: str):
+        return {"id": "resp_pubmed_test", "output_text": self.output_text, "output": []}
+
+
+class FakeResponses:
+    def __init__(self, response: FakeResponse):
+        self.response = response
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return self.response
+
+
+class FakeClient:
+    def __init__(self, response: FakeResponse):
+        self.responses = FakeResponses(response)
+
+
+class TrustedWebProviderV1Tests(unittest.TestCase):
+    def settings(self) -> TrustedWebSettingsV1:
+        return TrustedWebSettingsV1(
+            enabled=True,
+            model="gpt-5.5",
+            external_web_access=False,
+        )
+
+    def test_provider_request_is_bounded_and_stateless(self) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+            )
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        result = OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).search(
+            query="Does creatine improve strength?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+        )
+        kwargs = client.responses.kwargs
+        self.assertEqual(kwargs["tool_choice"], "required")
+        self.assertFalse(kwargs["store"])
+        self.assertFalse(kwargs["parallel_tool_calls"])
+        self.assertEqual(kwargs["max_tool_calls"], 2)
+        self.assertEqual(kwargs["max_output_tokens"], 1_200)
+        self.assertEqual(kwargs["reasoning"], {"effort": "low"})
+        self.assertEqual(
+            kwargs["include"],
+            ["web_search_call.action.sources"],
+        )
+        self.assertEqual(
+            kwargs["tools"][0]["filters"]["allowed_domains"],
+            list(policy.allowed_domains),
+        )
+        self.assertFalse(kwargs["tools"][0]["external_web_access"])
+        self.assertEqual(len(kwargs["safety_identifier"]), 64)
+        self.assertNotEqual(kwargs["safety_identifier"], ACTOR)
+        self.assertNotIn(ACTOR, json.dumps(kwargs, sort_keys=True))
+        self.assertEqual(len(result.sources), 1)
+        self.assertIn("Sources:", result.answer_markdown())
+
+    def test_provider_fails_closed_on_non_allowlisted_source(self) -> None:
+        client = FakeClient(FakeResponse("https://example.com/research"))
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "source_domain_not_allowed",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).search(
+                query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
+
+
+    def test_pubmed_synthesis_does_not_use_web_search_and_requires_inline_pmid(self) -> None:
+        client = FakeClient(TextOnlyFakeResponse())
+        record = NCBIResearchRecordV1(
+            pmid="123",
+            title="Creatine and resistance training review",
+            journal="Sports Medicine",
+            publication_date="2025",
+            publication_types=("Systematic Review",),
+            abstract="Human review abstract.",
+        )
+        result = OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).synthesize_from_pubmed_records(
+            query="Does creatine help strength?",
+            records=(record,),
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+        )
+        kwargs = client.responses.kwargs
+        self.assertNotIn("tools", kwargs)
+        self.assertFalse(kwargs["store"])
+        self.assertIn("Use only the supplied PubMed records", kwargs["instructions"])
+        self.assertEqual(result.sources[0].authority_type, "pubmed_research")
+        self.assertEqual(result.sources[0].evidence_type, "systematic_review")
+        self.assertEqual(result.sources[0].source_id, "PMID:123")
+
+
+if __name__ == "__main__":
+    unittest.main()
