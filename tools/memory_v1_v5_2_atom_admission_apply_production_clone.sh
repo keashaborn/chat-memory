@@ -15,6 +15,7 @@ runner=scripts/memory_v1_v5_2_atom_admission_apply.py
 authority_compat=ops/sql/20260724_memory_v1_v5_2_packet_authority_compat.sql
 exact_stage_guard=ops/sql/20260724_memory_v1_v5_2_exact_packet_stage_guard.sql
 atom_migration=ops/sql/20260724_memory_v1_v5_2_atom_admission.sql
+replay_compat=ops/sql/20260724_memory_v1_v5_2_atom_review_replay_compat.sql
 backup=$(mktemp /tmp/memory-v1-v5-2-atom-apply.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-atom-apply-roles.XXXXXX.sql)
 work=$(mktemp -d /tmp/memory-v1-v5-2-atom-apply.XXXXXX)
@@ -36,6 +37,19 @@ run_sql() {
 scalar() {
   "${compose[@]}" exec -T postgres psql -X -A -t -v ON_ERROR_STOP=1 \
     -U sage -d memory -c "$1"
+}
+
+assert_equal() {
+  local label=$1
+  local actual=$2
+  local expected=$3
+  if [[ "$actual" != "$expected" ]]; then
+    printf '%s\n' \
+      "ASSERTION_FAILED=$label" \
+      "expected=$expected" \
+      "actual=$actual" >&2
+    exit 1
+  fi
 }
 
 qdrant_signature() {
@@ -98,15 +112,17 @@ printf '%s\n' \
 run_sql <"$authority_compat"
 run_sql <"$exact_stage_guard"
 run_sql <"$atom_migration"
+run_sql <"$replay_compat"
+run_sql <"$replay_compat"
 
-[[ "$(scalar "
+assert_equal initial_atom_rows "$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.v5_2_atom_admission_proposal),
     (SELECT count(*) FROM memory.v5_2_atom_admission_review),
     (SELECT count(*) FROM memory.v5_2_atom_admission_apply),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation)
   )
-")" == '0,0,0,0' ]]
+")" '0,0,0,0'
 downstream_before=$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.relational_stage_batch),
@@ -119,50 +135,53 @@ downstream_before=$(scalar "
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$runner" \
   --mode preflight --manifest "$manifest" --output "$work/preflight.json"
-[[ "$(jq -r '.mode' "$work/preflight.json")" == preflight ]]
-[[ "$(jq -r '.persistent_writes' "$work/preflight.json")" == 0 ]]
-[[ "$(scalar "
+assert_equal preflight_mode "$(jq -r '.mode' "$work/preflight.json")" preflight
+assert_equal preflight_writes \
+  "$(jq -r '.persistent_writes' "$work/preflight.json")" 0
+assert_equal preflight_atom_rows "$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.v5_2_atom_admission_proposal),
     (SELECT count(*) FROM memory.v5_2_atom_admission_review),
     (SELECT count(*) FROM memory.v5_2_atom_admission_apply),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation)
   )
-")" == '0,0,0,0' ]]
+")" '0,0,0,0'
 
 MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY=authorized \
   POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$runner" \
   --mode apply --manifest "$manifest" --output "$work/apply.json"
-[[ "$(jq -r '.mode' "$work/apply.json")" == apply ]]
-[[ "$(jq -r '.persistent_writes' "$work/apply.json")" == 10 ]]
-[[ "$(jq -r '[.results[].proposal_outcome] | unique | join(\",\")' \
-  "$work/apply.json")" == applied ]]
-[[ "$(scalar "
+assert_equal apply_mode "$(jq -r '.mode' "$work/apply.json")" apply
+assert_equal apply_writes "$(jq -r '.persistent_writes' "$work/apply.json")" 10
+assert_equal apply_outcomes \
+  "$(jq -r '[.results[].proposal_outcome] | unique | join(",")' \
+    "$work/apply.json")" applied
+assert_equal applied_atom_rows "$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.v5_2_atom_admission_proposal),
     (SELECT count(*) FROM memory.v5_2_atom_admission_review),
     (SELECT count(*) FROM memory.v5_2_atom_admission_apply),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation)
   )
-")" == '2,2,1,5' ]]
+")" '2,2,1,5'
 
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$runner" \
   --mode replay --manifest "$manifest" --output "$work/replay.json"
-[[ "$(jq -r '.mode' "$work/replay.json")" == replay ]]
-[[ "$(jq -r '.persistent_writes' "$work/replay.json")" == 0 ]]
-[[ "$(jq -r '[.results[].proposal_outcome] | unique | join(\",\")' \
-  "$work/replay.json")" == replayed ]]
-[[ "$(scalar "
+assert_equal replay_mode "$(jq -r '.mode' "$work/replay.json")" replay
+assert_equal replay_writes "$(jq -r '.persistent_writes' "$work/replay.json")" 0
+assert_equal replay_outcomes \
+  "$(jq -r '[.results[].proposal_outcome] | unique | join(",")' \
+    "$work/replay.json")" replayed
+assert_equal replay_atom_rows "$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.v5_2_atom_admission_proposal),
     (SELECT count(*) FROM memory.v5_2_atom_admission_review),
     (SELECT count(*) FROM memory.v5_2_atom_admission_apply),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation)
   )
-")" == '2,2,1,5' ]]
-[[ "$(scalar "
+")" '2,2,1,5'
+assert_equal stance_apply_count "$(scalar "
   SELECT count(*) FROM memory.v5_2_atom_admission_apply AS applied
   JOIN memory.v5_2_atom_admission_proposal AS proposal
     ON proposal.owner_user_id=applied.owner_user_id
@@ -171,28 +190,30 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
     '1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
     AND proposal.packet_id=
       '78ca7a3e-e136-535a-9fe6-1d83aefff806'::uuid
-")" == 1 ]]
-[[ "$(scalar "
+")" 1
+assert_equal preference_apply_count "$(scalar "
   SELECT count(*) FROM memory.v5_2_atom_admission_apply AS applied
   JOIN memory.v5_2_atom_admission_proposal AS proposal
     ON proposal.owner_user_id=applied.owner_user_id
    AND proposal.proposal_id=applied.proposal_id
   WHERE proposal.packet_id=
     'a5624f05-8d75-5b96-bfd7-9f56145f7ad9'::uuid
-")" == 0 ]]
-[[ "$(scalar "
+")" 0
+assert_equal downstream_rows "$(scalar "
   SELECT concat_ws(',',
     (SELECT count(*) FROM memory.relational_stage_batch),
     (SELECT count(*) FROM memory.entity_mention),
     (SELECT count(*) FROM memory.observation),
     (SELECT count(*) FROM memory.claim)
   )
-")" == "$downstream_before" ]]
+")" "$downstream_before"
 
-[[ "$(qdrant_signature)" == "$qdrant_before" ]]
-[[ "$(production_signature)" == "$production_before" ]]
-[[ "$(git -C /opt/chat-memory rev-parse HEAD)" == "$production_head_before" ]]
-[[ "$(systemctl is-active brains.service)" == active ]]
+assert_equal qdrant_unchanged "$(qdrant_signature)" "$qdrant_before"
+assert_equal production_rows_unchanged \
+  "$(production_signature)" "$production_before"
+assert_equal production_head_unchanged \
+  "$(git -C /opt/chat-memory rev-parse HEAD)" "$production_head_before"
+assert_equal brains_service "$(systemctl is-active brains.service)" active
 docker exec brains-postgres-1 pg_isready -U sage -d memory >/dev/null
 
 printf '%s\n' \
