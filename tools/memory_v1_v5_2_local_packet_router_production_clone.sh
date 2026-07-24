@@ -154,6 +154,33 @@ psql "$clone_dsn" -X -v ON_ERROR_STOP=1 \
 
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$unit_test"
 
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python - <<'PY'
+import asyncio
+import os
+import uuid
+
+import asyncpg
+
+from scripts.memory_v1_v5_2_local_packet_router import plan_owner
+
+OWNER = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+
+async def main():
+    conn = await asyncpg.connect(
+        os.environ["POSTGRES_DSN"], command_timeout=30, ssl=False
+    )
+    try:
+        assert await conn.fetchval("SELECT session_user") == "brains_app"
+        target = await plan_owner(conn, OWNER)
+        if target is None:
+            raise RuntimeError("V5.2 router direct planner returned no work")
+    finally:
+        await conn.close()
+
+asyncio.run(main())
+PY
+
 dry_output="$work/dry.json"
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
   /opt/chat-memory/venv/bin/python "$worker" \
