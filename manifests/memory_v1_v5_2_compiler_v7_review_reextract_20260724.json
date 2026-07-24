@@ -1,0 +1,29 @@
+{
+  "contract_version": "memory_v1_v5_2_compiler_v7_review_reextract_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "selector_version": "20260724_v5_2_compiler_v7_review_v1",
+  "policy_compiler_version": "memory_v1_semantic_policy_compiler_v7",
+  "items": [
+    {
+      "evidence_id": "33126656-fc5a-5fc1-a035-246b14576ee5",
+      "content_sha256": "be7f19c9986565d34b72d5928301443e61122a5208e7ca8135e348ec2e6711c4",
+      "operation_id": "9dc7a342-524c-549f-92c4-f03daf845a6f",
+      "job_id": "db94d835-9598-5805-9101-f320e3c87f0f",
+      "terminal_id": "dea158c8-82e8-5b4c-83fe-7bbd13a633b5"
+    },
+    {
+      "evidence_id": "fea59e7e-30f5-4139-b634-97b291c88e14",
+      "content_sha256": "895146b94431f7e0ec3292e757e30fc4c782af222bd39598e610654adf08ccec",
+      "operation_id": "6479fbda-6b53-55fe-8b72-829eed81efda",
+      "job_id": "97211776-4362-5ede-9b22-777c5617e205",
+      "terminal_id": "5c6d918e-15d1-521c-88c3-ebc2981b9967"
+    },
+    {
+      "evidence_id": "dcf5ece1-0e22-574f-8ac9-f3d0acc4e8f5",
+      "content_sha256": "fb65fe592059bace88a4daea571ac1ba7df2b5aeb5136233dd01071cb6085182",
+      "operation_id": "89fa062d-5fdc-5aa1-b1b8-7d8c833912cf",
+      "job_id": "aecb3efc-48f6-5587-99cc-0aaa60af9662",
+      "terminal_id": "08e35644-957b-5fc8-a259-3dc0cb169ea8"
+    }
+  ]
+}
