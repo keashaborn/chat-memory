@@ -263,10 +263,10 @@ assert_equal report_operations \
   "$(jq -r '.new_operation_requests' "$report")" 5
 assert_equal report_replay "$(jq -r '.zero_write_replay' "$report")" true
 assert_equal applied_outcomes \
-  "$(jq -r '[.first_results[].outcome] | unique | join(\",\")' "$report")" \
+  "$(jq -r '[.first_results[].outcome] | unique | join(",")' "$report")" \
   applied
 assert_equal replay_outcomes \
-  "$(jq -r '[.replay_results[].outcome] | unique | join(\",\")' "$report")" \
+  "$(jq -r '[.replay_results[].outcome] | unique | join(",")' "$report")" \
   replayed
 
 final_counts=$(target_counts)
