@@ -317,11 +317,6 @@ path = Path(os.environ["OUTPUT"])
 path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 path.chmod(0o600)
 PY
-PYTHONPATH="$repo_root/scripts:$repo_root" \
-  /opt/chat-memory/venv/bin/python "$repo_root/$review_manifest_runner" \
-  --owner "$target_owner" --required-head "$head" \
-  --stage-manifest "$manifest" --decisions "$decisions" \
-  --output "$review_manifest"
 
 phase=baseline
 docker exec "$container" psql -X -A -t -F $'\t' -v ON_ERROR_STOP=1 \
@@ -347,6 +342,12 @@ PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   --confirm STAGE_EXACT_NEKO_CANONICAL_NAME_CLAIM_CANDIDATE_ONLY \
   --output "$stage_apply"
 [[ "$(jq -er '.rows_written' "$stage_apply")" == 4 ]]
+
+PYTHONPATH="$repo_root/scripts:$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$review_manifest_runner" \
+  --owner "$target_owner" --required-head "$head" \
+  --stage-manifest "$manifest" --decisions "$decisions" \
+  --output "$review_manifest"
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
 PYTHONPATH="$repo_root/scripts:$repo_root" \
