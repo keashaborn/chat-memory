@@ -19,19 +19,18 @@ rollback=ops/sql/20260725_memory_v1_v5_2_router_zero_call_review_compat_rollback
 sql_test=tests/memory_v1_v5_2_router_zero_call_review_compat.sql
 review_test=tests/test_memory_v1_v5_2_review_profile.py
 router_test=tests/test_memory_v1_v5_2_local_packet_router.py
-worker=scripts/memory_v1_v5_2_local_packet_router.py
+exact_router_test=tests/test_memory_v1_v5_2_exact_review_route.py
+worker=scripts/memory_v1_v5_2_exact_review_route.py
 python_bin=/opt/chat-memory/venv/bin/python
 
 backup=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.dump)
 before_function=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.before)
 after_function=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.after)
-care_apply=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.care)
-profession_apply=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.profession)
-care_replay=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.care-replay)
-profession_replay=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.profession-replay)
+apply_output=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.apply)
+replay_output=$(mktemp /tmp/memory-v5-2-compiler-v8-route.XXXXXX.replay)
 review_root=$(mktemp -d /tmp/memory-v5-2-compiler-v8-route.XXXXXX.reviews)
 chmod 0600 "$backup" "$before_function" "$after_function" \
-  "$care_apply" "$profession_apply" "$care_replay" "$profession_replay"
+  "$apply_output" "$replay_output"
 chmod 0700 "$review_root"
 phase=initialization
 
@@ -41,8 +40,7 @@ cleanup() {
   if [[ "$rc" -ne 0 ]]; then
     printf 'memory_v1_v5_2_compiler_v8_two_packet_route_clone: FAIL phase=%s\n' \
       "$phase" >&2
-    for output in "$care_apply" "$profession_apply" \
-      "$care_replay" "$profession_replay"; do
+    for output in "$apply_output" "$replay_output"; do
       if [[ -s "$output" ]]; then
         jq -c '{
           outcome,apply,plans,review_resolution_counts,write_counts,
@@ -54,7 +52,7 @@ cleanup() {
   docker exec "$container" dropdb -U sage --if-exists "$clone" \
     >/dev/null 2>&1 || true
   rm -f "$backup" "$before_function" "$after_function" \
-    "$care_apply" "$profession_apply" "$care_replay" "$profession_replay"
+    "$apply_output" "$replay_output"
   rm -rf "$review_root"
   exit "$rc"
 }
@@ -85,8 +83,9 @@ qdrant_signature() {
 [[ -x "$python_bin" ]]
 phase=unit_tests
 "$python_bin" -m py_compile \
-  scripts/memory_v1_v5_1_review_local_packet.py "$worker"
-"$python_bin" -m unittest "$review_test" "$router_test"
+  scripts/memory_v1_v5_1_review_local_packet.py \
+  scripts/memory_v1_v5_2_local_packet_router.py "$worker"
+"$python_bin" -m unittest "$review_test" "$router_test" "$exact_router_test"
 qdrant_before=$(qdrant_signature)
 production_routes_before=$(docker exec "$container" psql -U sage -d "$production" \
   -X -Atqc 'SELECT count(*) FROM memory.v5_2_local_packet_route_event')
@@ -127,44 +126,47 @@ clone_dsn=$("$python_bin" -c \
   "$POSTGRES_DSN" "$clone")
 
 run_router() {
-  local packet=$1 output=$2
+  local output=$1 apply=${2:-false}
+  local -a command=(
+    "$python_bin" "$worker"
+    --owner-user-id "$owner"
+    --packet-id "$care_packet"
+    --packet-id "$profession_packet"
+    --review-root "$review_root"
+  )
+  if [[ "$apply" == true ]]; then
+    command+=(--apply)
+  fi
   POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
-  MEMORY_V1_V5_2_LOCAL_PACKET_ROUTER_APPLY=memory_v1_v5_2_local_packet_router_apply_v1 \
-    "$python_bin" "$worker" --owner-user-id "$owner" \
-      --packet-id "$packet" --review-root "$review_root" --apply >"$output"
+  MEMORY_V1_V5_2_EXACT_REVIEW_ROUTE_APPLY=memory_v1_v5_2_exact_review_route_apply_v1 \
+    "${command[@]}" >"$output"
 }
 
-phase=caregiving_apply
-run_router "$care_packet" "$care_apply"
-phase=profession_apply
-run_router "$profession_packet" "$profession_apply"
-phase=caregiving_replay
-run_router "$care_packet" "$care_replay"
-phase=profession_replay
-run_router "$profession_packet" "$profession_replay"
+phase=transactional_apply
+run_router "$apply_output" true
+phase=post_apply_no_work
+run_router "$replay_output"
 
 phase=output_contracts
-for output in "$care_apply" "$profession_apply"; do
-  jq -e '
-    .apply==true and .outcome=="manual_review_artifact_ready" and
-    .write_counts.route_events==1 and
-    .write_counts.restricted_review_artifacts==2 and
-    .write_counts.stage==0 and .write_counts.claims==0 and
-    .write_counts.qdrant==0 and .write_counts.prompt_influence==0 and
-    .zero_write_replay_proved==true and .external_model_calls==0
-  ' "$output" >/dev/null
-done
-for output in "$care_replay" "$profession_replay"; do
-  jq -e '
-    .apply==true and .outcome=="no_work" and
-    (.plans|length)==1 and .plans[0].route=="no_work" and
-    .write_counts.route_events==0 and
-    .write_counts.restricted_review_artifacts==0 and
-    .write_counts.stage==0 and .write_counts.claims==0 and
-    .write_counts.qdrant==0 and .write_counts.prompt_influence==0 and
-    .zero_write_replay_proved==true and .external_model_calls==0
-  ' "$output" >/dev/null
-done
+jq -e '
+  .apply==true and .outcome=="manual_review_artifacts_ready" and
+  (.plans|length)==2 and
+  ([.plans[].route]|all(.=="manual_review_artifact_ready")) and
+  .write_counts.route_events==2 and
+  .write_counts.restricted_review_artifacts==4 and
+  .write_counts.stage==0 and .write_counts.claims==0 and
+  .write_counts.qdrant==0 and .write_counts.prompt_influence==0 and
+  .transactional_apply_proved==true and
+  .zero_write_replay_proved==true and .external_model_calls==0
+' "$apply_output" >/dev/null
+jq -e '
+  .apply==false and (.plans|length)==2 and
+  ([.plans[].route]|all(.=="no_work")) and
+  .database_writes==0 and .filesystem_writes==0 and
+  .stage_writes==0 and .claim_writes==0 and
+  .qdrant_writes==0 and .prompt_influence==0 and
+  .external_model_calls==0
+' "$replay_output" >/dev/null
 
 phase=postflight
 [[ "$(find "$review_root" -maxdepth 1 -type f -name '*.json' | wc -l)" == 4 ]]
