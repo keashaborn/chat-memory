@@ -216,7 +216,7 @@ capture_isolation_state() {
       uuid,uuid,uuid,uuid,text,uuid,text,text,text
     )'
   ) IS NOT NULL
-  AND position('$compiler_sha' IN pg_get_functiondef(
+  AND position('memory_v1_semantic_policy_compiler_v8' IN pg_get_functiondef(
     'memory.persist_owner_v5_2_local_packet_v1(
       uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,
       jsonb,boolean,integer
