@@ -210,9 +210,17 @@ phase=restore_runtime
 restore_runtime
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
-curl --fail --silent --show-error --max-time 30 \
-  -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-  http://127.0.0.1:8088/healthz >/dev/null
+brains_ready=0
+for _attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error --max-time 5 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/healthz >/dev/null; then
+    brains_ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "$brains_ready" == 1 ]]
 phase=report
 report="$snapshot_dir/memory_v1_v5_2_compiler_v8_claim_materialization_${run_tag}.json"
 REPORT="$report" BACKUP="$backup" MANIFEST="$manifest" PREFLIGHT="$preflight_result" APPLY="$apply_result" REPLAY="$replay_result" HEAD="$head" ITEM_COUNT="$item_count" EXPECTED_INSERT="$expected_insert" EXPECTED_MUTATED="$expected_mutated" QDRANT="$qdrant_before" python3 - <<'PY'
