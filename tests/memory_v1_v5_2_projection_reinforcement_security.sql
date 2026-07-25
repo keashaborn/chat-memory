@@ -22,7 +22,11 @@ BEGIN
       WHERE procedure.oid=function_oid
         AND owner_role.rolname='memory_v5_writer'
         AND procedure.prosecdef
-        AND procedure.proconfig @> ARRAY['search_path=']
+        AND EXISTS (
+          SELECT 1
+          FROM unnest(procedure.proconfig) AS setting
+          WHERE setting LIKE 'search_path=%'
+        )
     ) THEN
       RAISE EXCEPTION 'reinforcement function ownership/security drift: %',
         function_name;
