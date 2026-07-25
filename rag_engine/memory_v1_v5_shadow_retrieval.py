@@ -15,6 +15,8 @@ CONTENT_SURFACES = {
     "relevant_recommendation_or_explicit_recall",
     "relevant_recall_or_explicit_recall",
     "exact_project_scope_only",
+    "explicit_recall_only",
+    "restricted_explicit_recall_only",
 }
 NON_CONTENT_SURFACES = {"never", "zero_token_control_only"}
 EVIDENCE_STANCES = {"supports", "opposes", "qualifies", "context"}
@@ -145,6 +147,11 @@ def _surface_allowed(
             "personal_recall",
             "profile_recall",
         }
+    if surface in {
+        "explicit_recall_only",
+        "restricted_explicit_recall_only",
+    }:
+        return explicit_recall
     if surface == "exact_project_scope_only":
         return bool(
             project_key
@@ -163,6 +170,10 @@ def _use_instruction(status: str, surface: str) -> str:
         return "use_only_for_relevant_or_explicit_recall"
     if surface == "exact_project_scope_only":
         return "use_only_inside_exact_project_scope"
+    if surface == "restricted_explicit_recall_only":
+        return "use_only_for_restricted_explicit_recall"
+    if surface == "explicit_recall_only":
+        return "use_only_for_explicit_recall"
     return "answer_directly_only_when_relevant"
 
 

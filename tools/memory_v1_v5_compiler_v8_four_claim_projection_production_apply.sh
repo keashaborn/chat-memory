@@ -193,7 +193,7 @@ claim_csv=$(jq -r '[.items[].claim_id]|join(",")' "$plan")
 ")" == 0 ]]
 [[ "$(curl --fail --silent --show-error --max-time 30 \
   -H 'content-type: application/json' \
-  -d "{\"ids\":[$(jq -r '[.items[].claim_id|@json]|join(\",\")' "$plan")],
+  -d "{\"ids\":[$(jq -r '[.items[].claim_id|@json]|join(",")' "$plan")],
        \"with_payload\":true,\"with_vector\":false}" \
   http://127.0.0.1:6333/collections/memory_claim_v1/points \
   | jq -er '.result|length')" == 0 ]]
@@ -322,7 +322,8 @@ PYTHONPATH="$repo_root/scripts:$repo_root" \
 [[ "$(jq -er '.qdrant_writes' "$project")" == 4 ]]
 [[ "$(jq -er '.shadow_tests|length' "$project")" == 4 ]]
 [[ "$(jq -er '[.shadow_tests[]|select(
-  .other_owner_candidate_count==0 and .selected_count>=1 and
+  .other_owner_target_present==false and
+  .other_owner_database_record_count==0 and .selected_count>=1 and
   .prompt_influence==false)]|length' "$project")" == 4 ]]
 
 phase=zero_write_projection_replay
@@ -339,7 +340,8 @@ PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$project_replay")" == 4 ]]
 [[ "$(jq -er '.shadow_tests|length' "$project_replay")" == 4 ]]
 [[ "$(jq -er '[.shadow_tests[]|select(
-  .other_owner_candidate_count==0 and .selected_count>=1 and
+  .other_owner_target_present==false and
+  .other_owner_database_record_count==0 and .selected_count>=1 and
   .prompt_influence==false)]|length' "$project_replay")" == 4 ]]
 
 phase=verify

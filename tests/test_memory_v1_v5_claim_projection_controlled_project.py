@@ -7,6 +7,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
     load_admission,
     load_apply,
 )
+from rag_engine.memory_v1_projection import projection_payload  # noqa: E402
 
 
 def apply_result(item_count: int, *, deferred: bool = False) -> dict[str, object]:
@@ -176,24 +178,26 @@ class ControlledProjectionReplayTest(unittest.IsolatedAsyncioTestCase):
             ).hexdigest(),
         }
         row = {
+            "claim_id": claim_id,
             "status": "supported",
             "revision_number": 2,
             "predicate": "occupation.works_as",
             "canonical_text": canonical_text,
+            "qualifiers": {},
+            "sensitivity": "medium",
+            "retrieval_policy": {
+                "surface_policy": "direct_or_relevant",
+                "domains": ["personal"],
+                "intents": ["specific_recall"],
+            },
+            "updated_at": "2026-07-25T00:00:00+00:00",
             "outbox_status": "done",
             "attempts": 1,
             "payload": {"claim_id": claim_id, "revision_number": 2},
         }
         point = SimpleNamespace(
             id=claim_id,
-            payload={
-                "owner_user_id": OWNER,
-                "claim_id": claim_id,
-                "predicate": "occupation.works_as",
-                "status": "supported",
-                "revision_number": 2,
-                "schema_version": "memory_claim_projection_v1",
-            },
+            payload=projection_payload(uuid.UUID(OWNER), row),
             vector=[0.25, -0.5],
         )
         vectors, completed = await load_replay_state(

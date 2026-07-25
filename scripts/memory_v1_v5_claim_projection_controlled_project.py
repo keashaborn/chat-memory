@@ -19,6 +19,7 @@ from openai import OpenAI
 from memory_v1_projection_v5_contract_test import sha256
 from rag_engine.memory_v1_projection import (
     ClaimVectorIndex,
+    projection_payload,
     render_claim_for_embedding,
 )
 from rag_engine.memory_v1_v5_shadow_loader import load_v5_shadow_claims
@@ -317,15 +318,13 @@ async def load_replay_state(
 
             point = point_by_id[item["claim_id"]]
             point_payload = point.payload or {}
+            expected_payload = projection_payload(uuid.UUID(OWNER), dict(row))
             vector = point.vector
             if (
-                point_payload.get("owner_user_id") != OWNER
-                or point_payload.get("claim_id") != item["claim_id"]
-                or point_payload.get("predicate") != item["predicate"]
-                or point_payload.get("status") != "supported"
-                or point_payload.get("revision_number") != 2
-                or point_payload.get("schema_version")
-                != "memory_claim_projection_v1"
+                any(
+                    point_payload.get(key) != value
+                    for key, value in expected_payload.items()
+                )
                 or not isinstance(vector, list)
                 or len(vector) != vector_size
                 or any(not math.isfinite(float(value)) for value in vector)
@@ -360,7 +359,10 @@ async def shadow_tests(
         if item["claim_id"] not in {hit["claim_id"] for hit in owner_hits}:
             raise ControlledProjectionError("owner shadow candidate search missed projected claim")
         other_hits = index.search_claims(OTHER_OWNER, vector, limit=24)
-        if item["claim_id"] in {hit["claim_id"] for hit in other_hits}:
+        other_owner_target_present = item["claim_id"] in {
+            hit["claim_id"] for hit in other_hits
+        }
+        if other_owner_target_present:
             raise ControlledProjectionError("cross-owner Qdrant search exposed projected claim")
         other_records = await load_v5_shadow_claims(conn, OTHER_OWNER, [item["claim_id"]])
         if other_records:
@@ -397,6 +399,8 @@ async def shadow_tests(
                 "predicate": item["predicate"],
                 "owner_candidate_count": len(owner_hits),
                 "other_owner_candidate_count": len(other_hits),
+                "other_owner_target_present": other_owner_target_present,
+                "other_owner_database_record_count": len(other_records),
                 "selected_count": trace["selected_count"],
                 "candidate_set_sha256": trace["candidate_set_sha256"],
                 "selection_set_sha256": trace["selection_set_sha256"],

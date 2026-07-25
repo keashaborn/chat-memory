@@ -82,6 +82,8 @@ CONTENT_SURFACES = frozenset(
         SurfacePolicy.RELEVANT_RECOMMENDATION_OR_EXPLICIT_RECALL,
         SurfacePolicy.EXACT_PROJECT_SCOPE_ONLY,
         SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT,
+        SurfacePolicy.EXPLICIT_RECALL_ONLY,
+        SurfacePolicy.RESTRICTED_EXPLICIT_RECALL_ONLY,
     }
 )
 STORED_SURFACE_ALIASES = {
@@ -158,6 +160,11 @@ def _surface_is_eligible(
             "personal_recommendation",
             "recommendation",
         }
+    if surface in {
+        SurfacePolicy.EXPLICIT_RECALL_ONLY,
+        SurfacePolicy.RESTRICTED_EXPLICIT_RECALL_ONLY,
+    }:
+        return request.explicit_recall
     if surface == SurfacePolicy.EXACT_PROJECT_SCOPE_ONLY:
         return bool(
             request.project_key
@@ -176,6 +183,10 @@ def _use_instruction(status: EpistemicStatus, surface: SurfacePolicy) -> UseInst
         return UseInstruction.USE_ONLY_INSIDE_EXACT_PROJECT_SCOPE
     if surface == SurfacePolicy.MENTION_WHEN_DIRECTLY_RELEVANT:
         return UseInstruction.MENTION_ONLY_WHEN_DIRECTLY_RELEVANT
+    if surface == SurfacePolicy.RESTRICTED_EXPLICIT_RECALL_ONLY:
+        return UseInstruction.USE_ONLY_FOR_RESTRICTED_EXPLICIT_RECALL
+    if surface == SurfacePolicy.EXPLICIT_RECALL_ONLY:
+        return UseInstruction.USE_ONLY_FOR_EXPLICIT_RECALL
     return UseInstruction.ANSWER_DIRECTLY_ONLY_WHEN_RELEVANT
 
 

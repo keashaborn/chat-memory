@@ -20,7 +20,9 @@ EVIDENCE = "33333333-3333-4333-8333-333333333333"
 OBSERVATION = "44444444-4444-4444-8444-444444444444"
 
 
-def record() -> dict[str, object]:
+def record(
+    surface_policy: str = "relevant_recall_or_explicit_recall",
+) -> dict[str, object]:
     return {
         "owner_user_id": OWNER,
         "claim_id": CLAIM,
@@ -28,9 +30,7 @@ def record() -> dict[str, object]:
         "predicate": "stance.reported",
         "status": "supported",
         "sensitivity": "medium",
-        "retrieval_policy": {
-            "surface_policy": "relevant_recall_or_explicit_recall"
-        },
+        "retrieval_policy": {"surface_policy": surface_policy},
         "project_key": None,
         "component_key": None,
         "evidence_by_stance": {
@@ -51,7 +51,12 @@ def record() -> dict[str, object]:
     }
 
 
-def evaluate(*, intent: str, explicit_recall: bool) -> dict[str, object]:
+def evaluate(
+    *,
+    intent: str,
+    explicit_recall: bool,
+    surface_policy: str = "relevant_recall_or_explicit_recall",
+) -> dict[str, object]:
     return evaluate_v5_shadow_claims(
         OWNER,
         query="What have I said about worrying?",
@@ -59,7 +64,7 @@ def evaluate(*, intent: str, explicit_recall: bool) -> dict[str, object]:
         domain="personal",
         allowed_predicate_prefixes=["stance.reported"],
         candidate_hits=[{"claim_id": CLAIM, "semantic_score": 1.0}],
-        records=[record()],
+        records=[record(surface_policy)],
         max_claims=4,
         max_tokens=500,
         max_sensitivity="restricted",
@@ -84,6 +89,25 @@ class StanceRecallSurfaceTest(unittest.TestCase):
         result = evaluate(intent="general", explicit_recall=False)
         self.assertEqual(result["selected_count"], 0)
         self.assertEqual(result["rejected_counts"], {"surface_policy": 1})
+
+    def test_explicit_only_surface_is_selected_only_for_explicit_recall(self) -> None:
+        accepted = evaluate(
+            intent="specific_recall",
+            explicit_recall=True,
+            surface_policy="explicit_recall_only",
+        )
+        self.assertEqual(accepted["selected_count"], 1)
+        self.assertEqual(
+            accepted["claims"][0]["use_instruction"],
+            "use_only_for_explicit_recall",
+        )
+        rejected = evaluate(
+            intent="specific_recall",
+            explicit_recall=False,
+            surface_policy="explicit_recall_only",
+        )
+        self.assertEqual(rejected["selected_count"], 0)
+        self.assertEqual(rejected["rejected_counts"], {"surface_policy": 1})
 
 
 if __name__ == "__main__":

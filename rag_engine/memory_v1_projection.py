@@ -99,6 +99,9 @@ def projection_payload(
     actor: uuid.UUID, snapshot: Mapping[str, Any]
 ) -> Dict[str, Any]:
     policy = _json_object(snapshot.get("retrieval_policy"), "retrieval_policy")
+    surface = str(
+        policy.get("surface_policy") or policy.get("surface") or "support"
+    ).strip().lower()
     return {
         "schema_version": "memory_claim_projection_v1",
         "owner_user_id": str(actor),
@@ -109,8 +112,13 @@ def projection_payload(
         "sensitivity": str(snapshot["sensitivity"]),
         "domains": _policy_values(policy, "domains"),
         "intents": _policy_values(policy, "intents"),
-        "surface": str(policy.get("surface") or "support").strip().lower(),
-        "requires_explicit": bool(policy.get("requires_explicit")),
+        "surface": surface,
+        "requires_explicit": bool(policy.get("requires_explicit"))
+        or surface
+        in {
+            "explicit_recall_only",
+            "restricted_explicit_recall_only",
+        },
         "updated_at": snapshot["updated_at"].isoformat()
         if isinstance(snapshot.get("updated_at"), datetime)
         else str(snapshot.get("updated_at") or ""),

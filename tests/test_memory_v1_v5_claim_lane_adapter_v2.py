@@ -64,7 +64,9 @@ def lane_limit() -> MemoryLaneLimitV1:
     )
 
 
-def claim_request() -> MemorySelectionRequestV1:
+def claim_request(
+    *, explicit_recall: bool = True
+) -> MemorySelectionRequestV1:
     vector = (0.125, -0.25, 0.5)
     limit = lane_limit()
     return MemorySelectionRequestV1.create(
@@ -86,7 +88,7 @@ def claim_request() -> MemorySelectionRequestV1:
         domains=("personal",),
         requested_lanes=(MemoryLane.CLAIM,),
         selection_directive=SelectionDirective.EVALUATE,
-        explicit_recall=True,
+        explicit_recall=explicit_recall,
         project_key=None,
         component_key=None,
         max_sensitivity=Sensitivity.HIGH,
@@ -334,6 +336,52 @@ class ClaimLaneAdapterV2Test(unittest.TestCase):
         )
         self.assertEqual(result.records, ())
         counts = {item.code: item.count for item in result.reason_counts}
+        self.assertEqual(counts[RejectionCode.SURFACE_POLICY], 1)
+
+    def test_explicit_only_surface_requires_explicit_recall(self) -> None:
+        row = pet_relationship_row()
+        row["retrieval_policy"] = {"surface_policy": "explicit_recall_only"}
+
+        explicit_request = claim_request(explicit_recall=True)
+        explicit_scope = selector_context(
+            explicit_request,
+            subject=SELF,
+            object_entity=PET,
+            predicate="relationship.has_pet",
+        )
+        accepted = asyncio.run(
+            adapter(
+                row,
+                lambda _: explicit_scope,
+                predicate="relationship.has_pet",
+            ).select(explicit_request, lane_limit())
+        )
+        self.assertEqual(len(accepted.records), 1)
+        self.assertEqual(
+            accepted.records[0].surface_policy,
+            SurfacePolicy.EXPLICIT_RECALL_ONLY,
+        )
+        self.assertEqual(
+            accepted.records[0].use_instruction,
+            UseInstruction.USE_ONLY_FOR_EXPLICIT_RECALL,
+        )
+
+        general_request = claim_request(explicit_recall=False)
+        general_scope = selector_context(
+            general_request,
+            subject=SELF,
+            object_entity=PET,
+            predicate="relationship.has_pet",
+        )
+        rejected = asyncio.run(
+            adapter(
+                row,
+                lambda _: general_scope,
+                predicate="relationship.has_pet",
+            ).select(general_request, lane_limit())
+        )
+        self.assertEqual(rejected.records, ())
+        counts = {item.code: item.count for item in rejected.reason_counts}
         self.assertEqual(counts[RejectionCode.SURFACE_POLICY], 1)
 
     def test_wrong_subject_is_rejected_as_entity_scope(self) -> None:
