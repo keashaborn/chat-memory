@@ -336,12 +336,32 @@ def review_artifact_eligible(row: dict[str, Any]) -> bool:
     )
 
 
-def _validate_row(row: dict[str, Any], packet: dict[str, Any]) -> None:
+def model_call_provenance_valid(
+    profile: ReviewProfile,
+    local_model_calls: Any,
+    external_model_calls: Any,
+) -> bool:
+    if external_model_calls != 0:
+        return False
+    if profile.name == "v5_2":
+        return local_model_calls in {0, 1}
+    return local_model_calls == 1
+
+
+def _validate_row(
+    row: dict[str, Any],
+    packet: dict[str, Any],
+    profile: ReviewProfile,
+) -> None:
     if any(not _sha256_valid(row[field]) for field in HASH_FIELDS):
         raise LocalPacketReviewError("local packet provenance contains an invalid hash")
     if row["provider_id"] != "local_llama_cpp":
         raise LocalPacketReviewError("packet is not from the private local provider")
-    if row["local_model_calls"] != 1 or row["external_model_calls"] != 0:
+    if not model_call_provenance_valid(
+        profile,
+        row["local_model_calls"],
+        row["external_model_calls"],
+    ):
         raise LocalPacketReviewError("local packet model-call provenance is invalid")
     if row["storage_integrity_verified"] is not True:
         raise LocalPacketReviewError("local packet storage integrity was not verified")
@@ -408,7 +428,7 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
                 raise LocalPacketReviewError("owner-scoped immutable packet not found")
             row = dict(packet_rows[0])
             packet = _json_value(row["normalized_packet"], "normalized packet")
-            _validate_row(row, packet)
+            _validate_row(row, packet, profile)
             _validate_extraction_packet(
                 packet,
                 extraction_contract=profile.extraction_contract,

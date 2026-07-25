@@ -8,6 +8,7 @@ from scripts.memory_v1_v5_1_review_local_packet import (
     BUNDLE_CONTRACT,
     REVIEW_CONTRACT,
     LocalPacketReviewError,
+    model_call_provenance_valid,
     review_profile,
 )
 from scripts.memory_v1_v5_1_stage_preflight import (
@@ -53,6 +54,16 @@ class V52ReviewProfileTest(unittest.TestCase):
             "memory_v1_entity_resolution_review_v5_2",
         )
         self.assertNotEqual(profile.review_namespace, review_profile("v5_1").review_namespace)
+
+    def test_v5_2_accepts_deterministic_zero_call_provenance(self) -> None:
+        self.assertTrue(model_call_provenance_valid(review_profile("v5_2"), 0, 0))
+        self.assertTrue(model_call_provenance_valid(review_profile("v5_2"), 1, 0))
+        self.assertFalse(model_call_provenance_valid(review_profile("v5_2"), 2, 0))
+        self.assertFalse(model_call_provenance_valid(review_profile("v5_2"), 0, 1))
+
+    def test_v5_1_remains_one_call_only(self) -> None:
+        self.assertFalse(model_call_provenance_valid(review_profile("v5_1"), 0, 0))
+        self.assertTrue(model_call_provenance_valid(review_profile("v5_1"), 1, 0))
 
     def test_v5_2_packet_passes_only_v5_2_validator_binding(self) -> None:
         case = next(item for item in load_cases() if item["case_id"] == "sem-v5_2-003")

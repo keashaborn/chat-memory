@@ -45,6 +45,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class V52LocalPacketRouterTest(unittest.TestCase):
+    def test_exact_packet_selection_never_falls_back(self) -> None:
+        wanted = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        other = uuid.UUID("3a4e8e8b-a4d2-4574-bcba-712e2fa6ac01")
+        rows = [{"packet_id": other}, {"packet_id": wanted}]
+        self.assertEqual(MODULE.select_plans(rows, wanted), [rows[1]])
+        self.assertEqual(MODULE.select_plans(rows, uuid.uuid4()), [])
+        self.assertEqual(MODULE.select_plans(rows, None), rows)
+
     def test_terminal_allowlist_is_closed(self) -> None:
         self.assertEqual(
             MODULE.TERMINAL_REASON_CODES,

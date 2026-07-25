@@ -58,6 +58,7 @@ def arguments() -> argparse.Namespace:
         )
     )
     parser.add_argument("--owner-user-id", action="append", default=[])
+    parser.add_argument("--packet-id")
     parser.add_argument("--review-builder", default=str(DEFAULT_BUILDER))
     parser.add_argument("--review-root", default=str(DEFAULT_REVIEW_ROOT))
     parser.add_argument("--apply", action="store_true")
@@ -264,16 +265,29 @@ def stable_ids(
 
 
 async def plan_owner(
-    conn: asyncpg.Connection, owner: uuid.UUID
+    conn: asyncpg.Connection,
+    owner: uuid.UUID,
+    packet_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
     async with conn.transaction(isolation="repeatable_read", readonly=True):
         await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
         rows = await conn.fetch(
-            "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1(1)"
+            "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
+            25 if packet_id else 1,
         )
+    rows = select_plans(rows, packet_id)
     if len(rows) > 1:
         raise RuntimeError("V5.2 route planner exceeded its bound")
     return dict(rows[0]) if rows else None
+
+
+def select_plans(
+    rows: list[Any],
+    packet_id: uuid.UUID | None,
+) -> list[Any]:
+    if packet_id is None:
+        return rows
+    return [row for row in rows if row["packet_id"] == packet_id]
 
 
 async def finalize_terminal(
@@ -365,6 +379,12 @@ async def record_review(
 async def run() -> int:
     args = arguments()
     owners = canonical_owners(args.owner_user_id)
+    try:
+        target_packet_id = uuid.UUID(args.packet_id) if args.packet_id else None
+    except ValueError as exc:
+        raise RuntimeError("exact packet ID is invalid") from exc
+    if target_packet_id is not None and len(owners) != 1:
+        raise RuntimeError("exact packet routing requires exactly one owner")
     if args.apply and os.getenv("MEMORY_V1_V5_2_LOCAL_PACKET_ROUTER_APPLY") != (
         APPLY_ENABLE_TOKEN
     ):
@@ -378,7 +398,10 @@ async def run() -> int:
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("V5.2 local packet router requires brains_app session")
-        plans = [(owner, await plan_owner(conn, owner)) for owner in owners]
+        plans = [
+            (owner, await plan_owner(conn, owner, target_packet_id))
+            for owner in owners
+        ]
         selected = next(((owner, row) for owner, row in plans if row), None)
         sanitized_plans = [
             {
