@@ -17,7 +17,7 @@ other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 evidence=405fcdb1-a4d2-53ff-91ad-542b258cea03
 observation=d3c936dc-01c2-4288-9050-b709afa511d8
 runner=scripts/memory_v1_v5_2_single_preference_pipeline.py
-python_bin="$repo_root/venv/bin/python"
+python_bin=/opt/chat-memory/venv/bin/python
 artifact_dir="/home/ubuntu/memory-v1-reviews/single-preference-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
 
 set -a
