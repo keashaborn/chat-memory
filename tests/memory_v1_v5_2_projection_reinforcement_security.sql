@@ -31,8 +31,22 @@ BEGIN
       RAISE EXCEPTION 'reinforcement function ownership/security drift: %',
         function_name;
     END IF;
-    IF has_function_privilege('PUBLIC',function_oid,'EXECUTE')
-       OR NOT has_function_privilege('brains_app',function_oid,'EXECUTE') THEN
+    IF EXISTS (
+         SELECT 1
+         FROM pg_proc AS procedure,
+         LATERAL aclexplode(
+           COALESCE(
+             procedure.proacl,
+             acldefault('f',procedure.proowner)
+           )
+         ) AS privilege
+         WHERE procedure.oid=function_oid
+           AND privilege.grantee=0
+           AND privilege.privilege_type='EXECUTE'
+       )
+       OR NOT has_function_privilege(
+         'brains_app',function_oid,'EXECUTE'
+       ) THEN
       RAISE EXCEPTION 'reinforcement function ACL drift: %',function_name;
     END IF;
   END LOOP;
