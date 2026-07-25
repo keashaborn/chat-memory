@@ -95,7 +95,7 @@ class V52EntityResolutionBatchManifestTest(unittest.TestCase):
     def test_accepts_manual_link_existing_with_exact_row_budget(self) -> None:
         value = self.manifest()
         value["expected_total_bindings"] = 1
-        value["expected_new_rows"] = 5
+        value["expected_new_rows"] = 6
         value["items"] = [
             {
                 "resolution_id": SOURCE_RESOLUTION,
@@ -110,12 +110,12 @@ class V52EntityResolutionBatchManifestTest(unittest.TestCase):
             }
         ]
         metadata, _, _ = load_manifest(str(self.write(value)), root=self.root)
-        self.assertEqual(metadata["expected_new_rows"], 5)
+        self.assertEqual(metadata["expected_new_rows"], 6)
 
     def test_rejects_manual_link_without_expected_entity(self) -> None:
         value = self.manifest()
         value["expected_total_bindings"] = 1
-        value["expected_new_rows"] = 5
+        value["expected_new_rows"] = 6
         value["items"] = [
             {
                 "resolution_id": SOURCE_RESOLUTION,
@@ -131,7 +131,7 @@ class V52EntityResolutionBatchManifestTest(unittest.TestCase):
     def test_rejects_manual_link_without_review_reason(self) -> None:
         value = self.manifest()
         value["expected_total_bindings"] = 1
-        value["expected_new_rows"] = 5
+        value["expected_new_rows"] = 6
         value["items"] = [
             {
                 "resolution_id": SOURCE_RESOLUTION,

@@ -39,6 +39,7 @@ table_list=$(mktemp /tmp/memory-v1-v5-2-neko-entity-tables.XXXXXX)
 
 declare -A expected_delta=(
   [relational_operation_request]=2
+  [entity_alias_observation]=1
   [entity_resolution_review]=1
   [entity_resolution_apply]=1
   [observation_entity_binding]=1
@@ -330,7 +331,7 @@ POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root" \
   --confirm RECONCILE_REVIEW_AND_APPLY_OWNER_V5_2_ENTITY_RESOLUTIONS_ONLY \
   --output "$apply_result"
 
-[[ "$(jq -er '.database_rows_created' "$apply_result")" == 5 ]]
+[[ "$(jq -er '.database_rows_created' "$apply_result")" == 6 ]]
 [[ "$(jq -er '.bindings_created' "$apply_result")" == 1 ]]
 [[ "$(jq -er '.item_count' "$apply_result")" == 1 ]]
 [[ "$(jq -er '.applied[0].operation' "$apply_result")" \
@@ -361,6 +362,15 @@ phase=postflight
     AND subject_resolution_id='$resolution'::uuid
     AND object_entity_id IS NULL
     AND object_resolution_id IS NULL")" == 1 ]]
+[[ "$(psql_row "SELECT count(*) FROM memory.entity_alias_observation
+  WHERE owner_user_id='$owner'::uuid
+    AND evidence_id='33126656-fc5a-5fc1-a035-246b14576ee5'::uuid
+    AND mention_id='d1d58fb0-0422-4bf4-86bb-e7c98222a00c'::uuid
+    AND resolution_id='$resolution'::uuid
+    AND entity_id='$entity'::uuid
+    AND alias_text='Neko'
+    AND normalized_alias='neko'
+    AND alias_type='observed_name'")" == 1 ]]
 [[ "$(psql_row "SELECT count(*) FROM memory.claim_observation
   WHERE owner_user_id='$owner'::uuid
     AND observation_id='$observation'::uuid")" == 0 ]]
@@ -391,8 +401,9 @@ value = {
     "backup": str(backup_path),
     "backup_sha256": hashlib.sha256(backup_path.read_bytes()).hexdigest(),
     "verification": {
-        "database_rows_created": 5,
+        "database_rows_created": 6,
         "bindings_created": 1,
+        "alias_observations_created": 1,
         "zero_write_replay": True,
         "cross_owner_rejected": True,
         "non_target_unchanged": True,

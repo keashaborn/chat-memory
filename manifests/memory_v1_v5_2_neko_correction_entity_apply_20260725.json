@@ -1,6 +1,6 @@
 {
   "contract_version": "memory_v1_v5_2_entity_resolution_batch_manifest_v1",
-  "expected_new_rows": 5,
+  "expected_new_rows": 6,
   "expected_total_bindings": 1,
   "items": [
     {

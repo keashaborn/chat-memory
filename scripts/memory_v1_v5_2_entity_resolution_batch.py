@@ -84,7 +84,7 @@ def _digest(value: Any, field: str) -> str:
 def _expected_base_rows(items: list[dict[str, Any]]) -> int:
     rows_by_operation = {
         "auto_apply": 2,
-        "manual_link_existing_and_apply": 4,
+        "manual_link_existing_and_apply": 5,
         "reconcile_existing_and_apply": 8,
     }
     return sum(rows_by_operation[item["operation"]] for item in items)

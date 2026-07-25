@@ -24,6 +24,7 @@ manifest_source=manifests/memory_v1_v5_2_neko_correction_entity_apply_20260725.j
 python_bin=/opt/chat-memory/venv/bin/python
 review_root=/home/ubuntu/memory-v1-reviews
 artifact_dir="$review_root/neko-correction-entity-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
+source_backup=${MEMORY_V1_V5_2_NEKO_ENTITY_SOURCE_BACKUP:-}
 
 set -a
 source /opt/chat-memory/.env
@@ -78,8 +79,14 @@ production_before=$(production_signature)
 production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
-docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
-  | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
+if [[ -n "$source_backup" ]]; then
+  [[ "$source_backup" == /home/ubuntu/brains/snapshots/*.dump ]]
+  [[ -s "$source_backup" ]]
+  docker exec -i "$container" pg_restore -U sage -d "$clone_db" <"$source_backup"
+else
+  docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
+    | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
+fi
 
 clone_dsn=$(SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone_db" python3 - <<'PY'
 import os
@@ -99,6 +106,8 @@ PY
 PYTHONPATH="$repo_root" "$python_bin" "$repo_root/$unit_test"
 
 before_requests=$(clone_scalar "SELECT count(*) FROM memory.relational_operation_request
+  WHERE owner_user_id='$owner'::uuid")
+before_aliases=$(clone_scalar "SELECT count(*) FROM memory.entity_alias_observation
   WHERE owner_user_id='$owner'::uuid")
 before_reviews=$(clone_scalar "SELECT count(*) FROM memory.entity_resolution_review
   WHERE owner_user_id='$owner'::uuid")
@@ -148,7 +157,7 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
   --confirm RECONCILE_REVIEW_AND_APPLY_OWNER_V5_2_ENTITY_RESOLUTIONS_ONLY \
   --output "$report"
 
-[[ "$(jq -er '.database_rows_created' "$report")" == 5 ]]
+[[ "$(jq -er '.database_rows_created' "$report")" == 6 ]]
 [[ "$(jq -er '.bindings_created' "$report")" == 1 ]]
 [[ "$(jq -er '.item_count' "$report")" == 1 ]]
 [[ "$(jq -er '.applied[0].operation' "$report")" \
@@ -160,6 +169,8 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
 
 [[ "$(clone_scalar "SELECT count(*) FROM memory.relational_operation_request
   WHERE owner_user_id='$owner'::uuid")" == "$((before_requests + 2))" ]]
+[[ "$(clone_scalar "SELECT count(*) FROM memory.entity_alias_observation
+  WHERE owner_user_id='$owner'::uuid")" == "$((before_aliases + 1))" ]]
 [[ "$(clone_scalar "SELECT count(*) FROM memory.entity_resolution_review
   WHERE owner_user_id='$owner'::uuid")" == "$((before_reviews + 1))" ]]
 [[ "$(clone_scalar "SELECT count(*) FROM memory.entity_resolution_apply
@@ -179,6 +190,15 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
     AND subject_resolution_id='$resolution'::uuid
     AND object_entity_id IS NULL
     AND object_resolution_id IS NULL")" == 1 ]]
+[[ "$(clone_scalar "SELECT count(*) FROM memory.entity_alias_observation
+  WHERE owner_user_id='$owner'::uuid
+    AND evidence_id='33126656-fc5a-5fc1-a035-246b14576ee5'::uuid
+    AND mention_id='d1d58fb0-0422-4bf4-86bb-e7c98222a00c'::uuid
+    AND resolution_id='$resolution'::uuid
+    AND entity_id='$entity'::uuid
+    AND alias_text='Neko'
+    AND normalized_alias='neko'
+    AND alias_type='observed_name'")" == 1 ]]
 
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 [[ "$(production_signature)" == "$production_before" ]]
@@ -200,8 +220,9 @@ value = {
     "resolution_id": apply["applied"][0]["resolution_id"],
     "applied_entity_id": apply["applied"][0]["applied_entity_id"],
     "verification": {
-        "database_rows_created": 5,
+        "database_rows_created": 6,
         "bindings_created": 1,
+        "alias_observations_created": 1,
         "zero_write_replay": True,
         "cross_owner_rejected": True,
         "production_unchanged": True,
