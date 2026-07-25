@@ -24,6 +24,7 @@ from tests.test_memory_v1_selection_envelope_v1 import (
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+OTHER_ACTOR = UUID("557ea042-cb82-48f8-9429-472e96c957ef")
 THREAD = UUID("d776c8ef-7f3d-45b2-8820-4be87b7ca19d")
 
 
@@ -33,6 +34,88 @@ class FakeQdrant:
 
 
 class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.activation = patch.dict(
+            os.environ,
+            {
+                "MEMORY_V1_GOVERNED_ACTIVE": "1",
+                "MEMORY_V1_GOVERNED_ACTIVE_USER_IDS": str(ACTOR),
+                "MEMORY_V1_SHADOW_ALL_AUTHENTICATED": "0",
+                "MEMORY_V1_SHADOW_USER_IDS": str(ACTOR),
+                "MEMORY_V1_SHADOW_MAX_SENSITIVITY": "medium",
+                "MEMORY_V1_GOVERNED_EXPLICIT_HIGH_USER_IDS": str(ACTOR),
+                "MEMORY_V1_GOVERNED_EXPLICIT_RECALL_MAX_SENSITIVITY": "high",
+            },
+            clear=False,
+        )
+        self.activation.start()
+
+    def tearDown(self) -> None:
+        self.activation.stop()
+
+    async def test_non_activated_owner_returns_empty_before_classification(self) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=OTHER_ACTOR,
+            thread_id=THREAD,
+            current_request_id="inactive-owner-request",
+            current_message="Who is my spouse?",
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+
+        with patch(
+            "rag_engine.governed_memory_provider_v1.classify_memory_intent",
+            side_effect=AssertionError("inactive owner must not be classified"),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.embed_text",
+            side_effect=AssertionError("inactive owner must not be embedded"),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.make_qdrant_client",
+            side_effect=AssertionError("inactive owner must not reach Qdrant"),
+        ):
+            result = await provider.prepare(
+                authenticated_actor_user_id=OTHER_ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
+
+        self.assertIsNone(result.memory_input)
+        self.assertIsNone(result.memory_application)
+
+    async def test_governed_activation_does_not_depend_on_shadow_audit_allowlist(
+        self,
+    ) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id="governed-only-activation-request",
+            current_message="Explain why the sky looks blue.",
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+        with patch.dict(
+            os.environ,
+            {
+                "MEMORY_V1_SHADOW_ALL_AUTHENTICATED": "0",
+                "MEMORY_V1_SHADOW_USER_IDS": "",
+            },
+            clear=False,
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.classify_memory_intent",
+            return_value={
+                "routes": {"governed_claims": False},
+                "memory_intent": "none",
+                "claim_context": {},
+            },
+        ) as classify:
+            result = await provider.prepare(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
+
+        classify.assert_called_once()
+        self.assertIsNone(result.memory_input)
+        self.assertIsNone(result.memory_application)
+
     async def test_irrelevant_request_returns_empty_without_external_access(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(
             authenticated_actor_user_id=ACTOR,
@@ -162,6 +245,9 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
                 allowed_predicates=("identity.name", "relationship.parent_of")
             ),
         ), patch(
+            "rag_engine.governed_memory_provider_v1.governed_maximum_sensitivity",
+            return_value="medium",
+        ) as sensitivity_policy, patch(
             "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV2",
             return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
         ) as claim_adapter:
@@ -181,6 +267,8 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter_kwargs["candidate_limit"], 100)
         self.assertEqual(adapter_kwargs["minimum_semantic_score"], 0.0)
         self.assertEqual(adapter_kwargs["relative_semantic_ratio"], 0.0)
+        sensitivity_policy.assert_called_once()
+        self.assertEqual(sensitivity_policy.call_args.args[0], ACTOR)
 
     async def test_specific_family_recall_retains_normal_semantic_budget(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(

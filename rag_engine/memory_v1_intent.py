@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v14"
+VERSION = "memory_intent_adapter_v15"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -295,6 +295,41 @@ STANCE_RECALL_RE = re.compile(
     r"do you (?:know|remember) what i "
     r"(?:think|believe|said|have said|shared))\b"
 )
+PROFESSION_RECALL_RE = re.compile(
+    r"\b(?:"
+    r"what (?:is|was|are|were) my "
+    r"(?:profession|professional background|occupation|career|job|work history)|"
+    r"what (?:profession|professions|occupation|occupations|job|jobs|roles?) "
+    r"(?:have|had|did) i (?:worked|work|held|had)|"
+    r"what (?:have|had) i done for work|"
+    r"where (?:have|had|did) i (?:worked|work)|"
+    r"do you (?:know|remember) (?:anything )?about my "
+    r"(?:profession|professional background|occupation|career|job|work history)|"
+    r"do you remember what my "
+    r"(?:profession|occupation|career|job) (?:is|was)|"
+    r"(?:have|had|did) i (?:ever )?work(?:ed)? as "
+    r"(?:a |an )?[a-z][a-z0-9 .&/'-]{1,80}"
+    r")\b"
+)
+CAREGIVING_RECALL_RE = re.compile(
+    r"\b(?:"
+    r"who (?:do|did) i care for|"
+    r"who (?:am|was|have) i (?:a )?caregiver for|"
+    r"who (?:am|was|have) i caring for|"
+    r"who have i been caring for|"
+    r"do you (?:know|remember) who i "
+    r"(?:care for|cared for|am caring for|have been caring for)|"
+    r"do you (?:know|remember) (?:anything )?about my "
+    r"(?:caregiving|caretaking)(?: responsibilities| role)?|"
+    r"tell me (?:what you know )?about my "
+    r"(?:caregiving|caretaking)(?: responsibilities| role)?|"
+    r"(?:am|was) i (?:a )?(?:caregiver|caretaker) for "
+    r"[a-z][a-z .'-]{0,80}|"
+    r"do i care for [a-z][a-z .'-]{0,80}|"
+    r"tell me about my (?:caregiving|caretaking) relationship with "
+    r"[a-z][a-z .'-]{0,80}"
+    r")\b"
+)
 PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
 BROAD_PET_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:current )?pets|"
@@ -386,6 +421,30 @@ def _contains(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
 
 
+def _specific_family_relation_predicates(text: str) -> list[str]:
+    if re.search(r"\b(?:wife|husband|spouse)\b", text):
+        return ["relationship.spouse_of"]
+    if re.search(r"\bpartner\b", text):
+        return [
+            "relationship.romantic_partner_of",
+            "relationship.spouse_of",
+        ]
+    if re.search(
+        r"\b(?:mother|mom|mum|father|dad|parent|son|daughter|child)\b",
+        text,
+    ):
+        return ["relationship.parent_of"]
+    if re.search(r"\b(?:brother|sister|sibling)\b", text):
+        return ["relationship.sibling_of"]
+    if re.search(r"\bcousin\b", text):
+        return ["relationship.cousin_of"]
+    if re.search(r"\b(?:aunt|uncle)\b", text):
+        return ["relationship.aunt_or_uncle_of"]
+    if re.search(r"\bgrandparent\b", text):
+        return ["relationship.grandparent_of"]
+    return []
+
+
 def _looks_like_song_identification(text: str) -> bool:
     return _contains(text, SONG_IDENTIFICATION_TERMS) and not _contains(
         text,
@@ -475,10 +534,14 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
 
     family_death_recall = bool(FAMILY_DEATH_RECALL_RE.search(text))
     stance_recall = bool(STANCE_RECALL_RE.search(text))
+    profession_recall = bool(PROFESSION_RECALL_RE.search(text))
+    caregiving_recall = bool(CAREGIVING_RECALL_RE.search(text))
     recall_requested = (
         _looks_like_personal_recall(text)
         or family_death_recall
         or stance_recall
+        or profession_recall
+        or caregiving_recall
     )
     normalization_requested = _contains(text, NAME_TERMS) and _contains(
         text, NORMALIZATION_TERMS
@@ -512,9 +575,7 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     caregiving_context = _contains(text, CAREGIVING_TERMS)
     alcohol_context = _contains(text, ALCOHOL_TERMS)
     rural_life_context = _contains(text, RURAL_LIFE_TERMS)
-    support_requested = caregiving_context and (
-        recall_requested or _contains(text, SUPPORT_NEED_TERMS)
-    )
+    support_requested = caregiving_context and _contains(text, SUPPORT_NEED_TERMS)
 
     domain = None
     if normalization_requested or name_recall_requested:
@@ -529,6 +590,8 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         domain = "family_death"
     elif broad_family_recall:
         domain = "family_profile"
+    elif profession_recall or caregiving_recall:
+        domain = "life_context"
     elif support_requested:
         domain = "life_context"
     elif alcohol_context and recall_requested:
@@ -557,11 +620,25 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     elif domain == "family_death":
         allowed_predicates = list(FAMILY_DEATH_PREDICATES)
     elif domain == "family_profile":
-        allowed_predicates = list(FAMILY_PROFILE_PREDICATES)
+        allowed_predicates = (
+            _specific_family_relation_predicates(text)
+            if direct_family_relation_recall
+            else []
+        ) or list(FAMILY_PROFILE_PREDICATES)
     elif domain == "name_correction":
         allowed_predicates = list(NAME_PREDICATES)
     elif domain == "life_context":
-        allowed_predicates = list(LIFE_CONTEXT_PREDICATES)
+        if profession_recall:
+            allowed_predicates = ["occupation.works_as"]
+        elif caregiving_recall:
+            allowed_predicates = ["relationship.caregiver_for"]
+        elif caregiving_context:
+            allowed_predicates = [
+                "preference.life",
+                "relationship.caregiver_for",
+            ]
+        else:
+            allowed_predicates = list(LIFE_CONTEXT_PREDICATES)
     elif domain == "health_behavior":
         allowed_predicates = list(HEALTH_BEHAVIOR_PREDICATES)
     elif domain == "pet_profile":

@@ -49,17 +49,17 @@ def _allowlisted(actor: uuid.UUID) -> bool:
     return str(actor) in _uuid_values(os.getenv("MEMORY_V1_SHADOW_USER_IDS", ""))
 
 
-def _activation_allowlisted(actor: uuid.UUID) -> bool:
+def governed_activation_allowlisted(actor: uuid.UUID) -> bool:
     if os.getenv("MEMORY_V1_GOVERNED_ACTIVE", "0").strip() != "1":
-        return False
-    if not _allowlisted(actor):
         return False
     return str(actor) in _uuid_values(
         os.getenv("MEMORY_V1_GOVERNED_ACTIVE_USER_IDS", "")
     )
 
 
-def _maximum_sensitivity(actor: uuid.UUID, context: Dict[str, Any]) -> str:
+def governed_maximum_sensitivity(
+    actor: uuid.UUID, context: Dict[str, Any]
+) -> str:
     default = os.getenv("MEMORY_V1_SHADOW_MAX_SENSITIVITY", "medium")
     if not bool(context.get("explicit_recall")):
         return default
@@ -71,6 +71,16 @@ def _maximum_sensitivity(actor: uuid.UUID, context: Dict[str, Any]) -> str:
         "MEMORY_V1_GOVERNED_EXPLICIT_RECALL_MAX_SENSITIVITY",
         "high",
     )
+
+
+# The legacy shadow harness still requires both its audit allowlist and the
+# governed activation allowlist. The typed provider uses only the authoritative
+# governed activation policy above.
+def _activation_allowlisted(actor: uuid.UUID) -> bool:
+    return _allowlisted(actor) and governed_activation_allowlisted(actor)
+
+
+_maximum_sensitivity = governed_maximum_sensitivity
 
 
 def _render_claim_text(value: Any) -> str:

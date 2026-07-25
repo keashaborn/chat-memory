@@ -10,6 +10,7 @@ from rag_engine.memory_v1_shadow import (
     _format_prompt_block,
     _maximum_sensitivity,
     classify_shadow_context,
+    governed_activation_allowlisted,
 )
 
 
@@ -80,16 +81,21 @@ def main() -> int:
         intent="personal_recall",
         entity_hints=[],
         explicit_recall=True,
-        allowed_predicates=["personal_event.occurred"],
+        allowed_predicates=["life_event.died"],
     )
     expect(
         "What do you know about my pets?",
         "PROFILE_SUMMARY",
-        domain="pet_loss",
+        domain="pet_profile",
         intent="personal_recall",
         entity_hints=[],
         explicit_recall=True,
-        allowed_predicates=["personal_event.occurred"],
+        allowed_predicates=[
+            "identity.name",
+            "pet.breed",
+            "pet.sex",
+            "relationship.has_pet",
+        ],
     )
     expect(
         "What happened to Neko?",
@@ -97,7 +103,7 @@ def main() -> int:
         domain="pet_loss",
         intent="personal_recall",
         entity_hints=["neko"],
-        allowed_predicates=["personal_event.occurred"],
+        allowed_predicates=["life_event.died"],
     )
     expect(
         "What happened to Dahlia?",
@@ -105,7 +111,7 @@ def main() -> int:
         domain="pet_loss",
         intent="personal_recall",
         entity_hints=["dahlia"],
-        allowed_predicates=["personal_event.occurred"],
+        allowed_predicates=["life_event.died"],
     )
     for message, predicates in (
         ("What breed was Dahlia?", ["pet.breed"]),
@@ -241,6 +247,12 @@ def main() -> int:
         os.environ["MEMORY_V1_SHADOW_USER_IDS"] = str(actor)
         os.environ["MEMORY_V1_GOVERNED_ACTIVE"] = "1"
         os.environ["MEMORY_V1_GOVERNED_ACTIVE_USER_IDS"] = str(actor)
+        os.environ["MEMORY_V1_SHADOW_USER_IDS"] = ""
+        if not governed_activation_allowlisted(actor):
+            raise AssertionError(
+                "governed activation incorrectly depended on shadow audit policy"
+            )
+        os.environ["MEMORY_V1_SHADOW_USER_IDS"] = str(actor)
         if not _activation_allowlisted(actor):
             raise AssertionError("owner-scoped governed activation failed")
         os.environ["MEMORY_V1_SHADOW_ALL_AUTHENTICATED"] = "1"

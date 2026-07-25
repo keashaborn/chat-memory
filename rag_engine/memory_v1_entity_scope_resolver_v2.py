@@ -479,6 +479,12 @@ def resolve_memory_claim_selector_context_v2(
                 for edge in snapshot.edges
                 if edge.predicate == predicate and edge.subject_entity_id == self_id
             ]
+            if named_matches:
+                matching = [
+                    edge
+                    for edge in matching
+                    if edge.object_entity_id in named_matches
+                ]
             if matching:
                 rules.append(
                     _entity_rule(

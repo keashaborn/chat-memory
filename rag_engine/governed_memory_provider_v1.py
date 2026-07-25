@@ -40,6 +40,10 @@ from rag_engine.memory_v1_selection_envelope import (
     SourceContractVersionV1,
     select_governed_memory_v1,
 )
+from rag_engine.memory_v1_shadow import (
+    governed_activation_allowlisted,
+    governed_maximum_sensitivity,
+)
 from rag_engine.memory_v1_v5_claim_lane_adapter_v2 import V5ClaimLaneAdapterV2
 from rag_engine.memory_v1_v5_shadow_candidate import discover_v5_shadow_candidates
 from rag_engine.openai_client import embed_text
@@ -73,6 +77,8 @@ class LiveGovernedMemoryAssemblyProviderV1:
         trusted_policy_signals = ResponsePolicySignalsV0_2.model_validate_json(
             trusted_policy_signals.model_dump_json()
         )
+        if not governed_activation_allowlisted(authenticated_actor_user_id):
+            return GovernedMemoryAssemblyV1()
         if trusted_policy_signals.technical is True:
             request_classification = "TECH"
         elif trusted_policy_signals.fm_explicit is True:
@@ -149,9 +155,12 @@ class LiveGovernedMemoryAssemblyProviderV1:
                 project_key=None,
                 component_key=None,
                 max_sensitivity=(
-                    Sensitivity.HIGH
-                    if bool(claim_context.get("explicit_recall"))
-                    else Sensitivity.MEDIUM
+                    Sensitivity(
+                        governed_maximum_sensitivity(
+                            authenticated_actor_user_id,
+                            claim_context,
+                        )
+                    )
                 ),
                 selected_at=datetime.now(timezone.utc),
                 budget_policy=MemorySelectionBudgetPolicyV1.standard(),
