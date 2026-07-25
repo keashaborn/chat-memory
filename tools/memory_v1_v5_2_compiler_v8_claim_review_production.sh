@@ -315,7 +315,7 @@ cmp -s "$non_target_after" "$non_target_replay"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
 phase=postflight
-[[ "$(psql_row "SELECT count(*) FROM memory.projection_plan_item i JOIN memory.projection_plan_observation l USING (owner_user_id,plan_id) WHERE i.owner_user_id='$target_owner' AND l.observation_id IN ('a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc','c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb','70d55f38-1e33-418f-8ec6-6bfd2051f4e6','bbd94cc7-e9d5-429f-8af1-1a029b119db0') AND i.review_state='authorized'")" == 4 ]]
+[[ "$(psql_row "SELECT count(*) FROM memory.projection_plan_item i JOIN memory.projection_plan_observation l USING (owner_user_id,plan_id) JOIN memory.projection_review r USING (owner_user_id,plan_id,projection_ref) WHERE i.owner_user_id='$target_owner' AND l.observation_id IN ('a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc','c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb','70d55f38-1e33-418f-8ec6-6bfd2051f4e6','bbd94cc7-e9d5-429f-8af1-1a029b119db0') AND i.review_state='manual_review_required' AND r.decision='authorized'")" == 4 ]]
 [[ "$(psql_row "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id IN ('a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc','c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb','70d55f38-1e33-418f-8ec6-6bfd2051f4e6','bbd94cc7-e9d5-429f-8af1-1a029b119db0')")" == 0 ]]
 
 phase=restore
