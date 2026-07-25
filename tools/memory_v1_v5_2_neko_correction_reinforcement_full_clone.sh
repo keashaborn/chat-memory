@@ -35,6 +35,7 @@ compose=(
 )
 backup=$(mktemp /tmp/memory-v1-v5-2-reinforcement.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-reinforcement-roles.XXXXXX.sql)
+source_backup=${MEMORY_V1_V5_2_REINFORCEMENT_SOURCE_BACKUP:-}
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 head=$(git -C "$repo_root" rev-parse HEAD)
 
@@ -112,7 +113,19 @@ qdrant_before=$(qdrant_signature)
 production_before=$(production_signature)
 production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 
-docker exec brains-postgres-1 pg_dump -U sage -d memory -Fc >"$backup"
+if [[ -n "$source_backup" ]]; then
+  source_backup=$(realpath "$source_backup")
+  [[ "$source_backup" == /home/ubuntu/brains/snapshots/* ]]
+  [[ -s "$source_backup" ]]
+  [[ -f "$source_backup.sha256" ]]
+  (
+    cd "$(dirname "$source_backup")"
+    sha256sum --check "$(basename "$source_backup").sha256" >/dev/null
+  )
+  cp "$source_backup" "$backup"
+else
+  docker exec brains-postgres-1 pg_dump -U sage -d memory -Fc >"$backup"
+fi
 [[ -s "$backup" ]]
 docker exec brains-postgres-1 psql -X -A -t -U sage -d memory -c "
   SELECT format(
