@@ -86,9 +86,13 @@ async def finish_trusted_web_audit_v1(
     provider_response_id: str | None = None,
     sources: tuple[TrustedWebSourceV1, ...] = (),
     cited_sources: tuple[TrustedWebSourceV1, ...] = (),
+    admitted_sources: tuple[TrustedWebSourceV1, ...] = (),
+    rejected_source_reasons: tuple[tuple[str, str], ...] = (),
     error_code: str | None = None,
 ) -> None:
     cited_urls = {source.url for source in cited_sources}
+    admitted_urls = {source.url for source in admitted_sources}
+    rejected_by_url = dict(rejected_source_reasons)
     source_metadata = [
         {
             **(
@@ -98,6 +102,20 @@ async def finish_trusted_web_audit_v1(
             ),
             "citation_status": (
                 "cited" if source.url in cited_urls else "consulted"
+            ),
+            "admission_status": (
+                "admitted"
+                if source.url in admitted_urls
+                else "provider_observed_only"
+            ),
+            "admission_reason": (
+                "cited"
+                if source.url in cited_urls
+                else (
+                    "policy_relevant"
+                    if source.url in admitted_urls
+                    else rejected_by_url.get(source.url, "not_admitted")
+                )
             ),
         }
         for source in sources

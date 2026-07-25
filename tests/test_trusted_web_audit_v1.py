@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import unittest
+import json
 from uuid import UUID, uuid4
 
 from rag_engine.trusted_web_audit_v1 import (
     acquire_trusted_web_rate_limit_v1,
+    finish_trusted_web_audit_v1,
     query_sha256,
     start_trusted_web_audit_v1,
 )
+from rag_engine.trusted_web_provider_v1 import TrustedWebSourceV1
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -68,6 +71,43 @@ class TrustedWebAuditV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(digest), 64)
         self.assertIn(digest, args)
         self.assertNotIn(raw_query, args)
+
+    async def test_audit_distinguishes_provider_observed_and_admitted(
+        self,
+    ) -> None:
+        conn = FakeConnection()
+        cited = TrustedWebSourceV1(
+            url="https://openai.com/index/cited",
+            title="Cited",
+        )
+        supporting = TrustedWebSourceV1(
+            url="https://apnews.com/article/supporting",
+            title="Supporting",
+        )
+        rejected = TrustedWebSourceV1(
+            url="https://openai.com/news",
+            title="News hub",
+        )
+        await finish_trusted_web_audit_v1(
+            conn,
+            search_id=uuid4(),
+            status="completed",
+            latency_ms=10,
+            sources=(cited, supporting, rejected),
+            cited_sources=(cited,),
+            admitted_sources=(cited, supporting),
+            rejected_source_reasons=((rejected.url, "generic_index"),),
+        )
+        _sql, args = conn.execute_calls[0]
+        metadata = json.loads(args[3])
+        self.assertEqual(metadata[0]["citation_status"], "cited")
+        self.assertEqual(metadata[0]["admission_reason"], "cited")
+        self.assertEqual(metadata[1]["admission_reason"], "policy_relevant")
+        self.assertEqual(
+            metadata[2]["admission_status"],
+            "provider_observed_only",
+        )
+        self.assertEqual(metadata[2]["admission_reason"], "generic_index")
 
 
 if __name__ == "__main__":

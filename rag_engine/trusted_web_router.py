@@ -31,6 +31,11 @@ from rag_engine.trusted_web_audit_v1 import (
     query_sha256,
     start_trusted_web_audit_v1,
 )
+from rag_engine.trusted_web_admission_v1 import (
+    TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
+    WEB_EVIDENCE_ADMISSION_CONTRACT,
+    admit_trusted_web_sources_v1,
+)
 from rag_engine.trusted_web_ncbi_v1 import (
     NCBIClientError,
     NCBIPubMedClientV1,
@@ -121,9 +126,19 @@ class TrustedWebResponseV1(BaseModel):
     searched: bool
     answer: str = Field(min_length=1, max_length=40_000)
     source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
+    admission_contract: str = WEB_EVIDENCE_ADMISSION_CONTRACT
     sources: tuple[TrustedWebSourceV1, ...] = ()
     cited_sources: tuple[TrustedWebSourceV1, ...] = ()
+    admitted_sources: tuple[TrustedWebSourceV1, ...] = ()
     consulted_sources: tuple[TrustedWebSourceV1, ...] = ()
+    provider_consulted_source_count: int = Field(default=0, ge=0, le=50)
+    admitted_source_count: int = Field(default=0, ge=0, le=50)
+    rejected_source_count: int = Field(default=0, ge=0, le=50)
+    max_admitted_sources: int = Field(
+        default=TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
+        ge=1,
+        le=50,
+    )
 
 
 def apply_trusted_web_no_store_headers(response: Response) -> None:
@@ -306,6 +321,12 @@ async def trusted_web_query(
                 ),
                 timeout=settings.timeout_seconds + 5.0,
             )
+        admission = admit_trusted_web_sources_v1(
+            cited_sources=result.cited_sources,
+            consulted_sources=result.consulted_sources,
+            max_sources=TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
+            policy_pack="trusted_health",
+        )
         latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)
         await finish_trusted_web_audit_v1(
             conn,
@@ -315,13 +336,17 @@ async def trusted_web_query(
             provider_response_id=result.provider_response_id,
             sources=result.consulted_sources,
             cited_sources=result.cited_sources,
+            admitted_sources=admission.admitted_sources,
+            rejected_source_reasons=admission.rejected_source_reasons,
         )
         logger.info(
-            "[trusted_web] search_id=%s status=completed topic=%s cited_source_count=%s consulted_source_count=%s latency_ms=%s",
+            "[trusted_web] search_id=%s status=completed topic=%s cited_source_count=%s admitted_source_count=%s provider_consulted_source_count=%s rejected_source_count=%s latency_ms=%s",
             search_id,
             policy.topic.value,
             len(result.cited_sources),
+            len(admission.admitted_sources),
             len(result.consulted_sources),
+            admission.rejected_source_count,
             latency_ms,
         )
         return TrustedWebResponseV1(
@@ -334,7 +359,12 @@ async def trusted_web_query(
             answer=result.answer_markdown(),
             sources=result.cited_sources,
             cited_sources=result.cited_sources,
+            admitted_sources=admission.admitted_sources,
             consulted_sources=result.consulted_sources,
+            provider_consulted_source_count=len(result.consulted_sources),
+            admitted_source_count=len(admission.admitted_sources),
+            rejected_source_count=admission.rejected_source_count,
+            max_admitted_sources=admission.max_sources,
         )
     except HTTPException:
         raise

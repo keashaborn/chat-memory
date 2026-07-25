@@ -162,10 +162,15 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertEqual(response.disposition, TrustedWebDispositionV1.DECLINE)
         self.assertEqual(response.sources, ())
         self.assertEqual(response.cited_sources, ())
+        self.assertEqual(response.admitted_sources, ())
         self.assertEqual(response.consulted_sources, ())
         self.assertEqual(
             response.source_contract,
             "web_source_provenance_v2",
+        )
+        self.assertEqual(
+            response.admission_contract,
+            "web_evidence_admission_v1",
         )
 
 

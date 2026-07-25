@@ -32,6 +32,11 @@ from rag_engine.trusted_web_audit_v1 import (
     query_sha256,
     start_trusted_web_audit_v1,
 )
+from rag_engine.trusted_web_admission_v1 import (
+    CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+    WEB_EVIDENCE_ADMISSION_CONTRACT,
+    admit_trusted_web_sources_v1,
+)
 from rag_engine.trusted_web_policy_v1 import (
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
@@ -132,9 +137,19 @@ class CurrentNewsResponseV1(BaseModel):
     searched: bool
     answer: str = Field(min_length=1, max_length=40_000)
     source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
+    admission_contract: str = WEB_EVIDENCE_ADMISSION_CONTRACT
     sources: tuple[CurrentNewsSourceV1, ...] = ()
     cited_sources: tuple[CurrentNewsSourceV1, ...] = ()
+    admitted_sources: tuple[CurrentNewsSourceV1, ...] = ()
     consulted_sources: tuple[CurrentNewsSourceV1, ...] = ()
+    provider_consulted_source_count: int = Field(default=0, ge=0, le=50)
+    admitted_source_count: int = Field(default=0, ge=0, le=50)
+    rejected_source_count: int = Field(default=0, ge=0, le=50)
+    max_admitted_sources: int = Field(
+        default=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+        ge=1,
+        le=50,
+    )
 
 
 def apply_current_news_no_store_headers(response: Response) -> None:
@@ -397,11 +412,24 @@ async def current_news_query(
             ),
             timeout=settings.timeout_seconds + 5.0,
         )
+        admission = admit_trusted_web_sources_v1(
+            cited_sources=result.cited_sources,
+            consulted_sources=result.consulted_sources,
+            max_sources=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+            policy_pack="current_news",
+        )
         cited_news_sources = _current_news_sources_from_trusted_sources(
             result.cited_sources
         )
+        admitted_news_sources = _current_news_sources_from_trusted_sources(
+            admission.admitted_sources
+        )
         consulted_news_sources = _current_news_sources_from_trusted_sources(
             result.consulted_sources
+        )
+        rejected_news_source_count = max(
+            0,
+            len(consulted_news_sources) - len(admitted_news_sources),
         )
         latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)
         await finish_trusted_web_audit_v1(
@@ -412,13 +440,17 @@ async def current_news_query(
             provider_response_id=result.provider_response_id,
             sources=result.consulted_sources,
             cited_sources=result.cited_sources,
+            admitted_sources=admission.admitted_sources,
+            rejected_source_reasons=admission.rejected_source_reasons,
         )
         logger.info(
-            "[current_news] search_id=%s status=completed topic=%s cited_source_count=%s consulted_source_count=%s latency_ms=%s",
+            "[current_news] search_id=%s status=completed topic=%s cited_source_count=%s admitted_source_count=%s provider_consulted_source_count=%s rejected_source_count=%s latency_ms=%s",
             search_id,
             policy.topic.value,
             len(cited_news_sources),
+            len(admitted_news_sources),
             len(consulted_news_sources),
+            rejected_news_source_count,
             latency_ms,
         )
         return CurrentNewsResponseV1(
@@ -431,7 +463,12 @@ async def current_news_query(
             answer=result.answer_text,
             sources=cited_news_sources,
             cited_sources=cited_news_sources,
+            admitted_sources=admitted_news_sources,
             consulted_sources=consulted_news_sources,
+            provider_consulted_source_count=len(consulted_news_sources),
+            admitted_source_count=len(admitted_news_sources),
+            rejected_source_count=rejected_news_source_count,
+            max_admitted_sources=admission.max_sources,
         )
     except HTTPException:
         raise
