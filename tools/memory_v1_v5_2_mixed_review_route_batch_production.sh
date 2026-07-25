@@ -196,7 +196,7 @@ run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
 artifact_dir="$review_root/mixed-review-route-production-$run_tag"
 reviews="$artifact_dir/reviews"
 status_file="$snapshot_dir/memory_v1_v5_2_mixed_review_route_${run_tag}.status"
-install -d -o root -g root -m 0700 "$artifact_dir"
+install -d -o ubuntu -g ubuntu -m 0700 "$artifact_dir"
 install -d -o ubuntu -g ubuntu -m 0700 "$reviews"
 
 phase=tests
