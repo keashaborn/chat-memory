@@ -5,7 +5,7 @@ set -euo pipefail
 # claim-candidate/review production run. It writes one immutable audit report;
 # it does not write memory rows, Qdrant, retrieval, or prompt state.
 
-repo_root=$(git rev-parse --show-toplevel)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 run_tag=20260725T141700Z_cb87f2555f36
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 execution_head=cb87f2555f368ec0e8fe5db52a050759f8e2eaad
