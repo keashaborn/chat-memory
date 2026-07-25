@@ -107,6 +107,40 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertEqual(sources[1].publisher, "Reuters")
         self.assertEqual(sources[1].source_type, "news_source")
 
+    def test_current_news_sources_are_deduped_and_capped(self) -> None:
+        raw_sources = tuple(
+            TrustedWebSourceV1(
+                url=url,
+                title="Source",
+                authority_type="official_web",
+                evidence_type="web_source",
+            )
+            for url in (
+                "https://openai.com/index/hugging-face-model-evaluation-security-incident/?utm_source=openai",
+                "https://openai.com/sk-SK/index/hugging-face-model-evaluation-security-incident/",
+                "https://apnews.com/article/abc?utm_source=openai",
+                "https://apnews.com/article/abc",
+                "https://apnews.com/article/1",
+                "https://apnews.com/article/2",
+                "https://apnews.com/article/3",
+                "https://apnews.com/article/4",
+                "https://apnews.com/article/5",
+                "https://apnews.com/article/6",
+                "https://apnews.com/article/7",
+            )
+        )
+        sources = _current_news_sources_from_trusted_sources(raw_sources)
+        self.assertLessEqual(len(sources), 8)
+        self.assertEqual(
+            sources[0].url,
+            "https://openai.com/index/hugging-face-model-evaluation-security-incident/",
+        )
+        self.assertEqual(sources[0].title, "OpenAI")
+        self.assertEqual(
+            [source.url for source in sources].count("https://apnews.com/article/abc"),
+            1,
+        )
+
     def test_current_news_policy_routes_but_fetch_remains_disabled(self) -> None:
         decision = route_trusted_web_query(
             "What just happened with OpenAI and Hugging Face?"

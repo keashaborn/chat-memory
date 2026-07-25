@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -203,19 +203,54 @@ def _source_type_from_publisher(publisher: str) -> str:
     return "news_source"
 
 
+_CURRENT_NEWS_MAX_SOURCE_CARDS = 8
+
+
+def _current_news_card_url(url: str) -> str:
+    parsed = urlsplit(url)
+    path = parsed.path or "/"
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in path.split("/") if part]
+    if (
+        host == "openai.com"
+        and len(parts) >= 3
+        and len(parts[0]) == 5
+        and parts[0][2] == "-"
+        and parts[1] == "index"
+    ):
+        path = "/" + "/".join(parts[1:])
+    query = urlencode([
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=False)
+        if not key.lower().startswith("utm_")
+    ])
+    return urlunsplit((parsed.scheme, parsed.netloc, path, query, ""))
+
+
 def _current_news_sources_from_trusted_sources(
     sources: tuple[TrustedWebSourceV1, ...],
 ) -> tuple[CurrentNewsSourceV1, ...]:
-    return tuple(
-        CurrentNewsSourceV1(
-            url=source.url,
-            title=source.title,
-            publisher=_publisher_from_url(source.url),
-            published_at="",
-            source_type=_source_type_from_publisher(_publisher_from_url(source.url)),
+    result: list[CurrentNewsSourceV1] = []
+    seen: set[str] = set()
+    for source in sources:
+        card_url = _current_news_card_url(source.url)
+        if card_url in seen:
+            continue
+        seen.add(card_url)
+        publisher = _publisher_from_url(card_url)
+        title = source.title if source.title != "Source" else publisher
+        result.append(
+            CurrentNewsSourceV1(
+                url=card_url,
+                title=title,
+                publisher=publisher,
+                published_at="",
+                source_type=_source_type_from_publisher(publisher),
+            )
         )
-        for source in sources
-    )
+        if len(result) >= _CURRENT_NEWS_MAX_SOURCE_CARDS:
+            break
+    return tuple(result)
 
 
 def _safe_error_code(exc: Exception) -> str:
