@@ -1,0 +1,23 @@
+{
+  "contract_version": "memory_v1_v5_2_entity_resolution_batch_manifest_v1",
+  "target_server": "seebx",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "expected_total_bindings": 2,
+  "expected_new_rows": 6,
+  "items": [
+    {
+      "resolution_id": "7f924d81-f01a-4c3d-b57b-050d7013782c",
+      "operation": "auto_apply",
+      "expected_action": "link_existing",
+      "expected_decision_state": "auto_link_eligible",
+      "review_reason": null
+    },
+    {
+      "resolution_id": "bc33ee5d-e2b9-43c1-9ab5-8eb541c1fcf3",
+      "operation": "auto_apply",
+      "expected_action": "link_existing",
+      "expected_decision_state": "auto_link_eligible",
+      "review_reason": null
+    }
+  ]
+}
