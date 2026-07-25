@@ -202,6 +202,7 @@ authorization="$artifact_dir/stage-authorization.json"
 cross_result="$artifact_dir/stage-cross-owner.json"
 stage_apply="$artifact_dir/stage-apply.json"
 stage_replay="$artifact_dir/stage-replay.json"
+stage_post_apply_replay="$artifact_dir/stage-post-apply-replay.json"
 decisions="$artifact_dir/review-decisions.json"
 review_manifest="$artifact_dir/review-manifest.json"
 review_preflight="$artifact_dir/review-preflight.json"
@@ -378,6 +379,21 @@ PYTHONPATH="$repo_root/scripts:$repo_root" \
   --mode apply --manifest "$review_manifest" --output "$review_apply"
 [[ "$(jq -er '.rows_written' "$review_apply")" == 1 ]]
 
+MEMORY_V1_REQUIRED_HEAD="$head" \
+MEMORY_V1_V5_2_NEKO_CORRECTION_REINFORCEMENT_STAGE_APPLY=authorized \
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+  "$repo_root/$stage_runner" replay \
+  --manifest "$manifest" --authorization "$authorization" \
+  --confirm STAGE_EXACT_NEKO_CORRECTION_REINFORCEMENT_ONLY \
+  --output "$stage_replay"
+MEMORY_V1_REQUIRED_HEAD="$head" \
+MEMORY_V1_V5_2_NEKO_CORRECTION_REINFORCEMENT_REVIEW_APPLY=authorized \
+PYTHONPATH="$repo_root/scripts:$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$review_runner" \
+  --mode replay --manifest "$review_manifest" --output "$review_replay"
+[[ "$(jq -er '.rows_written' "$stage_replay")" == 0 ]]
+[[ "$(jq -er '.rows_written' "$review_replay")" == 0 ]]
+
 PYTHONPATH="$repo_root/scripts:$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$apply_manifest_runner" \
   --owner "$target_owner" --required-head "$head" \
@@ -409,19 +425,13 @@ PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   "$repo_root/$stage_runner" replay \
   --manifest "$manifest" --authorization "$authorization" \
   --confirm STAGE_EXACT_NEKO_CORRECTION_REINFORCEMENT_ONLY \
-  --output "$stage_replay"
-MEMORY_V1_REQUIRED_HEAD="$head" \
-MEMORY_V1_V5_2_NEKO_CORRECTION_REINFORCEMENT_REVIEW_APPLY=authorized \
-PYTHONPATH="$repo_root/scripts:$repo_root" \
-  /opt/chat-memory/venv/bin/python "$repo_root/$review_runner" \
-  --mode replay --manifest "$review_manifest" --output "$review_replay"
+  --output "$stage_post_apply_replay"
 MEMORY_V1_REQUIRED_HEAD="$head" \
 PYTHONPATH="$repo_root/scripts:$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" \
   --mode replay --manifest "$apply_manifest" \
   --apply-result "$apply_result" --output "$apply_replay"
-[[ "$(jq -er '.rows_written' "$stage_replay")" == 0 ]]
-[[ "$(jq -er '.rows_written' "$review_replay")" == 0 ]]
+[[ "$(jq -er '.rows_written' "$stage_post_apply_replay")" == 0 ]]
 [[ "$(jq -er '.rows_written' "$apply_replay")" == 0 ]]
 capture_partition target "$target_replay"
 capture_partition non_target "$non_target_replay"
@@ -521,6 +531,7 @@ value = {
         "review_rows_written": review_result["rows_written"],
         "apply_rows_written": apply_result["rows_written"],
         "zero_write_replay": True,
+        "post_apply_stage_replay_zero_write": True,
         "account_isolation_verified": True,
         "non_target_memory_unchanged": True,
         "qdrant_sha256": os.environ["QDRANT"],

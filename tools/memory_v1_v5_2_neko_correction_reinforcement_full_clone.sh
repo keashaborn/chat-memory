@@ -43,6 +43,7 @@ authorization="$artifact_dir/stage-authorization.json"
 cross_result="$artifact_dir/stage-cross-owner.json"
 stage_apply="$artifact_dir/stage-apply.json"
 stage_replay="$artifact_dir/stage-replay.json"
+stage_post_apply_replay="$artifact_dir/stage-post-apply-replay.json"
 decisions="$artifact_dir/review-decisions.json"
 review_manifest="$artifact_dir/review-manifest.json"
 review_preflight="$artifact_dir/review-preflight.json"
@@ -278,6 +279,15 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
 [[ "$(jq -er '.claim_observation_links_written' "$apply_result")" == 1 ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
+MEMORY_V1_V5_2_NEKO_CORRECTION_REINFORCEMENT_STAGE_APPLY=authorized \
+POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$stage_runner" replay \
+  --manifest "$manifest" --authorization "$authorization" \
+  --confirm STAGE_EXACT_NEKO_CORRECTION_REINFORCEMENT_ONLY \
+  --output "$stage_post_apply_replay"
+[[ "$(jq -er '.rows_written' "$stage_post_apply_replay")" == 0 ]]
+
+MEMORY_V1_REQUIRED_HEAD="$head" \
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" \
   --mode replay --manifest "$apply_manifest" \
@@ -330,6 +340,7 @@ value = {
     "verification": {
         "stage_rows_written": 6,
         "stage_replay_zero_write": True,
+        "stage_post_apply_replay_zero_write": True,
         "review_rows_written": 1,
         "review_replay_zero_write": True,
         "apply_rows_written": 3,

@@ -409,6 +409,18 @@ BEGIN
     WHERE link.owner_user_id=actor
       AND link.claim_id=target_claim
       AND link.observation_id=source.observation_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM memory.projection_plan AS stored
+    WHERE stored.owner_user_id=actor
+      AND stored.plan_id=p_plan_id
+      AND stored.packet_text=p_packet_text
+      AND stored.packet_sha256=packet->>'packet_sha256'
+      AND stored.owner_manifest_sha256=
+        memory.v5_projection_owner_manifest_sha256(
+          actor,packet->>'packet_sha256'
+        )
   ) THEN
     RAISE EXCEPTION 'V5.2 reinforcement observation is already linked'
       USING ERRCODE='23505';
