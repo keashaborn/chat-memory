@@ -201,6 +201,12 @@ def render_claim_text(source: Mapping[str, Any]) -> str:
         if predicate == "employment.worked_for":
             return _sentence(subject, f"worked for {target}", f"did not work for {target}", source)
         if predicate == "occupation.works_as":
+            temporal = source.get("temporal")
+            state_relation = (
+                temporal.get("state_relation") if isinstance(temporal, dict) else None
+            )
+            if state_relation == "historical":
+                return _sentence(subject, f"formerly worked as {target}", f"did not formerly work as {target}", source)
             return _sentence(subject, f"works as {target}", f"does not work as {target}", source)
         if predicate == "residence.lives_at":
             return _sentence(subject, f"lives at {target}", f"does not live at {target}", source)
