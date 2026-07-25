@@ -45,6 +45,7 @@ QUERY_BY_PREDICATE = {
     "relationship.caregiver_for": "Do you remember who I care for?",
     "relationship.spouse_of": "Do you remember who my spouse is?",
     "occupation.works_as": "Do you remember what professions I have worked in?",
+    "identity.name_canonical": "Was it Nemo or Neko?",
 }
 
 

@@ -1,0 +1,43 @@
+{
+  "contract_version": "memory_v1_v5_2_canonical_name_claim_projection_plan_v1",
+  "required_ancestor_commit": "fcdd62ea277c1ec237cf865188ff979e2bde7329",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "source": {
+    "apply_manifest_path": "/home/ubuntu/memory-v1-reviews/canonical-name-materialization-20260725T200112Z-fcdd62e/apply-manifest.json",
+    "apply_manifest_file_sha256": "bbd904cd96c4428d302b894f1d6a7ad80964cf3fa453dae50ebffe2de825a6d6",
+    "apply_manifest_sha256": "b0ff600b96a92912dd9e2c46c78f01f020cc418668d4519340a22d3c988d6cf0",
+    "apply_result_path": "/home/ubuntu/memory-v1-reviews/canonical-name-materialization-20260725T200112Z-fcdd62e/production-apply.json",
+    "apply_result_file_sha256": "fe7f56b92eaff34416d436c15a0863cc70c908ab97fbb6ddfa49f73f0c8111dc",
+    "apply_result_sha256": "d8c66bf76556cfdf6483e9d9562e7083dfbf2db5c63f9d7c57c6f4af2780a734"
+  },
+  "projection": {
+    "collection": "memory_claim_v1",
+    "embedding_model": "text-embedding-3-large",
+    "vector_size": 3072,
+    "maximum_embedding_requests": 1,
+    "automatic_http_retries": 0
+  },
+  "items": [
+    {
+      "claim_id": "8e3f4d82-8c21-4bbd-bbe8-91dd585f6fc9",
+      "predicate": "identity.name_canonical",
+      "canonical_text_sha256": "cbca4ad669cf5ad4780062be5dbb9583b84ff5a15d4a995ae70cc343f30bb29a",
+      "revision_number": 2
+    }
+  ],
+  "shadow_queries": {
+    "identity.name_canonical": "Was it Nemo or Neko?"
+  },
+  "required_proofs": {
+    "fresh_postgres_backup": true,
+    "exact_timer_restoration": true,
+    "zero_write_admission_replay": true,
+    "zero_call_projection_replay": true,
+    "owner_only_qdrant_filter": true,
+    "postgres_revalidation": true,
+    "non_target_postgres_unchanged": true,
+    "non_target_qdrant_unchanged": true,
+    "prompt_influence": false,
+    "general_account_activation": false
+  }
+}

@@ -100,6 +100,12 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
             "Do you remember what professions I have worked in?",
         )
 
+    def test_canonical_name_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["identity.name_canonical"],
+            "Was it Nemo or Neko?",
+        )
+
     def test_accepts_exact_deferred_admission_result(self) -> None:
         claim_id = "8fb8b3ab-a627-4555-99c6-fe4dc9b0ca89"
         outbox_id = "11111111-1111-4111-8111-111111111111"
