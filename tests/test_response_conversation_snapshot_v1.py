@@ -17,6 +17,9 @@ from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotV1,
     MAX_PRIOR_CONTENT_BYTES,
     USER_SOURCE,
+    VOICE_REALTIME_USER_SOURCE,
+    WEB_ASSISTANT_SOURCE,
+    WEB_USER_SOURCE,
     _snapshot,
     load_response_conversation_snapshot_v1,
 )
@@ -104,19 +107,22 @@ class FakeConnection:
 
     async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
         self.fetch_calls.append((sql, args))
-        if "AND source=$4" in sql:
+        if "AND source=ANY($4::text[])" in sql:
             return list(self.current_rows)
         if "assistant_transcript_attestation_v1" in sql:
             return list(self.prior_rows)
         raise AssertionError(f"unexpected fetch query: {sql}")
 
 
-def current_row(text: str = "Current message") -> dict[str, Any]:
+def current_row(
+    text: str = "Current message",
+    source: str = USER_SOURCE,
+) -> dict[str, Any]:
     row = {
         "id": CURRENT_ID,
         "owner_user_id": ACTOR,
         "thread_id": THREAD,
-        "source": USER_SOURCE,
+        "source": source,
         "request_id": REQUEST_ID,
         "text": text,
         "created_at": NOW,
@@ -143,6 +149,18 @@ def prior_row(
     if source == ATTESTED_ASSISTANT_SOURCE:
         row["assistant_text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
         row["attestation_sha256"] = "a" * 64
+    elif source in {WEB_USER_SOURCE, WEB_ASSISTANT_SOURCE}:
+        row["web_response_id"] = UUID("49c59ba0-e188-40f8-932d-51fa6b84e157")
+        row["web_query_sha256"] = (
+            hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if source == WEB_USER_SOURCE
+            else "b" * 64
+        )
+        row["web_answer_sha256"] = (
+            hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if source == WEB_ASSISTANT_SOURCE
+            else "b" * 64
+        )
     return row
 
 
@@ -247,10 +265,13 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         history_query, args = conn.fetch_calls[1]
         self.assertIn("request_id IS DISTINCT FROM $3", history_query)
         self.assertEqual(args[2], REQUEST_ID)
-        self.assertEqual(args[3], USER_SOURCE)
+        self.assertEqual(
+            args[3],
+            [USER_SOURCE, VOICE_REALTIME_USER_SOURCE],
+        )
         self.assertEqual(args[4], ATTESTED_ASSISTANT_SOURCE)
-        self.assertEqual(args[5], NOW)
-        self.assertEqual(args[6], CURRENT_ID)
+        self.assertEqual(args[7], NOW)
+        self.assertEqual(args[8], CURRENT_ID)
 
     async def test_attested_backend_assistant_history_is_admitted(self) -> None:
         conn = FakeConnection(
@@ -271,6 +292,46 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             current_message="Current message",
         )
         self.assertEqual(snapshot.messages[0].role, ConversationRole.ASSISTANT)
+
+    async def test_voice_turn_admits_bound_web_exchange_from_text(self) -> None:
+        conn = FakeConnection(
+            current_rows=[
+                current_row(source=VOICE_REALTIME_USER_SOURCE),
+            ],
+            prior_rows=[
+                prior_row(
+                    number=1,
+                    source=WEB_ASSISTANT_SOURCE,
+                    text="The searched answer from the phone.",
+                ),
+                prior_row(
+                    number=2,
+                    source=WEB_USER_SOURCE,
+                    text="What happened with OpenAI today?",
+                ),
+            ],
+        )
+        snapshot = await load_response_conversation_snapshot_v1(
+            conn,
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id=REQUEST_ID,
+            current_message="Current message",
+        )
+        self.assertEqual(
+            tuple((item.role, item.content) for item in snapshot.messages),
+            (
+                (
+                    ConversationRole.USER,
+                    "What happened with OpenAI today?",
+                ),
+                (
+                    ConversationRole.ASSISTANT,
+                    "The searched answer from the phone.",
+                ),
+                (ConversationRole.USER, "Current message"),
+            ),
+        )
 
     async def test_budget_drops_oldest_candidates_without_truncating_text(self) -> None:
         newer = "n" * 30_000

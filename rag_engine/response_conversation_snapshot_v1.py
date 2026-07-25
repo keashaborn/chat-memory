@@ -22,15 +22,23 @@ from rag_engine.response_policy_v0_2 import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
 )
+from rag_engine.web_transcript_persistence_v1 import (
+    WEB_ASSISTANT_SOURCE,
+    WEB_USER_SOURCE,
+)
 
 
 SNAPSHOT_VERSION = "response_conversation_snapshot_v1"
 USER_SOURCE = "frontend/chat:user"
+VOICE_REALTIME_USER_SOURCE = "voice/realtime-preview:user"
 ASSISTANT_SOURCE = "frontend/chat:assistant"
 ATTESTED_ASSISTANT_SOURCE = "backend/resse:assistant:v1"
 SOURCE_ROLE = {
     USER_SOURCE: ConversationRole.USER,
+    VOICE_REALTIME_USER_SOURCE: ConversationRole.USER,
     ATTESTED_ASSISTANT_SOURCE: ConversationRole.ASSISTANT,
+    WEB_USER_SOURCE: ConversationRole.USER,
+    WEB_ASSISTANT_SOURCE: ConversationRole.ASSISTANT,
 }
 
 MAX_PRIOR_MESSAGES = 23
@@ -343,14 +351,14 @@ async def load_response_conversation_snapshot_v1(
                     WHERE owner_user_id=$1
                       AND thread_id=$2
                       AND request_id=$3
-                      AND source=$4
+                      AND source=ANY($4::text[])
                     ORDER BY created_at,id
                     LIMIT 2
                     """,
                     authenticated_actor_user_id,
                     thread_id,
                     current_request_id,
-                    USER_SOURCE,
+                    [USER_SOURCE, VOICE_REALTIME_USER_SOURCE],
                 )
             )
             if not current_rows:
@@ -374,7 +382,8 @@ async def load_response_conversation_snapshot_v1(
                     "current transcript row differs from trusted thread"
                 )
             if (
-                current_row.get("source") != USER_SOURCE
+                current_row.get("source")
+                not in {USER_SOURCE, VOICE_REALTIME_USER_SOURCE}
                 or current_row.get("request_id") != current_request_id
             ):
                 raise ConversationSnapshotError(
@@ -392,33 +401,49 @@ async def load_response_conversation_snapshot_v1(
                     SELECT log.id,log.owner_user_id,log.thread_id,log.source,
                            log.text,log.request_id,log.created_at,
                            attestation.assistant_text_sha256,
-                           attestation.attestation_sha256
+                           attestation.attestation_sha256,
+                           web_binding.response_id AS web_response_id,
+                           web_binding.query_sha256 AS web_query_sha256,
+                           web_binding.answer_sha256 AS web_answer_sha256
                     FROM public.chat_log AS log
                     LEFT JOIN memory.assistant_transcript_attestation_v1 AS attestation
                       ON attestation.owner_user_id=log.owner_user_id
                      AND attestation.thread_id=log.thread_id
                      AND attestation.chat_log_id=log.id
                      AND attestation.answer_id=log.id
+                    LEFT JOIN trusted_web.response_transcript_v1 AS web_binding
+                      ON web_binding.owner_user_id=log.owner_user_id
+                     AND web_binding.thread_id=log.thread_id
+                     AND (
+                       web_binding.user_chat_log_id=log.id
+                       OR web_binding.assistant_chat_log_id=log.id
+                     )
                     WHERE log.owner_user_id=$1
                       AND log.thread_id=$2
                       AND log.request_id IS DISTINCT FROM $3
                       AND log.request_id IS NOT NULL
                       AND (
-                        log.source=$4
+                        log.source=ANY($4::text[])
                         OR (
                           log.source=$5
                           AND attestation.answer_id IS NOT NULL
                         )
+                        OR (
+                          log.source IN ($6,$7)
+                          AND web_binding.response_id IS NOT NULL
+                        )
                       )
-                      AND (log.created_at,log.id)<($6,$7)
+                      AND (log.created_at,log.id)<($8,$9)
                     ORDER BY log.created_at DESC,log.id DESC
-                    LIMIT $8
+                    LIMIT $10
                     """,
                     authenticated_actor_user_id,
                     thread_id,
                     current_request_id,
-                    USER_SOURCE,
+                    [USER_SOURCE, VOICE_REALTIME_USER_SOURCE],
                     ATTESTED_ASSISTANT_SOURCE,
+                    WEB_USER_SOURCE,
+                    WEB_ASSISTANT_SOURCE,
                     cutoff,
                     current_log_id,
                     MAX_PRIOR_MESSAGES + 1,
@@ -489,6 +514,21 @@ async def load_response_conversation_snapshot_v1(
                 char not in "0123456789abcdef" for char in attestation_hash
             ):
                 raise ConversationSnapshotError("assistant attestation is invalid")
+        elif source in {WEB_USER_SOURCE, WEB_ASSISTANT_SOURCE}:
+            if row.get("web_response_id") is None:
+                raise ConversationSnapshotError(
+                    "web transcript binding is absent"
+                )
+            expected_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            bound_hash = (
+                row.get("web_query_sha256")
+                if source == WEB_USER_SOURCE
+                else row.get("web_answer_sha256")
+            )
+            if bound_hash != expected_text_hash:
+                raise ConversationSnapshotError(
+                    "web transcript differs from its binding"
+                )
         size = len(text.encode("utf-8"))
         if size > MAX_CURRENT_MESSAGE_BYTES:
             raise ConversationSnapshotError("one prior message exceeds snapshot budget")

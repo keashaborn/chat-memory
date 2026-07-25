@@ -291,7 +291,15 @@ async def commit_realtime_preview_audio(
             detail={"error": "realtime_sideband_not_ready"},
         )
     try:
-        await controller.commit()
+        await controller.commit(
+            web_search_authorized=(
+                (
+                    req.headers.get("x-vs-web-search-authorization")
+                    or ""
+                ).strip()
+                == "supabase_fresh_voice_lease_v1"
+            )
+        )
     except RealtimePreviewSidebandNotReady as exc:
         raise HTTPException(
             status_code=409,

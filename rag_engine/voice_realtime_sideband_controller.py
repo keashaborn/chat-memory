@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import uuid
+from collections import deque
 from contextlib import suppress
 from typing import Any, Callable
 
@@ -65,9 +66,11 @@ class RealtimePreviewSidebandController:
         self._closing = False
         self._websocket: Any | None = None
         self._send_lock = asyncio.Lock()
-        self._pending_turns: asyncio.Queue[tuple[int, str, str]] = (
+        self._pending_turns: asyncio.Queue[tuple[int, str, str, bool]] = (
             asyncio.Queue(maxsize=MAX_PENDING_TURNS)
         )
+        self._pending_commit_authorizations: deque[bool] = deque()
+        self._web_search_authorized_by_item: dict[str, bool] = {}
         self._committed_items: list[str] = []
         self._sequence_by_item: dict[str, int] = {}
         self._completed_by_item: dict[str, str] = {}
@@ -82,7 +85,7 @@ class RealtimePreviewSidebandController:
             name=f"realtime-preview:{self.session.preview_session_id}",
         )
 
-    async def commit(self) -> None:
+    async def commit(self, *, web_search_authorized: bool = False) -> None:
         try:
             await asyncio.wait_for(self._connected.wait(), timeout=5.0)
         except asyncio.TimeoutError as exc:
@@ -95,12 +98,19 @@ class RealtimePreviewSidebandController:
                 "sideband connection is unavailable"
             )
         async with self._send_lock:
-            await websocket.send(
-                json.dumps(
-                    {"type": "input_audio_buffer.commit"},
-                    separators=(",", ":"),
-                )
+            self._pending_commit_authorizations.append(
+                bool(web_search_authorized)
             )
+            try:
+                await websocket.send(
+                    json.dumps(
+                        {"type": "input_audio_buffer.commit"},
+                        separators=(",", ":"),
+                    )
+                )
+            except Exception:
+                self._pending_commit_authorizations.pop()
+                raise
         self.session.append_event("commit.accepted")
 
     async def close(self) -> None:
@@ -231,6 +241,11 @@ class RealtimePreviewSidebandController:
         sequence = len(self._committed_items) + 1
         self._committed_items.append(item_id)
         self._sequence_by_item[item_id] = sequence
+        self._web_search_authorized_by_item[item_id] = (
+            self._pending_commit_authorizations.popleft()
+            if self._pending_commit_authorizations
+            else False
+        )
 
     def _handle_transcript_completed(self, event: dict[str, Any]) -> None:
         item_id = self._item_id(event.get("item_id"))
@@ -253,9 +268,18 @@ class RealtimePreviewSidebandController:
                 return
             transcript = self._completed_by_item.pop(item_id)
             sequence = self._sequence_by_item[item_id]
+            web_search_authorized = self._web_search_authorized_by_item.pop(
+                item_id,
+                False,
+            )
             try:
                 self._pending_turns.put_nowait(
-                    (sequence, item_id, transcript)
+                    (
+                        sequence,
+                        item_id,
+                        transcript,
+                        web_search_authorized,
+                    )
                 )
             except asyncio.QueueFull as exc:
                 raise RealtimePreviewSidebandError(
@@ -268,7 +292,12 @@ class RealtimePreviewSidebandController:
             timeout=httpx.Timeout(100.0, connect=5.0),
         ) as client:
             while True:
-                sequence, item_id, transcript = await self._pending_turns.get()
+                (
+                    sequence,
+                    item_id,
+                    transcript,
+                    web_search_authorized,
+                ) = await self._pending_turns.get()
                 try:
                     if not transcript:
                         self.session.append_event(
@@ -284,6 +313,7 @@ class RealtimePreviewSidebandController:
                         sequence=sequence,
                         item_id=item_id,
                         transcript=transcript,
+                        web_search_authorized=web_search_authorized,
                     )
                 except asyncio.CancelledError:
                     raise
@@ -306,6 +336,7 @@ class RealtimePreviewSidebandController:
         sequence: int,
         item_id: str,
         transcript: str,
+        web_search_authorized: bool,
     ) -> None:
         request_id = str(uuid.uuid4())
         voice_turn_id = str(uuid.uuid4())
@@ -328,6 +359,64 @@ class RealtimePreviewSidebandController:
                 "voice_turn_id": voice_turn_id,
             },
         )
+
+        if web_search_authorized:
+            search_headers = {
+                **headers,
+                "x-vs-web-search-authorization": (
+                    "supabase_fresh_voice_lease_v1"
+                ),
+            }
+            search_response = await client.post(
+                f"{self._internal_base_url}/search/execute",
+                headers=search_headers,
+                json={
+                    "user_id": self.session.owner_user_id,
+                    "thread_id": str(self.session.thread_id),
+                    "query": transcript,
+                    "channel": "voice",
+                },
+            )
+            if search_response.status_code != 200:
+                raise RealtimePreviewSidebandError(
+                    "governed search execution failed"
+                )
+            search_payload = search_response.json()
+            if not isinstance(search_payload, dict):
+                raise RealtimePreviewSidebandError(
+                    "governed search payload was invalid"
+                )
+            if search_payload.get("executed") is True:
+                answer = search_payload.get("answer")
+                answer_id = search_payload.get("answer_id")
+                if not isinstance(answer, str) or not answer.strip():
+                    raise RealtimePreviewSidebandError(
+                        "governed search answer was empty"
+                    )
+                try:
+                    parsed_answer_id = str(uuid.UUID(str(answer_id)))
+                except (TypeError, ValueError) as exc:
+                    raise RealtimePreviewSidebandError(
+                        "governed search answer binding was invalid"
+                    ) from exc
+                self.session.append_event(
+                    "response.completed",
+                    {
+                        "item_id": item_id,
+                        "sequence": sequence,
+                        "transcript": transcript,
+                        "answer": answer,
+                        "answer_id": parsed_answer_id,
+                        "voice_turn_id": voice_turn_id,
+                        "request_id": request_id,
+                        "timings": {},
+                        "web_search": True,
+                        "search_route": (
+                            search_payload.get("plan") or {}
+                        ).get("selected_route"),
+                    },
+                )
+                return
 
         log_response = await client.post(
             f"{self._internal_base_url}/log",

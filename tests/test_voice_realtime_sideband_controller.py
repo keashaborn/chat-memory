@@ -51,6 +51,16 @@ class FakeHTTPClient:
     async def post(self, url: str, **kwargs: Any) -> FakeHTTPResponse:
         self.calls.append({"url": url, **kwargs})
         headers = kwargs["headers"]
+        if url.endswith("/search/execute"):
+            return FakeHTTPResponse(
+                status_code=200,
+                payload={
+                    "executed": True,
+                    "answer": "Current sourced OpenAI news.",
+                    "answer_id": ANSWER_ID,
+                    "plan": {"selected_route": "current_news"},
+                },
+            )
         if url.endswith("/log"):
             return FakeHTTPResponse(
                 status_code=200,
@@ -206,6 +216,62 @@ class RealtimePreviewSidebandControllerTests(
         )
         events = self.session.events_after(0)[0]
         self.assertEqual(events[0]["type"], "commit.accepted")
+
+    async def test_authorized_voice_turn_uses_common_search_contract(self) -> None:
+        websocket = FakeWebSocket()
+        self.controller._websocket = websocket
+        self.controller._connected.set()
+        await self.controller.commit(web_search_authorized=True)
+
+        worker = asyncio.create_task(self.controller._turn_worker())
+        try:
+            await self.controller._handle_message(
+                json.dumps(
+                    {
+                        "type": "input_audio_buffer.committed",
+                        "item_id": "item_news",
+                    }
+                )
+            )
+            await self.controller._handle_message(
+                json.dumps(
+                    {
+                        "type": (
+                            "conversation.item."
+                            "input_audio_transcription.completed"
+                        ),
+                        "item_id": "item_news",
+                        "transcript": "What happened with OpenAI today?",
+                    }
+                )
+            )
+            await asyncio.wait_for(
+                self.controller._pending_turns.join(),
+                timeout=1.0,
+            )
+        finally:
+            worker.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await worker
+
+        self.assertEqual(len(self.http.calls), 1)
+        search_call = self.http.calls[0]
+        self.assertTrue(search_call["url"].endswith("/search/execute"))
+        self.assertEqual(search_call["json"]["channel"], "voice")
+        self.assertEqual(
+            search_call["headers"]["x-vs-web-search-authorization"],
+            "supabase_fresh_voice_lease_v1",
+        )
+        response_events = [
+            event
+            for event in self.session.events_after(0)[0]
+            if event["type"] == "response.completed"
+        ]
+        self.assertEqual(
+            response_events[-1]["answer"],
+            "Current sourced OpenAI news.",
+        )
+        self.assertTrue(response_events[-1]["web_search"])
 
     async def test_provider_error_does_not_expose_provider_message(
         self,

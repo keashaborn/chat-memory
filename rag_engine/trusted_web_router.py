@@ -24,7 +24,7 @@ except ImportError:
             allow_reuse=True,
         )
 
-from rag_engine.supabase_actor_auth import require_verified_supabase_actor
+from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
 from rag_engine.trusted_web_audit_v1 import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
@@ -195,9 +195,7 @@ async def trusted_web_query(
             detail="trusted_web_runtime_unconfigured",
         )
 
-    owner = UUID(
-        await require_verified_supabase_actor(req, str(payload.user_id))
-    )
+    owner = UUID(await require_web_search_actor_v1(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())[:128]
     search_id = uuid4()
     policy = route_trusted_web_query(

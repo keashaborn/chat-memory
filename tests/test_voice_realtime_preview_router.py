@@ -65,14 +65,16 @@ class FakeSidebandController:
         self.kwargs = kwargs
         self.started = False
         self.commits = 0
+        self.web_search_authorizations: list[bool] = []
         self.closed = False
         self.__class__.instances.append(self)
 
     def start(self) -> None:
         self.started = True
 
-    async def commit(self) -> None:
+    async def commit(self, *, web_search_authorized: bool = False) -> None:
         self.commits += 1
+        self.web_search_authorizations.append(web_search_authorized)
 
     async def close(self) -> None:
         self.closed = True
@@ -278,6 +280,7 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
         )
         self.assertEqual(committed.status_code, 200)
         self.assertEqual(controller.commits, 1)
+        self.assertEqual(controller.web_search_authorizations, [False])
 
         events = self.client.get(
             (

@@ -15,6 +15,9 @@ from rag_engine.vantage_router import router as vantage_router
 from rag_engine.resse_response_router import router as resse_response_router
 from rag_engine.trusted_web_router import router as trusted_web_router
 from rag_engine.current_news_router import router as current_news_router
+from rag_engine.search_execution_router_v1 import (
+    router as search_execution_router_v1,
+)
 from rag_engine.telemetry_router import router as telemetry_router
 from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
 from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutrition_log_router
@@ -56,6 +59,7 @@ from rag_engine.thread_title_v1 import (
     generate_semantic_title,
     select_first_meaningful_exchange,
 )
+from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -64,6 +68,7 @@ app.include_router(vantage_router, prefix="/vantage")
 app.include_router(resse_response_router, prefix="/response")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
+app.include_router(search_execution_router_v1, prefix="/search")
 app.include_router(telemetry_router)
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")
@@ -733,10 +738,15 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
         await _set_connection_actor(conn, _actor_uid)
         rows = await conn.fetch(
             """
-            SELECT id, source, text, created_at
-            FROM chat_log
-            WHERE owner_user_id=$1 AND thread_id=$2
-            ORDER BY created_at ASC
+            SELECT log.id,log.source,log.text,log.created_at,
+                   web.cited_sources,web.admitted_sources
+            FROM chat_log AS log
+            LEFT JOIN trusted_web.response_transcript_v1 AS web
+              ON web.owner_user_id=log.owner_user_id
+             AND web.thread_id=log.thread_id
+             AND web.assistant_chat_log_id=log.id
+            WHERE log.owner_user_id=$1 AND log.thread_id=$2
+            ORDER BY log.created_at ASC
             LIMIT $3
             """,
             _actor_uid,
@@ -747,12 +757,27 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
         for r in rows:
             src = (r["source"] or "")
             role = "assistant" if "assistant" in src else "user"
-            out.append({
+            message = {
                 "id": str(r["id"]),
                 "role": role,
                 "content": r["text"],
                 "created_at": r["created_at"].isoformat(),
-            })
+            }
+            if src == WEB_ASSISTANT_SOURCE:
+                cited = r["cited_sources"] or []
+                admitted = r["admitted_sources"] or []
+                if isinstance(cited, str):
+                    cited = json.loads(cited)
+                if isinstance(admitted, str):
+                    admitted = json.loads(admitted)
+                message.update(
+                    {
+                        "web_search": True,
+                        "trusted_web_sources": cited,
+                        "trusted_web_admitted_sources": admitted,
+                    }
+                )
+            out.append(message)
         return out
     finally:
         await conn.close()
