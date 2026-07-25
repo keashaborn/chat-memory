@@ -15,6 +15,8 @@ security_test="$repo_root/tests/memory_v1_v5_shadow_claim_contract.sql"
 expected_migration_sha=17957ba743ce3f05709c18af19c2c9d602d4ec77dfcd350126fac176ce9bc50f
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 artifact_dir="/home/ubuntu/memory-v1-reviews/compiler-v8-projection-recovery-clone-$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$repo_root" rev-parse --short=12 HEAD)"
+timer_state=$(mktemp /tmp/memory-v1-compiler-v8-recovery-clone-timers.XXXXXX)
+timers_quiesced=0
 
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 [[ "$(sha256sum "$migration" | awk '{print $1}')" == "$expected_migration_sha" ]]
@@ -22,8 +24,22 @@ mkdir -p "$artifact_dir"
 chmod 0700 "$artifact_dir"
 
 cleanup() {
+  if [[ "$timers_quiesced" -eq 1 ]]; then
+    while IFS=$'\t' read -r unit enabled active; do
+      [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]]
+      [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
+      if [[ "$active" == active ]]; then
+        sudo -n systemctl start "$unit"
+      else
+        sudo -n systemctl stop "$unit"
+      fi
+      [[ "$(systemctl is-active "$unit")" == "$active" ]]
+    done <"$timer_state"
+    timers_quiesced=0
+  fi
   docker exec "$container" dropdb -U sage --if-exists --force "$clone_db" \
     >/dev/null 2>&1 || true
+  rm -f "$timer_state"
 }
 trap cleanup EXIT
 
@@ -64,6 +80,31 @@ memory_data_signature() {
   } | sha256sum | awk '{print $1}'
 }
 
+: >"$timer_state"
+while IFS= read -r unit; do
+  [[ "$unit" =~ ^memory-v1-[a-z0-9-]+\.timer$ ]]
+  printf '%s\t%s\t%s\n' "$unit" \
+    "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")" \
+    >>"$timer_state"
+done < <(
+  systemctl list-unit-files 'memory-v1-*.timer' --no-legend --no-pager \
+    | awk '{print $1}' | sort -u
+)
+[[ -s "$timer_state" ]]
+chmod 0600 "$timer_state"
+while IFS=$'\t' read -r unit _enabled active; do
+  [[ "$active" != active ]] || sudo -n systemctl stop "$unit"
+done <"$timer_state"
+timers_quiesced=1
+while IFS=$'\t' read -r unit _enabled _active; do
+  service=${unit%.timer}.service
+  for _attempt in $(seq 1 30); do
+    systemctl is-active --quiet "$service" || break
+    sleep 1
+  done
+  ! systemctl is-active --quiet "$service"
+done <"$timer_state"
+
 production_before=$(memory_data_signature "$source_db")
 qdrant_before=$(qdrant_signature)
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
@@ -79,11 +120,26 @@ docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
 clone_after=$(memory_data_signature "$clone_db")
 production_after=$(memory_data_signature "$source_db")
 qdrant_after=$(qdrant_signature)
+printf 'clone_before=%s\nclone_after=%s\nproduction_before=%s\nproduction_after=%s\nqdrant_before=%s\nqdrant_after=%s\n' \
+  "$clone_before" "$clone_after" "$production_before" "$production_after" \
+  "$qdrant_before" "$qdrant_after" >"$artifact_dir/signatures.env"
+chmod 0600 "$artifact_dir/signatures.env"
 [[ "$clone_after" == "$clone_before" ]]
 [[ "$production_after" == "$production_before" ]]
 [[ "$qdrant_after" == "$qdrant_before" ]]
 grep -F 'memory_v1_v5_shadow_claim_contract: PASS' \
   "$artifact_dir/security.log" >/dev/null
+
+while IFS=$'\t' read -r unit enabled active; do
+  [[ "$(systemctl is-enabled "$unit")" == "$enabled" ]]
+  if [[ "$active" == active ]]; then
+    sudo -n systemctl start "$unit"
+  else
+    sudo -n systemctl stop "$unit"
+  fi
+  [[ "$(systemctl is-active "$unit")" == "$active" ]]
+done <"$timer_state"
+timers_quiesced=0
 
 report="$artifact_dir/report.json"
 jq -n \
@@ -108,6 +164,7 @@ jq -n \
     external_model_calls:0,
     embedding_requests:0,
     production_writes:0,
+    timer_state:"exactly_restored",
     retrieval_activated:false,
     prompt_influence_activated:false
   }' >"$report"
