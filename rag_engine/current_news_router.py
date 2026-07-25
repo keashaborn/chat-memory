@@ -100,8 +100,8 @@ def _current_news_skeleton_answer(policy_topic: TrustedWebTopicV1) -> str:
             "retrieval is not enabled yet."
         )
     return (
-        "Current news lookup was not used because this question was outside "
-        "current-news scope."
+        "News mode needs a specific topic, company, person, or event to check. "
+        "For example: \"What just happened with OpenAI and Hugging Face?\""
     )
 
 

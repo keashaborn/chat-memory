@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from rag_engine.current_news_router import (
     CurrentNewsRequestV1,
     CurrentNewsResponseV1,
+    _current_news_skeleton_answer,
     apply_current_news_no_store_headers,
 )
 from rag_engine.trusted_web_policy_v1 import (
@@ -48,6 +49,15 @@ class CurrentNewsRouterTests(unittest.TestCase):
         apply_current_news_no_store_headers(response)
         self.assertIn("no-store", response.headers["cache-control"])
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+
+
+    def test_current_news_vague_prompt_gets_actionable_guidance(self) -> None:
+        decision = route_trusted_web_query("Can you check the news yourself?")
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        answer = _current_news_skeleton_answer(decision.topic)
+        self.assertIn("needs a specific topic", answer)
+        self.assertIn("OpenAI and Hugging Face", answer)
+        self.assertNotIn("outside current-news scope", answer)
 
     def test_current_news_policy_routes_but_fetch_remains_disabled(self) -> None:
         decision = route_trusted_web_query(
