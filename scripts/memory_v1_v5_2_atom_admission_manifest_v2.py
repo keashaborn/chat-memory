@@ -98,11 +98,13 @@ def deterministic_id(case: dict[str, Any], proposal_sha256: str, role: str) -> s
 
 def repository_head() -> str:
     root = Path(__file__).resolve().parents[1]
+    git_env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     status = subprocess.run(
         ["git", "-C", str(root), "status", "--porcelain"],
         check=True,
         capture_output=True,
         text=True,
+        env=git_env,
     ).stdout
     if status.strip():
         raise ManifestError("manifest generation requires a clean Git worktree")
@@ -111,6 +113,7 @@ def repository_head() -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=git_env,
     ).stdout.strip()
 
 

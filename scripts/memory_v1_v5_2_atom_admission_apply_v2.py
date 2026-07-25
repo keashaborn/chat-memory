@@ -86,11 +86,13 @@ def parse_uuid(value: Any, field: str) -> uuid.UUID:
 
 def repository_state(required_base: str) -> str:
     root = Path(__file__).resolve().parents[1]
+    git_env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     status = subprocess.run(
         ["git", "-C", str(root), "status", "--porcelain"],
         check=True,
         capture_output=True,
         text=True,
+        env=git_env,
     ).stdout
     if status.strip():
         raise AdmissionError("atom admission requires a clean Git worktree")
@@ -99,12 +101,14 @@ def repository_state(required_base: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=git_env,
     ).stdout.strip()
     subprocess.run(
         ["git", "-C", str(root), "merge-base", "--is-ancestor", required_base, head],
         check=True,
         capture_output=True,
         text=True,
+        env=git_env,
     )
     return head
 

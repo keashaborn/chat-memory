@@ -12,6 +12,7 @@ fi
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+export GIT_OPTIONAL_LOCKS=0
 set -a
 source "${MEMORY_V1_ENV_FILE:-/opt/chat-memory/.env}"
 set +a
