@@ -92,6 +92,61 @@ class V52EntityResolutionBatchManifestTest(unittest.TestCase):
         with self.assertRaisesRegex(EntityResolutionBatchError, "reused"):
             load_manifest(str(self.write(value)), root=self.root)
 
+    def test_accepts_manual_link_existing_with_exact_row_budget(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 5
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_link_existing_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "expected_entity_id": ENTITY,
+                "review_reason": (
+                    "The reviewed correction uniquely identifies the existing "
+                    "owner-scoped entity."
+                ),
+            }
+        ]
+        metadata, _, _ = load_manifest(str(self.write(value)), root=self.root)
+        self.assertEqual(metadata["expected_new_rows"], 5)
+
+    def test_rejects_manual_link_without_expected_entity(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 5
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_link_existing_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": "A review reason exists.",
+            }
+        ]
+        with self.assertRaisesRegex(StageBatchError, "fields"):
+            load_manifest(str(self.write(value)), root=self.root)
+
+    def test_rejects_manual_link_without_review_reason(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 5
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_link_existing_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "expected_entity_id": ENTITY,
+                "review_reason": None,
+            }
+        ]
+        with self.assertRaisesRegex(
+            EntityResolutionBatchError, "manual-link-existing"
+        ):
+            load_manifest(str(self.write(value)), root=self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

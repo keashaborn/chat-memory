@@ -35,7 +35,11 @@ DEFAULT_REVIEW_ROOT = "/home/ubuntu/memory-v1-reviews"
 REQUEST_NAMESPACE = uuid.UUID("1c19d198-a701-5633-a7ae-24f60996582f")
 MAX_ITEMS = 32
 MAX_NEW_ROWS = 500
-OPERATIONS = {"auto_apply", "reconcile_existing_and_apply"}
+OPERATIONS = {
+    "auto_apply",
+    "manual_link_existing_and_apply",
+    "reconcile_existing_and_apply",
+}
 
 
 class EntityResolutionBatchError(RuntimeError):
@@ -80,6 +84,7 @@ def _digest(value: Any, field: str) -> str:
 def _expected_base_rows(items: list[dict[str, Any]]) -> int:
     rows_by_operation = {
         "auto_apply": 2,
+        "manual_link_existing_and_apply": 4,
         "reconcile_existing_and_apply": 8,
     }
     return sum(rows_by_operation[item["operation"]] for item in items)
@@ -124,6 +129,8 @@ def load_manifest(
         }
         if operation == "reconcile_existing_and_apply":
             item_keys.update({"expected_entity_id", "successor_resolution_id"})
+        elif operation == "manual_link_existing_and_apply":
+            item_keys.add("expected_entity_id")
         item = exact_object(
             raw_item,
             item_keys,
@@ -143,6 +150,22 @@ def load_manifest(
                 or item["review_reason"] is not None
             ):
                 raise EntityResolutionBatchError("auto-apply item contract is invalid")
+        elif operation == "manual_link_existing_and_apply":
+            reason = item["review_reason"]
+            if (
+                item["expected_action"] != "link_existing"
+                or item["expected_decision_state"] != "manual_review_required"
+                or not isinstance(reason, str)
+                or not reason.strip()
+                or len(reason) > 500
+            ):
+                raise EntityResolutionBatchError(
+                    "manual-link-existing-and-apply item contract is invalid"
+                )
+            item["expected_entity_id"] = _uuid(
+                item["expected_entity_id"],
+                f"items[{index}].expected_entity_id",
+            )
         else:
             reason = item["review_reason"]
             if (
@@ -363,11 +386,12 @@ async def create_plan(args: argparse.Namespace) -> dict[str, Any]:
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
             planned: list[dict[str, Any]] = []
             for item in metadata["items"]:
-                preflight = await (
-                    _apply_preflight(conn, item, None)
-                    if item["operation"] == "auto_apply"
-                    else _reconciliation_preflight(conn, item)
-                )
+                if item["operation"] == "auto_apply":
+                    preflight = await _apply_preflight(conn, item, None)
+                elif item["operation"] == "manual_link_existing_and_apply":
+                    preflight = await _review_preflight(conn, item)
+                else:
+                    preflight = await _reconciliation_preflight(conn, item)
                 planned.append({"manifest_item": item, "preflight": preflight})
     finally:
         await conn.close()
@@ -666,6 +690,23 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                         raise EntityResolutionBatchError("review outcome is not applied")
                     review_id = uuid.UUID(review_result["review_id"])
                     apply_preflight = await _apply_preflight(conn, effective, review_id)
+                elif item["operation"] == "manual_link_existing_and_apply":
+                    current_review = await _review_preflight(conn, effective)
+                    if current_review != entry["preflight"]:
+                        raise EntityResolutionBatchError("review preflight drifted")
+                    review_request = _request_id(
+                        plan_sha, effective["resolution_id"], "review"
+                    )
+                    review_result = await _review(
+                        conn,
+                        effective,
+                        review_request,
+                        current_review["authorization_manifest_sha256"],
+                    )
+                    if review_result["outcome"] != "applied":
+                        raise EntityResolutionBatchError("review outcome is not applied")
+                    review_id = uuid.UUID(review_result["review_id"])
+                    apply_preflight = await _apply_preflight(conn, effective, review_id)
                 else:
                     apply_preflight = await _apply_preflight(conn, effective, None)
                     if apply_preflight != entry["preflight"]:
@@ -681,7 +722,11 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                 if apply_result["outcome"] != "applied":
                     raise EntityResolutionBatchError("resolution outcome is not applied")
                 if (
-                    item["operation"] == "reconcile_existing_and_apply"
+                    item["operation"]
+                    in {
+                        "manual_link_existing_and_apply",
+                        "reconcile_existing_and_apply",
+                    }
                     and apply_result["applied_entity_id"]
                     != item["expected_entity_id"]
                 ):
@@ -751,6 +796,18 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                         raise EntityResolutionBatchError(
                             "reconciliation replay is not zero-write"
                         )
+                    replay_review = await _review(
+                        conn,
+                        effective,
+                        uuid.UUID(prior["review_request_id"]),
+                        prior["review_manifest_sha256"],
+                    )
+                    if (
+                        replay_review["outcome"] != "replayed"
+                        or replay_review["review_id"] != prior["review_id"]
+                    ):
+                        raise EntityResolutionBatchError("review replay is not zero-write")
+                elif item["operation"] == "manual_link_existing_and_apply":
                     replay_review = await _review(
                         conn,
                         effective,
