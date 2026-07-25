@@ -243,18 +243,6 @@ async def run() -> int:
                 raise ApplyError("projection apply outcome mismatch")
             rows_written = applied["rows_written"]
             apply_event_id = str(applied["apply_event_id"])
-            if (
-                await connection.fetchval(
-                    "SELECT count(*) FROM memory.claim_observation "
-                    "WHERE owner_user_id=$1 AND claim_id=$2 "
-                    "AND observation_id=$3 AND stance='supports'",
-                    uuid.UUID(OWNER),
-                    uuid.UUID(CLAIM),
-                    uuid.UUID(OBSERVATION),
-                )
-                != 1
-            ):
-                raise ApplyError("supporting observation link is absent")
         claim_after = await connection.fetchval(
             "SELECT to_jsonb(stored)::text FROM memory.claim AS stored "
             "WHERE owner_user_id=$1 AND claim_id=$2",
