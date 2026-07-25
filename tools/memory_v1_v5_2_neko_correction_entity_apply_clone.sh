@@ -21,6 +21,10 @@ runner=scripts/memory_v1_v5_2_entity_resolution_batch.py
 fixture=tests/memory_v1_v5_2_entity_resolution_batch_fixture.py
 unit_test=tests/test_memory_v1_v5_2_entity_resolution_batch.py
 manifest_source=manifests/memory_v1_v5_2_neko_correction_entity_apply_20260725.json
+relational_migration=ops/sql/20260715_memory_v1_relational_staging_v5.sql
+writer_migration=ops/sql/20260715_memory_v1_relational_writer_v5.sql
+stage_v5_2_migration=ops/sql/20260722_memory_v1_relational_stage_v5_2.sql
+entity_v5_2_migration=ops/sql/20260722_memory_v1_entity_resolution_reconciliation_v5_2.sql
 python_bin=/opt/chat-memory/venv/bin/python
 review_root=/home/ubuntu/memory-v1-reviews
 artifact_dir="$review_root/neko-correction-entity-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
@@ -50,6 +54,11 @@ production_scalar() {
 clone_scalar() {
   docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
     -U sage -d "$clone_db" -c "$1" | sed -n '1p'
+}
+
+clone_sql() {
+  docker exec -i "$container" psql -X -q -v ON_ERROR_STOP=1 \
+    -U sage -d "$clone_db"
 }
 
 qdrant_signature() {
@@ -83,6 +92,12 @@ if [[ -n "$source_backup" ]]; then
   [[ "$source_backup" == /home/ubuntu/brains/snapshots/*.dump ]]
   [[ -s "$source_backup" ]]
   docker exec -i "$container" pg_restore -U sage -d "$clone_db" <"$source_backup"
+  # Production safety backups omit owners and grants. Reapply only the
+  # idempotent relational/entity contracts needed by this disposable clone.
+  clone_sql <"$repo_root/$relational_migration"
+  clone_sql <"$repo_root/$writer_migration"
+  clone_sql <"$repo_root/$stage_v5_2_migration"
+  clone_sql <"$repo_root/$entity_v5_2_migration"
 else
   docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
     | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
