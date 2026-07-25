@@ -17,6 +17,8 @@ other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 evidence=405fcdb1-a4d2-53ff-91ad-542b258cea03
 observation=d3c936dc-01c2-4288-9050-b709afa511d8
 runner=scripts/memory_v1_v5_2_single_preference_pipeline.py
+migration=ops/sql/20260725_memory_v1_v5_2_projection_digest_qualification.sql
+security_test=tests/memory_v1_v5_2_projection_digest_qualification_security.sql
 python_bin=/opt/chat-memory/venv/bin/python
 artifact_dir="/home/ubuntu/memory-v1-reviews/single-preference-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
 
@@ -26,6 +28,8 @@ set +a
 [[ -n "${POSTGRES_DSN:-}" ]]
 [[ -x "$python_bin" ]]
 [[ -f "$repo_root/$runner" ]]
+[[ -f "$repo_root/$migration" ]]
+[[ -f "$repo_root/$security_test" ]]
 mkdir -p "$artifact_dir"
 chmod 0700 "$artifact_dir"
 
@@ -75,6 +79,12 @@ production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
 docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
   | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
+docker exec -i "$container" psql -X -q -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" <"$repo_root/$migration"
+docker exec -i "$container" psql -X -q -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" <"$repo_root/$migration"
+docker exec -i "$container" psql -X -q -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" <"$repo_root/$security_test"
 
 clone_dsn=$(SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone_db" python3 - <<'PY'
 import os
