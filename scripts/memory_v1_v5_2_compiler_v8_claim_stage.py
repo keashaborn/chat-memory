@@ -37,6 +37,7 @@ EXPECTED_TABLE_ROWS = {
 }
 EXPECTED_NEW_ROWS = sum(EXPECTED_TABLE_ROWS.values())
 EXPECTED_ITEM_ROWS = 6
+EXPECTED_EXISTING_AGGREGATES = 0
 ENTAILMENT_APPLY_OUTCOME = "applied"
 ENTAILMENT_REPLAY_OUTCOME = "replayed"
 ASSESSOR_TYPE = "system"
@@ -91,6 +92,42 @@ TARGETS = {
 
 class ProjectionStageError(RuntimeError):
     pass
+
+
+def build_projection_packet(
+    owner_user_id: str, source: dict[str, Any]
+) -> dict[str, Any]:
+    return build_packet(owner_user_id, source)
+
+
+async def preflight_projection(
+    conn: Any, plan_id: str, packet_text: str
+) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        "SELECT * FROM memory.preflight_projection_packet_v5_2($1,$2)",
+        uuid.UUID(plan_id),
+        packet_text,
+    )
+    if row is None:
+        raise ProjectionStageError("projection preflight is absent")
+    return dict(row)
+
+
+async def persist_projection(
+    conn: Any,
+    plan_id: str,
+    packet_text: str,
+    owner_manifest_sha256: str,
+) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        "SELECT * FROM memory.stage_projection_plan_v5_2($1,$2,$3)",
+        uuid.UUID(plan_id),
+        packet_text,
+        owner_manifest_sha256,
+    )
+    if row is None:
+        raise ProjectionStageError("projection stage result is absent")
+    return dict(row)
 
 
 def arguments() -> argparse.Namespace:
@@ -398,20 +435,17 @@ async def prepare_item(
 ) -> dict[str, Any]:
     target = TARGETS[observation_id]
     source, spans, observation_ref = await source_snapshot(conn, observation_id, owner)
-    packet = build_packet(owner, source)
+    packet = build_projection_packet(owner, source)
     validate_packet(packet, owner, registry)
     packet_text = stable_json(packet)
-    packet_preflight = await conn.fetchrow(
-        "SELECT * FROM memory.preflight_projection_packet_v5_2($1,$2)",
-        uuid.UUID(plan_id),
-        packet_text,
-    )
+    packet_preflight = await preflight_projection(conn, plan_id, packet_text)
     entailment_preflight = await preflight_entailment(
         conn, observation_id, spans
     )
     if (
         packet_preflight is None
-        or packet_preflight["existing_aggregates"] != 0
+        or packet_preflight["existing_aggregates"]
+        != EXPECTED_EXISTING_AGGREGATES
         or packet_preflight["existing_plans"] != 0
         or packet["projections"][0]["payload"]["canonical_text"]
         != target["canonical_text"]
@@ -507,7 +541,7 @@ async def validate_live_item(
     source, spans, observation_ref = await source_snapshot(
         conn, item["observation_id"], manifest["owner_user_id"]
     )
-    packet = build_packet(manifest["owner_user_id"], source)
+    packet = build_projection_packet(manifest["owner_user_id"], source)
     validate_packet(packet, manifest["owner_user_id"], registry)
     packet_text = stable_json(packet)
     if (
@@ -522,17 +556,16 @@ async def validate_live_item(
         != item["packet_text_sha256"]
     ):
         raise ProjectionStageError("live deterministic source drifted")
-    packet_preflight = await conn.fetchrow(
-        "SELECT * FROM memory.preflight_projection_packet_v5_2($1,$2)",
-        uuid.UUID(item["plan_id"]),
-        packet_text,
+    packet_preflight = await preflight_projection(
+        conn, item["plan_id"], packet_text
     )
     entailment_preflight = await preflight_entailment(
         conn, item["observation_id"], spans
     )
     expected_plans = 1 if replay else 0
     if (
-        packet_preflight["existing_aggregates"] != 0
+        packet_preflight["existing_aggregates"]
+        != EXPECTED_EXISTING_AGGREGATES
         or packet_preflight["existing_plans"] != expected_plans
         or packet_preflight["owner_manifest_sha256"] != item["owner_manifest_sha256"]
         or entailment_preflight["authorization_manifest_sha256"]
@@ -577,9 +610,9 @@ async def apply_or_replay(
                 item,
                 spans,
             )
-            staged = await conn.fetchrow(
-                "SELECT * FROM memory.stage_projection_plan_v5_2($1,$2,$3)",
-                uuid.UUID(item["plan_id"]),
+            staged = await persist_projection(
+                conn,
+                item["plan_id"],
                 packet_text,
                 item["owner_manifest_sha256"],
             )
@@ -648,9 +681,9 @@ async def cross_owner_probe(
         await set_actor(conn, other_owner)
         first = manifest["items"][0]
         try:
-            await conn.fetchrow(
-                "SELECT * FROM memory.preflight_projection_packet_v5_2($1,$2)",
-                uuid.UUID(first["plan_id"]),
+            await preflight_projection(
+                conn,
+                first["plan_id"],
                 stable_json(first["packet"]),
             )
         except Exception:

@@ -460,6 +460,120 @@ def build_packet(owner_user_id: str, source: Mapping[str, Any]) -> dict[str, Any
     return packet
 
 
+def build_reinforcement_packet(
+    owner_user_id: str,
+    source: Mapping[str, Any],
+    *,
+    target_claim_id: str,
+    expected_revision_number: int,
+) -> dict[str, Any]:
+    """Build an exact-source packet that adds evidence to an existing claim."""
+    claim_id = str(uuid.UUID(target_claim_id))
+    revision_number = int(expected_revision_number)
+    if revision_number < 1:
+        raise ProjectionDispatchError(
+            "reinforcement expected_revision_number must be positive"
+        )
+    projection = build_projection(owner_user_id, source)
+    if projection["lane"] != "claim":
+        raise ProjectionDispatchError("reinforcement target must use the claim lane")
+    projection["target"] = {
+        "action": "reinforce",
+        "aggregate_id": claim_id,
+        "expected_revision_number": revision_number,
+        "reason_codes": ["additional_supporting_observation"],
+    }
+    projection["review"] = {
+        "state": "manual_review_required",
+        "authorization_required": True,
+        "reason_codes": ["v5_2_claim_reinforcement_requires_review"],
+    }
+    packet = {
+        "contract_version": CONTRACT_VERSION,
+        "predicate_registry_version": REGISTRY_VERSION,
+        "projection_policy_version": POLICY_VERSION,
+        "projector": PROJECTOR,
+        "projector_version": PROJECTOR_VERSION,
+        "projections": [projection],
+        "packet_sha256": "",
+    }
+    packet["packet_sha256"] = sha256(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    return packet
+
+
+def build_canonical_name_reinforcement_packet(
+    owner_user_id: str,
+    source: Mapping[str, Any],
+    *,
+    target_claim_id: str,
+    expected_revision_number: int,
+) -> dict[str, Any]:
+    """Normalize a corrective name observation into its durable claim identity."""
+    normalized_source = _normalize_source(source)
+    if (
+        normalized_source.get("predicate") != "identity.name_canonical"
+        or normalized_source.get("projection_class") != "correction"
+        or normalized_source.get("surface_policy") != "normalization_only"
+        or normalized_source.get("modality") != "corrective"
+        or normalized_source.get("polarity") != "affirmed"
+        or normalized_source.get("object_kind") != "literal"
+    ):
+        raise ProjectionDispatchError(
+            "source is outside canonical-name correction normalization"
+        )
+    claim_id = str(uuid.UUID(target_claim_id))
+    revision_number = int(expected_revision_number)
+    if revision_number < 1:
+        raise ProjectionDispatchError(
+            "reinforcement expected_revision_number must be positive"
+        )
+    projection = build_projection(owner_user_id, normalized_source)
+    normalized_literal = dict(_literal(normalized_source))
+    normalized_literal["value"] = _safe_text(
+        normalized_literal["value"], "canonical name", maximum=200
+    ).casefold()
+    projection["identity"]["object_literal_sha256"] = sha256(normalized_literal)
+    projection["payload"]["claim_class"] = "direct_claim"
+    projection["payload"]["surface_policy"] = "direct_or_relevant"
+    projection["identity"]["semantic_key_sha256"] = semantic_key_sha256(
+        str(uuid.UUID(owner_user_id)),
+        "claim",
+        projection["identity"],
+        projection["payload"],
+    )
+    projection["target"] = {
+        "action": "reinforce",
+        "aggregate_id": claim_id,
+        "expected_revision_number": revision_number,
+        "reason_codes": [
+            "additional_supporting_observation",
+            "canonical_name_correction_normalized",
+        ],
+    }
+    projection["review"] = {
+        "state": "manual_review_required",
+        "authorization_required": True,
+        "reason_codes": [
+            "v5_2_canonical_name_reinforcement_requires_review"
+        ],
+    }
+    packet = {
+        "contract_version": CONTRACT_VERSION,
+        "predicate_registry_version": REGISTRY_VERSION,
+        "projection_policy_version": POLICY_VERSION,
+        "projector": PROJECTOR,
+        "projector_version": PROJECTOR_VERSION,
+        "projections": [projection],
+        "packet_sha256": "",
+    }
+    packet["packet_sha256"] = sha256(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    return packet
+
+
 def build_reconciled_stance_packet(
     owner_user_id: str,
     primary_source: Mapping[str, Any],

@@ -14,8 +14,10 @@ from memory_v1_projection_v5_2_contract import (
 )
 from memory_v1_v5_2_projection_dispatch import (
     ProjectionDispatchError,
+    build_canonical_name_reinforcement_packet,
     build_packet,
     build_reconciled_stance_packet,
+    build_reinforcement_packet,
 )
 
 
@@ -27,6 +29,7 @@ SUBJECT = "aaaaaaaa-1111-4111-8111-111111111111"
 OBJECT = "bbbbbbbb-2222-4222-8222-222222222222"
 OBSERVATION = "cccccccc-3333-4333-8333-333333333333"
 PROJECT = "dddddddd-4444-4444-8444-444444444444"
+CLAIM = "ffffffff-6666-4666-8666-666666666666"
 
 
 def literal(contract: str) -> dict:
@@ -194,6 +197,96 @@ class ProjectionDispatchTests(unittest.TestCase):
         self.assertEqual(projection["identity"]["modality"], "reported_belief")
         packet = build_packet(OWNER, source(entry))
         self.assertEqual(packet["projector_version"], "semantic_dispatch_v2")
+
+    def test_claim_reinforcement_preserves_semantics_and_targets_revision(self) -> None:
+        entry = self.registry_by_name["identity.name_canonical"]
+        packet = build_reinforcement_packet(
+            OWNER,
+            source(entry),
+            target_claim_id=CLAIM,
+            expected_revision_number=2,
+        )
+        validate_packet(packet, OWNER, self.registry_by_name)
+        projection = packet["projections"][0]
+        self.assertEqual(projection["lane"], "claim")
+        self.assertEqual(
+            projection["target"],
+            {
+                "action": "reinforce",
+                "aggregate_id": CLAIM,
+                "expected_revision_number": 2,
+                "reason_codes": ["additional_supporting_observation"],
+            },
+        )
+        self.assertEqual(
+            projection["review"]["reason_codes"],
+            ["v5_2_claim_reinforcement_requires_review"],
+        )
+        self.assertEqual(
+            projection["payload"]["canonical_text"],
+            "The user's canonical name is Avery.",
+        )
+
+    def test_reinforcement_rejects_non_claim_lane(self) -> None:
+        entry = self.registry_by_name["preference.life"]
+        with self.assertRaisesRegex(
+            ProjectionDispatchError, "must use the claim lane"
+        ):
+            build_reinforcement_packet(
+                OWNER,
+                source(entry),
+                target_claim_id=CLAIM,
+                expected_revision_number=1,
+            )
+
+    def test_reinforcement_rejects_nonpositive_revision(self) -> None:
+        entry = self.registry_by_name["identity.name_canonical"]
+        with self.assertRaisesRegex(
+            ProjectionDispatchError, "must be positive"
+        ):
+            build_reinforcement_packet(
+                OWNER,
+                source(entry),
+                target_claim_id=CLAIM,
+                expected_revision_number=0,
+            )
+
+    def test_canonical_name_correction_normalizes_only_semantic_identity(self) -> None:
+        entry = self.registry_by_name["identity.name_canonical"]
+        value = source(entry)
+        value["modality"] = "corrective"
+        value["projection_class"] = "correction"
+        value["surface_policy"] = "normalization_only"
+        packet = build_canonical_name_reinforcement_packet(
+            OWNER,
+            value,
+            target_claim_id=CLAIM,
+            expected_revision_number=2,
+        )
+        validate_packet(packet, OWNER, self.registry_by_name)
+        projection = packet["projections"][0]
+        normalized_literal = dict(value["object_literal"])
+        normalized_literal["value"] = "avery"
+        self.assertEqual(
+            projection["identity"]["object_literal_sha256"],
+            sha256(normalized_literal),
+        )
+        self.assertEqual(
+            projection["payload"],
+            {
+                "kind": "claim",
+                "claim_class": "direct_claim",
+                "canonical_text": "The user's canonical name is Avery.",
+                "surface_policy": "direct_or_relevant",
+            },
+        )
+        self.assertEqual(
+            projection["target"]["reason_codes"],
+            [
+                "additional_supporting_observation",
+                "canonical_name_correction_normalized",
+            ],
+        )
 
 
     def test_reconciled_stance_uses_one_primary_and_one_context_source(self) -> None:
