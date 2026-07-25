@@ -36,9 +36,13 @@ EXPECTED_TABLE_ROWS = {
     "projection_plan_observation": 4,
 }
 EXPECTED_NEW_ROWS = sum(EXPECTED_TABLE_ROWS.values())
+EXPECTED_ITEM_ROWS = 6
+ENTAILMENT_APPLY_OUTCOME = "applied"
+ENTAILMENT_REPLAY_OUTCOME = "replayed"
 ASSESSOR_TYPE = "system"
 ASSESSOR_REF = "controlled_v5_2_compiler_v8_bound_claim_stage"
 CONFIRMATION = "STAGE_EXACT_FOUR_COMPILER_V8_CLAIM_CANDIDATES_ONLY"
+APPLY_ENV = "MEMORY_V1_V5_2_COMPILER_V8_CLAIM_STAGE_APPLY"
 TARGET_OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 SELF_ENTITY_ID = "35029129-27bd-457b-8cb5-82dd37ba32ba"
 TARGETS = {
@@ -180,7 +184,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         or value["assessor_ref"] != ASSESSOR_REF
         or value["expected_new_rows"] != EXPECTED_NEW_ROWS
         or value["expected_table_rows"] != EXPECTED_TABLE_ROWS
-        or len(value["items"]) != 4
+        or len(value["items"]) != len(TARGETS)
     ):
         raise ProjectionStageError("manifest boundary mismatch")
     if value["owner_user_id"] != TARGET_OWNER:
@@ -241,7 +245,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         ):
             raise ProjectionStageError("manifest item hash mismatch")
     if set(seen["observation_id"]) != set(TARGETS):
-        raise ProjectionStageError("exact four-observation set mismatch")
+        raise ProjectionStageError("exact target-observation set mismatch")
     for item in value["items"]:
         target = TARGETS[item["observation_id"]]
         if (
@@ -285,6 +289,46 @@ def load_authorization(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
 
 async def set_actor(conn: Any, owner: str) -> None:
     await conn.execute("SELECT set_config('app.user_id',$1,true)", owner)
+
+
+async def preflight_entailment(
+    conn: Any,
+    observation_id: str,
+    spans: list[dict[str, Any]],
+) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        """SELECT * FROM memory.preflight_observation_entailment_v5(
+             $1,'accepted'::memory.observation_entailment_decision_v5,
+             'predicate_entailment_v5_1_accepted',$2::jsonb,$3,$4)""",
+        uuid.UUID(observation_id),
+        stable_json(spans),
+        ASSESSOR_TYPE,
+        ASSESSOR_REF,
+    )
+    if row is None:
+        raise ProjectionStageError("observation entailment preflight is absent")
+    return dict(row)
+
+
+async def persist_entailment(
+    conn: Any,
+    item: dict[str, Any],
+    spans: list[dict[str, Any]],
+) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        """SELECT * FROM memory.record_observation_entailment_v5(
+             $1,$2,'accepted'::memory.observation_entailment_decision_v5,
+             'predicate_entailment_v5_1_accepted',$3::jsonb,$4,$5,$6)""",
+        uuid.UUID(item["entailment_request_id"]),
+        uuid.UUID(item["observation_id"]),
+        stable_json(spans),
+        ASSESSOR_TYPE,
+        ASSESSOR_REF,
+        item["entailment_authorization_manifest_sha256"],
+    )
+    if row is None:
+        raise ProjectionStageError("observation entailment result is absent")
+    return dict(row)
 
 
 async def source_snapshot(
@@ -362,20 +406,13 @@ async def prepare_item(
         uuid.UUID(plan_id),
         packet_text,
     )
-    entailment_preflight = await conn.fetchrow(
-        """SELECT * FROM memory.preflight_observation_entailment_v5(
-             $1,'accepted'::memory.observation_entailment_decision_v5,
-             'predicate_entailment_v5_1_accepted',$2::jsonb,$3,$4)""",
-        uuid.UUID(observation_id),
-        stable_json(spans),
-        ASSESSOR_TYPE,
-        ASSESSOR_REF,
+    entailment_preflight = await preflight_entailment(
+        conn, observation_id, spans
     )
     if (
         packet_preflight is None
         or packet_preflight["existing_aggregates"] != 0
         or packet_preflight["existing_plans"] != 0
-        or entailment_preflight is None
         or packet["projections"][0]["payload"]["canonical_text"]
         != target["canonical_text"]
     ):
@@ -414,7 +451,9 @@ async def build_manifest(args: argparse.Namespace, conn: Any) -> dict[str, Any]:
     try:
         await set_actor(conn, owner)
         if len(args.observation) != len(TARGETS):
-            raise ProjectionStageError("exactly four observation IDs are required")
+            raise ProjectionStageError(
+                f"exactly {len(TARGETS)} observation IDs are required"
+            )
         observations = [str(uuid.UUID(value)) for value in args.observation]
         if set(observations) != set(TARGETS):
             raise ProjectionStageError("exact observation set mismatch")
@@ -488,14 +527,8 @@ async def validate_live_item(
         uuid.UUID(item["plan_id"]),
         packet_text,
     )
-    entailment_preflight = await conn.fetchrow(
-        """SELECT * FROM memory.preflight_observation_entailment_v5(
-             $1,'accepted'::memory.observation_entailment_decision_v5,
-             'predicate_entailment_v5_1_accepted',$2::jsonb,$3,$4)""",
-        uuid.UUID(item["observation_id"]),
-        stable_json(spans),
-        ASSESSOR_TYPE,
-        ASSESSOR_REF,
+    entailment_preflight = await preflight_entailment(
+        conn, item["observation_id"], spans
     )
     expected_plans = 1 if replay else 0
     if (
@@ -522,7 +555,7 @@ async def apply_or_replay(
         raise ProjectionStageError("confirmation phrase mismatch")
     if os.environ.get("MEMORY_V1_REQUIRED_HEAD") != manifest["required_head_commit"]:
         raise ProjectionStageError("runtime head does not match manifest")
-    if os.environ.get("MEMORY_V1_V5_2_COMPILER_V8_CLAIM_STAGE_APPLY") != "authorized":
+    if os.environ.get(APPLY_ENV) != "authorized":
         raise ProjectionStageError("production apply environment authorization missing")
     _, registry = load_contracts()
     replay = args.command == "replay"
@@ -539,16 +572,10 @@ async def apply_or_replay(
             )
             prepared.append((item, spans, packet_text))
         for item, spans, packet_text in prepared:
-            entailment = await conn.fetchrow(
-                """SELECT * FROM memory.record_observation_entailment_v5(
-                     $1,$2,'accepted'::memory.observation_entailment_decision_v5,
-                     'predicate_entailment_v5_1_accepted',$3::jsonb,$4,$5,$6)""",
-                uuid.UUID(item["entailment_request_id"]),
-                uuid.UUID(item["observation_id"]),
-                stable_json(spans),
-                ASSESSOR_TYPE,
-                ASSESSOR_REF,
-                item["entailment_authorization_manifest_sha256"],
+            entailment = await persist_entailment(
+                conn,
+                item,
+                spans,
             )
             staged = await conn.fetchrow(
                 "SELECT * FROM memory.stage_projection_plan_v5_2($1,$2,$3)",
@@ -561,10 +588,15 @@ async def apply_or_replay(
             # deferred mode before the next plan in this atomic batch.
             await conn.execute("SET CONSTRAINTS ALL DEFERRED")
             expected_outcome = "replayed" if replay else "applied"
-            expected_rows = 0 if replay else 6
+            expected_rows = 0 if replay else EXPECTED_ITEM_ROWS
             item_rows = entailment["rows_written"] + staged["rows_written"]
             if (
-                entailment["outcome"] != expected_outcome
+                entailment["outcome"]
+                != (
+                    ENTAILMENT_REPLAY_OUTCOME
+                    if replay
+                    else ENTAILMENT_APPLY_OUTCOME
+                )
                 or staged["outcome"] != expected_outcome
                 or item_rows != expected_rows
             ):

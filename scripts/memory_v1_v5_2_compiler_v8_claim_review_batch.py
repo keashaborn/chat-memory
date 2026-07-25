@@ -18,6 +18,9 @@ MANIFEST_CONTRACT = "memory_v1_v5_2_compiler_v8_claim_review_manifest_v1"
 RESULT_CONTRACT = "memory_v1_v5_2_compiler_v8_claim_review_result_v1"
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 VALID_DECISIONS = {"authorized", "rejected", "deferred"}
+EXPECTED_EVIDENCE_COUNT = 2
+REVIEWER_REF = "memory_v1_v5_2_compiler_v8_bound_claim_review_20260725"
+APPLY_ENV = "MEMORY_V1_V5_2_COMPILER_V8_CLAIM_REVIEW_APPLY"
 
 
 class ReviewBatchError(RuntimeError):
@@ -78,14 +81,16 @@ def load_manifest(path: Path) -> dict[str, Any]:
     ):
         raise ReviewBatchError("manifest hash mismatch")
     uuid.UUID(value["owner_user_id"])
-    if not isinstance(value["evidence_ids"], list) or len(value["evidence_ids"]) != 2:
+    if (
+        not isinstance(value["evidence_ids"], list)
+        or len(value["evidence_ids"]) != EXPECTED_EVIDENCE_COUNT
+    ):
         raise ReviewBatchError("exact evidence set is required")
     for evidence_id in value["evidence_ids"]:
         uuid.UUID(evidence_id)
     if (
         value["reviewer_type"] != "system"
-        or value["reviewer_ref"]
-        != "memory_v1_v5_2_compiler_v8_bound_claim_review_20260725"
+        or value["reviewer_ref"] != REVIEWER_REF
         or value["expected_new_rows"] != len(value["items"])
         or not 1 <= len(value["items"]) <= 32
     ):
@@ -110,7 +115,7 @@ async def run() -> int:
     if os.environ.get("MEMORY_V1_REQUIRED_HEAD", "") != manifest["required_head_commit"]:
         raise ReviewBatchError("runtime head does not match manifest")
     if args.mode == "apply" and os.environ.get(
-        "MEMORY_V1_V5_2_COMPILER_V8_CLAIM_REVIEW_APPLY", ""
+        APPLY_ENV, ""
     ) != "authorized":
         raise ReviewBatchError("apply mode requires the bounded authorization gate")
 
