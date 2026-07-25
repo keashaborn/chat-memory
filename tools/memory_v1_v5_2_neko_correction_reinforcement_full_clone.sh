@@ -36,6 +36,7 @@ compose=(
 backup=$(mktemp /tmp/memory-v1-v5-2-reinforcement.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-reinforcement-roles.XXXXXX.sql)
 source_backup=${MEMORY_V1_V5_2_REINFORCEMENT_SOURCE_BACKUP:-}
+reset_applied_clone=${MEMORY_V1_V5_2_REINFORCEMENT_RESET_APPLIED_CLONE:-}
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 head=$(git -C "$repo_root" rev-parse HEAD)
 
@@ -146,6 +147,122 @@ printf '%s\n' "ALTER ROLE brains_app PASSWORD 'clone_only_brains_password';" \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists <"$backup"
+if [[ "$reset_applied_clone" == 1 ]]; then
+  run_sql <<'SQL'
+DO $verify$
+DECLARE
+  owner_id constant uuid := '1240822d-ac9a-4096-95aa-e2b24d36ef50';
+  observation_id constant uuid := '5261da41-f863-42cd-8e3f-6e947f9743f2';
+  target_claim_id constant uuid := '8e3f4d82-8c21-4bbd-bbe8-91dd585f6fc9';
+  plan_id_value uuid;
+BEGIN
+  SELECT item.plan_id INTO STRICT plan_id_value
+  FROM memory.projection_plan_item AS item
+  JOIN memory.projection_plan_observation AS link
+    USING(owner_user_id,plan_id,projection_ref)
+  WHERE item.owner_user_id=owner_id
+    AND link.observation_id=observation_id
+    AND item.target_action='reinforce';
+  IF plan_id_value<>'b036d5a9-a39d-5b51-8f6c-5c91d778fe3b'
+     OR (SELECT count(*) FROM memory.claim_observation AS claim_link
+         WHERE claim_link.owner_user_id=owner_id
+           AND claim_link.claim_id=target_claim_id
+           AND claim_link.observation_id=observation_id)<>1
+     OR (SELECT count(*) FROM memory.projection_review AS review
+         WHERE review.owner_user_id=owner_id
+           AND review.plan_id=plan_id_value)<>1
+     OR (SELECT count(*) FROM memory.projection_apply_event AS event
+         WHERE event.owner_user_id=owner_id
+           AND event.plan_id=plan_id_value)<>1
+     OR (SELECT count(*) FROM memory.projection_dispatch_v5 AS dispatch
+         JOIN memory.projection_apply_event AS event
+           ON event.owner_user_id=dispatch.owner_user_id
+          AND event.event_id=dispatch.apply_event_id
+         WHERE event.owner_user_id=owner_id
+           AND event.plan_id=plan_id_value)<>1
+     OR (SELECT count(*) FROM memory.observation_entailment_v5 AS entailment
+         WHERE entailment.owner_user_id=owner_id
+           AND entailment.observation_id=observation_id)<>1
+     OR (SELECT count(*) FROM memory.relational_operation_request AS request
+         WHERE request.owner_user_id=owner_id
+           AND request.operation='record_observation_entailment_v5'
+           AND request.target_key=observation_id::text)<>1 THEN
+    RAISE EXCEPTION 'applied clone reset boundary is not exact';
+  END IF;
+END
+$verify$;
+
+ALTER TABLE memory.projection_dispatch_v5 DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_apply_event DISABLE TRIGGER USER;
+ALTER TABLE memory.claim_observation DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_review DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan_observation DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_claim_payload DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan_item DISABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan DISABLE TRIGGER USER;
+ALTER TABLE memory.observation_entailment_v5 DISABLE TRIGGER USER;
+ALTER TABLE memory.relational_operation_request DISABLE TRIGGER USER;
+
+DELETE FROM memory.projection_dispatch_v5 AS dispatch
+USING memory.projection_apply_event AS event,
+      memory.projection_plan_observation AS link
+WHERE dispatch.owner_user_id=event.owner_user_id
+  AND dispatch.apply_event_id=event.event_id
+  AND link.owner_user_id=event.owner_user_id
+  AND link.plan_id=event.plan_id
+  AND link.projection_ref=event.projection_ref
+  AND event.owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND link.observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.projection_apply_event AS event
+USING memory.projection_plan_observation AS link
+WHERE link.owner_user_id=event.owner_user_id
+  AND link.plan_id=event.plan_id
+  AND link.projection_ref=event.projection_ref
+  AND event.owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND link.observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.claim_observation
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND claim_id='8e3f4d82-8c21-4bbd-bbe8-91dd585f6fc9'
+  AND observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.projection_review AS review
+USING memory.projection_plan_observation AS link
+WHERE link.owner_user_id=review.owner_user_id
+  AND link.plan_id=review.plan_id
+  AND link.projection_ref=review.projection_ref
+  AND review.owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND link.observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.projection_plan_observation
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.projection_claim_payload
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND plan_id='b036d5a9-a39d-5b51-8f6c-5c91d778fe3b';
+DELETE FROM memory.projection_plan_item
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND plan_id='b036d5a9-a39d-5b51-8f6c-5c91d778fe3b';
+DELETE FROM memory.projection_plan
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND plan_id='b036d5a9-a39d-5b51-8f6c-5c91d778fe3b';
+DELETE FROM memory.observation_entailment_v5
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND observation_id='5261da41-f863-42cd-8e3f-6e947f9743f2';
+DELETE FROM memory.relational_operation_request
+WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
+  AND operation='record_observation_entailment_v5'
+  AND target_key='5261da41-f863-42cd-8e3f-6e947f9743f2';
+
+ALTER TABLE memory.projection_dispatch_v5 ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_apply_event ENABLE TRIGGER USER;
+ALTER TABLE memory.claim_observation ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_review ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan_observation ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_claim_payload ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan_item ENABLE TRIGGER USER;
+ALTER TABLE memory.projection_plan ENABLE TRIGGER USER;
+ALTER TABLE memory.observation_entailment_v5 ENABLE TRIGGER USER;
+ALTER TABLE memory.relational_operation_request ENABLE TRIGGER USER;
+SQL
+fi
 run_sql <"$migration"
 run_sql <"$migration"
 run_sql <"$security_test"
