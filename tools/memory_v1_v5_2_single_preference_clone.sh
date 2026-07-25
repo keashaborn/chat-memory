@@ -21,7 +21,7 @@ python_bin="$repo_root/venv/bin/python"
 artifact_dir="/home/ubuntu/memory-v1-reviews/single-preference-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
 
 set -a
-source "$repo_root/.env"
+source /opt/chat-memory/.env
 set +a
 [[ -n "${POSTGRES_DSN:-}" ]]
 [[ -x "$python_bin" ]]
