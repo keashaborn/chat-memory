@@ -42,6 +42,19 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
         self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
 
+    def test_current_news_routes_natural_freshness_phrase_with_entity(self) -> None:
+        decision = route_trusted_web_query(
+            "What's going on with OpenAI and Hugging Face?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertEqual(decision.reason, "approved_current_news_lookup")
+
+    def test_current_news_rejects_vague_freshness_phrase_without_entity(self) -> None:
+        decision = route_trusted_web_query("What's going on?")
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+
     def test_current_news_does_not_steal_health_or_medical_queries(self) -> None:
         supplement = route_trusted_web_query(
             "What does the evidence say about creatine safety?"
