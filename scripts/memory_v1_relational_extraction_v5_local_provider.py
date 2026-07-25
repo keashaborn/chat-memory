@@ -1312,6 +1312,22 @@ _DURABLE_ASSERTION_RE = re.compile(
     r"\w+\s+is\s+my\s+(?:father|mother|parent|brother|sister|sibling))\b",
     re.IGNORECASE,
 )
+_EXPLICIT_LIFE_PREFERENCE_RE = re.compile(
+    r"^\s*i\s+(?P<cue>"
+    r"really\s+love|love|really\s+like|like|enjoy|prefer|"
+    r"do\s+not\s+like|don['’]t\s+like|dislike|hate|avoid"
+    r")\s+(?P<target>[^\n?!]{2,500}?)\s*[.]?\s*$",
+    re.IGNORECASE,
+)
+_CONTEXT_DEPENDENT_PREFERENCE_TARGET_RE = re.compile(
+    r"^(?:him|her|them|it|this|that|these|those|someone|somebody)$",
+    re.IGNORECASE,
+)
+_TEMPORARY_PREFERENCE_SCOPE_RE = re.compile(
+    r"\b(?:today|tonight|this\s+(?:morning|afternoon|evening|week)|"
+    r"lately|right\s+now|at\s+the\s+moment)\b",
+    re.IGNORECASE,
+)
 _REPORTED_BELIEF_CUE_RE = re.compile(
     r"\b(?:i\s+(?:believe|think|see|view|consider)|"
     r"in\s+my\s+(?:view|opinion)|it\s+seems\s+to\s+me)\b",
@@ -1663,6 +1679,94 @@ def _response_preference_packet(
     observation["source_spans"] = [_source_span(source)]
     return ProviderPacket.model_validate(
         _packet(entities=[self_entity], observations=[observation])
+    )
+
+
+def _life_preference_domain(target: str) -> str:
+    lowered = target.casefold()
+    if re.search(
+        r"\b(?:work|job|quality|detail|shortcut|cut(?:ting)?\s+corners?|"
+        r"rush(?:ing)?|done\s+right)\b",
+        lowered,
+    ):
+        return "work_style"
+    if re.search(
+        r"\b(?:music|concert|song|album|band|orchestra|opera|jazz|"
+        r"classical)\b",
+        lowered,
+    ):
+        return "music"
+    if re.search(
+        r"\b(?:restaurants?|dining|meals?|food|cooking|cook)\b",
+        lowered,
+    ):
+        return "dining"
+    if re.search(
+        r"\b(?:walk|walking|hike|hiking|lake|outdoors?|garden|"
+        r"gardening)\b",
+        lowered,
+    ):
+        return "recreation"
+    return "general"
+
+
+def _explicit_life_preference_packet(
+    source: TrustedExtractionSource,
+) -> ProviderPacket | None:
+    content = source.content.strip()
+    match = _EXPLICIT_LIFE_PREFERENCE_RE.fullmatch(content)
+    if (
+        match is None
+        or _TRANSIENT_RE.search(content)
+        or _TEMPORARY_PREFERENCE_SCOPE_RE.search(content)
+    ):
+        return None
+    target = " ".join(match.group("target").split()).strip(" .,;:")
+    if target.casefold().startswith("to "):
+        target = target[3:].strip()
+    if (
+        len(target) < 2
+        or len(target) > 500
+        or _CONTEXT_DEPENDENT_PREFERENCE_TARGET_RE.fullmatch(target)
+        or _RESPONSE_CONTEXT_RE.search(target)
+    ):
+        return None
+    cue = " ".join(match.group("cue").casefold().replace("’", "'").split())
+    if cue in {"love", "really love", "like", "really like", "enjoy"}:
+        polarity = "likes"
+    elif cue == "prefer":
+        polarity = "prefers"
+    elif cue == "avoid":
+        polarity = "avoids"
+    else:
+        polarity = "dislikes"
+    observation = _example_observation(
+        source.content,
+        observation_ref="o00",
+        subject_entity_ref="e00",
+        predicate="preference.life",
+        object_value=_literal(
+            "json",
+            {
+                "context": None,
+                "domain": _life_preference_domain(target),
+                "polarity": polarity,
+                "target": target,
+            },
+        ),
+        projection_class="life_preference",
+        surface_policy="relevant_recommendation_or_explicit_recall",
+        sensitivity="medium",
+        reason_code="deterministic_explicit_life_preference",
+        modality="endorsed",
+        temporal_semantic="state_validity",
+    )
+    observation["source_spans"] = [_source_span(source)]
+    return ProviderPacket.model_validate(
+        _packet(
+            entities=[_deterministic_self_entity(source)],
+            observations=[observation],
+        )
     )
 
 
@@ -2142,6 +2246,12 @@ def _deterministic_policy_packet(
             source, ("mixed_authorship",)
         ), "mixed_authorship"
     if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+        life_preference_packet = _explicit_life_preference_packet(source)
+        if life_preference_packet is not None:
+            return (
+                life_preference_packet,
+                "explicit_life_preference",
+            )
         employment_packet = _explicit_started_employment_packet(source)
         if employment_packet is not None:
             return (
