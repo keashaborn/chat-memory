@@ -156,7 +156,8 @@ for output in "$care_apply" "$profession_apply"; do
 done
 for output in "$care_replay" "$profession_replay"; do
   jq -e '
-    .apply==true and .outcome=="manual_review_artifact_ready" and
+    .apply==true and .outcome=="no_work" and
+    (.plans|length)==1 and .plans[0].route=="no_work" and
     .write_counts.route_events==0 and
     .write_counts.restricted_review_artifacts==0 and
     .write_counts.stage==0 and .write_counts.claims==0 and
