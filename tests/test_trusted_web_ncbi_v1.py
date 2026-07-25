@@ -5,6 +5,8 @@ import xml.etree.ElementTree as ET
 
 from rag_engine.trusted_web_ncbi_v1 import (
     NCBIPubMedClientV1,
+    _build_terms,
+    _normalize_pubmed_query,
     classify_publication_types,
     format_ncbi_records_for_model,
     trusted_web_topic_uses_ncbi,
@@ -37,6 +39,20 @@ class FakeNCBIClient(NCBIPubMedClientV1):
         )
 
 
+class FallbackNCBIClient(FakeNCBIClient):
+    terms: list[str] = []
+
+    def _request_xml(self, endpoint: str, params: dict[str, str]) -> ET.Element:
+        if endpoint != "esearch.fcgi":
+            return super()._request_xml(endpoint, params)
+        self.terms.append(params["term"])
+        if "[Publication Type]" in params["term"]:
+            return ET.fromstring("<eSearchResult><IdList /></eSearchResult>")
+        return ET.fromstring(
+            "<eSearchResult><IdList><Id>123</Id></IdList></eSearchResult>"
+        )
+
+
 class TrustedWebNCBIV1Tests(unittest.TestCase):
     def test_research_topics_use_ncbi(self) -> None:
         self.assertTrue(trusted_web_topic_uses_ncbi(TrustedWebTopicV1.TRAINING_EVIDENCE))
@@ -59,6 +75,35 @@ class TrustedWebNCBIV1Tests(unittest.TestCase):
         self.assertIn("Use only the PubMed records below", context)
         self.assertIn("[PMID:123]", context)
         self.assertIn("Systematic Review", context)
+
+    def test_natural_language_health_query_removes_pubmed_noise(self) -> None:
+        query = (
+            "Is creatine safe for someone with kidney disease? "
+            "Cite current evidence."
+        )
+        self.assertEqual(
+            _normalize_pubmed_query(query),
+            (
+                "creatine creatine supplementation safety adverse effects "
+                "kidney disease renal function"
+            ),
+        )
+
+    def test_pubmed_search_relaxes_publication_type_but_keeps_human_filter(
+        self,
+    ) -> None:
+        query = "creatine safety in kidney disease"
+        terms = _build_terms(query)
+        self.assertEqual(len(terms), 2)
+        self.assertIn("[Publication Type]", terms[0])
+        self.assertNotIn("[Publication Type]", terms[1])
+        self.assertTrue(all("humans[MeSH Terms]" in term for term in terms))
+
+        client = FallbackNCBIClient()
+        client.terms.clear()
+        records = client.search(query)
+        self.assertEqual(records[0].pmid, "123")
+        self.assertEqual(client.terms, list(terms))
 
 
 if __name__ == "__main__":
