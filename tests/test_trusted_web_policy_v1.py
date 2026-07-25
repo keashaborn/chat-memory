@@ -4,7 +4,12 @@ import unittest
 
 from rag_engine.trusted_web_policy_v1 import (
     BACB_DOMAIN,
+    APNEWS_DOMAIN,
+    ARSTECHNICA_DOMAIN,
+    CURRENT_NEWS_ALLOWED_DOMAINS,
+    HUGGINGFACE_DOMAIN,
     ODS_DOMAIN,
+    OPENAI_DOMAIN,
     PMC_DOMAIN,
     PUBMED_DOMAIN,
     TrustedWebDispositionV1,
@@ -15,6 +20,47 @@ from rag_engine.trusted_web_policy_v1 import (
 
 
 class TrustedWebPolicyV1Tests(unittest.TestCase):
+
+    def test_current_news_routes_only_for_current_event_queries(self) -> None:
+        decision = route_trusted_web_query(
+            "What just happened with OpenAI and Hugging Face?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertEqual(decision.reason, "approved_current_news_lookup")
+        self.assertEqual(decision.allowed_domains, CURRENT_NEWS_ALLOWED_DOMAINS)
+        self.assertIn(OPENAI_DOMAIN, decision.allowed_domains)
+        self.assertIn(HUGGINGFACE_DOMAIN, decision.allowed_domains)
+        self.assertIn(APNEWS_DOMAIN, decision.allowed_domains)
+        self.assertIn(ARSTECHNICA_DOMAIN, decision.allowed_domains)
+        self.assertNotIn(PUBMED_DOMAIN, decision.allowed_domains)
+
+    def test_current_news_requires_current_intent_not_just_entity_name(self) -> None:
+        decision = route_trusted_web_query(
+            "Explain what Hugging Face is in general."
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+
+    def test_current_news_does_not_steal_health_or_medical_queries(self) -> None:
+        supplement = route_trusted_web_query(
+            "What does the evidence say about creatine safety?"
+        )
+        medical = route_trusted_web_query(
+            "Should I change my testosterone dose based on recent news?"
+        )
+        self.assertEqual(supplement.topic, TrustedWebTopicV1.SUPPLEMENTS)
+        self.assertNotEqual(medical.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(medical.disposition, TrustedWebDispositionV1.DECLINE)
+
+    def test_current_news_rejects_social_gossip_sources(self) -> None:
+        decision = route_trusted_web_query(
+            "Search Reddit and Twitter gossip for the latest OpenAI rumors."
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+        self.assertEqual(decision.reason, "unapproved_news_source")
+
     def test_supplement_route_uses_only_approved_domains(self) -> None:
         decision = route_trusted_web_query(
             "What does the evidence say about creatine for strength?"

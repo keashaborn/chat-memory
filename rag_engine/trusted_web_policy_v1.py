@@ -21,6 +21,13 @@ FDA_DOMAIN = "fda.gov"
 PUBMED_DOMAIN = "pubmed.ncbi.nlm.nih.gov"
 PMC_DOMAIN = "pmc.ncbi.nlm.nih.gov"
 BACB_DOMAIN = "bacb.com"
+OPENAI_DOMAIN = "openai.com"
+HUGGINGFACE_DOMAIN = "huggingface.co"
+APNEWS_DOMAIN = "apnews.com"
+REUTERS_DOMAIN = "reuters.com"
+ARSTECHNICA_DOMAIN = "arstechnica.com"
+WIRED_DOMAIN = "wired.com"
+THEVERGE_DOMAIN = "theverge.com"
 
 CORE_ALLOWED_DOMAINS = frozenset(
     {
@@ -35,6 +42,16 @@ CORE_ALLOWED_DOMAINS = frozenset(
     }
 )
 
+CURRENT_NEWS_ALLOWED_DOMAINS = (
+    OPENAI_DOMAIN,
+    HUGGINGFACE_DOMAIN,
+    APNEWS_DOMAIN,
+    REUTERS_DOMAIN,
+    ARSTECHNICA_DOMAIN,
+    WIRED_DOMAIN,
+    THEVERGE_DOMAIN,
+)
+
 
 class TrustedWebTopicV1(str, Enum):
     SUPPLEMENTS = "supplements"
@@ -45,6 +62,7 @@ class TrustedWebTopicV1(str, Enum):
     USDA_FOOD_COMPOSITION = "usda_food_composition"
     INTERNAL_EXERCISE_LIBRARY = "internal_exercise_library"
     SAFETY_STOP = "safety_stop"
+    CURRENT_NEWS = "current_news"
     UNSUPPORTED = "unsupported"
 
 
@@ -188,6 +206,48 @@ _NUTRITION_EVIDENCE_TERMS = (
     "nutrient timing",
 )
 
+_CURRENT_NEWS_ENTITY_TERMS = (
+    "openai",
+    "hugging face",
+    "huggingface",
+    "anthropic",
+    "google deepmind",
+    "deepmind",
+    "nvidia",
+    "meta ai",
+    "mistral",
+    "usda",
+    "fda",
+    "ftc",
+    "nist",
+)
+
+_CURRENT_NEWS_INTENT_TERMS = (
+    "latest",
+    "recent",
+    "current",
+    "news",
+    "just happened",
+    "what happened",
+    "announced",
+    "announcement",
+    "this week",
+    "today",
+    "yesterday",
+    "breaking",
+)
+
+_BLOCKED_NEWS_SOURCE_TERMS = (
+    "reddit",
+    "twitter",
+    "x.com",
+    "social media",
+    "forum",
+    "gossip",
+    "rumor",
+    "rumour",
+)
+
 _TRAINING_EVIDENCE_TERMS = (
     "hypertrophy",
     "muscle growth",
@@ -292,11 +352,27 @@ def route_trusted_web_query(
             disposition=TrustedWebDispositionV1.DECLINE,
             reason="unapproved_url_target",
         )
+    if _contains_any(normalized, _BLOCKED_NEWS_SOURCE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.UNSUPPORTED,
+            disposition=TrustedWebDispositionV1.DECLINE,
+            reason="unapproved_news_source",
+        )
     if _contains_any(normalized, _SAFETY_TERMS):
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.SAFETY_STOP,
             disposition=TrustedWebDispositionV1.SAFETY_STOP,
             reason="safety_signal",
+        )
+    if _contains_any(normalized, _CURRENT_NEWS_INTENT_TERMS) and _contains_any(
+        normalized,
+        _CURRENT_NEWS_ENTITY_TERMS,
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.CURRENT_NEWS,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_current_news_lookup",
+            allowed_domains=CURRENT_NEWS_ALLOWED_DOMAINS,
         )
     if _contains_any(normalized, _SUPPLEMENT_TERMS):
         return TrustedWebPolicyDecisionV1(
@@ -366,7 +442,15 @@ __all__ = [
     "FDA_DOMAIN",
     "ODPHP_DOMAIN",
     "REALFOOD_DOMAIN",
+    "APNEWS_DOMAIN",
+    "ARSTECHNICA_DOMAIN",
     "CORE_ALLOWED_DOMAINS",
+    "CURRENT_NEWS_ALLOWED_DOMAINS",
+    "HUGGINGFACE_DOMAIN",
+    "OPENAI_DOMAIN",
+    "REUTERS_DOMAIN",
+    "THEVERGE_DOMAIN",
+    "WIRED_DOMAIN",
     "POLICY_VERSION",
     "TrustedWebDispositionV1",
     "TrustedWebPolicyDecisionV1",
