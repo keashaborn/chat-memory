@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -15,6 +17,7 @@ from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
     ControlledProjectionError,
     OWNER,
     QUERY_BY_PREDICATE,
+    load_replay_state,
     load_admission,
     load_apply,
 )
@@ -77,6 +80,24 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
             "What have I said about worrying about the future?",
         )
 
+    def test_caregiving_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["relationship.caregiver_for"],
+            "Do you remember who I care for?",
+        )
+
+    def test_spouse_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["relationship.spouse_of"],
+            "Do you remember who my spouse is?",
+        )
+
+    def test_historical_occupation_has_an_approved_shadow_query(self) -> None:
+        self.assertEqual(
+            QUERY_BY_PREDICATE["occupation.works_as"],
+            "Do you remember what professions I have worked in?",
+        )
+
     def test_accepts_exact_deferred_admission_result(self) -> None:
         claim_id = "8fb8b3ab-a627-4555-99c6-fe4dc9b0ca89"
         outbox_id = "11111111-1111-4111-8111-111111111111"
@@ -109,6 +130,81 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
             path.write_text(json.dumps(admission), encoding="utf-8")
             loaded = load_admission(path, apply)
         self.assertEqual(loaded[claim_id]["outbox_id"], outbox_id)
+
+
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _ReplayConnection:
+    def __init__(self, row: dict[str, object]) -> None:
+        self.row = row
+
+    def transaction(self, **_kwargs: object) -> _Transaction:
+        return _Transaction()
+
+    async def execute(self, *_args: object) -> str:
+        return "SELECT 1"
+
+    async def fetchrow(self, *_args: object) -> dict[str, object]:
+        return self.row
+
+
+class _ReplayQdrant:
+    def __init__(self, point: SimpleNamespace) -> None:
+        self.point = point
+
+    def retrieve(self, **_kwargs: object) -> list[SimpleNamespace]:
+        return [self.point]
+
+
+class ControlledProjectionReplayTest(unittest.IsolatedAsyncioTestCase):
+    async def test_replay_uses_exact_done_outbox_and_stored_vector(self) -> None:
+        claim_id = "8fb8b3ab-a627-4555-99c6-fe4dc9b0ca89"
+        outbox_id = "11111111-1111-4111-8111-111111111111"
+        canonical_text = "The user formerly worked as clinical psychologist."
+        item = {
+            "claim_id": claim_id,
+            "outbox_id": outbox_id,
+            "predicate": "occupation.works_as",
+            "canonical_text_sha256": hashlib.sha256(
+                canonical_text.encode()
+            ).hexdigest(),
+        }
+        row = {
+            "status": "supported",
+            "revision_number": 2,
+            "predicate": "occupation.works_as",
+            "canonical_text": canonical_text,
+            "outbox_status": "done",
+            "attempts": 1,
+            "payload": {"claim_id": claim_id, "revision_number": 2},
+        }
+        point = SimpleNamespace(
+            id=claim_id,
+            payload={
+                "owner_user_id": OWNER,
+                "claim_id": claim_id,
+                "predicate": "occupation.works_as",
+                "status": "supported",
+                "revision_number": 2,
+                "schema_version": "memory_claim_projection_v1",
+            },
+            vector=[0.25, -0.5],
+        )
+        vectors, completed = await load_replay_state(
+            _ReplayConnection(row),
+            _ReplayQdrant(point),
+            collection="memory_claim_v1",
+            vector_size=2,
+            items=[item],
+        )
+        self.assertEqual(vectors[claim_id], [0.25, -0.5])
+        self.assertTrue(completed[0]["replay_verified"])
 
 
 if __name__ == "__main__":

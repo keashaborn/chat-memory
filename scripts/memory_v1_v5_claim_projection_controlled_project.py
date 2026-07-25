@@ -41,6 +41,9 @@ QUERY_BY_PREDICATE = {
     "pet.sex": "Was Dahlia female or male?",
     "pet.breed": "What breed was Dahlia?",
     "stance.reported": "What have I said about worrying about the future?",
+    "relationship.caregiver_for": "Do you remember who I care for?",
+    "relationship.spouse_of": "Do you remember who my spouse is?",
+    "occupation.works_as": "Do you remember what professions I have worked in?",
 }
 
 
@@ -50,6 +53,7 @@ class ControlledProjectionError(RuntimeError):
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("apply", "replay"), default="apply")
     parser.add_argument("--apply-result", required=True)
     parser.add_argument("--admission-result")
     parser.add_argument("--output", required=True)
@@ -246,6 +250,103 @@ async def freeze_remaining(conn: asyncpg.Connection, items: list[dict[str, Any]]
         )
 
 
+async def load_replay_state(
+    conn: asyncpg.Connection,
+    qdrant: Any,
+    *,
+    collection: str,
+    vector_size: int,
+    items: list[dict[str, Any]],
+) -> tuple[dict[str, list[float]], list[dict[str, Any]]]:
+    points = qdrant.retrieve(
+        collection_name=collection,
+        ids=[item["claim_id"] for item in items],
+        with_payload=True,
+        with_vectors=True,
+    )
+    point_by_id = {str(point.id): point for point in points}
+    if point_by_id.keys() != {item["claim_id"] for item in items}:
+        raise ControlledProjectionError("replay target Qdrant point set differs")
+
+    vectors: dict[str, list[float]] = {}
+    completed: list[dict[str, Any]] = []
+    async with conn.transaction(readonly=True, isolation="serializable"):
+        await set_actor(conn, OWNER)
+        for item in items:
+            row = await conn.fetchrow(
+                """SELECT claim.claim_id,claim.canonical_text,claim.predicate,
+                          claim.qualifiers,claim.status::text,claim.sensitivity::text,
+                          claim.retrieval_policy,claim.updated_at,
+                          COALESCE(max(revision.revision_number),0) AS revision_number,
+                          outbox.outbox_id,outbox.status::text AS outbox_status,
+                          outbox.attempts,outbox.payload
+                   FROM memory.claim AS claim
+                   LEFT JOIN memory.claim_revision AS revision
+                     ON revision.owner_user_id=claim.owner_user_id
+                    AND revision.claim_id=claim.claim_id
+                   JOIN memory.projection_outbox AS outbox
+                     ON outbox.owner_user_id=claim.owner_user_id
+                    AND outbox.aggregate_type='claim'
+                    AND outbox.aggregate_id=claim.claim_id
+                    AND outbox.operation='upsert'
+                   WHERE claim.owner_user_id=$1 AND claim.claim_id=$2
+                     AND outbox.outbox_id=$3
+                   GROUP BY claim.claim_id,outbox.outbox_id""",
+                uuid.UUID(OWNER),
+                uuid.UUID(item["claim_id"]),
+                uuid.UUID(item["outbox_id"]),
+            )
+            payload = row["payload"] if row else None
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if (
+                not row
+                or row["status"] != "supported"
+                or row["revision_number"] != 2
+                or row["predicate"] != item["predicate"]
+                or hashlib.sha256(row["canonical_text"].encode()).hexdigest()
+                != item["canonical_text_sha256"]
+                or row["outbox_status"] != "done"
+                or row["attempts"] != 1
+                or payload
+                != {"claim_id": item["claim_id"], "revision_number": 2}
+            ):
+                raise ControlledProjectionError(
+                    "replay Postgres claim or outbox state differs"
+                )
+
+            point = point_by_id[item["claim_id"]]
+            point_payload = point.payload or {}
+            vector = point.vector
+            if (
+                point_payload.get("owner_user_id") != OWNER
+                or point_payload.get("claim_id") != item["claim_id"]
+                or point_payload.get("predicate") != item["predicate"]
+                or point_payload.get("status") != "supported"
+                or point_payload.get("revision_number") != 2
+                or point_payload.get("schema_version")
+                != "memory_claim_projection_v1"
+                or not isinstance(vector, list)
+                or len(vector) != vector_size
+                or any(not math.isfinite(float(value)) for value in vector)
+            ):
+                raise ControlledProjectionError("replay Qdrant projection differs")
+            vectors[item["claim_id"]] = [float(value) for value in vector]
+            completed.append(
+                {
+                    "claim_id": item["claim_id"],
+                    "predicate": item["predicate"],
+                    "outbox_id": item["outbox_id"],
+                    "revision_number": 2,
+                    "embedding_input_sha256": hashlib.sha256(
+                        render_claim_for_embedding(dict(row)).encode()
+                    ).hexdigest(),
+                    "replay_verified": True,
+                }
+            )
+    return vectors, completed
+
+
 async def shadow_tests(
     conn: asyncpg.Connection,
     index: ClaimVectorIndex,
@@ -353,12 +454,19 @@ async def run() -> int:
             raise ControlledProjectionError("apply outcome and manifest differ")
         item["canonical_text_sha256"] = source["canonical_text_sha256"]
 
-    if os.environ.get("MEMORY_V1_CONTROLLED_PROJECTION", "") != "authorized":
-        raise ControlledProjectionError("controlled projection authorization gate is closed")
+    gate = (
+        "MEMORY_V1_CONTROLLED_PROJECTION"
+        if args.mode == "apply"
+        else "MEMORY_V1_CONTROLLED_PROJECTION_REPLAY"
+    )
+    if os.environ.get(gate, "") != "authorized":
+        raise ControlledProjectionError(
+            f"controlled projection {args.mode} authorization gate is closed"
+        )
     dsn = os.environ.get("POSTGRES_DSN", "").strip()
     qdrant_url = os.environ.get("QDRANT_URL", "").strip()
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not dsn or not qdrant_url or not api_key:
+    if not dsn or not qdrant_url or (args.mode == "apply" and not api_key):
         raise ControlledProjectionError("required runtime configuration is missing")
     if args.vector_size != 3072 or not 1 <= len(items) <= MAX_CLAIMS_PER_CONTROLLED_RUN:
         raise ControlledProjectionError("projection call or vector budget mismatch")
@@ -376,60 +484,92 @@ async def run() -> int:
         ids=[item["claim_id"] for item in items],
         with_payload=True,with_vectors=False,
     )
-    if existing:
+    if args.mode == "apply" and existing:
         raise ControlledProjectionError("one or more target claim points already exist")
+    if args.mode == "replay" and len(existing) != len(items):
+        raise ControlledProjectionError("one or more replay target points are missing")
 
-    provider = OpenAI(
-        api_key=api_key,
-        base_url=os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
-        max_retries=0,
-        timeout=30.0,
-    )
     conn = await asyncpg.connect(dsn, command_timeout=60)
     calls = 0
     writes = 0
     vectors: dict[str, list[float]] = {}
     completed: list[dict[str, Any]] = []
-    worker_id = f"controlled-v5:{socket.gethostname()}:{os.getpid()}"
-    active_job: dict[str, Any] | None = None
     try:
-        for item in items:
-            active_job = await claim_job(conn, item, worker_id)
-            text = render_claim_for_embedding(active_job["snapshot"])
-            if calls >= len(items):
-                raise ControlledProjectionError("embedding request budget exhausted")
-            calls += 1
-            response = provider.embeddings.create(model=model, input=text)
-            vector = [float(value) for value in response.data[0].embedding]
-            if len(vector) != args.vector_size or any(not math.isfinite(value) for value in vector):
-                raise ControlledProjectionError("provider returned an invalid embedding vector")
-            index.upsert_claim(OWNER, active_job["snapshot"], vector)
-            writes += 1
-            await finish_job(conn, active_job)
-            vectors[item["claim_id"]] = vector
-            completed.append(
-                {"claim_id": item["claim_id"], "predicate": item["predicate"],
-                 "outbox_id": item["outbox_id"], "revision_number": 2}
+        if args.mode == "replay":
+            vectors, completed = await load_replay_state(
+                conn,
+                qdrant,
+                collection=args.collection,
+                vector_size=args.vector_size,
+                items=items,
             )
-            active_job = None
-        if calls != len(items) or writes != len(items):
-            raise ControlledProjectionError("controlled projection did not consume exact budget")
-        shadows = await shadow_tests(conn, index, items, vectors)
-    except Exception as exc:
-        reason = f"controlled projection stopped: {type(exc).__name__}"
-        if active_job is not None:
+            shadows = await shadow_tests(conn, index, items, vectors)
+        else:
+            provider = OpenAI(
+                api_key=api_key,
+                base_url=os.environ.get("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1",
+                max_retries=0,
+                timeout=30.0,
+            )
+            worker_id = f"controlled-v5:{socket.gethostname()}:{os.getpid()}"
+            active_job: dict[str, Any] | None = None
             try:
-                await finish_job(conn, active_job, error=reason)
-            except Exception:
-                pass
-        await freeze_remaining(conn, items, reason)
-        raise
+                for item in items:
+                    active_job = await claim_job(conn, item, worker_id)
+                    text = render_claim_for_embedding(active_job["snapshot"])
+                    if calls >= len(items):
+                        raise ControlledProjectionError(
+                            "embedding request budget exhausted"
+                        )
+                    calls += 1
+                    response = provider.embeddings.create(model=model, input=text)
+                    vector = [
+                        float(value) for value in response.data[0].embedding
+                    ]
+                    if len(vector) != args.vector_size or any(
+                        not math.isfinite(value) for value in vector
+                    ):
+                        raise ControlledProjectionError(
+                            "provider returned an invalid embedding vector"
+                        )
+                    index.upsert_claim(OWNER, active_job["snapshot"], vector)
+                    writes += 1
+                    await finish_job(conn, active_job)
+                    vectors[item["claim_id"]] = vector
+                    completed.append(
+                        {
+                            "claim_id": item["claim_id"],
+                            "predicate": item["predicate"],
+                            "outbox_id": item["outbox_id"],
+                            "revision_number": 2,
+                            "embedding_input_sha256": hashlib.sha256(
+                                text.encode()
+                            ).hexdigest(),
+                        }
+                    )
+                    active_job = None
+                if calls != len(items) or writes != len(items):
+                    raise ControlledProjectionError(
+                        "controlled projection did not consume exact budget"
+                    )
+                shadows = await shadow_tests(conn, index, items, vectors)
+            except Exception as exc:
+                reason = f"controlled projection stopped: {type(exc).__name__}"
+                if active_job is not None:
+                    try:
+                        await finish_job(conn, active_job, error=reason)
+                    except Exception:
+                        pass
+                await freeze_remaining(conn, items, reason)
+                raise
     finally:
         await conn.close()
         qdrant.close()
 
     result = {
         "contract_version": CONTRACT,
+        "mode": args.mode,
         "owner_user_id": OWNER,
         "apply_result_file_sha256": hashlib.sha256(apply_path.read_bytes()).hexdigest(),
         "apply_result_sha256": apply["result_sha256"],
