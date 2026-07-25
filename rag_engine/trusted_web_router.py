@@ -54,6 +54,7 @@ from rag_engine.trusted_web_provider_v1 import (
     TrustedWebProviderSecurityError,
     TrustedWebSettingsV1,
     TrustedWebSourceV1,
+    WEB_SOURCE_PROVENANCE_CONTRACT,
 )
 
 
@@ -119,7 +120,10 @@ class TrustedWebResponseV1(BaseModel):
     reason: str
     searched: bool
     answer: str = Field(min_length=1, max_length=40_000)
+    source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
     sources: tuple[TrustedWebSourceV1, ...] = ()
+    cited_sources: tuple[TrustedWebSourceV1, ...] = ()
+    consulted_sources: tuple[TrustedWebSourceV1, ...] = ()
 
 
 def apply_trusted_web_no_store_headers(response: Response) -> None:
@@ -309,13 +313,15 @@ async def trusted_web_query(
             status="completed",
             latency_ms=latency_ms,
             provider_response_id=result.provider_response_id,
-            sources=result.sources,
+            sources=result.consulted_sources,
+            cited_sources=result.cited_sources,
         )
         logger.info(
-            "[trusted_web] search_id=%s status=completed topic=%s source_count=%s latency_ms=%s",
+            "[trusted_web] search_id=%s status=completed topic=%s cited_source_count=%s consulted_source_count=%s latency_ms=%s",
             search_id,
             policy.topic.value,
-            len(result.sources),
+            len(result.cited_sources),
+            len(result.consulted_sources),
             latency_ms,
         )
         return TrustedWebResponseV1(
@@ -326,7 +332,9 @@ async def trusted_web_query(
             reason=policy.reason,
             searched=True,
             answer=result.answer_markdown(),
-            sources=result.sources,
+            sources=result.cited_sources,
+            cited_sources=result.cited_sources,
+            consulted_sources=result.consulted_sources,
         )
     except HTTPException:
         raise

@@ -85,12 +85,21 @@ async def finish_trusted_web_audit_v1(
     latency_ms: int,
     provider_response_id: str | None = None,
     sources: tuple[TrustedWebSourceV1, ...] = (),
+    cited_sources: tuple[TrustedWebSourceV1, ...] = (),
     error_code: str | None = None,
 ) -> None:
+    cited_urls = {source.url for source in cited_sources}
     source_metadata = [
-        source.model_dump(mode="json")
-        if hasattr(source, "model_dump")
-        else source.dict()
+        {
+            **(
+                source.model_dump(mode="json")
+                if hasattr(source, "model_dump")
+                else source.dict()
+            ),
+            "citation_status": (
+                "cited" if source.url in cited_urls else "consulted"
+            ),
+        }
         for source in sources
     ]
     await conn.execute(

@@ -43,6 +43,7 @@ from rag_engine.trusted_web_provider_v1 import (
     TrustedWebProviderSecurityError,
     TrustedWebSettingsV1,
     TrustedWebSourceV1,
+    WEB_SOURCE_PROVENANCE_CONTRACT,
 )
 from rag_engine.trusted_web_router import NO_STORE_HEADERS
 
@@ -130,7 +131,10 @@ class CurrentNewsResponseV1(BaseModel):
     reason: str
     searched: bool
     answer: str = Field(min_length=1, max_length=40_000)
+    source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
     sources: tuple[CurrentNewsSourceV1, ...] = ()
+    cited_sources: tuple[CurrentNewsSourceV1, ...] = ()
+    consulted_sources: tuple[CurrentNewsSourceV1, ...] = ()
 
 
 def apply_current_news_no_store_headers(response: Response) -> None:
@@ -203,7 +207,7 @@ def _source_type_from_publisher(publisher: str) -> str:
     return "news_source"
 
 
-_CURRENT_NEWS_MAX_SOURCE_CARDS = 8
+_CURRENT_NEWS_MAX_SOURCES = 50
 
 
 def _current_news_card_url(url: str) -> str:
@@ -219,6 +223,7 @@ def _current_news_card_url(url: str) -> str:
         and parts[1] == "index"
     ):
         path = "/" + "/".join(parts[1:])
+    path = path.rstrip("/") or "/"
     query = urlencode([
         (key, value)
         for key, value in parse_qsl(parsed.query, keep_blank_values=False)
@@ -248,7 +253,7 @@ def _current_news_sources_from_trusted_sources(
                 source_type=_source_type_from_publisher(publisher),
             )
         )
-        if len(result) >= _CURRENT_NEWS_MAX_SOURCE_CARDS:
+        if len(result) >= _CURRENT_NEWS_MAX_SOURCES:
             break
     return tuple(result)
 
@@ -392,7 +397,12 @@ async def current_news_query(
             ),
             timeout=settings.timeout_seconds + 5.0,
         )
-        news_sources = _current_news_sources_from_trusted_sources(result.sources)
+        cited_news_sources = _current_news_sources_from_trusted_sources(
+            result.cited_sources
+        )
+        consulted_news_sources = _current_news_sources_from_trusted_sources(
+            result.consulted_sources
+        )
         latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)
         await finish_trusted_web_audit_v1(
             conn,
@@ -400,13 +410,15 @@ async def current_news_query(
             status="completed",
             latency_ms=latency_ms,
             provider_response_id=result.provider_response_id,
-            sources=result.sources,
+            sources=result.consulted_sources,
+            cited_sources=result.cited_sources,
         )
         logger.info(
-            "[current_news] search_id=%s status=completed topic=%s source_count=%s latency_ms=%s",
+            "[current_news] search_id=%s status=completed topic=%s cited_source_count=%s consulted_source_count=%s latency_ms=%s",
             search_id,
             policy.topic.value,
-            len(news_sources),
+            len(cited_news_sources),
+            len(consulted_news_sources),
             latency_ms,
         )
         return CurrentNewsResponseV1(
@@ -417,7 +429,9 @@ async def current_news_query(
             reason=policy.reason,
             searched=True,
             answer=result.answer_text,
-            sources=news_sources,
+            sources=cited_news_sources,
+            cited_sources=cited_news_sources,
+            consulted_sources=consulted_news_sources,
         )
     except HTTPException:
         raise

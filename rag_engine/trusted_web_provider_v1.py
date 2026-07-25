@@ -8,7 +8,7 @@ import html
 import os
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,6 +60,8 @@ _ANSWER_EMAIL_RE = re.compile(
     r"""(?<![\w.+-])[\w.+-]+@[a-z0-9.-]+\.[a-z]{2,}(?![\w-])""",
     re.IGNORECASE,
 )
+_TRACKING_QUERY_KEYS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid"})
+WEB_SOURCE_PROVENANCE_CONTRACT = "web_source_provenance_v2"
 
 
 class TrustedWebProviderError(RuntimeError):
@@ -130,11 +132,12 @@ class TrustedWebProviderResultV1(BaseModel):
 
     provider_response_id: str = Field(min_length=1, max_length=200)
     answer_text: str = Field(min_length=1, max_length=32_768)
-    sources: tuple[TrustedWebSourceV1, ...]
+    cited_sources: tuple[TrustedWebSourceV1, ...]
+    consulted_sources: tuple[TrustedWebSourceV1, ...]
 
     def answer_markdown(self) -> str:
         lines = [self.answer_text.strip(), "", "Sources:"]
-        for source in self.sources:
+        for source in self.cited_sources:
             title = _markdown_title(source.title)
             lines.append(f"- [{title}]({source.url})")
         return "\n".join(lines)
@@ -219,7 +222,9 @@ def _response_dict(response: Any) -> dict[str, Any]:
     return value
 
 
-def _raw_source_records(payload: dict[str, Any]) -> list[tuple[str, str]]:
+def _raw_consulted_source_records(
+    payload: dict[str, Any],
+) -> list[tuple[str, str]]:
     records: list[tuple[str, str]] = []
     for item in payload.get("output") or []:
         if not isinstance(item, dict):
@@ -234,55 +239,126 @@ def _raw_source_records(payload: dict[str, Any]) -> list[tuple[str, str]]:
                     title = str(source.get("title") or source.get("name") or "Source")
                     if url:
                         records.append((url, title))
-        if item.get("type") == "message":
-            for content in item.get("content") or []:
-                if not isinstance(content, dict):
-                    continue
-                for annotation in content.get("annotations") or []:
-                    if not isinstance(annotation, dict):
-                        continue
-                    if annotation.get("type") != "url_citation":
-                        continue
-                    url = str(annotation.get("url") or "").strip()
-                    title = str(annotation.get("title") or "Source")
-                    if url:
-                        records.append((url, title))
     return records
 
 
-def _validated_sources(
+def _raw_cited_source_records(
     payload: dict[str, Any],
+) -> list[tuple[str, str]]:
+    records: list[tuple[str, str]] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            for annotation in content.get("annotations") or []:
+                if (
+                    not isinstance(annotation, dict)
+                    or annotation.get("type") != "url_citation"
+                ):
+                    continue
+                url = str(annotation.get("url") or "").strip()
+                title = str(annotation.get("title") or "").strip()
+                if url:
+                    records.append((url, title))
+    return records
+
+
+def _canonical_source_url(
+    raw_url: str,
     allowed_domains: tuple[str, ...],
+) -> str:
+    validated = validate_allowed_source_url(raw_url, allowed_domains)
+    parsed = urlsplit(validated)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=False)
+            if not key.lower().startswith("utm_")
+            and key.lower() not in _TRACKING_QUERY_KEYS
+        ]
+    )
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path.rstrip("/") or "/",
+            query,
+            "",
+        )
+    )
+
+
+def _validated_source_records(
+    raw_records: list[tuple[str, str]],
+    allowed_domains: tuple[str, ...],
+    *,
+    require_titles: bool,
 ) -> tuple[TrustedWebSourceV1, ...]:
-    raw_records = _raw_source_records(payload)
-    if not raw_records:
-        raise TrustedWebProviderSecurityError("trusted_web_no_sources")
     result: list[TrustedWebSourceV1] = []
     seen: set[str] = set()
     for raw_url, raw_title in raw_records:
         try:
-            url = validate_allowed_source_url(raw_url, allowed_domains)
+            url = _canonical_source_url(raw_url, allowed_domains)
         except ValueError as exc:
             raise TrustedWebProviderSecurityError(str(exc)) from None
         if url in seen:
             continue
+        title = _markdown_title(raw_title)
+        if require_titles and title == "Source":
+            raise TrustedWebProviderSecurityError(
+                "trusted_web_citation_title_missing"
+            )
         seen.add(url)
         result.append(
             TrustedWebSourceV1(
                 url=url,
-                title=_markdown_title(raw_title),
+                title=title,
                 authority_type="official_web",
                 evidence_type="web_source",
             )
         )
-    if not result:
-        raise TrustedWebProviderSecurityError("trusted_web_no_allowed_sources")
     return tuple(result)
+
+
+def _validated_source_provenance(
+    payload: dict[str, Any],
+    allowed_domains: tuple[str, ...],
+) -> tuple[
+    tuple[TrustedWebSourceV1, ...],
+    tuple[TrustedWebSourceV1, ...],
+]:
+    cited = _validated_source_records(
+        _raw_cited_source_records(payload),
+        allowed_domains,
+        require_titles=True,
+    )
+    if not cited:
+        raise TrustedWebProviderSecurityError("trusted_web_no_cited_sources")
+    consulted = _validated_source_records(
+        _raw_consulted_source_records(payload),
+        allowed_domains,
+        require_titles=False,
+    )
+    consulted_by_url = {source.url: source for source in consulted}
+    consulted_urls = [source.url for source in consulted]
+    for source in cited:
+        if source.url not in consulted_by_url:
+            consulted_urls.append(source.url)
+        consulted_by_url[source.url] = source
+    normalized_consulted = tuple(
+        consulted_by_url[url] for url in consulted_urls
+    )
+    if not normalized_consulted:
+        raise TrustedWebProviderSecurityError("trusted_web_no_sources")
+    return cited, normalized_consulted
 
 
 def _validate_answer_links(
     answer: str,
     allowed_domains: tuple[str, ...],
+    allowed_source_urls: tuple[str, ...] | None = None,
 ) -> None:
     if _ANSWER_EMAIL_RE.search(answer):
         raise TrustedWebProviderSecurityError(
@@ -303,24 +379,42 @@ def _validate_answer_links(
         for match in _ANSWER_WWW_URL_RE.finditer(answer)
     )
 
+    allowed_urls = (
+        {
+            _canonical_source_url(url, allowed_domains)
+            for url in allowed_source_urls
+        }
+        if allowed_source_urls is not None
+        else None
+    )
     seen: set[str] = set()
     for raw_candidate in candidates:
         candidate = str(raw_candidate or "").strip().rstrip(
             ".,;:!?)]}"
         )
-        if candidate in seen:
-            continue
-        seen.add(candidate)
         if not candidate.lower().startswith(("https://", "http://")):
             raise TrustedWebProviderSecurityError(
                 "trusted_web_answer_link_not_allowed"
             )
         try:
-            validate_allowed_source_url(candidate, allowed_domains)
+            canonical_candidate = _canonical_source_url(
+                candidate,
+                allowed_domains,
+            )
         except ValueError:
             raise TrustedWebProviderSecurityError(
                 "trusted_web_answer_link_not_allowed"
             ) from None
+        if canonical_candidate in seen:
+            continue
+        seen.add(canonical_candidate)
+        if (
+            allowed_urls is not None
+            and canonical_candidate not in allowed_urls
+        ):
+            raise TrustedWebProviderSecurityError(
+                "trusted_web_answer_link_not_cited"
+            )
 
 
 def _source_domains(
@@ -395,12 +489,20 @@ class OpenAITrustedWebProviderV1:
             raise TrustedWebProviderError("trusted_web_provider_answer_missing")
         if len(answer) > 32_768:
             raise TrustedWebProviderError("trusted_web_provider_answer_too_large")
-        sources = _validated_sources(payload, policy.allowed_domains)
-        _validate_answer_links(answer, policy.allowed_domains)
+        cited_sources, consulted_sources = _validated_source_provenance(
+            payload,
+            policy.allowed_domains,
+        )
+        _validate_answer_links(
+            answer,
+            policy.allowed_domains,
+            tuple(source.url for source in cited_sources),
+        )
         return TrustedWebProviderResultV1(
             provider_response_id=response_id,
             answer_text=answer,
-            sources=sources,
+            cited_sources=cited_sources,
+            consulted_sources=consulted_sources,
         )
 
 
@@ -455,39 +557,57 @@ class OpenAITrustedWebProviderV1:
             raise TrustedWebProviderSecurityError("trusted_web_missing_inline_citation")
         if len(answer) > 32_768:
             raise TrustedWebProviderError("trusted_web_provider_answer_too_large")
-        sources = (
+        source_records = (
             tuple(
-                TrustedWebSourceV1(
-                    url=record.url,
-                    title=record.title,
-                    authority_type="official_public_guidance",
-                    evidence_type=record.evidence_type,
-                    source_id=record.source_id,
+                (
+                    record.citation_marker,
+                    TrustedWebSourceV1(
+                        url=record.url,
+                        title=record.title,
+                        authority_type="official_public_guidance",
+                        evidence_type=record.evidence_type,
+                        source_id=record.source_id,
+                    ),
                 )
                 for record in ods_records
             )
             + tuple(
-                TrustedWebSourceV1(
-                    url=record.url,
-                    title=record.title,
-                    authority_type="pubmed_research",
-                    evidence_type=classify_publication_types(record.publication_types),
-                    source_id=record.source_id,
+                (
+                    record.citation_marker,
+                    TrustedWebSourceV1(
+                        url=record.url,
+                        title=record.title,
+                        authority_type="pubmed_research",
+                        evidence_type=classify_publication_types(
+                            record.publication_types
+                        ),
+                        source_id=record.source_id,
+                    ),
                 )
                 for record in records
             )
         )
-        _validate_answer_links(answer, _source_domains(sources))
+        consulted_sources = tuple(source for _, source in source_records)
+        cited_sources = tuple(
+            source for marker, source in source_records if marker in answer
+        )
+        _validate_answer_links(
+            answer,
+            _source_domains(consulted_sources),
+            tuple(source.url for source in cited_sources),
+        )
         return TrustedWebProviderResultV1(
             provider_response_id=response_id,
             answer_text=answer,
-            sources=sources,
+            cited_sources=cited_sources,
+            consulted_sources=consulted_sources,
         )
 
 
 __all__ = [
     "OpenAITrustedWebProviderV1",
     "TRUSTED_WEB_INSTRUCTIONS_V1",
+    "WEB_SOURCE_PROVENANCE_CONTRACT",
     "TrustedWebProviderError",
     "TrustedWebProviderResultV1",
     "TrustedWebProviderSecurityError",

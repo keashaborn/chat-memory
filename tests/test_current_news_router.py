@@ -107,7 +107,9 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertEqual(sources[1].publisher, "Reuters")
         self.assertEqual(sources[1].source_type, "news_source")
 
-    def test_current_news_sources_are_deduped_and_capped(self) -> None:
+    def test_current_news_sources_are_deduped_without_losing_provenance(
+        self,
+    ) -> None:
         raw_sources = tuple(
             TrustedWebSourceV1(
                 url=url,
@@ -130,10 +132,10 @@ class CurrentNewsRouterTests(unittest.TestCase):
             )
         )
         sources = _current_news_sources_from_trusted_sources(raw_sources)
-        self.assertLessEqual(len(sources), 8)
+        self.assertEqual(len(sources), 9)
         self.assertEqual(
             sources[0].url,
-            "https://openai.com/index/hugging-face-model-evaluation-security-incident/",
+            "https://openai.com/index/hugging-face-model-evaluation-security-incident",
         )
         self.assertEqual(sources[0].title, "OpenAI")
         self.assertEqual(
@@ -159,6 +161,12 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertFalse(response.searched)
         self.assertEqual(response.disposition, TrustedWebDispositionV1.DECLINE)
         self.assertEqual(response.sources, ())
+        self.assertEqual(response.cited_sources, ())
+        self.assertEqual(response.consulted_sources, ())
+        self.assertEqual(
+            response.source_contract,
+            "web_source_provenance_v2",
+        )
 
 
 if __name__ == "__main__":

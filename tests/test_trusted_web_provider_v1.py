@@ -17,10 +17,21 @@ SECRET = "test-service-token-with-at-least-32-bytes"
 
 
 class FakeResponse:
-    def __init__(self, source_url: str, answer_text: str | None = None):
+    def __init__(
+        self,
+        source_url: str,
+        answer_text: str | None = None,
+        *,
+        source_title: str = "Creatine evidence review",
+        citation_url: str | None = None,
+        citation_title: str = "Creatine evidence review",
+        additional_sources: tuple[dict[str, str], ...] = (),
+        include_citation: bool = True,
+    ):
         self.output_text = answer_text or (
             "Creatine improves some high-intensity performance outcomes."
         )
+        annotation_url = citation_url or source_url
         self._payload = {
             "id": "resp_test",
             "output": [
@@ -31,8 +42,9 @@ class FakeResponse:
                         "sources": [
                             {
                                 "url": source_url,
-                                "title": "Creatine evidence review",
-                            }
+                                "title": source_title,
+                            },
+                            *additional_sources,
                         ],
                     },
                 },
@@ -42,7 +54,19 @@ class FakeResponse:
                         {
                             "type": "output_text",
                             "text": self.output_text,
-                            "annotations": [],
+                            "annotations": (
+                                [
+                                    {
+                                        "type": "url_citation",
+                                        "url": annotation_url,
+                                        "title": citation_title,
+                                        "start_index": 0,
+                                        "end_index": len(self.output_text),
+                                    }
+                                ]
+                                if include_citation
+                                else []
+                            ),
                         }
                     ],
                 },
@@ -119,8 +143,67 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         self.assertEqual(len(kwargs["safety_identifier"]), 64)
         self.assertNotEqual(kwargs["safety_identifier"], ACTOR)
         self.assertNotIn(ACTOR, json.dumps(kwargs, sort_keys=True))
-        self.assertEqual(len(result.sources), 1)
+        self.assertEqual(len(result.cited_sources), 1)
+        self.assertEqual(len(result.consulted_sources), 1)
         self.assertIn("Sources:", result.answer_markdown())
+
+    def test_provider_separates_cited_from_consulted_and_prefers_citation_title(
+        self,
+    ) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://openai.com/news/?utm_source=openai",
+                source_title="OpenAI",
+                citation_url="https://openai.com/news/",
+                citation_title="OpenAI Newsroom",
+                additional_sources=(
+                    {
+                        "url": "https://status.openai.com/",
+                        "title": "OpenAI Status",
+                    },
+                ),
+            )
+        )
+        policy = route_trusted_web_query("What just happened with OpenAI?")
+        result = OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).search(
+            query="What just happened with OpenAI?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+        )
+        self.assertEqual(len(result.cited_sources), 1)
+        self.assertEqual(len(result.consulted_sources), 2)
+        self.assertEqual(result.cited_sources[0].title, "OpenAI Newsroom")
+        self.assertEqual(
+            result.consulted_sources[0].title,
+            "OpenAI Newsroom",
+        )
+        self.assertNotIn("utm_source", result.consulted_sources[0].url)
+
+    def test_provider_fails_closed_without_citation_annotations(self) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+                include_citation=False,
+            )
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "trusted_web_no_cited_sources",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).search(
+                query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
 
 
     def test_provider_accepts_custom_instructions_for_current_news(self) -> None:
@@ -199,6 +282,30 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         )
         self.assertIn("pubmed.ncbi.nlm.nih.gov", result.answer_text)
 
+    def test_provider_fails_closed_on_allowlisted_but_uncited_answer_link(
+        self,
+    ) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+                "See [another study](https://pubmed.ncbi.nlm.nih.gov/99999999/).",
+            )
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "trusted_web_answer_link_not_cited",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).search(
+                query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
+
 
     def test_pubmed_synthesis_does_not_use_web_search_and_requires_inline_pmid(self) -> None:
         client = FakeClient(TextOnlyFakeResponse())
@@ -223,9 +330,16 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         self.assertNotIn("tools", kwargs)
         self.assertFalse(kwargs["store"])
         self.assertIn("Use only the supplied ODS and PubMed records", kwargs["instructions"])
-        self.assertEqual(result.sources[0].authority_type, "pubmed_research")
-        self.assertEqual(result.sources[0].evidence_type, "systematic_review")
-        self.assertEqual(result.sources[0].source_id, "PMID:123")
+        self.assertEqual(
+            result.cited_sources[0].authority_type,
+            "pubmed_research",
+        )
+        self.assertEqual(
+            result.cited_sources[0].evidence_type,
+            "systematic_review",
+        )
+        self.assertEqual(result.cited_sources[0].source_id, "PMID:123")
+        self.assertEqual(result.consulted_sources, result.cited_sources)
 
 
 if __name__ == "__main__":
