@@ -31,12 +31,14 @@ from scripts.memory_v1_v5_local_packet_disposition import (
 
 WORKER_VERSION = "memory_v1_v5_2_exact_review_route_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_2_exact_review_route_apply_v1"
+MAX_EXACT_PACKETS = 16
 
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Review and route exactly two owner-scoped V5.2 packets in one "
+            "Review and route an exact bounded set of owner-scoped V5.2 "
+            "packets in one "
             "database transaction. Never stages, promotes, retrieves, writes "
             "Qdrant, or influences prompts."
         )
@@ -54,8 +56,10 @@ def exact_packet_ids(values: list[str]) -> list[uuid.UUID]:
         packet_ids = sorted({uuid.UUID(value) for value in values}, key=str)
     except ValueError as exc:
         raise RuntimeError("exact packet allowlist contains an invalid UUID") from exc
-    if len(packet_ids) != 2:
-        raise RuntimeError("exact review routing requires two unique packet IDs")
+    if not 1 <= len(packet_ids) <= MAX_EXACT_PACKETS:
+        raise RuntimeError(
+            f"exact review routing requires 1-{MAX_EXACT_PACKETS} unique packet IDs"
+        )
     return packet_ids
 
 

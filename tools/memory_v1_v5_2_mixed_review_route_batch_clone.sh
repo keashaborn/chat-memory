@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# seebx backend only. Exercises the exact four-packet V5.2 review route in a
+# disposable production clone. Production Postgres and Qdrant remain read-only.
+
+[[ "$EUID" -eq 0 ]]
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_root"
+container=brains-postgres-1
+production=memory
+clone="memory_v5_2_mixed_route_$(date -u +%Y%m%d%H%M%S)_$$"
+owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
+other=557ea042-cb82-48f8-9429-472e96c957ef
+manifest=manifests/memory_v1_v5_2_mixed_review_route_batch_20260725.json
+manifest_sha=fa369796412929e6d50bff5ae96249f15794de8a9986228709474742e6aa3d4e
+worker=scripts/memory_v1_v5_2_exact_review_route.py
+worker_sha=bc6d0f915b2e8bc9c42489abc0bbf7f9c8ae593d575b18291d004c58fee5e6ab
+unit_test=tests/test_memory_v1_v5_2_exact_review_route.py
+unit_test_sha=1c89259f58c2eea89c86e5263cf58f7c51104f555fe8f9f6082279ac444afd90
+python_bin=/opt/chat-memory/venv/bin/python
+run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
+artifact_dir="/home/ubuntu/memory-v1-reviews/mixed-review-route-clone-$run_tag"
+reviews="$artifact_dir/reviews"
+backup=$(mktemp /tmp/memory-v5-2-mixed-route.XXXXXX.dump)
+production_before=$(mktemp /tmp/memory-v5-2-mixed-route.XXXXXX.before)
+production_after=$(mktemp /tmp/memory-v5-2-mixed-route.XXXXXX.after)
+
+cleanup() {
+  docker exec "$container" dropdb -U sage --if-exists --force "$clone" \
+    >/dev/null 2>&1 || true
+  rm -f "$backup" "$production_before" "$production_after"
+}
+trap cleanup EXIT
+
+scalar() {
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U sage -d "$1" -c "$2" | tr -d '[:space:]'
+}
+
+qdrant_signature() {
+  curl --fail --silent --show-error --max-time 30 \
+    -H 'content-type: application/json' \
+    -d '{"limit":10000,"with_payload":true,"with_vector":true}' \
+    http://127.0.0.1:6333/collections/memory_claim_v1/points/scroll \
+    | jq -cS '.result.points | sort_by(.id|tostring)' \
+    | sha256sum | awk '{print $1}'
+}
+
+capture_production() {
+  docker exec "$container" psql -X -A -F $'\t' -t -v ON_ERROR_STOP=1 \
+    -U sage -d "$production" -c "
+      SELECT 'route_events',count(*) FROM memory.v5_2_local_packet_route_event
+      UNION ALL
+      SELECT 'stage_batches',count(*) FROM memory.relational_stage_batch
+      UNION ALL
+      SELECT 'claims',count(*) FROM memory.claim
+      ORDER BY 1
+    " >"$1"
+}
+
+[[ -z "$(git status --porcelain)" ]]
+[[ "$(sha256sum "$manifest" | awk '{print $1}')" == "$manifest_sha" ]]
+[[ "$(sha256sum "$worker" | awk '{print $1}')" == "$worker_sha" ]]
+[[ "$(sha256sum "$unit_test" | awk '{print $1}')" == "$unit_test_sha" ]]
+git merge-base --is-ancestor \
+  "$(jq -er '.required_ancestor_commit' "$manifest")" HEAD
+[[ "$(jq -er '.owner_user_id' "$manifest")" == "$owner" ]]
+[[ "$(jq -er '.items|length' "$manifest")" == 4 ]]
+[[ "$(jq -er '.maximum_packets' "$manifest")" == 16 ]]
+[[ "$(jq -er '.external_model_calls' "$manifest")" == 0 ]]
+[[ -x "$python_bin" && -x "$worker" ]]
+bash -n "$0"
+
+set -a
+source /opt/chat-memory/.env
+set +a
+[[ -n "${POSTGRES_DSN:-}" ]]
+
+install -d -o ubuntu -g ubuntu -m 0700 "$artifact_dir" "$reviews"
+chmod 0600 "$backup" "$production_before" "$production_after"
+capture_production "$production_before"
+qdrant_before=$(qdrant_signature)
+
+docker exec "$container" pg_dump -U sage -d "$production" \
+  -Fc --no-owner >"$backup"
+[[ -s "$backup" ]]
+docker exec "$container" createdb -U sage -T template0 "$clone"
+docker exec -i "$container" pg_restore -U sage -d "$clone" \
+  --no-owner <"$backup"
+
+clone_dsn=$(
+  SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone" "$python_bin" -c \
+    'import os; from urllib.parse import urlsplit,urlunsplit; v=urlsplit(os.environ["SOURCE_DSN"]); print(urlunsplit((v.scheme,v.netloc,"/"+os.environ["CLONE_DB"],v.query,v.fragment)))'
+)
+
+mapfile -t packet_ids < <(jq -er '.items[].packet_id' "$manifest")
+mapfile -t evidence_ids < <(jq -er '.items[].evidence_id' "$manifest")
+[[ "${#packet_ids[@]}" -eq 4 && "${#evidence_ids[@]}" -eq 4 ]]
+packet_csv=$(IFS=,; printf '%s' "${packet_ids[*]}")
+evidence_csv=$(IFS=,; printf '%s' "${evidence_ids[*]}")
+
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
+  WHERE owner_user_id='$owner'::uuid
+    AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
+")" == 4 ]]
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.v5_2_local_packet_route_event
+  WHERE owner_user_id='$owner'::uuid
+    AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
+")" == 0 ]]
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.relational_stage_batch
+  WHERE owner_user_id='$owner'::uuid
+    AND evidence_id=ANY(string_to_array('$evidence_csv',',')::uuid[])
+")" == 0 ]]
+
+PYTHONPATH="$repo_root" "$python_bin" -m unittest \
+  tests.test_memory_v1_v5_2_exact_review_route
+
+run_worker() {
+  local actor=$1 output=$2 apply=${3:-false}
+  local -a command=(
+    "$python_bin" "$worker"
+    --owner-user-id "$actor"
+    --review-root "$reviews"
+  )
+  local packet
+  for packet in "${packet_ids[@]}"; do
+    command+=(--packet-id "$packet")
+  done
+  if [[ "$apply" == true ]]; then command+=(--apply); fi
+  runuser -u ubuntu -- env \
+    POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+    MEMORY_V1_V5_2_EXACT_REVIEW_ROUTE_APPLY=memory_v1_v5_2_exact_review_route_apply_v1 \
+    "${command[@]}" >"$output"
+  chmod 0600 "$output"
+}
+
+dry="$artifact_dir/dry.json"
+apply="$artifact_dir/apply.json"
+replay="$artifact_dir/replay.json"
+isolation="$artifact_dir/isolation.json"
+run_worker "$owner" "$dry"
+jq -e '
+  .apply==false and (.plans|length)==4 and
+  ([.plans[].route]|all(.=="manual_review_artifact_ready")) and
+  .database_writes==0 and .filesystem_writes==0 and
+  .stage_writes==0 and .claim_writes==0 and .qdrant_writes==0 and
+  .external_model_calls==0 and .prompt_influence==0
+' "$dry" >/dev/null
+
+run_worker "$owner" "$apply" true
+jq -e '
+  .apply==true and .outcome=="manual_review_artifacts_ready" and
+  .write_counts.route_events==4 and
+  .write_counts.restricted_review_artifacts==8 and
+  .write_counts.stage==0 and .write_counts.claims==0 and
+  .write_counts.qdrant==0 and .write_counts.prompt_influence==0 and
+  .transactional_apply_proved==true and
+  .zero_write_replay_proved==true and .external_model_calls==0
+' "$apply" >/dev/null
+
+run_worker "$owner" "$replay"
+jq -e '
+  .apply==false and (.plans|length)==4 and
+  ([.plans[].route]|all(.=="no_work")) and
+  .database_writes==0 and .filesystem_writes==0 and
+  .stage_writes==0 and .claim_writes==0 and .qdrant_writes==0 and
+  .external_model_calls==0 and .prompt_influence==0
+' "$replay" >/dev/null
+
+run_worker "$other" "$isolation"
+jq -e '
+  .apply==false and (.plans|length)==4 and
+  ([.plans[].route]|all(.=="no_work")) and
+  .database_writes==0 and .filesystem_writes==0 and
+  .stage_writes==0 and .claim_writes==0 and .qdrant_writes==0 and
+  .external_model_calls==0 and .prompt_influence==0
+' "$isolation" >/dev/null
+
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.v5_2_local_packet_route_event
+  WHERE owner_user_id='$owner'::uuid
+    AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
+    AND route='manual_review_artifact_ready'
+")" == 4 ]]
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.relational_stage_batch
+  WHERE owner_user_id='$owner'::uuid
+    AND evidence_id=ANY(string_to_array('$evidence_csv',',')::uuid[])
+")" == 0 ]]
+
+artifact_count=$(find "$reviews" -maxdepth 1 -type f -name '*.json' | wc -l)
+[[ "$artifact_count" -eq 8 ]]
+while IFS= read -r path; do
+  [[ "$(stat -c '%a:%U:%G' "$path")" == 600:ubuntu:ubuntu ]]
+done < <(find "$reviews" -maxdepth 1 -type f -name '*.json' | sort)
+
+capture_production "$production_after"
+cmp -s "$production_before" "$production_after"
+qdrant_after=$(qdrant_signature)
+[[ "$qdrant_before" == "$qdrant_after" ]]
+
+report="$artifact_dir/report.json"
+jq -n \
+  --arg head_commit "$(git rev-parse HEAD)" \
+  --arg manifest_sha256 "$manifest_sha" \
+  --arg qdrant_sha256 "$qdrant_after" \
+  '{
+    contract_version:"memory_v1_v5_2_mixed_review_route_clone_report_v1",
+    head_commit:$head_commit,
+    manifest_sha256:$manifest_sha256,
+    packet_count:4,
+    review_route_events:4,
+    restricted_review_artifacts:8,
+    transactional_apply_proved:true,
+    zero_write_replay_proved:true,
+    account_isolation_proved:true,
+    production_database_unchanged:true,
+    qdrant_unchanged:true,
+    qdrant_sha256:$qdrant_sha256,
+    external_model_calls:0,
+    stage_writes:0,
+    claim_writes:0,
+    prompt_influence:0,
+    hard_stop:"before_relational_staging_claims_qdrant_retrieval_or_prompt_influence"
+  }' >"$report"
+chown ubuntu:ubuntu "$report"
+chmod 0600 "$report"
+sha256sum "$report" >"$report.sha256"
+chown ubuntu:ubuntu "$report.sha256"
+chmod 0600 "$report.sha256"
+
+printf 'memory_v1_v5_2_mixed_review_route_batch_clone: PASS\n'
+printf 'report=%s\nreport_sha256=%s\n' \
+  "$report" "$(awk '{print $1}' "$report.sha256")"
