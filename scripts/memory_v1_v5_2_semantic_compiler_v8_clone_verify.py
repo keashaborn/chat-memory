@@ -30,7 +30,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 )
 
 
-CONTRACT_VERSION = "memory_v1_v5_2_general_compiler_v7_clone_verify_v1"
+CONTRACT_VERSION = "memory_v1_v5_2_semantic_compiler_v8_clone_verify_v1"
 OWNER = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 OTHER_OWNER = uuid.UUID("557ea042-cb82-48f8-9429-472e96c957ef")
 MODEL = "qwen3-14b-local-extractor"

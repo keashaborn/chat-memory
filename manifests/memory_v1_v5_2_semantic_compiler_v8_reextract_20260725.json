@@ -1,0 +1,26 @@
+{
+  "contract_version": "memory_v1_v5_2_semantic_compiler_v8_reextract_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "selector_version": "20260725_v5_2_semantic_compiler_v8_reextract_v1",
+  "policy_compiler_version": "memory_v1_semantic_policy_compiler_v8",
+  "items": [
+    {
+      "evidence_id": "fea59e7e-30f5-4139-b634-97b291c88e14",
+      "content_sha256": "895146b94431f7e0ec3292e757e30fc4c782af222bd39598e610654adf08ccec",
+      "prior_packet_id": "a7f23e7b-89ff-5d23-bb75-79473be6f57d",
+      "prior_packet_storage_sha256": "430264a8f709288562505c0e50c97e2b379af59536ff5a65061352c3b925789e",
+      "operation_id": "6d907502-d830-5467-9e61-fe846453383d",
+      "job_id": "d0585d84-7386-5b5f-b7ff-ac97949883cc",
+      "terminal_id": "25717c16-e87c-54ff-92da-d071770f6ab7"
+    },
+    {
+      "evidence_id": "dcf5ece1-0e22-574f-8ac9-f3d0acc4e8f5",
+      "content_sha256": "fb65fe592059bace88a4daea571ac1ba7df2b5aeb5136233dd01071cb6085182",
+      "prior_packet_id": "842c2fc5-d2ca-584d-a95c-98655e942732",
+      "prior_packet_storage_sha256": "968611c8092391ffcdaa5ab493dbe7d1eb574c0a8e1748915c3ccb24c22bf029",
+      "operation_id": "87074bcf-7206-5032-8c25-f98c1b79f31c",
+      "job_id": "360dbb78-69e3-5a3d-ba9b-2512acca21b8",
+      "terminal_id": "059d58f1-eb02-559a-b30b-f55f51e1af7c"
+    }
+  ]
+}

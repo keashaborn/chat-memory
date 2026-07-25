@@ -14,12 +14,12 @@ set +a
 python_bin=/opt/chat-memory/venv/bin/python
 container=brains-postgres-1
 production=memory
-clone="memory_v5_v5_2_general_compiler_v7_${$}"
+clone="memory_v5_v5_2_semantic_compiler_v8_${$}"
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
-verifier=scripts/memory_v1_v5_2_general_compiler_v7_clone_verify.py
-backup=$(mktemp /tmp/memory-v5-2-general-compiler-v7.XXXXXX.dump)
+verifier=scripts/memory_v1_v5_2_semantic_compiler_v8_clone_verify.py
+backup=$(mktemp /tmp/memory-v5-2-semantic-compiler-v8.XXXXXX.dump)
 report_dir=/home/ubuntu/memory-v1-reviews
-report="$report_dir/general-compiler-v7-clone-$(git rev-parse --short HEAD).json"
+report="$report_dir/semantic-compiler-v8-clone-$(git rev-parse --short HEAD).json"
 chmod 0600 "$backup"
 
 cleanup() {
@@ -84,7 +84,7 @@ chown ubuntu:ubuntu "$report"
 
 jq -e '
   .passed == true and
-  .compiler_version == "memory_v1_semantic_policy_compiler_v7" and
+  .compiler_version == "memory_v1_semantic_policy_compiler_v8" and
   .owner_isolation_visible_rows == 0 and
   .external_model_calls == 0 and
   .local_model_calls == 1 and
@@ -109,4 +109,4 @@ after_qdrant=$(curl -fsS \
   http://127.0.0.1:8088/docs)" == 200 ]]
 
 printf 'REPORT=%s\n' "$report"
-printf '%s\n' 'memory_v1_v5_2_general_compiler_v7_production_clone: PASS'
+printf '%s\n' 'memory_v1_v5_2_semantic_compiler_v8_production_clone: PASS'

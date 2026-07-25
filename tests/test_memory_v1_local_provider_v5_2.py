@@ -104,7 +104,7 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(
             provider._policy_compiler_version,
-            "memory_v1_semantic_policy_compiler_v7",
+            "memory_v1_semantic_policy_compiler_v8",
         )
 
     def test_multiple_explicit_stance_cues_require_atomic_split(self) -> None:

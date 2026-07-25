@@ -48,7 +48,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v7"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v8"
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
 )
