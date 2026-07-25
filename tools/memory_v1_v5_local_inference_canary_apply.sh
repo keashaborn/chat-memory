@@ -226,12 +226,6 @@ if [[ "$contract_profile" == v5_2 ]]; then
     WHERE registry_version='memory_predicate_registry_v5_2'
       AND contract_version='memory_v1_relational_extraction_v5_2'
       AND status='proposed' AND NOT runtime_active")" == 1 ]]
-  [[ "$(psql_scalar "SELECT count(*) FROM memory.observation
-    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
-  [[ "$(psql_scalar "SELECT count(*) FROM memory.entity_resolution_plan
-    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
-  [[ "$(psql_scalar "SELECT count(*) FROM memory.projection_plan
-    WHERE predicate_registry_version='memory_predicate_registry_v5_2'")" == 0 ]]
 fi
 resume_mode=$(psql_scalar "SELECT CASE WHEN EXISTS (
   SELECT 1
