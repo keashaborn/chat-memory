@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 from uuid import UUID
 
 from fastapi import Response
@@ -10,13 +12,17 @@ from rag_engine.current_news_router import (
     CurrentNewsRequestV1,
     CurrentNewsResponseV1,
     _current_news_skeleton_answer,
+    _current_news_sources_from_trusted_sources,
     apply_current_news_no_store_headers,
+    current_news_fetch_enabled_from_env,
+    current_news_provider_settings_from_env,
 )
 from rag_engine.trusted_web_policy_v1 import (
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
+from rag_engine.trusted_web_provider_v1 import TrustedWebSourceV1
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -58,6 +64,48 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertIn("needs a specific topic", answer)
         self.assertIn("OpenAI and Hugging Face", answer)
         self.assertNotIn("outside current-news scope", answer)
+
+
+    def test_current_news_fetch_flag_defaults_off(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(current_news_fetch_enabled_from_env())
+
+    def test_current_news_fetch_flag_and_external_access_are_server_owned(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "CURRENT_NEWS_FETCH_ENABLED": "true",
+                "TRUSTED_WEB_EXTERNAL_WEB_ACCESS": "false",
+                "CURRENT_NEWS_EXTERNAL_WEB_ACCESS": "true",
+            },
+            clear=True,
+        ):
+            self.assertTrue(current_news_fetch_enabled_from_env())
+            settings = current_news_provider_settings_from_env()
+            self.assertTrue(settings.enabled)
+            self.assertTrue(settings.external_web_access)
+
+    def test_current_news_sources_are_news_card_shaped(self) -> None:
+        sources = _current_news_sources_from_trusted_sources(
+            (
+                TrustedWebSourceV1(
+                    url="https://openai.com/news/example",
+                    title="OpenAI update",
+                    authority_type="official_web",
+                    evidence_type="web_source",
+                ),
+                TrustedWebSourceV1(
+                    url="https://www.reuters.com/technology/example",
+                    title="Reuters report",
+                    authority_type="official_web",
+                    evidence_type="web_source",
+                ),
+            )
+        )
+        self.assertEqual(sources[0].publisher, "OpenAI")
+        self.assertEqual(sources[0].source_type, "official_source")
+        self.assertEqual(sources[1].publisher, "Reuters")
+        self.assertEqual(sources[1].source_type, "news_source")
 
     def test_current_news_policy_routes_but_fetch_remains_disabled(self) -> None:
         decision = route_trusted_web_query(

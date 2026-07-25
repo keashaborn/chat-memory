@@ -278,12 +278,13 @@ class OpenAITrustedWebProviderV1:
         policy: TrustedWebPolicyDecisionV1,
         actor_user_id: str,
         safety_secret: str,
+        instructions: str = TRUSTED_WEB_INSTRUCTIONS_V1,
     ) -> TrustedWebProviderResultV1:
         if not policy.allowed_domains:
             raise TrustedWebProviderError("trusted_web_allowed_domains_empty")
         response = self._client.responses.create(
             model=self._settings.model,
-            instructions=TRUSTED_WEB_INSTRUCTIONS_V1,
+            instructions=instructions,
             input=query,
             tools=[
                 {

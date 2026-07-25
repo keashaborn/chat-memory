@@ -120,6 +120,25 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         self.assertEqual(len(result.sources), 1)
         self.assertIn("Sources:", result.answer_markdown())
 
+
+    def test_provider_accepts_custom_instructions_for_current_news(self) -> None:
+        client = FakeClient(FakeResponse("https://openai.com/news/example"))
+        policy = route_trusted_web_query("What just happened with OpenAI?")
+        OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).search(
+            query="What just happened with OpenAI?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+            instructions="current-news-test-instructions",
+        )
+        self.assertEqual(
+            client.responses.kwargs["instructions"],
+            "current-news-test-instructions",
+        )
+
     def test_provider_fails_closed_on_non_allowlisted_source(self) -> None:
         client = FakeClient(FakeResponse("https://example.com/research"))
         policy = route_trusted_web_query("Does creatine improve strength?")
@@ -160,7 +179,7 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         kwargs = client.responses.kwargs
         self.assertNotIn("tools", kwargs)
         self.assertFalse(kwargs["store"])
-        self.assertIn("Use only the supplied PubMed records", kwargs["instructions"])
+        self.assertIn("Use only the supplied ODS and PubMed records", kwargs["instructions"])
         self.assertEqual(result.sources[0].authority_type, "pubmed_research")
         self.assertEqual(result.sources[0].evidence_type, "systematic_review")
         self.assertEqual(result.sources[0].source_id, "PMID:123")
