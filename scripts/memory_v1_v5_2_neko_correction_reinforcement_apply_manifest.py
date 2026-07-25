@@ -23,6 +23,9 @@ REVIEW_CONTRACT = (
 REVIEW_RESULT_CONTRACT = (
     "memory_v1_v5_2_neko_correction_reinforcement_review_result_v1"
 )
+STAGE_CONTRACT = (
+    "memory_v1_v5_2_neko_correction_reinforcement_stage_manifest_v1"
+)
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 OBSERVATION = "5261da41-f863-42cd-8e3f-6e947f9743f2"
@@ -115,8 +118,23 @@ async def run() -> int:
     review_result = load_hashed(
         review_result_path, REVIEW_RESULT_CONTRACT, "result_sha256"
     )
+    stage_manifest_path = private_path(review_manifest["source_stage_manifest"])
+    if (
+        file_sha256(stage_manifest_path)
+        != review_manifest["source_stage_manifest_file_sha256"]
+    ):
+        raise ManifestError("stage manifest file hash mismatch")
+    stage_manifest = load_hashed(
+        stage_manifest_path, STAGE_CONTRACT, "manifest_sha256"
+    )
+    if (
+        stage_manifest["manifest_sha256"]
+        != review_manifest["source_stage_manifest_sha256"]
+    ):
+        raise ManifestError("stage manifest content binding mismatch")
     items = review_manifest.get("items")
     outcomes = review_result.get("outcomes")
+    stage_items = stage_manifest.get("items")
     if (
         review_manifest.get("owner_user_id") != owner
         or review_result.get("owner_user_id") != owner
@@ -128,12 +146,18 @@ async def run() -> int:
         or len(items) != 1
         or not isinstance(outcomes, list)
         or len(outcomes) != 1
+        or not isinstance(stage_items, list)
+        or len(stage_items) != 1
     ):
         raise ManifestError("review artifacts are outside the exact boundary")
     reviewed = items[0]
     outcome = outcomes[0]
+    staged = stage_items[0]
     plan_id = str(uuid.UUID(reviewed["plan_id"]))
     review_id = str(uuid.UUID(outcome["review_id"]))
+    projection = staged["packet"]["projections"][0]
+    target = projection["target"]
+    payload = projection["payload"]
     if (
         reviewed.get("projection_ref") != "p01"
         or reviewed.get("observation_id") != OBSERVATION
@@ -146,6 +170,29 @@ async def run() -> int:
         or outcome.get("decision") != "authorized"
         or outcome.get("outcome") != "applied"
         or outcome.get("rows_written") != 1
+        or staged.get("plan_id") != plan_id
+        or staged.get("observation_id") != OBSERVATION
+        or staged.get("predicate") != "identity.name_canonical"
+        or staged.get("canonical_text") != CANONICAL_TEXT
+        or projection.get("projection_ref") != "p01"
+        or projection["identity"]["semantic_key_sha256"] != SEMANTIC_KEY
+        or target.get("action") != "reinforce"
+        or target.get("aggregate_id") != CLAIM
+        or target.get("expected_revision_number") != CLAIM_REVISION
+        or target.get("reason_codes")
+        != [
+            "additional_supporting_observation",
+            "canonical_name_correction_normalized",
+        ]
+        or projection["review"]["reason_codes"]
+        != ["v5_2_canonical_name_reinforcement_requires_review"]
+        or payload
+        != {
+            "kind": "claim",
+            "claim_class": "direct_claim",
+            "canonical_text": CANONICAL_TEXT,
+            "surface_policy": "direct_or_relevant",
+        }
     ):
         raise ManifestError("authorized review semantics drifted")
 
@@ -167,59 +214,14 @@ async def run() -> int:
             "p01",
             uuid.UUID(review_id),
         )
-        source = await connection.fetchrow(
-            """
-            SELECT item.target_action::text AS target_action,
-                   item.expected_revision_number,
-                   item.semantic_key_sha256,
-                   item.projection_sha256,
-                   item.target_reason_codes,
-                   item.review_reason_codes,
-                   payload.target_claim_id,
-                   payload.claim_class,
-                   payload.canonical_text,
-                   payload.surface_policy::text AS surface_policy,
-                   link.observation_id
-            FROM memory.projection_plan_item AS item
-            JOIN memory.projection_claim_payload AS payload
-              USING(owner_user_id,plan_id,projection_ref)
-            JOIN memory.projection_plan_observation AS link
-              USING(owner_user_id,plan_id,projection_ref)
-            WHERE item.owner_user_id=$1
-              AND item.plan_id=$2
-              AND item.projection_ref='p01'
-            """,
-            uuid.UUID(owner),
-            uuid.UUID(plan_id),
-        )
-        if state is None or source is None:
+        if state is None:
             raise ManifestError("reviewed reinforcement is absent")
-        source = dict(source)
-        for field in ("target_reason_codes", "review_reason_codes"):
-            if isinstance(source[field], str):
-                source[field] = json.loads(source[field])
         if (
             state["lane"] != "claim"
             or state["target_action"] != "reinforce"
             or state["review_state"] != "manual_review_required"
             or state["current_revision_number"] != CLAIM_REVISION
             or str(state["review_id"]) != review_id
-            or source["target_action"] != "reinforce"
-            or source["expected_revision_number"] != CLAIM_REVISION
-            or source["semantic_key_sha256"] != SEMANTIC_KEY
-            or source["projection_sha256"] != reviewed["projection_sha256"]
-            or source["target_reason_codes"]
-            != [
-                "additional_supporting_observation",
-                "canonical_name_correction_normalized",
-            ]
-            or source["review_reason_codes"]
-            != ["v5_2_canonical_name_reinforcement_requires_review"]
-            or str(source["target_claim_id"]) != CLAIM
-            or source["claim_class"] != "direct_claim"
-            or source["canonical_text"] != CANONICAL_TEXT
-            or source["surface_policy"] != "direct_or_relevant"
-            or str(source["observation_id"]) != OBSERVATION
         ):
             raise ManifestError("projection apply preflight drifted")
         await transaction.rollback()
