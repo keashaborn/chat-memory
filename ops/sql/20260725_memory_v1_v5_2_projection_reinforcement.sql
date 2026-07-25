@@ -20,6 +20,123 @@ BEGIN
 END
 $prerequisite$;
 
+CREATE OR REPLACE FUNCTION
+  memory.v5_2_canonical_name_reinforcement_policy_bridge(
+    p_owner_user_id uuid,
+    p_plan_id uuid,
+    p_projection_ref text,
+    p_observation_id uuid
+  )
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path=''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM memory.projection_plan_item AS item
+    JOIN memory.projection_claim_payload AS payload
+      ON payload.owner_user_id=item.owner_user_id
+     AND payload.plan_id=item.plan_id
+     AND payload.projection_ref=item.projection_ref
+    JOIN memory.projection_plan_observation AS link
+      ON link.owner_user_id=item.owner_user_id
+     AND link.plan_id=item.plan_id
+     AND link.projection_ref=item.projection_ref
+    JOIN memory.observation AS observation
+      ON observation.owner_user_id=link.owner_user_id
+     AND observation.observation_id=link.observation_id
+    JOIN memory.observation_entity_binding AS binding
+      ON binding.owner_user_id=observation.owner_user_id
+     AND binding.observation_id=observation.observation_id
+    JOIN memory.claim AS target
+      ON target.owner_user_id=payload.owner_user_id
+     AND target.claim_id=payload.target_claim_id
+    WHERE item.owner_user_id=p_owner_user_id
+      AND item.plan_id=p_plan_id
+      AND item.projection_ref=p_projection_ref
+      AND link.observation_id=p_observation_id
+      AND item.lane='claim'
+      AND item.target_action='reinforce'
+      AND item.target_reason_codes='[
+        "additional_supporting_observation",
+        "canonical_name_correction_normalized"
+      ]'::jsonb
+      AND item.review_reason_codes=
+        '["v5_2_canonical_name_reinforcement_requires_review"]'::jsonb
+      AND item.predicate_registry_version=
+        'memory_predicate_registry_v5_2'
+      AND item.predicate='identity.name_canonical'
+      AND item.object_kind='literal'
+      AND item.object_entity_id IS NULL
+      AND item.polarity='affirmed'
+      AND item.modality='corrective'
+      AND payload.target_action='reinforce'
+      AND payload.claim_class='direct_claim'
+      AND payload.surface_policy='direct_or_relevant'
+      AND payload.canonical_text=target.canonical_text
+      AND observation.predicate_registry_version=
+        'memory_predicate_registry_v5_2'
+      AND observation.predicate='identity.name_canonical'
+      AND observation.polarity='affirmed'
+      AND observation.modality='corrective'
+      AND observation.projection_class='correction'
+      AND observation.surface_policy='normalization_only'
+      AND binding.subject_entity_id=item.subject_entity_id
+      AND binding.object_entity_id IS NULL
+      AND memory.v5_digest_text(memory.v5_canonical_json_text(
+            observation.object_literal
+          ))=item.object_literal_sha256
+      AND target.status='supported'
+      AND target.canonical_key='v5:'||item.semantic_key_sha256
+      AND target.subject_entity_id=item.subject_entity_id
+      AND target.predicate=item.predicate
+      AND target.object_entity_id IS NULL
+      AND item.expected_revision_number=(
+        SELECT max(revision.revision_number)
+        FROM memory.claim_revision AS revision
+        WHERE revision.owner_user_id=target.owner_user_id
+          AND revision.claim_id=target.claim_id
+      )
+      AND target.retrieval_policy->>'surface_policy'='direct_or_relevant'
+      AND lower(btrim(target.object_literal->>'value'))=
+            lower(btrim(observation.object_literal->>'value'))
+  )
+$function$;
+
+DO $install_policy_bridge$
+DECLARE
+  guard_definition text;
+  marker text :=
+    E'      -- canonical_name_claim_source_v5_2_compat\n'
+    E'      AND NOT (\n';
+  replacement text :=
+    E'      -- canonical_name_claim_source_v5_2_compat\n'
+    E'      AND NOT (\n'
+    E'        memory.v5_2_canonical_name_reinforcement_policy_bridge(\n'
+    E'          item.owner_user_id,item.plan_id,item.projection_ref,\n'
+    E'          link.observation_id\n'
+    E'        )\n'
+    E'        OR\n';
+BEGIN
+  SELECT pg_get_functiondef(
+    'memory.guard_projection_item_complete_v5()'::regprocedure
+  ) INTO guard_definition;
+  IF strpos(
+       guard_definition,
+       'memory.v5_2_canonical_name_reinforcement_policy_bridge('
+     )=0 THEN
+    IF length(guard_definition)-length(replace(guard_definition,marker,''))
+         <>length(marker) THEN
+      RAISE EXCEPTION
+        'V5.2 reinforcement policy-bridge guard source drifted';
+    END IF;
+    EXECUTE replace(guard_definition,marker,replacement);
+  END IF;
+END
+$install_policy_bridge$;
+
 CREATE OR REPLACE FUNCTION memory.preflight_projection_reinforcement_v5_2(
   p_plan_id uuid,
   p_packet_text text
@@ -491,6 +608,9 @@ ALTER FUNCTION memory.preflight_projection_reinforcement_v5_2(uuid,text)
   OWNER TO memory_v5_writer;
 ALTER FUNCTION memory.stage_projection_reinforcement_v5_2(uuid,text,text)
   OWNER TO memory_v5_writer;
+ALTER FUNCTION
+  memory.v5_2_canonical_name_reinforcement_policy_bridge(uuid,uuid,text,uuid)
+  OWNER TO memory_v5_writer;
 
 REVOKE ALL ON FUNCTION
   memory.preflight_projection_reinforcement_v5_2(uuid,text)
@@ -498,11 +618,17 @@ REVOKE ALL ON FUNCTION
 REVOKE ALL ON FUNCTION
   memory.stage_projection_reinforcement_v5_2(uuid,text,text)
   FROM PUBLIC;
+REVOKE ALL ON FUNCTION
+  memory.v5_2_canonical_name_reinforcement_policy_bridge(uuid,uuid,text,uuid)
+  FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION
   memory.preflight_projection_reinforcement_v5_2(uuid,text)
   TO brains_app;
 GRANT EXECUTE ON FUNCTION
   memory.stage_projection_reinforcement_v5_2(uuid,text,text)
   TO brains_app;
+GRANT EXECUTE ON FUNCTION
+  memory.v5_2_canonical_name_reinforcement_policy_bridge(uuid,uuid,text,uuid)
+  TO memory_v5_writer;
 
 COMMIT;

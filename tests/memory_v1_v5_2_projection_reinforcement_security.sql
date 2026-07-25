@@ -50,6 +50,52 @@ BEGIN
       RAISE EXCEPTION 'reinforcement function ACL drift: %',function_name;
     END IF;
   END LOOP;
+  function_oid := to_regprocedure(
+    'memory.v5_2_canonical_name_reinforcement_policy_bridge(uuid,uuid,text,uuid)'
+  );
+  IF function_oid IS NULL
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_proc AS procedure
+       JOIN pg_roles AS owner_role ON owner_role.oid=procedure.proowner
+       WHERE procedure.oid=function_oid
+         AND owner_role.rolname='memory_v5_writer'
+         AND NOT procedure.prosecdef
+         AND EXISTS (
+           SELECT 1
+           FROM unnest(procedure.proconfig) AS setting
+           WHERE setting LIKE 'search_path=%'
+         )
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM pg_proc AS procedure,
+       LATERAL aclexplode(
+         COALESCE(
+           procedure.proacl,
+           acldefault('f',procedure.proowner)
+         )
+       ) AS privilege
+       WHERE procedure.oid=function_oid
+         AND privilege.grantee=0
+         AND privilege.privilege_type='EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'memory_v5_writer',function_oid,'EXECUTE'
+     )
+     OR has_function_privilege(
+       'brains_app',function_oid,'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'reinforcement policy bridge ownership/security drift';
+  END IF;
+  IF strpos(
+       pg_get_functiondef(
+         'memory.guard_projection_item_complete_v5()'::regprocedure
+       ),
+       'memory.v5_2_canonical_name_reinforcement_policy_bridge('
+     )=0 THEN
+    RAISE EXCEPTION 'projection completeness guard omitted reinforcement bridge';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_roles
     WHERE rolname='memory_v5_writer'
