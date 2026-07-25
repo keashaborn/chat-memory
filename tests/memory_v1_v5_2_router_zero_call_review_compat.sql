@@ -8,6 +8,7 @@ SELECT set_config('test.one_call_packet_id', :'one_call_packet_id', false);
 DO $catalog$
 DECLARE
   function_definition text;
+  authority_definition text;
 BEGIN
   SELECT pg_get_functiondef(
     'memory.plan_owner_v5_2_local_packet_route_v1(integer)'::regprocedure
@@ -21,6 +22,19 @@ BEGIN
        'packet\.local_model_calls\s*=\s*1'
      )<>0 THEN
     RAISE EXCEPTION 'V5.2 planner is not zero-call compatible';
+  END IF;
+  SELECT pg_get_functiondef(
+    'memory.authoritative_owner_v5_2_packet_id_v1(uuid)'::regprocedure
+  ) INTO authority_definition;
+  IF strpos(
+       authority_definition,
+       'packet.local_model_calls BETWEEN 0 AND 1'
+     )=0
+     OR regexp_count(
+       authority_definition,
+       'packet\.local_model_calls\s*=\s*1'
+     )<>0 THEN
+    RAISE EXCEPTION 'V5.2 packet authority is not zero-call compatible';
   END IF;
   IF NOT has_function_privilege(
        'brains_app',

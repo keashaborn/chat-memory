@@ -10,6 +10,9 @@ BEGIN
   IF session_user<>'sage'
      OR to_regprocedure(
        'memory.plan_owner_v5_2_local_packet_route_v1(integer)'
+     ) IS NULL
+     OR to_regprocedure(
+       'memory.authoritative_owner_v5_2_packet_id_v1(uuid)'
      ) IS NULL THEN
     RAISE EXCEPTION 'V5.2 zero-call review rollback prerequisites are absent';
   END IF;
@@ -42,9 +45,36 @@ BEGIN
   )<>1 THEN
     RAISE EXCEPTION 'unexpected V5.2 planner rollback predicate';
   END IF;
+
+  SELECT pg_get_functiondef(
+    'memory.authoritative_owner_v5_2_packet_id_v1(uuid)'::regprocedure
+  ) INTO function_definition;
+  IF regexp_count(
+       function_definition,
+       'packet\.local_model_calls\s+BETWEEN\s+0\s+AND\s+1'
+     )=1 THEN
+    function_definition:=regexp_replace(
+      function_definition,
+      'packet\.local_model_calls\s+BETWEEN\s+0\s+AND\s+1',
+      'packet.local_model_calls=1'
+    );
+    EXECUTE function_definition;
+  ELSIF regexp_count(
+    function_definition,
+    'packet\.local_model_calls\s*=\s*1'
+  )<>1 THEN
+    RAISE EXCEPTION 'unexpected V5.2 authority rollback predicate';
+  END IF;
 END
 $rollback$;
 
+ALTER FUNCTION memory.authoritative_owner_v5_2_packet_id_v1(uuid)
+  OWNER TO memory_v5_2_local_router_maintainer;
+REVOKE ALL ON FUNCTION memory.authoritative_owner_v5_2_packet_id_v1(uuid)
+  FROM PUBLIC,brains_app;
+GRANT EXECUTE ON FUNCTION memory.authoritative_owner_v5_2_packet_id_v1(uuid)
+  TO memory_v5_2_local_router_maintainer,
+     memory_v5_2_atom_admission_maintainer;
 ALTER FUNCTION memory.plan_owner_v5_2_local_packet_route_v1(integer)
   OWNER TO memory_v5_2_local_router_maintainer;
 REVOKE ALL ON FUNCTION memory.plan_owner_v5_2_local_packet_route_v1(integer)

@@ -48,9 +48,13 @@ trap cleanup EXIT
 
 function_sha() {
   docker exec "$container" psql -U sage -d "$1" -X -Atqc "
-    SELECT encode(public.digest(convert_to(pg_get_functiondef(
-      'memory.plan_owner_v5_2_local_packet_route_v1(integer)'::regprocedure
+    SELECT encode(public.digest(convert_to(string_agg(
+      pg_get_functiondef(signature),E'\\n' ORDER BY signature::text
     ),'UTF8'),'sha256'),'hex')
+    FROM unnest(ARRAY[
+      'memory.authoritative_owner_v5_2_packet_id_v1(uuid)'::regprocedure,
+      'memory.plan_owner_v5_2_local_packet_route_v1(integer)'::regprocedure
+    ]) AS signature
   "
 }
 
