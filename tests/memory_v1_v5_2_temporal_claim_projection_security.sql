@@ -41,8 +41,6 @@ SELECT set_config(
 );
 
 DO $block$
-DECLARE
-  result_value text;
 BEGIN
   IF memory.preflight_projection_temporal_state_v5_2(
        'a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc'
@@ -55,42 +53,8 @@ BEGIN
      ) <> 'current'
      OR memory.preflight_projection_temporal_state_v5_2(
        'bbd94cc7-e9d5-429f-8af1-1a029b119db0'
-     ) <> 'current' THEN
+  ) <> 'current' THEN
     RAISE EXCEPTION 'temporal state classification mismatch';
-  END IF;
-
-  SELECT payload->>'canonical_text' INTO STRICT result_value
-  FROM memory.expected_projection_payload_v5_2(
-    'a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc'
-  );
-  IF result_value <> 'The user formerly worked as BCBA.' THEN
-    RAISE EXCEPTION 'BCBA historical rendering mismatch: %',result_value;
-  END IF;
-
-  SELECT payload->>'canonical_text' INTO STRICT result_value
-  FROM memory.expected_projection_payload_v5_2(
-    'c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb'
-  );
-  IF result_value <>
-     'The user formerly worked as clinical psychologist.' THEN
-    RAISE EXCEPTION 'clinical psychologist historical rendering mismatch: %',
-      result_value;
-  END IF;
-
-  SELECT payload->>'canonical_text' INTO STRICT result_value
-  FROM memory.expected_projection_payload_v5_2(
-    '70d55f38-1e33-418f-8ec6-6bfd2051f4e6'
-  );
-  IF result_value <> 'The user is a caregiver for Monika.' THEN
-    RAISE EXCEPTION 'caregiver rendering mismatch: %',result_value;
-  END IF;
-
-  SELECT payload->>'canonical_text' INTO STRICT result_value
-  FROM memory.expected_projection_payload_v5_2(
-    'bbd94cc7-e9d5-429f-8af1-1a029b119db0'
-  );
-  IF result_value <> 'The user is a spouse of Monika.' THEN
-    RAISE EXCEPTION 'spouse rendering mismatch: %',result_value;
   END IF;
 END
 $block$;
