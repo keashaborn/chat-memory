@@ -413,6 +413,12 @@ phase=postflight
 phase=restore
 restore_runtime
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
+for _attempt in $(seq 1 30); do
+  curl --fail --silent --show-error --max-time 3 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/healthz >/dev/null 2>&1 && break
+  sleep 1
+done
 curl --fail --silent --show-error --max-time 30 \
   -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
   http://127.0.0.1:8088/healthz >/dev/null
