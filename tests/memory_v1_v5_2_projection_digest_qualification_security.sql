@@ -65,7 +65,7 @@ BEGIN
 END
 $contract$;
 
-SET LOCAL ROLE brains_app;
+SET LOCAL SESSION AUTHORIZATION brains_app;
 SELECT set_config(
   'app.user_id',
   '1240822d-ac9a-4096-95aa-e2b24d36ef50',
