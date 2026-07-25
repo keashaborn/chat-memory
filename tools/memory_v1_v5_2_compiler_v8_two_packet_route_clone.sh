@@ -33,10 +33,15 @@ review_root=$(mktemp -d /tmp/memory-v5-2-compiler-v8-route.XXXXXX.reviews)
 chmod 0600 "$backup" "$before_function" "$after_function" \
   "$care_apply" "$profession_apply" "$care_replay" "$profession_replay"
 chmod 0700 "$review_root"
+phase=initialization
 
 cleanup() {
   rc=$?
   trap - EXIT
+  if [[ "$rc" -ne 0 ]]; then
+    printf 'memory_v1_v5_2_compiler_v8_two_packet_route_clone: FAIL phase=%s\n' \
+      "$phase" >&2
+  fi
   docker exec "$container" dropdb -U sage --if-exists "$clone" \
     >/dev/null 2>&1 || true
   rm -f "$backup" "$before_function" "$after_function" \
@@ -69,6 +74,7 @@ qdrant_signature() {
 
 [[ -z "$(git status --porcelain)" ]]
 [[ -x "$python_bin" ]]
+phase=unit_tests
 "$python_bin" -m py_compile \
   scripts/memory_v1_v5_1_review_local_packet.py "$worker"
 "$python_bin" -m unittest "$review_test" "$router_test"
@@ -76,6 +82,7 @@ qdrant_before=$(qdrant_signature)
 production_routes_before=$(docker exec "$container" psql -U sage -d "$production" \
   -X -Atqc 'SELECT count(*) FROM memory.v5_2_local_packet_route_event')
 
+phase=clone_restore
 docker exec "$container" pg_dump -U sage -d "$production" -Fc >"$backup"
 [[ -s "$backup" ]]
 docker exec "$container" createdb -U sage -T template0 "$clone"
@@ -83,6 +90,7 @@ docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --exit-on-error <"$backup"
 
 function_sha "$clone" >"$before_function"
+phase=migration_security
 docker exec -i "$container" psql -U sage -d "$clone" -X \
   -v ON_ERROR_STOP=1 <"$migration" >/dev/null
 docker exec -i "$container" psql -U sage -d "$clone" -X \
@@ -94,6 +102,7 @@ docker exec -i "$container" psql -U sage -d "$clone" -X \
   -v one_call_packet_id="$profession_packet" \
   <"$sql_test" >/dev/null
 
+phase=rollback_fidelity
 docker exec -i "$container" psql -U sage -d "$clone" -X \
   -v ON_ERROR_STOP=1 <"$rollback" >/dev/null
 function_sha "$clone" >"$after_function"
@@ -116,11 +125,16 @@ run_router() {
       --packet-id "$packet" --review-root "$review_root" --apply >"$output"
 }
 
+phase=caregiving_apply
 run_router "$care_packet" "$care_apply"
+phase=profession_apply
 run_router "$profession_packet" "$profession_apply"
+phase=caregiving_replay
 run_router "$care_packet" "$care_replay"
+phase=profession_replay
 run_router "$profession_packet" "$profession_replay"
 
+phase=output_contracts
 for output in "$care_apply" "$profession_apply"; do
   jq -e '
     .apply==true and .outcome=="manual_review_artifact_ready" and
@@ -142,6 +156,7 @@ for output in "$care_replay" "$profession_replay"; do
   ' "$output" >/dev/null
 done
 
+phase=postflight
 [[ "$(find "$review_root" -maxdepth 1 -type f -name '*.json' | wc -l)" == 4 ]]
 [[ "$(docker exec "$container" psql -U sage -d "$clone" -X -Atqc "
   SELECT count(*) FROM memory.v5_2_local_packet_route_event
@@ -167,4 +182,5 @@ done
   == "$production_routes_before" ]]
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
+phase=complete
 printf '%s\n' 'memory_v1_v5_2_compiler_v8_two_packet_route_clone: PASS'
