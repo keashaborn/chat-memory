@@ -110,15 +110,15 @@ DECLARE
   guard_definition text;
   marker text :=
     E'      -- canonical_name_claim_source_v5_2_compat\n'
-    E'      AND NOT (\n';
+    || E'      AND NOT (\n';
   replacement text :=
     E'      -- canonical_name_claim_source_v5_2_compat\n'
-    E'      AND NOT (\n'
-    E'        memory.v5_2_canonical_name_reinforcement_policy_bridge(\n'
-    E'          item.owner_user_id,item.plan_id,item.projection_ref,\n'
-    E'          link.observation_id\n'
-    E'        )\n'
-    E'        OR\n';
+    || E'      AND NOT (\n'
+    || E'        memory.v5_2_canonical_name_reinforcement_policy_bridge(\n'
+    || E'          item.owner_user_id,item.plan_id,item.projection_ref,\n'
+    || E'          link.observation_id\n'
+    || E'        )\n'
+    || E'        OR\n';
 BEGIN
   SELECT pg_get_functiondef(
     'memory.guard_projection_item_complete_v5()'::regprocedure
