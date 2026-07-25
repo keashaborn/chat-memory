@@ -6,7 +6,9 @@ import hashlib
 import hmac
 import html
 import os
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,6 +48,18 @@ Evidence:
 """
 
 _ALLOWED_MODELS = frozenset({"gpt-5.4", "gpt-5.5", "gpt-5.6"})
+_ANSWER_HTTP_URL_RE = re.compile(r"""https?://[^\s<>'"`]+""", re.IGNORECASE)
+_ANSWER_MARKDOWN_TARGET_RE = re.compile(
+    r"""!?\[[^\]\r\n]*\]\(\s*<?([^\s)>]+)>?""",
+)
+_ANSWER_WWW_URL_RE = re.compile(
+    r"""(?<![@\w])www\.[a-z0-9.-]+\.[a-z]{2,}(?:/[^\s<>'"`]*)?""",
+    re.IGNORECASE,
+)
+_ANSWER_EMAIL_RE = re.compile(
+    r"""(?<![\w.+-])[\w.+-]+@[a-z0-9.-]+\.[a-z]{2,}(?![\w-])""",
+    re.IGNORECASE,
+)
 
 
 class TrustedWebProviderError(RuntimeError):
@@ -266,6 +280,64 @@ def _validated_sources(
     return tuple(result)
 
 
+def _validate_answer_links(
+    answer: str,
+    allowed_domains: tuple[str, ...],
+) -> None:
+    if _ANSWER_EMAIL_RE.search(answer):
+        raise TrustedWebProviderSecurityError(
+            "trusted_web_answer_link_not_allowed"
+        )
+
+    candidates: list[str] = []
+    candidates.extend(
+        match.group(1)
+        for match in _ANSWER_MARKDOWN_TARGET_RE.finditer(answer)
+    )
+    candidates.extend(
+        match.group(0)
+        for match in _ANSWER_HTTP_URL_RE.finditer(answer)
+    )
+    candidates.extend(
+        f"https://{match.group(0)}"
+        for match in _ANSWER_WWW_URL_RE.finditer(answer)
+    )
+
+    seen: set[str] = set()
+    for raw_candidate in candidates:
+        candidate = str(raw_candidate or "").strip().rstrip(
+            ".,;:!?)]}"
+        )
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if not candidate.lower().startswith(("https://", "http://")):
+            raise TrustedWebProviderSecurityError(
+                "trusted_web_answer_link_not_allowed"
+            )
+        try:
+            validate_allowed_source_url(candidate, allowed_domains)
+        except ValueError:
+            raise TrustedWebProviderSecurityError(
+                "trusted_web_answer_link_not_allowed"
+            ) from None
+
+
+def _source_domains(
+    sources: tuple[TrustedWebSourceV1, ...],
+) -> tuple[str, ...]:
+    domains = {
+        str(urlsplit(source.url).hostname or "").lower()
+        for source in sources
+    }
+    domains.discard("")
+    if not domains:
+        raise TrustedWebProviderSecurityError(
+            "trusted_web_source_domains_missing"
+        )
+    return tuple(sorted(domains))
+
+
 class OpenAITrustedWebProviderV1:
     def __init__(self, client: Any, settings: TrustedWebSettingsV1):
         self._client = client
@@ -323,10 +395,12 @@ class OpenAITrustedWebProviderV1:
             raise TrustedWebProviderError("trusted_web_provider_answer_missing")
         if len(answer) > 32_768:
             raise TrustedWebProviderError("trusted_web_provider_answer_too_large")
+        sources = _validated_sources(payload, policy.allowed_domains)
+        _validate_answer_links(answer, policy.allowed_domains)
         return TrustedWebProviderResultV1(
             provider_response_id=response_id,
             answer_text=answer,
-            sources=_validated_sources(payload, policy.allowed_domains),
+            sources=sources,
         )
 
 
@@ -381,10 +455,8 @@ class OpenAITrustedWebProviderV1:
             raise TrustedWebProviderSecurityError("trusted_web_missing_inline_citation")
         if len(answer) > 32_768:
             raise TrustedWebProviderError("trusted_web_provider_answer_too_large")
-        return TrustedWebProviderResultV1(
-            provider_response_id=response_id,
-            answer_text=answer,
-            sources=tuple(
+        sources = (
+            tuple(
                 TrustedWebSourceV1(
                     url=record.url,
                     title=record.title,
@@ -403,7 +475,13 @@ class OpenAITrustedWebProviderV1:
                     source_id=record.source_id,
                 )
                 for record in records
-            ),
+            )
+        )
+        _validate_answer_links(answer, _source_domains(sources))
+        return TrustedWebProviderResultV1(
+            provider_response_id=response_id,
+            answer_text=answer,
+            sources=sources,
         )
 
 
@@ -415,4 +493,5 @@ __all__ = [
     "TrustedWebProviderSecurityError",
     "TrustedWebSettingsV1",
     "TrustedWebSourceV1",
+    "_validate_answer_links",
 ]

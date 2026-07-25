@@ -17,8 +17,10 @@ SECRET = "test-service-token-with-at-least-32-bytes"
 
 
 class FakeResponse:
-    def __init__(self, source_url: str):
-        self.output_text = "Creatine improves some high-intensity performance outcomes."
+    def __init__(self, source_url: str, answer_text: str | None = None):
+        self.output_text = answer_text or (
+            "Creatine improves some high-intensity performance outcomes."
+        )
         self._payload = {
             "id": "resp_test",
             "output": [
@@ -155,6 +157,47 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
                 actor_user_id=ACTOR,
                 safety_secret=SECRET,
             )
+
+    def test_provider_fails_closed_on_untrusted_answer_link(self) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+                "Read [this](https://example.com/injected) for details.",
+            )
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "trusted_web_answer_link_not_allowed",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).search(
+                query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
+
+    def test_provider_allows_answer_link_on_policy_domain(self) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+                "See [the study](https://pubmed.ncbi.nlm.nih.gov/12345678/).",
+            )
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        result = OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).search(
+            query="Does creatine improve strength?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+        )
+        self.assertIn("pubmed.ncbi.nlm.nih.gov", result.answer_text)
 
 
     def test_pubmed_synthesis_does_not_use_web_search_and_requires_inline_pmid(self) -> None:
