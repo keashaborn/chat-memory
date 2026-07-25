@@ -16,6 +16,13 @@ from memory_v1_projection_v5_contract_test import sha256
 
 CONTRACT = "memory_v1_claim_projection_apply_batch_manifest_v1"
 REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
+REVIEW_MANIFEST_CONTRACT = (
+    "memory_v1_v5_2_compiler_v8_claim_review_manifest_v1"
+)
+REVIEW_RESULT_CONTRACT = (
+    "memory_v1_v5_2_compiler_v8_claim_review_result_v1"
+)
+REQUEST_NAMESPACE = "memory-v1-v5-2-compiler-v8-claim"
 ASSESSMENT = {
     "action": "promote_supported",
     "support_score": "1.000",
@@ -117,7 +124,7 @@ def request_id(owner: str, plan_id: str, operation: str) -> str:
     return str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            f"memory-v1-v5-2-compiler-v8-claim|{owner}|{plan_id}|p01|{operation}",
+            f"{REQUEST_NAMESPACE}|{owner}|{plan_id}|p01|{operation}",
         )
     )
 
@@ -136,9 +143,9 @@ async def run() -> int:
     review_result = load_hashed(review_result_path, "result_sha256")
     if (
         review_manifest.get("contract_version")
-        != "memory_v1_v5_2_compiler_v8_claim_review_manifest_v1"
+        != REVIEW_MANIFEST_CONTRACT
         or review_result.get("contract_version")
-        != "memory_v1_v5_2_compiler_v8_claim_review_result_v1"
+        != REVIEW_RESULT_CONTRACT
         or review_result.get("mode") != "apply"
         or review_manifest.get("owner_user_id") != owner
         or review_result.get("owner_user_id") != owner

@@ -29,7 +29,12 @@ snapshot_dir=/home/ubuntu/brains/snapshots
 apply_runner=scripts/memory_v1_v5_claim_projection_apply_batch.py
 lock_file=/home/ubuntu/brains/.memory_v1_v5_2_compiler_v8_claim_materialization.lock
 expected_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
-expected_observations="'a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc','c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb','70d55f38-1e33-418f-8ec6-6bfd2051f4e6','bbd94cc7-e9d5-429f-8af1-1a029b119db0'"
+expected_item_count=${MEMORY_V1_V5_2_MATERIALIZATION_EXPECTED_ITEMS:-4}
+expected_predicates=${MEMORY_V1_V5_2_MATERIALIZATION_EXPECTED_PREDICATES:-occupation.works_as,occupation.works_as,relationship.caregiver_for,relationship.spouse_of}
+review_manifest=$(jq -er '.review_manifest_path' "$manifest")
+[[ "$review_manifest" == "$review_root"/* ]]
+observation_csv=$(jq -er '[.items[].observation_id]|join(",")' \
+  "$review_manifest")
 phase=initialization
 status_file=
 run_tag=
@@ -122,12 +127,13 @@ for output in "$preflight_result" "$apply_result" "$replay_result"; do [[ "$outp
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 head=$(git -C "$repo_root" rev-parse HEAD)
 [[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
-[[ "$item_count" == 4 ]]
+[[ "$item_count" == "$expected_item_count" ]]
 [[ "$target_owner" == "$expected_owner" ]]
 [[ "$(jq -er '.defer_projection_outbox' "$manifest")" == true ]]
-[[ "$(jq -r '[.items[].predicate]|sort|join(",")' "$manifest")" == "occupation.works_as,occupation.works_as,relationship.caregiver_for,relationship.spouse_of" ]]
-[[ "$expected_insert" == 44 ]]
-[[ "$expected_mutated" == 48 ]]
+[[ "$(jq -r '[.items[].predicate]|sort|join(",")' "$manifest")" \
+   == "$expected_predicates" ]]
+[[ "$expected_insert" == "$((11*item_count))" ]]
+[[ "$expected_mutated" == "$((12*item_count))" ]]
 set -a; source /opt/chat-memory/.env; set +a
 [[ -n "${POSTGRES_DSN:-}" && -n "${QDRANT_URL:-}" ]]
 exec 9>"$lock_file"; flock -n 9
@@ -170,7 +176,7 @@ phase=capture_baseline
 docker exec "$container" psql -X -A -F $'\t' -t -v ON_ERROR_STOP=1 -U sage -d "$database" -c "SELECT table_name,EXISTS(SELECT 1 FROM information_schema.columns AS c WHERE c.table_schema='memory' AND c.table_name=t.table_name AND c.column_name='owner_user_id') FROM information_schema.tables AS t WHERE table_schema='memory' AND table_type='BASE TABLE' ORDER BY table_name" >"$table_list"
 capture_partition target "$target_before"; capture_partition non_target "$non_target_before"
 qdrant_before=$(qdrant_signature)
-[[ "$(psql_row "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id IN ($expected_observations)")" == 0 ]]
+[[ "$(psql_row "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id=ANY(string_to_array('$observation_csv',',')::uuid[])")" == 0 ]]
 
 phase=backup
 backup_partial="$snapshot_dir/.memory_pre_v5_2_compiler_v8_claim_materialization_${run_tag}.dump.partial"
@@ -190,9 +196,10 @@ phase=transactional_apply
 MEMORY_V1_REQUIRED_HEAD="$head" MEMORY_V1_CLAIM_PROJECTION_APPLY_BATCH=authorized PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python "$repo_root/$apply_runner" --mode apply --manifest "$manifest" --output "$apply_result"
 [[ "$(jq -er '.insert_rows' "$apply_result")" == "$expected_insert" && "$(jq -er '.mutated_rows' "$apply_result")" == "$expected_mutated" ]]
 claim_ids=$(jq -r '[.outcomes[].claim_id]|join(",")' "$apply_result")
-[[ "$(psql_row "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
-[[ "$(psql_row "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id IN ($expected_observations) AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
-[[ "$(psql_row "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND canonical_text IN ('The user is a caregiver for Monika.','The user is a spouse of Monika.','The user formerly worked as BCBA.','The user formerly worked as clinical psychologist.')")" == 4 ]]
+plan_ids=$(jq -r '[.items[].plan_id]|join(",")' "$manifest")
+[[ "$(psql_row "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
+[[ "$(psql_row "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id=ANY(string_to_array('$observation_csv',',')::uuid[]) AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
+[[ "$(psql_row "SELECT count(DISTINCT claim.claim_id) FROM memory.claim AS claim JOIN memory.claim_observation AS claim_link ON claim_link.owner_user_id=claim.owner_user_id AND claim_link.claim_id=claim.claim_id JOIN memory.projection_plan_observation AS plan_link ON plan_link.owner_user_id=claim_link.owner_user_id AND plan_link.observation_id=claim_link.observation_id JOIN memory.projection_claim_payload AS payload ON payload.owner_user_id=plan_link.owner_user_id AND payload.plan_id=plan_link.plan_id AND payload.projection_ref=plan_link.projection_ref WHERE claim.owner_user_id='$target_owner' AND claim.claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND plan_link.plan_id=ANY(string_to_array('$plan_ids',',')::uuid[]) AND claim.canonical_text=payload.canonical_text")" == "$item_count" ]]
 [[ "$(psql_row "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner' AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 0 ]]
 capture_partition target "$target_apply"; capture_partition non_target "$non_target_apply"
 verify_target_delta "$target_before" "$target_apply"; cmp -s "$non_target_before" "$non_target_apply"

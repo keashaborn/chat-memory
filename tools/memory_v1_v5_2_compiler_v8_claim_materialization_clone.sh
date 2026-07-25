@@ -20,7 +20,8 @@ clone_db="memory_claim_projection_apply_$(date -u +%Y%m%d%H%M%S)_$$"
 runner=scripts/memory_v1_v5_claim_projection_apply_batch.py
 env_file=/opt/chat-memory/.env
 expected_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
-expected_observations="'a0ea633d-96df-4ad8-a0c1-b3f4f84e30cc','c8ce8cd0-e058-4181-ae94-fd6fb1e7c6eb','70d55f38-1e33-418f-8ec6-6bfd2051f4e6','bbd94cc7-e9d5-429f-8af1-1a029b119db0'"
+expected_item_count=${MEMORY_V1_V5_2_MATERIALIZATION_EXPECTED_ITEMS:-4}
+expected_predicates=${MEMORY_V1_V5_2_MATERIALIZATION_EXPECTED_PREDICATES:-occupation.works_as,occupation.works_as,relationship.caregiver_for,relationship.spouse_of}
 
 qdrant_signature() {
   curl --fail --silent --show-error --max-time 30 \
@@ -39,15 +40,20 @@ item_count=$(jq -er '.items|length' "$manifest")
 expected_insert=$(jq -er '.expected_insert_rows' "$manifest")
 expected_mutated=$(jq -er '.expected_mutated_rows' "$manifest")
 target_owner=$(jq -er '.owner_user_id' "$manifest")
+review_manifest=$(jq -er '.review_manifest_path' "$manifest")
+[[ "$review_manifest" == /home/ubuntu/memory-v1-reviews/* ]]
+observation_csv=$(jq -er '[.items[].observation_id]|join(",")' \
+  "$review_manifest")
 if [[ "$target_owner" == 557ea042-cb82-48f8-9429-472e96c957ef ]]; then
   other_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 else
   other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 fi
-[[ "$item_count" == 4 ]]
+[[ "$item_count" == "$expected_item_count" ]]
 [[ "$target_owner" == "$expected_owner" ]]
 [[ "$(jq -er '.defer_projection_outbox' "$manifest")" == true ]]
-[[ "$(jq -r '[.items[].predicate]|sort|join(",")' "$manifest")" == "occupation.works_as,occupation.works_as,relationship.caregiver_for,relationship.spouse_of" ]]
+[[ "$(jq -r '[.items[].predicate]|sort|join(",")' "$manifest")" \
+   == "$expected_predicates" ]]
 qdrant_before=$(qdrant_signature)
 for output in "$preflight" "$apply" "$replay"; do
   [[ "$output" == /home/ubuntu/memory-v1-reviews/* && ! -e "$output" ]]
@@ -108,10 +114,11 @@ for table in before:
 PY
 
 claim_ids=$(jq -r '[.outcomes[].claim_id]|join(",")' "$apply")
+plan_ids=$(jq -r '[.items[].plan_id]|join(",")' "$manifest")
 [[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
 [[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner' AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 0 ]]
-[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id IN ($expected_observations) AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 4 ]]
-[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND canonical_text IN ('The user is a caregiver for Monika.','The user is a spouse of Monika.','The user formerly worked as BCBA.','The user formerly worked as clinical psychologist.')")" == 4 ]]
+[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id=ANY(string_to_array('$observation_csv',',')::uuid[]) AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
+[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c "SELECT count(DISTINCT claim.claim_id) FROM memory.claim AS claim JOIN memory.claim_observation AS claim_link ON claim_link.owner_user_id=claim.owner_user_id AND claim_link.claim_id=claim.claim_id JOIN memory.projection_plan_observation AS plan_link ON plan_link.owner_user_id=claim_link.owner_user_id AND plan_link.observation_id=claim_link.observation_id JOIN memory.projection_claim_payload AS payload ON payload.owner_user_id=plan_link.owner_user_id AND payload.plan_id=plan_link.plan_id AND payload.projection_ref=plan_link.projection_ref WHERE claim.owner_user_id='$target_owner' AND claim.claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND plan_link.plan_id=ANY(string_to_array('$plan_ids',',')::uuid[]) AND claim.canonical_text=payload.canonical_text")" == "$item_count" ]]
 
 probe_plan=$(jq -er '.items[0].plan_id' "$manifest")
 probe_review=$(jq -er '.items[0].review_id' "$manifest")
