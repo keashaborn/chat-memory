@@ -125,7 +125,7 @@ run_sql <"$migration"
 run_sql <"$migration"
 run_sql <"$security_test"
 
-PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+PYTHONPATH="$repo_root/scripts:$repo_root" /opt/chat-memory/venv/bin/python \
   "$repo_root/tests/test_memory_v1_v5_2_compiler_v8_claim_stage.py"
 
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
