@@ -322,7 +322,8 @@ phase=restore
 restore_runtime
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
 curl --fail --silent --show-error --max-time 30 \
-  http://127.0.0.1:8000/health >/dev/null
+  -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+  http://127.0.0.1:8088/healthz >/dev/null
 
 phase=report
 report="$snapshot_dir/memory_v1_v5_2_compiler_v8_claim_${run_tag}.json"
