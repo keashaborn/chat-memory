@@ -1391,8 +1391,8 @@ _EXPLICIT_FORMER_SELF_OCCUPATION_RE = re.compile(
     re.IGNORECASE,
 )
 _TRAILING_OCCUPATION_CREDENTIAL_RE = re.compile(
-    r"\s+and\s+(?:an?\s+)?(?:BCBA|board[\s-]+certified\s+"
-    r"behavior\s+analyst)\s*$",
+    r"\s+and\s+(?:an?\s+)?(?P<credential>BCBA|"
+    r"board[\s-]+certified\s+behavior\s+analyst)\s*$",
     re.IGNORECASE,
 )
 _CORRECTED_PET_NAME_PATTERNS = (
@@ -1537,6 +1537,43 @@ _PARTNER_ROLE_RE = re.compile(
 
 def _source_span(source: TrustedExtractionSource) -> dict[str, Any]:
     return {"start": 0, "end": len(source.content), "quote": source.content}
+
+
+def _named_relationship_span(
+    source: TrustedExtractionSource,
+    *,
+    name_text: str,
+    cue_pattern: str,
+    max_prefix: int,
+) -> dict[str, Any]:
+    content = source.content
+    name_matches = tuple(
+        re.finditer(rf"(?<!\w){re.escape(name_text)}(?!\w)", content, re.IGNORECASE)
+    )
+    cue_matches = tuple(re.finditer(cue_pattern, content, re.IGNORECASE))
+    for name_match in name_matches:
+        candidates = [
+            cue
+            for cue in cue_matches
+            if cue.end() <= name_match.start()
+            and name_match.start() - cue.end() <= max_prefix
+            and re.search(
+                r"[.!?\n]",
+                content[cue.end() : name_match.start()],
+            )
+            is None
+        ]
+        if not candidates:
+            continue
+        cue = candidates[-1]
+        start = cue.start()
+        end = name_match.end()
+        return {
+            "start": start,
+            "end": end,
+            "quote": content[start:end],
+        }
+    return _source_span(source)
 
 
 def _guard_deferral_packet(
@@ -1743,6 +1780,22 @@ def _explicit_named_caregiving_packet(
     role_parts = ["relationship:care_recipient"]
     if len(spouses) == 1:
         role_parts.append(f"relationship:{spouses[0].named_party_role}")
+    caregiver_span = _named_relationship_span(
+        source,
+        name_text=caregiver.name_text,
+        cue_pattern=(
+            r"\b(?:caregiver\s+for|care\s+for|cared\s+for|"
+            r"caring\s+for|take\s+care\s+of|took\s+care\s+of|"
+            r"taken\s+care\s+of)\b"
+        ),
+        max_prefix=240,
+    )
+    spouse_span = _named_relationship_span(
+        source,
+        name_text=caregiver.name_text,
+        cue_pattern=r"\bmy\s+(?:wife|husband|spouse)\b",
+        max_prefix=24,
+    )
     self_entity = _deterministic_self_entity(source)
     person_entity = {
         "entity_ref": "e01",
@@ -1750,7 +1803,7 @@ def _explicit_named_caregiving_packet(
         "mention_kind": "named",
         "name_text": caregiver.name_text,
         "relationship_role": "|".join(role_parts),
-        "source_spans": [_source_span(source)],
+        "source_spans": [caregiver_span],
         "extraction_confidence": 0.99,
         "reason_codes": ["deterministic_named_care_recipient"],
     }
@@ -1771,6 +1824,7 @@ def _explicit_named_caregiving_packet(
         temporal_profile="active_interval",
         historical_end=caregiver.historical_end,
     )
+    caregiver_observation["source_spans"] = [caregiver_span]
     observations = [caregiver_observation]
     if len(spouses) == 1:
         spouse_observation = _example_observation(
@@ -1790,12 +1844,13 @@ def _explicit_named_caregiving_packet(
             temporal_profile="active_interval",
             historical_end=spouses[0].historical_end,
         )
+        spouse_observation["source_spans"] = [spouse_span]
         observations.append(spouse_observation)
     deferrals = [
         {
             "reason_code": "sensitive_manual_review",
             "memory_shape": "direct_claim",
-            "source_spans": [_source_span(source)],
+            "source_spans": [caregiver_span],
             "sensitivity": "high",
         }
     ]
@@ -2265,21 +2320,51 @@ def _explicit_self_occupation_matches(
     content: str,
 ) -> tuple[tuple[str, int, int, bool], ...]:
     matches: list[tuple[str, int, int, bool]] = []
+
+    def add_roles(match: re.Match[str], *, historical: bool) -> None:
+        raw_role = match.group("role")
+        role_start = match.start("role")
+        trailing = _TRAILING_OCCUPATION_CREDENTIAL_RE.search(raw_role)
+        role_segments: list[tuple[str, int, int]] = []
+        if trailing is None:
+            role_segments.append((raw_role, role_start, match.end("role")))
+        else:
+            role_segments.extend(
+                (
+                    (
+                        raw_role[: trailing.start()],
+                        role_start,
+                        role_start + trailing.start(),
+                    ),
+                    (
+                        trailing.group("credential"),
+                        role_start + trailing.start("credential"),
+                        role_start + trailing.end("credential"),
+                    ),
+                )
+            )
+        for raw_value, start, end in role_segments:
+            left_trimmed = len(raw_value) - len(raw_value.lstrip())
+            right_trimmed = len(raw_value.rstrip())
+            role = raw_value.strip(" \t\r\n\"'‘’“”.,;:")
+            if role:
+                matches.append(
+                    (
+                        role,
+                        start + left_trimmed,
+                        start + right_trimmed,
+                        historical,
+                    )
+                )
+
     for pattern in (
         _EXPLICIT_SELF_OCCUPATION_RE,
         _EXPLICIT_FREELANCE_OCCUPATION_RE,
     ):
         for match in pattern.finditer(content):
-            role = match.group("role").strip(" \t\r\n\"'‘’“”.,;:")
-            if role:
-                matches.append((role, match.start(), match.end(), False))
+            add_roles(match, historical=False)
     for match in _EXPLICIT_FORMER_SELF_OCCUPATION_RE.finditer(content):
-        role = match.group("role").strip(" \t\r\n\"'‘’“”.,;:")
-        role = _TRAILING_OCCUPATION_CREDENTIAL_RE.sub("", role).strip(
-            " \t\r\n\"'‘’“”.,;:"
-        )
-        if role:
-            matches.append((role, match.start(), match.end(), True))
+        add_roles(match, historical=True)
     return tuple(matches)
 
 
@@ -3211,36 +3296,74 @@ def _compile_entity_links(
         )
         repairs.append("self_entity_link")
 
-    if self_ref is not None and len(occupation_matches) == 1:
-        role, start, end, historical = occupation_matches[0]
+    if self_ref is not None and occupation_matches:
         occupation_indexes = [
             index
             for index, item in enumerate(observations)
             if item["predicate"] == "occupation.works_as"
         ]
-        matching_concepts = [
-            item
-            for item in entities
-            if item["entity_type"] == "concept"
-            and isinstance(item.get("name_text"), str)
-            and item["name_text"].strip().casefold() == role.casefold()
-            and _role_has_any(item.get("relationship_role"), {"occupation"})
+        historical_role_keys = {
+            role.casefold()
+            for role, _start, _end, historical in occupation_matches
+            if historical
+        }
+        reclassified_credential_indexes = [
+            index
+            for index, item in enumerate(observations)
+            if item["predicate"] == "credential.reported"
+            and isinstance(item.get("object"), dict)
+            and item["object"].get("kind") == "literal"
+            and isinstance(item["object"].get("value"), str)
+            and item["object"]["value"].strip().casefold()
+            in historical_role_keys
         ]
-        if not matching_concepts:
-            concept_ref = _add_compiler_entity(
-                source,
-                entities,
-                entity_type="concept",
-                name_text=role,
-                relationship_role="occupation:reported",
+        removed_observation_refs = {
+            observations[index]["observation_ref"]
+            for index in occupation_indexes + reclassified_credential_indexes
+        }
+        observations[:] = [
+            item
+            for index, item in enumerate(observations)
+            if index not in set(
+                occupation_indexes + reclassified_credential_indexes
             )
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in removed_observation_refs
+        ]
+        if reclassified_credential_indexes:
+            repairs.append("coordinated_former_credential_reclassified")
+
+        for role, start, end, historical in occupation_matches:
             matching_concepts = [
                 item
                 for item in entities
-                if item["entity_ref"] == concept_ref
+                if item["entity_type"] == "concept"
+                and isinstance(item.get("name_text"), str)
+                and item["name_text"].strip().casefold() == role.casefold()
+                and _role_has_any(
+                    item.get("relationship_role"),
+                    {"occupation"},
+                )
             ]
-            repairs.append("explicit_occupation_concept_entity")
-        if len(matching_concepts) == 1:
+            if not matching_concepts:
+                concept_ref = _add_compiler_entity(
+                    source,
+                    entities,
+                    entity_type="concept",
+                    name_text=role,
+                    relationship_role="occupation:reported",
+                )
+                matching_concepts = [
+                    item
+                    for item in entities
+                    if item["entity_ref"] == concept_ref
+                ]
+                repairs.append("explicit_occupation_concept_entity")
+            if len(matching_concepts) != 1:
+                continue
             occupation_observation = {
                 "extraction_confidence": 0.98,
                 "modality": "asserted",
@@ -3248,11 +3371,7 @@ def _compile_entity_links(
                     "kind": "entity",
                     "entity_ref": matching_concepts[0]["entity_ref"],
                 },
-                "observation_ref": (
-                    observations[occupation_indexes[0]]["observation_ref"]
-                    if occupation_indexes
-                    else _next_observation_ref(observations)
-                ),
+                "observation_ref": _next_observation_ref(observations),
                 "polarity": "affirmed",
                 "predicate": "occupation.works_as",
                 "projection_class": "direct_claim",
@@ -3281,12 +3400,7 @@ def _compile_entity_links(
                         historical_end=True,
                     )
                 )
-            if occupation_indexes:
-                observations[occupation_indexes[0]] = occupation_observation
-                for index in reversed(occupation_indexes[1:]):
-                    del observations[index]
-            else:
-                observations.append(occupation_observation)
+            observations.append(occupation_observation)
             predicates.add("occupation.works_as")
             repairs.append(
                 (
@@ -3301,6 +3415,7 @@ def _compile_entity_links(
                     else "explicit_occupation_observation_completed"
                 )
             )
+        predicates = {item["predicate"] for item in observations}
 
     pet_source = bool(_PET_RE.search(content))
     pet_predicates = any(

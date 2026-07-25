@@ -107,6 +107,20 @@ def entity_object_name(
     return named_entity(entities, obj["entity_ref"])
 
 
+def source_span_text(content: str, span: dict[str, Any]) -> str:
+    start = span.get("start")
+    end = span.get("end")
+    if (
+        not isinstance(start, int)
+        or isinstance(start, bool)
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or not 0 <= start < end <= len(content)
+    ):
+        raise RuntimeError("packet source span is invalid")
+    return content[start:end]
+
+
 def verify_correction(
     packet: dict[str, Any],
     local_calls: int,
@@ -148,6 +162,7 @@ def verify_correction(
 def verify_caregiving(
     packet: dict[str, Any],
     local_calls: int,
+    source_content: str,
 ) -> dict[str, Any]:
     entities = entity_map(packet)
     observations = [
@@ -160,13 +175,42 @@ def verify_caregiving(
     observation = observations[0]
     subject = entities[observation["subject_entity_ref"]]
     object_name = entity_object_name(entities, observation)
+    caregiver_text = source_span_text(
+        source_content,
+        observation["source_spans"][0],
+    )
     if (
         subject["entity_type"] != "self"
         or object_name != "Monika"
         or observation["sensitivity"] != "high"
         or observation["surface_policy"] != "explicit_recall_only"
+        or not caregiver_text.casefold().startswith("caring for ")
+        or "my wife" not in caregiver_text.casefold()
+        or not caregiver_text.casefold().endswith("monika")
+        or "psychotic break" in caregiver_text.casefold()
+        or len(caregiver_text) >= 100
     ):
         raise RuntimeError("caregiving direction or policy changed")
+    spouse = [
+        item
+        for item in packet["observations"]
+        if item["predicate"] == "relationship.spouse_of"
+    ]
+    spouse_text = (
+        source_span_text(
+            source_content,
+            spouse[0]["source_spans"][0],
+        )
+        if len(spouse) == 1
+        else ""
+    )
+    if (
+        len(spouse) != 1
+        or spouse_text.casefold().replace(",", "")
+        != "my wife monika"
+        or len(spouse_text) >= 40
+    ):
+        raise RuntimeError("caregiving spouse evidence span changed")
     for entity in entities.values():
         role = entity.get("relationship_role")
         if isinstance(role, str):
@@ -193,20 +237,29 @@ def verify_profession(
         for item in packet["observations"]
         if item["predicate"] == "occupation.works_as"
     ]
-    if len(observations) != 1 or local_calls != 1:
+    if len(observations) != 2 or local_calls != 1:
         raise RuntimeError("former profession extraction changed")
-    observation = observations[0]
-    if (
-        entities[observation["subject_entity_ref"]]["entity_type"] != "self"
-        or entity_object_name(entities, observation)
-        != "clinical psychologist"
-        or observation["temporal"]["shape"] != "open_interval"
-        or observation["temporal"]["instant_range"]["lower"] is not None
-        or observation["temporal"]["instant_range"]["upper"] is None
-        or "historical_relationship_ended_before_source"
-        not in observation["temporal"]["reason_codes"]
+    if {
+        entity_object_name(entities, observation)
+        for observation in observations
+    } != {"clinical psychologist", "BCBA"}:
+        raise RuntimeError("former profession role split changed")
+    for observation in observations:
+        if (
+            entities[observation["subject_entity_ref"]]["entity_type"]
+            != "self"
+            or observation["temporal"]["shape"] != "open_interval"
+            or observation["temporal"]["instant_range"]["lower"] is not None
+            or observation["temporal"]["instant_range"]["upper"] is None
+            or "historical_relationship_ended_before_source"
+            not in observation["temporal"]["reason_codes"]
+        ):
+            raise RuntimeError("former profession temporal contract changed")
+    if any(
+        item["predicate"] == "credential.reported"
+        for item in packet["observations"]
     ):
-        raise RuntimeError("former profession temporal contract changed")
+        raise RuntimeError("former profession retained current credential")
     if any(
         item["reason_code"] == "project_scope_unresolved"
         for item in packet["deferrals"]
@@ -332,7 +385,11 @@ async def run() -> int:
         if case["case"] == "pet_name_correction":
             result = verify_correction(packet, local_calls)
         elif case["case"] == "named_caregiving":
-            result = verify_caregiving(packet, local_calls)
+            result = verify_caregiving(
+                packet,
+                local_calls,
+                row["content"],
+            )
         elif case["case"] == "former_profession":
             result = verify_profession(packet, local_calls)
         else:

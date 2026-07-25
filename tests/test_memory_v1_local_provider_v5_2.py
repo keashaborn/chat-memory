@@ -12,6 +12,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     SEMANTIC_V5_2_REGISTRY_VERSION,
     SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
     _compile_entity_links,
+    _credential_packet,
     _deterministic_policy_packet,
     _packet,
     _structured_result,
@@ -377,6 +378,30 @@ class LocalProviderV52Test(unittest.TestCase):
             {item["reason_code"] for item in value["deferrals"]},
             {"sensitive_manual_review", "compound_requires_split"},
         )
+        spouse = next(
+            item
+            for item in value["observations"]
+            if item["predicate"] == "relationship.spouse_of"
+        )
+        caregiver_span = caregiving["source_spans"][0]
+        spouse_span = spouse["source_spans"][0]
+        self.assertEqual(
+            content[caregiver_span["start"] : caregiver_span["end"]],
+            "caring for others including my wife, Monika",
+        )
+        self.assertEqual(
+            content[spouse_span["start"] : spouse_span["end"]],
+            "my wife, Monika",
+        )
+        self.assertLess(caregiver_span["end"], len(content))
+        self.assertLess(spouse_span["end"], len(content))
+        compound = next(
+            item
+            for item in value["deferrals"]
+            if item["reason_code"] == "compound_requires_split"
+        )
+        self.assertEqual(compound["source_spans"][0]["start"], 0)
+        self.assertEqual(compound["source_spans"][0]["end"], len(content))
 
     def test_named_caregiving_compiles_owner_to_recipient(self) -> None:
         content = (
@@ -424,24 +449,24 @@ class LocalProviderV52Test(unittest.TestCase):
         source = self.source(content)
         profile = load_runtime_profile_v2(ROOT, "v5_2")
         registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
-        packet = ProviderPacket.model_validate(
-            _packet(
-                deferrals=[
-                    {
-                        "reason_code": "project_scope_unresolved",
-                        "memory_shape": "project_knowledge",
-                        "source_spans": [
-                            {
-                                "start": 0,
-                                "end": len(content),
-                                "quote": content,
-                            }
-                        ],
-                        "sensitivity": "medium",
-                    }
-                ]
-            )
+        packet_value = _credential_packet(source, "BCBA").model_dump(
+            mode="json"
         )
+        packet_value["deferrals"] = [
+            {
+                "reason_code": "project_scope_unresolved",
+                "memory_shape": "project_knowledge",
+                "source_spans": [
+                    {
+                        "start": 0,
+                        "end": len(content),
+                        "quote": content,
+                    }
+                ],
+                "sensitivity": "medium",
+            }
+        ]
+        packet = ProviderPacket.model_validate(packet_value)
         compiled, repairs = _compile_entity_links(source, packet, registry)
         value = compiled.model_dump(mode="json")
         entities = {
@@ -452,24 +477,37 @@ class LocalProviderV52Test(unittest.TestCase):
             for item in value["observations"]
             if item["predicate"] == "occupation.works_as"
         ]
-        self.assertEqual(len(occupations), 1)
-        observation = occupations[0]
+        self.assertEqual(len(occupations), 2)
         self.assertEqual(
-            entities[observation["subject_entity_ref"]]["entity_type"],
-            "self",
+            {
+                entities[item["object"]["entity_ref"]]["name_text"]
+                for item in occupations
+            },
+            {"clinical psychologist", "BCBA"},
         )
-        self.assertEqual(
-            entities[observation["object"]["entity_ref"]]["name_text"],
-            "clinical psychologist",
-        )
-        self.assertEqual(observation["temporal"]["shape"], "open_interval")
-        self.assertIn(
-            "historical_relationship_ended_before_source",
-            observation["temporal"]["reason_codes"],
+        for observation in occupations:
+            self.assertEqual(
+                entities[observation["subject_entity_ref"]]["entity_type"],
+                "self",
+            )
+            self.assertEqual(
+                observation["temporal"]["shape"],
+                "open_interval",
+            )
+            self.assertIsNone(
+                observation["temporal"]["instant_range"]["lower"]
+            )
+            self.assertIn(
+                "historical_relationship_ended_before_source",
+                observation["temporal"]["reason_codes"],
+            )
+        self.assertNotIn(
+            "credential.reported",
+            {item["predicate"] for item in value["observations"]},
         )
         self.assertIn("explicit_occupation_concept_entity", repairs)
         self.assertIn(
-            "explicit_former_occupation_observation_completed",
+            "coordinated_former_credential_reclassified",
             repairs,
         )
         self.assertIn("orphan_project_scope_deferral_removed", repairs)
