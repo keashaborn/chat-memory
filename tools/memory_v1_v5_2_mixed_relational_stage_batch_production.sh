@@ -304,16 +304,38 @@ assert_equal entities_unchanged "$(psql_row "
 assert_equal claims_unchanged "$(psql_row "
   SELECT count(*) FROM memory.claim
   WHERE owner_user_id='$target_owner'::uuid")" "$claims_before"
-cross_owner_visible=$(psql "$POSTGRES_DSN" -X -A -t -v ON_ERROR_STOP=1 -c "
-  BEGIN;
-  SELECT set_config('app.user_id','$other_owner',true);
-  SELECT count(*) FROM memory.observation
-  WHERE evidence_id IN (
-    '${evidence_ids[0]}'::uuid,'${evidence_ids[1]}'::uuid,
-    '${evidence_ids[2]}'::uuid
-  );
-  ROLLBACK;" | sed -n '3p')
-assert_equal cross_owner_visible "$cross_owner_visible" 0
+OTHER_OWNER="$other_owner" EVIDENCE_IDS="$(IFS=,; echo "${evidence_ids[*]}")" \
+  POSTGRES_DSN="$POSTGRES_DSN" "$python_bin" - <<'PY'
+import asyncio
+import os
+import uuid
+
+import asyncpg
+
+async def main():
+    conn = await asyncpg.connect(os.environ["POSTGRES_DSN"])
+    try:
+        for value in os.environ["EVIDENCE_IDS"].split(","):
+            try:
+                async with conn.transaction(readonly=True):
+                    await conn.execute(
+                        "SELECT set_config('app.user_id',$1,true)",
+                        os.environ["OTHER_OWNER"],
+                    )
+                    await conn.fetchval(
+                        "SELECT memory.plan_owner_v5_2_atom_stage_v2($1::uuid)",
+                        uuid.UUID(value),
+                    )
+            except asyncpg.PostgresError as exc:
+                if exc.sqlstate != "P0002":
+                    raise
+            else:
+                raise RuntimeError("cross-owner atom-stage plan resolved")
+    finally:
+        await conn.close()
+
+asyncio.run(main())
+PY
 capture_partition target "$target_after"
 capture_partition non_target "$non_target_after"
 cmp -s "$non_target_before" "$non_target_after"
