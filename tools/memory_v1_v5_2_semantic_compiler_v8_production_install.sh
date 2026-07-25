@@ -262,8 +262,14 @@ git -C "$live" merge --ff-only "$target_commit"
 code_deployed=1
 sudo -n systemctl restart brains.service
 [[ "$(systemctl is-active brains.service)" == active ]]
-[[ "$(curl -sS -o /dev/null -w '%{http_code}' \
-  http://127.0.0.1:8088/docs)" == 200 ]]
+http_code=000
+for _attempt in $(seq 1 30); do
+  http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+    http://127.0.0.1:8088/docs || true)
+  [[ "$http_code" == 200 ]] && break
+  sleep 1
+done
+[[ "$http_code" == 200 ]]
 [[ "$(git -C "$live" rev-parse HEAD)" == "$target_commit" ]]
 [[ -z "$(git -C "$live" status --porcelain)" ]]
 
