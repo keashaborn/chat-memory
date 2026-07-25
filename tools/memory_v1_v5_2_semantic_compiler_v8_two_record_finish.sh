@@ -226,7 +226,8 @@ capture_isolation_state() {
 [[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
   WHERE selector_version='$selector'")" == 0 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
-  WHERE policy_compiler_sha256='$compiler_sha'")" == 0 ]]
+  WHERE owner_user_id='$owner'::uuid
+    AND job_id IN ('$care_job'::uuid,'$profession_job'::uuid)")" == 0 ]]
 
 reserved=$(scalar "SELECT count(*)
   FROM memory.v5_local_inference_event
