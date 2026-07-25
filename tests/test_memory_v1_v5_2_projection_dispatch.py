@@ -251,7 +251,7 @@ class ProjectionDispatchTests(unittest.TestCase):
                 expected_revision_number=0,
             )
 
-    def test_canonical_name_correction_normalizes_only_semantic_identity(self) -> None:
+    def test_canonical_name_correction_normalizes_only_target_policy(self) -> None:
         entry = self.registry_by_name["identity.name_canonical"]
         value = source(entry)
         value["modality"] = "corrective"
@@ -265,11 +265,9 @@ class ProjectionDispatchTests(unittest.TestCase):
         )
         validate_packet(packet, OWNER, self.registry_by_name)
         projection = packet["projections"][0]
-        normalized_literal = dict(value["object_literal"])
-        normalized_literal["value"] = "avery"
         self.assertEqual(
             projection["identity"]["object_literal_sha256"],
-            sha256(normalized_literal),
+            value["object_literal_sha256"],
         )
         self.assertEqual(
             projection["payload"],

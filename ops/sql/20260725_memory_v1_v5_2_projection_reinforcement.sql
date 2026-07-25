@@ -61,7 +61,6 @@ DECLARE
   semantic_value text;
   aggregate_count integer;
   normalization_mode boolean;
-  normalized_literal jsonb;
   expected_payload jsonb;
 BEGIN
   actor := memory.require_v5_writer_context();
@@ -172,17 +171,9 @@ BEGIN
           ) IS DISTINCT FROM expected.temporal_source_observation_id::text THEN
       RAISE EXCEPTION 'V5.2 canonical-name normalization source mismatch';
     END IF;
-    normalized_literal := jsonb_set(
-      source.object_literal,
-      '{value}',
-      to_jsonb(lower(btrim(source.object_literal->>'value')))
-    );
     semantic_value := memory.v5_projection_semantic_key_sha256(
       actor,'claim',source.subject_entity_id,source.predicate,'literal',
-      NULL,
-      memory.v5_digest_text(
-        memory.v5_canonical_json_text(normalized_literal)
-      ),
+      NULL,source.object_literal_sha256,
       source.polarity::memory.observation_polarity,
       source.modality::memory.observation_modality,
       expected.lane_scope
@@ -195,9 +186,7 @@ BEGIN
       'surface_policy','direct_or_relevant'
     );
     IF projection#>>'{identity,object_literal_sha256}'
-          <>memory.v5_digest_text(
-            memory.v5_canonical_json_text(normalized_literal)
-          )
+          <>source.object_literal_sha256
        OR projection#>>'{identity,semantic_key_sha256}'<>semantic_value
        OR projection->'payload'<>expected_payload THEN
       RAISE EXCEPTION 'V5.2 canonical-name normalization target mismatch';
@@ -272,8 +261,20 @@ BEGIN
       memory.v5_canonical_json_text(claim_row.object_literal)
     )
   END;
-  IF object_literal_sha IS DISTINCT FROM
-       projection#>>'{identity,object_literal_sha256}' THEN
+  IF (
+       normalization_mode
+       AND (
+         claim_row.object_literal->>'kind'<>'literal'
+         OR claim_row.object_literal->>'datatype'<>'text'
+         OR lower(btrim(claim_row.object_literal->>'value'))
+              <>lower(btrim(source.object_literal->>'value'))
+       )
+     )
+     OR (
+       NOT normalization_mode
+       AND object_literal_sha IS DISTINCT FROM
+         projection#>>'{identity,object_literal_sha256}'
+     ) THEN
     RAISE EXCEPTION 'V5.2 reinforcement literal target mismatch';
   END IF;
   SELECT COALESCE(max(revision.revision_number),0)

@@ -530,11 +530,6 @@ def build_canonical_name_reinforcement_packet(
             "reinforcement expected_revision_number must be positive"
         )
     projection = build_projection(owner_user_id, normalized_source)
-    normalized_literal = dict(_literal(normalized_source))
-    normalized_literal["value"] = _safe_text(
-        normalized_literal["value"], "canonical name", maximum=200
-    ).casefold()
-    projection["identity"]["object_literal_sha256"] = sha256(normalized_literal)
     projection["payload"]["claim_class"] = "direct_claim"
     projection["payload"]["surface_policy"] = "direct_or_relevant"
     projection["identity"]["semantic_key_sha256"] = semantic_key_sha256(
