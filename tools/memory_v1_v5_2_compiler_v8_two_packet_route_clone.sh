@@ -41,6 +41,15 @@ cleanup() {
   if [[ "$rc" -ne 0 ]]; then
     printf 'memory_v1_v5_2_compiler_v8_two_packet_route_clone: FAIL phase=%s\n' \
       "$phase" >&2
+    for output in "$care_apply" "$profession_apply" \
+      "$care_replay" "$profession_replay"; do
+      if [[ -s "$output" ]]; then
+        jq -c '{
+          outcome,apply,plans,review_resolution_counts,write_counts,
+          zero_write_replay_proved,external_model_calls
+        }' "$output" >&2 || true
+      fi
+    done
   fi
   docker exec "$container" dropdb -U sage --if-exists "$clone" \
     >/dev/null 2>&1 || true
