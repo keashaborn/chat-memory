@@ -82,6 +82,9 @@ _PUBMED_STOPWORDS = frozenset(
         "cal",
         "cause",
         "cite",
+        "current",
+        "currently",
+        "disease",
         "does",
         "effect",
         "evidence",
@@ -100,6 +103,7 @@ _PUBMED_STOPWORDS = frozenset(
         "product",
         "reasonably",
         "show",
+        "someone",
         "say",
         "taking",
         "that",
@@ -170,10 +174,17 @@ def _normalize_pubmed_query(query: str) -> str:
 
 
 def _build_term(query: str) -> str:
+    return _build_terms(query)[0]
+
+
+def _build_terms(query: str) -> tuple[str, ...]:
     text = _normalize_pubmed_query(query)
     quality = "(systematic review[Publication Type] OR meta-analysis[Publication Type] OR randomized controlled trial[Publication Type] OR clinical trial[Publication Type] OR review[Publication Type])"
     humans = "humans[MeSH Terms]"
-    return f"({text}) AND ({quality}) AND ({humans})"
+    return (
+        f"({text}) AND ({quality}) AND ({humans})",
+        f"({text}) AND ({humans})",
+    )
 
 
 @dataclass(frozen=True)
@@ -226,21 +237,24 @@ class NCBIPubMedClientV1:
             raise NCBIClientError("ncbi_xml_parse_failed") from exc
 
     def _esearch(self, query: str) -> tuple[str, ...]:
-        root = self._request_xml(
-            "esearch.fcgi",
-            {
-                "db": "pubmed",
-                "term": _build_term(query),
-                "retmax": str(max(1, min(10, self.max_records * 2))),
-                "sort": "relevance",
-            },
-        )
-        ids: list[str] = []
-        for elem in root.findall(".//IdList/Id"):
-            value = "".join(elem.itertext()).strip()
-            if value.isdigit() and value not in ids:
-                ids.append(value)
-        return tuple(ids)
+        for term in _build_terms(query):
+            root = self._request_xml(
+                "esearch.fcgi",
+                {
+                    "db": "pubmed",
+                    "term": term,
+                    "retmax": str(max(1, min(10, self.max_records * 2))),
+                    "sort": "relevance",
+                },
+            )
+            ids: list[str] = []
+            for elem in root.findall(".//IdList/Id"):
+                value = "".join(elem.itertext()).strip()
+                if value.isdigit() and value not in ids:
+                    ids.append(value)
+            if ids:
+                return tuple(ids)
+        return ()
 
     def _efetch(self, ids: tuple[str, ...]) -> tuple[NCBIResearchRecordV1, ...]:
         root = self._request_xml(
