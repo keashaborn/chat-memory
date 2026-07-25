@@ -152,7 +152,7 @@ if [[ "$reset_applied_clone" == 1 ]]; then
 DO $verify$
 DECLARE
   owner_id constant uuid := '1240822d-ac9a-4096-95aa-e2b24d36ef50';
-  observation_id constant uuid := '5261da41-f863-42cd-8e3f-6e947f9743f2';
+  target_observation_id constant uuid := '5261da41-f863-42cd-8e3f-6e947f9743f2';
   target_claim_id constant uuid := '8e3f4d82-8c21-4bbd-bbe8-91dd585f6fc9';
   plan_id_value uuid;
 BEGIN
@@ -161,13 +161,13 @@ BEGIN
   JOIN memory.projection_plan_observation AS link
     USING(owner_user_id,plan_id,projection_ref)
   WHERE item.owner_user_id=owner_id
-    AND link.observation_id=observation_id
+    AND link.observation_id=target_observation_id
     AND item.target_action='reinforce';
   IF plan_id_value<>'b036d5a9-a39d-5b51-8f6c-5c91d778fe3b'
      OR (SELECT count(*) FROM memory.claim_observation AS claim_link
          WHERE claim_link.owner_user_id=owner_id
            AND claim_link.claim_id=target_claim_id
-           AND claim_link.observation_id=observation_id)<>1
+           AND claim_link.observation_id=target_observation_id)<>1
      OR (SELECT count(*) FROM memory.projection_review AS review
          WHERE review.owner_user_id=owner_id
            AND review.plan_id=plan_id_value)<>1
@@ -182,11 +182,11 @@ BEGIN
            AND event.plan_id=plan_id_value)<>1
      OR (SELECT count(*) FROM memory.observation_entailment_v5 AS entailment
          WHERE entailment.owner_user_id=owner_id
-           AND entailment.observation_id=observation_id)<>1
+           AND entailment.observation_id=target_observation_id)<>1
      OR (SELECT count(*) FROM memory.relational_operation_request AS request
          WHERE request.owner_user_id=owner_id
            AND request.operation='record_observation_entailment_v5'
-           AND request.target_key=observation_id::text)<>1 THEN
+           AND request.target_key=target_observation_id::text)<>1 THEN
     RAISE EXCEPTION 'applied clone reset boundary is not exact';
   END IF;
 END
