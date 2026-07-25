@@ -285,7 +285,7 @@ assert_equal named_entities "$(scalar "
     AND metadata->>'resolution_id' IN (
       '$monika_resolution','$psychologist_resolution','$bcba_resolution'
     )")" \
-  'concept:BCBA,person:Monika,concept:clinical psychologist'
+  'concept:BCBA,concept:clinical psychologist,person:Monika'
 
 assert_equal binding_semantics "$(scalar "
   SELECT string_agg(
