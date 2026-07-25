@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # seebx backend only. Restores production into a disposable Postgres clone,
-# stages four exact reviewed V5.2 packets, proves replay and owner isolation,
+# stages three exact review-clean V5.2 packets, proves replay and owner isolation,
 # and leaves production, Qdrant, claims, and prompt behavior unchanged.
 
 repo_root=$(git rev-parse --show-toplevel)
@@ -22,7 +22,6 @@ review_root=/home/ubuntu/memory-v1-reviews
 target_owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 evidence_ids=(
-  3e331222-976f-5983-88e2-6e5a8f7b148b
   33126656-fc5a-5fc1-a035-246b14576ee5
   405fcdb1-a4d2-53ff-91ad-542b258cea03
   4550d3a1-7649-5d1b-aff8-f2504e36f869
@@ -90,8 +89,7 @@ target_counts() {
       VALUES
         ('${evidence_ids[0]}'::uuid),
         ('${evidence_ids[1]}'::uuid),
-        ('${evidence_ids[2]}'::uuid),
-        ('${evidence_ids[3]}'::uuid)
+        ('${evidence_ids[2]}'::uuid)
     )
     SELECT concat_ws(',',
       (SELECT count(*) FROM memory.relational_stage_batch
@@ -126,7 +124,7 @@ target_counts() {
 
 [[ -z "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain)" ]]
 [[ "$(sha256sum "$manifest_source" | awk '{print $1}')" == \
-  e1d8b2e574c79efb6583a95096e06eb8f8a4779604fc046b872ef95d32332c2d ]]
+  d67ee1ec7910c64fd0d1aff8bff4bd59bfecdba767437b03345534acaee5a293 ]]
 [[ "$(sha256sum "$stage_runner" | awk '{print $1}')" == \
   3dddef3dbf71862fc42252d6263075ad8d407bc292a4f06760866c816c3699b9 ]]
 [[ "$(sha256sum "$authorizer" | awk '{print $1}')" == \
@@ -188,9 +186,9 @@ MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
   --confirm STAGE_REVIEWED_OWNER_V5_2_PACKETS_ONLY \
   --output "$work/stage-apply.json"
 
-assert_equal staged_target_counts "$(target_counts)" '4,5,5,5,5,5,4'
+assert_equal staged_target_counts "$(target_counts)" '3,3,3,3,3,3,3'
 assert_equal stage_rows \
-  "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 33
+  "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 21
 assert_equal replay_rows \
   "$(jq -r '.checks.replay_rows_written' "$work/stage-apply.json")" 0
 assert_equal entities_unchanged "$(scalar "
@@ -208,7 +206,7 @@ cross_owner_visible=$(PGPASSWORD=clone_only_brains_password psql \
     SELECT count(*) FROM memory.observation
     WHERE evidence_id IN (
       '${evidence_ids[0]}'::uuid,'${evidence_ids[1]}'::uuid,
-      '${evidence_ids[2]}'::uuid,'${evidence_ids[3]}'::uuid
+      '${evidence_ids[2]}'::uuid
     );
     ROLLBACK;" | sed -n '3p')
 assert_equal cross_owner_visible "$cross_owner_visible" 0
@@ -222,8 +220,8 @@ assert_equal brains_service "$(systemctl is-active brains.service)" active
 
 printf '%s\n' \
   'MEMORY_V1_V5_2_MIXED_RELATIONAL_STAGE_BATCH_CLONE=PASS' \
-  'bundle_count=4' \
-  'stage_rows_created=33' \
+  'bundle_count=3' \
+  'stage_rows_created=21' \
   'replay_rows_created=0' \
   'entity_rows_created=0' \
   'claim_rows_created=0' \

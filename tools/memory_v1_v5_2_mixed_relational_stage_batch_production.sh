@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Transactionally stages four exact reviewed V5.2 packets.
+# seebx backend only. Transactionally stages three review-clean V5.2 packets.
 # It creates only relational staging rows and stops before entity application,
 # claims, Qdrant projection, retrieval, or prompt influence.
 
@@ -27,7 +27,6 @@ manifest_source=manifests/memory_v1_v5_2_mixed_relational_stage_batch_20260725.j
 stage_runner=scripts/memory_v1_v5_2_stage_batch.py
 authorizer=tests/memory_v1_v5_2_stage_batch_fixture.py
 evidence_ids=(
-  3e331222-976f-5983-88e2-6e5a8f7b148b
   33126656-fc5a-5fc1-a035-246b14576ee5
   405fcdb1-a4d2-53ff-91ad-542b258cea03
   4550d3a1-7649-5d1b-aff8-f2504e36f869
@@ -151,13 +150,13 @@ def load(path):
 before = load(os.environ["BEFORE"])
 after = load(os.environ["AFTER"])
 expected = {
-    "relational_stage_batch": 4,
-    "entity_mention": 5,
-    "entity_resolution_plan": 5,
-    "entity_resolution_candidate": 5,
-    "observation": 5,
-    "observation_temporal": 5,
-    "relational_operation_request": 4,
+    "relational_stage_batch": 3,
+    "entity_mention": 3,
+    "entity_resolution_plan": 3,
+    "entity_resolution_candidate": 3,
+    "observation": 3,
+    "observation_temporal": 3,
+    "relational_operation_request": 3,
 }
 if before.keys() != after.keys():
     raise SystemExit("target-owner table set changed")
@@ -168,8 +167,8 @@ for table in before:
         raise SystemExit(f"unexpected target delta {table}: {delta} != {wanted}")
     if wanted == 0 and before[table][1] != after[table][1]:
         raise SystemExit(f"unexpected target mutation {table}")
-if sum(expected.values()) != 33:
-    raise SystemExit("target row budget is not 33")
+if sum(expected.values()) != 21:
+    raise SystemExit("target row budget is not 21")
 PY
 }
 
@@ -183,7 +182,7 @@ hash_lock() {
 head=$(git rev-parse HEAD)
 git merge-base --is-ancestor f5016d70deb31f68768f9faf74b42ba19f32fff3 "$head"
 hash_lock "$manifest_source" manifest_sha \
-  e1d8b2e574c79efb6583a95096e06eb8f8a4779604fc046b872ef95d32332c2d
+  d67ee1ec7910c64fd0d1aff8bff4bd59bfecdba767437b03345534acaee5a293
 hash_lock "$stage_runner" stage_runner_sha \
   3dddef3dbf71862fc42252d6263075ad8d407bc292a4f06760866c816c3699b9
 hash_lock "$authorizer" authorizer_sha \
@@ -268,7 +267,7 @@ assert_equal initial_target_stage_rows "$(psql_row "
   WHERE owner_user_id='$target_owner'::uuid
     AND evidence_id IN (
       '${evidence_ids[0]}'::uuid,'${evidence_ids[1]}'::uuid,
-      '${evidence_ids[2]}'::uuid,'${evidence_ids[3]}'::uuid
+      '${evidence_ids[2]}'::uuid
     )")" 0
 
 phase=plan
@@ -294,7 +293,7 @@ MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
   --confirm STAGE_REVIEWED_OWNER_V5_2_PACKETS_ONLY \
   --output "$work/stage-apply.json"
 assert_equal stage_rows \
-  "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 33
+  "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 21
 assert_equal replay_rows \
   "$(jq -r '.checks.replay_rows_written' "$work/stage-apply.json")" 0
 
@@ -311,7 +310,7 @@ cross_owner_visible=$(psql "$POSTGRES_DSN" -X -A -t -v ON_ERROR_STOP=1 -c "
   SELECT count(*) FROM memory.observation
   WHERE evidence_id IN (
     '${evidence_ids[0]}'::uuid,'${evidence_ids[1]}'::uuid,
-    '${evidence_ids[2]}'::uuid,'${evidence_ids[3]}'::uuid
+    '${evidence_ids[2]}'::uuid
   );
   ROLLBACK;" | sed -n '3p')
 assert_equal cross_owner_visible "$cross_owner_visible" 0
@@ -342,8 +341,8 @@ jq -n \
     completed_at:$completed_at,head_commit:$head_commit,
     owner_user_id:$owner_user_id,
     backup:{path:$backup,sha256:$backup_sha256},work_root:$work_root,
-    rows:{stage_total:33,batches:4,mentions:5,resolutions:5,
-      candidates:5,observations:5,temporals:5,operation_requests:4,
+    rows:{stage_total:21,batches:3,mentions:3,resolutions:3,
+      candidates:3,observations:3,temporals:3,operation_requests:3,
       entities:0,claims:0},
     evidence:{target_before:$target_before,target_after:$target_after,
       non_target_before:$non_target_before,non_target_after:$non_target_after,
@@ -366,7 +365,7 @@ printf '%s\n' \
   "head=$head" \
   "report=$report" \
   "backup=$backup" \
-  'stage_rows_created=33' \
+  'stage_rows_created=21' \
   'entity_rows_created=0' \
   'claim_rows_created=0' \
   'qdrant_writes=0' \

@@ -4,18 +4,6 @@
   "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
   "bundles": [
     {
-      "path": "/home/ubuntu/memory-v1-reviews/mixed-review-route-production-20260725T204602Z_f5016d70deb3/reviews/v5-2-router-05d5d9258f2d51da23b5dcb140ca326e62f431220b2a7bf471df6e6c862f4070-stage.json",
-      "sha256": "569f738eddab3e12568da35b8a14215c05e5ebe65d54a900d0c0f634da539900",
-      "expected_outcome": "applied",
-      "expected_counts": {
-        "mentions": 2,
-        "resolutions": 2,
-        "candidates": 2,
-        "observations": 2,
-        "temporals": 2
-      }
-    },
-    {
       "path": "/home/ubuntu/memory-v1-reviews/mixed-review-route-production-20260725T204602Z_f5016d70deb3/reviews/v5-2-router-23248a4ca4297bc1cb6da2b6c8566a606f279e858528f9537a16d5d12bafee16-stage.json",
       "sha256": "9168b0357f3ac0b06cf331980825a0bbd08bcbd905a6110a807c3d4a19a84fca",
       "expected_outcome": "applied",
