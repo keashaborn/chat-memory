@@ -15,6 +15,12 @@ from urllib.parse import urlparse
 
 import asyncpg
 
+from rag_engine.memory_v1_evidence_context_loader_v1 import (
+    load_memory_evidence_context_v1,
+)
+from rag_engine.memory_v1_evidence_context_v1 import (
+    MemoryEvidenceContextEnvelopeV1,
+)
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_CALL_ENABLE_TOKEN,
     LOCAL_POLICY_COMPILER_VERSION,
@@ -32,6 +38,7 @@ from scripts.memory_v1_relational_extraction_v5_observable_provider import (
     sanitize_provider_packet,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
     TrustedExtractionSource,
     canonical_sha256,
     load_registry,
@@ -58,6 +65,40 @@ PINNED_MODEL_ALIAS = "qwen3-14b-local-extractor"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,63}$")
 REJECTION_RE = re.compile(r"^[a-z][a-z0-9_]{1,99}$")
+
+
+class EvidenceContextBoundLocalProvider:
+    """Bind one owner-scoped context envelope to one provider invocation."""
+
+    def __init__(
+        self,
+        delegate: LocalLlamaCppProvider,
+        evidence_context: MemoryEvidenceContextEnvelopeV1,
+    ) -> None:
+        self._delegate = delegate
+        self._evidence_context = evidence_context
+
+    @property
+    def provider_id(self) -> str:
+        return self._delegate.provider_id
+
+    @property
+    def provider_version(self) -> str:
+        return self._delegate.provider_version
+
+    @property
+    def external_model_calls(self) -> int:
+        return int(self._delegate.external_model_calls)
+
+    @property
+    def external_call_capability(self) -> bool:
+        return bool(self._delegate.external_call_capability)
+
+    def extract(self, source: TrustedExtractionSource) -> ProviderPacket:
+        return self._delegate.extract(
+            source,
+            evidence_context=self._evidence_context,
+        )
 
 
 def sha256_text(value: str) -> str:
@@ -491,6 +532,11 @@ def sanitized_audit(provider: LocalLlamaCppProvider) -> dict[str, Any] | None:
         "validation_error_count",
         "validation_error_types",
         "validation_error_locations",
+        "evidence_context_contract_version",
+        "evidence_context_envelope_sha256",
+        "evidence_context_span_count",
+        "evidence_context_assertion_origin_count",
+        "evidence_context_coreference_version",
     }
     return {key: value for key, value in provider.last_audit.items() if key in allowed}
 
@@ -651,15 +697,36 @@ async def run() -> int:
             max_output_tokens=args.max_output_tokens,
             timeout_seconds=args.timeout_seconds,
         )
-        capturing = (
-            CapturingProvider(provider)
-            if args.diagnostic_replay
-            else None
-        )
         phase = "validation"
+        capturing = None
         try:
+            evidence_context = (
+                await load_memory_evidence_context_v1(
+                    conn,
+                    expected_owner_user_id=ids["owner"],
+                    target_evidence_id=ids["evidence_id"],
+                    expected_target_content_sha256=(
+                        args.expected_content_sha256
+                    ),
+                )
+                if profile.name == "v5_2"
+                else None
+            )
+            validation_provider = (
+                EvidenceContextBoundLocalProvider(
+                    provider,
+                    evidence_context,
+                )
+                if evidence_context is not None
+                else provider
+            )
+            capturing = (
+                CapturingProvider(validation_provider)
+                if args.diagnostic_replay
+                else None
+            )
             validated = validate_and_normalize(
-                capturing if capturing is not None else provider,
+                capturing if capturing is not None else validation_provider,
                 source=source,
                 registry=registry,
                 schema=schema,
