@@ -19,6 +19,9 @@ build_manifest=manifests/memory_v1_v5_2_evidence_context_atom_stage_20260726.jso
 bundle_builder=scripts/memory_v1_v5_2_atom_stage_bundle_v2.py
 stage_runner=scripts/memory_v1_v5_2_stage_batch.py
 stage_fixture=tests/memory_v1_v5_2_stage_batch_fixture.py
+compat_migration=ops/sql/20260726_memory_v1_v5_2_disposition_atom_projection_compat.sql
+compat_rollback=ops/sql/20260726_memory_v1_v5_2_disposition_atom_projection_compat_rollback.sql
+compat_test=tests/memory_v1_v5_2_disposition_atom_projection_compat.sql
 backup=$(mktemp /tmp/memory-v1-v5-2-evidence-context-stage.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-evidence-context-stage-roles.XXXXXX.sql)
 work=$(mktemp -d /tmp/memory-v1-v5-2-evidence-context-stage.XXXXXX)
@@ -38,6 +41,9 @@ stage_runner_sha=3dddef3dbf71862fc42252d6263075ad8d407bc292a4f06760866c816c3699b
 stage_fixture_sha=96461968b5afa0ec2a8aa207ec7ec2096278d851cd51d4e0a7c90541ab5a54ac
 compose_ci_sha=c437744f84f82ce14446fa420bb4680312bbc08acdbdebb92e6a48cc1af23f8e
 compose_clone_sha=3185bdb665cb37dd2e695e7653ff8b749ba5dd75a2f3bbe06a7c2717a2e5c0e2
+compat_migration_sha=758af9d35fc2cd00514525b40b5dc19937a99c17d18a5ec4e3bece151ad59202
+compat_rollback_sha=88f2c7ea892799a7c0c7219e0b67bc0a78bb861946007c0f84e68b98c5860f5b
+compat_test_sha=4ef8b7a10ac3061a39a2eff6d81ba5bcef3736369d856929aea5a235dcdda0cd
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
@@ -168,6 +174,9 @@ assert_sha stage_runner "$stage_runner" "$stage_runner_sha"
 assert_sha stage_fixture "$stage_fixture" "$stage_fixture_sha"
 assert_sha compose_ci docker-compose.ci.yml "$compose_ci_sha"
 assert_sha compose_clone docker-compose.stage-batch-clone.yml "$compose_clone_sha"
+assert_sha compat_migration "$compat_migration" "$compat_migration_sha"
+assert_sha compat_rollback "$compat_rollback" "$compat_rollback_sha"
+assert_sha compat_test "$compat_test" "$compat_test_sha"
 
 qdrant_before=$(qdrant_signature)
 production_before=$(production_signature)
@@ -176,6 +185,11 @@ production_planner_sha=$(production_scalar "
   SELECT encode(public.digest(convert_to(
     pg_get_functiondef(
       'memory.plan_owner_v5_2_atom_stage_v2(uuid)'::regprocedure
+    ),'UTF8'),'sha256'),'hex')")
+legacy_guard_sha=$(production_scalar "
+  SELECT encode(public.digest(convert_to(
+    pg_get_functiondef(
+      'memory.guard_disposed_evidence_from_stage_v1()'::regprocedure
     ),'UTF8'),'sha256'),'hex')")
 
 assert_equal production_initial_target_stage "$(production_scalar "
@@ -213,11 +227,22 @@ printf '%s\n' \
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists <"$backup"
 
+run_sql <"$compat_migration"
+run_sql <"$compat_migration"
+PGPASSWORD=clone_only_brains_password psql \
+  -h 127.0.0.1 -p "$port" -U brains_app -d memory \
+  -X -v ON_ERROR_STOP=1 -f "$compat_test"
+
 assert_equal clone_planner_sha "$(scalar "
   SELECT encode(public.digest(convert_to(
     pg_get_functiondef(
       'memory.plan_owner_v5_2_atom_stage_v2(uuid)'::regprocedure
     ),'UTF8'),'sha256'),'hex')")" "$production_planner_sha"
+assert_equal legacy_guard_unchanged "$(scalar "
+  SELECT encode(public.digest(convert_to(
+    pg_get_functiondef(
+      'memory.guard_disposed_evidence_from_stage_v1()'::regprocedure
+    ),'UTF8'),'sha256'),'hex')")" "$legacy_guard_sha"
 assert_equal clone_initial_target_stage "$(target_stage_counts)" \
   '0,0,0,0,0,0,0,0,0,0,0'
 
@@ -310,6 +335,22 @@ assert_equal target_claims_unchanged "$(scalar "
   SELECT count(*) FROM memory.claim
   WHERE owner_user_id='$target_owner'::uuid")" "$target_claims_before"
 
+run_sql <"$compat_rollback"
+assert_equal compatibility_function_removed "$(scalar "
+  SELECT to_regprocedure(
+    'memory.guard_disposed_evidence_from_stage_v2()'
+  ) IS NULL")" t
+assert_equal legacy_trigger_restored "$(scalar "
+  SELECT procedure.proname
+  FROM pg_trigger AS trigger
+  JOIN pg_proc AS procedure
+    ON procedure.oid=trigger.tgfoid
+  WHERE trigger.tgrelid='memory.relational_stage_batch'::regclass
+    AND trigger.tgname='v5_local_disposition_stage_guard'
+    AND NOT trigger.tgisinternal")" guard_disposed_evidence_from_stage_v1
+assert_equal staged_rows_survive_compatibility_rollback \
+  "$(target_stage_counts)" '1,1,1,1,1,1,1,0,0,0,0'
+
 assert_equal qdrant_unchanged "$(qdrant_signature)" "$qdrant_before"
 assert_equal production_rows_unchanged \
   "$(production_signature)" "$production_before"
@@ -326,6 +367,8 @@ printf '%s\n' \
   'clone_rows_created=7' \
   'same_run_replay_rows=0' \
   'self_resolution=trusted_owner_self_binding' \
+  'legacy_terminal_disposition_preserved=true' \
+  'exact_admitted_atom_compatibility=passed' \
   'entity_resolution_apply_rows=0' \
   'observation_binding_rows=0' \
   'claim_rows_created=0' \
