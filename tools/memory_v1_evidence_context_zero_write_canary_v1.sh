@@ -62,7 +62,7 @@ cleanup() {
 trap cleanup EXIT
 
 capture_state() {
-  docker exec "$container" psql -U sage -d "$database" -X -At \
+  docker exec -i "$container" psql -U sage -d "$database" -X -At \
     -v ON_ERROR_STOP=1 <<SQL
 SELECT 'target_evidence',count(*),max(content_sha256)
 FROM memory.evidence
@@ -147,6 +147,14 @@ PYTHONPATH="$repo_root" \
 canary_rc=$?
 set -e
 chmod 0600 "$report"
+capture_state >"$after"
+[[ -s "$before" && -s "$after" ]]
+cmp -s "$before" "$after"
+qdrant_after=$(qdrant_signature)
+[[ "$qdrant_before" == "$qdrant_after" ]]
+restore_timers
+[[ "$(systemctl is-active brains.service)" == active ]]
+
 [[ "$canary_rc" == 0 ]]
 jq -e '
   .outcome=="accepted"
@@ -157,13 +165,6 @@ jq -e '
   }
 ' "$report" >/dev/null
 [[ -s "$packet" && "$(stat -c %a "$packet")" == 600 ]]
-
-capture_state >"$after"
-cmp -s "$before" "$after"
-qdrant_after=$(qdrant_signature)
-[[ "$qdrant_before" == "$qdrant_after" ]]
-restore_timers
-[[ "$(systemctl is-active brains.service)" == active ]]
 
 printf '%s\n' \
   'memory_v1_evidence_context_zero_write_canary_v1: PASS' \
