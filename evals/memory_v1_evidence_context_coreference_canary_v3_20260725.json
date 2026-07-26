@@ -1,0 +1,52 @@
+{
+  "contract_version": "memory_v1_evidence_context_coreference_canary_review_v3",
+  "reviewed_at": "2026-07-26T05:00:00Z",
+  "implementation": {
+    "tested_commit": "f01cc6cf3cc8d9d9422e49ac4ef18c97c9537d32",
+    "coreference_contract": "memory_v1_evidence_context_coreference_v1",
+    "sibling_assertion_authority": false
+  },
+  "artifacts": {
+    "context_envelope_sha256": "84b3e0aeae1353355411c65ec8cca5cf605c95b3bd2a5431571ccbc03cc035ed",
+    "provider_request_sha256": "904ebc9e4c1f20cafc8a4b51bcf20e390a77bdfc2f6e01e7df802419fc0a9b7f",
+    "provider_response_sha256": "e882817852fb9612acd442565b50fb74bf357bcbf58687690138d0e3f3542697",
+    "compiled_packet_sha256": "460c46818ce5a8fb62f4f3ef67dc97241df8a42bb4d7c68aed61fd96a5721fd2",
+    "root_only_report_sha256": "64979e86c2bfe12d041080b95c4f607fc8751cb5f1639b65dc2a617508cfaf24",
+    "root_only_packet_sha256": "210a07852a04dda86063c23713c5b5a6e61a0ca6d26613668f2604364fe1979e",
+    "state_before_sha256": "cfa0924412f147fe5976c6a123e5e2ad5a3c5bf2943dfee33f5d65b0fcff8c47",
+    "state_after_sha256": "cfa0924412f147fe5976c6a123e5e2ad5a3c5bf2943dfee33f5d65b0fcff8c47",
+    "timer_state_sha256": "b0979aa4937619b36eaa34c677f0adf9337fc504be31022c9307a9d56700d317"
+  },
+  "execution": {
+    "outcome": "accepted",
+    "private_local_model_calls": 1,
+    "external_model_calls": 0,
+    "database_state_rows_compared": 10,
+    "database_state_equal": true,
+    "qdrant_state_equal": true,
+    "retrieval_activation": false,
+    "prompt_influence": false,
+    "timers_restored_exactly": true,
+    "brains_service_active": true
+  },
+  "semantic_result": {
+    "predicate": "stance.reported",
+    "projection_class": "reported_stance",
+    "context_coreference_resolved": true,
+    "resolved_topic_text": "Fractal Monism",
+    "resolved_position": "Fractal Monism will help people in life",
+    "topic_namespace_duplicate": true,
+    "target_quote_length": 54,
+    "reported_target_end": 35,
+    "target_span_valid": false,
+    "stage_eligible": false
+  },
+  "conclusion": {
+    "coreference_rule_verified": true,
+    "normalization_followup_required": true,
+    "normalization_commit": "9c702e3602512cb9fa9770002a5271d9a9e43f0f",
+    "normalization_clone_verified": true,
+    "requires_new_private_model_call": true,
+    "staging_authorized": false
+  }
+}
