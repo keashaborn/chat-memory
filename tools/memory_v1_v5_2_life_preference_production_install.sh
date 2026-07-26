@@ -102,8 +102,9 @@ capture_memory_state() {
   )
 }
 
-[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$target_head" ]]
 [[ -z "$(git -C "$repo_root" status --short)" ]]
+git -C "$repo_root" merge-base --is-ancestor \
+  "$target_head" "$(git -C "$repo_root" rev-parse HEAD)"
 [[ "$(git -C "$live" rev-parse HEAD)" == "$current_head" ]]
 [[ -z "$(git -C "$live" status --short)" ]]
 git -C "$live" merge-base --is-ancestor "$current_head" "$target_head"
