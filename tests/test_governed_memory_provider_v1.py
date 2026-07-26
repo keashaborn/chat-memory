@@ -315,6 +315,63 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter_kwargs["minimum_semantic_score"], 0.20)
         self.assertEqual(adapter_kwargs["relative_semantic_ratio"], 0.40)
 
+    async def test_fm_explicit_prior_stance_recall_applies_only_governed_stance(
+        self,
+    ) -> None:
+        snapshot = create_current_only_conversation_snapshot_v1(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id="fm-explicit-stance-request",
+            current_message=(
+                "What have I said about how Fractal Monism can help people?"
+            ),
+        )
+        provider = LiveGovernedMemoryAssemblyProviderV1(object())
+
+        with patch.dict(
+            os.environ,
+            {"QDRANT_URL": "http://qdrant.invalid"},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.embed_text",
+            return_value=[0.125, -0.25, 0.5],
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.make_qdrant_client",
+            return_value=FakeQdrant(),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.ClaimVectorIndex",
+            return_value=object(),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.load_governed_entity_scope_snapshot_v2",
+            return_value={"snapshot": object()},
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.resolve_memory_claim_selector_context_v2",
+            return_value=SimpleNamespace(
+                allowed_predicates=("stance.reported",)
+            ),
+        ), patch(
+            "rag_engine.governed_memory_provider_v1.V5ClaimLaneAdapterV2",
+            return_value=FakeProvider(lane_result(MemoryLane.CLAIM)),
+        ) as claim_adapter:
+            result = await provider.prepare(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=snapshot,
+                trusted_policy_signals=ResponsePolicySignalsV0_2(
+                    fm_explicit=True
+                ),
+            )
+
+        self.assertIsNotNone(result.memory_input)
+        self.assertIsNotNone(result.memory_application)
+        assert result.memory_application is not None
+        self.assertTrue(result.memory_application.memory_content_included)
+        self.assertGreater(len(result.memory_application.injected_records), 0)
+        self.assertGreater(result.memory_application.actual_prompt_tokens, 0)
+        adapter_kwargs = claim_adapter.call_args.kwargs
+        self.assertEqual(
+            adapter_kwargs["predicate_prefix_resolver"](object()),
+            ("stance.reported",),
+        )
+
     async def test_trusted_suppression_signals_block_family_memory_before_external_access(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(
             authenticated_actor_user_id=ACTOR,

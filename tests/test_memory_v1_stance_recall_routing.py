@@ -39,6 +39,30 @@ class StanceRecallRoutingTest(unittest.TestCase):
     def test_broad_opinion_recall_routes_to_reported_stances(self) -> None:
         self.assert_stance_route("What are some opinions I have shared?")
 
+    def test_fm_explicit_prior_stance_recall_remains_memory_eligible(self) -> None:
+        self.assert_stance_route(
+            "What have I said about how Fractal Monism can help people?",
+            classification="FM_CONCEPTUAL",
+        )
+
+    def test_fm_conceptual_turn_without_prior_user_recall_stays_suppressed(
+        self,
+    ) -> None:
+        plan = classify_memory_intent(
+            "Explain how Fractal Monism can help people.",
+            request_classification="FM_CONCEPTUAL",
+        )
+        self.assertEqual(plan["memory_intent"], "none")
+        self.assertFalse(plan["direct_relevance"])
+        self.assertFalse(plan["routes"]["governed_claims"])
+        self.assertEqual(
+            plan["claim_context"],
+            {
+                "eligible": False,
+                "reason": "turn_intent:fm_conceptual",
+            },
+        )
+
     def test_information_providing_stance_does_not_retrieve_stances(self) -> None:
         plan = classify_memory_intent(
             "I believe worrying about next month does not help.",

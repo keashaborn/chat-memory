@@ -19,7 +19,7 @@ from .qdrant_compat import make_qdrant_client
 
 
 VERSION = "memory_v1_v5_shadow_trace_v1"
-SUPPRESSED_REQUEST_CLASSES = {"TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"}
+SUPPRESSED_REQUEST_CLASSES = {"TECH", "MEMORY_ARCHITECTURE"}
 SPECIALIZED_INTENTS = {"preference_recall", "recommendation", *PROJECT_INTENTS}
 PROFILE_RECALL_CLASSES = {"SPECIFIC_RECALL", "PROFILE_SUMMARY"}
 FIRST_PERSON_RE = re.compile(r"\b(?:i|me|my|mine)\b", re.IGNORECASE)

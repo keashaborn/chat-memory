@@ -526,11 +526,17 @@ def _looks_like_personal_recall(text: str) -> bool:
 
 
 def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
-    if request_classification in {"TECH", "MEMORY_ARCHITECTURE", "FM_CONCEPTUAL"}:
+    if request_classification in {"TECH", "MEMORY_ARCHITECTURE"}:
         return {
             "eligible": False,
             "reason": f"turn_intent:{request_classification.lower()}",
         }
+
+    if (
+        request_classification == "FM_CONCEPTUAL"
+        and not STANCE_RECALL_RE.search(text)
+    ):
+        return {"eligible": False, "reason": "turn_intent:fm_conceptual"}
 
     family_death_recall = bool(FAMILY_DEATH_RECALL_RE.search(text))
     stance_recall = bool(STANCE_RECALL_RE.search(text))
