@@ -167,6 +167,10 @@ SQL
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   tests/test_memory_v1_evidence_context_v1.py
 PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+  tests/test_memory_v1_evidence_context_loader_v1.py
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+  tests/test_memory_v1_local_provider_evidence_context_v1.py
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   tools/memory_v1_evidence_context_v1_report.py \
   --input "$input_json" \
   --expected-owner-user-id "$owner" \
