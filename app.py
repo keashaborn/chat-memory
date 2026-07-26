@@ -34,6 +34,9 @@ class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
     vantage_id: Optional[str] = "default"
+
+class PinThreadReq(BaseModel):
+    pinned: bool
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
 from rag_engine.voice_realtime_preview_router import (
@@ -716,10 +719,31 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
     try:
         await _set_connection_actor(conn, user_id)
         rows = await conn.fetch(
-            "SELECT id, title, updated_at FROM threads WHERE owner_user_id=$1 AND archived=false ORDER BY updated_at DESC",
+            """
+            SELECT id,
+                   title,
+                   updated_at,
+                   pinned_at,
+                   pinned_at IS NOT NULL AS pinned
+            FROM threads
+            WHERE owner_user_id=$1
+              AND archived=false
+            ORDER BY (pinned_at IS NOT NULL) DESC,
+                     pinned_at DESC NULLS LAST,
+                     updated_at DESC
+            """,
             user_id
         )
-        return [{"thread_id": str(r["id"]), "title": r["title"], "updated_at": r["updated_at"].isoformat()} for r in rows]
+        return [
+            {
+                "thread_id": str(r["id"]),
+                "title": r["title"],
+                "updated_at": r["updated_at"].isoformat(),
+                "pinned": bool(r["pinned"]),
+                "pinned_at": r["pinned_at"].isoformat() if r["pinned_at"] else None,
+            }
+            for r in rows
+        ]
     finally:
         await conn.close()
 
@@ -908,6 +932,50 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
             "title": updated["title"],
             "title_source": updated["title_source"],
             "updated": True,
+        }
+    finally:
+        await conn.close()
+
+
+@app.post("/threads/{thread_id}/pin")
+async def threads_pin(thread_id: str, body: PinThreadReq, req: Request):
+    tid = parse_uuid(thread_id)
+    if not tid:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_thread_id"},
+            status_code=400,
+        )
+
+    actor_err, actor_uid = await _require_actor_for_thread(req, tid)
+    if actor_err:
+        return actor_err
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, actor_uid)
+        updated = await conn.fetchrow(
+            """
+            UPDATE threads
+            SET pinned_at = CASE WHEN $1 THEN now() ELSE NULL END
+            WHERE owner_user_id=$2 AND id=$3
+            RETURNING pinned_at
+            """,
+            body.pinned,
+            actor_uid,
+            tid,
+        )
+        if not updated:
+            return JSONResponse(
+                {"status": "not_found", "detail": "thread_not_found"},
+                status_code=404,
+            )
+
+        pinned_at = updated["pinned_at"]
+        return {
+            "status": "ok",
+            "thread_id": str(tid),
+            "pinned": pinned_at is not None,
+            "pinned_at": pinned_at.isoformat() if pinned_at else None,
         }
     finally:
         await conn.close()
