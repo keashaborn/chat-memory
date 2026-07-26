@@ -31,6 +31,7 @@ packet="$review_dir/packet.json"
 unit_state="$review_dir/timers.tsv"
 before="$review_dir/state-before.tsv"
 after="$review_dir/state-after.tsv"
+touch "$unit_state" "$before" "$after"
 chmod 0600 "$unit_state" "$before" "$after"
 
 timers_restored=0
