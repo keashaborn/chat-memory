@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import unittest
+import uuid
 
 from rag_engine.memory_v1_evidence_context_loader_v1 import (
     EvidenceContextContractError,
@@ -185,24 +186,74 @@ class EvidenceContextLoaderV1Test(unittest.TestCase):
             0,
         )
 
-    def test_sibling_overflow_fails_closed(self) -> None:
+    def test_large_source_uses_deterministic_target_centered_window(self) -> None:
         connection = Connection()
-        connection.evidence = connection.evidence * 5
-        with self.assertRaisesRegex(
-            EvidenceContextContractError,
-            "bounded evidence-context window",
-        ):
-            asyncio.run(
-                load_memory_evidence_context_v1(
-                    connection,
-                    expected_owner_user_id=OWNER,
-                    target_evidence_id=TARGET_ID,
-                    expected_target_content_sha256=connection.target[
-                        "content_sha256"
-                    ],
-                    max_spans=12,
-                )
+        source_text = " ".join(f"span-{index:02d}" for index in range(28))
+        connection.source["text"] = source_text
+        connection.evidence = []
+        cursor = 0
+        for index in range(28):
+            content = f"span-{index:02d}"
+            start = source_text.index(content, cursor)
+            end = start + len(content)
+            cursor = end
+            evidence_id = (
+                TARGET_ID
+                if index == 20
+                else str(uuid.uuid5(uuid.NAMESPACE_URL, f"span:{index}"))
             )
+            connection.evidence.append(
+                {
+                    "evidence_id": evidence_id,
+                    "owner_user_id": OWNER,
+                    "source_system": "public.chat_log",
+                    "external_id": f"chat_log:{SOURCE_ID}:span:{evidence_id}",
+                    "content": content,
+                    "content_sha256": sha(content),
+                    "recorded_at": "2026-07-02T02:05:41.345358+00:00",
+                    "metadata": {
+                        "source_id": SOURCE_ID,
+                        "thread_id": THREAD_ID,
+                        "request_id": REQUEST_ID,
+                        "source_content_sha256": sha(source_text),
+                        "source_char_start": start,
+                        "source_char_end": end,
+                        "primary_lane": "user_viewpoint",
+                        "epistemic_role": "user_belief_or_opinion",
+                        "span_origin": "compound_child",
+                    },
+                }
+            )
+        connection.target = next(
+            row
+            for row in connection.evidence
+            if row["evidence_id"] == TARGET_ID
+        )
+
+        envelope = asyncio.run(
+            load_memory_evidence_context_v1(
+                connection,
+                expected_owner_user_id=OWNER,
+                target_evidence_id=TARGET_ID,
+                expected_target_content_sha256=connection.target[
+                    "content_sha256"
+                ],
+                max_spans=12,
+            )
+        )
+
+        self.assertEqual(len(envelope.spans), 12)
+        self.assertEqual(
+            [span.context_role for span in envelope.spans],
+            ["before"] * 7 + ["target"] + ["after"] * 4,
+        )
+        self.assertEqual(
+            [span.content for span in envelope.spans],
+            [f"span-{index:02d}" for index in range(13, 25)],
+        )
+        queries = "\n".join(connection.queries)
+        self.assertIn("row_number() OVER", queries)
+        self.assertIn("target_position", queries)
 
 
 if __name__ == "__main__":
