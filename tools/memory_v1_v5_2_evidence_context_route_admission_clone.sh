@@ -30,14 +30,14 @@ route_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.route)
 route_replay=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.route-replay)
 isolation_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.isolation)
 plan_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.plan)
-preflight_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.preflight)
-apply_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.apply)
-replay_output=$(mktemp /tmp/memory-v5-2-evidence-context-admission.XXXXXX.replay)
+work=$(mktemp -d /tmp/memory-v5-2-evidence-context-admission.XXXXXX.work)
+preflight_output="$work/preflight.json"
+apply_output="$work/apply.json"
+replay_output="$work/replay.json"
 review_root=$(mktemp -d /tmp/memory-v5-2-evidence-context-admission.XXXXXX.reviews)
 chmod 0600 "$backup" "$protected_before" "$protected_after" \
-  "$route_output" "$route_replay" "$isolation_output" "$plan_output" \
-  "$preflight_output" "$apply_output" "$replay_output"
-chmod 0700 "$review_root"
+  "$route_output" "$route_replay" "$isolation_output" "$plan_output"
+chmod 0700 "$work" "$review_root"
 phase=initialization
 
 cleanup() {
@@ -59,9 +59,8 @@ cleanup() {
   docker exec "$container" dropdb -U sage --if-exists "$clone" \
     >/dev/null 2>&1 || true
   rm -f "$backup" "$protected_before" "$protected_after" \
-    "$route_output" "$route_replay" "$isolation_output" "$plan_output" \
-    "$preflight_output" "$apply_output" "$replay_output"
-  rm -rf "$review_root"
+    "$route_output" "$route_replay" "$isolation_output" "$plan_output"
+  rm -rf "$work" "$review_root"
   exit "$rc"
 }
 trap cleanup EXIT
