@@ -15,6 +15,11 @@ from .memory_v1_selection_envelope import (
     MemorySelectionRequestV1,
     SourceContractVersionV1,
 )
+from .memory_v1_stance_topic_scope_v1 import (
+    StanceTopicScopeError,
+    StanceTopicScopeV1,
+    claim_row_matches_stance_topic_scope_v1,
+)
 from .memory_v1_v5_claim_lane_adapter import (
     CandidateDiscovererV1,
     ClaimRowLoaderV1,
@@ -39,6 +44,7 @@ class V5ClaimLaneAdapterV2:
         row_loader: ClaimRowLoaderV1,
         predicate_prefix_resolver: PredicatePrefixResolverV1,
         selector_context_resolver: SelectorContextResolverV2,
+        stance_topic_scope: StanceTopicScopeV1 | None = None,
         candidate_limit: int = 24,
         minimum_semantic_score: float = 0.20,
         relative_semantic_ratio: float = 0.40,
@@ -48,6 +54,7 @@ class V5ClaimLaneAdapterV2:
         self._row_loader = row_loader
         self._predicate_resolver = predicate_prefix_resolver
         self._context_resolver = selector_context_resolver
+        self._stance_topic_scope = stance_topic_scope
         self._candidate_limit = candidate_limit
         self._minimum_semantic_score = minimum_semantic_score
         self._relative_semantic_ratio = relative_semantic_ratio
@@ -64,10 +71,23 @@ class V5ClaimLaneAdapterV2:
             context = MemoryClaimSelectorContextV2.model_validate_json(
                 context.model_dump_json()
             )
+            stance_topic_scope = (
+                None
+                if self._stance_topic_scope is None
+                else self._stance_topic_scope.strict_revalidated()
+            )
         except Exception as exc:
             raise GovernedLaneAdapterError(
                 "claim V2 adapter received an invalid bound entity scope"
             ) from exc
+        if stance_topic_scope is not None and (
+            stance_topic_scope.owner_user_id != request.owner_user_id
+            or stance_topic_scope.selection_trace_id != request.selection_trace_id
+            or stance_topic_scope.request_binding_sha256 != binding.request_binding_sha256
+        ):
+            raise GovernedLaneAdapterError(
+                "claim V2 stance topic scope differs from the selection request"
+            )
         if (
             context.owner_user_id != request.owner_user_id
             or context.selection_trace_id != request.selection_trace_id
@@ -89,6 +109,13 @@ class V5ClaimLaneAdapterV2:
             raise GovernedLaneAdapterError(
                 "claim V2 predicate permissions differ from entity-scope rules"
             )
+        if (
+            stance_topic_scope is not None
+            and stance_topic_scope.predicate not in context.allowed_predicates
+        ):
+            raise GovernedLaneAdapterError(
+                "claim V2 stance topic scope exceeds predicate permissions"
+            )
 
         def row_policy(
             row: Mapping[str, object],
@@ -102,10 +129,16 @@ class V5ClaimLaneAdapterV2:
                     "claim V2 row policy request binding changed"
                 )
             try:
-                return claim_row_matches_entity_scope_v2(row, context)
-            except EntityScopeError as exc:
+                entity_allowed = claim_row_matches_entity_scope_v2(row, context)
+                if not entity_allowed or stance_topic_scope is None:
+                    return entity_allowed
+                return claim_row_matches_stance_topic_scope_v1(
+                    row,
+                    stance_topic_scope,
+                )
+            except (EntityScopeError, StanceTopicScopeError) as exc:
                 raise GovernedLaneAdapterError(
-                    "claim V2 row violated the entity-scope contract"
+                    "claim V2 row violated the bounded selector contract"
                 ) from exc
 
         adapter = V5ClaimLaneAdapterV1(

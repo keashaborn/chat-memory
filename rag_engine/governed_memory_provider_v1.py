@@ -40,6 +40,9 @@ from rag_engine.memory_v1_selection_envelope import (
     SourceContractVersionV1,
     select_governed_memory_v1,
 )
+from rag_engine.memory_v1_stance_topic_scope_v1 import (
+    resolve_stance_topic_scope_v1,
+)
 from rag_engine.memory_v1_shadow import (
     governed_activation_allowlisted,
     governed_maximum_sensitivity,
@@ -165,6 +168,10 @@ class LiveGovernedMemoryAssemblyProviderV1:
                 selected_at=datetime.now(timezone.utc),
                 budget_policy=MemorySelectionBudgetPolicyV1.standard(),
             )
+            stance_topic_scope = resolve_stance_topic_scope_v1(
+                request=request,
+                claim_context=claim_context,
+            )
             if MemoryLane.CLAIM in requested:
                 scope_batch = await load_governed_entity_scope_snapshot_v2(
                     self._conn,
@@ -200,6 +207,7 @@ class LiveGovernedMemoryAssemblyProviderV1:
                     predicate_prefix_resolver=lambda _request: (
                         selector_context.allowed_predicates
                     ),
+                    stance_topic_scope=stance_topic_scope,
                     selector_context_resolver=lambda _request: selector_context,
                     candidate_limit=100 if broad_profile_recall else 24,
                     minimum_semantic_score=0.0 if broad_profile_recall else 0.20,

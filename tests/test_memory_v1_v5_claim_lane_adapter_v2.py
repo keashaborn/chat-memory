@@ -35,6 +35,9 @@ from rag_engine.memory_v1_selection_envelope import (
     SurfacePolicy,
     UseInstruction,
 )
+from rag_engine.memory_v1_stance_topic_scope_v1 import (
+    resolve_stance_topic_scope_v1,
+)
 from rag_engine.memory_v1_v5_claim_lane_adapter_v2 import V5ClaimLaneAdapterV2
 
 
@@ -65,7 +68,9 @@ def lane_limit() -> MemoryLaneLimitV1:
 
 
 def claim_request(
-    *, explicit_recall: bool = True
+    *,
+    explicit_recall: bool = True,
+    query_text: str = "What do you know about my pets?",
 ) -> MemorySelectionRequestV1:
     vector = (0.125, -0.25, 0.5)
     limit = lane_limit()
@@ -77,7 +82,7 @@ def claim_request(
         owner_user_id=OWNER,
         request_id="adapter-v2-test",
         thread_id=THREAD,
-        query_text="What do you know about my pets?",
+        query_text=query_text,
         query_vector=vector,
         query_embedding=QueryEmbeddingArtifactV1.from_vector(
             source=QueryEmbeddingSource.PRIVATE_LOCAL,
@@ -209,6 +214,7 @@ def adapter(
     context_resolver,
     *,
     predicate: str,
+    stance_topic_scope=None,
 ) -> V5ClaimLaneAdapterV2:
     claim_id = uid(1)
 
@@ -233,6 +239,7 @@ def adapter(
         row_loader=load,
         predicate_prefix_resolver=lambda _: (predicate,),
         selector_context_resolver=context_resolver,
+        stance_topic_scope=stance_topic_scope,
     )
 
 
@@ -265,6 +272,15 @@ def reported_stance_row() -> dict[str, object]:
             "subject_entity_type": "self",
             "object_entity_id": None,
             "object_entity_type": None,
+            "object_literal": {
+                "kind": "literal",
+                "datatype": "json",
+                "value": {
+                    "topic_key": "evidence.public_opinion",
+                    "topic_text": "public opinion and evidence",
+                    "position": "Public opinion is not the same as evidence",
+                },
+            },
         }
     )
     return row
@@ -316,6 +332,67 @@ class ClaimLaneAdapterV2Test(unittest.TestCase):
             result.records[0].use_instruction,
             UseInstruction.MENTION_ONLY_WHEN_DIRECTLY_RELEVANT,
         )
+
+    def test_specific_stance_topic_rejects_unrelated_stance(self) -> None:
+        selection_request = claim_request(
+            query_text=(
+                "What have I said about how Fractal Monism can help people?"
+            )
+        )
+        value = selector_context(
+            selection_request,
+            subject=SELF,
+            object_entity=None,
+            predicate="stance.reported",
+        )
+        scope = resolve_stance_topic_scope_v1(
+            request=selection_request,
+            claim_context={
+                "domain": "stance_recall",
+                "allowed_predicates": ["stance.reported"],
+            },
+        )
+        result = asyncio.run(
+            adapter(
+                reported_stance_row(),
+                lambda _: value,
+                predicate="stance.reported",
+                stance_topic_scope=scope,
+            ).select(selection_request, lane_limit())
+        )
+        self.assertEqual(result.records, ())
+        counts = {item.code: item.count for item in result.reason_counts}
+        self.assertEqual(counts[RejectionCode.ENTITY_SCOPE], 1)
+
+    def test_specific_stance_topic_accepts_matching_stance(self) -> None:
+        selection_request = claim_request(
+            query_text=(
+                "What have I said about public opinion and evidence?"
+            )
+        )
+        value = selector_context(
+            selection_request,
+            subject=SELF,
+            object_entity=None,
+            predicate="stance.reported",
+        )
+        scope = resolve_stance_topic_scope_v1(
+            request=selection_request,
+            claim_context={
+                "domain": "stance_recall",
+                "allowed_predicates": ["stance.reported"],
+            },
+        )
+        result = asyncio.run(
+            adapter(
+                reported_stance_row(),
+                lambda _: value,
+                predicate="stance.reported",
+                stance_topic_scope=scope,
+            ).select(selection_request, lane_limit())
+        )
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0].predicate, "stance.reported")
 
     def test_unknown_stored_surface_alias_fails_closed(self) -> None:
         selection_request = self.claim_request()
@@ -413,7 +490,7 @@ class ClaimLaneAdapterV2Test(unittest.TestCase):
         )
         row = pet_relationship_row()
         row["owner_user_id"] = OTHER
-        with self.assertRaisesRegex(GovernedLaneAdapterError, "entity-scope contract"):
+        with self.assertRaisesRegex(GovernedLaneAdapterError, "selector contract"):
             asyncio.run(
                 adapter(
                     row,
