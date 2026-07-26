@@ -80,7 +80,7 @@ def _collection_snapshot(
             raise RuntimeError("the controlled stance projection predicate changed")
         if str(payload.get("status") or "") != "supported":
             raise RuntimeError("the controlled stance projection is not supported")
-        if int(payload.get("revision") or 0) != TARGET_REVISION:
+        if int(payload.get("revision_number") or 0) != TARGET_REVISION:
             raise RuntimeError("the controlled stance projection revision changed")
         vector = point.vector
         if isinstance(vector, dict):
@@ -113,7 +113,9 @@ def _collection_snapshot(
                         "claim_id": str(current_payload.get("claim_id") or ""),
                         "predicate": str(current_payload.get("predicate") or ""),
                         "status": str(current_payload.get("status") or ""),
-                        "revision": int(current_payload.get("revision") or 0),
+                        "revision_number": int(
+                            current_payload.get("revision_number") or 0
+                        ),
                         "vector_sha256": _vector_sha256(current_vector or ()),
                     }
                 )
