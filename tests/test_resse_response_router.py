@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import Response
@@ -13,9 +14,16 @@ from rag_engine.resse_response_router import (
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ResseResponseRouterTests(unittest.TestCase):
+    def test_normal_chat_generation_is_backend_owned(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn("generation_config=OpenAIChatGenerationConfigV1()", source)
+        self.assertNotIn("OPENAI_CHAT_MODEL", source)
+        self.assertNotIn("normalize_chat_model", source)
+
     def test_public_request_rejects_client_policy_controls(self) -> None:
         with self.assertRaises(ValidationError):
             ResseResponseRequestV1.model_validate(

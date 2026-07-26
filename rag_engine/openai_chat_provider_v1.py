@@ -31,15 +31,16 @@ from rag_engine.prompt_assembler_v1 import (
 from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
 
 
-OPENAI_CHAT_REQUEST_VERSION = "openai_chat_request_v1"
-OPENAI_CHAT_RESPONSE_VERSION = "openai_chat_response_v1"
-OPENAI_CHAT_ADAPTER_VERSION = "openai_chat_completions_adapter_v1"
+OPENAI_CHAT_REQUEST_VERSION = "openai_chat_request_v2"
+OPENAI_CHAT_RESPONSE_VERSION = "openai_chat_response_v2"
+OPENAI_CHAT_ADAPTER_VERSION = "openai_chat_completions_gpt_5_6_sol_high_v1"
 REFERENCE_DATA_MESSAGE_VERSION = "provider_reference_data_message_v1"
 SAFETY_IDENTIFIER_VERSION = "vs1"
 
-DEFAULT_CHAT_MODEL = "gpt-5.2"
+DEFAULT_CHAT_MODEL = "gpt-5.6-sol"
+DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_MAX_COMPLETION_TOKENS = RESERVED_OUTPUT_TOKENS
-DEFAULT_PROVIDER_TIMEOUT_SECONDS = 60.0
+DEFAULT_PROVIDER_TIMEOUT_SECONDS = 85.0
 MAX_PROVIDER_TIMEOUT_SECONDS = 120.0
 
 _MESSAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -48,12 +49,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 SUPPORTED_CHAT_MODELS = frozenset(
     {
-        "gpt-5.2",
-        "gpt-5.1",
-        "gpt-4.1",
-        "gpt-4.1-mini",
-        "gpt-4o",
-        "gpt-4o-mini",
+        DEFAULT_CHAT_MODEL,
     }
 )
 
@@ -187,8 +183,7 @@ def safety_identifier_v1(
 
 class OpenAIChatGenerationConfigV1(_StrictFrozenModel):
     model: str = DEFAULT_CHAT_MODEL
-    temperature: float = Field(default=0.4, ge=0.0, le=2.0)
-    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    reasoning_effort: Literal["high"] = DEFAULT_REASONING_EFFORT
     max_completion_tokens: int = Field(
         default=DEFAULT_MAX_COMPLETION_TOKENS,
         ge=1,
@@ -431,8 +426,7 @@ class OpenAIChatRequestV1(_StrictFrozenModel):
                 message.model_dump(mode="json", exclude_none=True)
                 for message in verified.messages
             ],
-            "temperature": config.temperature,
-            "top_p": config.top_p,
+            "reasoning_effort": config.reasoning_effort,
             "max_completion_tokens": config.max_completion_tokens,
             "safety_identifier": verified.safety_identifier,
             "store": False,
@@ -734,6 +728,7 @@ __all__ = [
     "DEFAULT_CHAT_MODEL",
     "DEFAULT_MAX_COMPLETION_TOKENS",
     "DEFAULT_PROVIDER_TIMEOUT_SECONDS",
+    "DEFAULT_REASONING_EFFORT",
     "OPENAI_CHAT_ADAPTER_VERSION",
     "OpenAIChatCompletionsAdapterV1",
     "OpenAIChatGenerationConfigV1",

@@ -125,7 +125,7 @@ def provider_response(
 ) -> dict[str, Any]:
     value: dict[str, Any] = {
         "id": "chatcmpl-test-001",
-        "model": "gpt-5.2",
+        "model": "gpt-5.6-sol",
         "choices": [
             {
                 "index": 0,
@@ -267,9 +267,8 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
 
     def test_provider_kwargs_preserve_generation_config_and_required_controls(self) -> None:
         config = OpenAIChatGenerationConfigV1(
-            model="gpt-5.2",
-            temperature=0.4,
-            top_p=1.0,
+            model="gpt-5.6-sol",
+            reasoning_effort="high",
             max_completion_tokens=2048,
             timeout_seconds=45.0,
         )
@@ -278,9 +277,10 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
             generation_config=config,
         )
         kwargs = request.provider_kwargs()
-        self.assertEqual(kwargs["model"], "gpt-5.2")
-        self.assertEqual(kwargs["temperature"], 0.4)
-        self.assertEqual(kwargs["top_p"], 1.0)
+        self.assertEqual(kwargs["model"], "gpt-5.6-sol")
+        self.assertEqual(kwargs["reasoning_effort"], "high")
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("top_p", kwargs)
         self.assertEqual(kwargs["max_completion_tokens"], 2048)
         self.assertEqual(kwargs["timeout"], 45.0)
         self.assertEqual(kwargs["safety_identifier"], request.safety_identifier)
@@ -322,7 +322,7 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
         plan = trusted_plan()
         response = SimpleNamespace(
             id="chatcmpl-sdk-001",
-            model="gpt-5.2",
+            model="gpt-5.6-sol",
             usage=SimpleNamespace(
                 prompt_tokens=100,
                 completion_tokens=4,
@@ -445,7 +445,7 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
         wrong_model = provider_response()
         wrong_model["model"] = "gpt-4.1"
         invalid_snapshot_date = provider_response()
-        invalid_snapshot_date["model"] = "gpt-5.2-2026-99-99"
+        invalid_snapshot_date["model"] = "gpt-5.6-sol-2026-99-99"
         blank_response_id = provider_response()
         blank_response_id["id"] = "   "
         incomplete = provider_response()
@@ -504,14 +504,14 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
     def test_exact_dated_snapshot_of_requested_model_is_accepted(self) -> None:
         plan = trusted_plan()
         response = provider_response()
-        response["model"] = "gpt-5.2-2026-07-20"
+        response["model"] = "gpt-5.6-sol-2026-07-20"
 
         result = OpenAIChatCompletionsAdapterV1(
             FakeClient(response)
         ).complete(plan)
 
-        self.assertEqual(result.requested_model, "gpt-5.2")
-        self.assertEqual(result.model, "gpt-5.2-2026-07-20")
+        self.assertEqual(result.requested_model, "gpt-5.6-sol")
+        self.assertEqual(result.model, "gpt-5.6-sol-2026-07-20")
 
     def test_request_dto_cannot_be_executed_instead_of_trusted_plan(self) -> None:
         request = OpenAIChatRequestV1.create(
@@ -569,10 +569,9 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
 
     def test_generation_limits_are_strict(self) -> None:
         invalid = (
-            {"model": "gpt 5.2"},
+            {"model": "gpt-5.2"},
             {"model": "gpt-3.5-turbo"},
-            {"temperature": 2.1},
-            {"top_p": 0.0},
+            {"reasoning_effort": "medium"},
             {"max_completion_tokens": DEFAULT_MAX_COMPLETION_TOKENS + 1},
             {"timeout_seconds": 0.5},
             {"timeout_seconds": 121.0},

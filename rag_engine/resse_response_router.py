@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
-from rag_engine.openai_client import get_openai_client, normalize_chat_model
+from rag_engine.openai_client import get_openai_client
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     InactiveResponseCompositionRootV0_2,
@@ -94,9 +94,7 @@ async def resse_response_query(
             openai_client=get_openai_client(),
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
             memory_provider=LiveGovernedMemoryAssemblyProviderV1(conn),
-            generation_config=OpenAIChatGenerationConfigV1(
-                model=normalize_chat_model(os.getenv("OPENAI_CHAT_MODEL")),
-            ),
+            generation_config=OpenAIChatGenerationConfigV1(),
         )
         execution = await asyncio.wait_for(
             root.execute_detailed(
