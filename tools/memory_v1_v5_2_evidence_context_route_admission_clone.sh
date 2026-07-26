@@ -262,7 +262,7 @@ jq -e '
 ' "$preflight_output" >/dev/null
 
 phase=admission_apply
-MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY=authorized \
+MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY_V2=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
   "$python_bin" "$admission" \
   --mode apply --manifest "$manifest" --output "$apply_output"
