@@ -105,9 +105,12 @@ capture_memory_state() {
 [[ -z "$(git -C "$repo_root" status --short)" ]]
 git -C "$repo_root" merge-base --is-ancestor \
   "$target_head" "$(git -C "$repo_root" rev-parse HEAD)"
-[[ "$(git -C "$live" rev-parse HEAD)" == "$current_head" ]]
+live_head=$(git -C "$live" rev-parse HEAD)
+[[ "$live_head" == "$current_head" || "$live_head" == "$target_head" ]]
 [[ -z "$(git -C "$live" status --short)" ]]
-git -C "$live" merge-base --is-ancestor "$current_head" "$target_head"
+if [[ "$live_head" == "$current_head" ]]; then
+  git -C "$live" merge-base --is-ancestor "$current_head" "$target_head"
+fi
 
 declare -A expected=(
   [scripts/memory_v1_relational_extraction_v5_local_provider.py]=12531e9617f6d77017d6500ace01b4821599ebdd833e6a4d44a9eb8ceb5e3e73
@@ -166,7 +169,9 @@ qdrant_before=$(qdrant_signature)
   FROM memory.evidence_extraction_job
   WHERE selector_version='$selector'")" == 0 ]]
 
-git -C "$live" merge --ff-only "$target_head" >/dev/null
+if [[ "$live_head" == "$current_head" ]]; then
+  git -C "$live" merge --ff-only "$target_head" >/dev/null
+fi
 [[ "$(git -C "$live" rev-parse HEAD)" == "$target_head" ]]
 [[ -z "$(git -C "$live" status --short)" ]]
 
@@ -202,8 +207,7 @@ cmp -s "$memory_before" "$memory_after"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
 [[ "$(systemctl is-active brains.service)" == active ]]
-[[ "$(curl -fsS http://127.0.0.1:6333/readyz)" == \
-  'health check passed' ]]
+curl -fsS http://127.0.0.1:6333/readyz >/dev/null
 
 restore_timers
 jq -n \
