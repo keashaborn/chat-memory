@@ -95,7 +95,8 @@ print(urlunsplit((
 PY
 )
 
-PYTHONPATH="$repo_root" "$python_bin" "$repo_root/$stage_test"
+PYTHONPATH="$repo_root/scripts:$repo_root" \
+  "$python_bin" "$repo_root/$stage_test"
 
 before_requests=$(clone_scalar "SELECT count(*) FROM memory.relational_operation_request WHERE owner_user_id='$owner'")
 before_entailments=$(clone_scalar "SELECT count(*) FROM memory.observation_entailment_v5 WHERE owner_user_id='$owner'")
@@ -119,21 +120,22 @@ review_apply="$artifact_dir/review-apply.json"
 review_replay="$artifact_dir/review-replay.json"
 report="$artifact_dir/report.json"
 
-POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$stage_runner" manifest \
   --owner "$owner" --observation "$observation" \
   --required-head "$head" --output "$manifest"
-PYTHONPATH="$repo_root" "$python_bin" "$repo_root/$stage_runner" authorize \
+PYTHONPATH="$repo_root/scripts:$repo_root" \
+  "$python_bin" "$repo_root/$stage_runner" authorize \
   --manifest "$manifest" --output "$authorization"
 
-POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$stage_runner" cross-owner \
   --manifest "$manifest" --other-owner "$other_owner" --output "$cross_result"
 [[ "$(jq -er '.cross_owner_rejected' "$cross_result")" == true ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
 MEMORY_V1_V5_2_EVIDENCE_CONTEXT_STANCE_CLAIM_STAGE_APPLY=authorized \
-POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$stage_runner" apply \
   --manifest "$manifest" --authorization "$authorization" \
   --confirm STAGE_EXACT_ONE_EVIDENCE_CONTEXT_STANCE_CANDIDATE_ONLY \
@@ -142,7 +144,7 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
 MEMORY_V1_V5_2_EVIDENCE_CONTEXT_STANCE_CLAIM_STAGE_APPLY=authorized \
-POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$stage_runner" replay \
   --manifest "$manifest" --authorization "$authorization" \
   --confirm STAGE_EXACT_ONE_EVIDENCE_CONTEXT_STANCE_CANDIDATE_ONLY \
