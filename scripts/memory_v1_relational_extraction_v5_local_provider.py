@@ -52,8 +52,88 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
 SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v8"
+EVIDENCE_CONTEXT_COREFERENCE_VERSION = (
+    "memory_v1_evidence_context_coreference_v1"
+)
 RELATIONSHIP_REGISTRY_VERSIONS = frozenset(
     {RELATIONSHIP_V5_1_REGISTRY_VERSION, SEMANTIC_V5_2_REGISTRY_VERSION}
+)
+_DEFINITE_DESCRIPTION_RE = re.compile(
+    r"\b(?P<determiner>the|this|that|these|those)\s+"
+    r"(?P<phrase>[a-z][a-z0-9'-]*(?:\s+[a-z][a-z0-9'-]*){0,3}?)"
+    r"(?=\s+(?:"
+    r"is|are|was|were|will|would|can|could|should|may|might|"
+    r"has|have|had|does|do|did|helps?|affects?|means?|refers?|"
+    r"became|becomes|seems|appears|needs?|requires?|includes?|"
+    r"contains?|uses?|works?|runs?|belongs?|relates?"
+    r")\b|[,.?!;:]|$)",
+    re.IGNORECASE,
+)
+_DEFINITE_DESCRIPTION_NONREFERENTIAL_HEADS = frozenset(
+    {
+        "day",
+        "evening",
+        "fact",
+        "future",
+        "idea",
+        "moment",
+        "morning",
+        "night",
+        "past",
+        "point",
+        "present",
+        "reason",
+        "same",
+        "thing",
+        "time",
+        "way",
+    }
+)
+_COREFERENCE_TOKEN_STOPWORDS = frozenset(
+    {
+        "about",
+        "after",
+        "again",
+        "also",
+        "because",
+        "been",
+        "before",
+        "being",
+        "between",
+        "could",
+        "from",
+        "have",
+        "into",
+        "just",
+        "more",
+        "much",
+        "only",
+        "other",
+        "people",
+        "should",
+        "some",
+        "than",
+        "that",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "very",
+        "want",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "will",
+        "with",
+        "would",
+    }
 )
 PROVIDER_DEFERRAL_REASON_CODES = frozenset(
     {
@@ -71,6 +151,141 @@ PROVIDER_DEFERRAL_REASON_CODES = frozenset(
         "insufficient_evidence",
     }
 )
+
+
+def _target_definite_descriptions(content: str) -> list[dict[str, Any]]:
+    """Return exact target-only definite descriptions in source order."""
+    descriptions: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for match in _DEFINITE_DESCRIPTION_RE.finditer(content):
+        start, end = match.span()
+        if (start, end) in seen:
+            continue
+        phrase = match.group(0)
+        head = match.group("phrase").split()[-1].casefold()
+        if head in _DEFINITE_DESCRIPTION_NONREFERENTIAL_HEADS:
+            continue
+        descriptions.append(
+            {
+                "determiner": match.group("determiner").casefold(),
+                "phrase": phrase,
+                "head": head,
+                "start": start,
+                "end": end,
+            }
+        )
+        seen.add((start, end))
+    return descriptions
+
+
+def _coreference_tokens(value: str) -> set[str]:
+    return {
+        token.casefold()
+        for token in re.findall(r"[^\W_][\w'-]*", value, re.UNICODE)
+        if len(token) >= 3
+        and token.casefold() not in _COREFERENCE_TOKEN_STOPWORDS
+    }
+
+
+def _semantic_coreference_strings(
+    packet_value: dict[str, Any],
+) -> tuple[str, ...]:
+    """Return semantic output text, excluding source quotes and audit labels."""
+    strings: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    entities_by_ref = {
+        entity.get("entity_ref"): entity
+        for entity in packet_value.get("entity_mentions", [])
+        if isinstance(entity, dict)
+        and isinstance(entity.get("entity_ref"), str)
+    }
+    for observation in packet_value.get("observations", []):
+        if not isinstance(observation, dict):
+            continue
+        object_value = observation.get("object")
+        if not isinstance(object_value, dict):
+            continue
+        if object_value.get("kind") == "literal":
+            collect(object_value.get("value"))
+        elif object_value.get("kind") == "entity":
+            entity = entities_by_ref.get(object_value.get("entity_ref"))
+            if isinstance(entity, dict):
+                collect(entity.get("name_text"))
+        subject = entities_by_ref.get(observation.get("subject_entity_ref"))
+        if isinstance(subject, dict) and subject.get("entity_type") != "self":
+            collect(subject.get("name_text"))
+    return tuple(strings)
+
+
+def _unresolved_context_coreferences(
+    source: TrustedExtractionSource,
+    evidence_context: MemoryEvidenceContextEnvelopeV1,
+    packet: ProviderPacket,
+) -> tuple[str, ...]:
+    """Fail closed when a target definite description remains unresolved."""
+    descriptions = _target_definite_descriptions(source.content)
+    if not descriptions:
+        return ()
+    packet_value = packet.model_dump(mode="json")
+    if not packet_value.get("observations"):
+        return ()
+
+    target_index = next(
+        (
+            index
+            for index, span in enumerate(evidence_context.spans)
+            if span.context_role == "target"
+        ),
+        -1,
+    )
+    preceding_context = (
+        evidence_context.spans[:target_index]
+        if target_index > 0
+        else ()
+    )
+    target_tokens = _coreference_tokens(source.content)
+    context_only_tokens: set[str] = set()
+    for span in preceding_context:
+        context_only_tokens.update(_coreference_tokens(span.content))
+    context_only_tokens.difference_update(target_tokens)
+
+    semantic_strings = _semantic_coreference_strings(packet_value)
+    semantic_text = " ".join(semantic_strings).casefold()
+    semantic_tokens: set[str] = set()
+    for value in semantic_strings:
+        semantic_tokens.update(_coreference_tokens(value))
+
+    unresolved: list[str] = []
+    for description in descriptions:
+        phrase = str(description["phrase"]).casefold()
+        head = str(description["head"]).casefold()
+        generic_topic = any(
+            value.casefold() == head
+            or value.casefold().startswith(
+                (f"{head}.", f"{head}_", f"{head}-", f"{head} ")
+            )
+            for value in semantic_strings
+        )
+        resolved_from_context = bool(
+            context_only_tokens.intersection(semantic_tokens)
+        )
+        if (
+            phrase in semantic_text
+            or generic_topic
+            or not resolved_from_context
+        ):
+            unresolved.append(head)
+    return tuple(sorted(set(unresolved)))
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 LLAMA_CPP_MAX_GRAMMAR_STRING_REPETITION = 1024
 LOCAL_GRAMMAR_MAX_ITEMS = {
@@ -4538,6 +4753,9 @@ class LocalLlamaCppProvider:
                         "CONTEXT_ONLY_SPAN_END",
                     )
                 )
+            definite_descriptions = _target_definite_descriptions(
+                source.content
+            )
             context_input = (
                 "EVIDENCE_CONTEXT_CONTRACT="
                 f"{evidence_context.contract_version}\n"
@@ -4548,6 +4766,8 @@ class LocalLlamaCppProvider:
                 "CONTEXT_ONLY_START\n"
                 f"{chr(10).join(rendered_context)}\n"
                 "CONTEXT_ONLY_END\n"
+                "TARGET_DEFINITE_DESCRIPTIONS="
+                f"{canonical_json(definite_descriptions)}\n"
             )
             context_instructions = (
                 "\n\nEVIDENCE_CONTEXT_RULES_V1\n"
@@ -4557,7 +4777,17 @@ class LocalLlamaCppProvider:
                 "originate an entity, observation, comparison, or source "
                 "span. Every returned source span must quote and index "
                 "SOURCE_CONTENT only. If SOURCE_CONTENT does not itself "
-                "support an observation, defer it."
+                "support an observation, defer it.\n"
+                "DEFINITE_DESCRIPTION_COREFERENCE_V1\n"
+                "For each TARGET_DEFINITE_DESCRIPTIONS item, resolve the "
+                "target phrase from the nearest compatible explicit referent "
+                "in preceding CONTEXT_ONLY spans. Use that resolved canonical "
+                "referent in topic_key, topic_text, and position. Context may "
+                "supply only the referent name; the target must independently "
+                "supply the asserted stance. If no single compatible referent "
+                "is supported, return no observation for that phrase and "
+                "defer with context_missing. Never retain a generic definite "
+                "description such as 'the philosophy' as a resolved topic."
             )
         input_text = (
             "TRUSTED_SOURCE_TIME="
@@ -4768,6 +4998,51 @@ class LocalLlamaCppProvider:
                 raw_packet,
                 self._registry,
             )
+            if evidence_context is not None:
+                definite_descriptions = _target_definite_descriptions(
+                    source.content
+                )
+                unresolved = _unresolved_context_coreferences(
+                    source,
+                    evidence_context,
+                    compiled_packet,
+                )
+                self.last_audit.update(
+                    {
+                        "evidence_context_coreference_version": (
+                            EVIDENCE_CONTEXT_COREFERENCE_VERSION
+                        ),
+                        "target_definite_description_count": len(
+                            definite_descriptions
+                        ),
+                        "target_definite_description_heads_sha256": (
+                            canonical_sha256(
+                                [
+                                    item["head"]
+                                    for item in definite_descriptions
+                                ]
+                            )
+                        ),
+                    }
+                )
+                if unresolved:
+                    self.last_audit.update(
+                        {
+                            "unresolved_context_coreference_count": len(
+                                unresolved
+                            ),
+                            "unresolved_context_coreference_heads_sha256": (
+                                canonical_sha256(list(unresolved))
+                            ),
+                            "error_code": (
+                                "context_coreference_unresolved"
+                            ),
+                        }
+                    )
+                    raise LocalProviderAdapterError(
+                        "context_coreference_unresolved",
+                        retryable=False,
+                    )
             self.last_audit.update(
                 {
                     "policy_compiler_version": (

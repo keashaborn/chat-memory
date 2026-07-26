@@ -12,9 +12,17 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import (
     load_runtime_profile_v2,
 )
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    EVIDENCE_CONTEXT_COREFERENCE_VERSION,
     LocalLlamaCppProvider,
+    _example_entity,
+    _example_observation,
+    _literal,
+    _packet,
+    _target_definite_descriptions,
+    _unresolved_context_coreferences,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
     TrustedExtractionSource,
 )
 
@@ -148,6 +156,16 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             request.instructions,
         )
         self.assertIn(
+            "DEFINITE_DESCRIPTION_COREFERENCE_V1",
+            request.instructions,
+        )
+        self.assertIn(
+            "TARGET_DEFINITE_DESCRIPTIONS="
+            '[{"determiner":"the","end":28,"head":"philosophy",'
+            '"phrase":"the philosophy","start":14}]',
+            request.input_text,
+        )
+        self.assertIn(
             "EVIDENCE_CONTEXT_CONTRACT="
             "memory_evidence_context_envelope_v1",
             request.input_text,
@@ -172,6 +190,106 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             1,
         )[1].split("\nCONTEXT_ONLY_END", 1)[0]
         self.assertNotIn(source.content, context_block)
+
+    def test_detector_preserves_exact_target_offsets(self) -> None:
+        source, _ = source_and_context()
+        self.assertEqual(
+            _target_definite_descriptions(source.content),
+            [
+                {
+                    "determiner": "the",
+                    "phrase": "the philosophy",
+                    "head": "philosophy",
+                    "start": 14,
+                    "end": 28,
+                }
+            ],
+        )
+        self.assertEqual(
+            _target_definite_descriptions(
+                "I think this way will work in the future."
+            ),
+            [],
+        )
+
+    @staticmethod
+    def stance_packet(
+        source: TrustedExtractionSource,
+        *,
+        topic_key: str,
+        topic_text: str,
+        position: str,
+    ) -> ProviderPacket:
+        return ProviderPacket.model_validate(
+            _packet(
+                entities=[
+                    _example_entity(
+                        source.content,
+                        entity_ref="e00",
+                        entity_type="self",
+                        mention_kind="self_reference",
+                        name_text=None,
+                        relationship_role="user:self",
+                        reason_code="explicit_self_reference",
+                    )
+                ],
+                observations=[
+                    _example_observation(
+                        source.content,
+                        observation_ref="o00",
+                        subject_entity_ref="e00",
+                        predicate="stance.reported",
+                        object_value=_literal(
+                            "json",
+                            {
+                                "topic_key": topic_key,
+                                "topic_text": topic_text,
+                                "position": position,
+                                "orientation": "supports",
+                                "context": None,
+                            },
+                        ),
+                        projection_class="reported_stance",
+                        surface_policy=(
+                            "relevant_recall_or_explicit_recall"
+                        ),
+                        sensitivity="medium",
+                        reason_code="explicit_reported_stance",
+                        modality="reported_belief",
+                    )
+                ],
+            )
+        )
+
+    def test_generic_definite_description_fails_closed(self) -> None:
+        source, context = source_and_context()
+        packet = self.stance_packet(
+            source,
+            topic_key="philosophy.life_impact",
+            topic_text="philosophy and its impact on life",
+            position="the philosophy will help people in life",
+        )
+        self.assertEqual(
+            _unresolved_context_coreferences(source, context, packet),
+            ("philosophy",),
+        )
+
+    def test_nearest_explicit_sibling_referent_passes(self) -> None:
+        source, context = source_and_context()
+        packet = self.stance_packet(
+            source,
+            topic_key="fractal_monism.life_impact",
+            topic_text="Fractal Monism and its impact on life",
+            position="Fractal Monism will help people in life",
+        )
+        self.assertEqual(
+            _unresolved_context_coreferences(source, context, packet),
+            (),
+        )
+        self.assertEqual(
+            EVIDENCE_CONTEXT_COREFERENCE_VERSION,
+            "memory_v1_evidence_context_coreference_v1",
+        )
 
     def test_context_target_mismatch_fails_closed(self) -> None:
         source, context = source_and_context()

@@ -48,6 +48,23 @@ Any proposed observation must continue to cite the target evidence span. A
 future multi-evidence observation requires a separate reviewed contract, not an
 implicit expansion of this envelope.
 
+## Definite-description coreference
+
+`memory_v1_evidence_context_coreference_v1` detects target-only definite
+descriptions, records their exact Unicode offsets, and exposes them to the
+private extractor separately from ordered context spans. For a phrase such as
+`the philosophy`, the extractor must select the nearest compatible explicit
+referent in preceding sibling context and use that referent in the semantic
+topic and position.
+
+Sibling context supplies only the referent name. The target remains the sole
+authority for the stance or other assertion, and every source span still cites
+the target. A fail-closed post-validator rejects an observation when it keeps
+the generic phrase or generic topic head, or when the semantic output has no
+distinctive token grounded in preceding context. Ambiguous cases must defer
+with `context_missing`; the runtime never rewrites an unresolved phrase by
+guessing.
+
 ## Current exact evaluation
 
 The first bounded case contains three spans from one Verbal Sage/LifeSwitch
