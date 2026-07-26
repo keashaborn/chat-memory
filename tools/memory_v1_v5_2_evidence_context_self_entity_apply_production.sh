@@ -195,7 +195,7 @@ PY
   chmod 0600 "$expected_file"
 }
 
-[[ -z "$(git -C "$repo_root" status --porcelain)" ]]
+[[ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$repo_root" status --porcelain)" ]]
 git -C "$repo_root" merge-base --is-ancestor "$required_ancestor" HEAD
 head=$(git -C "$repo_root" rev-parse HEAD)
 [[ -x "$python_bin" ]]
@@ -376,7 +376,7 @@ phase=restore
 restore_runtime
 authenticated_health
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
-[[ -z "$(git -C "$repo_root" status --porcelain)" ]]
+[[ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$repo_root" status --porcelain)" ]]
 
 REPORT="$report" APPLY="$apply_result" HEAD="$head" \
 BACKUP="$backup" QDRANT="$qdrant_before" python3 - <<'PY'
