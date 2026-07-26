@@ -160,6 +160,14 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             request.instructions,
         )
         self.assertIn(
+            "COREFERENCE_RESOLUTION_PROCEDURE_V1",
+            request.instructions,
+        )
+        self.assertIn(
+            "Synthetic rule example",
+            request.instructions,
+        )
+        self.assertIn(
             "TARGET_DEFINITE_DESCRIPTIONS="
             '[{"determiner":"the","end":28,"head":"philosophy",'
             '"phrase":"the philosophy","start":14}]',
@@ -190,6 +198,16 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             1,
         )[1].split("\nCONTEXT_ONLY_END", 1)[0]
         self.assertNotIn(source.content, context_block)
+        context_headers = [
+            line
+            for line in context_block.splitlines()
+            if line.startswith("CONTEXT_ONLY_SPAN ")
+        ]
+        self.assertEqual(len(context_headers), 2)
+        self.assertIn("coreference_distance=1", context_headers[0])
+        self.assertIn("source_offsets=184:238", context_headers[0])
+        self.assertIn("coreference_distance=2", context_headers[1])
+        self.assertIn("source_offsets=0:183", context_headers[1])
 
     def test_detector_preserves_exact_target_offsets(self) -> None:
         source, _ = source_and_context()

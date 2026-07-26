@@ -65,6 +65,12 @@ distinctive token grounded in preceding context. Ambiguous cases must defer
 with `context_missing`; the runtime never rewrites an unresolved phrase by
 guessing.
 
+The provider renders preceding siblings in an explicitly labeled
+nearest-to-farthest coreference search order. It skips siblings that merely
+repeat the generic head and uses the first compatible sibling that names a
+specific concept. This rendering order does not alter envelope provenance,
+source offsets, or assertion authority.
+
 ## Current exact evaluation
 
 The first bounded case contains three spans from one Verbal Sage/LifeSwitch

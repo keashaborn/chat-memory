@@ -4739,12 +4739,34 @@ class LocalLlamaCppProvider:
                     "evidence context grants sibling assertion authority"
                 )
             rendered_context = []
-            for span in context_spans:
+            preceding_spans = [
+                span
+                for span in context_spans
+                if span.context_role == "before"
+            ]
+            following_spans = [
+                span
+                for span in context_spans
+                if span.context_role != "before"
+            ]
+            coreference_order = [
+                *[
+                    (span, distance)
+                    for distance, span in enumerate(
+                        reversed(preceding_spans),
+                        start=1,
+                    )
+                ],
+                *[(span, None) for span in following_spans],
+            ]
+            for span, distance in coreference_order:
                 rendered_context.extend(
                     (
                         (
                             "CONTEXT_ONLY_SPAN "
                             f"role={span.context_role} "
+                            "coreference_distance="
+                            f"{distance if distance is not None else 'none'} "
                             f"lane={span.primary_lane} "
                             f"source_offsets={span.char_start}:{span.char_end} "
                             f"content_sha256={span.content_sha256}"
@@ -4788,6 +4810,20 @@ class LocalLlamaCppProvider:
                 "is supported, return no observation for that phrase and "
                 "defer with context_missing. Never retain a generic definite "
                 "description such as 'the philosophy' as a resolved topic."
+                "\nCOREFERENCE_RESOLUTION_PROCEDURE_V1\n"
+                "Scan preceding CONTEXT_ONLY spans by ascending "
+                "coreference_distance. Skip a span that only repeats the "
+                "generic target head. Select the first compatible span that "
+                "names a specific concept. Substitute that specific concept "
+                "in semantic output, but do not copy any assertion from the "
+                "context span.\n"
+                "Synthetic rule example: context says 'We adopted Boundary "
+                "Theory.' Target says 'I think the framework helps people.' "
+                "Valid semantic output uses topic_text 'Boundary Theory' and "
+                "position 'Boundary Theory helps people.' It cites only the "
+                "target. Invalid output keeps topic_text 'framework', says "
+                "'the framework helps people', or treats adoption as a "
+                "target assertion."
             )
         input_text = (
             "TRUSTED_SOURCE_TIME="
