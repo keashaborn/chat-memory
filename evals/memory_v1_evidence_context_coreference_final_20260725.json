@@ -1,0 +1,59 @@
+{
+  "contract_version": "memory_v1_evidence_context_coreference_final_v1",
+  "verified_at": "2026-07-26T05:15:00Z",
+  "implementation": {
+    "coreference_binding_commit": "e7f8a0b94d2588ec574f205bdeb66e73becdb811",
+    "provenance_normalization_commit": "9c702e3602512cb9fa9770002a5271d9a9e43f0f",
+    "topic_key_normalization_commit": "dbb004a1f2d5540a90f83d80def1a4e9bcff22e1",
+    "coreference_contract": "memory_v1_evidence_context_coreference_v1"
+  },
+  "model_canary": {
+    "tested_commit": "f01cc6cf3cc8d9d9422e49ac4ef18c97c9537d32",
+    "private_local_model_calls": 1,
+    "external_model_calls": 0,
+    "context_coreference_resolved": true,
+    "input_packet_sha256": "460c46818ce5a8fb62f4f3ef67dc97241df8a42bb4d7c68aed61fd96a5721fd2",
+    "database_state_equal": true,
+    "qdrant_state_equal": true,
+    "timers_restored_exactly": true
+  },
+  "deterministic_replay": {
+    "contract_version": "memory_v1_evidence_context_packet_replay_report_v1",
+    "context_envelope_sha256": "84b3e0aeae1353355411c65ec8cca5cf605c95b3bd2a5431571ccbc03cc035ed",
+    "local_model_calls": 0,
+    "external_model_calls": 0,
+    "output_packet_sha256": "6489b00f7ba89e45506a51992332486c9390bca234630bbcfa31661cdd831c6a",
+    "root_only_report_sha256": "c97dea55e349d7d06dbef1f1bc902a5f077e927c04d684f4354bfa0b9d8454d0",
+    "root_only_packet_sha256": "c50e4c8ca912e6fe8c1208a4a2b6c7fd2df2e347db6c3dc7e6e3285df51976b9",
+    "repairs": [
+      "context_target_source_spans_canonicalized",
+      "context_coreference_bound"
+    ],
+    "write_counts": {
+      "database": 0,
+      "qdrant": 0,
+      "retrieval": 0,
+      "prompt_influence": 0
+    }
+  },
+  "semantic_acceptance": {
+    "entity_count": 1,
+    "observation_count": 1,
+    "deferral_count": 0,
+    "predicate": "stance.reported",
+    "projection_class": "reported_stance",
+    "topic_key": "fractal_monism.life_impact",
+    "topic_text": "Fractal Monism",
+    "position": "Fractal Monism will help people in life",
+    "target_span_start": 0,
+    "target_span_end": 54,
+    "sibling_assertion_authority": false,
+    "semantic_review": "passed"
+  },
+  "deployment": {
+    "production_deployed": false,
+    "staging_authorized": false,
+    "retrieval_active": false,
+    "prompt_influence": false
+  }
+}
