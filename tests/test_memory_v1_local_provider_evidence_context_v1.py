@@ -404,6 +404,27 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             "memory_v1_evidence_context_coreference_v1",
         )
 
+    def test_bound_topic_namespace_normalizes_idempotently(self) -> None:
+        source, context = source_and_context()
+        packet = self.stance_packet(
+            source,
+            topic_key="fractal_monism.fractal_monism_life_impact",
+            topic_text="Fractal Monism",
+            position="Fractal Monism will help people in life",
+        )
+        repaired, repairs = _apply_context_coreference_bindings(
+            source,
+            context,
+            packet,
+        )
+        self.assertEqual(repairs, ("context_coreference_bound",))
+        self.assertEqual(
+            repaired.model_dump(mode="json")["observations"][0][
+                "object"
+            ]["value"]["topic_key"],
+            "fractal_monism.life_impact",
+        )
+
     def test_context_target_mismatch_fails_closed(self) -> None:
         source, context = source_and_context()
         mismatched = TrustedExtractionSource.create(

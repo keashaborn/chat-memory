@@ -400,13 +400,30 @@ def _apply_context_coreference_bindings(
             if not isinstance(stance_value, dict):
                 continue
             topic_key = stance_value.get("topic_key")
-            if isinstance(topic_key, str) and (
-                topic_key.casefold() == head
-                or topic_key.casefold().startswith(
-                    (f"{head}.", f"{head}_", f"{head}-")
-                )
-            ):
-                suffix = topic_key[len(head):].lstrip("._-")
+            suffix: str | None = None
+            if isinstance(topic_key, str):
+                topic_key_folded = topic_key.casefold()
+                if (
+                    topic_key_folded == head
+                    or topic_key_folded.startswith(
+                        (f"{head}.", f"{head}_", f"{head}-")
+                    )
+                ):
+                    suffix = topic_key[len(head):].lstrip("._-")
+                elif (
+                    topic_key_folded == referent_key
+                    or topic_key_folded.startswith(
+                        (
+                            f"{referent_key}.",
+                            f"{referent_key}_",
+                            f"{referent_key}-",
+                        )
+                    )
+                ):
+                    suffix = topic_key[len(referent_key):].lstrip(
+                        "._-"
+                    )
+            if suffix is not None:
                 if suffix.casefold() == referent_key:
                     suffix = ""
                 elif suffix.casefold().startswith(
@@ -417,12 +434,14 @@ def _apply_context_coreference_bindings(
                     )
                 ):
                     suffix = suffix[len(referent_key):].lstrip("._-")
-                stance_value["topic_key"] = (
+                normalized_topic_key = (
                     f"{referent_key}.{suffix}"
                     if suffix
                     else referent_key
                 )
-                binding_changed = True
+                if normalized_topic_key != topic_key:
+                    stance_value["topic_key"] = normalized_topic_key
+                    binding_changed = True
             for field_name in ("topic_text", "position"):
                 field_value = stance_value.get(field_name)
                 if not isinstance(field_value, str):
