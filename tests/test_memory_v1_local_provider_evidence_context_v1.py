@@ -14,6 +14,9 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import (
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     EVIDENCE_CONTEXT_COREFERENCE_VERSION,
     LocalLlamaCppProvider,
+    _apply_context_coreference_bindings,
+    _context_coreference_bindings,
+    _explicit_concept_candidates,
     _example_entity,
     _example_observation,
     _literal,
@@ -174,6 +177,14 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
             request.input_text,
         )
         self.assertIn(
+            "TARGET_DEFINITE_DESCRIPTION_BINDINGS=",
+            request.input_text,
+        )
+        self.assertIn(
+            '"referent":"Fractal Monism"',
+            request.input_text,
+        )
+        self.assertIn(
             "EVIDENCE_CONTEXT_CONTRACT="
             "memory_evidence_context_envelope_v1",
             request.input_text,
@@ -228,6 +239,20 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
                 "I think this way will work in the future."
             ),
             [],
+        )
+
+    def test_concept_candidates_preserve_ambiguity(self) -> None:
+        self.assertEqual(
+            _explicit_concept_candidates(
+                "We considered Stoicism and Buddhism."
+            ),
+            ("Buddhism", "Stoicism"),
+        )
+        self.assertEqual(
+            _explicit_concept_candidates(
+                "We are building fractal monistic data."
+            ),
+            ("Fractal Monism",),
         )
 
     @staticmethod
@@ -290,6 +315,58 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
         self.assertEqual(
             _unresolved_context_coreferences(source, context, packet),
             ("philosophy",),
+        )
+
+    def test_unique_sibling_concept_is_bound_without_assertion_transfer(
+        self,
+    ) -> None:
+        source, context = source_and_context()
+        bindings = _context_coreference_bindings(source, context)
+        self.assertEqual(len(bindings), 1)
+        self.assertEqual(bindings[0]["head"], "philosophy")
+        self.assertEqual(bindings[0]["referent"], "Fractal Monism")
+        self.assertEqual(bindings[0]["referent_key"], "fractal_monism")
+        self.assertEqual(bindings[0]["context_distance"], 2)
+
+        generic = self.stance_packet(
+            source,
+            topic_key="philosophy.life_impact",
+            topic_text="philosophy and its impact on life",
+            position="the philosophy will help people in life",
+        )
+        repaired, repairs = _apply_context_coreference_bindings(
+            source,
+            context,
+            generic,
+        )
+        self.assertEqual(repairs, ("context_coreference_bound",))
+        self.assertEqual(
+            _unresolved_context_coreferences(source, context, repaired),
+            (),
+        )
+        value = repaired.model_dump(mode="json")
+        self.assertEqual(len(value["entity_mentions"]), 1)
+        self.assertEqual(len(value["observations"]), 1)
+        observation = value["observations"][0]
+        self.assertEqual(
+            observation["object"]["value"]["topic_key"],
+            "fractal_monism.life_impact",
+        )
+        self.assertEqual(
+            observation["object"]["value"]["topic_text"],
+            "Fractal Monism and its impact on life",
+        )
+        self.assertEqual(
+            observation["object"]["value"]["position"],
+            "Fractal Monism will help people in life",
+        )
+        self.assertEqual(
+            observation["source_spans"][0]["quote"],
+            source.content,
+        )
+        self.assertNotIn(
+            context.spans[0].content,
+            observation["source_spans"][0]["quote"],
         )
 
     def test_nearest_explicit_sibling_referent_passes(self) -> None:

@@ -71,6 +71,13 @@ repeat the generic head and uses the first compatible sibling that names a
 specific concept. This rendering order does not alter envelope provenance,
 source offsets, or assertion authority.
 
+For the controlled `stance.reported` surface, a deterministic binder may
+normalize one unique named-concept candidate from the nearest qualifying
+preceding sibling. The post-compiler can substitute only that referent into
+`topic_key`, `topic_text`, and `position`; it cannot create an entity,
+predicate, stance, source span, or additional observation. Multiple candidates,
+an absent candidate, or an ungrounded model result still fail closed.
+
 ## Current exact evaluation
 
 The first bounded case contains three spans from one Verbal Sage/LifeSwitch

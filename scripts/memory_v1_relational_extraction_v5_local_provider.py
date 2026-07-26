@@ -92,15 +92,18 @@ _DEFINITE_DESCRIPTION_NONREFERENTIAL_HEADS = frozenset(
 _COREFERENCE_TOKEN_STOPWORDS = frozenset(
     {
         "about",
+        "adopted",
         "after",
         "again",
         "also",
+        "and",
         "because",
         "been",
         "before",
         "being",
         "between",
         "could",
+        "considered",
         "from",
         "have",
         "into",
@@ -108,12 +111,14 @@ _COREFERENCE_TOKEN_STOPWORDS = frozenset(
         "more",
         "much",
         "only",
+        "or",
         "other",
         "people",
         "should",
         "some",
         "than",
         "that",
+        "the",
         "their",
         "them",
         "then",
@@ -123,6 +128,8 @@ _COREFERENCE_TOKEN_STOPWORDS = frozenset(
         "this",
         "those",
         "through",
+        "to",
+        "using",
         "very",
         "want",
         "were",
@@ -134,6 +141,47 @@ _COREFERENCE_TOKEN_STOPWORDS = frozenset(
         "with",
         "would",
     }
+)
+_COREFERENCE_CONCEPT_HEADS = frozenset(
+    {
+        "app",
+        "approach",
+        "architecture",
+        "concept",
+        "design",
+        "framework",
+        "idea",
+        "method",
+        "model",
+        "philosophy",
+        "platform",
+        "program",
+        "project",
+        "system",
+        "theory",
+    }
+)
+_COREFERENCE_CONCEPT_MARKERS = frozenset(
+    {
+        "approach",
+        "architecture",
+        "design",
+        "framework",
+        "method",
+        "model",
+        "philosophy",
+        "platform",
+        "program",
+        "project",
+        "system",
+        "theory",
+    }
+)
+_COREFERENCE_NAMED_CONCEPT_SUFFIXES = (
+    "ism",
+    "istic",
+    "ology",
+    "ological",
 )
 PROVIDER_DEFERRAL_REASON_CODES = frozenset(
     {
@@ -185,6 +233,204 @@ def _coreference_tokens(value: str) -> set[str]:
         if len(token) >= 3
         and token.casefold() not in _COREFERENCE_TOKEN_STOPWORDS
     }
+
+
+def _canonical_concept_suffix(token: str) -> str:
+    lowered = token.casefold()
+    if lowered.endswith("istic") and len(lowered) > len("istic"):
+        return f"{lowered[:-len('istic')]}ism"
+    return lowered
+
+
+def _explicit_concept_candidates(content: str) -> tuple[str, ...]:
+    """Extract conservative named-concept phrases without creating claims."""
+    token_matches = list(
+        re.finditer(r"[^\W_][\w'-]*", content, re.UNICODE)
+    )
+    candidates: list[str] = []
+    for index in range(len(token_matches) - 1, -1, -1):
+        token = token_matches[index].group(0)
+        lowered = token.casefold()
+        if lowered.endswith(_COREFERENCE_NAMED_CONCEPT_SUFFIXES):
+            words = [_canonical_concept_suffix(token)]
+            if index > 0:
+                prior = token_matches[index - 1].group(0)
+                prior_lowered = prior.casefold()
+                if (
+                    len(prior) >= 3
+                    and prior_lowered not in _COREFERENCE_TOKEN_STOPWORDS
+                    and prior_lowered
+                    not in _DEFINITE_DESCRIPTION_NONREFERENTIAL_HEADS
+                ):
+                    words.insert(0, prior_lowered)
+            candidate = " ".join(words).strip()
+            if len(candidate.split()) >= 2 or token[:1].isupper():
+                candidates.append(candidate.title())
+            continue
+        if lowered not in _COREFERENCE_CONCEPT_MARKERS:
+            continue
+        words = [token]
+        cursor = index - 1
+        while cursor >= 0 and len(words) < 4:
+            prior = token_matches[cursor].group(0)
+            prior_lowered = prior.casefold()
+            if (
+                len(prior) < 3
+                or prior_lowered in _COREFERENCE_TOKEN_STOPWORDS
+                or prior_lowered
+                in _DEFINITE_DESCRIPTION_NONREFERENTIAL_HEADS
+            ):
+                break
+            words.insert(0, prior)
+            cursor -= 1
+        if len(words) >= 2:
+            candidates.append(" ".join(words))
+    return tuple(dict.fromkeys(candidates))
+
+
+def _context_coreference_bindings(
+    source: TrustedExtractionSource,
+    evidence_context: MemoryEvidenceContextEnvelopeV1,
+) -> list[dict[str, Any]]:
+    """Bind only unique, preceding, source-grounded concept referents."""
+    descriptions = _target_definite_descriptions(source.content)
+    if not descriptions:
+        return []
+    target_index = next(
+        (
+            index
+            for index, span in enumerate(evidence_context.spans)
+            if span.context_role == "target"
+        ),
+        -1,
+    )
+    if target_index <= 0:
+        return []
+    preceding = evidence_context.spans[:target_index]
+    bindings: list[dict[str, Any]] = []
+    for description in descriptions:
+        head = str(description["head"]).casefold()
+        if head not in _COREFERENCE_CONCEPT_HEADS:
+            continue
+        for distance, span in enumerate(reversed(preceding), start=1):
+            candidates = tuple(
+                candidate
+                for candidate in _explicit_concept_candidates(span.content)
+                if head not in {
+                    token.casefold()
+                    for token in candidate.split()
+                }
+            )
+            if not candidates:
+                continue
+            if len(candidates) != 1:
+                break
+            referent = candidates[0]
+            bindings.append(
+                {
+                    **description,
+                    "referent": referent,
+                    "referent_key": re.sub(
+                        r"[^a-z0-9]+",
+                        "_",
+                        referent.casefold(),
+                    ).strip("_"),
+                    "context_distance": distance,
+                    "context_content_sha256": span.content_sha256,
+                    "context_char_start": span.char_start,
+                    "context_char_end": span.char_end,
+                }
+            )
+            break
+    return bindings
+
+
+def _replace_coreference_text(
+    value: str,
+    *,
+    phrase: str,
+    head: str,
+    referent: str,
+) -> str:
+    replaced = re.sub(
+        rf"\b{re.escape(phrase)}\b",
+        referent,
+        value,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        rf"\b{re.escape(head)}\b",
+        referent,
+        replaced,
+        flags=re.IGNORECASE,
+    )
+
+
+def _apply_context_coreference_bindings(
+    source: TrustedExtractionSource,
+    evidence_context: MemoryEvidenceContextEnvelopeV1,
+    packet: ProviderPacket,
+) -> tuple[ProviderPacket, tuple[str, ...]]:
+    """Substitute referents only inside target-supported stance values."""
+    bindings = _context_coreference_bindings(source, evidence_context)
+    if not bindings:
+        return packet, ()
+    value = packet.model_dump(mode="json")
+    repairs: list[str] = []
+    for binding in bindings:
+        phrase = str(binding["phrase"])
+        head = str(binding["head"])
+        referent = str(binding["referent"])
+        referent_key = str(binding["referent_key"])
+        binding_changed = False
+        for observation in value.get("observations", []):
+            if (
+                not isinstance(observation, dict)
+                or observation.get("predicate") != "stance.reported"
+            ):
+                continue
+            object_value = observation.get("object")
+            stance_value = (
+                object_value.get("value")
+                if isinstance(object_value, dict)
+                and object_value.get("kind") == "literal"
+                and object_value.get("datatype") == "json"
+                else None
+            )
+            if not isinstance(stance_value, dict):
+                continue
+            topic_key = stance_value.get("topic_key")
+            if isinstance(topic_key, str) and (
+                topic_key.casefold() == head
+                or topic_key.casefold().startswith(
+                    (f"{head}.", f"{head}_", f"{head}-")
+                )
+            ):
+                suffix = topic_key[len(head):].lstrip("._-")
+                stance_value["topic_key"] = (
+                    f"{referent_key}.{suffix}"
+                    if suffix
+                    else referent_key
+                )
+                binding_changed = True
+            for field_name in ("topic_text", "position"):
+                field_value = stance_value.get(field_name)
+                if not isinstance(field_value, str):
+                    continue
+                replaced = _replace_coreference_text(
+                    field_value,
+                    phrase=phrase,
+                    head=head,
+                    referent=referent,
+                )
+                if replaced != field_value:
+                    stance_value[field_name] = replaced
+                    binding_changed = True
+        if binding_changed:
+            repairs.append("context_coreference_bound")
+    if not repairs:
+        return packet, ()
+    return ProviderPacket.model_validate(value), tuple(repairs)
 
 
 def _semantic_coreference_strings(
@@ -4778,6 +5024,10 @@ class LocalLlamaCppProvider:
             definite_descriptions = _target_definite_descriptions(
                 source.content
             )
+            coreference_bindings = _context_coreference_bindings(
+                source,
+                evidence_context,
+            )
             context_input = (
                 "EVIDENCE_CONTEXT_CONTRACT="
                 f"{evidence_context.contract_version}\n"
@@ -4790,6 +5040,8 @@ class LocalLlamaCppProvider:
                 "CONTEXT_ONLY_END\n"
                 "TARGET_DEFINITE_DESCRIPTIONS="
                 f"{canonical_json(definite_descriptions)}\n"
+                "TARGET_DEFINITE_DESCRIPTION_BINDINGS="
+                f"{canonical_json(coreference_bindings)}\n"
             )
             context_instructions = (
                 "\n\nEVIDENCE_CONTEXT_RULES_V1\n"
@@ -4811,6 +5063,10 @@ class LocalLlamaCppProvider:
                 "defer with context_missing. Never retain a generic definite "
                 "description such as 'the philosophy' as a resolved topic."
                 "\nCOREFERENCE_RESOLUTION_PROCEDURE_V1\n"
+                "TARGET_DEFINITE_DESCRIPTION_BINDINGS contains only unique, "
+                "deterministically source-grounded referent bindings. When a "
+                "binding is present, use its referent exactly as the semantic "
+                "topic; it still supplies no assertion authority. "
                 "Scan preceding CONTEXT_ONLY spans by ascending "
                 "coreference_distance. Skip a span that only repeats the "
                 "generic target head. Select the first compatible span that "
@@ -5038,6 +5294,18 @@ class LocalLlamaCppProvider:
                 definite_descriptions = _target_definite_descriptions(
                     source.content
                 )
+                coreference_bindings = _context_coreference_bindings(
+                    source,
+                    evidence_context,
+                )
+                compiled_packet, coreference_repairs = (
+                    _apply_context_coreference_bindings(
+                        source,
+                        evidence_context,
+                        compiled_packet,
+                    )
+                )
+                repairs = (*repairs, *coreference_repairs)
                 unresolved = _unresolved_context_coreferences(
                     source,
                     evidence_context,
@@ -5056,6 +5324,25 @@ class LocalLlamaCppProvider:
                                 [
                                     item["head"]
                                     for item in definite_descriptions
+                                ]
+                            )
+                        ),
+                        "resolved_context_coreference_binding_count": len(
+                            coreference_bindings
+                        ),
+                        "resolved_context_coreference_bindings_sha256": (
+                            canonical_sha256(
+                                [
+                                    {
+                                        "head": item["head"],
+                                        "referent_key": item[
+                                            "referent_key"
+                                        ],
+                                        "context_content_sha256": item[
+                                            "context_content_sha256"
+                                        ],
+                                    }
+                                    for item in coreference_bindings
                                 ]
                             )
                         ),
