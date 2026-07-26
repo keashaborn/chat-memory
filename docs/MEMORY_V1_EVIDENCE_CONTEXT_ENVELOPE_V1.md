@@ -78,6 +78,11 @@ preceding sibling. The post-compiler can substitute only that referent into
 predicate, stance, source span, or additional observation. Multiple candidates,
 an absent candidate, or an ungrounded model result still fail closed.
 
+The same post-compiler canonicalizes target-supported stance source spans
+against the immutable target content and removes a duplicated referent prefix
+from the topic namespace. This is provenance repair, not assertion expansion:
+the canonical span still refers only to the admitted target evidence.
+
 ## Current exact evaluation
 
 The first bounded case contains three spans from one Verbal Sage/LifeSwitch

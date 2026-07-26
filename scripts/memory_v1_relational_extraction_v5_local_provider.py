@@ -407,6 +407,16 @@ def _apply_context_coreference_bindings(
                 )
             ):
                 suffix = topic_key[len(head):].lstrip("._-")
+                if suffix.casefold() == referent_key:
+                    suffix = ""
+                elif suffix.casefold().startswith(
+                    (
+                        f"{referent_key}.",
+                        f"{referent_key}_",
+                        f"{referent_key}-",
+                    )
+                ):
+                    suffix = suffix[len(referent_key):].lstrip("._-")
                 stance_value["topic_key"] = (
                     f"{referent_key}.{suffix}"
                     if suffix
@@ -426,11 +436,35 @@ def _apply_context_coreference_bindings(
                 if replaced != field_value:
                     stance_value[field_name] = replaced
                     binding_changed = True
+            canonical_spans = [_source_span(source)]
+            if observation.get("source_spans") != canonical_spans:
+                observation["source_spans"] = canonical_spans
+                repairs.append(
+                    "context_target_source_spans_canonicalized"
+                )
+            referenced_entity_refs = {
+                observation.get("subject_entity_ref")
+            }
+            if (
+                isinstance(object_value, dict)
+                and object_value.get("kind") == "entity"
+            ):
+                referenced_entity_refs.add(object_value.get("entity_ref"))
+            for entity in value.get("entity_mentions", []):
+                if (
+                    isinstance(entity, dict)
+                    and entity.get("entity_ref") in referenced_entity_refs
+                    and entity.get("source_spans") != canonical_spans
+                ):
+                    entity["source_spans"] = canonical_spans
+                    repairs.append(
+                        "context_target_source_spans_canonicalized"
+                    )
         if binding_changed:
             repairs.append("context_coreference_bound")
     if not repairs:
         return packet, ()
-    return ProviderPacket.model_validate(value), tuple(repairs)
+    return ProviderPacket.model_validate(value), tuple(dict.fromkeys(repairs))
 
 
 def _semantic_coreference_strings(

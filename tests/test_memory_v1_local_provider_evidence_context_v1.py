@@ -330,16 +330,26 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
 
         generic = self.stance_packet(
             source,
-            topic_key="philosophy.life_impact",
+            topic_key="philosophy.fractal_monism_life_impact",
             topic_text="philosophy and its impact on life",
             position="the philosophy will help people in life",
         )
+        generic_value = generic.model_dump(mode="json")
+        generic_value["entity_mentions"][0]["source_spans"][0]["end"] = 35
+        generic_value["observations"][0]["source_spans"][0]["end"] = 35
+        generic = ProviderPacket.model_validate(generic_value)
         repaired, repairs = _apply_context_coreference_bindings(
             source,
             context,
             generic,
         )
-        self.assertEqual(repairs, ("context_coreference_bound",))
+        self.assertEqual(
+            repairs,
+            (
+                "context_target_source_spans_canonicalized",
+                "context_coreference_bound",
+            ),
+        )
         self.assertEqual(
             _unresolved_context_coreferences(source, context, repaired),
             (),
@@ -363,6 +373,14 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
         self.assertEqual(
             observation["source_spans"][0]["quote"],
             source.content,
+        )
+        self.assertEqual(
+            observation["source_spans"][0]["end"],
+            len(source.content),
+        )
+        self.assertEqual(
+            value["entity_mentions"][0]["source_spans"][0]["end"],
+            len(source.content),
         )
         self.assertNotIn(
             context.spans[0].content,
