@@ -89,7 +89,7 @@ qdrant_signature() {
 production_signature() {
   production_scalar "
     SELECT md5(jsonb_build_object(
-      'route_events',(SELECT count(*) FROM memory.v5_2_packet_route_event),
+      'route_events',(SELECT count(*) FROM memory.v5_2_local_packet_route_event),
       'atom_proposals',(SELECT count(*) FROM memory.v5_2_atom_admission_proposal),
       'atom_reviews',(SELECT count(*) FROM memory.v5_2_atom_admission_review),
       'atom_applies',(SELECT count(*) FROM memory.v5_2_atom_admission_apply),
