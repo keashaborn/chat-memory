@@ -18,7 +18,7 @@ observation=87ce1a11-01ae-4d6f-80ea-8e62b5b43cff
 stage_runner=scripts/memory_v1_v5_2_evidence_context_stance_claim_stage.py
 stage_test=tests/test_memory_v1_v5_2_evidence_context_stance_claim_stage.py
 review_manifest_runner=scripts/memory_v1_v5_2_compiler_v8_claim_review_manifest.py
-review_runner=scripts/memory_v1_v5_2_compiler_v8_claim_review_batch.py
+review_runner=scripts/memory_v1_v5_2_evidence_context_stance_claim_review_batch.py
 python_bin=/opt/chat-memory/venv/bin/python
 review_root=/home/ubuntu/memory-v1-reviews
 artifact_dir="$review_root/evidence-context-stance-claim-clone-$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}"
@@ -196,7 +196,7 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
 [[ "$(jq -er '.rows_written' "$review_preflight")" == 0 ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
-MEMORY_V1_V5_2_COMPILER_V8_CLAIM_REVIEW_APPLY=authorized \
+MEMORY_V1_V5_2_EVIDENCE_CONTEXT_STANCE_CLAIM_REVIEW_APPLY=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$review_runner" \
   --mode apply --manifest "$review_manifest" --output "$review_apply"
@@ -204,7 +204,7 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
 [[ "$(jq -er '.decision_counts.authorized' "$review_apply")" == 1 ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
-MEMORY_V1_V5_2_COMPILER_V8_CLAIM_REVIEW_APPLY=authorized \
+MEMORY_V1_V5_2_EVIDENCE_CONTEXT_STANCE_CLAIM_REVIEW_APPLY=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$review_runner" \
   --mode replay --manifest "$review_manifest" --output "$review_replay"
