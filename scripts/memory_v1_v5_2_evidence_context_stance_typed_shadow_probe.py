@@ -175,7 +175,7 @@ async def run(
 
     conn = await asyncpg.connect(dsn, command_timeout=30)
     try:
-        async with conn.transaction(readonly=True):
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
             snapshot = create_current_only_conversation_snapshot_v1(
                 authenticated_actor_user_id=owner,
                 thread_id=uuid4(),
