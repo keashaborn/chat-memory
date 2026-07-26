@@ -5,7 +5,7 @@ set -euo pipefail
 # atom-level stage admission on a disposable production clone. Production,
 # Qdrant, claims, retrieval, and prompts remain unchanged.
 
-repo_root=$(git rev-parse --show-toplevel)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 container=brains-postgres-1
