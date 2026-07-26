@@ -19,6 +19,10 @@ BEGIN
 END
 $rollback$;
 
+REVOKE EXECUTE ON FUNCTION
+  memory.v5_2_atom_stage_projection_authorized_v1(uuid,uuid,jsonb,text)
+  FROM memory_v5_local_disposition_maintainer;
+
 DROP TRIGGER IF EXISTS v5_local_disposition_stage_guard
   ON memory.relational_stage_batch;
 CREATE TRIGGER v5_local_disposition_stage_guard

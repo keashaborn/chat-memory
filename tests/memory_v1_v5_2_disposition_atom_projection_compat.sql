@@ -57,6 +57,23 @@ BEGIN
       'PUBLIC must not execute the compatibility trigger directly';
   END IF;
 
+  IF NOT has_function_privilege(
+       'memory_v5_local_disposition_maintainer',
+       'memory.v5_2_atom_stage_projection_authorized_v1(uuid,uuid,jsonb,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION
+      'compatibility owner cannot call the atom authorization function';
+  END IF;
+  IF has_function_privilege(
+       'brains_app',
+       'memory.v5_2_atom_stage_projection_authorized_v1(uuid,uuid,jsonb,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION
+      'brains_app must not execute the atom authorization function directly';
+  END IF;
+
   IF to_regprocedure(
        'memory.v5_2_atom_stage_projection_authorized_v1(uuid,uuid,jsonb,text)'
      ) IS NULL

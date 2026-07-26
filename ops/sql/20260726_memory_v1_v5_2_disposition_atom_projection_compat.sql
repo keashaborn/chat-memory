@@ -86,6 +86,9 @@ ALTER FUNCTION memory.guard_disposed_evidence_from_stage_v2()
   OWNER TO memory_v5_local_disposition_maintainer;
 REVOKE ALL ON FUNCTION memory.guard_disposed_evidence_from_stage_v2()
   FROM PUBLIC,brains_app,memory_v5_local_disposition_maintainer;
+GRANT EXECUTE ON FUNCTION
+  memory.v5_2_atom_stage_projection_authorized_v1(uuid,uuid,jsonb,text)
+  TO memory_v5_local_disposition_maintainer;
 
 DROP TRIGGER IF EXISTS v5_local_disposition_stage_guard
   ON memory.relational_stage_batch;
