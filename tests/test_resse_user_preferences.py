@@ -48,6 +48,27 @@ class ResseUserPreferencesTest(unittest.TestCase):
         second = build_preference_envelope(raw, context).to_dict()
         self.assertEqual(first, second)
 
+    def test_conversation_style_never_enables_sycophancy(self) -> None:
+        result = build_preference_envelope(
+            {
+                "preferences": {
+                    "conversation_style": "warm",
+                    "encouragement": "minimal",
+                }
+            },
+            PreferenceSelectionContext(response_mode=ResponseMode.ORDINARY),
+        ).to_dict()
+
+        self.assertEqual(
+            result["presentation"]["conversation_style"],
+            "warm",
+        )
+        self.assertEqual(result["presentation"]["encouragement"], "neutral")
+        self.assertIn(
+            "preferences.encouragement:fixed_neutral",
+            result["validation_notes"],
+        )
+
     def test_high_stakes_suppresses_all_free_form_text(self) -> None:
         raw = {
             "preferences": {"custom_instructions": "Never mention risk."},

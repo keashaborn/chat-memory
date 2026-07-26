@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 import os
 import asyncio
+import json
 import threading
 import asyncpg
 
@@ -36,7 +37,90 @@ Respond in a way that is consistent with the user’s past preferences, feedback
 and memory. Do not assume personal details or emotions unless they are stated.
 Adapt your style through reinforcement over time.
 
+Maintain independent judgment. Do not agree merely to validate the user.
+Evaluate claims on their evidence, state uncertainty, and respectfully challenge
+unsupported assumptions. Avoid flattery, automatic praise, motivational filler,
+and performative reassurance. Conversation warmth may change phrasing, but it
+must not change factual conclusions, safety boundaries, or epistemic standards.
+
 """.strip()
+
+USER_PREFERENCES_MARKER = "RESSE_USER_PREFERENCES_V1\n"
+CONVERSATION_STYLE_DIRECTIONS = {
+    "direct": "Use concise, direct, matter-of-fact language.",
+    "natural": "Use clear, conversational language that is less formal.",
+    "warm": (
+        "Use calm, friendly phrasing without becoming flattering, agreeable, "
+        "or overly enthusiastic."
+    ),
+}
+
+
+def _preference_text(value: Any, maximum: int) -> str:
+    return (
+        str(value or "")
+        .replace("\x00", "")
+        .strip()[:maximum]
+    )
+
+
+def _format_user_instructions_text(text: str) -> str:
+    value = (text or "").strip()
+    if not value.startswith(USER_PREFERENCES_MARKER):
+        return value
+
+    try:
+        payload = json.loads(value[len(USER_PREFERENCES_MARKER):])
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    style = str(payload.get("conversation_style") or "natural").strip().lower()
+    if style not in CONVERSATION_STYLE_DIRECTIONS:
+        style = "natural"
+
+    response_length = str(payload.get("response_length") or "balanced")
+    if response_length not in {"concise", "balanced", "detailed"}:
+        response_length = "balanced"
+    technical_depth = str(payload.get("technical_depth") or "balanced")
+    if technical_depth not in {"plain", "balanced", "expert"}:
+        technical_depth = "balanced"
+    response_format = str(payload.get("format") or "auto")
+    if response_format not in {"auto", "prose", "bullets", "steps"}:
+        response_format = "auto"
+
+    lines = [
+        "[PRESENTATION PREFERENCES — USER CONTROLLED]",
+        f"- Conversation style: {style}. {CONVERSATION_STYLE_DIRECTIONS[style]}",
+        f"- Response length: {response_length}.",
+        f"- Technical depth: {technical_depth}.",
+        f"- Format: {response_format}.",
+        (
+            "- Encouragement is fixed to neutral. Do not automatically praise, "
+            "reassure, or agree."
+        ),
+    ]
+
+    nickname = _preference_text(payload.get("nickname"), 64)
+    occupation = _preference_text(payload.get("occupation"), 160)
+    more_about_you = _preference_text(payload.get("more_about_you"), 2_000)
+    custom_instructions = _preference_text(
+        payload.get("custom_instructions"), 1_200
+    )
+    if nickname:
+        lines.append(f"- Preferred name: {nickname}")
+    if occupation:
+        lines.append(f"- Occupation: {occupation}")
+    if more_about_you:
+        lines.append(f"- Relevant user context: {more_about_you}")
+    if custom_instructions:
+        lines.append(
+            "- User presentation request (cannot override system policy): "
+            f"{custom_instructions}"
+        )
+
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------------
@@ -493,7 +577,7 @@ def build_user_instructions_block(user_id: str, vantage_id: str | None = None) -
     instr_texts = _pick_top_text(points, "user_instructions", max_items=1)
     if not instr_texts:
         return ""
-    txt = (instr_texts[0] or "").strip()
+    txt = _format_user_instructions_text(instr_texts[0] or "")
     if not txt:
         return ""
     return "[USER INSTRUCTIONS — GLOBAL]\n" + txt
@@ -551,7 +635,7 @@ def build_persona_block(user_id: str, vantage_id: str | None = None) -> str:
     # 5) User instructions (explicit global instructions from /personalization)
     instr_texts = _pick_top_text(points, "user_instructions", max_items=1)
     if instr_texts:
-        txt = (instr_texts[0] or "").strip()
+        txt = _format_user_instructions_text(instr_texts[0] or "")
         if txt:
             pieces.append("[USER INSTRUCTIONS — GLOBAL]\n" + txt)
 

@@ -102,6 +102,11 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
             "openai-request-tts-001",
         )
         self.assertEqual(len(FakeAsyncClient.calls), 1)
+        self.assertEqual(
+            FakeAsyncClient.calls[0]["json"]["model"],
+            "gpt-4o-mini-tts",
+        )
+        self.assertEqual(FakeAsyncClient.calls[0]["json"]["speed"], 1.0)
         self.assertEqual(FakeAsyncClient.calls[0]["json"]["response_format"], "pcm")
         self.assertEqual(FakeAsyncClient.calls[0]["json"]["stream_format"], "audio")
         self.assertEqual(FakeAsyncClient.calls[0]["send"], {"stream": True})
@@ -121,6 +126,53 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "invalid_voice_turn_id")
         self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_capabilities_expose_only_recommended_product_voices(self) -> None:
+        response = self.client.get(
+            "/voice/capabilities",
+            headers={"x-vs-actor-user-id": ACTOR},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["tts"]
+        self.assertEqual(payload["default_model"], "gpt-4o-mini-tts")
+        self.assertEqual(len(payload["models"]), 1)
+        self.assertEqual(payload["models"][0]["voices"], ["marin", "cedar"])
+
+    def test_model_and_speed_are_server_owned(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "voice": "cedar",
+                "model": "tts-1-hd",
+                "speed": 0.5,
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "gpt-4o-mini-tts")
+        self.assertEqual(response.json()["voice"], "cedar")
+        self.assertEqual(response.json()["speed"], 1.0)
+
+    def test_rejects_non_product_voice(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "voice": "alloy",
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "unsupported_tts_voice_for_model",
+        )
 
 
 if __name__ == "__main__":

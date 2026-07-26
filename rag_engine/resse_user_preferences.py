@@ -33,6 +33,7 @@ ALLOWED_PREFERENCE_FIELDS = frozenset(
         "response_length",
         "technical_depth",
         "format",
+        "conversation_style",
         "encouragement",
         "custom_instructions",
     }
@@ -59,8 +60,13 @@ class ResponseFormat(str, Enum):
     STEPS = "steps"
 
 
+class ConversationStyle(str, Enum):
+    DIRECT = "direct"
+    NATURAL = "natural"
+    WARM = "warm"
+
+
 class Encouragement(str, Enum):
-    MINIMAL = "minimal"
     NEUTRAL = "neutral"
 
 
@@ -69,6 +75,7 @@ class UserPreferences:
     response_length: ResponseLength = ResponseLength.BALANCED
     technical_depth: TechnicalDepth = TechnicalDepth.BALANCED
     response_format: ResponseFormat = ResponseFormat.AUTO
+    conversation_style: ConversationStyle = ConversationStyle.NATURAL
     encouragement: Encouragement = Encouragement.NEUTRAL
     custom_instructions: str = ""
 
@@ -105,6 +112,7 @@ class ResolvedPreferenceEnvelope:
     response_length: ResponseLength
     technical_depth: TechnicalDepth
     response_format: ResponseFormat
+    conversation_style: ConversationStyle
     encouragement: Encouragement
     nickname: str | None
     occupation: str | None
@@ -126,6 +134,7 @@ class ResolvedPreferenceEnvelope:
                 "response_length": self.response_length.value,
                 "technical_depth": self.technical_depth.value,
                 "format": self.response_format.value,
+                "conversation_style": self.conversation_style.value,
                 "encouragement": self.encouragement.value,
             },
             "selected_profile_context": {
@@ -256,13 +265,16 @@ def parse_preference_payload(raw: Mapping[str, Any]) -> ParsedPreferencePayload:
         "preferences.format",
         notes,
     )
-    encouragement = _parse_enum(
-        Encouragement,
-        raw_preferences.get("encouragement"),
-        Encouragement.NEUTRAL,
-        "preferences.encouragement",
+    conversation_style = _parse_enum(
+        ConversationStyle,
+        raw_preferences.get("conversation_style"),
+        ConversationStyle.NATURAL,
+        "preferences.conversation_style",
         notes,
     )
+    encouragement = Encouragement.NEUTRAL
+    if raw_preferences.get("encouragement") not in (None, "", "neutral"):
+        notes.append("preferences.encouragement:fixed_neutral")
 
     custom_instructions, truncated = _clean_text(
         raw_preferences.get("custom_instructions"),
@@ -293,6 +305,7 @@ def parse_preference_payload(raw: Mapping[str, Any]) -> ParsedPreferencePayload:
             response_length=response_length,
             technical_depth=technical_depth,
             response_format=response_format,
+            conversation_style=conversation_style,
             encouragement=encouragement,
             custom_instructions=custom_instructions,
         ),
@@ -344,6 +357,7 @@ def resolve_preference_envelope(
         response_length = ResponseLength.CONCISE
         technical_depth = TechnicalDepth.PLAIN
         response_format = ResponseFormat.AUTO
+        conversation_style = ConversationStyle.DIRECT
         encouragement = Encouragement.NEUTRAL
         if preferences.response_length is not response_length:
             suppressed.append("preferences.response_length:high_stakes_override")
@@ -351,13 +365,18 @@ def resolve_preference_envelope(
             suppressed.append("preferences.technical_depth:high_stakes_override")
         if preferences.response_format is not response_format:
             suppressed.append("preferences.format:high_stakes_override")
+        if preferences.conversation_style is not conversation_style:
+            suppressed.append(
+                "preferences.conversation_style:high_stakes_override"
+            )
         if preferences.encouragement is not encouragement:
             suppressed.append("preferences.encouragement:high_stakes_override")
     else:
         response_length = preferences.response_length
         technical_depth = preferences.technical_depth
         response_format = preferences.response_format
-        encouragement = preferences.encouragement
+        conversation_style = preferences.conversation_style
+        encouragement = Encouragement.NEUTRAL
 
     nickname = _select_text(
         field="profile.nickname",
@@ -397,6 +416,7 @@ def resolve_preference_envelope(
         response_length=response_length,
         technical_depth=technical_depth,
         response_format=response_format,
+        conversation_style=conversation_style,
         encouragement=encouragement,
         nickname=nickname,
         occupation=occupation,

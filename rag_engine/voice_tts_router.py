@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import os
 import uuid
 from typing import Any
@@ -20,10 +19,11 @@ router = APIRouter()
 
 OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL") or "https://api.openai.com/v1/audio/speech"
 
-DEFAULT_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts"
+DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
+DEFAULT_TTS_SPEED = 1.0
 MAX_TTS_CHARS = 4096
-VOICE_CAPABILITIES_VERSION = "2026-07-23.1"
+VOICE_CAPABILITIES_VERSION = "2026-07-26.1"
 
 TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "gpt-4o-mini-tts": {
@@ -33,43 +33,10 @@ TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
         "supports_instructions": True,
         "default_voice": "marin",
         "recommended_voices": ["marin", "cedar"],
-        "voices": [
-            "alloy",
-            "ash",
-            "ballad",
-            "coral",
-            "echo",
-            "fable",
-            "nova",
-            "onyx",
-            "sage",
-            "shimmer",
-            "verse",
-            "marin",
-            "cedar",
-        ],
-    },
-    "tts-1": {
-        "label": "TTS-1",
-        "description": "Legacy: lower latency with lower audio quality.",
-        "legacy": True,
-        "supports_instructions": False,
-        "default_voice": "sage",
-        "recommended_voices": [],
-        "voices": ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
-    },
-    "tts-1-hd": {
-        "label": "TTS-1 HD",
-        "description": "Legacy: higher quality than TTS-1, without style instructions.",
-        "legacy": True,
-        "supports_instructions": False,
-        "default_voice": "sage",
-        "recommended_voices": [],
-        "voices": ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
+        "voices": ["marin", "cedar"],
     },
 }
 
-ALLOWED_TTS_MODELS = set(TTS_MODEL_CAPABILITIES)
 NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
     "pragma": "no-cache",
@@ -86,27 +53,6 @@ def _require_actor(req: Request) -> str:
         return str(uuid.UUID(raw))
     except Exception:
         raise HTTPException(status_code=400, detail="invalid_actor_user_id")
-
-
-def _clean_model(raw: Any) -> str:
-    fallback = DEFAULT_TTS_MODEL if DEFAULT_TTS_MODEL in ALLOWED_TTS_MODELS else "gpt-4o-mini-tts"
-    if raw is None or not str(raw).strip():
-        return fallback
-
-    value = str(raw).strip()
-
-    if ":" in value or value not in ALLOWED_TTS_MODELS:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "unsupported_tts_model",
-                "field": "model",
-                "value": value[:120],
-                "allowed": sorted(ALLOWED_TTS_MODELS),
-            },
-        )
-
-    return value
 
 
 def _clean_voice(raw: Any, model: str) -> str:
@@ -134,18 +80,6 @@ def _clean_voice(raw: Any, model: str) -> str:
     return value
 
 
-def _clean_speed(raw: Any) -> float:
-    try:
-        value = float(raw)
-    except Exception:
-        value = 1.0
-
-    if not math.isfinite(value):
-        value = 1.0
-
-    return max(0.25, min(4.0, value))
-
-
 @router.post("/voice/tts")
 async def create_tts(req: Request):
     actor_user_id = _require_actor(req)
@@ -168,9 +102,9 @@ async def create_tts(req: Request):
     if len(text) > MAX_TTS_CHARS:
         raise HTTPException(status_code=413, detail=f"text_too_large_max_{MAX_TTS_CHARS}")
 
-    model = _clean_model(body.get("model"))
+    model = DEFAULT_TTS_MODEL
     voice = _clean_voice(body.get("voice"), model)
-    speed = _clean_speed(body.get("speed", 1.0))
+    speed = DEFAULT_TTS_SPEED
     instructions = str(body.get("instructions") or "").strip()
 
     if body.get("dry_run") is True:
@@ -286,11 +220,11 @@ async def get_voice_capabilities(req: Request):
     _require_actor(req)
 
     models = []
-    for model_id in ("gpt-4o-mini-tts", "tts-1", "tts-1-hd"):
+    for model_id in (DEFAULT_TTS_MODEL,):
         capabilities = TTS_MODEL_CAPABILITIES[model_id]
         models.append({"id": model_id, **capabilities})
 
-    default_model = DEFAULT_TTS_MODEL if DEFAULT_TTS_MODEL in ALLOWED_TTS_MODELS else "gpt-4o-mini-tts"
+    default_model = DEFAULT_TTS_MODEL
     default_voice = _clean_voice(None, default_model)
 
     return JSONResponse(
