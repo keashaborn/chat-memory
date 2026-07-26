@@ -167,6 +167,30 @@ class StanceTopicScopeV1Test(unittest.TestCase):
             )
         )
 
+    def test_restricted_reader_canonical_text_is_sufficient_without_literal(
+        self,
+    ) -> None:
+        scope = resolve_stance_topic_scope_v1(
+            request=request(
+                "What have I said about how Fractal Monism can help people?"
+            ),
+            claim_context=self.claim_context(),
+        )
+        assert scope is not None
+        self.assertTrue(
+            claim_row_matches_stance_topic_scope_v1(
+                {
+                    "owner_user_id": OWNER,
+                    "predicate": "stance.reported",
+                    "canonical_text": (
+                        "The user reports this position: "
+                        '"Fractal Monism will help people in life."'
+                    ),
+                },
+                scope,
+            )
+        )
+
     def test_broad_opinion_recall_keeps_all_owner_stances(self) -> None:
         scope = resolve_stance_topic_scope_v1(
             request=request("What are some opinions I have shared?"),

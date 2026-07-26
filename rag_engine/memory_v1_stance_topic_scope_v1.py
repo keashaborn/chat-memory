@@ -275,28 +275,27 @@ def resolve_stance_topic_scope_v1(
 
 
 def _row_topic_tokens(row: Mapping[str, object]) -> tuple[str, ...]:
+    canonical_text = row.get("canonical_text")
+    if not isinstance(canonical_text, str) or not canonical_text.strip():
+        raise StanceTopicScopeError(
+            "stance row lacks canonical text"
+        )
     literal = row.get("object_literal")
     if isinstance(literal, str):
         try:
             literal = json.loads(literal)
         except (TypeError, ValueError):
             literal = None
-    if not isinstance(literal, Mapping):
-        raise StanceTopicScopeError(
-            "stance row lacks a structured object literal"
-        )
-    value = literal.get("value")
+    value = literal.get("value") if isinstance(literal, Mapping) else {}
     if not isinstance(value, Mapping):
-        raise StanceTopicScopeError(
-            "stance row object literal lacks a structured value"
-        )
+        value = {}
     material = " ".join(
         str(item or "")
         for item in (
             value.get("topic_key"),
             value.get("topic_text"),
             value.get("position"),
-            row.get("canonical_text"),
+            canonical_text,
         )
     )
     return _normalized_tokens(material)
