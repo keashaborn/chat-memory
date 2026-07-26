@@ -57,9 +57,14 @@ design statement:
 - contextual project intent;
 - the target user viewpoint.
 
-The expected semantic route is component-scoped project knowledge describing a
-Fractal Monism response-policy goal. It is not a personal biographical claim,
-not a response-style preference, and not an FM corpus authority record.
+For the exact target, the supported atomic assertion is the user's reported
+stance that the philosophy can help people. The sibling spans disambiguate the
+topic as Fractal Monism and its Verbal Sage/LifeSwitch project setting. The
+larger response-policy goal spans multiple admitted evidence units and must be
+formed later through an explicit multi-evidence project synthesis; it cannot be
+smuggled through this target-only envelope. Neither result is a personal
+biographical claim, a response-style preference, or an FM corpus authority
+record.
 
 This phase performs no extraction call, staging, durable claim creation,
 Qdrant write, retrieval activation, or prompt influence.

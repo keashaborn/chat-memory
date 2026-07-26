@@ -20,8 +20,10 @@ source_json=$(mktemp /tmp/memory-evidence-context-source.XXXXXX.json)
 evidence_json=$(mktemp /tmp/memory-evidence-context-spans.XXXXXX.json)
 input_json=$(mktemp /tmp/memory-evidence-context-input.XXXXXX.json)
 report_json=$(mktemp /tmp/memory-evidence-context-report.XXXXXX.json)
+request_report_json=$(mktemp /tmp/memory-evidence-context-request.XXXXXX.json)
 chmod 0600 \
-  "$backup" "$source_json" "$evidence_json" "$input_json" "$report_json"
+  "$backup" "$source_json" "$evidence_json" "$input_json" "$report_json" \
+  "$request_report_json"
 
 cleanup() {
   rc=$?
@@ -30,6 +32,7 @@ cleanup() {
     >/dev/null 2>&1 || true
   rm -f \
     "$backup" "$source_json" "$evidence_json" "$input_json" "$report_json"
+  rm -f "$request_report_json"
   exit "$rc"
 }
 trap cleanup EXIT
@@ -170,6 +173,13 @@ PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
   --target-evidence-id "$target" \
   --expected-target-content-sha256 "$target_sha" \
   >"$report_json"
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+  tools/memory_v1_evidence_context_request_v1_report.py \
+  --input "$input_json" \
+  --expected-owner-user-id "$owner" \
+  --target-evidence-id "$target" \
+  --expected-target-content-sha256 "$target_sha" \
+  >"$request_report_json"
 
 jq -e \
   --arg target_sha "$target_sha" \
@@ -193,6 +203,20 @@ jq -e \
   and .retrieval_activation==false
   and .prompt_influence==false
   ' "$report_json" >/dev/null
+jq -e \
+  --arg target_sha "$target_sha" \
+  '
+  .contract_version=="memory_evidence_context_request_report_v1"
+  and .prompt_profile=="semantic_stance_compact_v1_sibling_context_v1"
+  and .target_content_sha256==$target_sha
+  and .context_span_count==3
+  and .assertion_origin_count==1
+  and .external_model_calls==0
+  and .local_model_calls==0
+  and .raw_text_retained==false
+  and .retrieval_activation==false
+  and .prompt_influence==false
+  ' "$request_report_json" >/dev/null
 
 production_after=$(scalar "$production" "
   SELECT encode(public.digest(convert_to(
@@ -231,6 +255,7 @@ printf '%s\n' \
   'owner_isolation=PASS' \
   'target_assertion_origins=1' \
   'sibling_context_only=2' \
+  'provider_request=ZERO_CALL_BOUND' \
   'production_rows=UNCHANGED' \
   'qdrant=UNCHANGED' \
   'retrieval_activation=OFF' \
