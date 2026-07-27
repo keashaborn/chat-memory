@@ -191,6 +191,8 @@ ALTER FUNCTION memory.classify_v5_local_inference_outcome_v2(text)
   OWNER TO memory_v5_local_inference_maintainer;
 REVOKE ALL ON FUNCTION memory.classify_v5_local_inference_outcome_v2(text)
   FROM PUBLIC,brains_app,memory_v5_local_inference_maintainer;
+GRANT EXECUTE ON FUNCTION memory.classify_v5_local_inference_outcome_v2(text)
+  TO memory_v5_local_inference_maintainer;
 
 CREATE TABLE memory.v5_local_inference_outcome_event (
   event_id uuid PRIMARY KEY,
@@ -610,7 +612,7 @@ REVOKE ALL ON FUNCTION memory.owner_v5_local_inference_circuit_state_v2(
 ) FROM PUBLIC,brains_app,memory_v5_local_inference_maintainer;
 GRANT EXECUTE ON FUNCTION memory.owner_v5_local_inference_circuit_state_v2(
   text,text,text,text,text,text,integer,integer
-) TO brains_app;
+) TO brains_app,memory_v5_local_inference_maintainer;
 
 DO $migration$
 DECLARE
