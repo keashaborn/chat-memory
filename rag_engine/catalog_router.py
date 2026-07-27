@@ -70,6 +70,143 @@ async def search_exercises(
     finally:
         await conn.close()
 
+
+@router.get("/exercises/browse")
+async def browse_exercises(
+    q: str = Query("", max_length=120),
+    movement_group: str = Query("", max_length=80),
+    kind: str = Query("strength", min_length=1, max_length=40),
+    limit: int = Query(100, ge=1, le=200),
+):
+    clean_q = str(q or "").strip()
+    clean_group = str(movement_group or "").strip().lower()
+    clean_kind = str(kind or "strength").strip().lower()
+
+    conn = await _db()
+    try:
+        rows = await conn.fetch(
+            f"""
+            with selected_families as (
+              select
+                f.exercise_family_id,
+                f.slug,
+                f.display_name,
+                f.kind,
+                f.movement_group,
+                f.movement_pattern,
+                f.primary_muscles,
+                f.description,
+                f.sort_order
+              from {CATALOG_SCHEMA}.exercise_family f
+              where f.is_active=true
+                and f.kind=$3
+                and ($2='' or f.movement_group=$2)
+                and (
+                  $1=''
+                  or lower(f.display_name) like ('%' || lower($1) || '%')
+                  or exists (
+                    select 1
+                    from {CATALOG_SCHEMA}.exercise_family_member qfm
+                    join {CATALOG_SCHEMA}.exercise qe
+                      on qe.exercise_id=qfm.exercise_id
+                    where qfm.exercise_family_id=f.exercise_family_id
+                      and qfm.is_active=true
+                      and qe.is_active=true
+                      and qe.is_public=true
+                      and lower(qe.display_name) like ('%' || lower($1) || '%')
+                  )
+                )
+              order by f.sort_order asc, lower(f.display_name) asc
+              limit $4
+            )
+            select
+              f.exercise_family_id,
+              f.slug as family_slug,
+              f.display_name as family_name,
+              f.kind,
+              f.movement_group,
+              f.movement_pattern,
+              f.primary_muscles as family_primary_muscles,
+              f.description,
+              f.sort_order as family_sort_order,
+              fm.exercise_family_member_id,
+              fm.variant_label,
+              fm.is_default,
+              fm.sort_order as variant_sort_order,
+              e.exercise_id,
+              e.slug as exercise_slug,
+              e.display_name,
+              e.modality,
+              e.primary_muscles,
+              e.equipment_required,
+              e.unilateral
+            from selected_families f
+            join {CATALOG_SCHEMA}.exercise_family_member fm
+              on fm.exercise_family_id=f.exercise_family_id
+             and fm.is_active=true
+            join {CATALOG_SCHEMA}.exercise e
+              on e.exercise_id=fm.exercise_id
+             and e.is_active=true
+             and e.is_public=true
+            order by
+              f.sort_order asc,
+              lower(f.display_name) asc,
+              fm.is_default desc,
+              fm.sort_order asc,
+              lower(e.display_name) asc
+            """,
+            clean_q,
+            clean_group,
+            clean_kind,
+            limit,
+        )
+
+        families: list[dict] = []
+        family_by_id: dict[str, dict] = {}
+
+        for row in rows:
+            family_id = str(row["exercise_family_id"])
+            family = family_by_id.get(family_id)
+
+            if family is None:
+                family = {
+                    "exercise_family_id": family_id,
+                    "slug": row["family_slug"],
+                    "display_name": row["family_name"],
+                    "kind": row["kind"],
+                    "movement_group": row["movement_group"],
+                    "movement_pattern": row["movement_pattern"],
+                    "primary_muscles": list(row["family_primary_muscles"] or []),
+                    "description": row["description"],
+                    "sort_order": row["family_sort_order"],
+                    "variants": [],
+                }
+                family_by_id[family_id] = family
+                families.append(family)
+
+            family["variants"].append(
+                {
+                    "exercise_family_member_id": str(
+                        row["exercise_family_member_id"]
+                    ),
+                    "exercise_id": str(row["exercise_id"]),
+                    "slug": row["exercise_slug"],
+                    "display_name": row["display_name"],
+                    "variant_label": row["variant_label"],
+                    "modality": row["modality"],
+                    "primary_muscles": list(row["primary_muscles"] or []),
+                    "equipment_required": list(row["equipment_required"] or []),
+                    "unilateral": bool(row["unilateral"]),
+                    "is_default": bool(row["is_default"]),
+                    "sort_order": row["variant_sort_order"],
+                }
+            )
+
+        return JSONResponse(families)
+    finally:
+        await conn.close()
+
+
 @router.get("/foods/search")
 async def search_foods(
     q: str = Query(..., min_length=1),
