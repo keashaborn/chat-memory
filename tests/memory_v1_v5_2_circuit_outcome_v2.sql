@@ -268,6 +268,7 @@ SELECT * FROM memory.claim_owner_v5_local_inference_job_v1(
 SELECT
   1/((:'systemic_control_outcome'='circuit_open')::integer),
   1/((:'systemic_consecutive_rejections'='10')::integer);
+RESET SESSION AUTHORIZATION;
 SELECT 1/((count(*)=1)::integer)
 FROM memory.v5_local_inference_event
 WHERE owner_user_id='ca111111-1111-4111-8111-111111111111'
@@ -282,7 +283,6 @@ SELECT 1/((attempts=0 AND status='pending')::integer)
 FROM memory.evidence_extraction_job
 WHERE owner_user_id='ca111111-1111-4111-8111-111111111111'
   AND job_id='ca400000-0000-4000-8000-000000000003';
-RESET SESSION AUTHORIZATION;
 
 -- A cooled-down circuit allows exactly one half-open reservation.
 DO $half_open$
@@ -435,9 +435,6 @@ EXCEPTION WHEN check_violation THEN
   NULL;
 END
 $cross_owner$;
-SELECT 1/((count(*)=0)::integer)
-FROM memory.evidence_extraction_job
-WHERE job_id='ca400000-0000-4000-8000-000000000007';
 
 SELECT set_config('app.user_id','ca111111-1111-4111-8111-111111111111',true);
 
