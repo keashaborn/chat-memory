@@ -79,7 +79,11 @@ class FakeResponse:
 
 
 class TextOnlyFakeResponse:
-    output_text = "Creatine evidence is mixed but generally favorable for resistance-training performance [PMID:123]."
+    def __init__(
+        self,
+        output_text: str = "Creatine evidence is mixed but generally favorable for resistance-training performance [PMID:123].",
+    ):
+        self.output_text = output_text
 
     def model_dump(self, mode: str):
         return {"id": "resp_pubmed_test", "output_text": self.output_text, "output": []}
@@ -107,6 +111,13 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
             model="gpt-5.5",
             external_web_access=False,
         )
+
+    def test_instructions_forbid_source_access_disclaimers(self) -> None:
+        from rag_engine.trusted_web_provider_v1 import TRUSTED_WEB_INSTRUCTIONS_V1
+
+        self.assertIn("Never claim that you lack access", TRUSTED_WEB_INSTRUCTIONS_V1)
+        self.assertIn("PubMed", TRUSTED_WEB_INSTRUCTIONS_V1)
+        self.assertIn("ODS", TRUSTED_WEB_INSTRUCTIONS_V1)
 
     def test_provider_request_is_bounded_and_stateless(self) -> None:
         client = FakeClient(
@@ -200,6 +211,29 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
                 self.settings(),
             ).search(
                 query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
+
+
+    def test_provider_fails_closed_when_sourced_answer_denies_access(self) -> None:
+        client = FakeClient(
+            FakeResponse(
+                "https://openai.com/news/example",
+                "I don't have access to current news, but OpenAI announced an update.",
+            )
+        )
+        policy = route_trusted_web_query("What is the current news about OpenAI?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "trusted_web_answer_denies_source_access",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).search(
+                query="What is the current news about OpenAI?",
                 policy=policy,
                 actor_user_id=ACTOR,
                 safety_secret=SECRET,
@@ -302,6 +336,35 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
             ).search(
                 query="Does creatine improve strength?",
                 policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+            )
+
+
+    def test_pubmed_synthesis_fails_closed_when_answer_denies_sources(self) -> None:
+        client = FakeClient(
+            TextOnlyFakeResponse(
+                "I cannot access sources, but creatine may help strength [PMID:123]."
+            )
+        )
+        record = NCBIResearchRecordV1(
+            pmid="123",
+            title="Creatine and resistance training review",
+            journal="Sports Medicine",
+            publication_date="2025",
+            publication_types=("Systematic Review",),
+            abstract="Human review abstract.",
+        )
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "trusted_web_answer_denies_source_access",
+        ):
+            OpenAITrustedWebProviderV1(
+                client,
+                self.settings(),
+            ).synthesize_from_pubmed_records(
+                query="Does creatine help strength?",
+                records=(record,),
                 actor_user_id=ACTOR,
                 safety_secret=SECRET,
             )

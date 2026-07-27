@@ -29,6 +29,12 @@ ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 
 
 class CurrentNewsRouterTests(unittest.TestCase):
+    def test_current_news_instructions_forbid_access_disclaimers(self) -> None:
+        from rag_engine.current_news_router import CURRENT_NEWS_INSTRUCTIONS_V1
+
+        self.assertIn("Never claim that you lack access", CURRENT_NEWS_INSTRUCTIONS_V1)
+        self.assertIn("current-news sources", CURRENT_NEWS_INSTRUCTIONS_V1)
+
     def test_public_contract_rejects_client_policy_controls(self) -> None:
         with self.assertRaises(ValidationError):
             CurrentNewsRequestV1.model_validate(
