@@ -5119,8 +5119,9 @@ class LlamaCppSecureTransport:
             ) as response:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
+            error_body = exc.read(4097)
             raise LocalProviderAdapterError(
-                _http_error_code(exc.code),
+                _http_error_code(exc.code, error_body),
                 retryable=exc.code in {408, 425, 429, 500, 502, 503, 504},
                 http_status=exc.code,
             ) from exc
@@ -5994,13 +5995,33 @@ def _optional_nonnegative_int(value: Any) -> int | None:
     return value
 
 
-def _http_error_code(status: int) -> str:
+def _http_error_code(status: int, error_body: bytes | None = None) -> str:
     if status in {401, 403}:
         return "local_transport_auth_rejected"
     if status == 429:
         return "local_transport_rate_limited"
     if status >= 500:
         return "local_transport_server_error"
+    if status == 400 and error_body is not None and len(error_body) <= 4097:
+        try:
+            payload = json.loads(error_body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        message = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message")
+            elif isinstance(error, str):
+                message = error
+            if message is None:
+                message = payload.get("message")
+        if (
+            isinstance(message, str)
+            and re.search(r"request \(\d+ tokens\)", message)
+            and "exceeds the available context size" in message.casefold()
+        ):
+            return "local_transport_context_exceeded"
     return "local_transport_http_rejected"
 
 

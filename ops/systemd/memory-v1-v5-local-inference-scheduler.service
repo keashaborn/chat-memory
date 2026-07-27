@@ -15,7 +15,7 @@ Environment=MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY=memory_v1_v5_local_inference_sche
 LoadCredential=local_api_key:/etc/memory-v1-local-inference/api-key
 RuntimeDirectory=memory-v1-v5-local-scheduler
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-scheduler/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_inference_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --contract-profile v5_2 --max-jobs 100 --max-runtime-seconds 21600 --max-attempts 2 --lease-seconds 900 --timeout-seconds 600 --max-output-tokens 4096 --rolling-window-seconds 3600 --max-reserved-jobs 100 --failure-threshold 3 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-scheduler/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_inference_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --contract-profile v5_2 --max-jobs 100 --max-runtime-seconds 21600 --max-attempts 2 --lease-seconds 900 --timeout-seconds 600 --max-output-tokens 2048 --rolling-window-seconds 3600 --max-reserved-jobs 100 --failure-threshold 3 --apply
 TimeoutStartSec=6h15min
 UMask=0077
 Nice=10

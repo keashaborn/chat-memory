@@ -26,6 +26,7 @@ def main() -> int:
         "--max-jobs 100",
         "--max-runtime-seconds 21600",
         "--max-attempts 2",
+        "--max-output-tokens 2048",
         "--rolling-window-seconds 3600",
         "--max-reserved-jobs 100",
         "--failure-threshold 3",
