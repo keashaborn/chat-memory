@@ -37,8 +37,14 @@ class FakeTransaction:
 
 
 class FakeConnection:
-    def __init__(self, *, owns_thread: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        owns_thread: bool = True,
+        visible_thread: bool = True,
+    ) -> None:
         self.owns_thread = owns_thread
+        self.visible_thread = visible_thread
         self.entered = 0
         self.exited = 0
         self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -54,6 +60,13 @@ class FakeConnection:
         if "FROM public.threads" not in query:
             raise AssertionError(f"unexpected fetchval: {query}")
         return self.owns_thread
+
+    async def fetchrow(self, query: str, *args: Any) -> dict[str, Any] | None:
+        if "FROM public.threads" not in query:
+            raise AssertionError(f"unexpected fetchrow: {query}")
+        if not self.visible_thread:
+            return None
+        return {"id": THREAD, "title": "Persisted thread", "updated_at": NOW}
 
 
 async def finalized_response():
@@ -93,12 +106,19 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("memory.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.final_answer_memory_binding_v1", sql)
         self.assertIn("UPDATE public.threads", sql)
+        self.assertIn("INSERT INTO public.active_thread_selection", sql)
         self.assertEqual(conn.execute_calls[0][1], (str(ACTOR),))
         chat_call = next(
             call for call in conn.execute_calls if "INSERT INTO public.chat_log" in call[0]
         )
         self.assertEqual(chat_call[1][1], ACTOR)
         self.assertEqual(chat_call[1][2], str(ACTOR))
+        selection_call = next(
+            call
+            for call in conn.execute_calls
+            if "INSERT INTO public.active_thread_selection" in call[0]
+        )
+        self.assertEqual(selection_call[1], (ACTOR, THREAD))
 
     async def test_absent_owner_thread_fails_closed(self) -> None:
         conn = FakeConnection(owns_thread=False)
@@ -120,6 +140,23 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
 
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertNotIn("INSERT INTO public.chat_log", sql)
+
+    async def test_invisible_thread_rolls_back_response_and_promotion(self) -> None:
+        conn = FakeConnection(visible_thread=False)
+        finalized = await finalized_response()
+
+        with self.assertRaises(ResponsePersistenceError) as raised:
+            await persist_finalized_response_v1(
+                conn,
+                owner_user_id=ACTOR,
+                thread_id=THREAD,
+                request_id="persistence-request",
+                finalized=finalized,
+            )
+
+        self.assertEqual(raised.exception.stage, "resume_target_promotion")
+        sql = "\n".join(query for query, _ in conn.execute_calls)
+        self.assertNotIn("INSERT INTO public.active_thread_selection", sql)
 
 
 if __name__ == "__main__":

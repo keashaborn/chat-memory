@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
+from rag_engine.active_thread_selection_v1 import promote_resume_thread_v1
 from rag_engine.response_conversation_snapshot_v1 import ATTESTED_ASSISTANT_SOURCE
 from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
 
@@ -120,6 +121,12 @@ async def persist_finalized_response_v1(
                 "UPDATE public.threads SET updated_at=now() WHERE owner_user_id=$1 AND id=$2",
                 owner_user_id,
                 thread_id,
+            )
+            stage = "resume_target_promotion"
+            await promote_resume_thread_v1(
+                conn,
+                owner_user_id=owner_user_id,
+                thread_id=thread_id,
             )
     except Exception:
         raise ResponsePersistenceError(stage) from None

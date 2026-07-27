@@ -19,6 +19,13 @@ def _owner_uuid(owner_user_id: str | uuid.UUID) -> uuid.UUID:
         raise ActiveThreadSelectionV1Error("invalid_owner_user_id") from exc
 
 
+def _thread_uuid(thread_id: str | uuid.UUID) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(thread_id))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ActiveThreadSelectionV1Error("invalid_thread_id") from exc
+
+
 def _thread_payload(row: Any) -> dict[str, Any]:
     return {
         "thread_id": str(row["id"]),
@@ -138,19 +145,30 @@ async def select_active_thread_v1(
     owner_user_id: str | uuid.UUID,
     thread_id: str | uuid.UUID,
 ) -> dict[str, Any]:
-    owner = _owner_uuid(owner_user_id)
-    try:
-        selected_id = uuid.UUID(str(thread_id))
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise ActiveThreadSelectionV1Error("invalid_thread_id") from exc
-
     async with conn.transaction():
-        await _lock_owner(conn, owner)
-        selected = await _visible_thread(conn, owner, selected_id)
-        if selected is None:
-            raise ActiveThreadSelectionV1Error("thread_not_found")
-        await _write_selection(conn, owner, selected_id)
-        return _thread_payload(selected)
+        return await promote_resume_thread_v1(
+            conn,
+            owner_user_id=owner_user_id,
+            thread_id=thread_id,
+        )
+
+
+async def promote_resume_thread_v1(
+    conn: asyncpg.Connection,
+    *,
+    owner_user_id: str | uuid.UUID,
+    thread_id: str | uuid.UUID,
+) -> dict[str, Any]:
+    """Promote a verified thread inside the caller's existing transaction."""
+
+    owner = _owner_uuid(owner_user_id)
+    selected_id = _thread_uuid(thread_id)
+    await _lock_owner(conn, owner)
+    selected = await _visible_thread(conn, owner, selected_id)
+    if selected is None:
+        raise ActiveThreadSelectionV1Error("thread_not_found")
+    await _write_selection(conn, owner, selected_id)
+    return _thread_payload(selected)
 
 
 async def clear_active_thread_v1(

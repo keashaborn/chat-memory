@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -26,8 +27,14 @@ class FakeTransaction:
 
 
 class FakeConnection:
-    def __init__(self, *, owns_thread: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        owns_thread: bool = True,
+        visible_thread: bool = True,
+    ) -> None:
         self.owns_thread = owns_thread
+        self.visible_thread = visible_thread
         self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
 
     def transaction(self) -> FakeTransaction:
@@ -39,6 +46,15 @@ class FakeConnection:
 
     async def fetchval(self, sql: str, *args: Any) -> bool:
         return self.owns_thread
+
+    async def fetchrow(self, sql: str, *args: Any) -> dict[str, Any] | None:
+        if not self.visible_thread:
+            return None
+        return {
+            "id": THREAD,
+            "title": "Web thread",
+            "updated_at": datetime.now(timezone.utc),
+        }
 
 
 class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
@@ -67,12 +83,19 @@ class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
             statements,
         )
         self.assertIn("interval '1 microsecond'", statements)
+        self.assertIn("INSERT INTO public.active_thread_selection", statements)
         self.assertNotIn("qdrant", statements.lower())
         chat_args = conn.execute_calls[1][1]
         self.assertEqual(chat_args[3], WEB_USER_SOURCE)
         self.assertEqual(chat_args[9], WEB_ASSISTANT_SOURCE)
         self.assertIn("memory_ineligible", chat_args[5])
         self.assertIn("memory_ineligible", chat_args[11])
+        selection_call = next(
+            call
+            for call in conn.execute_calls
+            if "INSERT INTO public.active_thread_selection" in call[0]
+        )
+        self.assertEqual(selection_call[1], (OWNER, THREAD))
 
     async def test_missing_owner_thread_fails_closed(self) -> None:
         conn = FakeConnection(owns_thread=False)
@@ -92,6 +115,27 @@ class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
                 admitted_sources=[],
                 consulted_source_count=0,
             )
+
+    async def test_invisible_thread_rolls_back_exchange_and_promotion(self) -> None:
+        conn = FakeConnection(visible_thread=False)
+        with self.assertRaises(WebTranscriptPersistenceError):
+            await persist_web_exchange_v1(
+                conn,
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+                request_id="request-web-003",
+                query="query",
+                answer="answer",
+                search_id=SEARCH,
+                route="current_news",
+                policy_version="search_decision_v1_2",
+                decision="live",
+                cited_sources=[],
+                admitted_sources=[],
+                consulted_source_count=0,
+            )
+        statements = "\n".join(sql for sql, _ in conn.execute_calls)
+        self.assertNotIn("INSERT INTO public.active_thread_selection", statements)
 
 
 if __name__ == "__main__":

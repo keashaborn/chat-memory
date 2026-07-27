@@ -7,6 +7,8 @@ import json
 from typing import Any
 from uuid import UUID, uuid4
 
+from rag_engine.active_thread_selection_v1 import promote_resume_thread_v1
+
 
 WEB_USER_SOURCE = "backend/web:user:v1"
 WEB_ASSISTANT_SOURCE = "backend/web:assistant:v1"
@@ -119,6 +121,11 @@ async def persist_web_exchange_v1(
                 """,
                 owner_user_id,
                 thread_id,
+            )
+            await promote_resume_thread_v1(
+                conn,
+                owner_user_id=owner_user_id,
+                thread_id=thread_id,
             )
     except Exception:
         raise WebTranscriptPersistenceError(

@@ -10,6 +10,7 @@ from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,
     clear_active_thread_v1,
     get_active_thread_v1,
+    promote_resume_thread_v1,
     select_active_thread_v1,
 )
 
@@ -110,6 +111,22 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
                 thread_id=THREAD,
             )
         self.assertEqual(raised.exception.code, "thread_not_found")
+
+    async def test_turn_promotion_uses_callers_transaction(self) -> None:
+        conn = FakeConnection()
+        result = await promote_resume_thread_v1(
+            conn,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+        )
+        self.assertEqual(result["thread_id"], str(THREAD))
+        self.assertEqual(conn.execute_calls[0][1], (str(OWNER),))
+        write = next(
+            args
+            for query, args in conn.execute_calls
+            if "INSERT INTO public.active_thread_selection" in query
+        )
+        self.assertEqual(write, (OWNER, THREAD))
 
     async def test_clear_writes_explicit_null(self) -> None:
         conn = FakeConnection()
