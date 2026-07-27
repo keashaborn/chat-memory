@@ -2,7 +2,7 @@
   "contract_version": "memory_v1_v5_2_circuit_outcome_clone_result_v1",
   "evaluated_at": "2026-07-27T11:47:28Z",
   "production_head": "cd028d2f5d2d33482228a84272cbf69ab9f0cea3",
-  "isolated_branch_head": "34507a21195b5a42e0e4a703c3a49209a0987e4f",
+  "tested_branch_head": "36470a09c3ca74f61427342e73605a8eda37fc28",
   "production_deployed": false,
   "production_processing_resumed": false,
   "model_calls": 0,
