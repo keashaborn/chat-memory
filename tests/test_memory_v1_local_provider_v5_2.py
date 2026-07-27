@@ -265,6 +265,14 @@ class LocalProviderV52Test(unittest.TestCase):
             request.prompt_profile,
             "personal_context_compact_v1",
         )
+        self.assertIn(
+            "I talked to Jordan Lee, who was the president at the time.",
+            request.instructions,
+        )
+        self.assertIn(
+            '"predicate":"occupation.works_as"',
+            request.instructions,
+        )
         predicate = request.output_schema["$defs"]["ProviderObservation"][
             "properties"
         ]["predicate"]

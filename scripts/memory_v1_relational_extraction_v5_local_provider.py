@@ -1571,6 +1571,70 @@ EMPLOYMENT_EXAMPLE = (
     "STRUCTURE_EXAMPLE_PROVIDER_PACKET="
     f"{EMPLOYMENT_EXAMPLE_PACKET}"
 )
+THIRD_PERSON_OCCUPATION_EXAMPLE_SOURCE = (
+    "I talked to Jordan Lee, who was the president at the time."
+)
+_THIRD_PERSON_OCCUPATION_EXAMPLE_VALUE = _packet(
+    entities=[
+        _example_entity(
+            THIRD_PERSON_OCCUPATION_EXAMPLE_SOURCE,
+            entity_ref="e00",
+            entity_type="person",
+            mention_kind="named",
+            name_text="Jordan Lee",
+            relationship_role="professional:contact",
+            reason_code="explicit_named_person",
+        ),
+        _example_entity(
+            THIRD_PERSON_OCCUPATION_EXAMPLE_SOURCE,
+            entity_ref="e01",
+            entity_type="concept",
+            mention_kind="named",
+            name_text="president",
+            relationship_role="occupation:president",
+            reason_code="explicit_occupation_concept",
+        ),
+    ],
+    observations=[
+        _example_observation(
+            THIRD_PERSON_OCCUPATION_EXAMPLE_SOURCE,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="occupation.works_as",
+            object_value={"entity_ref": "e01", "kind": "entity"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="medium",
+            reason_code="explicit_occupation_statement",
+            temporal_semantic="state_validity",
+        )
+    ],
+)
+_THIRD_PERSON_OCCUPATION_EXAMPLE_VALUE["observations"][0][
+    "temporal"
+].update(
+    {
+        "basis": "instant",
+        "certainty": "bounded",
+        "instant_range": {
+            "lower": None,
+            "upper": None,
+            "bounds": "[)",
+        },
+        "precision": "exact",
+        "reason_codes": [
+            "historical_relationship_ended_before_source"
+        ],
+        "shape": "open_interval",
+        "source_form": "implicit_source_time",
+    }
+)
+THIRD_PERSON_OCCUPATION_EXAMPLE = (
+    "STRUCTURE_EXAMPLE_SOURCE_CONTENT="
+    f"{THIRD_PERSON_OCCUPATION_EXAMPLE_SOURCE}\n"
+    "STRUCTURE_EXAMPLE_PROVIDER_PACKET="
+    f"{canonical_json(_THIRD_PERSON_OCCUPATION_EXAMPLE_VALUE)}"
+)
 LOCAL_CORE_INSTRUCTIONS = (
     f"{EXTRACTION_INSTRUCTIONS}\n"
     "Within each reason_codes array, values must be unique. "
@@ -1811,6 +1875,12 @@ def _personal_context_prompt_instructions(
     allowed_predicates: tuple[str, ...],
 ) -> str:
     predicate_text = ", ".join(allowed_predicates)
+    structural_example = ""
+    if allowed_predicates == ("occupation.works_as",):
+        structural_example = (
+            "\n"
+            f"{THIRD_PERSON_OCCUPATION_EXAMPLE}\n"
+        )
     return (
         f"{LOCAL_CORE_INSTRUCTIONS}\n\n"
         "PERSONAL_CONTEXT_COMPACT_V1\n"
@@ -1828,6 +1898,7 @@ def _personal_context_prompt_instructions(
         "date, diagnosis, relationship, name, or attribute not stated by the "
         "target source. If the target does not independently support one of "
         "the supplied predicates, defer it.\n"
+        f"{structural_example}"
     )
 
 
