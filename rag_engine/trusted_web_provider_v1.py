@@ -45,6 +45,10 @@ Evidence:
 - If only an abstract is available, avoid claims that require full-text verification.
 - Distinguish broad public guidance from individual research findings.
 - Use concise plain language and make every material factual claim traceable to a source.
+- When this component is invoked, approved sources or records are available to you.
+  Never claim that you lack access to news, web, PubMed, ODS, sources, citations,
+  or current information. If evidence is insufficient, say what the cited sources
+  do and do not support.
 """
 
 _ALLOWED_MODELS = frozenset({"gpt-5.4", "gpt-5.5", "gpt-5.6"})
@@ -59,6 +63,24 @@ _ANSWER_WWW_URL_RE = re.compile(
 _ANSWER_EMAIL_RE = re.compile(
     r"""(?<![\w.+-])[\w.+-]+@[a-z0-9.-]+\.[a-z]{2,}(?![\w-])""",
     re.IGNORECASE,
+)
+_CAPABILITY_DENIAL_PATTERNS = (
+    re.compile(
+        r"""\b(?:i|we)\s+(?:do not|don't|cannot|can't)\s+(?:have\s+)?(?:access(?:\s+to)?|browse|search|use|consult)\s+(?:the\s+)?(?:web|internet|news|current\s+news|external\s+sources?|sources?)\b""",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"""\b(?:i|we)\s+(?:do not|don't|cannot|can't)\s+access\s+(?:real[-\s]?time|current|up[-\s]?to[-\s]?date)\b""",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"""\b(?:my|the)\s+(?:knowledge|training\s+data)\s+(?:is|are)\s+(?:not\s+)?up[-\s]?to[-\s]?date\b""",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"""\bas\s+an\s+ai[^.\n]{0,140}\b(?:no|not|without|don't|do\s+not|cannot|can't)[^.\n]{0,140}\b(?:web|internet|news|sources?)\b""",
+        re.IGNORECASE,
+    ),
 )
 _TRACKING_QUERY_KEYS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid"})
 WEB_SOURCE_PROVENANCE_CONTRACT = "web_source_provenance_v2"
@@ -355,6 +377,23 @@ def _validated_source_provenance(
     return cited, normalized_consulted
 
 
+def _normalize_answer_for_policy_checks(answer: str) -> str:
+    return (
+        str(answer or "")
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("`", "'")
+    )
+
+
+def _validate_no_capability_denial(answer: str) -> None:
+    normalized = _normalize_answer_for_policy_checks(answer)
+    if any(pattern.search(normalized) for pattern in _CAPABILITY_DENIAL_PATTERNS):
+        raise TrustedWebProviderSecurityError(
+            "trusted_web_answer_denies_source_access"
+        )
+
+
 def _validate_answer_links(
     answer: str,
     allowed_domains: tuple[str, ...],
@@ -493,6 +532,7 @@ class OpenAITrustedWebProviderV1:
             payload,
             policy.allowed_domains,
         )
+        _validate_no_capability_denial(answer)
         _validate_answer_links(
             answer,
             policy.allowed_domains,
@@ -591,6 +631,7 @@ class OpenAITrustedWebProviderV1:
         cited_sources = tuple(
             source for marker, source in source_records if marker in answer
         )
+        _validate_no_capability_denial(answer)
         _validate_answer_links(
             answer,
             _source_domains(consulted_sources),
@@ -614,4 +655,5 @@ __all__ = [
     "TrustedWebSettingsV1",
     "TrustedWebSourceV1",
     "_validate_answer_links",
+    "_validate_no_capability_denial",
 ]
