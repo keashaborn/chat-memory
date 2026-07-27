@@ -19,6 +19,7 @@ from rag_engine.memory_v1_evidence_context_loader_v1 import (
     load_memory_evidence_context_v1,
 )
 from rag_engine.memory_v1_evidence_context_v1 import (
+    EvidenceContextContractError,
     MemoryEvidenceContextEnvelopeV1,
 )
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
@@ -560,6 +561,15 @@ def rejection_code(
         return "local_persistence_rejected"
     if phase == "completion":
         return "local_completion_rejected"
+    if isinstance(exc, EvidenceContextContractError):
+        if str(exc) == "database actor differs from authenticated owner":
+            return "local_owner_scope_violation"
+        if str(exc) in {
+            "loader owner and target must be UUIDs",
+            "max_spans must be between 1 and 32",
+        }:
+            return "local_validation_internal_error"
+        return "context_missing"
     if isinstance(exc, ValueError):
         return classify_validator_rejection(str(exc))
     return "local_validation_internal_error"

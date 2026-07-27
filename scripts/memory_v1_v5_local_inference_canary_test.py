@@ -51,7 +51,9 @@ def main() -> int:
             pass
         else:
             raise AssertionError("non-loopback database DSN was accepted")
-    if rejection_code(RuntimeError("validation")) != "local_validation_rejected":
+    if rejection_code(RuntimeError("validation")) != (
+        "local_validation_internal_error"
+    ):
         raise AssertionError("validation rejection code changed")
     if rejection_code(RuntimeError("persistence"), phase="persistence") != (
         "local_persistence_rejected"

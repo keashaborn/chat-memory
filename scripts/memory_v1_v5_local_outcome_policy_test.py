@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import unittest
 
+from rag_engine.memory_v1_evidence_context_v1 import (
+    EvidenceContextContractError,
+)
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalProviderAdapterError,
 )
@@ -70,6 +73,28 @@ class OutcomePolicyTest(unittest.TestCase):
         )
         self.assertEqual(
             rejection_code(RuntimeError("internal validator failure")),
+            "local_validation_internal_error",
+        )
+        self.assertEqual(
+            rejection_code(
+                EvidenceContextContractError("target source_id is invalid")
+            ),
+            "context_missing",
+        )
+        self.assertEqual(
+            rejection_code(
+                EvidenceContextContractError(
+                    "database actor differs from authenticated owner"
+                )
+            ),
+            "local_owner_scope_violation",
+        )
+        self.assertEqual(
+            rejection_code(
+                EvidenceContextContractError(
+                    "loader owner and target must be UUIDs"
+                )
+            ),
             "local_validation_internal_error",
         )
 
