@@ -1886,7 +1886,10 @@ def _personal_context_prompt_instructions(
         "PERSONAL_CONTEXT_COMPACT_V1\n"
         f"The governed prompt registry contains only: {predicate_text}. "
         "Extract only atomic observations explicitly supported by "
-        "SOURCE_CONTENT. Context-only spans may resolve a named or pronominal "
+        "SOURCE_CONTENT. Every supplied predicate was selected from an "
+        "explicit target-source cue. Return at least one atomic observation "
+        "for every supplied predicate; never return an empty packet on this "
+        "compact route. Context-only spans may resolve a named or pronominal "
         "referent but never originate an assertion. For education.attended, "
         "create self and the named educational organization. For "
         "relationship.has_pet, preserve owner-to-animal direction. Pet sex, "
@@ -5328,7 +5331,7 @@ class LocalLlamaCppProvider:
         if _employment_prompt_enabled(self._registry, source.content):
             prompt_profile = "employment_compact_v1"
             allowed_predicates = ("employment.worked_for",)
-            minimum_stance_observations = 1
+            minimum_observations = 1
             registry_contract = _registry_contract_for_predicates(
                 self._registry,
                 allowed_predicates,
@@ -5337,7 +5340,7 @@ class LocalLlamaCppProvider:
         elif _semantic_stance_prompt_enabled(self._registry, source.content):
             prompt_profile = "semantic_stance_compact_v1"
             allowed_predicates = ("stance.reported",)
-            minimum_stance_observations = (
+            minimum_observations = (
                 _semantic_stance_minimum_observations(source.content)
             )
             registry_contract = _registry_contract_for_predicates(
@@ -5345,7 +5348,7 @@ class LocalLlamaCppProvider:
                 allowed_predicates,
             )
             instructions = _semantic_stance_prompt_instructions(
-                minimum_stance_observations
+                minimum_observations
             )
         elif personal_context_predicates := _personal_context_prompt_predicates(
             self._registry,
@@ -5353,7 +5356,7 @@ class LocalLlamaCppProvider:
         ):
             prompt_profile = "personal_context_compact_v1"
             allowed_predicates = personal_context_predicates
-            minimum_stance_observations = 1
+            minimum_observations = len(personal_context_predicates)
             registry_contract = _registry_contract_for_predicates(
                 self._registry,
                 allowed_predicates,
@@ -5362,7 +5365,7 @@ class LocalLlamaCppProvider:
                 allowed_predicates
             )
         else:
-            minimum_stance_observations = 1
+            minimum_observations = 1
             relationship_instructions = (
                 RELATIONSHIP_V5_1_EXTRACTION_INSTRUCTIONS
                 if _relationship_contract_enabled(self._registry)
@@ -5393,7 +5396,7 @@ class LocalLlamaCppProvider:
             output_schema=_llama_cpp_output_schema(
                 ProviderPacket.model_json_schema(),
                 allowed_predicates=allowed_predicates,
-                minimum_stance_observations=minimum_stance_observations,
+                minimum_observations=minimum_observations,
             ),
             max_output_tokens=self._max_output_tokens,
             timeout_seconds=self._timeout_seconds,
@@ -5700,7 +5703,7 @@ def _llama_cpp_output_schema(
     value: dict[str, Any],
     *,
     allowed_predicates: tuple[str, ...] = (),
-    minimum_stance_observations: int = 1,
+    minimum_observations: int = 1,
 ) -> dict[str, Any]:
     """Keep the canonical validator strict while avoiding unsafe GBNF repeats."""
     schema = deepcopy(value)
@@ -5734,9 +5737,16 @@ def _llama_cpp_output_schema(
     if allowed_predicates and isinstance(predicate, dict):
         predicate.pop("pattern", None)
         predicate["enum"] = list(allowed_predicates)
+    packet_properties = schema.get("properties", {})
+    if allowed_predicates:
+        if not 1 <= minimum_observations <= 8:
+            raise ValueError("observation minimum is invalid")
+        observations_schema = packet_properties.get("observations")
+        if not isinstance(observations_schema, dict):
+            raise ValueError("observations output schema is missing")
+        observations_schema["minItems"] = minimum_observations
     if allowed_predicates == ("stance.reported",):
         definitions = schema.get("$defs", {})
-        packet_properties = schema.get("properties", {})
         observation_properties = observation.get("properties", {})
         literal = definitions.get("LiteralObject", {})
         literal_properties = literal.get("properties", {})
@@ -5751,12 +5761,8 @@ def _llama_cpp_output_schema(
             )
         ):
             raise ValueError("stance output schema definitions are missing")
-        if minimum_stance_observations not in {1, 2}:
+        if minimum_observations not in {1, 2}:
             raise ValueError("stance observation minimum is invalid")
-        observations_schema = packet_properties.get("observations")
-        if not isinstance(observations_schema, dict):
-            raise ValueError("stance observations schema is missing")
-        observations_schema["minItems"] = minimum_stance_observations
         observation_properties["object"] = {
             "$ref": "#/$defs/LiteralObject"
         }

@@ -156,6 +156,10 @@ class LocalProviderV52Test(unittest.TestCase):
             "properties"
         ]["predicate"]
         self.assertEqual(predicate["enum"], ["education.attended"])
+        self.assertEqual(
+            request.output_schema["properties"]["observations"]["minItems"],
+            1,
+        )
 
     def test_pet_death_source_uses_compact_governed_route(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
@@ -189,6 +193,14 @@ class LocalProviderV52Test(unittest.TestCase):
                 "relationship.has_pet",
             ],
         )
+        self.assertIn(
+            "never return an empty packet",
+            request.instructions,
+        )
+        self.assertEqual(
+            request.output_schema["properties"]["observations"]["minItems"],
+            5,
+        )
 
     def test_generic_lost_cat_uses_compact_governed_route(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
@@ -213,6 +225,10 @@ class LocalProviderV52Test(unittest.TestCase):
         self.assertEqual(
             predicate["enum"],
             ["life_event.died", "relationship.has_pet"],
+        )
+        self.assertEqual(
+            request.output_schema["properties"]["observations"]["minItems"],
+            2,
         )
 
     def test_caregiving_health_source_uses_compact_governed_route(self) -> None:
@@ -244,6 +260,10 @@ class LocalProviderV52Test(unittest.TestCase):
                 "health.user_reported_observation",
                 "relationship.caregiver_for",
             ],
+        )
+        self.assertEqual(
+            request.output_schema["properties"]["observations"]["minItems"],
+            2,
         )
 
     def test_third_person_role_uses_compact_governed_route(self) -> None:
