@@ -10,7 +10,7 @@ import re
 import socket
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 import asyncpg
@@ -49,6 +49,7 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import (
     PROFILE_NAMES,
     load_runtime_profile_v2,
 )
+from scripts.memory_v1_v5_local_outcome_policy import classify_rejection_code
 
 
 WORKER_VERSION = "memory_v1_v5_local_inference_canary_v1"
@@ -472,13 +473,14 @@ async def fail_job(
     job: dict[str, Any],
     worker_id: str,
     code: str,
+    max_attempts: int,
 ) -> dict[str, Any]:
     async with conn.transaction():
         await set_actor(conn, owner)
         row = await conn.fetchrow(
             """
             SELECT * FROM memory.fail_owner_evidence_extraction_job_v1(
-              $1,$2,$3,$4,$5,$6,$7,1
+              $1,$2,$3,$4,$5,$6,$7,$8
             )
             """,
             operation_id,
@@ -488,22 +490,79 @@ async def fail_job(
             job["evidence_content_sha256"],
             "local_inference_rejected",
             code,
+            max_attempts,
         )
     if row is None:
         raise RuntimeError("local inference job failure returned no row")
     return dict(row)
 
 
-def rejection_code(exc: BaseException, *, phase: str = "validation") -> str:
+async def finalize_record_outcome(
+    conn: asyncpg.Connection,
+    *,
+    owner: uuid.UUID,
+    operation_id: uuid.UUID,
+    job: dict[str, Any],
+    worker_id: str,
+    completion_event_id: uuid.UUID,
+    code: str,
+) -> dict[str, Any]:
+    async with conn.transaction():
+        await set_actor(conn, owner)
+        row = await conn.fetchrow(
+            """
+            SELECT * FROM memory.finalize_owner_v5_local_record_outcome_v2(
+              $1,$2,$3,$4,$5,$6,$7
+            )
+            """,
+            operation_id,
+            job["job_id"],
+            job["lease_token"],
+            worker_id,
+            job["evidence_content_sha256"],
+            completion_event_id,
+            code,
+        )
+    if row is None:
+        raise RuntimeError("local inference record outcome returned no row")
+    return dict(row)
+
+
+def rejection_code(
+    exc: BaseException,
+    *,
+    phase: str = "validation",
+    audit: Mapping[str, Any] | None = None,
+) -> str:
     if isinstance(exc, LocalProviderAdapterError) and REJECTION_RE.fullmatch(
         exc.code
     ):
+        if exc.code == "invalid_structured_output" and audit is not None:
+            error_types = {
+                str(value)
+                for value in audit.get("validation_error_types", ())
+                if isinstance(value, str)
+            }
+            if "missing" in error_types:
+                return "local_structured_required_field_missing"
+            if "extra_forbidden" in error_types:
+                return "local_structured_extra_field"
+            if error_types & {
+                "enum",
+                "literal_error",
+                "literal_mismatch",
+            }:
+                return "local_structured_enum_invalid"
+            if error_types:
+                return "local_structured_type_invalid"
         return exc.code
     if phase == "persistence":
         return "local_persistence_rejected"
     if phase == "completion":
         return "local_completion_rejected"
-    return "local_validation_rejected"
+    if isinstance(exc, ValueError):
+        return classify_validator_rejection(str(exc))
+    return "local_validation_internal_error"
 
 
 def sanitized_audit(provider: LocalLlamaCppProvider) -> dict[str, Any] | None:
@@ -874,44 +933,67 @@ async def run() -> int:
                 )
                 return 1
             local_calls = provider.local_model_calls
-            code = rejection_code(exc, phase=phase)
-            fail_operation_id = uuid.uuid5(
-                PERSIST_NAMESPACE, f"fail:{run_id}:{job_id}"
+            code = rejection_code(
+                exc,
+                phase=phase,
+                audit=provider.last_audit,
+            )
+            policy = classify_rejection_code(code)
+            terminal_operation_id = uuid.uuid5(
+                PERSIST_NAMESPACE, f"terminal:{run_id}:{job_id}"
             )
             completion_operation_id = uuid.uuid5(
                 PERSIST_NAMESPACE, f"complete:{run_id}:{job_id}"
             )
             async with conn.transaction():
-                failed = await fail_job(
-                    conn,
-                    owner=ids["owner"],
-                    operation_id=fail_operation_id,
-                    job=claim,
-                    worker_id=worker_id,
-                    code=code,
-                )
-                completed = await complete(
-                    conn,
-                    owner=ids["owner"],
-                    operation_id=completion_operation_id,
-                    reservation_event_id=claim["reservation_event_id"],
-                    run_id=run_id,
-                    job_id=job_id,
-                    outcome="rejected",
-                    local_model_calls=local_calls,
-                    rejection_code=code,
-                    provider_output_sha256=None,
-                    validator_packet_sha256=None,
-                    packet_storage_sha256=None,
-                )
-            failed_replay = await fail_job(
-                conn,
-                owner=ids["owner"],
-                operation_id=fail_operation_id,
-                job=claim,
-                worker_id=worker_id,
-                code=code,
-            )
+                if policy.outcome_class == "record_terminal":
+                    completed = await complete(
+                        conn,
+                        owner=ids["owner"],
+                        operation_id=completion_operation_id,
+                        reservation_event_id=claim["reservation_event_id"],
+                        run_id=run_id,
+                        job_id=job_id,
+                        outcome="rejected",
+                        local_model_calls=local_calls,
+                        rejection_code=code,
+                        provider_output_sha256=None,
+                        validator_packet_sha256=None,
+                        packet_storage_sha256=None,
+                    )
+                    terminal = await finalize_record_outcome(
+                        conn,
+                        owner=ids["owner"],
+                        operation_id=terminal_operation_id,
+                        job=claim,
+                        worker_id=worker_id,
+                        completion_event_id=completed["event_id"],
+                        code=code,
+                    )
+                else:
+                    terminal = await fail_job(
+                        conn,
+                        owner=ids["owner"],
+                        operation_id=terminal_operation_id,
+                        job=claim,
+                        worker_id=worker_id,
+                        code=code,
+                        max_attempts=args.max_attempts,
+                    )
+                    completed = await complete(
+                        conn,
+                        owner=ids["owner"],
+                        operation_id=completion_operation_id,
+                        reservation_event_id=claim["reservation_event_id"],
+                        run_id=run_id,
+                        job_id=job_id,
+                        outcome="rejected",
+                        local_model_calls=local_calls,
+                        rejection_code=code,
+                        provider_output_sha256=None,
+                        validator_packet_sha256=None,
+                        packet_storage_sha256=None,
+                    )
             completed_replay = await complete(
                 conn,
                 owner=ids["owner"],
@@ -926,8 +1008,28 @@ async def run() -> int:
                 validator_packet_sha256=None,
                 packet_storage_sha256=None,
             )
+            if policy.outcome_class == "record_terminal":
+                terminal_replay = await finalize_record_outcome(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=terminal_operation_id,
+                    job=claim,
+                    worker_id=worker_id,
+                    completion_event_id=completed["event_id"],
+                    code=code,
+                )
+            else:
+                terminal_replay = await fail_job(
+                    conn,
+                    owner=ids["owner"],
+                    operation_id=terminal_operation_id,
+                    job=claim,
+                    worker_id=worker_id,
+                    code=code,
+                    max_attempts=args.max_attempts,
+                )
             if (
-                failed_replay["apply_outcome"] != "replayed"
+                terminal_replay["apply_outcome"] != "replayed"
                 or completed_replay["apply_outcome"] != "replayed"
             ):
                 raise RuntimeError("rejected canary replay was not zero-write")
@@ -939,7 +1041,9 @@ async def run() -> int:
                         "apply": True,
                         "outcome": "rejected",
                         "rejection_code": code,
-                        "job_status": failed["status"],
+                        "outcome_class": policy.outcome_class,
+                        "terminal_disposition": policy.disposition,
+                        "job_status": terminal["status"],
                         "external_model_calls": 0,
                         "local_model_calls": local_calls,
                         "audit": sanitized_audit(provider),

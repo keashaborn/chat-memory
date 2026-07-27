@@ -1,0 +1,134 @@
+{
+  "contract_version": "memory_v1_v5_2_outcome_taxonomy_v1",
+  "policy_version": "memory_v1_v5_local_outcome_policy_v2",
+  "principles": {
+    "append_only_history": true,
+    "record_outcomes_increment_systemic_circuit": false,
+    "unknown_failure_codes_fail_closed": true,
+    "private_source_content_in_status": false,
+    "fingerprint_scope": [
+      "provider_id",
+      "provider_version",
+      "provider_model_sha256",
+      "model_file_sha256",
+      "runtime_revision_sha256",
+      "policy_compiler_sha256"
+    ]
+  },
+  "classes": {
+    "success": {
+      "circuit_impact": false,
+      "terminal": true,
+      "examples": [
+        "accepted"
+      ]
+    },
+    "record_terminal": {
+      "circuit_impact": false,
+      "terminal": true,
+      "dispositions": [
+        "skipped",
+        "deferred",
+        "review_required"
+      ],
+      "examples": [
+        "context_reference_unresolved",
+        "insufficient_durable_evidence",
+        "nothing_durable_to_stage",
+        "semantic_validation_rejected",
+        "sensitive_or_ambiguous_review",
+        "entity_resolution_review_required",
+        "predicate_review_required"
+      ],
+      "disposition_rules": {
+        "skipped": [
+          "insufficient_durable_evidence",
+          "nothing_durable_to_stage",
+          "ordinary_semantic_rejection",
+          "question_only",
+          "semantic_validation_rejected",
+          "structured_domain",
+          "transient_state"
+        ],
+        "deferred": [
+          "ambiguous_transcription",
+          "context_reference_unresolved",
+          "context_missing"
+        ],
+        "review_required": [
+          "compound_requires_split",
+          "entity_resolution_review_required",
+          "mixed_authorship",
+          "predicate_review_required",
+          "project_scope_unresolved",
+          "sensitive_or_ambiguous_review"
+        ]
+      },
+      "queue_representation": {
+        "skipped": "skipped",
+        "deferred": "skipped with final.disposition=deferred",
+        "review_required": "review_required"
+      }
+    },
+    "systemic_threshold": {
+      "circuit_impact": true,
+      "terminal": false,
+      "examples": [
+        "local_transport_unavailable",
+        "local_transport_timeout",
+        "local_transport_server_error",
+        "local_structured_type_invalid",
+        "local_persistence_rejected",
+        "local_completion_rejected"
+      ]
+    },
+    "systemic_immediate": {
+      "circuit_impact": true,
+      "terminal": false,
+      "opens_immediately": true,
+      "examples": [
+        "local_owner_scope_violation",
+        "local_rls_invariant_failed",
+        "local_model_hash_mismatch",
+        "local_runtime_hash_mismatch",
+        "local_compiler_hash_mismatch",
+        "local_security_invariant_failed"
+      ]
+    },
+    "neutral": {
+      "circuit_impact": false,
+      "terminal": false,
+      "examples": [
+        "local_worker_abandoned"
+      ]
+    },
+    "control": {
+      "circuit_impact": false,
+      "terminal": false,
+      "examples": [
+        "quota_exhausted",
+        "circuit_open"
+      ]
+    },
+    "systemic_unclassified": {
+      "circuit_impact": true,
+      "opens_immediately": true,
+      "normalized_reason_code": "unclassified_failure"
+    }
+  },
+  "circuit": {
+    "approved_threshold": 10,
+    "cooldown_seconds": 900,
+    "blocked_wakeups_extend_cooldown": false,
+    "half_open_max_inflight": 1,
+    "half_open_success_classes": [
+      "success",
+      "record_terminal"
+    ],
+    "half_open_failure_classes": [
+      "systemic_threshold",
+      "systemic_immediate",
+      "systemic_unclassified"
+    ]
+  }
+}

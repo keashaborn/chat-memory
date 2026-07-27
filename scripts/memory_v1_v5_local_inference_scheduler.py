@@ -23,6 +23,7 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import (
     PROFILE_NAMES,
     load_runtime_profile_v2,
 )
+from scripts.memory_v1_v5_local_outcome_policy import classify_rejection_code
 
 
 WORKER_VERSION = "memory_v1_v5_local_inference_scheduler_v2"
@@ -273,10 +274,32 @@ def sanitized_batch_summary(
         for item in results
         if item.get("rejection_code") is not None
     )
+    policies = [
+        classify_rejection_code(
+            str(item["rejection_code"])
+            if item.get("rejection_code") is not None
+            else None
+        )
+        for item in results
+    ]
+    outcome_classes = Counter(policy.outcome_class for policy in policies)
+    operational_reasons = Counter(
+        policy.normalized_reason_code
+        for policy in policies
+        if policy.normalized_reason_code is not None
+    )
+    dispositions = Counter(
+        policy.disposition
+        for policy in policies
+        if policy.disposition is not None
+    )
     return {
         "processed": len(results),
         "outcome_counts": dict(sorted(outcomes.items())),
         "rejection_code_counts": dict(sorted(rejections.items())),
+        "outcome_class_counts": dict(sorted(outcome_classes.items())),
+        "operational_reason_counts": dict(sorted(operational_reasons.items())),
+        "disposition_counts": dict(sorted(dispositions.items())),
         "local_model_calls": sum(
             int(item.get("local_model_calls", 0)) for item in results
         ),
