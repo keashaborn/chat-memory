@@ -103,7 +103,9 @@ sanitized reason code.
 
 Rollback restores the prior claim-function body by exact anchor, drops the
 aggregate status and circuit functions, drops the restricted terminal-outcome
-function and its append-only table, and drops the classifier. It does not alter
-preexisting inference events, packets, queue history, claims, Qdrant, answer
-bindings, or prompts. The Python worker change must be rolled back in the same
-release so it does not call a removed function.
+function, and drops the classifier. The additive outcome table is dropped only
+when empty; if any live outcome event exists, rollback revokes writer access and
+retains the table as dormant append-only history. It does not alter preexisting
+inference events, packets, queue history, claims, Qdrant, answer bindings, or
+prompts. The Python worker change must be rolled back in the same release so it
+does not call a removed function.

@@ -90,7 +90,20 @@ DROP FUNCTION memory.owner_v5_local_inference_circuit_state_v2(
 DROP FUNCTION memory.finalize_owner_v5_local_record_outcome_v2(
   uuid,uuid,uuid,text,text,uuid,text
 );
-DROP TABLE memory.v5_local_inference_outcome_event;
+DO $outcome_history$
+BEGIN
+  REVOKE ALL ON memory.v5_local_inference_outcome_event
+    FROM PUBLIC,brains_app,memory_v5_local_inference_maintainer;
+  IF EXISTS (
+    SELECT 1 FROM memory.v5_local_inference_outcome_event LIMIT 1
+  ) THEN
+    COMMENT ON TABLE memory.v5_local_inference_outcome_event IS
+      'Dormant append-only V5 local outcome history retained by rollback.';
+  ELSE
+    DROP TABLE memory.v5_local_inference_outcome_event;
+  END IF;
+END
+$outcome_history$;
 DROP FUNCTION memory.classify_v5_local_inference_outcome_v2(text);
 
 COMMIT;
