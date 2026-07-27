@@ -18,7 +18,7 @@ target_commit=${1:?target commit required}
 repo_root=$(git rev-parse --show-toplevel)
 live=/opt/chat-memory
 manifest=ops/manifests/memory_v1_evidence_context_window_retry_v1_20260726.json
-expected_manifest_sha=4834f7959e503efcff519ac1db10aae40213b43145165dbdc67a5e6d4855e8e9
+expected_manifest_sha=ae7bab04f255724707e1427b02d2b58c0fd5b23c9e4dc64234bb9a014e4d814b
 expected_live=f8d313a02f0460ddadca4b95687ae3dba7f5d2d0
 implementation_commit=cf98a2b876cb5662827d65378c9b46fed2a2d0e7
 migration=ops/sql/20260726_memory_v1_zero_call_validation_retry.sql
@@ -40,6 +40,8 @@ units_quiesced=0
 unit_state=$(mktemp /tmp/memory-v1-context-retry-units.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-context-retry-tables.XXXXXX)
 cross_owner_output=$(mktemp /tmp/memory-v1-context-retry-cross-owner.XXXXXX)
+live_dirty_paths=$(mktemp /tmp/memory-v1-context-retry-live-dirty.XXXXXX)
+target_paths=$(mktemp /tmp/memory-v1-context-retry-target-paths.XXXXXX)
 
 git_live=(git -c safe.directory="$live" -C "$live")
 
@@ -66,7 +68,8 @@ restore_timers() {
 record_exit() {
   exit_code=$?
   restore_timers || exit_code=1
-  rm -f "$unit_state" "$table_list" "$cross_owner_output"
+  rm -f "$unit_state" "$table_list" "$cross_owner_output" \
+    "$live_dirty_paths" "$target_paths"
   if [[ -n "$status_file" ]]; then
     {
       printf 'run_tag=%s\n' "$run_tag"
@@ -253,8 +256,17 @@ SQL
 [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$target_commit" ]]
 git -C "$repo_root" merge-base --is-ancestor "$implementation_commit" HEAD
 [[ "$("${git_live[@]}" rev-parse HEAD)" == "$expected_live" ]]
-[[ -z "$("${git_live[@]}" status --porcelain)" ]]
 "${git_live[@]}" merge-base --is-ancestor "$expected_live" "$target_commit"
+"${git_live[@]}" diff --cached --quiet
+! "${git_live[@]}" status --porcelain | grep -q '^??'
+! "${git_live[@]}" status --porcelain |
+  awk 'substr($0,1,2)!=" M"{bad=1} END{exit !bad}'
+"${git_live[@]}" diff --name-only | sort -u >"$live_dirty_paths"
+"${git_live[@]}" diff --name-only "$expected_live" "$target_commit" |
+  sort -u >"$target_paths"
+[[ -z "$(comm -12 "$live_dirty_paths" "$target_paths")" ]]
+live_dirty_sha_before=$("${git_live[@]}" diff --binary | sha256sum |
+  awk '{print $1}')
 [[ "$(sha256sum "$repo_root/$manifest" | awk '{print $1}')" == \
   "$expected_manifest_sha" ]]
 [[ "$(sha256sum "$repo_root/$migration" | awk '{print $1}')" == \
@@ -279,10 +291,10 @@ git -C "$repo_root" merge-base --is-ancestor "$implementation_commit" HEAD
    .["memory.requeue_owner_local_zero_call_validation_failure_v1"]] |
   join("|")' "$repo_root/$manifest")" == '4|1' ]]
 [[ "$(jq -r '.expected_effects | [.jobs_requeued,.audit_events_inserted,
-  .additive_functions_installed,.model_calls,.packet_writes,
+  .brains_restart,.additive_functions_installed,.model_calls,.packet_writes,
   .claim_writes,.qdrant_writes,
   .retrieval_changes,.prompt_influence_changes] | join("|")' \
-  "$repo_root/$manifest")" == '5|5|1|0|0|0|0|0|0' ]]
+  "$repo_root/$manifest")" == '5|5|false|1|0|0|0|0|0|0' ]]
 
 exec 9>"$lock_file"
 flock -n 9
@@ -388,6 +400,12 @@ local_event_count_before=$(psql_scalar 'SELECT count(*) FROM memory.v5_local_inf
 phase=deploy
 "${git_live[@]}" merge --ff-only "$target_commit"
 [[ "$("${git_live[@]}" rev-parse HEAD)" == "$target_commit" ]]
+[[ "$("${git_live[@]}" diff --binary | sha256sum | awk '{print $1}')" == \
+  "$live_dirty_sha_before" ]]
+[[ -z "$(comm -12 "$live_dirty_paths" <(
+  "${git_live[@]}" diff --name-only "$expected_live" "$target_commit" |
+    sort -u
+))" ]]
 [[ "$(sha256sum "$live/rag_engine/memory_v1_evidence_context_loader_v1.py" |
   awk '{print $1}')" == 15b207437cfdbe6708910929b67fc5be4befab24b1cdfad3aaf17d00fcc4ec22 ]]
 [[ "$(sha256sum "$live/scripts/memory_v1_relational_extraction_v5_local_provider.py" |
@@ -401,7 +419,7 @@ docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
     'memory.requeue_owner_local_zero_call_validation_failure_v1(uuid,uuid,text,uuid,uuid,integer,text)'
   ) IS NOT NULL
 )::integer")" == 1 ]]
-systemctl restart brains.service
+[[ "$(systemctl is-active brains.service)" == active ]]
 for _attempt in $(seq 1 30); do
   if curl -fsS -H "x-vs-service-token: ${VS_SERVICE_TOKEN}" \
       http://127.0.0.1:8088/healthz >/dev/null 2>&1 \
@@ -457,6 +475,9 @@ capture_non_target_state "$other_after"
 cmp -s "$protected_before" "$protected_after"
 cmp -s "$other_before" "$other_after"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
+[[ "$("${git_live[@]}" rev-parse HEAD)" == "$target_commit" ]]
+[[ "$("${git_live[@]}" diff --binary | sha256sum | awk '{print $1}')" == \
+  "$live_dirty_sha_before" ]]
 
 phase=replay
 target_before_replay=$(target_state)
@@ -486,14 +507,17 @@ jq -n \
   --arg backup "$backup" --arg backup_sha256 "$backup_sha" \
   --arg apply_output "$apply_output" --arg replay_output "$replay_output" \
   --arg qdrant_sha256 "$qdrant_before" \
+  --arg live_dirty_sha256 "$live_dirty_sha_before" \
   '{contract_version:"memory_v1_evidence_context_window_retry_apply_report_v1",
     completed_at:$completed_at,head_commit:$head_commit,
     manifest:{path:$manifest,sha256:$manifest_sha256},
     owner_user_id:$owner_user_id,
     backup:{path:$backup,sha256:$backup_sha256},
     evidence:{apply_output:$apply_output,replay_output:$replay_output,
-      qdrant_sha256:$qdrant_sha256},
+      qdrant_sha256:$qdrant_sha256,
+      preserved_live_dirty_sha256:$live_dirty_sha256},
     checks:{fresh_backup:true,runtime_deployed:true,
+      brains_restarted:false,unrelated_live_changes_preserved:true,
       additive_functions_installed:1,jobs_requeued:5,
       audit_events_inserted:5,exact_owner_scope:true,
       non_target_rows_unchanged:true,protected_tables_unchanged:true,

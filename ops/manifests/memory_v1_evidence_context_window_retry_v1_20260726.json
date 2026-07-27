@@ -75,6 +75,7 @@
   },
   "expected_effects": {
     "production_fast_forward": true,
+    "brains_restart": false,
     "additive_functions_installed": 1,
     "jobs_requeued": 5,
     "audit_events_inserted": 5,
