@@ -130,13 +130,13 @@ phase=source_preflight
 cd "$repo"
 [[ -z "$(git status --short)" ]]
 sha256sum -c <<'HASHES'
-a7b7cca367ffcd53523f8b2ebe0019947410067a084d115b4967cfe6783d90cb  ops/systemd/memory-v1-v5-local-inference-scheduler.service
+9a703362087f5fef6111c6d7515fa7ad12a6bdc058a253c64a76e6d88b854fb8  ops/systemd/memory-v1-v5-local-inference-scheduler.service
 49c00faacf1f890bf9abc04fac50e56eb9a7a64c05ff620ddcad837d433c6e0d  ops/systemd/memory-v1-v5-local-inference-scheduler.timer
 0da89022b24453a3617a7d633cb019bc42de9de69c44f0c71011ae29b92e148e  scripts/memory_v1_v5_local_inference_scheduler.py
 b0d0d727f3bcd0e0183e470aa2866c313bd951256ffc16f671bf91345e8da874  scripts/memory_v1_v5_local_inference_canary.py
 cb70ae71926be29284593dbb67c8fcb8537a38bdf3e71dec330591494aec317f  scripts/memory_v1_v5_local_inference_scheduler_test.py
-3e644bc0720f36922bc119fd82a4932f2751cc739fa5decf43dab371b45f8855  scripts/memory_v1_v5_local_inference_continuous_drain_contract_test.py
-128acad3a700c5e14f83a6f512d272e7ce173efc154445d2cd7561ed7403e7c6  scripts/memory_v1_v5_2_continuous_drain_activation_contract_test.py
+51aa730043eeaa46f54af173ff807519590791c2c26cd1e890bcc7e477787cb3  scripts/memory_v1_v5_local_inference_continuous_drain_contract_test.py
+a6ca947fc8898f8ab3fda67fafa6628f4ee94a2cb14484bc6d0b62aa69051bf5  scripts/memory_v1_v5_2_continuous_drain_activation_contract_test.py
 af28ef6f5e1a4e98bd236fcaaade3e4591b0bf96329d265a0462fe2daabafb50  tools/memory_v1_v5_local_inference_continuous_drain_clone_benchmark.sh
 HASHES
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python \
@@ -269,7 +269,7 @@ grep -q -- '--max-attempts 2' "/etc/systemd/system/$service"
 grep -q -- '--rolling-window-seconds 3600' \
   "/etc/systemd/system/$service"
 grep -q -- '--max-reserved-jobs 100' "/etc/systemd/system/$service"
-grep -q -- '--failure-threshold 3' "/etc/systemd/system/$service"
+grep -q -- '--failure-threshold 10' "/etc/systemd/system/$service"
 grep -q -- 'OnUnitInactiveSec=5min' "/etc/systemd/system/$timer"
 
 phase=zero_data_change_verification
@@ -320,7 +320,7 @@ jq -n \
       max_attempts:2,
       rolling_window_seconds:3600,
       max_reserved_jobs:100,
-      failure_threshold:3,
+      failure_threshold:10,
       timer_interval_seconds:300,
       active_state:$service_state,
       result:$service_result

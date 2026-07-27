@@ -29,7 +29,7 @@ def main() -> int:
         "--max-attempts 2",
         "--rolling-window-seconds 3600",
         "--max-reserved-jobs 100",
-        "--failure-threshold 3",
+        "--failure-threshold 10",
         "account_scope_single_owner:true",
         "external_model_calls:0",
         "prompt_policy_changed:false",

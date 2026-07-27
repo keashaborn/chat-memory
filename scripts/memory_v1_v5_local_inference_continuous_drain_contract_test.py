@@ -31,7 +31,7 @@ def main() -> int:
         "--max-output-tokens 2048",
         "--rolling-window-seconds 3600",
         "--max-reserved-jobs 100",
-        "--failure-threshold 3",
+        "--failure-threshold 10",
     ):
         require_once(service, value)
 
