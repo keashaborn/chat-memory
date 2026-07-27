@@ -1,0 +1,89 @@
+{
+  "audit_version": "memory_v1_v5_2_terminal_reconciliation_clone_audit_v1",
+  "source_production_commit": "841e5b3c65044616f4d3fa584fe0830aefa595e8",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "artifacts": {
+    "migration_sha256": "6d851f5f010e609e30cce0197039f5e5288d37cd7112a9a76e1306146aa262e5",
+    "rollback_sha256": "a689a4aea0c8648b206205a7eb1712e44ef3da9396c96114342f2668fccb2192",
+    "runner_sha256": "d430864fd2322416106e9500aa7adcb5dbf6d71b439bf7739b0ae47a97242fb3",
+    "manifest_sha256": "1b762eb330841eb35e0f89afbd554ec6c8ab72645e8abef8361777a10a57b9ee",
+    "source_dump_sha256": "1a2c7440bb317be070c29efe4b50909964e8d9a6ee47583251813f16ea65c8d0"
+  },
+  "inventory": {
+    "historical_outcomes_superseded": 10,
+    "terminal_transitions": 69,
+    "inventory_sets": {
+      "terminal_no_stage_verified": 62,
+      "deferral_only": 1,
+      "terminal_skipped": 6
+    },
+    "dispositions": {
+      "skipped": 68,
+      "deferred": 1
+    },
+    "reasons": {
+      "context_missing": 1,
+      "empty_packet": 3,
+      "insufficient_evidence": 35,
+      "question_only": 2,
+      "structured_domain": 26,
+      "transient_state": 2
+    },
+    "manual_review_remaining": 78
+  },
+  "clone_results": {
+    "first_apply": {
+      "supersession_applied": 10,
+      "terminal_applied": 69
+    },
+    "replay": {
+      "supersession_replayed": 10,
+      "terminal_replayed": 69,
+      "persistent_writes": 0
+    },
+    "circuit_before": {
+      "state": "half_open_ready",
+      "systemic_failure_count": 10,
+      "reason": "uncatalogued_validator_rejection"
+    },
+    "circuit_after": {
+      "state": "closed",
+      "systemic_failure_count": 0,
+      "reason": null
+    },
+    "queue_before": {
+      "pending": 561,
+      "review_required": 147,
+      "skipped": 58
+    },
+    "queue_after": {
+      "pending": 561,
+      "review_required": 78,
+      "skipped": 127
+    },
+    "model_calls": {
+      "ledger_rows_before": 628,
+      "ledger_rows_after": 628,
+      "local_calls_before": 191,
+      "local_calls_after": 191,
+      "external_calls_before": 0,
+      "external_calls_after": 0
+    },
+    "protected_stores_unchanged": true,
+    "protected_store_count": 14,
+    "other_owner_rows_unchanged": true,
+    "forced_rls": true,
+    "cross_owner_finalization_denied": true,
+    "append_only_update_denied": true,
+    "append_only_delete_denied": true,
+    "qdrant_unchanged": true,
+    "qdrant_sha256": "afc4d7ddad8218b79267954d27509c570d632b7c9824fc4f52a67895e92fd257",
+    "rollback_test": {
+      "passed": true,
+      "restored_circuit_function_sha256": "e207e9376d0b0df19059645be66777aae18e8abb20b565313601b685ff4de899",
+      "brains_app_execute_revoked": true,
+      "history_tables_preserved": true
+    }
+  },
+  "passed": true
+}
