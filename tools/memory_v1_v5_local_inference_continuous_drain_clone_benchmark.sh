@@ -16,6 +16,7 @@ fi
 
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
+runtime_env=/opt/chat-memory/.env
 container=brains-postgres-1
 production=memory
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
@@ -148,6 +149,7 @@ systemd-analyze verify \
 [[ "$(systemctl show memory-v1-v5-local-inference-health.service \
   -p Result --value)" == success ]]
 test -r /etc/memory-v1-local-inference/api-key
+test -r "$runtime_env"
 
 while IFS= read -r unit; do
   printf '%s\t%s\t%s\n' "$unit" \
@@ -192,7 +194,7 @@ docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --clean --if-exists <"$backup"
 
 set -a
-source "$repo/.env"
+source "$runtime_env"
 set +a
 clone_dsn=$(
   python3 - "$POSTGRES_DSN" "$clone" <<'PY'
