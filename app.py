@@ -37,6 +37,10 @@ class NewThreadReq(BaseModel):
 
 class PinThreadReq(BaseModel):
     pinned: bool
+
+class ActiveThreadReq(BaseModel):
+    user_id: str
+    thread_id: str
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
 from rag_engine.voice_realtime_preview_router import (
@@ -57,6 +61,12 @@ from rag_engine.raw_memory_ownership import (
 from rag_engine.thread_deletion_v1 import (
     ThreadDeletionV1Error,
     delete_thread_v1,
+)
+from rag_engine.active_thread_selection_v1 import (
+    ActiveThreadSelectionV1Error,
+    clear_active_thread_v1,
+    get_active_thread_v1,
+    select_active_thread_v1,
 )
 from rag_engine.thread_title_v1 import (
     generate_semantic_title,
@@ -196,6 +206,7 @@ SENSITIVE_NO_STORE_PREFIXES = (
     "/telemetry/",
     "/metrics/",
     "/trusted-web/",
+    "/threads/active",
 )
 SENSITIVE_NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
@@ -742,10 +753,14 @@ async def threads_new(body: NewThreadReq, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, user_id)
-        row = await conn.fetchrow(
-            "INSERT INTO threads(owner_user_id, user_id, title) VALUES ($1,$2,$3) RETURNING id, title, updated_at",
-            user_id, user_id, title
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "INSERT INTO threads(owner_user_id, user_id, title) VALUES ($1,$2,$3) RETURNING id, title, updated_at",
+                user_id, user_id, title
+            )
+            await select_active_thread_v1(
+                conn, owner_user_id=user_id, thread_id=row["id"]
+            )
         return {"thread_id": str(row["id"]), "title": row["title"], "updated_at": row["updated_at"].isoformat()}
     finally:
         await conn.close()
@@ -788,6 +803,86 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
         ]
     finally:
         await conn.close()
+
+@app.get("/threads/active/{user_id}")
+async def threads_active_get(user_id: str, req: Request, vantage_id: str = "default"):
+    user_id_alias = (user_id or "").strip() or "anon"
+    actor_err, owner_user_id = await _require_actor_for_user(
+        req, user_id_alias, vantage_id
+    )
+    if actor_err:
+        return actor_err
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, owner_user_id)
+        selected = await get_active_thread_v1(
+            conn,
+            owner_user_id=owner_user_id,
+        )
+        return selected or {"thread_id": None}
+    finally:
+        await conn.close()
+
+
+@app.post("/threads/active")
+async def threads_active_select(body: ActiveThreadReq, req: Request):
+    user_id_alias = (body.user_id or "").strip() or "anon"
+    actor_err, owner_user_id = await _require_actor_for_user(
+        req, user_id_alias
+    )
+    if actor_err:
+        return actor_err
+
+    thread_id = parse_uuid(body.thread_id)
+    if thread_id is None:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_thread_id"},
+            status_code=400,
+        )
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, owner_user_id)
+        try:
+            return await select_active_thread_v1(
+                conn,
+                owner_user_id=owner_user_id,
+                thread_id=thread_id,
+            )
+        except ActiveThreadSelectionV1Error as exc:
+            return JSONResponse(
+                {"status": "not_found", "detail": exc.code},
+                status_code=404,
+            )
+    finally:
+        await conn.close()
+
+
+@app.delete("/threads/active/{user_id}")
+async def threads_active_clear(
+    user_id: str,
+    req: Request,
+    vantage_id: str = "default",
+):
+    user_id_alias = (user_id or "").strip() or "anon"
+    actor_err, owner_user_id = await _require_actor_for_user(
+        req, user_id_alias, vantage_id
+    )
+    if actor_err:
+        return actor_err
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await _set_connection_actor(conn, owner_user_id)
+        await clear_active_thread_v1(
+            conn,
+            owner_user_id=owner_user_id,
+        )
+        return {"status": "ok", "thread_id": None}
+    finally:
+        await conn.close()
+
 
 @app.get("/threads/{thread_id}/messages")
 async def threads_messages(thread_id: str, req: Request, limit: int = 200):
