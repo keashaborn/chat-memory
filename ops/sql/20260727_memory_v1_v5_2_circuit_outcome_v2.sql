@@ -458,7 +458,6 @@ DECLARE
   reset_at timestamptz;
   reset_event_id uuid;
   latest_systemic_at timestamptz;
-  latest_systemic_event_id uuid;
   latest_systemic_code text;
   failure_count integer := 0;
   immediate_failure boolean := false;
@@ -516,17 +515,12 @@ BEGIN
       completed.rejection_code
       ORDER BY completed.created_at DESC,completed.event_id DESC
     ))[1],
-    max(completed.created_at),
-    (array_agg(
-      completed.event_id
-      ORDER BY completed.created_at DESC,completed.event_id DESC
-    ))[1]
+    max(completed.created_at)
   INTO
     failure_count,
     immediate_failure,
     latest_systemic_code,
-    latest_systemic_at,
-    latest_systemic_event_id
+    latest_systemic_at
   FROM memory.v5_local_inference_event AS completed
   CROSS JOIN LATERAL memory.classify_v5_local_inference_outcome_v2(
     completed.rejection_code
@@ -556,6 +550,30 @@ BEGIN
   opened_at:=latest_systemic_at;
   open_reason:=coalesce(latest_systemic_code,'unclassified_failure');
   IF immediate_failure THEN
+    SELECT
+      completed.rejection_code,
+      completed.created_at
+    INTO open_reason,opened_at
+    FROM memory.v5_local_inference_event AS completed
+    CROSS JOIN LATERAL memory.classify_v5_local_inference_outcome_v2(
+      completed.rejection_code
+    ) AS classification
+    WHERE completed.owner_user_id=actor
+      AND completed.action='completed'
+      AND completed.provider_id=p_provider_id
+      AND completed.provider_version=p_provider_version
+      AND completed.provider_model_sha256=p_provider_model_sha256
+      AND completed.model_file_sha256=p_model_file_sha256
+      AND completed.runtime_revision_sha256=p_runtime_revision_sha256
+      AND completed.policy_compiler_sha256=p_policy_compiler_sha256
+      AND classification.immediate_open
+      AND (
+        reset_at IS NULL
+        OR (completed.created_at,completed.event_id)>
+           (reset_at,reset_event_id)
+      )
+    ORDER BY completed.created_at DESC,completed.event_id DESC
+    LIMIT 1;
     RETURN QUERY SELECT
       'open'::text,failure_count,open_reason,opened_at,
       NULL::timestamptz,NULL::uuid;
@@ -846,6 +864,12 @@ BEGIN
   WHERE blocked.owner_user_id=actor
     AND blocked.action='blocked'
     AND blocked.outcome='circuit_open'
+    AND blocked.provider_id=p_provider_id
+    AND blocked.provider_version=p_provider_version
+    AND blocked.provider_model_sha256=p_provider_model_sha256
+    AND blocked.model_file_sha256=p_model_file_sha256
+    AND blocked.runtime_revision_sha256=p_runtime_revision_sha256
+    AND blocked.policy_compiler_sha256=p_policy_compiler_sha256
     AND blocked.created_at>=coalesce(
       circuit.opened_at,
       clock_timestamp()-interval '24 hours'
