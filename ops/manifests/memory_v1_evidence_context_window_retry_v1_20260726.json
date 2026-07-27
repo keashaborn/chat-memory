@@ -1,7 +1,7 @@
 {
   "contract_version": "memory_v1_evidence_context_window_retry_manifest_v1",
   "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
-  "production_base_commit": "f8d313a02f0460ddadca4b95687ae3dba7f5d2d0",
+  "production_base_commit": "f34637d3a4a8bc17effe8db1ae29c1c2cab0d5b7",
   "implementation_commit": "cf98a2b876cb5662827d65378c9b46fed2a2d0e7",
   "reason_codes": [
     "registry_enum_compiler_repair",
