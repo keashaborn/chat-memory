@@ -1774,6 +1774,63 @@ def _employment_prompt_instructions() -> str:
     )
 
 
+def _personal_context_prompt_predicates(
+    registry: dict[str, Any],
+    content: str,
+) -> tuple[str, ...]:
+    if registry.get("registry_version") != SEMANTIC_V5_2_REGISTRY_VERSION:
+        return ()
+    predicates: set[str] = set()
+    if _EDUCATION_ATTENDED_CUE_RE.search(content):
+        predicates.add("education.attended")
+    if _PET_CUE_RE.search(content):
+        predicates.add("relationship.has_pet")
+        if _PET_DEATH_CUE_RE.search(content):
+            predicates.add("life_event.died")
+        if _PET_SEX_CUE_RE.search(content):
+            predicates.add("pet.sex")
+        if _PET_BREED_CUE_RE.search(content):
+            predicates.add("pet.breed")
+        if _REPORTED_HEALTH_DETAIL_CUE_RE.search(content):
+            predicates.add("health.user_reported_observation")
+    if _CAREGIVING_CUE_RE.search(content):
+        predicates.add("relationship.caregiver_for")
+        if _REPORTED_HEALTH_DETAIL_CUE_RE.search(content):
+            predicates.add("health.user_reported_observation")
+    if _THIRD_PERSON_OCCUPATION_CUE_RE.search(content):
+        predicates.add("occupation.works_as")
+    registered = {
+        item["predicate"]
+        for item in registry["predicates"]
+        if isinstance(item, dict) and isinstance(item.get("predicate"), str)
+    }
+    return tuple(sorted(predicates.intersection(registered)))
+
+
+def _personal_context_prompt_instructions(
+    allowed_predicates: tuple[str, ...],
+) -> str:
+    predicate_text = ", ".join(allowed_predicates)
+    return (
+        f"{LOCAL_CORE_INSTRUCTIONS}\n\n"
+        "PERSONAL_CONTEXT_COMPACT_V1\n"
+        f"The governed prompt registry contains only: {predicate_text}. "
+        "Extract only atomic observations explicitly supported by "
+        "SOURCE_CONTENT. Context-only spans may resolve a named or pronominal "
+        "referent but never originate an assertion. For education.attended, "
+        "create self and the named educational organization. For "
+        "relationship.has_pet, preserve owner-to-animal direction. Pet sex, "
+        "breed, health details, and death are separate observations about the "
+        "animal; death is an undated occurrence unless the source states a "
+        "date. For relationship.caregiver_for, preserve caregiver-to-recipient "
+        "direction. A third person's stated role uses occupation.works_as and "
+        "must not become the user's occupation. Never infer a current state, "
+        "date, diagnosis, relationship, name, or attribute not stated by the "
+        "target source. If the target does not independently support one of "
+        "the supplied predicates, defer it.\n"
+    )
+
+
 def _relationship_contract_enabled(registry: dict[str, Any]) -> bool:
     return registry.get("registry_version") in RELATIONSHIP_REGISTRY_VERSIONS
 
@@ -1876,6 +1933,57 @@ _NON_NAMED_EMPLOYER_RE = re.compile(
 _NON_EMPLOYER_WORK_FOR_RE = re.compile(
     r"\b(?:work(?:ed|ing)?\s+for\s+(?:a\s+living|free|fun|myself)|"
     r"self[-\s]?employ(?:ed|ment))\b",
+    re.IGNORECASE,
+)
+_EDUCATION_ATTENDED_CUE_RE = re.compile(
+    r"\b(?:went\s+to|attended|studied\s+at|graduated\s+from)\s+"
+    r"(?:the\s+)?[^\n.!?]{0,80}\b"
+    r"(?:school|college|university|institute|academy)\b",
+    re.IGNORECASE,
+)
+_PET_CUE_RE = re.compile(
+    r"\b(?:my|our)\s+(?:male\s+|female\s+)?"
+    r"(?:dog|cat|rabbit|parrot|pet|german\s+shepherd|"
+    r"labrador(?:\s+retriever)?|golden\s+retriever|poodle|beagle|"
+    r"rottweiler|boxer|bulldog|terrier|spaniel|mastiff|husky|"
+    r"collie)\b|"
+    r"\b(?:dog|cat|rabbit|parrot|pet)\s+(?:i|we)\s+"
+    r"(?:had|owned|loved|lost)\b|"
+    r"\b(?:i|we)\s+(?:had|owned|loved|lost)\s+"
+    r"(?:(?:a|an|my|our)\s+)?(?:dog|cat|rabbit|parrot|pet)\b",
+    re.IGNORECASE,
+)
+_PET_DEATH_CUE_RE = re.compile(
+    r"\b(?:lost|died|dead|passed\s+away|put\s+(?:him|her|it)\s+"
+    r"(?:down|to\s+sleep)|euthani[sz]ed)\b",
+    re.IGNORECASE,
+)
+_PET_SEX_CUE_RE = re.compile(
+    r"\b(?:male|female)\b",
+    re.IGNORECASE,
+)
+_PET_BREED_CUE_RE = re.compile(
+    r"\b(?:german\s+shepherd|labrador(?:\s+retriever)?|"
+    r"golden\s+retriever|poodle|beagle|rottweiler|boxer|"
+    r"bulldog|terrier|spaniel|mastiff|husky|collie)\b",
+    re.IGNORECASE,
+)
+_CAREGIVING_CUE_RE = re.compile(
+    r"\b(?:care(?:d|s|ing)?\s+for|caregiver\s+(?:for|to)|"
+    r"look(?:ed|s|ing)?\s+after|tak(?:e|es|ing|en)\s+care\s+of)\b",
+    re.IGNORECASE,
+)
+_REPORTED_HEALTH_DETAIL_CUE_RE = re.compile(
+    r"\b(?:allerg(?:y|ies|ic)|cancer|condition|diagnos(?:is|ed)|"
+    r"disease|illness|injur(?:y|ies)|medical|psychotic\s+break|"
+    r"skin\s+(?:issue|issues|condition|conditions)|symptom|symptoms)\b",
+    re.IGNORECASE,
+)
+_THIRD_PERSON_OCCUPATION_CUE_RE = re.compile(
+    r"\bwho\s+(?:is|was)\s+(?:the|a|an)\s+"
+    r"(?:president|director|manager|owner|founder|chief|"
+    r"professor|teacher|doctor|psychologist|analyst|engineer|"
+    r"attorney|lawyer|nurse|coach)\b",
     re.IGNORECASE,
 )
 _GENERAL_MENTAL_HEALTH_CAUSAL_RE = re.compile(
@@ -5167,6 +5275,20 @@ class LocalLlamaCppProvider:
             )
             instructions = _semantic_stance_prompt_instructions(
                 minimum_stance_observations
+            )
+        elif personal_context_predicates := _personal_context_prompt_predicates(
+            self._registry,
+            source.content,
+        ):
+            prompt_profile = "personal_context_compact_v1"
+            allowed_predicates = personal_context_predicates
+            minimum_stance_observations = 1
+            registry_contract = _registry_contract_for_predicates(
+                self._registry,
+                allowed_predicates,
+            )
+            instructions = _personal_context_prompt_instructions(
+                allowed_predicates
             )
         else:
             minimum_stance_observations = 1

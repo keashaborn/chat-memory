@@ -456,6 +456,91 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
         self.assertNotIn("EVIDENCE_CONTEXT", request.input_text)
         self.assertNotIn("EVIDENCE_CONTEXT_RULES_V1", request.instructions)
 
+    def test_third_person_role_context_uses_compact_registry(self) -> None:
+        target_content = (
+            "I talked to Bob Fry who was the president at the time."
+        )
+        target_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        sibling_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        sibling_content = (
+            "The organization was important to my early career."
+        )
+        source_text = f"{sibling_content} {target_content}"
+        target_start = source_text.index(target_content)
+        rows = [
+            {
+                "evidence_id": sibling_id,
+                "owner_user_id": OWNER,
+                "source_system": "public.chat_log",
+                "content": sibling_content,
+                "content_sha256": sha(sibling_content),
+                "metadata": {
+                    "source_id": SOURCE_ID,
+                    "thread_id": THREAD_ID,
+                    "request_id": REQUEST_ID,
+                    "source_content_sha256": sha(source_text),
+                    "source_char_start": 0,
+                    "source_char_end": len(sibling_content),
+                    "primary_lane": "contextual_personal_history",
+                    "epistemic_role": "user_report",
+                    "span_origin": "compound_child",
+                },
+            },
+            {
+                "evidence_id": target_id,
+                "owner_user_id": OWNER,
+                "source_system": "public.chat_log",
+                "content": target_content,
+                "content_sha256": sha(target_content),
+                "metadata": {
+                    "source_id": SOURCE_ID,
+                    "thread_id": THREAD_ID,
+                    "request_id": REQUEST_ID,
+                    "source_content_sha256": sha(source_text),
+                    "source_char_start": target_start,
+                    "source_char_end": len(source_text),
+                    "primary_lane": "contextual_personal_history",
+                    "epistemic_role": "user_report",
+                    "span_origin": "compound_child",
+                },
+            },
+        ]
+        context = build_memory_evidence_context_envelope_v1(
+            expected_owner_user_id=OWNER,
+            target_evidence_id=target_id,
+            expected_target_content_sha256=sha(target_content),
+            source_row={
+                "id": SOURCE_ID,
+                "owner_user_id": OWNER,
+                "thread_id": THREAD_ID,
+                "request_id": REQUEST_ID,
+                "created_at": "2026-07-02T02:05:41.345358+00:00",
+                "text": source_text,
+            },
+            evidence_rows=rows,
+        )
+        source = TrustedExtractionSource.create(
+            job_id="00000000-0000-4000-8000-000000000001",
+            source_system="public.chat_log",
+            source_external_id=target_id,
+            source_sha256=sha(target_content),
+            source_recorded_at="2026-07-02T02:05:41.345358+00:00",
+            content=target_content,
+        )
+        request = self.provider().request(
+            source,
+            evidence_context=context,
+        )
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1_sibling_context_v1",
+        )
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(predicate["enum"], ["occupation.works_as"])
+        self.assertLess(len(request.instructions), 16_000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -133,7 +133,7 @@ class LocalProviderV52Test(unittest.TestCase):
             2,
         )
 
-    def test_non_stance_v5_2_source_retains_full_registry_profile(self) -> None:
+    def test_education_source_uses_compact_governed_route(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
         registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
         provider = LocalLlamaCppProvider(
@@ -146,12 +146,129 @@ class LocalProviderV52Test(unittest.TestCase):
         request = provider.request(
             self.source("I attended the University of Wisconsin.")
         )
-        self.assertEqual(request.prompt_profile, "full_registry_v1")
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1",
+        )
+        self.assertIn("PERSONAL_CONTEXT_COMPACT_V1", request.instructions)
+        self.assertLess(len(request.instructions), 12_000)
         predicate = request.output_schema["$defs"]["ProviderObservation"][
             "properties"
         ]["predicate"]
-        self.assertIn("education.attended", predicate["enum"])
-        self.assertIn("employment.worked_for", predicate["enum"])
+        self.assertEqual(predicate["enum"], ["education.attended"])
+
+    def test_pet_death_source_uses_compact_governed_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source(
+                "My male German shepherd had a rare blood cancer and died."
+            )
+        )
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1",
+        )
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(
+            predicate["enum"],
+            [
+                "health.user_reported_observation",
+                "life_event.died",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        )
+
+    def test_generic_lost_cat_uses_compact_governed_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source("About two years ago I lost a cat I loved a lot.")
+        )
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1",
+        )
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(
+            predicate["enum"],
+            ["life_event.died", "relationship.has_pet"],
+        )
+
+    def test_caregiving_health_source_uses_compact_governed_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source(
+                "I cared for her for years because she had skin and allergy "
+                "issues."
+            )
+        )
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1",
+        )
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(
+            predicate["enum"],
+            [
+                "health.user_reported_observation",
+                "relationship.caregiver_for",
+            ],
+        )
+
+    def test_third_person_role_uses_compact_governed_route(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        request = provider.request(
+            self.source(
+                "I talked to Bob Fry who was the president at the time."
+            )
+        )
+        self.assertEqual(
+            request.prompt_profile,
+            "personal_context_compact_v1",
+        )
+        predicate = request.output_schema["$defs"]["ProviderObservation"][
+            "properties"
+        ]["predicate"]
+        self.assertEqual(predicate["enum"], ["occupation.works_as"])
 
     def test_employer_statement_uses_compact_governed_route(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")
