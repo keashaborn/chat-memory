@@ -19,6 +19,7 @@ runtime_env=/opt/chat-memory/.env
 container=brains-postgres-1
 production=memory
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
+other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 clone="memory_context_budget_${$}"
 snapshot_dir=/home/ubuntu/brains/snapshots
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
@@ -37,6 +38,7 @@ job_ids=(
   716e679e-00a8-444f-9f67-7082f9f65719
   707128d8-aa3a-4634-a021-0973fbee3c1b
 )
+migration=ops/sql/20260727_memory_v1_v5_2_context_budget_recovery.sql
 
 scalar() {
   local database=$1 query=$2
@@ -159,6 +161,8 @@ docker exec "$container" createdb -U sage -T template0 "$clone"
 clone_created=1
 docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --clean --if-exists <"$backup"
+docker exec -i "$container" psql -U sage -d "$clone" -X \
+  -v ON_ERROR_STOP=1 <"$migration" >/dev/null
 
 set -a
 source "$runtime_env"
@@ -190,11 +194,99 @@ docker exec "$container" psql -U sage -d "$clone" -X \
     SET available_at=clock_timestamp()+interval '1 day'
     WHERE owner_user_id='$owner'::uuid
       AND status IN ('pending','error')
-      AND job_id NOT IN ($ids_sql);
-    UPDATE memory.evidence_extraction_job
-    SET status='pending',available_at=clock_timestamp(),last_error=NULL
-    WHERE owner_user_id='$owner'::uuid
-      AND job_id IN ($ids_sql);"
+      AND job_id NOT IN ($ids_sql);" >/dev/null
+
+apply_output="$work/recovery-apply.txt"
+replay_output="$work/recovery-replay.txt"
+psql "$clone_dsn" -X -Atq -v ON_ERROR_STOP=1 <<SQL >"$apply_output"
+BEGIN;
+SELECT set_config('app.user_id','$owner',true);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  '52ffb345-3384-4b81-99a9-b271d27245a1'::uuid,
+  'c9c5bc9a-0707-4a64-ae23-4755e886d8c7'::uuid,
+  '5a8adf167d46b95dac70fcf0220e0aedfbc696b65a0cc0817ae51d9f1036737c',
+  'ca88037d-2e65-595b-b7b9-d56f597a5e5c'::uuid,
+  '601569ab-c680-4019-8316-57f3e2a0d75f'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  '0d9eb08b-1130-408c-a8cb-1052fdf4d7ac'::uuid,
+  '716e679e-00a8-444f-9f67-7082f9f65719'::uuid,
+  '1458bbf1860c62fae9998d9e161f7830ed5b15c23a98c7b12e12100bdefce807',
+  'fd9ebb9f-7424-5a43-9592-3294df5ad960'::uuid,
+  '8be05c76-6faf-40c1-a687-df7aa4920eb3'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  'c12fda14-6907-4f3f-a7e2-96b313ad7961'::uuid,
+  '707128d8-aa3a-4634-a021-0973fbee3c1b'::uuid,
+  'c01b32f1619ae3af5bbaa590a11e93801856c326c6e61c44821958a2aba848b0',
+  'aabc8dce-ab7b-54a4-8974-fe08f7d0b3bb'::uuid,
+  'edc23f59-aeec-44ad-9a8b-4be64eb5eda6'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+COMMIT;
+SQL
+[[ "$(grep -cx applied "$apply_output")" -eq 3 ]]
+
+psql "$clone_dsn" -X -Atq -v ON_ERROR_STOP=1 <<SQL >"$replay_output"
+BEGIN;
+SELECT set_config('app.user_id','$owner',true);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  '52ffb345-3384-4b81-99a9-b271d27245a1'::uuid,
+  'c9c5bc9a-0707-4a64-ae23-4755e886d8c7'::uuid,
+  '5a8adf167d46b95dac70fcf0220e0aedfbc696b65a0cc0817ae51d9f1036737c',
+  'ca88037d-2e65-595b-b7b9-d56f597a5e5c'::uuid,
+  '601569ab-c680-4019-8316-57f3e2a0d75f'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  '0d9eb08b-1130-408c-a8cb-1052fdf4d7ac'::uuid,
+  '716e679e-00a8-444f-9f67-7082f9f65719'::uuid,
+  '1458bbf1860c62fae9998d9e161f7830ed5b15c23a98c7b12e12100bdefce807',
+  'fd9ebb9f-7424-5a43-9592-3294df5ad960'::uuid,
+  '8be05c76-6faf-40c1-a687-df7aa4920eb3'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+SELECT apply_outcome FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+  'c12fda14-6907-4f3f-a7e2-96b313ad7961'::uuid,
+  '707128d8-aa3a-4634-a021-0973fbee3c1b'::uuid,
+  'c01b32f1619ae3af5bbaa590a11e93801856c326c6e61c44821958a2aba848b0',
+  'aabc8dce-ab7b-54a4-8974-fe08f7d0b3bb'::uuid,
+  'edc23f59-aeec-44ad-9a8b-4be64eb5eda6'::uuid,
+  1,'local_transport_http_rejected',
+  'private_gpu_context_budget_recovery_v1'
+);
+COMMIT;
+SQL
+[[ "$(grep -cx replayed "$replay_output")" -eq 3 ]]
+
+psql "$clone_dsn" -X -v ON_ERROR_STOP=1 >/dev/null <<SQL
+BEGIN;
+SELECT set_config('app.user_id','$other_owner',true);
+DO \$block\$
+BEGIN
+  PERFORM * FROM memory.requeue_owner_v5_2_context_budget_failure_v1(
+    '52ffb345-3384-4b81-99a9-b271d27245a1'::uuid,
+    'c9c5bc9a-0707-4a64-ae23-4755e886d8c7'::uuid,
+    '5a8adf167d46b95dac70fcf0220e0aedfbc696b65a0cc0817ae51d9f1036737c',
+    'ca88037d-2e65-595b-b7b9-d56f597a5e5c'::uuid,
+    '601569ab-c680-4019-8316-57f3e2a0d75f'::uuid,
+    1,'local_transport_http_rejected',
+    'private_gpu_context_budget_recovery_v1'
+  );
+  RAISE EXCEPTION 'cross-owner recovery unexpectedly succeeded';
+EXCEPTION
+  WHEN check_violation THEN NULL;
+END
+\$block\$;
+ROLLBACK;
+SQL
 [[ "$(scalar "$clone" "
   SELECT count(*) FROM memory.evidence_extraction_job
   WHERE owner_user_id='$owner'::uuid AND job_id IN ($ids_sql)
@@ -276,6 +368,9 @@ jq -n \
     elapsed_seconds:$elapsed_seconds,
     checks:{
       exact_failed_records:true,
+      controlled_requeue_applied:true,
+      controlled_requeue_replay:true,
+      cross_owner_rejected:true,
       context_budget_fit:true,
       packets_created:3,
       production_unchanged:true,
