@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import os
 import unittest
@@ -8,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Mapping
 from urllib.parse import urlencode, urlsplit
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
@@ -983,6 +985,140 @@ class PlanApiIntegrationTest(unittest.IsolatedAsyncioTestCase):
         status, _, payload = await self.create_draft(document=bad_document)
         self.assertEqual(status, 422)
         self.assertEqual(payload["detail"]["code"], "unknown_plan_field")
+
+    async def test_recovery_adjustment_is_owner_scoped_idempotent_and_stoppable(self) -> None:
+        today = dt.datetime.now(ZoneInfo("America/Chicago")).date()
+        yesterday = today - dt.timedelta(days=1)
+        strength_end = today + dt.timedelta(days=13)
+        body = {
+            "reason_code": "surgery_recovery",
+            "note": "private medical context",
+            "nutrition_period": {
+                "starts_on": yesterday.isoformat(),
+                "ends_on": today.isoformat(),
+            },
+            "strength_period": {
+                "starts_on": today.isoformat(),
+                "ends_on": strength_end.isoformat(),
+            },
+        }
+        key = f"recovery-create-{uuid.uuid4()}"
+        status, _, created = await self.request(
+            "POST",
+            "/lifeswitch/plan/recovery-adjustments",
+            idempotency_key=key,
+            json_body=body,
+        )
+        self.assertEqual(status, 201)
+        adjustment_id = created["recovery_adjustment"]["adjustment_id"]
+
+        status, _, replay = await self.request(
+            "POST",
+            "/lifeswitch/plan/recovery-adjustments",
+            idempotency_key=key,
+            json_body=body,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(
+            replay["recovery_adjustment"]["adjustment_id"],
+            adjustment_id,
+        )
+
+        query = urlencode(
+            {"starts_on": yesterday.isoformat(), "ends_on": today.isoformat()}
+        )
+        status, _, owner_view = await self.request(
+            "GET",
+            f"/lifeswitch/plan/recovery-adjustments?{query}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(owner_view["recovery_adjustments"]), 1)
+        self.assertEqual(
+            owner_view["recovery_adjustments"][0]["note"],
+            "private medical context",
+        )
+
+        status, _, viewer_view = await self.request(
+            "GET",
+            f"/lifeswitch/plan/recovery-adjustments?{query}",
+            principal="viewer",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(viewer_view["recovery_adjustments"][0]["note"], "")
+
+        status, _, other_view = await self.request(
+            "GET",
+            f"/lifeswitch/plan/recovery-adjustments?{query}",
+            principal="other-owner",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(other_view["recovery_adjustments"], [])
+
+        status, _, overlap = await self.request(
+            "POST",
+            "/lifeswitch/plan/recovery-adjustments",
+            idempotency_key=f"recovery-overlap-{uuid.uuid4()}",
+            json_body={
+                "reason_code": "injury",
+                "nutrition_period": {
+                    "starts_on": today.isoformat(),
+                    "ends_on": today.isoformat(),
+                },
+            },
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            overlap["detail"]["code"],
+            "recovery_adjustment_overlap",
+        )
+
+        status, _, forbidden = await self.request(
+            "POST",
+            f"/lifeswitch/plan/recovery-adjustments/{adjustment_id}/stop",
+            principal="viewer",
+            idempotency_key=f"recovery-viewer-stop-{uuid.uuid4()}",
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["detail"]["code"], "owner_approval_required")
+
+        stop_key = f"recovery-stop-{uuid.uuid4()}"
+        status, _, stopped = await self.request(
+            "POST",
+            f"/lifeswitch/plan/recovery-adjustments/{adjustment_id}/stop",
+            idempotency_key=stop_key,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            stopped["recovery_adjustment"]["stopped_on"],
+            today.isoformat(),
+        )
+
+        today_query = urlencode(
+            {"starts_on": today.isoformat(), "ends_on": today.isoformat()}
+        )
+        status, _, today_view = await self.request(
+            "GET",
+            f"/lifeswitch/plan/recovery-adjustments?{today_query}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(today_view["recovery_adjustments"], [])
+
+        yesterday_query = urlencode(
+            {"starts_on": yesterday.isoformat(), "ends_on": yesterday.isoformat()}
+        )
+        status, _, historical_view = await self.request(
+            "GET",
+            f"/lifeswitch/plan/recovery-adjustments?{yesterday_query}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(historical_view["recovery_adjustments"]), 1)
+        self.assertEqual(
+            historical_view["recovery_adjustments"][0]["nutrition_period"],
+            {
+                "starts_on": yesterday.isoformat(),
+                "ends_on": yesterday.isoformat(),
+            },
+        )
 
 
 if __name__ == "__main__":

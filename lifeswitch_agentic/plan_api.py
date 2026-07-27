@@ -5,6 +5,7 @@ import uuid
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Protocol
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -31,6 +32,11 @@ from .plan_read_repository import (
 from .plan_repository import ActivationResult, PlanRepository, ProposalResult, RevisionRecord
 from .plan_conditioning_prescriptions import PlanConditioningPrescriptionService
 from .plan_workout_templates import PlanWorkoutTemplateService
+from .recovery_adjustments import (
+    RecoveryAdjustmentInput,
+    RecoveryAdjustmentRecord,
+    RecoveryAdjustmentRepository,
+)
 
 
 class ConnectionProvider(Protocol):
@@ -75,6 +81,18 @@ class PlanRecommendationRequest(StrictRequestModel):
     user_request: str = Field(default="", max_length=1200)
 
 
+class RecoveryPeriodRequest(StrictRequestModel):
+    starts_on: dt.date
+    ends_on: dt.date
+
+
+class CreateRecoveryAdjustmentRequest(StrictRequestModel):
+    reason_code: str = Field(default="surgery_recovery", max_length=80)
+    note: str = Field(default="", max_length=1000)
+    nutrition_period: RecoveryPeriodRequest | None = None
+    strength_period: RecoveryPeriodRequest | None = None
+
+
 def _request_id(request: Request) -> str | None:
     value = getattr(request.state, "request_id", None)
     if value is None:
@@ -108,6 +126,7 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         "active_plan_required",
         "no_plan_changes",
         "revision_not_draft",
+        "recovery_adjustment_overlap",
     }:
         status_code = 409
     elif error.code in {
@@ -126,6 +145,9 @@ def _domain_http_error(error: PlanDomainError) -> HTTPException:
         "invalid_author",
         "invalid_owner_timezone",
         "request_id_too_long",
+        "invalid_recovery_period",
+        "invalid_recovery_reason",
+        "recovery_scope_required",
     }:
         status_code = 422
     else:
@@ -296,6 +318,13 @@ def _revision_review(view: RevisionReviewView, context: ActorContext) -> dict[st
     }
 
 
+def _recovery_adjustment(
+    record: RecoveryAdjustmentRecord,
+    context: ActorContext,
+) -> dict[str, Any]:
+    return record.to_dict(include_private_note=context.is_owner)
+
+
 def create_plan_router(
     *,
     connection_provider: ConnectionProvider,
@@ -307,6 +336,7 @@ def create_plan_router(
     observation_context_repository: PlanObservationContextRepository | None = None,
     workout_template_service: PlanWorkoutTemplateService | None = None,
     conditioning_prescription_service: PlanConditioningPrescriptionService | None = None,
+    recovery_adjustment_repository: RecoveryAdjustmentRepository | None = None,
 ) -> APIRouter:
     write_repo = plan_repository or PlanRepository()
     read_repo = read_repository or PlanReadRepository()
@@ -317,6 +347,7 @@ def create_plan_router(
     conditioning_service = (
         conditioning_prescription_service or PlanConditioningPrescriptionService()
     )
+    recovery_repo = recovery_adjustment_repository or RecoveryAdjustmentRepository()
     router = APIRouter(tags=["LifeSwitch Plan Agentic"])
 
     @router.get("/workout-templates")
@@ -394,6 +425,116 @@ def create_plan_router(
             async with connection_provider() as conn:
                 view = await read_repo.get_active_plan(conn, owner_user_id=context.owner_user_id)
             return {"active_plan": _active_plan(view) if view else None}
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.get("/recovery-adjustments")
+    async def list_recovery_adjustments(
+        starts_on: dt.date = Query(...),
+        ends_on: dt.date = Query(...),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            _require(context, "plan:view")
+            if ends_on < starts_on or (ends_on - starts_on).days > 550:
+                raise PlanDomainError(
+                    "invalid_recovery_period",
+                    "recovery adjustment range must be ordered and no longer than 551 days",
+                )
+            async with connection_provider() as conn:
+                records = await recovery_repo.list_for_range(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    starts_on=starts_on,
+                    ends_on=ends_on,
+                )
+            return {
+                "recovery_adjustments": [
+                    _recovery_adjustment(record, context) for record in records
+                ]
+            }
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/recovery-adjustments", status_code=201)
+    async def create_recovery_adjustment(
+        body: CreateRecoveryAdjustmentRequest,
+        idempotency_key: str = Header(
+            ...,
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+        ),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            if not context.is_owner:
+                raise PlanDomainError(
+                    "owner_approval_required",
+                    "only the owner can create a recovery adjustment",
+                )
+            adjustment = RecoveryAdjustmentInput.create(
+                reason_code=body.reason_code,
+                note=body.note,
+                nutrition_starts_on=(
+                    body.nutrition_period.starts_on if body.nutrition_period else None
+                ),
+                nutrition_ends_on=(
+                    body.nutrition_period.ends_on if body.nutrition_period else None
+                ),
+                strength_starts_on=(
+                    body.strength_period.starts_on if body.strength_period else None
+                ),
+                strength_ends_on=(
+                    body.strength_period.ends_on if body.strength_period else None
+                ),
+            )
+            async with connection_provider() as conn:
+                result = await recovery_repo.create(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    actor_user_id=context.actor_user_id,
+                    adjustment=adjustment,
+                    idempotency_key=idempotency_key,
+                )
+            return {"recovery_adjustment": _recovery_adjustment(result, context)}
+        except PlanDomainError as error:
+            raise _domain_http_error(error) from error
+        except asyncpg.PostgresError as error:
+            raise _internal_http_error() from error
+
+    @router.post("/recovery-adjustments/{adjustment_id}/stop")
+    async def stop_recovery_adjustment(
+        adjustment_id: uuid.UUID,
+        idempotency_key: str = Header(
+            ...,
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+        ),
+        context: ActorContext = Depends(actor_dependency),
+    ) -> dict[str, Any]:
+        try:
+            if not context.is_owner:
+                raise PlanDomainError(
+                    "owner_approval_required",
+                    "only the owner can stop a recovery adjustment",
+                )
+            local_day = dt.datetime.now(ZoneInfo(context.owner_timezone)).date()
+            async with connection_provider() as conn:
+                result = await recovery_repo.stop(
+                    conn,
+                    owner_user_id=context.owner_user_id,
+                    actor_user_id=context.actor_user_id,
+                    adjustment_id=adjustment_id,
+                    stopped_on=local_day,
+                    idempotency_key=idempotency_key,
+                )
+            return {"recovery_adjustment": _recovery_adjustment(result, context)}
         except PlanDomainError as error:
             raise _domain_http_error(error) from error
         except asyncpg.PostgresError as error:
