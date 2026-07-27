@@ -27,6 +27,7 @@ snapshot_dir=/home/ubuntu/brains/snapshots
 expected_head=${MEMORY_V1_V5_2_CONTEXT_BUDGET_EXPECTED_HEAD:-}
 clone_report=${MEMORY_V1_V5_2_CONTEXT_BUDGET_CLONE_REPORT:-}
 clone_report_sha=${MEMORY_V1_V5_2_CONTEXT_BUDGET_CLONE_REPORT_SHA256:-}
+provided_timer_state=${MEMORY_V1_V5_2_CONTEXT_BUDGET_TIMER_STATE_FILE:-}
 
 job_ids=(
   c9c5bc9a-0707-4a64-ae23-4755e886d8c7
@@ -214,12 +215,19 @@ systemd-analyze verify ops/systemd/$service
 curl --fail --silent --show-error --max-time 10 \
   http://127.0.0.1:18080/health >/dev/null
 
-while IFS= read -r unit; do
-  printf '%s\t%s\t%s\n' "$unit" \
-    "$(systemctl is-enabled "$unit")" \
-    "$(systemctl is-active "$unit")" >>"$timer_state"
-done < <(systemctl list-unit-files 'memory-v1-*.timer' --no-legend --no-pager \
-  | awk '{print $1}' | sort -u)
+if [[ -n "$provided_timer_state" ]]; then
+  [[ "$provided_timer_state" == "$snapshot_dir/"* ]]
+  test -r "$provided_timer_state"
+  awk 'NF==3 {print $1 "\t" $2 "\t" $3}' \
+    "$provided_timer_state" >"$timer_state"
+else
+  while IFS= read -r unit; do
+    printf '%s\t%s\t%s\n' "$unit" \
+      "$(systemctl is-enabled "$unit")" \
+      "$(systemctl is-active "$unit")" >>"$timer_state"
+  done < <(systemctl list-unit-files 'memory-v1-*.timer' --no-legend --no-pager \
+    | awk '{print $1}' | sort -u)
+fi
 [[ -s "$timer_state" ]]
 timers_quiesced=1
 while IFS=$'\t' read -r unit _enabled _active; do
@@ -251,15 +259,20 @@ qdrant_before=$(qdrant_signature)
 
 ids_sql=$(printf "'%s'::uuid," "${job_ids[@]}")
 ids_sql=${ids_sql%,}
-[[ "$(scalar "
+exact_ready=$(scalar "
   SELECT count(*) FROM memory.evidence_extraction_job
   WHERE owner_user_id='$owner'::uuid AND job_id IN ($ids_sql)
-    AND status='skipped' AND attempts=1
-    AND last_error='local_inference_rejected: local_transport_http_rejected'")" \
-  -eq 3 ]]
-[[ "$(scalar "
+    AND (
+      (status='skipped' AND attempts=1 AND
+       last_error='local_inference_rejected: local_transport_http_rejected')
+      OR (status='pending' AND attempts=1 AND last_error IS NULL)
+      OR (status='review_required' AND attempts=2 AND last_error IS NULL)
+    )")
+[[ "$exact_ready" -eq 3 ]]
+existing_packets=$(scalar "
   SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
-  WHERE owner_user_id='$owner'::uuid AND job_id IN ($ids_sql)")" -eq 0 ]]
+  WHERE owner_user_id='$owner'::uuid AND job_id IN ($ids_sql)")
+[[ "$existing_packets" -ge 0 && "$existing_packets" -le 3 ]]
 
 cp "/etc/systemd/system/$service" "$unit_backup"
 chmod 0600 "$unit_backup"
@@ -279,14 +292,27 @@ apply_output=$work/recovery-apply.txt
 replay_output=$work/recovery-replay.txt
 psql "$POSTGRES_DSN" -X -Atq -v ON_ERROR_STOP=1 \
   <"$apply_sql" >"$apply_output"
-[[ "$(grep -cx applied "$apply_output")" -eq 3 ]]
+[[ "$(grep -Ec '^(applied|replayed)$' "$apply_output")" -eq 3 ]]
 psql "$POSTGRES_DSN" -X -Atq -v ON_ERROR_STOP=1 \
   <"$apply_sql" >"$replay_output"
 [[ "$(grep -cx replayed "$replay_output")" -eq 3 ]]
 
 install -o root -g root -m 0400 \
   /etc/memory-v1-local-inference/api-key "$credential_dir/local_api_key"
+calls_made=0
 for index in 0 1 2; do
+  current_state=$(scalar "
+    SELECT status||':'||attempts::text FROM memory.evidence_extraction_job
+    WHERE owner_user_id='$owner'::uuid
+      AND job_id='${job_ids[$index]}'::uuid")
+  if [[ "$current_state" == review_required:2 ]]; then
+    [[ "$(scalar "
+      SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
+      WHERE owner_user_id='$owner'::uuid
+        AND job_id='${job_ids[$index]}'::uuid")" -eq 1 ]]
+    continue
+  fi
+  [[ "$current_state" == pending:1 ]]
   output="$work/canary-$index.json"
   POSTGRES_DSN="$POSTGRES_DSN" \
   PYTHONPATH="$repo" \
@@ -315,12 +341,14 @@ for index in 0 1 2; do
   jq -e '
     .contract_version=="memory_v1_v5_local_inference_canary_v1" and
     .predicate_contract_profile=="v5_2" and
-    .outcome=="accepted" and .job_status=="review_required" and
+    .outcome=="accepted" and
     .local_model_calls==1 and .external_model_calls==0 and
     .write_counts.claims==0 and .write_counts.qdrant==0 and
     .write_counts.prompt_influence==0
   ' "$output" >/dev/null
+  calls_made=$((calls_made+1))
 done
+[[ "$calls_made" -eq $((3-existing_packets)) ]]
 
 [[ "$(scalar "
   SELECT count(*) FROM memory.evidence_extraction_job
@@ -351,6 +379,7 @@ jq -n \
   --arg clone_report "$clone_report" \
   --arg clone_report_sha256 "$clone_report_sha" \
   --arg qdrant_sha256 "$qdrant_after" \
+  --argjson local_model_calls "$calls_made" \
   '{
     contract_version:"memory_v1_v5_2_context_budget_recovery_apply_v1",
     completed_at:$completed_at,
@@ -359,7 +388,7 @@ jq -n \
     clone_verification:{path:$clone_report,sha256:$clone_report_sha256},
     recovered_jobs:3,
     accepted_packets:3,
-    local_model_calls:3,
+    local_model_calls:$local_model_calls,
     external_model_calls:0,
     checks:{
       hash_locked:true,
