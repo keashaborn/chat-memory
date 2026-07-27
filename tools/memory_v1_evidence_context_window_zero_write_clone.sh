@@ -150,6 +150,11 @@ jq -e '
   .outcome=="accepted"
   and .local_model_calls==1
   and .external_model_calls==0
+  and .entity_count==2
+  and .observation_count==1
+  and .deferral_count==0
+  and .predicates==["occupation.works_as"]
+  and .projection_classes==["direct_claim"]
   and .write_counts=={
     "database":0,
     "prompt_influence":0,
@@ -157,6 +162,38 @@ jq -e '
     "retrieval":0
   }
 ' "$report" >/dev/null
+jq -e '
+  (.observations | length)==1
+  and (.entity_mentions | length)==2
+  and (.deferrals | length)==0
+  and .observations[0].predicate=="occupation.works_as"
+  and .observations[0].object.kind=="entity"
+  and (
+    .observations[0] as $observation
+    | (
+        .entity_mentions
+        | map(
+            select(
+              .entity_ref==$observation.subject_entity_ref
+              and .entity_type=="person"
+              and .name_text=="Bob Fry"
+            )
+          )
+        | length
+      )==1
+    and (
+        .entity_mentions
+        | map(
+            select(
+              .entity_ref==$observation.object.entity_ref
+              and .entity_type=="concept"
+              and (.name_text | ascii_downcase)=="president"
+            )
+          )
+        | length
+      )==1
+  )
+' "$packet" >/dev/null
 
 jq -c '{
   outcome,
