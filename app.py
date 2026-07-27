@@ -63,6 +63,7 @@ from rag_engine.thread_title_v1 import (
     select_first_meaningful_exchange,
 )
 from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
+from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -482,7 +483,48 @@ def infer_extra_tags(text: str, source: str = "frontend") -> List[str]:
 
 
 
-# ---------- admin memory review ----------
+# ---------- admin memory health ----------
+@app.get("/admin/memory/health")
+async def admin_memory_health(req: Request):
+    """
+    Owner-scoped governed-memory operational health.
+
+    The response contains aggregate counts and timestamps only. It never
+    exposes stored memory content, record identifiers, or owner identifiers.
+    """
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response()
+    if parse_uuid(actor) is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_actor_user_id"},
+            status_code=400,
+        )
+
+    try:
+        return await build_admin_memory_health_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            qdrant_url=QDRANT_URL,
+            collection_name=os.getenv(
+                "MEMORY_V1_COLLECTION",
+                "memory_claim_v1",
+            ),
+        )
+    except Exception:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "memory_health_unavailable",
+                "request_id": rid,
+            },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+# ---------- legacy admin memory review ----------
 @app.get("/admin/memory/review-plan")
 async def admin_memory_review_plan(req: Request):
     """
