@@ -18,7 +18,7 @@ ExecStart=/opt/vs-memory-inference/runtime/b10066-cuda/llama-server \
   --host 127.0.0.1 \
   --port 18080 \
   --api-key-file /etc/vs-memory-inference/api-keys \
-  --ctx-size 16384 \
+  --ctx-size 32768 \
   --n-gpu-layers 99 \
   --flash-attn on \
   --parallel 1 \

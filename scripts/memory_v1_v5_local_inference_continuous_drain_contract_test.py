@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / "ops/systemd/memory-v1-v5-local-inference-scheduler.service"
 TIMER = ROOT / "ops/systemd/memory-v1-v5-local-inference-scheduler.timer"
 SCHEDULER = ROOT / "scripts/memory_v1_v5_local_inference_scheduler.py"
+GPU_SERVICE = ROOT / "ops/systemd/vs-memory-gpu-inference.service"
 
 
 def require_once(text: str, value: str) -> None:
@@ -19,6 +20,7 @@ def main() -> int:
     service = SERVICE.read_text(encoding="utf-8")
     timer = TIMER.read_text(encoding="utf-8")
     scheduler = SCHEDULER.read_text(encoding="utf-8")
+    gpu_service = GPU_SERVICE.read_text(encoding="utf-8")
 
     for value in (
         "--owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50",
@@ -49,6 +51,12 @@ def main() -> int:
     require_once(timer, "OnBootSec=5min")
     require_once(timer, "OnUnitInactiveSec=5min")
     require_once(timer, "RandomizedDelaySec=10s")
+    require_once(gpu_service, "--ctx-size 32768")
+    require_once(gpu_service, "--parallel 1")
+    require_once(gpu_service, "--reasoning off")
+    require_once(gpu_service, "--reasoning-budget 0")
+    require_once(gpu_service, "IPAddressDeny=any")
+    require_once(gpu_service, "IPAddressAllow=localhost")
 
     # The batch worker remains sequential. It must not fan out model calls.
     require_once(scheduler, "while len(results) < args.max_jobs:")
