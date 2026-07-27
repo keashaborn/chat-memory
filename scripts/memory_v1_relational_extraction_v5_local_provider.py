@@ -3079,6 +3079,11 @@ def _add_compiler_entity(
 
 def _pet_name(content: str) -> str | None:
     patterns = (
+        r"\bmy\s+(?:(?:male|female)\s+)?"
+        r"(?:german\s+shepherd|labrador(?:\s+retriever)?|"
+        r"golden\s+retriever|poodle|beagle|rottweiler|boxer|"
+        r"bulldog|terrier|spaniel|mastiff|husky|collie)\s+"
+        r"([A-Z][\w'’-]{0,79})\b",
         r"\bmy\s+(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\s+"
         r"([A-Z][\w'’-]{0,79})\b",
         r"\b([A-Z][\w'’-]{0,79})\s*,?\s+my\s+"
@@ -4226,21 +4231,49 @@ def _compile_entity_links(
             )
         predicates = {item["predicate"] for item in observations}
 
-    pet_source = bool(_PET_RE.search(content))
+    pet_source = bool(_PET_CUE_RE.search(content))
     pet_predicates = any(
         predicate.startswith("pet.") for predicate in predicates
     ) or "relationship.has_pet" in predicates
     if pet_source and pet_predicates:
+        explicit_pet_name = _pet_name(content)
         animal_ref = _entity_ref(entities, "animal")
         if animal_ref is None:
             animal_ref = _add_compiler_entity(
                 source,
                 entities,
                 entity_type="animal",
-                name_text=_pet_name(content),
+                name_text=explicit_pet_name,
                 relationship_role="pet:reported",
             )
             repairs.append("animal_entity_link")
+        animal_entity = next(
+            item for item in entities if item["entity_ref"] == animal_ref
+        )
+        if explicit_pet_name is None and animal_entity.get("name_text") is not None:
+            animal_entity["name_text"] = None
+            animal_entity["mention_kind"] = "role_only"
+            animal_entity["reason_codes"] = [
+                code
+                for code in animal_entity.get("reason_codes", [])
+                if code not in {"explicit_pet_name", "context_pet_name"}
+            ]
+            if "target_role_only_pet_reference" not in animal_entity["reason_codes"]:
+                animal_entity["reason_codes"].append(
+                    "target_role_only_pet_reference"
+                )
+            repairs.append("context_only_pet_name_removed")
+        elif explicit_pet_name is not None:
+            animal_entity["name_text"] = explicit_pet_name
+            animal_entity["mention_kind"] = "named"
+        if not _role_has_any(animal_entity.get("relationship_role"), {"pet"}):
+            current_role = animal_entity.get("relationship_role")
+            animal_entity["relationship_role"] = (
+                f"{current_role}|pet:reported"
+                if isinstance(current_role, str) and current_role
+                else "pet:reported"
+            )
+            repairs.append("pet_relationship_role_augmented")
         if self_ref is None and _FIRST_PERSON_RE.search(content):
             self_ref = _add_compiler_entity(
                 source,

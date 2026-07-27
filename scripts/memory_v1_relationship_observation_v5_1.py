@@ -43,7 +43,11 @@ def _pattern(value: str) -> str:
 PREDICATE_EVIDENCE_PATTERNS = {
     "relationship.caregiver_for": r"\b(?:caregiver|carer|care\s+for|caring\s+for)\b",
     "relationship.collaborator_with": r"\bcollaborat(?:e|es|ed|ing|or)s?\b",
-    "relationship.has_pet": r"\b(?:pet|pets|dog|dogs|cat|cats|animal|animals)\b",
+    "relationship.has_pet": (
+        r"\b(?:pet|pets|dog|dogs|cat|cats|animal|animals|german\s+shepherd|"
+        r"labrador(?:\s+retriever)?|golden\s+retriever|poodle|beagle|"
+        r"rottweiler|boxer|bulldog|terrier|spaniel|mastiff|husky|collie)\b"
+    ),
     "relationship.healthcare_provider_for": r"\b(?:doctor|physician|cardiologist|psychiatrist|psychologist|therapist)\b",
     "relationship.in_law_of": r"\b(?:wife|husband|spouse)['’]s\s+(?:brother|sister|father|mother)\b|\b(?:brother|sister|father|mother)[\s-]+in[\s-]+law\b",
     "relationship.lives_with": r"\b(?:live|lives|lived|living)\s+(?:together\s+)?with\b|\bshare\s+(?:an?|the)\s+(?:apartment|home|house)\b",

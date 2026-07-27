@@ -676,6 +676,106 @@ class LocalProviderV52Test(unittest.TestCase):
             {item.predicate for item in compiled.observations},
         )
 
+    def test_context_pet_name_is_removed_and_ownership_is_rewired(self) -> None:
+        content = (
+            "My male German shepherd had a rare blood cancer and died "
+            "a few months later."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        span = {"start": 0, "end": len(content), "quote": content}
+        temporal = {
+            "anchored_to_source_time": False,
+            "basis": "none",
+            "calendar_range": None,
+            "certainty": "unknown",
+            "instant": None,
+            "instant_range": None,
+            "precision": "unknown",
+            "reason_codes": ["implicit_source_time"],
+            "recurrence": None,
+            "relative_offset": None,
+            "semantic": "state_validity",
+            "shape": "none",
+            "source_form": "implicit_source_time",
+        }
+        packet = ProviderPacket.model_validate(
+            _packet(
+                entities=[
+                    {
+                        "entity_ref": "e00",
+                        "entity_type": "animal",
+                        "mention_kind": "named",
+                        "name_text": "Dahlia",
+                        "relationship_role": "animal:individual",
+                        "source_spans": [span],
+                        "extraction_confidence": 0.99,
+                        "reason_codes": ["explicit_pet_name"],
+                    }
+                ],
+                observations=[
+                    {
+                        "extraction_confidence": 0.99,
+                        "modality": "asserted",
+                        "object": {
+                            "approximate": False,
+                            "datatype": "boolean",
+                            "kind": "literal",
+                            "unit": None,
+                            "value": True,
+                        },
+                        "observation_ref": "o00",
+                        "polarity": "affirmed",
+                        "predicate": "relationship.has_pet",
+                        "projection_class": "direct_claim",
+                        "reason_codes": ["explicit_pet_relationship"],
+                        "sensitivity": "low",
+                        "source_spans": [span],
+                        "subject_entity_ref": "e00",
+                        "surface_policy": "direct_or_relevant",
+                        "temporal": temporal,
+                    }
+                ],
+            )
+        )
+        compiled, repairs = _compile_entity_links(source, packet, registry)
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        animals = [
+            item for item in entities.values()
+            if item["entity_type"] == "animal"
+        ]
+        self.assertEqual(len(animals), 1)
+        self.assertIsNone(animals[0]["name_text"])
+        self.assertEqual(animals[0]["mention_kind"], "role_only")
+        self.assertIn(
+            "target_role_only_pet_reference",
+            animals[0]["reason_codes"],
+        )
+        ownership = [
+            item for item in value["observations"]
+            if item["predicate"] == "relationship.has_pet"
+        ]
+        self.assertEqual(len(ownership), 1)
+        observation = ownership[0]
+        self.assertEqual(
+            entities[observation["subject_entity_ref"]]["entity_type"],
+            "self",
+        )
+        self.assertEqual(
+            entities[observation["object"]["entity_ref"]]["entity_type"],
+            "animal",
+        )
+        self.assertNotIn(
+            "unregistered_predicate",
+            {item["reason_code"] for item in value["deferrals"]},
+        )
+        self.assertIn("context_only_pet_name_removed", repairs)
+        self.assertIn("pet_relation_normalized", repairs)
+
 
 if __name__ == "__main__":
     unittest.main()
