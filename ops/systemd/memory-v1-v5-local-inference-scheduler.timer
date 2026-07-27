@@ -1,10 +1,10 @@
 [Unit]
-Description=Run one bounded local Memory V1 V5.2 shadow extraction every two hours
+Description=Continuously drain eligible local Memory V1 V5.2 extraction work
 
 [Timer]
-OnBootSec=30min
-OnUnitInactiveSec=2h
-RandomizedDelaySec=2min
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=10s
 Persistent=true
 Unit=memory-v1-v5-local-inference-scheduler.service
 

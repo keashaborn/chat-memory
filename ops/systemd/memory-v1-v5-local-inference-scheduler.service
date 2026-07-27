@@ -1,5 +1,5 @@
 [Unit]
-Description=Memory V1 owner-scoped bounded local V5.2 shadow extraction
+Description=Memory V1 owner-scoped continuous local V5.2 extraction drain
 After=network-online.target brains.service memory-v1-v5-local-inference-tunnel.service
 Wants=network-online.target
 Requires=memory-v1-v5-local-inference-tunnel.service
@@ -15,8 +15,8 @@ Environment=MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY=memory_v1_v5_local_inference_sche
 LoadCredential=local_api_key:/etc/memory-v1-local-inference/api-key
 RuntimeDirectory=memory-v1-v5-local-scheduler
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-scheduler/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_inference_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --contract-profile v5_2 --max-jobs 1 --max-attempts 1 --lease-seconds 900 --timeout-seconds 600 --max-output-tokens 4096 --rolling-window-seconds 86400 --max-reserved-jobs 12 --failure-threshold 3 --apply
-TimeoutStartSec=12min
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-scheduler/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_inference_scheduler.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --contract-profile v5_2 --max-jobs 100 --max-runtime-seconds 21600 --max-attempts 2 --lease-seconds 900 --timeout-seconds 600 --max-output-tokens 4096 --rolling-window-seconds 3600 --max-reserved-jobs 100 --failure-threshold 3 --apply
+TimeoutStartSec=6h15min
 UMask=0077
 Nice=10
 CPUQuota=25%

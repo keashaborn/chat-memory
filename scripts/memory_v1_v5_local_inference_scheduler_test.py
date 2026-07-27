@@ -113,7 +113,15 @@ def main() -> int:
     assert select_owner_target([(OWNER, {}, None, None)]) is None
 
     validate_arguments(args())
-    validate_arguments(args(max_jobs=100, max_runtime_seconds=21600))
+    validate_arguments(
+        args(
+            max_jobs=100,
+            max_runtime_seconds=21600,
+            max_attempts=2,
+            rolling_window_seconds=3600,
+            max_reserved_jobs=100,
+        )
+    )
     for invalid_batch in (
         {"max_jobs": 0},
         {"max_jobs": 101},
