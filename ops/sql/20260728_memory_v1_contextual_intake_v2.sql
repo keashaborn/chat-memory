@@ -158,7 +158,9 @@ BEGIN
     CASE
       WHEN evidence.source_system='public.chat_log'
        AND base.outcome='eligible'
-       AND NOT (
+       AND (
+         evidence.metadata->>'span_origin'='legacy_full_turn_rebind_v1'
+         OR NOT (
          evidence.metadata->>'source_id'
            ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
          AND evidence.metadata->>'source_content_sha256'
@@ -168,6 +170,7 @@ BEGIN
          AND nullif(evidence.metadata->>'primary_lane','') IS NOT NULL
          AND nullif(evidence.metadata->>'epistemic_role','') IS NOT NULL
          AND nullif(evidence.metadata->>'span_origin','') IS NOT NULL
+         )
        )
       THEN 'deferred'
       ELSE base.outcome
@@ -175,7 +178,9 @@ BEGIN
     CASE
       WHEN evidence.source_system='public.chat_log'
        AND base.outcome='eligible'
-       AND NOT (
+       AND (
+         evidence.metadata->>'span_origin'='legacy_full_turn_rebind_v1'
+         OR NOT (
          evidence.metadata->>'source_id'
            ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
          AND evidence.metadata->>'source_content_sha256'
@@ -185,6 +190,7 @@ BEGIN
          AND nullif(evidence.metadata->>'primary_lane','') IS NOT NULL
          AND nullif(evidence.metadata->>'epistemic_role','') IS NOT NULL
          AND nullif(evidence.metadata->>'span_origin','') IS NOT NULL
+         )
        )
       THEN 'contextual_split'
       ELSE base.route
@@ -192,7 +198,9 @@ BEGIN
     CASE
       WHEN evidence.source_system='public.chat_log'
        AND base.outcome='eligible'
-       AND NOT (
+       AND (
+         evidence.metadata->>'span_origin'='legacy_full_turn_rebind_v1'
+         OR NOT (
          evidence.metadata->>'source_id'
            ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
          AND evidence.metadata->>'source_content_sha256'
@@ -202,6 +210,7 @@ BEGIN
          AND nullif(evidence.metadata->>'primary_lane','') IS NOT NULL
          AND nullif(evidence.metadata->>'epistemic_role','') IS NOT NULL
          AND nullif(evidence.metadata->>'span_origin','') IS NOT NULL
+         )
        )
       THEN 'contextual_split_required'
       ELSE base.reason_code
@@ -223,7 +232,9 @@ BEGIN
     (
       evidence.source_system='public.chat_log'
       AND base.outcome='eligible'
-      AND NOT (
+      AND (
+        evidence.metadata->>'span_origin'='legacy_full_turn_rebind_v1'
+        OR NOT (
         evidence.metadata->>'source_id'
           ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         AND evidence.metadata->>'source_content_sha256'
@@ -233,6 +244,7 @@ BEGIN
         AND nullif(evidence.metadata->>'primary_lane','') IS NOT NULL
         AND nullif(evidence.metadata->>'epistemic_role','') IS NOT NULL
         AND nullif(evidence.metadata->>'span_origin','') IS NOT NULL
+        )
       )
     )
   FROM memory.plan_owner_evidence_intake_v1(
@@ -319,8 +331,23 @@ BEGIN
   SELECT log.* INTO source
   FROM public.chat_log AS log
   WHERE log.owner_user_id=actor
-    AND log.source='frontend/chat:user'
-    AND parent.external_id IN (log.id::text,'chat_log:'||log.id::text);
+    AND log.source IN (
+      'frontend/chat:user',
+      'backend/web:user',
+      'voice/realtime-preview:user'
+    )
+    AND log.id=CASE
+      WHEN parent.metadata->>'source_id'
+        ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN (parent.metadata->>'source_id')::uuid
+      WHEN parent.external_id
+        ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN parent.external_id::uuid
+      WHEN parent.external_id
+        ~ '^chat_log:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN substring(parent.external_id FROM 10)::uuid
+      ELSE NULL
+    END;
   IF NOT FOUND OR source.text IS DISTINCT FROM parent.content
      OR source.thread_id IS NULL OR source.request_id IS NULL
      OR source.request_id

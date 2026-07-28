@@ -15,12 +15,14 @@ from urllib.parse import urlparse
 
 import asyncpg
 
-from rag_engine.memory_v1_evidence_context_loader_v1 import (
-    load_memory_evidence_context_v1,
+from rag_engine.memory_v1_evidence_context_loader_v2 import (
+    load_memory_evidence_context_v2,
 )
 from rag_engine.memory_v1_evidence_context_v1 import (
     EvidenceContextContractError,
-    MemoryEvidenceContextEnvelopeV1,
+)
+from rag_engine.memory_v1_evidence_context_v2 import (
+    MemoryEvidenceContextEnvelopeV2,
 )
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_CALL_ENABLE_TOKEN,
@@ -75,7 +77,7 @@ class EvidenceContextBoundLocalProvider:
     def __init__(
         self,
         delegate: LocalLlamaCppProvider,
-        evidence_context: MemoryEvidenceContextEnvelopeV1,
+        evidence_context: MemoryEvidenceContextEnvelopeV2,
     ) -> None:
         self._delegate = delegate
         self._evidence_context = evidence_context
@@ -770,7 +772,7 @@ async def run() -> int:
         capturing = None
         try:
             evidence_context = (
-                await load_memory_evidence_context_v1(
+                await load_memory_evidence_context_v2(
                     conn,
                     expected_owner_user_id=ids["owner"],
                     target_evidence_id=ids["evidence_id"],

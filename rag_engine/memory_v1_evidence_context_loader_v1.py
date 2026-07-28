@@ -206,6 +206,11 @@ async def load_memory_evidence_context_v1(
                     AND status='active'
                     AND metadata->>'source_id'=$2
                     AND metadata->>'source_content_sha256'=$3
+                    AND (
+                      evidence_id=$4
+                      OR coalesce(metadata->>'span_origin','')
+                           <>'legacy_full_turn_rebind_v1'
+                    )
                 ),
                 target_position AS (
                   SELECT source_ordinal,total_span_count

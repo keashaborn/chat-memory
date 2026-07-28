@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -99,24 +99,71 @@ def fixture_ids(database: str) -> list[tuple[uuid.UUID, uuid.UUID, str]]:
     ]
 
 
+def context_fixture_ids(database: str) -> tuple[uuid.UUID, uuid.UUID]:
+    namespace = uuid.uuid5(uuid.NAMESPACE_URL, database)
+    return (
+        uuid.uuid5(namespace, "prior-user-context"),
+        uuid.uuid5(namespace, "prior-assistant-context"),
+    )
+
+
 async def seed(conn: asyncpg.Connection) -> dict[str, object]:
     database = await assert_clone(conn)
     async with conn.transaction():
         await set_actor(conn, OWNER_A)
-        thread_id = await conn.fetchval(
+        thread_ids = await conn.fetch(
             """
             SELECT id
               FROM public.threads
              WHERE owner_user_id=$1
              ORDER BY created_at,id
-             LIMIT 1
+             LIMIT 2
             """,
             OWNER_A,
         )
-        if thread_id is None:
-            raise RuntimeError("fixture owner has no thread in clone")
+        if len(thread_ids) != 2:
+            raise RuntimeError("fixture owner needs two threads in clone")
+        thread_ids = [row["id"] for row in thread_ids]
+        fragment_thread_id = thread_ids[1]
+        prior_user_id, prior_assistant_id = context_fixture_ids(database)
+        await conn.executemany(
+            """
+            INSERT INTO public.chat_log(
+              id,user_id,source,text,tags,created_at,thread_id,
+              request_id,owner_user_id
+            ) VALUES (
+              $1,$2,$3,$4,ARRAY['clone-context-fixture'],
+              now()+$5::interval,$6,$7,$8
+            )
+            """,
+            [
+                (
+                    prior_user_id,
+                    str(OWNER_A),
+                    "frontend/chat:user",
+                    "I began studying martial arts after high school.",
+                    timedelta(minutes=-3),
+                    fragment_thread_id,
+                    str(uuid.uuid5(prior_user_id, "request")),
+                    OWNER_A,
+                ),
+                (
+                    prior_assistant_id,
+                    str(OWNER_A),
+                    "frontend/chat:assistant",
+                    "When did you begin studying martial arts?",
+                    timedelta(minutes=-2),
+                    fragment_thread_id,
+                    str(uuid.uuid5(prior_assistant_id, "request")),
+                    OWNER_A,
+                ),
+            ],
+        )
         evidence: list[dict[str, str]] = []
-        for source_id, request_id, content in fixture_ids(database):
+        for index, (source_id, request_id, content) in enumerate(
+            fixture_ids(database)
+        ):
+            thread_id = thread_ids[index]
             await conn.execute(
                 """
                 INSERT INTO public.chat_log(
@@ -151,8 +198,15 @@ async def seed(conn: asyncpg.Connection) -> dict[str, object]:
                         "capture_version": "clone_contextual_intake_v2",
                         "source_type": "frontend/chat:user",
                         "source_external_id": str(source_id),
+                        "source_id": str(source_id),
+                        "source_content_sha256": sha256_text(content),
                         "thread_id": str(thread_id),
                         "request_id": str(request_id),
+                        "source_char_start": 0,
+                        "source_char_end": len(content),
+                        "primary_lane": "personal_history",
+                        "epistemic_role": "user_report",
+                        "span_origin": "legacy_full_turn_rebind_v1",
                         "semantic_processing": "pending",
                     },
                     sort_keys=True,
@@ -179,7 +233,7 @@ async def seed(conn: asyncpg.Connection) -> dict[str, object]:
                 or plan["route"] != "contextual_split"
                 or plan["reason_code"] != "contextual_split_required"
                 or not plan["requires_contextual_split"]
-                or plan["source_bound"]
+                or not plan["source_bound"]
             ):
                 raise RuntimeError("fixture parent did not enter split route")
             evidence.append(

@@ -17,6 +17,7 @@ migration=ops/sql/20260728_memory_v1_contextual_intake_v2.sql
 rollback=ops/sql/20260728_memory_v1_contextual_intake_v2_rollback.sql
 security_test=tests/memory_v1_contextual_intake_v2_security.sql
 verifier=tests/memory_v1_contextual_intake_v2_clone_verify.py
+context_verifier=tests/memory_v1_evidence_context_v2_clone_verify.py
 dispatcher=scripts/memory_v1_contextual_evidence_intake_dispatcher_v2.py
 python_bin=/opt/chat-memory/venv/bin/python
 backup=$(mktemp /tmp/memory-contextual-intake-v2.XXXXXX.dump)
@@ -26,9 +27,10 @@ protected_after=$(mktemp /tmp/memory-contextual-intake-v2-after.XXXXXX)
 seed_report=$(mktemp /tmp/memory-contextual-intake-v2-seed.XXXXXX.json)
 dispatch_report=$(mktemp /tmp/memory-contextual-intake-v2-dispatch.XXXXXX.json)
 verify_report=$(mktemp /tmp/memory-contextual-intake-v2-verify.XXXXXX.json)
+context_report=$(mktemp /tmp/memory-contextual-intake-v2-context.XXXXXX.json)
 chmod 0600 \
   "$backup" "$table_list" "$protected_before" "$protected_after" \
-  "$seed_report" "$dispatch_report" "$verify_report"
+  "$seed_report" "$dispatch_report" "$verify_report" "$context_report"
 
 cleanup() {
   rc=$?
@@ -37,13 +39,14 @@ cleanup() {
     dropdb -U sage --if-exists --force "$clone" >/dev/null 2>&1 || true
   rm -f \
     "$backup" "$table_list" "$protected_before" "$protected_after" \
-    "$seed_report" "$dispatch_report" "$verify_report"
+    "$seed_report" "$dispatch_report" "$verify_report" "$context_report"
   exit "$rc"
 }
 trap cleanup EXIT
 
 for file in \
-  "$migration" "$rollback" "$security_test" "$verifier" "$dispatcher"
+  "$migration" "$rollback" "$security_test" "$verifier" \
+  "$context_verifier" "$dispatcher"
 do
   test -f "$file"
 done
@@ -162,6 +165,8 @@ PYTHONPATH="$repo_root" "$python_bin" "$dispatcher" \
 
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" "$python_bin" \
   "$verifier" --phase verify --report-path "$verify_report" >/dev/null
+POSTGRES_DSN="$clone_dsn" REPORT_PATH="$context_report" \
+PYTHONPATH="$repo_root" "$python_bin" "$context_verifier" >/dev/null
 
 span_count=$(jq -r '.span_count' "$verify_report")
 test "$span_count" -ge 3
@@ -191,12 +196,20 @@ test "$(jq -r '.model_calls' "$dispatch_report")" -eq 0
 test "$(jq -r '.claim_writes' "$dispatch_report")" -eq 0
 test "$(jq -r '.qdrant_writes' "$dispatch_report")" -eq 0
 test "$(jq -r '.prompt_influence' "$dispatch_report")" -eq 0
+test "$(jq -r '.cross_owner_rejected' "$context_report")" = true
+test "$(jq -r '.assertion_origin_count' "$context_report")" -eq 1
+test "$(jq -r '.prior_turn_assertion_origin_count' "$context_report")" -eq 0
+test "$(jq -r '.model_calls' "$context_report")" -eq 0
+test "$(jq -r '.claim_writes' "$context_report")" -eq 0
+test "$(jq -r '.qdrant_writes' "$context_report")" -eq 0
+test "$(jq -r '.prompt_influence' "$context_report")" = false
 
 printf '%s\n' \
   "memory_v1_contextual_intake_v2_clone: PASS" \
   "span_count=$span_count" \
   "context_needed_count=$(jq -r '.context_needed_count' "$verify_report")" \
   "queued_child_count=$(jq -r '.queued_child_count' "$verify_report")" \
+  "prior_turn_count=$(jq -r '.prior_turn_count' "$context_report")" \
   "qdrant_unchanged=true" \
   "protected_tables_unchanged=true" \
   "cross_owner_visible=0" \

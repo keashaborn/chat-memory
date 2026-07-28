@@ -15,6 +15,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     EVIDENCE_CONTEXT_COREFERENCE_VERSION,
     LocalLlamaCppProvider,
     _apply_context_coreference_bindings,
+    _compile_entity_links,
     _context_coreference_bindings,
     _explicit_concept_candidates,
     _example_entity,
@@ -239,6 +240,60 @@ class LocalProviderEvidenceContextV1Test(unittest.TestCase):
                 "I think this way will work in the future."
             ),
             [],
+        )
+        self.assertEqual(
+            _target_definite_descriptions(
+                "I got a German Shepherd by the name of Max."
+            ),
+            [],
+        )
+
+    def test_eye_color_requires_explicit_eye_cue(self) -> None:
+        content = "I bred German Shepherds five times."
+        source = TrustedExtractionSource.create(
+            job_id="00000000-0000-4000-8000-000000000001",
+            source_system="public.chat_log",
+            source_external_id=TARGET_ID,
+            source_sha256=sha(content),
+            source_recorded_at="2026-07-02T02:05:41.345358+00:00",
+            content=content,
+        )
+        animal = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="animal",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role="pet:reported",
+            reason_code="reported_pet",
+        )
+        observation = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="pet.eye_color",
+            object_value=_literal("text", "red"),
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_eye_color",
+        )
+        packet = ProviderPacket.model_validate(
+            _packet(entities=[animal], observations=[observation])
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            packet,
+            self.provider()._registry,
+        )
+        self.assertEqual(compiled.observations, [])
+        self.assertEqual(
+            [item.reason_code for item in compiled.deferrals],
+            ["insufficient_evidence"],
+        )
+        self.assertIn(
+            "pet_eye_color_requires_explicit_eye_cue",
+            repairs,
         )
 
     def test_concept_candidates_preserve_ambiguity(self) -> None:
