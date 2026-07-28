@@ -34,6 +34,30 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.budget.max_searches, 4)
         self.assertEqual(plan.budget.max_sources, 10)
 
+    def test_general_current_news_uses_bounded_current_news_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Is there any news about the US and Iran today?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "current_news")
+        self.assertEqual(plan.policy_pack, "current_news")
+        self.assertIn("freshness_required", plan.reason_codes)
+        self.assertIn("general_current_news_scope", plan.reason_codes)
+        self.assertEqual(plan.budget.max_searches, 4)
+        self.assertEqual(plan.budget.max_sources, 10)
+
+    def test_health_news_stays_on_trusted_health_route(self) -> None:
+        plan = create_search_plan_v1(
+            "Is there any news about creatine safety today?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "health")
+        self.assertNotIn(
+            "general_current_news_scope",
+            plan.reason_codes,
+        )
+
     def test_high_stakes_health_uses_indexed_health_pack(self) -> None:
         plan = create_search_plan_v1(
             "Is creatine safe with kidney disease? Cite studies."

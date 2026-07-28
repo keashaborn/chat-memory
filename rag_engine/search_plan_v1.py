@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 SEARCH_PLAN_CONTRACT = "search_plan_v1"
-SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_2"
+SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_3"
 
 SearchDecision = Literal["no_search", "indexed", "live", "research"]
 SearchPolicyPack = Literal[
@@ -94,6 +94,9 @@ STRONG_FRESHNESS_PATTERNS = _patterns(
     r"\bupdates? (?:about|on)\b",
     r"\bis (?:this|that) still (?:true|accurate|current)\b",
     r"\bup[- ]to[- ]date\b",
+)
+GENERAL_CURRENT_NEWS_PATTERNS = _patterns(
+    r"\bnews (?:about|on)\b",
 )
 WEAK_FRESHNESS_PATTERNS = _patterns(
     r"\blatest\b",
@@ -259,6 +262,8 @@ def _policy_pack(value: str) -> SearchPolicyPack:
         value, TRUSTED_CURRENT_NEWS_ENTITY_PATTERNS
     ):
         return "software_security"
+    if _matches(value, GENERAL_CURRENT_NEWS_PATTERNS):
+        return "current_news"
     if _matches(value, LEGAL_FINANCIAL_PATTERNS):
         return "legal_financial"
     return "general"
@@ -325,6 +330,9 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
     trusted_current_news = _matches(
         value, TRUSTED_CURRENT_NEWS_ENTITY_PATTERNS
     )
+    general_current_news = _matches(
+        value, GENERAL_CURRENT_NEWS_PATTERNS
+    )
     if _matches(value, SPECIFIC_SOURCE_PATTERNS):
         return _plan(
             "live", ("specific_source_requested",), pack, "high"
@@ -349,6 +357,8 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
             reasons.append("explicit_web_request")
         if trusted_current_news:
             reasons.append("trusted_current_news_scope")
+        elif general_current_news and pack == "current_news":
+            reasons.append("general_current_news_scope")
         return _plan(
             "live",
             tuple(reasons),

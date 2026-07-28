@@ -7,11 +7,13 @@ from rag_engine.trusted_web_policy_v1 import (
     APNEWS_DOMAIN,
     ARSTECHNICA_DOMAIN,
     CURRENT_NEWS_ALLOWED_DOMAINS,
+    GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
     HUGGINGFACE_DOMAIN,
     ODS_DOMAIN,
     OPENAI_DOMAIN,
     PMC_DOMAIN,
     PUBMED_DOMAIN,
+    REUTERS_DOMAIN,
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
@@ -49,6 +51,36 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
         self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
         self.assertEqual(decision.reason, "approved_current_news_lookup")
+
+    def test_general_current_news_is_limited_to_wire_services(self) -> None:
+        decision = route_trusted_web_query(
+            "Is there any news about the US and Iran today?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertEqual(
+            decision.reason,
+            "approved_general_current_news_lookup",
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            (APNEWS_DOMAIN, REUTERS_DOMAIN),
+        )
+
+    def test_general_current_news_does_not_steal_health_topics(self) -> None:
+        decision = route_trusted_web_query(
+            "Is there any news about creatine safety today?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.SUPPLEMENTS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertNotEqual(
+            decision.allowed_domains,
+            GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+        )
 
     def test_current_news_rejects_vague_freshness_phrase_without_entity(self) -> None:
         decision = route_trusted_web_query("What's going on?")

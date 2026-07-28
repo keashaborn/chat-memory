@@ -10,7 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel, ConfigDict
 
 
-POLICY_VERSION = "trusted_web_policy_v1_1"
+POLICY_VERSION = "trusted_web_policy_v1_2"
 
 ODS_DOMAIN = "ods.od.nih.gov"
 MEDLINEPLUS_DOMAIN = "medlineplus.gov"
@@ -50,6 +50,10 @@ CURRENT_NEWS_ALLOWED_DOMAINS = (
     ARSTECHNICA_DOMAIN,
     WIRED_DOMAIN,
     THEVERGE_DOMAIN,
+)
+GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS = (
+    APNEWS_DOMAIN,
+    REUTERS_DOMAIN,
 )
 
 
@@ -258,6 +262,36 @@ _CURRENT_NEWS_INTENT_TERMS = (
     "breaking",
 )
 
+_GENERAL_CURRENT_NEWS_RE = re.compile(
+    r"\bnews\s+(?:about|on)\b",
+    re.IGNORECASE,
+)
+
+_GENERAL_CURRENT_NEWS_EXCLUDED_TERMS = (
+    "medication",
+    "drug",
+    "dose",
+    "dosage",
+    "side effect",
+    "interaction",
+    "contraindication",
+    "symptom",
+    "diagnosis",
+    "treatment",
+    "clinical",
+    "creatine",
+    "supplement",
+    "vitamin",
+    "mineral",
+    "nutrition",
+    "pregnant",
+    "pregnancy",
+    "kidney",
+    "liver",
+    "heart",
+    "blood pressure",
+)
+
 _BLOCKED_NEWS_SOURCE_TERMS = (
     "reddit",
     "twitter",
@@ -451,6 +485,19 @@ def route_trusted_web_query(
             reason="approved_training_evidence",
             allowed_domains=(PUBMED_DOMAIN, PMC_DOMAIN),
         )
+    if (
+        _GENERAL_CURRENT_NEWS_RE.search(normalized)
+        and not _contains_any(
+            normalized,
+            _GENERAL_CURRENT_NEWS_EXCLUDED_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.CURRENT_NEWS,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_general_current_news_lookup",
+            allowed_domains=GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+        )
     return TrustedWebPolicyDecisionV1(
         topic=TrustedWebTopicV1.UNSUPPORTED,
         disposition=TrustedWebDispositionV1.DECLINE,
@@ -467,6 +514,7 @@ __all__ = [
     "ARSTECHNICA_DOMAIN",
     "CORE_ALLOWED_DOMAINS",
     "CURRENT_NEWS_ALLOWED_DOMAINS",
+    "GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS",
     "HUGGINGFACE_DOMAIN",
     "OPENAI_DOMAIN",
     "REUTERS_DOMAIN",
