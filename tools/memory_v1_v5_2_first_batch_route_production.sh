@@ -77,6 +77,11 @@ run_sql() {
     -U sage -d "$database" "$@"
 }
 
+query_rows() {
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U sage -d "$database" -c "$1"
+}
+
 qdrant_signature() {
   curl --fail --silent --show-error --max-time 30 \
     -H 'content-type: application/json' \
@@ -296,9 +301,69 @@ for item in "${disposition_items[@]}"; do
   terminal_args+=(--disposition-item "$item")
 done
 review_args=()
-for packet_id in "${review_ids[@]}"; do
+review_csv=$(IFS=,; printf '%s' "${review_ids[*]}")
+mapfile -t superseded_review_ids < <(query_rows "
+  SELECT packet.packet_id
+  FROM memory.evidence_extraction_packet_v5_local AS packet
+  WHERE packet.owner_user_id='$owner'::uuid
+    AND packet.packet_id=ANY(string_to_array('$review_csv',',')::uuid[])
+    AND EXISTS (
+      SELECT 1
+      FROM memory.evidence_extraction_event AS lineage
+      JOIN memory.evidence_extraction_job AS successor
+        ON successor.owner_user_id=lineage.owner_user_id
+       AND successor.job_id=lineage.job_id
+      WHERE lineage.owner_user_id=packet.owner_user_id
+        AND lineage.event_type='queued'
+        AND lineage.details->>'prior_packet_id'=packet.packet_id::text
+        AND successor.evidence_id=packet.evidence_id
+        AND successor.evidence_content_sha256=packet.evidence_content_sha256
+        AND successor.route='relational_extraction'
+    )
+  ORDER BY packet.packet_id
+")
+mapfile -t pending_review_ids < <(query_rows "
+  SELECT packet.packet_id
+  FROM memory.evidence_extraction_packet_v5_local AS packet
+  WHERE packet.owner_user_id='$owner'::uuid
+    AND packet.packet_id=ANY(string_to_array('$review_csv',',')::uuid[])
+    AND NOT EXISTS (
+      SELECT 1
+      FROM memory.evidence_extraction_event AS lineage
+      JOIN memory.evidence_extraction_job AS successor
+        ON successor.owner_user_id=lineage.owner_user_id
+       AND successor.job_id=lineage.job_id
+      WHERE lineage.owner_user_id=packet.owner_user_id
+        AND lineage.event_type='queued'
+        AND lineage.details->>'prior_packet_id'=packet.packet_id::text
+        AND successor.evidence_id=packet.evidence_id
+        AND successor.evidence_content_sha256=packet.evidence_content_sha256
+        AND successor.route='relational_extraction'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.v5_2_local_packet_route_event AS routed
+      WHERE routed.owner_user_id=packet.owner_user_id
+        AND routed.packet_id=packet.packet_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.v5_local_packet_disposition AS disposed
+      WHERE disposed.owner_user_id=packet.owner_user_id
+        AND disposed.packet_id=packet.packet_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.relational_stage_batch AS staged
+      WHERE staged.owner_user_id=packet.owner_user_id
+        AND staged.evidence_id=packet.evidence_id
+    )
+  ORDER BY packet.packet_id
+")
+[[ "${#pending_review_ids[@]}" -ge 1 ]]
+[[ "$(( ${#pending_review_ids[@]} + ${#superseded_review_ids[@]} ))" -eq 11 ]]
+for packet_id in "${pending_review_ids[@]}"; do
   review_args+=(--packet-id "$packet_id")
 done
+pending_review_count=${#pending_review_ids[@]}
+superseded_review_count=${#superseded_review_ids[@]}
 
 run_terminal() {
   local actor=$1 output=$2 apply=${3:-false}
@@ -341,12 +406,14 @@ if run_terminal "$other" "$terminal_other"; then
   exit 1
 fi
 run_review "$owner" "$review_dry"
-jq -e '.apply==false and (.plans|length)==11
+jq -e --argjson expected "$pending_review_count" '.apply==false
+  and (.plans|length)==$expected
   and ([.plans[].route]|all(.=="manual_review_artifact_ready"))
   and .database_writes==0 and .filesystem_writes==0' \
   "$review_dry" >/dev/null
 run_review "$other" "$review_other"
-jq -e '.apply==false and (.plans|length)==11
+jq -e --argjson expected "$pending_review_count" '.apply==false
+  and (.plans|length)==$expected
   and ([.plans[].route]|all(.=="no_work"))
   and .database_writes==0 and .filesystem_writes==0' \
   "$review_other" >/dev/null
@@ -360,9 +427,10 @@ jq -e '.apply==true and .database_writes==55
   and .qdrant_writes==0 and .prompt_influence==0' \
   "$terminal_apply" >/dev/null
 run_review "$owner" "$review_apply" true
-jq -e '.apply==true and .outcome=="manual_review_artifacts_ready"
-  and .write_counts.route_events==11
-  and .write_counts.restricted_review_artifacts==22
+jq -e --argjson expected "$pending_review_count" '.apply==true
+  and .outcome=="manual_review_artifacts_ready"
+  and .write_counts.route_events==$expected
+  and .write_counts.restricted_review_artifacts==($expected*2)
   and .transactional_apply_proved==true
   and .zero_write_replay_proved==true
   and .write_counts.stage==0 and .write_counts.claims==0
@@ -372,12 +440,13 @@ data_committed=1
 
 phase=verifying_replay
 run_review "$owner" "$review_replay"
-jq -e '.apply==false and (.plans|length)==11
+jq -e --argjson expected "$pending_review_count" '.apply==false
+  and (.plans|length)==$expected
   and ([.plans[].route]|all(.=="no_work"))
   and .database_writes==0 and .filesystem_writes==0' \
   "$review_replay" >/dev/null
 
-[[ "$(target_route_count)" == 66 ]]
+[[ "$(target_route_count)" == "$((55+pending_review_count))" ]]
 [[ "$(scalar "
   SELECT count(*) FROM memory.v5_2_local_packet_route_event
   WHERE owner_user_id='$owner'::uuid
@@ -395,7 +464,7 @@ jq -e '.apply==false and (.plans|length)==11
   WHERE owner_user_id='$owner'::uuid
     AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
     AND reason_code='reviewable_relational_packet_v5_2'
-")" == 11 ]]
+")" == "$pending_review_count" ]]
 [[ "$(scalar "
   SELECT count(*) FROM memory.v5_local_packet_disposition
   WHERE owner_user_id='$owner'::uuid
@@ -406,7 +475,8 @@ jq -e '.apply==false and (.plans|length)==11
   WHERE owner_user_id='$owner'::uuid
     AND evidence_id=ANY(string_to_array('$evidence_csv',',')::uuid[])
 ")" == 0 ]]
-[[ "$(find "$reviews" -maxdepth 1 -type f -name '*.json' | wc -l)" == 22 ]]
+[[ "$(find "$reviews" -maxdepth 1 -type f -name '*.json' | wc -l)" \
+      == "$((pending_review_count*2))" ]]
 
 phase=verifying_protected_state
 capture_protected_tables "$after"
@@ -442,6 +512,8 @@ jq -n \
   --arg migration_sha256 "$migration_sha" \
   --arg manifest_sha256 "$manifest_sha" \
   --arg qdrant_sha256 "$qdrant_after" \
+  --argjson pending_review_count "$pending_review_count" \
+  --argjson superseded_review_count "$superseded_review_count" \
   '{
     contract_version:"memory_v1_v5_2_first_batch_route_production_report_v1",
     production_commit:$production_commit,
@@ -449,12 +521,13 @@ jq -n \
     backup_sha256:$backup_sha256,
     migration_sha256:$migration_sha256,
     manifest_sha256:$manifest_sha256,
-    packet_count:66,
+    manifest_packet_count:66,
     terminal_no_stage:50,
     terminal_review_unresolved:5,
-    manual_review_artifact_ready:11,
-    restricted_review_artifacts:22,
-    database_route_writes:66,
+    manual_review_artifact_ready:$pending_review_count,
+    superseded_review_packets:$superseded_review_count,
+    restricted_review_artifacts:($pending_review_count*2),
+    database_route_writes:(55+$pending_review_count),
     stage_writes:0,
     claim_writes:0,
     qdrant_writes:0,
