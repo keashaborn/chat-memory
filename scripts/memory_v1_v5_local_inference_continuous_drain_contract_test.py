@@ -23,7 +23,6 @@ def main() -> int:
     gpu_service = GPU_SERVICE.read_text(encoding="utf-8")
 
     for value in (
-        "--owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50",
         "--contract-profile v5_2",
         "--max-jobs 100",
         "--max-runtime-seconds 21600",
@@ -34,6 +33,17 @@ def main() -> int:
         "--failure-threshold 10",
     ):
         require_once(service, value)
+
+    if "--owner-user-id" in service:
+        raise AssertionError(
+            "continuous drain must derive owners from authenticated registry"
+        )
+    for universal_owner_boundary in (
+        "from scripts.memory_v1_authenticated_owners import "
+        "resolve_authenticated_owners",
+        "owners = await resolve_authenticated_owners("
+    ):
+        require_once(scheduler, universal_owner_boundary)
 
     for retained_boundary in (
         "LoadCredential=local_api_key:",
@@ -57,6 +67,24 @@ def main() -> int:
     require_once(gpu_service, "--reasoning-budget 0")
     require_once(gpu_service, "IPAddressDeny=any")
     require_once(gpu_service, "IPAddressAllow=localhost")
+
+    # Only source-bound evidence may enter private inference. Legacy rows that
+    # need append-only rebinding remain visible in aggregate reporting.
+    for readiness_boundary in (
+        "CONTEXT_READY_PREDICATE_SQL",
+        "evidence.content_sha256=job.evidence_content_sha256",
+        "evidence.source_system='public.chat_log'",
+        "source.thread_id::text=evidence.metadata->>'thread_id'",
+        "source.request_id::text=evidence.metadata->>'request_id'",
+        "public.digest(convert_to(source.text,'UTF8'),'sha256')",
+        "substring(",
+        '"context_ready_count": context_ready_count',
+        '"context_rebind_required_count": max(',
+    ):
+        if readiness_boundary not in scheduler:
+            raise AssertionError(
+                f"context-readiness boundary absent: {readiness_boundary}"
+            )
 
     # The batch worker remains sequential. It must not fan out model calls.
     require_once(scheduler, "while len(results) < args.max_jobs:")

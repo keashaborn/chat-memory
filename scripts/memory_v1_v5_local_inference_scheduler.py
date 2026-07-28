@@ -59,6 +59,50 @@ SAFE_CANARY_FIELDS = {
 }
 SELECTOR_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,99}$")
 SAFE_AUDIT_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
+CONTEXT_READY_PREDICATE_SQL = """
+evidence.status='active'
+AND evidence.content_sha256=job.evidence_content_sha256
+AND evidence.source_system='public.chat_log'
+AND evidence.metadata->>'source_id'
+    ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+AND evidence.metadata->>'source_content_sha256' ~ '^[0-9a-f]{64}$'
+AND evidence.metadata->>'thread_id'
+    ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+AND evidence.metadata->>'request_id'
+    ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+AND evidence.metadata->>'source_char_start' ~ '^[0-9]+$'
+AND evidence.metadata->>'source_char_end' ~ '^[0-9]+$'
+AND nullif(evidence.metadata->>'primary_lane','') IS NOT NULL
+AND nullif(evidence.metadata->>'epistemic_role','') IS NOT NULL
+AND nullif(evidence.metadata->>'span_origin','') IS NOT NULL
+AND source.text IS NOT NULL
+AND source.thread_id::text=evidence.metadata->>'thread_id'
+AND source.request_id::text=evidence.metadata->>'request_id'
+AND encode(
+      public.digest(convert_to(source.text,'UTF8'),'sha256'),
+      'hex'
+    )=evidence.metadata->>'source_content_sha256'
+AND CASE
+      WHEN evidence.metadata->>'source_char_start' ~ '^[0-9]+$'
+       AND evidence.metadata->>'source_char_end' ~ '^[0-9]+$'
+      THEN (evidence.metadata->>'source_char_start')::bigint>=0
+       AND (evidence.metadata->>'source_char_end')::bigint
+           >(evidence.metadata->>'source_char_start')::bigint
+       AND (evidence.metadata->>'source_char_end')::bigint
+           <=char_length(source.text)
+      ELSE false
+    END
+AND substring(
+      source.text
+      FROM (evidence.metadata->>'source_char_start')::integer+1
+      FOR (evidence.metadata->>'source_char_end')::integer
+          -(evidence.metadata->>'source_char_start')::integer
+    )=evidence.content
+AND encode(
+      public.digest(convert_to(evidence.content,'UTF8'),'sha256'),
+      'hex'
+    )=evidence.content_sha256
+"""
 
 
 def sha256_text(value: str) -> str:
@@ -185,18 +229,76 @@ async def plan_owner(
             owner,
             selector_version,
         )
+        eligible_count = int(
+            await conn.fetchval(
+                """
+                SELECT count(*)
+                FROM memory.evidence_extraction_job AS job
+                WHERE job.owner_user_id=$1
+                  AND job.route='relational_extraction'
+                  AND job.status IN ('pending','error')
+                  AND job.attempts<$2
+                  AND ($3::text IS NULL OR job.selector_version=$3)
+                  AND job.available_at<=clock_timestamp()
+                """,
+                owner,
+                max_attempts,
+                selector_version,
+            )
+        )
+        context_ready_count = int(
+            await conn.fetchval(
+                f"""
+                SELECT count(*)
+                FROM memory.evidence_extraction_job AS job
+                JOIN memory.evidence AS evidence
+                  ON evidence.owner_user_id=job.owner_user_id
+                 AND evidence.evidence_id=job.evidence_id
+                JOIN public.chat_log AS source
+                  ON source.owner_user_id=job.owner_user_id
+                 AND source.id=CASE
+                       WHEN evidence.metadata->>'source_id'
+                         ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                       THEN (evidence.metadata->>'source_id')::uuid
+                       ELSE NULL
+                     END
+                WHERE job.owner_user_id=$1
+                  AND job.route='relational_extraction'
+                  AND job.status IN ('pending','error')
+                  AND job.attempts<$2
+                  AND ($3::text IS NULL OR job.selector_version=$3)
+                  AND job.available_at<=clock_timestamp()
+                  AND {CONTEXT_READY_PREDICATE_SQL}
+                """,
+                owner,
+                max_attempts,
+                selector_version,
+            )
+        )
         target_row = await conn.fetchrow(
-            """
-            SELECT job_id,evidence_id,evidence_content_sha256,selector_version,
-                   status::text AS status,attempts
-            FROM memory.evidence_extraction_job
-            WHERE owner_user_id=$1
-              AND route='relational_extraction'
-              AND status IN ('pending','error')
-              AND attempts<$2
-              AND ($3::text IS NULL OR selector_version=$3)
-              AND available_at<=clock_timestamp()
-            ORDER BY priority,available_at,created_at,job_id
+            f"""
+            SELECT job.job_id,job.evidence_id,job.evidence_content_sha256,
+                   job.selector_version,job.status::text AS status,job.attempts
+            FROM memory.evidence_extraction_job AS job
+            JOIN memory.evidence AS evidence
+              ON evidence.owner_user_id=job.owner_user_id
+             AND evidence.evidence_id=job.evidence_id
+            JOIN public.chat_log AS source
+              ON source.owner_user_id=job.owner_user_id
+             AND source.id=CASE
+                   WHEN evidence.metadata->>'source_id'
+                     ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+                   THEN (evidence.metadata->>'source_id')::uuid
+                   ELSE NULL
+                 END
+            WHERE job.owner_user_id=$1
+              AND job.route='relational_extraction'
+              AND job.status IN ('pending','error')
+              AND job.attempts<$2
+              AND ($3::text IS NULL OR job.selector_version=$3)
+              AND job.available_at<=clock_timestamp()
+              AND {CONTEXT_READY_PREDICATE_SQL}
+            ORDER BY job.priority,job.available_at,job.created_at,job.job_id
             LIMIT 1
             """,
             owner,
@@ -227,6 +329,12 @@ async def plan_owner(
         ),
         "selector_version_sha256": (
             sha256_text(selector_version) if selector_version is not None else None
+        ),
+        "eligible_count": eligible_count,
+        "context_ready_count": context_ready_count,
+        "context_rebind_required_count": max(
+            eligible_count - context_ready_count,
+            0,
         ),
     }
     return report, target, last_service_at
