@@ -10,19 +10,22 @@ BEGIN
      ) IS NULL THEN
     RAISE EXCEPTION 'zero-atom V5.2 route functions are absent';
   END IF;
-  IF has_function_privilege(
-       'PUBLIC',
-       'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)',
-       'EXECUTE'
+  IF EXISTS (
+       SELECT 1
+       FROM pg_proc AS procedure
+       CROSS JOIN LATERAL aclexplode(
+         coalesce(procedure.proacl,acldefault('f',procedure.proowner))
+       ) AS privilege
+       WHERE procedure.oid IN (
+         'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)'::regprocedure,
+         'memory.finalize_owner_v5_2_zero_atom_deferral_route_v1(uuid,uuid,uuid,text,text,text,text[])'::regprocedure
+       )
+         AND privilege.grantee=0
+         AND privilege.privilege_type='EXECUTE'
      )
      OR NOT has_function_privilege(
        'brains_app',
        'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)',
-       'EXECUTE'
-     )
-     OR has_function_privilege(
-       'PUBLIC',
-       'memory.finalize_owner_v5_2_zero_atom_deferral_route_v1(uuid,uuid,uuid,text,text,text,text[])',
        'EXECUTE'
      )
      OR NOT has_function_privilege(
