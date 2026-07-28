@@ -201,6 +201,21 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             AdminUsageUsersRequestV1(query="person@example.com")
 
+    def test_product_metrics_exclude_registered_system_actors(self) -> None:
+        metrics = usage_ledger_v1._METRICS_CTES
+        self.assertIn(
+            "lifeswitch_usage.ai_actor_registry_v1 registry",
+            metrics,
+        )
+        self.assertIn(
+            "registry.actor_user_id=event.owner_user_id",
+            metrics,
+        )
+        self.assertIn("and not exists", metrics)
+
+    def test_system_workload_response_is_bounded(self) -> None:
+        self.assertEqual(usage_ledger_v1.MAX_SYSTEM_WORKLOADS, 25)
+
     def test_cursor_is_bound_to_window_sort_and_query(self) -> None:
         secret = "usage-test-secret-that-is-long-enough"
         cursor = usage_ledger_v1._encode_cursor(

@@ -31,6 +31,7 @@ DEFAULT_USER_LIMIT = 25
 MAX_USER_LIMIT = 50
 MAX_CURSOR_LENGTH = 2_048
 MAX_QUERY_LENGTH = 64
+MAX_SYSTEM_WORKLOADS = 25
 USER_ID_QUERY_PATTERN = re.compile(r"^[0-9a-f-]{1,36}$", re.IGNORECASE)
 UsageSortV1 = Literal[
     "total_tokens_desc",
@@ -330,20 +331,28 @@ with bounds as (
 ),
 ai as (
   select
-    owner_user_id,
+    event.owner_user_id,
     count(*)::bigint as ai_requests,
-    coalesce(sum(input_tokens),0)::bigint as input_tokens,
-    coalesce(sum(cached_input_tokens),0)::bigint as cached_input_tokens,
-    coalesce(sum(output_tokens),0)::bigint as output_tokens,
-    coalesce(sum(reasoning_output_tokens),0)::bigint
+    coalesce(sum(event.input_tokens),0)::bigint as input_tokens,
+    coalesce(sum(event.cached_input_tokens),0)::bigint as cached_input_tokens,
+    coalesce(sum(event.output_tokens),0)::bigint as output_tokens,
+    coalesce(sum(event.reasoning_output_tokens),0)::bigint
       as reasoning_output_tokens,
-    coalesce(sum(total_tokens),0)::bigint as total_tokens,
-    min(recorded_at) as first_recorded_at,
-    max(recorded_at) as last_ai_at
-  from lifeswitch_usage.ai_usage_event_v1, bounds
-  where bounds.start_day is null
-     or recorded_at >= bounds.start_day::timestamptz
-  group by owner_user_id
+    coalesce(sum(event.total_tokens),0)::bigint as total_tokens,
+    min(event.recorded_at) as first_recorded_at,
+    max(event.recorded_at) as last_ai_at
+  from lifeswitch_usage.ai_usage_event_v1 event
+  cross join bounds
+  where (
+      bounds.start_day is null
+      or event.recorded_at >= bounds.start_day::timestamptz
+    )
+    and not exists (
+      select 1
+      from lifeswitch_usage.ai_actor_registry_v1 registry
+      where registry.actor_user_id=event.owner_user_id
+    )
+  group by event.owner_user_id
 ),
 nutrition as (
   select
@@ -601,16 +610,92 @@ async def build_admin_usage_overview_v1(
                   coalesce(sum(conditioning_sessions),0)::bigint
                     as conditioning_sessions,
                   (
-                    select min(recorded_at)
-                    from lifeswitch_usage.ai_usage_event_v1
+                    select min(event.recorded_at)
+                    from lifeswitch_usage.ai_usage_event_v1 event
+                    where not exists (
+                      select 1
+                      from lifeswitch_usage.ai_actor_registry_v1 registry
+                      where registry.actor_user_id=event.owner_user_id
+                    )
                   ) as ai_tracking_started_at,
                   max(last_activity_at) as last_activity_at
                 from metrics
                 """,
                 window_days,
             )
+            system_rows = await conn.fetch(
+                """
+                with bounds as (
+                  select case
+                    when $1::integer = 0 then null::date
+                    else (current_date - ($1::integer - 1))
+                  end as start_day
+                )
+                select
+                  registry.actor_kind,
+                  registry.workload_key,
+                  registry.display_label,
+                  count(event.ai_usage_event_id)::bigint as requests,
+                  coalesce(sum(event.input_tokens),0)::bigint as input_tokens,
+                  coalesce(sum(event.cached_input_tokens),0)::bigint
+                    as cached_input_tokens,
+                  coalesce(sum(event.output_tokens),0)::bigint as output_tokens,
+                  coalesce(sum(event.reasoning_output_tokens),0)::bigint
+                    as reasoning_output_tokens,
+                  coalesce(sum(event.total_tokens),0)::bigint as total_tokens,
+                  min(event.recorded_at) as first_recorded_at,
+                  max(event.recorded_at) as last_recorded_at
+                from lifeswitch_usage.ai_actor_registry_v1 registry
+                cross join bounds
+                left join lifeswitch_usage.ai_usage_event_v1 event
+                  on event.owner_user_id=registry.actor_user_id
+                 and (
+                   bounds.start_day is null
+                   or event.recorded_at >= bounds.start_day::timestamptz
+                 )
+                group by
+                  registry.actor_kind,
+                  registry.workload_key,
+                  registry.display_label
+                having count(event.ai_usage_event_id) > 0
+                order by total_tokens desc,registry.workload_key asc
+                limit $2
+                """,
+                window_days,
+                MAX_SYSTEM_WORKLOADS,
+            )
         if row is None:
             raise UsageLedgerError("usage overview unavailable")
+        system_workloads = [
+            {
+                "actor_kind": str(workload["actor_kind"]),
+                "workload_key": str(workload["workload_key"]),
+                "display_label": str(workload["display_label"]),
+                "requests": _as_int(workload["requests"]),
+                "input_tokens": _as_int(workload["input_tokens"]),
+                "cached_input_tokens": _as_int(
+                    workload["cached_input_tokens"]
+                ),
+                "output_tokens": _as_int(workload["output_tokens"]),
+                "reasoning_output_tokens": _as_int(
+                    workload["reasoning_output_tokens"]
+                ),
+                "total_tokens": _as_int(workload["total_tokens"]),
+                "first_recorded_at": _as_iso(workload["first_recorded_at"]),
+                "last_recorded_at": _as_iso(workload["last_recorded_at"]),
+            }
+            for workload in system_rows
+        ]
+        system_first_values = [
+            workload["first_recorded_at"]
+            for workload in system_rows
+            if workload["first_recorded_at"] is not None
+        ]
+        system_last_values = [
+            workload["last_recorded_at"]
+            for workload in system_rows
+            if workload["last_recorded_at"] is not None
+        ]
         return {
             "ok": True,
             "schema": OVERVIEW_SCHEMA,
@@ -628,6 +713,45 @@ async def build_admin_usage_overview_v1(
                     row["reasoning_output_tokens"]
                 ),
                 "total_tokens": _as_int(row["total_tokens"]),
+            },
+            "system_ai": {
+                "requests": sum(
+                    workload["requests"] for workload in system_workloads
+                ),
+                "input_tokens": sum(
+                    workload["input_tokens"] for workload in system_workloads
+                ),
+                "cached_input_tokens": sum(
+                    workload["cached_input_tokens"]
+                    for workload in system_workloads
+                ),
+                "output_tokens": sum(
+                    workload["output_tokens"] for workload in system_workloads
+                ),
+                "reasoning_output_tokens": sum(
+                    workload["reasoning_output_tokens"]
+                    for workload in system_workloads
+                ),
+                "total_tokens": sum(
+                    workload["total_tokens"] for workload in system_workloads
+                ),
+                "first_recorded_at": (
+                    _as_iso(min(system_first_values))
+                    if system_first_values
+                    else None
+                ),
+                "last_recorded_at": (
+                    _as_iso(max(system_last_values))
+                    if system_last_values
+                    else None
+                ),
+                "workloads": system_workloads,
+            },
+            "coverage": {
+                "product_chat": "recorded",
+                "registered_system_workloads": "recorded",
+                "corpus_evaluation": "not_instrumented",
+                "external_agent_usage": "not_instrumented",
             },
             "nutrition": {
                 "days_logged": _as_int(row["nutrition_days_logged"]),
@@ -787,6 +911,11 @@ async def build_admin_usage_user_detail_v1(
                   sum(total_tokens)::bigint as total_tokens
                 from lifeswitch_usage.ai_usage_event_v1,bounds
                 where owner_user_id=$1
+                  and not exists (
+                    select 1
+                    from lifeswitch_usage.ai_actor_registry_v1 registry
+                    where registry.actor_user_id=$1
+                  )
                   and (
                     bounds.start_day is null
                     or recorded_at >= bounds.start_day::timestamptz
@@ -811,6 +940,11 @@ async def build_admin_usage_user_detail_v1(
                   sum(total_tokens)::bigint as total_tokens
                 from lifeswitch_usage.ai_usage_event_v1,bounds
                 where owner_user_id=$1
+                  and not exists (
+                    select 1
+                    from lifeswitch_usage.ai_actor_registry_v1 registry
+                    where registry.actor_user_id=$1
+                  )
                   and (
                     bounds.start_day is null
                     or recorded_at >= bounds.start_day::timestamptz
@@ -836,6 +970,11 @@ async def build_admin_usage_user_detail_v1(
                     sum(total_tokens)::bigint as total_tokens
                   from lifeswitch_usage.ai_usage_event_v1,bounds
                   where owner_user_id=$1
+                    and not exists (
+                      select 1
+                      from lifeswitch_usage.ai_actor_registry_v1 registry
+                      where registry.actor_user_id=$1
+                    )
                     and (
                       bounds.start_day is null
                       or recorded_at >= bounds.start_day::timestamptz
