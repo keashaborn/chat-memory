@@ -78,6 +78,10 @@ from rag_engine.thread_title_v1 import (
 )
 from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
 from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
+from rag_engine.usage_ledger_v1 import (
+    AdminUsageSummaryRequestV1,
+    build_admin_usage_summary_v1,
+)
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
@@ -206,6 +210,7 @@ async def service_token_middleware(request: Request, call_next):
 
 
 SENSITIVE_NO_STORE_PREFIXES = (
+    "/admin/",
     "/voice/",
     "/telemetry/",
     "/metrics/",
@@ -496,6 +501,45 @@ def infer_extra_tags(text: str, source: str = "frontend") -> List[str]:
     return extra
 
 
+
+
+# ---------- admin usage ----------
+@app.post("/admin/usage/summary")
+async def admin_usage_summary(
+    payload: AdminUsageSummaryRequestV1,
+    req: Request,
+):
+    """
+    Content-free per-user usage aggregates for an authorized admin BFF.
+
+    The service boundary supplies the authenticated actor. The BFF supplies
+    the bounded target UUID list after a fresh Supabase capability check.
+    """
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response()
+    if parse_uuid(actor) is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_actor_user_id"},
+            status_code=400,
+        )
+
+    try:
+        return await build_admin_usage_summary_v1(
+            dsn=DSN,
+            request=payload,
+        )
+    except Exception:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "usage_summary_unavailable",
+                "request_id": rid,
+            },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
 
 
 # ---------- admin memory health ----------

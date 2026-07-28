@@ -311,7 +311,9 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
         self.assertEqual(result.content, "Use the smallest useful next action.")
         self.assertIsNone(result.refusal)
         self.assertEqual(result.provider_input_tokens, 100)
+        self.assertEqual(result.provider_cached_input_tokens, 0)
         self.assertEqual(result.provider_output_tokens, 12)
+        self.assertEqual(result.provider_reasoning_output_tokens, 0)
         self.assertEqual(result.provider_total_tokens, 112)
         self.assertEqual(
             result.request_max_completion_tokens,
@@ -360,6 +362,21 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
         self.assertEqual(result.provider_input_tokens, 80)
         self.assertEqual(result.provider_output_tokens, 9)
         self.assertEqual(result.provider_total_tokens, 89)
+
+    def test_cached_and_reasoning_usage_details_are_bound(self) -> None:
+        plan = trusted_plan()
+        response = provider_response(prompt_tokens=100, completion_tokens=12)
+        response["usage"]["prompt_tokens_details"] = {
+            "cached_tokens": 40,
+        }
+        response["usage"]["completion_tokens_details"] = {
+            "reasoning_tokens": 8,
+        }
+        result = OpenAIChatCompletionsAdapterV1(
+            FakeClient(response)
+        ).complete(plan)
+        self.assertEqual(result.provider_cached_input_tokens, 40)
+        self.assertEqual(result.provider_reasoning_output_tokens, 8)
 
     def test_missing_or_invalid_usage_fails_closed(self) -> None:
         plan = trusted_plan()

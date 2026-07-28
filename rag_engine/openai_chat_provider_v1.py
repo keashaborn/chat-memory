@@ -457,7 +457,9 @@ class OpenAIChatResponseV1(_StrictFrozenModel):
         repr=False,
     )
     provider_input_tokens: int = Field(ge=0)
+    provider_cached_input_tokens: int = Field(ge=0)
     provider_output_tokens: int = Field(ge=0)
+    provider_reasoning_output_tokens: int = Field(ge=0)
     provider_total_tokens: int = Field(ge=0)
     request_max_completion_tokens: int = Field(ge=1, le=RESERVED_OUTPUT_TOKENS)
     request_conservative_input_token_bound: int = Field(ge=1)
@@ -492,6 +494,10 @@ class OpenAIChatResponseV1(_StrictFrozenModel):
             self.provider_input_tokens + self.provider_output_tokens
         ):
             raise ValueError("provider usage totals do not reconcile")
+        if self.provider_cached_input_tokens > self.provider_input_tokens:
+            raise ValueError("provider cached input usage exceeds input usage")
+        if self.provider_reasoning_output_tokens > self.provider_output_tokens:
+            raise ValueError("provider reasoning usage exceeds output usage")
         if self.provider_output_tokens > self.request_max_completion_tokens:
             raise ValueError("provider output usage exceeds the request limit")
         if self.provider_input_tokens > self.request_conservative_input_token_bound:
@@ -572,6 +578,39 @@ def _usage_count(usage: Any, primary: str, alternate: str) -> int:
     return value
 
 
+def _optional_usage_detail(
+    usage: Any,
+    *,
+    primary_container: str,
+    alternate_container: str,
+    field_name: str,
+) -> int:
+    primary = _field(usage, primary_container)
+    alternate = _field(usage, alternate_container)
+    if primary is not None and alternate is not None:
+        primary_value = _field(primary, field_name)
+        alternate_value = _field(alternate, field_name)
+        if (
+            primary_value is not None
+            and alternate_value is not None
+            and primary_value != alternate_value
+        ):
+            raise ValueError("provider usage detail aliases disagree")
+        value = (
+            primary_value
+            if primary_value is not None
+            else alternate_value
+        )
+    else:
+        details = primary if primary is not None else alternate
+        value = _field(details, field_name) if details is not None else None
+    if value is None:
+        return 0
+    if type(value) is not int or value < 0:
+        raise ValueError("provider usage detail is invalid")
+    return value
+
+
 def _response_from_provider(
     request: OpenAIChatRequestV1,
     provider_response: Any,
@@ -614,8 +653,24 @@ def _response_from_provider(
     input_tokens = _usage_count(usage, "prompt_tokens", "input_tokens")
     output_tokens = _usage_count(usage, "completion_tokens", "output_tokens")
     total_tokens = _usage_count(usage, "total_tokens", "total_tokens")
+    cached_input_tokens = _optional_usage_detail(
+        usage,
+        primary_container="prompt_tokens_details",
+        alternate_container="input_tokens_details",
+        field_name="cached_tokens",
+    )
+    reasoning_output_tokens = _optional_usage_detail(
+        usage,
+        primary_container="completion_tokens_details",
+        alternate_container="output_tokens_details",
+        field_name="reasoning_tokens",
+    )
     if total_tokens != input_tokens + output_tokens:
         raise ValueError("provider usage totals do not reconcile")
+    if cached_input_tokens > input_tokens:
+        raise ValueError("provider cached input usage exceeds input usage")
+    if reasoning_output_tokens > output_tokens:
+        raise ValueError("provider reasoning usage exceeds output usage")
     if output_tokens > request.generation_config.max_completion_tokens:
         raise ValueError("provider output usage exceeds the request limit")
     if input_tokens > request.conservative_input_token_bound:
@@ -633,7 +688,9 @@ def _response_from_provider(
         "content": content,
         "refusal": refusal,
         "provider_input_tokens": input_tokens,
+        "provider_cached_input_tokens": cached_input_tokens,
         "provider_output_tokens": output_tokens,
+        "provider_reasoning_output_tokens": reasoning_output_tokens,
         "provider_total_tokens": total_tokens,
         "request_max_completion_tokens": (
             request.generation_config.max_completion_tokens

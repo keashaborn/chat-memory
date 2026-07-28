@@ -22,6 +22,7 @@ from rag_engine.response_composition_root_v0_2 import (
 )
 from rag_engine.response_inspection_v1 import build_response_inspection_v1
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
+from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
@@ -113,6 +114,13 @@ async def resse_response_query(
         )
         finalized = execution.finalized
         persistence_started_ns = time.monotonic_ns()
+        await persist_openai_chat_usage_v1(
+            conn,
+            owner_user_id=owner,
+            answer_id=finalized.answer_id,
+            source_channel="voice" if voice_turn_id is not None else "chat",
+            provider_response=execution.provider_response,
+        )
         if not payload.no_store:
             await persist_finalized_response_v1(
                 conn,
