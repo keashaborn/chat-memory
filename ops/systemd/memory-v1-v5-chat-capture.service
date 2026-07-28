@@ -1,5 +1,5 @@
 [Unit]
-Description=Memory V1 six-owner no-model V5 chat evidence capture
+Description=Memory V1 authenticated-owner no-model V5 chat evidence capture
 After=network-online.target brains.service
 Wants=network-online.target
 
@@ -11,7 +11,7 @@ WorkingDirectory=/opt/chat-memory
 EnvironmentFile=/opt/chat-memory/.env
 Environment=PYTHONPATH=/opt/chat-memory
 Environment=MEMORY_V1_V5_CHAT_CAPTURE_APPLY=enabled
-ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_chat_capture.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --owner-user-id 818b60b9-89bd-442a-998c-fc1924184dfc --owner-user-id 5c9f624a-a66d-4183-babb-b3a0f0f4e733 --owner-user-id 673d64a3-c4ba-4d1c-89e3-e0c579022fad --limit 500 --apply --report-path /tmp/memory-v1-v5-chat-capture.json
+ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_chat_capture.py --limit 500 --apply --report-path /tmp/memory-v1-v5-chat-capture.json
 TimeoutStartSec=2min
 UMask=0077
 Nice=10

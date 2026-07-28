@@ -16,8 +16,8 @@ import uuid
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 from scripts.memory_v1_v5_local_packet_disposition import (
-    canonical_owners,
     loopback_dsn,
     sha256_text,
     stable_json,
@@ -227,7 +227,6 @@ async def apply_once(
 
 async def run() -> int:
     args = arguments()
-    owners = canonical_owners(args.owner_user_id)
     if args.apply and os.getenv("MEMORY_V1_V5_LOCAL_AUTO_STAGE_APPLY") != (
         APPLY_ENABLE_TOKEN
     ):
@@ -235,6 +234,7 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise LocalAutoStageError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
     root = secure_review_root(args.review_root)
     conn = await asyncpg.connect(loopback_dsn(dsn), command_timeout=60, ssl=False)
     try:

@@ -15,6 +15,7 @@ import uuid
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 
 CAPTURE_VERSION = "memory_v1_v5_chat_capture_20260717_v1"
 SOURCE_SYSTEM = "public.chat_log"
@@ -28,7 +29,7 @@ def arguments() -> argparse.Namespace:
             "evidence without model calls or semantic writes."
         )
     )
-    parser.add_argument("--owner-user-id", action="append", required=True)
+    parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--report-path", required=True)
@@ -261,12 +262,10 @@ async def main() -> int:
         raise RuntimeError(
             "--apply requires MEMORY_V1_V5_CHAT_CAPTURE_APPLY=enabled"
         )
-    owners = sorted(
-        {uuid.UUID(value) for value in args.owner_user_id}, key=str
-    )
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
 
     conn = await asyncpg.connect(dsn, command_timeout=60)
     owner_reports: list[dict[str, Any]] = []

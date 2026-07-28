@@ -14,9 +14,7 @@ Environment=MEMORY_V1_V5_LOCAL_ENTITY_VALIDATION_APPLY=memory_v1_v5_local_entity
 LoadCredential=local_api_key:/etc/memory-v1-local-inference/api-key
 RuntimeDirectory=memory-v1-v5-local-entity-validation
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entity-validation/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entity_validation.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --apply
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entity-validation/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entity_validation.py --owner-user-id 557ea042-cb82-48f8-9429-472e96c957ef --apply
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entity-validation/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entity_validation.py --owner-user-id d839b4bc-0bd2-4f2d-aafe-0f3f75883db8 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entity-validation/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entity_validation.py --apply
 TimeoutStartSec=7min
 UMask=0077
 Nice=10

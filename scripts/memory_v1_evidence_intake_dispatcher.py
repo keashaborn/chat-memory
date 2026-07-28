@@ -15,7 +15,7 @@ import uuid
 
 import asyncpg
 
-from rag_engine.memory_v1_store import actor_uuid
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 
 
 TERMINAL_OUTCOMES = {"empty", "skipped"}
@@ -23,7 +23,7 @@ TERMINAL_OUTCOMES = {"empty", "skipped"}
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--owner-user-id", action="append", required=True)
+    parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument("--selector-version", default="20260716_v1")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--apply", action="store_true")
@@ -196,13 +196,10 @@ async def main() -> int:
     args = arguments()
     if not 1 <= args.limit <= 500:
         raise ValueError("--limit must be between 1 and 500")
-    owners = sorted(
-        {actor_uuid(value) for value in args.owner_user_id},
-        key=str,
-    )
     dsn = os.environ.get("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
 
     conn = await asyncpg.connect(dsn, command_timeout=60)
     try:

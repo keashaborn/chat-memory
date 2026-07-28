@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
 from rag_engine.response_composition_root_v0_2 import (
@@ -26,7 +26,6 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
-from rag_engine.voice_session_router import require_active_voice_session
 
 
 router = APIRouter()
@@ -74,11 +73,9 @@ async def resse_response_query(
     request_started_ns = time.monotonic_ns()
     if not DSN:
         raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
-    owner = UUID(require_actor_matches_owner(req, str(payload.user_id)))
+    owner = UUID(await require_memory_actor_v1(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
     voice_turn_id = voice_turn_id_from_request(req)
-    if voice_turn_id is not None:
-        await require_active_voice_session(req, str(owner))
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
     if payload.no_store:

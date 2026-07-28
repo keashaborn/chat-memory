@@ -11,6 +11,7 @@ import uuid
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 from memory_v1_projection_v5_contract_test import (
     owner_manifest_sha256,
     stable_json,
@@ -23,7 +24,6 @@ from memory_v1_v5_claim_projection_preflight import (
     load_source,
 )
 from scripts.memory_v1_v5_local_packet_disposition import (
-    canonical_owners,
     loopback_dsn,
     sha256_text,
     stable_json as stable_output,
@@ -135,7 +135,6 @@ async def apply_once(
 
 async def run() -> int:
     args = arguments()
-    owners = canonical_owners(args.owner_user_id)
     if args.apply and os.getenv("MEMORY_V1_V5_LOCAL_CLAIM_PROJECTION_APPLY") != (
         APPLY_ENABLE_TOKEN
     ):
@@ -143,6 +142,7 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise LocalClaimProjectionError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
     conn = await asyncpg.connect(loopback_dsn(dsn),command_timeout=60,ssl=False)
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":

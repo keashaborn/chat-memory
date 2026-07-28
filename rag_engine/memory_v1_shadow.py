@@ -52,6 +52,14 @@ def _allowlisted(actor: uuid.UUID) -> bool:
 def governed_activation_allowlisted(actor: uuid.UUID) -> bool:
     if os.getenv("MEMORY_V1_GOVERNED_ACTIVE", "0").strip() != "1":
         return False
+    if (
+        os.getenv(
+            "MEMORY_V1_GOVERNED_ACTIVE_ALL_AUTHENTICATED",
+            "0",
+        ).strip()
+        == "1"
+    ):
+        return True
     return str(actor) in _uuid_values(
         os.getenv("MEMORY_V1_GOVERNED_ACTIVE_USER_IDS", "")
     )
@@ -63,7 +71,14 @@ def governed_maximum_sensitivity(
     default = os.getenv("MEMORY_V1_SHADOW_MAX_SENSITIVITY", "medium")
     if not bool(context.get("explicit_recall")):
         return default
-    if str(actor) not in _uuid_values(
+    all_authenticated = (
+        os.getenv(
+            "MEMORY_V1_GOVERNED_EXPLICIT_HIGH_ALL_AUTHENTICATED",
+            "0",
+        ).strip()
+        == "1"
+    )
+    if not all_authenticated and str(actor) not in _uuid_values(
         os.getenv("MEMORY_V1_GOVERNED_EXPLICIT_HIGH_USER_IDS", "")
     ):
         return default

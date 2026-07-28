@@ -53,6 +53,14 @@ def _activation_allowlisted(actor: uuid.UUID) -> bool:
         return False
     if not _allowlisted(actor):
         return False
+    if (
+        os.getenv(
+            "MEMORY_V1_SPECIALIZED_ACTIVE_ALL_AUTHENTICATED",
+            "0",
+        ).strip()
+        == "1"
+    ):
+        return True
     return str(actor) in _uuid_values(
         os.getenv("MEMORY_V1_SPECIALIZED_ACTIVE_USER_IDS", "")
     )

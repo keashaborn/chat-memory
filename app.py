@@ -52,6 +52,10 @@ from rag_engine.voice_session_router import (
 )
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.memory_actor_auth_v1 import (
+    memory_actor_authority_v1,
+    require_memory_actor_v1,
+)
 from rag_engine.raw_memory_ownership import (
     RawMemoryOwnershipError,
     assert_raw_payload_owner,
@@ -584,10 +588,10 @@ async def log_chat(req: Request):
         return JSONResponse({"status":"bad_request","detail":"invalid json"}, status_code=400)
 
     text = body.get("text") or body.get("input") or ""
-    user_id_alias = require_actor_matches_owner(req, body.get("user_id") or "")
+    user_id_alias = await require_memory_actor_v1(
+        req, body.get("user_id") or ""
+    )
     voice_turn_id = voice_turn_id_from_request(req)
-    if voice_turn_id is not None:
-        await require_active_voice_session(req, user_id_alias)
     source = body.get("source") or "frontend"
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
@@ -668,6 +672,14 @@ async def log_chat(req: Request):
     try:
         conn = await asyncpg.connect(DSN)
         await _set_connection_actor(conn, user_id)
+        await conn.fetchval(
+            """
+            SELECT memory.register_authenticated_owner_v1($1,$2,$3)
+            """,
+            uuid.UUID(user_id),
+            memory_actor_authority_v1(req),
+            request_id,
+        )
 
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.

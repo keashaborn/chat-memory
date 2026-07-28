@@ -13,6 +13,7 @@ import uuid
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LOCAL_CALL_ENABLE_TOKEN,
     LocalProviderAdapterError,
@@ -31,7 +32,6 @@ from scripts.memory_v1_v5_local_inference_canary import (
     PINNED_RUNTIME_REVISION,
 )
 from scripts.memory_v1_v5_local_packet_disposition import (
-    canonical_owners,
     loopback_dsn,
     sha256_text,
     stable_json,
@@ -227,10 +227,10 @@ async def persist_assessment(
 async def run() -> int:
     args = arguments()
     validate_arguments(args)
-    owners = canonical_owners(args.owner_user_id)
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise LocalEntailmentError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
     conn = await asyncpg.connect(loopback_dsn(dsn), command_timeout=60, ssl=False)
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":

@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 from scripts.memory_v1_predicate_runtime_profile_v2 import (
     PROFILE_NAMES,
     load_runtime_profile_v2,
@@ -589,10 +590,10 @@ async def run() -> int:
     profile = load_runtime_profile_v2(root, args.contract_profile)
     if args.apply and profile.lifecycle == "offline_review_only":
         raise RuntimeError("review-only predicate profile cannot run scheduler")
-    owners = canonical_owners(args.owner_user_id)
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
     planned = await plan_all_owners(
         dsn,
         owners,
