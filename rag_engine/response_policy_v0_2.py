@@ -60,6 +60,18 @@ class ResponseMode(str, Enum):
     ORDINARY = "ORDINARY"
 
 
+class Interaction(str, Enum):
+    DIRECT = "DIRECT"
+    GUIDED_REFLECTION = "GUIDED_REFLECTION"
+    BEHAVIORAL_INTERVENTION = "BEHAVIORAL_INTERVENTION"
+
+
+class QuestionPolicy(str, Enum):
+    FORBIDDEN = "FORBIDDEN"
+    OPTIONAL_ONE_NON_LEADING = "OPTIONAL_ONE_NON_LEADING"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
 MODE_PRECEDENCE: tuple[ResponseMode, ...] = (
     ResponseMode.HIGH_STAKES,
     ResponseMode.TECHNICAL,
@@ -87,6 +99,7 @@ class Closure(str, Enum):
     TECHNICAL_PROCEDURE = "technical_procedure"
     MATERIAL_CLARIFICATION = "material_clarification"
     CONSENTED_COACHING = "consented_coaching"
+    GUIDED_REFLECTION = "guided_reflection"
     SAFETY_ACTION = "safety_action"
 
 
@@ -348,6 +361,10 @@ class ResponsePolicySignalsV0_2(StrictFrozenModel):
     user_fm_opt_out: bool = False
     technical_procedure_requested: bool | None = None
     coaching_consent: bool | None = None
+    direct_response_requested: bool | None = None
+    guided_reflection_requested: bool | None = None
+    behavioral_intervention_requested: bool | None = None
+    user_declines_questions: bool | None = None
     material_clarification_required: bool | None = None
     explicit_next_step_requested: bool | None = None
     domain_risk_gate: GateState = GateState.PASS
@@ -395,8 +412,12 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
     conversation_sha256: str
     safety_assessment_sha256: str
     response_mode: ResponseMode
+    interaction: Interaction
+    question_policy: QuestionPolicy
     closure: Closure
     mode_reasons: tuple[str, ...]
+    interaction_reasons: tuple[str, ...]
+    fm_ir_020_eligible: bool
     high_stakes_gate: GateState
     fm_application_gate: GateState
     fm_default_level: FMLevel
@@ -427,7 +448,10 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
         return value
 
     @field_validator(
-        "mode_reasons", "fm_gate_reasons", "ignored_legacy_request_fields"
+        "mode_reasons",
+        "interaction_reasons",
+        "fm_gate_reasons",
+        "ignored_legacy_request_fields",
     )
     @classmethod
     def sorted_unique_codes(cls, value: tuple[str, ...], info: Any) -> tuple[str, ...]:
@@ -467,6 +491,33 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
             and self.fm_effective_level is not self.fm_default_level
         ):
             raise ValueError("effective FM must equal the default when no veto applies")
+        if self.interaction is Interaction.GUIDED_REFLECTION:
+            if self.closure is not Closure.GUIDED_REFLECTION:
+                raise ValueError("guided reflection requires its dedicated closure")
+            if self.question_policy not in {
+                QuestionPolicy.FORBIDDEN,
+                QuestionPolicy.OPTIONAL_ONE_NON_LEADING,
+            }:
+                raise ValueError("guided reflection requires a bounded question policy")
+            if self.fm_ir_020_eligible:
+                raise ValueError("guided reflection cannot authorize FM-IR-020")
+        elif self.question_policy is not QuestionPolicy.NOT_APPLICABLE:
+            raise ValueError("non-reflective interaction cannot set a question policy")
+        if (
+            self.interaction is not Interaction.BEHAVIORAL_INTERVENTION
+            and self.fm_ir_020_eligible
+        ):
+            raise ValueError("FM-IR-020 requires behavioral intervention")
+        if (
+            self.response_mode is ResponseMode.HIGH_STAKES
+            and self.interaction is not Interaction.DIRECT
+        ):
+            raise ValueError("HIGH_STAKES forces direct interaction")
+        if (
+            self.fm_application_gate is not GateState.PASS
+            and self.interaction is Interaction.BEHAVIORAL_INTERVENTION
+        ):
+            raise ValueError("FM application veto forbids behavioral intervention")
         return self
 
 
@@ -630,6 +681,38 @@ _LOCAL_COACHING_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:build a habit|let'?s track|run an experiment)\b"),
 )
 
+_LOCAL_DIRECT_RESPONSE_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:give me your recommendation|tell me which|"
+        r"tell me what (?:i|we) should do|what do you recommend|"
+        r"answer (?:the question |me )?directly)\b"
+    ),
+)
+
+_LOCAL_GUIDED_REFLECTION_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:help me|i want to|can we) "
+        r"(?:think|reflect|talk|work) (?:this |it )?through\b"
+    ),
+    re.compile(r"\bthink (?:this|it) through with me\b"),
+    re.compile(r"\bhelp me understand why\b"),
+    re.compile(r"\bhelp me reflect (?:on|about)\b"),
+)
+
+_LOCAL_BEHAVIORAL_INTERVENTION_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\bhelp me (?:design|build|make|set up) "
+        r"(?:a |an |one )?(?:plan|change|experiment|tracker|protocol)\b"
+    ),
+    re.compile(r"\b(?:run|design|track) (?:a |an )?(?:experiment|change|intervention)\b"),
+    re.compile(r"\btrack whether (?:it|this|the change) helps\b"),
+)
+
+_LOCAL_DECLINES_QUESTIONS_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(?:do not|don't) ask (?:me )?(?:any |further )?questions\b"),
+    re.compile(r"\bwithout asking (?:me )?(?:a |any )?questions?\b"),
+)
+
 
 def _matched_codes(
     text: str, rules: tuple[tuple[str, re.Pattern[str]], ...]
@@ -721,6 +804,7 @@ def _select_mode(
 
 def _select_closure(
     mode: ResponseMode,
+    interaction: Interaction,
     text: str,
     signals: ResponsePolicySignalsV0_2,
     safety_assessment: SafetyAssessmentV0_2,
@@ -743,6 +827,12 @@ def _select_closure(
         ):
             return Closure.SAFETY_ACTION
         return Closure.COMPLETE
+
+    if interaction is Interaction.GUIDED_REFLECTION:
+        return Closure.GUIDED_REFLECTION
+
+    if interaction is Interaction.BEHAVIORAL_INTERVENTION:
+        return Closure.CONSENTED_COACHING
 
     if mode is ResponseMode.TECHNICAL:
         if signals.technical_procedure_requested is True:
@@ -781,6 +871,89 @@ def _select_closure(
     ):
         return Closure.EXPLICIT_NEXT_STEP
     return Closure.COMPLETE
+
+
+def _trusted_or_local(
+    trusted: bool | None,
+    detected: bool,
+) -> bool:
+    if trusted is not None:
+        return trusted
+    return detected
+
+
+def _select_interaction(
+    mode: ResponseMode,
+    text: str,
+    signals: ResponsePolicySignalsV0_2,
+    application_gate: GateState,
+) -> tuple[Interaction, QuestionPolicy, tuple[str, ...], bool]:
+    if mode is ResponseMode.HIGH_STAKES:
+        return (
+            Interaction.DIRECT,
+            QuestionPolicy.NOT_APPLICABLE,
+            ("high_stakes_forces_direct",),
+            False,
+        )
+    if application_gate is not GateState.PASS:
+        return (
+            Interaction.DIRECT,
+            QuestionPolicy.NOT_APPLICABLE,
+            ("fm_application_boundary_forces_direct",),
+            False,
+        )
+
+    declines_questions = _trusted_or_local(
+        signals.user_declines_questions,
+        _matches_any(text, _LOCAL_DECLINES_QUESTIONS_RULES),
+    )
+    direct = _trusted_or_local(
+        signals.direct_response_requested,
+        _matches_any(text, _LOCAL_DIRECT_RESPONSE_RULES),
+    )
+    intervention = _trusted_or_local(
+        signals.behavioral_intervention_requested,
+        _matches_any(text, _LOCAL_BEHAVIORAL_INTERVENTION_RULES),
+    )
+    reflection = _trusted_or_local(
+        signals.guided_reflection_requested,
+        _matches_any(text, _LOCAL_GUIDED_REFLECTION_RULES),
+    )
+
+    if direct:
+        return (
+            Interaction.DIRECT,
+            QuestionPolicy.NOT_APPLICABLE,
+            ("direct_response_requested",),
+            False,
+        )
+    if intervention:
+        return (
+            Interaction.BEHAVIORAL_INTERVENTION,
+            QuestionPolicy.NOT_APPLICABLE,
+            ("behavioral_intervention_requested",),
+            True,
+        )
+    if reflection:
+        reasons = ["guided_reflection_requested"]
+        if declines_questions:
+            reasons.append("user_declined_questions")
+        return (
+            Interaction.GUIDED_REFLECTION,
+            (
+                QuestionPolicy.FORBIDDEN
+                if declines_questions
+                else QuestionPolicy.OPTIONAL_ONE_NON_LEADING
+            ),
+            tuple(sorted(reasons)),
+            False,
+        )
+    return (
+        Interaction.DIRECT,
+        QuestionPolicy.NOT_APPLICABLE,
+        ("direct_default",),
+        False,
+    )
 
 
 def _default_fm_level(
@@ -902,12 +1075,20 @@ def decide_response_policy_v0_2(
     mode, high_stakes_gate, mode_reasons = _select_mode(
         text, trusted, safety_assessment, local_high_stakes
     )
-    closure = _select_closure(
-        mode, text, trusted, safety_assessment, local_high_stakes
-    )
     default_fm = _default_fm_level(mode, trusted)
     application_gate, application_reasons = _application_gate(
         high_stakes_gate, local_boundaries, trusted
+    )
+    interaction, question_policy, interaction_reasons, fm_ir_020_eligible = (
+        _select_interaction(mode, text, trusted, application_gate)
+    )
+    closure = _select_closure(
+        mode,
+        interaction,
+        text,
+        trusted,
+        safety_assessment,
+        local_high_stakes,
     )
 
     fm_gate_reasons = list(application_reasons)
@@ -944,8 +1125,12 @@ def decide_response_policy_v0_2(
         conversation_sha256=request.conversation_sha256,
         safety_assessment_sha256=safety_assessment.assessment_sha256,
         response_mode=mode,
+        interaction=interaction,
+        question_policy=question_policy,
         closure=closure,
         mode_reasons=tuple(sorted(set(reasons))),
+        interaction_reasons=tuple(sorted(set(interaction_reasons))),
+        fm_ir_020_eligible=fm_ir_020_eligible,
         high_stakes_gate=high_stakes_gate,
         fm_application_gate=application_gate,
         fm_default_level=default_fm,
@@ -1034,6 +1219,8 @@ __all__ = [
     "ConversationRole",
     "FMLevel",
     "GateState",
+    "Interaction",
+    "QuestionPolicy",
     "ResponseMode",
     "ResponsePolicyContractError",
     "ResponsePolicyConversationMessageV0_2",

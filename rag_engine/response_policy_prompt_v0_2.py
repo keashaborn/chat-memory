@@ -17,12 +17,15 @@ from rag_engine.response_policy_v0_2 import (
     POLICY_VERSION,
     Closure,
     FMLevel,
+    Interaction,
+    QuestionPolicy,
     ResponseMode,
     ResponsePolicyDecisionV0_2,
 )
 
 
 RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_2"
+RESPONSE_INTERACTION_VERSION = "response_interaction_v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
@@ -61,8 +64,15 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     safety_assessment_sha256: str
     decision_sha256: str
     response_mode: ResponseMode
+    interaction_version: Literal["response_interaction_v1"] = (
+        RESPONSE_INTERACTION_VERSION
+    )
+    interaction: Interaction
+    question_policy: QuestionPolicy
     fm_effective_level: FMLevel
     closure: Closure
+    interaction_instruction_sha256: str
+    closure_instruction_sha256: str
     content: str = Field(min_length=1, repr=False)
     content_sha256: str
     estimated_tokens: int = Field(ge=1)
@@ -73,6 +83,8 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
         "conversation_sha256",
         "safety_assessment_sha256",
         "decision_sha256",
+        "interaction_instruction_sha256",
+        "closure_instruction_sha256",
         "content_sha256",
     )
     @classmethod
@@ -94,6 +106,14 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
             raise ValueError("response-policy content hash mismatch")
         if self.estimated_tokens != _tokens(self.content):
             raise ValueError("response-policy token estimate mismatch")
+        if self.interaction_instruction_sha256 != _content_sha256(
+            _interaction_instruction(self.interaction, self.question_policy)
+        ):
+            raise ValueError("interaction instruction hash mismatch")
+        if self.closure_instruction_sha256 != _content_sha256(
+            _CLOSURE_INSTRUCTIONS[self.closure]
+        ):
+            raise ValueError("closure instruction hash mismatch")
         return self
 
 _CORE = (
@@ -139,11 +159,10 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
     ),
     ResponseMode.COACHING: (
         "Use low-shame, practical behavioral coaching. Treat patterns as "
-        "revisable behavior rather than fixed identity. Prefer a baseline, an "
-        "operational definition, one plausible reversible change, an observation "
-        "window, adverse indicators, a stop rule, and a review criterion. Obtain "
-        "consent before tracking or intervention. Never run covert experiments "
-        "or make goal attainment a measure of human worth."
+        "revisable behavior rather than fixed identity. Preserve the user's "
+        "stated goals, autonomy, and relevant constraints. Obtain consent before "
+        "any tracking or intervention. Do not make goal attainment a measure of "
+        "human worth. Never run covert experiments."
     ),
     ResponseMode.ORDINARY: (
         "Answer naturally and directly. Do not force philosophy, coaching, a "
@@ -158,6 +177,48 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
         "directly relevant and materially clarifies the answer."
     ),
 }
+
+_INTERACTION_INSTRUCTIONS: dict[Interaction, str] = {
+    Interaction.DIRECT: (
+        "Answer the explicit request directly. Do not force reflective "
+        "exploration, a behavior-change plan, tracking, or an experiment."
+    ),
+    Interaction.GUIDED_REFLECTION: (
+        "The user asked for guided reflection, not an intervention plan. In one "
+        "or two sentences, synthesize only relevant user-provided material. "
+        "Do not steer toward a predetermined conclusion. Do not prescribe "
+        "planning, experiments, tracking, measurement, review periods, or stop "
+        "conditions."
+    ),
+    Interaction.BEHAVIORAL_INTERVENTION: (
+        "The user explicitly requested practical change design. Use a consented, "
+        "reversible, proportionate sequence: define the target, one plausible "
+        "change, an observation window, adverse indicators, a stop rule, and a "
+        "review criterion. Never run covert experiments or overclaim causality."
+    ),
+}
+
+_QUESTION_POLICY_INSTRUCTIONS: dict[QuestionPolicy, str] = {
+    QuestionPolicy.FORBIDDEN: (
+        "The user declined questions. Ask none; concise synthesis alone is the "
+        "complete response."
+    ),
+    QuestionPolicy.OPTIONAL_ONE_NON_LEADING: (
+        "When materially useful, ask zero or one non-leading question that "
+        "surfaces a criterion, alternative, constraint, assumption, or tradeoff. "
+        "A question is not required."
+    ),
+    QuestionPolicy.NOT_APPLICABLE: "",
+}
+
+
+def _interaction_instruction(
+    interaction: Interaction,
+    question_policy: QuestionPolicy,
+) -> str:
+    base = _INTERACTION_INSTRUCTIONS[interaction]
+    question = _QUESTION_POLICY_INSTRUCTIONS[question_policy]
+    return f"{base} {question}".strip()
 
 
 _CLOSURE_INSTRUCTIONS: dict[Closure, str] = {
@@ -182,6 +243,11 @@ _CLOSURE_INSTRUCTIONS: dict[Closure, str] = {
     Closure.CONSENTED_COACHING: (
         "The user has consented to coaching or tracking. State the agreed small "
         "change and measurement plainly, including review and stop conditions."
+    ),
+    Closure.GUIDED_REFLECTION: (
+        "End immediately after the concise synthesis or optional single question. "
+        "Do not add an answer offer, next-step menu, plan, exercise, or second "
+        "question."
     ),
     Closure.SAFETY_ACTION: (
         "Include the concrete safety action warranted now. Do not end with an "
@@ -213,10 +279,15 @@ def render_response_policy_prompt_v0_2(
             "philosophical question from selected canonical material."
         ),
     }[verified.fm_effective_level]
+    interaction_instruction = _interaction_instruction(
+        verified.interaction,
+        verified.question_policy,
+    )
     content = "\n".join(
         (
             _CORE,
             _MODE_INSTRUCTIONS[verified.response_mode],
+            interaction_instruction,
             fm_line,
             _CLOSURE_INSTRUCTIONS[verified.closure],
         )
@@ -230,8 +301,16 @@ def render_response_policy_prompt_v0_2(
         safety_assessment_sha256=verified.safety_assessment_sha256,
         decision_sha256=verified.decision_sha256,
         response_mode=verified.response_mode,
+        interaction=verified.interaction,
+        question_policy=verified.question_policy,
         fm_effective_level=verified.fm_effective_level,
         closure=verified.closure,
+        interaction_instruction_sha256=_content_sha256(
+            interaction_instruction
+        ),
+        closure_instruction_sha256=_content_sha256(
+            _CLOSURE_INSTRUCTIONS[verified.closure]
+        ),
         content=content,
         content_sha256=_content_sha256(content),
         estimated_tokens=_tokens(content),
@@ -240,6 +319,7 @@ def render_response_policy_prompt_v0_2(
 
 __all__ = [
     "RESPONSE_POLICY_PROMPT_VERSION",
+    "RESPONSE_INTERACTION_VERSION",
     "ResponsePolicyPromptError",
     "ResponsePolicyPromptV0_2",
     "render_response_policy_prompt_v0_2",

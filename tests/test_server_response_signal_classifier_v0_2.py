@@ -49,6 +49,10 @@ def output(**updates: Any) -> dict[str, Any]:
         "user_fm_opt_out": False,
         "technical_procedure_requested": False,
         "coaching_consent": False,
+        "direct_response_requested": False,
+        "guided_reflection_requested": False,
+        "behavioral_intervention_requested": False,
+        "user_declines_questions": False,
         "material_clarification_required": False,
         "explicit_next_step_requested": False,
     }

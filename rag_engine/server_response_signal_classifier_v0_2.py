@@ -96,6 +96,10 @@ class _DomainRiskModelOutput(BaseModel):
     user_fm_opt_out: bool
     technical_procedure_requested: bool
     coaching_consent: bool
+    direct_response_requested: bool = False
+    guided_reflection_requested: bool = False
+    behavioral_intervention_requested: bool = False
+    user_declines_questions: bool = False
     material_clarification_required: bool
     explicit_next_step_requested: bool
 
@@ -273,6 +277,15 @@ A direct informational request about Fractal Monism is not domain risk by itself
 Set technical only for concrete computing, code, infrastructure, or device work.
 Set fm_explicit only when the user explicitly asks about or requests Fractal Monism.
 Set coaching for user-requested behavior change, tracking, planning, or habit work.
+Set direct_response_requested when the user explicitly requests a direct answer
+or recommendation. Set guided_reflection_requested when the user asks to think
+or reflect something through without asking for a plan. Set
+behavioral_intervention_requested only for an explicit request to design a
+change, plan, experiment, tracker, measurement, or intervention. Set
+user_declines_questions when the user explicitly asks not to be questioned.
+These interaction signals are independent of technical, FM, and coaching mode.
+Direct response takes precedence over intervention, which takes precedence over
+guided reflection. High-stakes and controlling domain policy remain authoritative.
 ordinary_fm_relevant may be true only when one subtle perspective shift would be
 directly relevant outside high-stakes or technical work. user_fm_opt_out is true
 when the user asks not to use Fractal Monism. The remaining booleans describe
@@ -539,6 +552,16 @@ def _signals_from_model(output: _DomainRiskModelOutput) -> ResponsePolicySignals
             True if output.technical_procedure_requested else None
         ),
         coaching_consent=True if output.coaching_consent else None,
+        direct_response_requested=(
+            True if output.direct_response_requested else None
+        ),
+        guided_reflection_requested=(
+            True if output.guided_reflection_requested else None
+        ),
+        behavioral_intervention_requested=(
+            True if output.behavioral_intervention_requested else None
+        ),
+        user_declines_questions=True if output.user_declines_questions else None,
         material_clarification_required=(
             True if output.material_clarification_required else None
         ),

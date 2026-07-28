@@ -35,6 +35,7 @@ from rag_engine.response_policy_prompt_v0_2 import (
 )
 from rag_engine.response_policy_v0_2 import (
     FMLevel,
+    Interaction,
     ResponseMode,
     ResponsePolicyDecisionV0_2,
     ResponsePolicyInputV0_2,
@@ -314,6 +315,10 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     policy_prompt_sha256: str
     search_capability_manifest_sha256: str | None = None
     response_mode: ResponseMode
+    interaction_version: str
+    interaction: Interaction
+    interaction_instruction_sha256: str
+    closure_instruction_sha256: str
     fm_level: FMLevel
     system_prompt_sha256: str
     system_prompt_bytes: int = Field(ge=1)
@@ -351,6 +356,8 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "policy_decision_sha256",
         "policy_prompt_sha256",
         "search_capability_manifest_sha256",
+        "interaction_instruction_sha256",
+        "closure_instruction_sha256",
         "system_prompt_sha256",
         "memory_assembly_input_sha256",
         "memory_application_manifest_sha256",
@@ -460,6 +467,16 @@ class AssembledPromptV1(_StrictFrozenModel):
                 else None,
             ),
             (manifest.response_mode, decision.response_mode),
+            (manifest.interaction_version, prompt.interaction_version),
+            (manifest.interaction, decision.interaction),
+            (
+                manifest.interaction_instruction_sha256,
+                prompt.interaction_instruction_sha256,
+            ),
+            (
+                manifest.closure_instruction_sha256,
+                prompt.closure_instruction_sha256,
+            ),
             (manifest.fm_level, decision.fm_effective_level),
             (manifest.system_prompt_sha256, _text_sha256(self.system_prompt)),
             (manifest.system_prompt_bytes, system_bytes),
@@ -564,6 +581,8 @@ def _decision_prompt_bindings_match(
             prompt.safety_assessment_sha256 == decision.safety_assessment_sha256,
             prompt.decision_sha256 == decision.decision_sha256,
             prompt.response_mode is decision.response_mode,
+            prompt.interaction is decision.interaction,
+            prompt.question_policy is decision.question_policy,
             prompt.fm_effective_level is decision.fm_effective_level,
             prompt.closure is decision.closure,
         )
@@ -999,6 +1018,12 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             else None
         ),
         "response_mode": decision.response_mode,
+        "interaction_version": policy_prompt.interaction_version,
+        "interaction": decision.interaction,
+        "interaction_instruction_sha256": (
+            policy_prompt.interaction_instruction_sha256
+        ),
+        "closure_instruction_sha256": policy_prompt.closure_instruction_sha256,
         "fm_level": decision.fm_effective_level,
         "system_prompt_sha256": _text_sha256(system_prompt),
         "system_prompt_bytes": system_bytes,

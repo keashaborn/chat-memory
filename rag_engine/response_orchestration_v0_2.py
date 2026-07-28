@@ -54,7 +54,7 @@ TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_2"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_2"
 )
-SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_2"
+SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_3"
 ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_2"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
@@ -334,6 +334,11 @@ class SanitizedResponseShadowTraceV0_2(_StrictFrozenModel):
     occurred_at: datetime
     correlation_id: UUID
     response_mode: str
+    interaction_version: str
+    interaction: str
+    interaction_reason_codes: tuple[str, ...]
+    interaction_instruction_sha256: str
+    closure_instruction_sha256: str
     closure: str
     high_stakes_gate: str
     safety_action_required: bool
@@ -357,7 +362,11 @@ class SanitizedResponseShadowTraceV0_2(_StrictFrozenModel):
             raise ValueError("shadow trace time must be timezone-aware")
         return value.astimezone(timezone.utc)
 
-    @field_validator("trace_sha256")
+    @field_validator(
+        "trace_sha256",
+        "interaction_instruction_sha256",
+        "closure_instruction_sha256",
+    )
     @classmethod
     def hash_shape(cls, value: str) -> str:
         if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
@@ -367,6 +376,7 @@ class SanitizedResponseShadowTraceV0_2(_StrictFrozenModel):
     @field_validator(
         "safety_reason_codes",
         "mode_reason_codes",
+        "interaction_reason_codes",
         "fm_gate_reason_codes",
         "ignored_legacy_request_fields",
     )
@@ -442,6 +452,26 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             raise ValueError("trusted plan signals differ from prompt assembly")
         expected_trace_values = (
             (self.shadow_trace.response_mode, self.policy_decision.response_mode.value),
+            (
+                self.shadow_trace.interaction_version,
+                self.policy_prompt.interaction_version,
+            ),
+            (
+                self.shadow_trace.interaction,
+                self.policy_decision.interaction.value,
+            ),
+            (
+                self.shadow_trace.interaction_reason_codes,
+                tuple(sorted(self.policy_decision.interaction_reasons)),
+            ),
+            (
+                self.shadow_trace.interaction_instruction_sha256,
+                self.policy_prompt.interaction_instruction_sha256,
+            ),
+            (
+                self.shadow_trace.closure_instruction_sha256,
+                self.policy_prompt.closure_instruction_sha256,
+            ),
             (self.shadow_trace.closure, self.policy_decision.closure.value),
             (
                 self.shadow_trace.high_stakes_gate,
@@ -578,6 +608,15 @@ def _shadow_trace(
         "occurred_at": occurred_at,
         "correlation_id": correlation_id,
         "response_mode": decision.response_mode.value,
+        "interaction_version": assembled.source_request.policy_prompt.interaction_version,
+        "interaction": decision.interaction.value,
+        "interaction_reason_codes": tuple(sorted(decision.interaction_reasons)),
+        "interaction_instruction_sha256": (
+            assembled.source_request.policy_prompt.interaction_instruction_sha256
+        ),
+        "closure_instruction_sha256": (
+            assembled.source_request.policy_prompt.closure_instruction_sha256
+        ),
         "closure": decision.closure.value,
         "high_stakes_gate": decision.high_stakes_gate.value,
         "safety_action_required": (
