@@ -103,6 +103,63 @@ AND encode(
       'hex'
     )=evidence.content_sha256
 """
+CONTEXT_READY_CANDIDATES_CTE_SQL = f"""
+WITH context_ready_jobs AS (
+  SELECT job.*,
+         evidence.metadata->>'source_id' AS source_id,
+         evidence.metadata->>'source_content_sha256' AS source_content_sha256,
+         evidence.metadata->>'source_char_start' AS source_char_start,
+         evidence.metadata->>'source_char_end' AS source_char_end,
+         EXISTS (
+           SELECT 1
+           FROM memory.evidence_extraction_job AS sibling
+           JOIN memory.evidence AS sibling_evidence
+             ON sibling_evidence.owner_user_id=sibling.owner_user_id
+            AND sibling_evidence.evidence_id=sibling.evidence_id
+           WHERE sibling.owner_user_id=job.owner_user_id
+             AND sibling.route=job.route
+             AND sibling.job_id<>job.job_id
+             AND sibling.status IN ('review_required','completed','skipped')
+             AND sibling.created_at>=job.created_at
+             AND sibling_evidence.metadata->>'source_id'
+                 =evidence.metadata->>'source_id'
+             AND sibling_evidence.metadata->>'source_content_sha256'
+                 =evidence.metadata->>'source_content_sha256'
+             AND sibling_evidence.metadata->>'source_char_start'
+                 =evidence.metadata->>'source_char_start'
+             AND sibling_evidence.metadata->>'source_char_end'
+                 =evidence.metadata->>'source_char_end'
+         ) AS has_same_or_newer_terminal_sibling
+  FROM memory.evidence_extraction_job AS job
+  JOIN memory.evidence AS evidence
+    ON evidence.owner_user_id=job.owner_user_id
+   AND evidence.evidence_id=job.evidence_id
+  JOIN public.chat_log AS source
+    ON source.owner_user_id=job.owner_user_id
+   AND source.id=CASE
+         WHEN evidence.metadata->>'source_id'
+           ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+         THEN (evidence.metadata->>'source_id')::uuid
+         ELSE NULL
+       END
+  WHERE job.owner_user_id=$1
+    AND job.route='relational_extraction'
+    AND job.status IN ('pending','error')
+    AND job.attempts<$2
+    AND ($3::text IS NULL OR job.selector_version=$3)
+    AND job.available_at<=clock_timestamp()
+    AND {CONTEXT_READY_PREDICATE_SQL}
+),
+ranked_context_ready_jobs AS (
+  SELECT context_ready_jobs.*,
+         row_number() OVER (
+           PARTITION BY owner_user_id,source_id,source_content_sha256,
+                        source_char_start,source_char_end
+           ORDER BY created_at DESC,priority,available_at,job_id
+         ) AS source_envelope_ordinal
+  FROM context_ready_jobs
+)
+"""
 
 
 def sha256_text(value: str) -> str:
@@ -246,59 +303,47 @@ async def plan_owner(
                 selector_version,
             )
         )
-        context_ready_count = int(
-            await conn.fetchval(
-                f"""
-                SELECT count(*)
-                FROM memory.evidence_extraction_job AS job
-                JOIN memory.evidence AS evidence
-                  ON evidence.owner_user_id=job.owner_user_id
-                 AND evidence.evidence_id=job.evidence_id
-                JOIN public.chat_log AS source
-                  ON source.owner_user_id=job.owner_user_id
-                 AND source.id=CASE
-                       WHEN evidence.metadata->>'source_id'
-                         ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-                       THEN (evidence.metadata->>'source_id')::uuid
-                       ELSE NULL
-                     END
-                WHERE job.owner_user_id=$1
-                  AND job.route='relational_extraction'
-                  AND job.status IN ('pending','error')
-                  AND job.attempts<$2
-                  AND ($3::text IS NULL OR job.selector_version=$3)
-                  AND job.available_at<=clock_timestamp()
-                  AND {CONTEXT_READY_PREDICATE_SQL}
-                """,
-                owner,
-                max_attempts,
-                selector_version,
-            )
+        context_stats = await conn.fetchrow(
+            f"""
+            {CONTEXT_READY_CANDIDATES_CTE_SQL}
+            SELECT count(*)::integer AS raw_context_ready_count,
+                   count(*) FILTER (
+                     WHERE source_envelope_ordinal=1
+                       AND NOT has_same_or_newer_terminal_sibling
+                   )::integer AS context_ready_count,
+                   (
+                     count(*)-count(*) FILTER (
+                       WHERE source_envelope_ordinal=1
+                     )
+                   )::integer AS context_duplicate_count,
+                   count(*) FILTER (
+                     WHERE has_same_or_newer_terminal_sibling
+                   )::integer AS context_superseded_count
+            FROM ranked_context_ready_jobs
+            """,
+            owner,
+            max_attempts,
+            selector_version,
+        )
+        raw_context_ready_count = int(
+            context_stats["raw_context_ready_count"]
+        )
+        context_ready_count = int(context_stats["context_ready_count"])
+        context_duplicate_count = int(
+            context_stats["context_duplicate_count"]
+        )
+        context_superseded_count = int(
+            context_stats["context_superseded_count"]
         )
         target_row = await conn.fetchrow(
             f"""
-            SELECT job.job_id,job.evidence_id,job.evidence_content_sha256,
-                   job.selector_version,job.status::text AS status,job.attempts
-            FROM memory.evidence_extraction_job AS job
-            JOIN memory.evidence AS evidence
-              ON evidence.owner_user_id=job.owner_user_id
-             AND evidence.evidence_id=job.evidence_id
-            JOIN public.chat_log AS source
-              ON source.owner_user_id=job.owner_user_id
-             AND source.id=CASE
-                   WHEN evidence.metadata->>'source_id'
-                     ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-                   THEN (evidence.metadata->>'source_id')::uuid
-                   ELSE NULL
-                 END
-            WHERE job.owner_user_id=$1
-              AND job.route='relational_extraction'
-              AND job.status IN ('pending','error')
-              AND job.attempts<$2
-              AND ($3::text IS NULL OR job.selector_version=$3)
-              AND job.available_at<=clock_timestamp()
-              AND {CONTEXT_READY_PREDICATE_SQL}
-            ORDER BY job.priority,job.available_at,job.created_at,job.job_id
+            {CONTEXT_READY_CANDIDATES_CTE_SQL}
+            SELECT job_id,evidence_id,evidence_content_sha256,
+                   selector_version,status::text AS status,attempts
+            FROM ranked_context_ready_jobs
+            WHERE source_envelope_ordinal=1
+              AND NOT has_same_or_newer_terminal_sibling
+            ORDER BY priority,available_at,created_at,job_id
             LIMIT 1
             """,
             owner,
@@ -331,9 +376,12 @@ async def plan_owner(
             sha256_text(selector_version) if selector_version is not None else None
         ),
         "eligible_count": eligible_count,
+        "raw_context_ready_count": raw_context_ready_count,
         "context_ready_count": context_ready_count,
+        "context_duplicate_count": context_duplicate_count,
+        "context_superseded_count": context_superseded_count,
         "context_rebind_required_count": max(
-            eligible_count - context_ready_count,
+            eligible_count - raw_context_ready_count,
             0,
         ),
     }

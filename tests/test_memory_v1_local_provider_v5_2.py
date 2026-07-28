@@ -14,6 +14,9 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     _compile_entity_links,
     _credential_packet,
     _deterministic_policy_packet,
+    _example_entity,
+    _example_observation,
+    _literal,
     _packet,
     _structured_result,
 )
@@ -224,11 +227,15 @@ class LocalProviderV52Test(unittest.TestCase):
         ]["predicate"]
         self.assertEqual(
             predicate["enum"],
-            ["life_event.died", "relationship.has_pet"],
+            ["relationship.has_pet"],
         )
         self.assertEqual(
             request.output_schema["properties"]["observations"]["minItems"],
-            2,
+            1,
+        )
+        self.assertIn(
+            "does not by itself prove death",
+            request.instructions,
         )
 
     def test_caregiving_health_source_uses_compact_governed_route(self) -> None:
@@ -775,6 +782,410 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertIn("context_only_pet_name_removed", repairs)
         self.assertIn("pet_relation_normalized", repairs)
+
+    def test_explicit_education_is_completed_deterministically(self) -> None:
+        content = (
+            "Then I went to the forest Institute of professional psychology "
+            "in Springfield, Missouri."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(_packet()),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        education = [
+            item
+            for item in value["observations"]
+            if item["predicate"] == "education.attended"
+        ]
+        self.assertEqual(len(education), 1)
+        observation = education[0]
+        self.assertEqual(
+            entities[observation["subject_entity_ref"]]["entity_type"],
+            "self",
+        )
+        organization = entities[observation["object"]["entity_ref"]]
+        self.assertEqual(organization["entity_type"], "organization")
+        self.assertEqual(
+            organization["name_text"],
+            "forest Institute of professional psychology",
+        )
+        self.assertEqual(
+            observation["source_spans"][0]["quote"],
+            "forest Institute of professional psychology",
+        )
+        self.assertIn(
+            "historical_relationship_ended_before_source",
+            observation["temporal"]["reason_codes"],
+        )
+        self.assertTrue(observation["temporal"]["anchored_to_source_time"])
+        self.assertEqual(
+            observation["temporal"]["instant_range"]["upper"],
+            "2026-07-21T12:00:00.000000Z",
+        )
+        self.assertIn(
+            "trusted_source_time_upper_bound",
+            observation["temporal"]["reason_codes"],
+        )
+        self.assertIn(
+            "explicit_education_observation_completed",
+            repairs,
+        )
+
+    def test_unresolved_caregiving_pronoun_defers_without_self_health(self) -> None:
+        content = (
+            "I cared for her for many years she had a lot of skin and "
+            "allergy issues."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        self_entity = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="self",
+            mention_kind="self_reference",
+            name_text=None,
+            relationship_role="user:self",
+            reason_code="explicit_self_reference",
+        )
+        unresolved_person = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="person",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role="relationship:care_recipient",
+            reason_code="unresolved_pronoun",
+        )
+        caregiving = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="relationship.caregiver_for",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="explicit_recall_only",
+            sensitivity="high",
+            reason_code="reported_caregiving",
+            temporal_semantic="state_validity",
+        )
+        health = _example_observation(
+            content,
+            observation_ref="o01",
+            subject_entity_ref="e00",
+            predicate="health.user_reported_observation",
+            object_value=_literal("text", "skin and allergy issues"),
+            projection_class="supportive_context",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="reported_health_detail",
+            modality="reported_observation",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[self_entity, unresolved_person],
+                    observations=[caregiving, health],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        self.assertEqual(value["observations"], [])
+        self.assertEqual(value["entity_mentions"], [])
+        self.assertEqual(
+            {item["reason_code"] for item in value["deferrals"]},
+            {"context_missing"},
+        )
+        self.assertIn(
+            "unresolved_caregiving_pronoun_deferred",
+            repairs,
+        )
+
+    def test_pet_loss_ends_relationship_without_inventing_death(self) -> None:
+        content = "About two years ago I lost a cat I loved a lot."
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        self_entity = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="self",
+            mention_kind="self_reference",
+            name_text=None,
+            relationship_role="user:self",
+            reason_code="explicit_self_reference",
+        )
+        animal = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="animal",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role="pet:reported",
+            reason_code="reported_pet",
+        )
+        ownership = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="relationship.has_pet",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_pet_relationship",
+            temporal_semantic="state_validity",
+        )
+        invented_death = _example_observation(
+            content,
+            observation_ref="o01",
+            subject_entity_ref="e01",
+            predicate="life_event.died",
+            object_value=_literal("boolean", True),
+            projection_class="direct_claim",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="inferred_from_loss",
+            temporal_semantic="occurrence",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[self_entity, animal],
+                    observations=[ownership, invented_death],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        self.assertEqual(
+            {item["predicate"] for item in value["observations"]},
+            {"relationship.has_pet"},
+        )
+        ownership = value["observations"][0]
+        self.assertIn(
+            "historical_relationship_ended_before_source",
+            ownership["temporal"]["reason_codes"],
+        )
+        self.assertTrue(ownership["temporal"]["anchored_to_source_time"])
+        self.assertEqual(
+            ownership["temporal"]["instant_range"]["upper"],
+            "2026-07-21T12:00:00.000000Z",
+        )
+        self.assertIn(
+            "trusted_source_time_upper_bound",
+            ownership["temporal"]["reason_codes"],
+        )
+        self.assertIn("pet_loss_not_promoted_to_death", repairs)
+        self.assertIn(
+            "pet_relationship_historical_end_normalized",
+            repairs,
+        )
+
+    def test_pet_death_closes_ownership_and_historical_health(self) -> None:
+        content = (
+            "My male German shepherd had a rare blood cancer and died "
+            "a few months later."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        self_entity = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="self",
+            mention_kind="self_reference",
+            name_text=None,
+            relationship_role="user:self",
+            reason_code="explicit_self_reference",
+        )
+        animal = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="animal",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role="pet:reported",
+            reason_code="reported_pet",
+        )
+        ownership = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="relationship.has_pet",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_pet_relationship",
+            temporal_semantic="state_validity",
+        )
+        health = _example_observation(
+            content,
+            observation_ref="o01",
+            subject_entity_ref="e00",
+            predicate="health.user_reported_observation",
+            object_value=_literal("text", "rare blood cancer"),
+            projection_class="supportive_context",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="reported_pet_health",
+            modality="reported_observation",
+        )
+        death = _example_observation(
+            content,
+            observation_ref="o02",
+            subject_entity_ref="e01",
+            predicate="life_event.died",
+            object_value=_literal("boolean", True),
+            projection_class="direct_claim",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="explicit_pet_death",
+            temporal_semantic="occurrence",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[self_entity, animal],
+                    observations=[ownership, health, death],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        by_predicate = {
+            item["predicate"]: item for item in value["observations"]
+        }
+        self.assertEqual(
+            entities[
+                by_predicate["health.user_reported_observation"][
+                    "subject_entity_ref"
+                ]
+            ]["entity_type"],
+            "animal",
+        )
+        self.assertIn(
+            "historical_relationship_ended_before_source",
+            by_predicate["relationship.has_pet"]["temporal"][
+                "reason_codes"
+            ],
+        )
+        self.assertIn(
+            "historical_relationship_ended_before_source",
+            by_predicate["health.user_reported_observation"]["temporal"][
+                "reason_codes"
+            ],
+        )
+        for predicate in (
+            "relationship.has_pet",
+            "health.user_reported_observation",
+        ):
+            temporal_value = by_predicate[predicate]["temporal"]
+            self.assertTrue(temporal_value["anchored_to_source_time"])
+            self.assertEqual(
+                temporal_value["instant_range"]["upper"],
+                "2026-07-21T12:00:00.000000Z",
+            )
+            self.assertIn(
+                "trusted_source_time_upper_bound",
+                temporal_value["reason_codes"],
+            )
+        self.assertEqual(
+            by_predicate["life_event.died"]["temporal"]["semantic"],
+            "occurrence",
+        )
+        self.assertEqual(
+            by_predicate["life_event.died"]["temporal"]["source_form"],
+            "none",
+        )
+        self.assertIn(
+            "pet_death_undated_occurrence_normalized",
+            repairs,
+        )
+
+    def test_third_person_occupation_never_becomes_self_occupation(self) -> None:
+        content = "I talked to Bob Fry who was the president at the time."
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        person = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="person",
+            mention_kind="named",
+            name_text="Bob Fry",
+            relationship_role="person:reported",
+            reason_code="explicit_named_person",
+        )
+        role = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="concept",
+            mention_kind="named",
+            name_text="president",
+            relationship_role="occupation:reported",
+            reason_code="explicit_occupation",
+        )
+        occupation = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="occupation.works_as",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="medium",
+            reason_code="third_person_historical_occupation",
+            temporal_semantic="state_validity",
+        )
+        compiled, _ = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[person, role],
+                    observations=[occupation],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        entities = {
+            item["entity_ref"]: item for item in value["entity_mentions"]
+        }
+        observation = value["observations"][0]
+        self.assertEqual(
+            entities[observation["subject_entity_ref"]]["name_text"],
+            "Bob Fry",
+        )
+        self.assertNotIn(
+            "self",
+            {item["entity_type"] for item in value["entity_mentions"]},
+        )
+        self.assertTrue(observation["temporal"]["anchored_to_source_time"])
+        self.assertEqual(
+            observation["temporal"]["instant_range"]["upper"],
+            "2026-07-21T12:00:00.000000Z",
+        )
+        self.assertIn(
+            "trusted_source_time_upper_bound",
+            observation["temporal"]["reason_codes"],
+        )
 
 
 if __name__ == "__main__":

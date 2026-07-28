@@ -13,6 +13,7 @@ from pathlib import Path
 from scripts.memory_v1_v5_local_inference_scheduler import (
     APPLY_ENABLE_TOKEN,
     CANARY_CONTRACT,
+    CONTEXT_READY_CANDIDATES_CTE_SQL,
     batch_child_run_id,
     canary_command,
     canonical_owners,
@@ -60,6 +61,18 @@ def completed(payload: dict, returncode: int) -> subprocess.CompletedProcess[str
 
 
 def main() -> int:
+    assert "row_number() OVER" in CONTEXT_READY_CANDIDATES_CTE_SQL
+    assert (
+        "sibling.created_at>=job.created_at"
+        in CONTEXT_READY_CANDIDATES_CTE_SQL
+    )
+    assert (
+        "sibling.status IN ('review_required','completed','skipped')"
+        in CONTEXT_READY_CANDIDATES_CTE_SQL
+    )
+    assert "source_content_sha256" in CONTEXT_READY_CANDIDATES_CTE_SQL
+    assert "source_char_start" in CONTEXT_READY_CANDIDATES_CTE_SQL
+    assert "source_char_end" in CONTEXT_READY_CANDIDATES_CTE_SQL
     assert canonical_owners([str(OWNER), str(OWNER)]) == [OWNER]
     assert loopback_dsn("postgresql://user@127.0.0.1:5432/memory") == (
         "postgresql://user@127.0.0.1:5432/memory"

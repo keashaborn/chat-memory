@@ -1849,7 +1849,7 @@ def _personal_context_prompt_predicates(
         predicates.add("education.attended")
     if _PET_CUE_RE.search(content):
         predicates.add("relationship.has_pet")
-        if _PET_DEATH_CUE_RE.search(content):
+        if _PET_EXPLICIT_DEATH_CUE_RE.search(content):
             predicates.add("life_event.died")
         if _PET_SEX_CUE_RE.search(content):
             predicates.add("pet.sex")
@@ -1895,7 +1895,8 @@ def _personal_context_prompt_instructions(
         "relationship.has_pet, preserve owner-to-animal direction. Pet sex, "
         "breed, health details, and death are separate observations about the "
         "animal; death is an undated occurrence unless the source states a "
-        "date. For relationship.caregiver_for, preserve caregiver-to-recipient "
+        "date. The word 'lost' ends the pet relationship but does not by itself "
+        "prove death. For relationship.caregiver_for, preserve caregiver-to-recipient "
         "direction. A third person's stated role uses occupation.works_as and "
         "must not become the user's occupation. Never infer a current state, "
         "date, diagnosis, relationship, name, or attribute not stated by the "
@@ -2015,6 +2016,18 @@ _EDUCATION_ATTENDED_CUE_RE = re.compile(
     r"(?:school|college|university|institute|academy)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_EDUCATION_ATTENDED_RE = re.compile(
+    r"\b(?:i\s+)?(?:went\s+to|attended|studied\s+at|graduated\s+from)\s+"
+    r"(?:the\s+)?(?P<organization>[^\n.!?]{2,240})",
+    re.IGNORECASE,
+)
+_EDUCATION_ORGANIZATION_MARKER_RE = re.compile(
+    r"\b(?:school|college|university|institute|academy)\b",
+    re.IGNORECASE,
+)
+_EDUCATION_LOCATION_SUFFIX_RE = re.compile(
+    r"\s+in\s+[A-Z][^.!?]{0,100}$",
+)
 _PET_CUE_RE = re.compile(
     r"\b(?:my|our)\s+(?:male\s+|female\s+)?"
     r"(?:dog|cat|rabbit|parrot|pet|german\s+shepherd|"
@@ -2027,8 +2040,9 @@ _PET_CUE_RE = re.compile(
     r"(?:(?:a|an|my|our)\s+)?(?:dog|cat|rabbit|parrot|pet)\b",
     re.IGNORECASE,
 )
-_PET_DEATH_CUE_RE = re.compile(
-    r"\b(?:lost|died|dead|passed\s+away|put\s+(?:him|her|it)\s+"
+_PET_LOSS_CUE_RE = re.compile(r"\blost\b", re.IGNORECASE)
+_PET_EXPLICIT_DEATH_CUE_RE = re.compile(
+    r"\b(?:died|dead|passed\s+away|put\s+(?:him|her|it)\s+"
     r"(?:down|to\s+sleep)|euthani[sz]ed)\b",
     re.IGNORECASE,
 )
@@ -2045,6 +2059,11 @@ _PET_BREED_CUE_RE = re.compile(
 _CAREGIVING_CUE_RE = re.compile(
     r"\b(?:care(?:d|s|ing)?\s+for|caregiver\s+(?:for|to)|"
     r"look(?:ed|s|ing)?\s+after|tak(?:e|es|ing|en)\s+care\s+of)\b",
+    re.IGNORECASE,
+)
+_UNRESOLVED_CAREGIVING_PRONOUN_RE = re.compile(
+    r"\b(?:care(?:d|s|ing)?\s+for|look(?:ed|s|ing)?\s+after|"
+    r"tak(?:e|es|ing|en)\s+care\s+of)\s+(?:her|him|them)\b",
     re.IGNORECASE,
 )
 _REPORTED_HEALTH_DETAIL_CUE_RE = re.compile(
@@ -3098,6 +3117,31 @@ def _pet_name(content: str) -> str | None:
     return None
 
 
+def _explicit_education_organization(
+    content: str,
+) -> tuple[str, int, int] | None:
+    for match in _EXPLICIT_EDUCATION_ATTENDED_RE.finditer(content):
+        raw = match.group("organization")
+        if _EDUCATION_ORGANIZATION_MARKER_RE.search(raw) is None:
+            continue
+        location = _EDUCATION_LOCATION_SUFFIX_RE.search(raw)
+        if location is not None:
+            raw = raw[: location.start()]
+        raw = re.split(
+            r"\s+(?:where|which|before|after|and\s+then)\b",
+            raw,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        left_trimmed = len(raw) - len(raw.lstrip())
+        value = raw.strip(" \t\r\n\"'‘’“”.,;:")
+        if not value or len(value) > 200:
+            continue
+        start = match.start("organization") + left_trimmed
+        return value, start, start + len(value)
+    return None
+
+
 def _explicit_self_name_supported(content: str, value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -3841,6 +3885,27 @@ def _relationship_v5_1_temporal(
     }
 
 
+def _historical_state_before_source_temporal(
+    source: TrustedExtractionSource,
+) -> dict[str, Any]:
+    value = _relationship_v5_1_temporal(
+        source,
+        temporal_profile="active_interval",
+        historical_end=True,
+    )
+    if value["basis"] == "instant" and value["instant_range"] is not None:
+        value["anchored_to_source_time"] = True
+        value["instant_range"]["upper"] = source.source_recorded_at
+        if (
+            "trusted_source_time_upper_bound"
+            not in value["reason_codes"]
+        ):
+            value["reason_codes"].append(
+                "trusted_source_time_upper_bound"
+            )
+    return value
+
+
 def _relationship_v5_1_complete_explicit_assertions(
     source: TrustedExtractionSource,
     entities: list[dict[str, Any]],
@@ -4064,6 +4129,52 @@ def _compile_entity_links(
             if not observations:
                 value["entity_mentions"] = []
                 entities = value["entity_mentions"]
+    if _UNRESOLVED_CAREGIVING_PRONOUN_RE.search(content) and not any(
+        item.get("entity_type") in {"person", "animal"}
+        and isinstance(item.get("name_text"), str)
+        and bool(item["name_text"].strip())
+        for item in entities
+    ):
+        unresolved_refs = {
+            item["observation_ref"]
+            for item in observations
+            if item["predicate"] in {
+                "relationship.caregiver_for",
+                "health.user_reported_observation",
+            }
+        }
+        if unresolved_refs:
+            observations[:] = [
+                item
+                for item in observations
+                if item["observation_ref"] not in unresolved_refs
+            ]
+            value["comparison_hints"] = [
+                item
+                for item in value["comparison_hints"]
+                if item["observation_ref"] not in unresolved_refs
+            ]
+            value["deferrals"] = [
+                item
+                for item in value["deferrals"]
+                if item["reason_code"]
+                not in {
+                    "insufficient_evidence",
+                    "sensitive_manual_review",
+                    "entity_resolution_unresolved",
+                }
+            ]
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="context_missing",
+                memory_shape="none",
+                source_spans=[_source_span(source)],
+                sensitivity="high",
+            )
+            repairs.append("unresolved_caregiving_pronoun_deferred")
+            if not observations:
+                value["entity_mentions"] = []
+                entities = value["entity_mentions"]
     predicates = {item["predicate"] for item in observations}
     original_global_insufficient_ids = {
         id(item)
@@ -4082,7 +4193,9 @@ def _compile_entity_links(
         _FIRST_PERSON_RE.search(content)
         and (
             occupation_matches
+            or _explicit_education_organization(content) is not None
             or "occupation.works_as" in predicates
+            or "education.attended" in predicates
             or "relationship.has_pet" in predicates
             or "relationship.parent_of" in predicates
             or "relationship.sibling_of" in predicates
@@ -4109,6 +4222,85 @@ def _compile_entity_links(
             relationship_role="user:self",
         )
         repairs.append("self_entity_link")
+
+    education = _explicit_education_organization(content)
+    if self_ref is not None and education is not None:
+        organization_name, organization_start, organization_end = education
+        education_indexes = [
+            index
+            for index, item in enumerate(observations)
+            if item["predicate"] == "education.attended"
+        ]
+        removed_education_refs = {
+            observations[index]["observation_ref"]
+            for index in education_indexes
+        }
+        observations[:] = [
+            item
+            for index, item in enumerate(observations)
+            if index not in set(education_indexes)
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in removed_education_refs
+        ]
+        organization_key = organization_name.casefold()
+        organizations = [
+            item
+            for item in entities
+            if item["entity_type"] == "organization"
+            and isinstance(item.get("name_text"), str)
+            and item["name_text"].strip().casefold() == organization_key
+        ]
+        if not organizations:
+            organization_ref = _add_compiler_entity(
+                source,
+                entities,
+                entity_type="organization",
+                name_text=organization_name,
+                relationship_role="education:institution",
+            )
+        else:
+            organization_ref = organizations[0]["entity_ref"]
+        observations.append(
+            {
+                "extraction_confidence": 0.98,
+                "modality": "asserted",
+                "object": {
+                    "kind": "entity",
+                    "entity_ref": organization_ref,
+                },
+                "observation_ref": _next_observation_ref(observations),
+                "polarity": "affirmed",
+                "predicate": "education.attended",
+                "projection_class": "direct_claim",
+                "reason_codes": ["explicit_education_attendance"],
+                "sensitivity": "medium",
+                "source_spans": [
+                    {
+                        "start": organization_start,
+                        "end": organization_end,
+                        "quote": content[
+                            organization_start:organization_end
+                        ],
+                    }
+                ],
+                "subject_entity_ref": self_ref,
+                "surface_policy": "direct_or_relevant",
+                "temporal": _historical_state_before_source_temporal(
+                    source
+                ),
+            }
+        )
+        predicates.add("education.attended")
+        repairs.append(
+            (
+                "explicit_education_observation_canonicalized"
+                if education_indexes
+                else "explicit_education_observation_completed"
+            )
+        )
 
     if self_ref is not None and occupation_matches:
         occupation_indexes = [
@@ -4289,6 +4481,7 @@ def _compile_entity_links(
                 "identity.name",
                 "identity.name_canonical",
                 "life_event.died",
+                "health.user_reported_observation",
             }:
                 observation["subject_entity_ref"] = animal_ref
             if predicate == "relationship.has_pet" and self_ref is not None:
@@ -4305,6 +4498,28 @@ def _compile_entity_links(
                         )
                         repairs.append("pet_hearing_status_normalized")
                         break
+        if (
+            _PET_LOSS_CUE_RE.search(content)
+            and not _PET_EXPLICIT_DEATH_CUE_RE.search(content)
+        ):
+            unsupported_death_refs = {
+                item["observation_ref"]
+                for item in observations
+                if item["predicate"] == "life_event.died"
+            }
+            if unsupported_death_refs:
+                observations[:] = [
+                    item
+                    for item in observations
+                    if item["observation_ref"] not in unsupported_death_refs
+                ]
+                value["comparison_hints"] = [
+                    item
+                    for item in value["comparison_hints"]
+                    if item["observation_ref"]
+                    not in unsupported_death_refs
+                ]
+                repairs.append("pet_loss_not_promoted_to_death")
         repairs.append("pet_relation_normalized")
 
     entity_roles = {
@@ -4528,6 +4743,58 @@ def _compile_entity_links(
             repairs.append("duplicate_relationship_observations_removed")
 
         predicates = {item["predicate"] for item in observations}
+
+    if pet_source and (
+        _PET_LOSS_CUE_RE.search(content)
+        or _PET_EXPLICIT_DEATH_CUE_RE.search(content)
+    ):
+        pet_entity_types = {
+            item["entity_ref"]: item["entity_type"] for item in entities
+        }
+        for observation in observations:
+            if observation["predicate"] == "relationship.has_pet":
+                observation["temporal"] = (
+                    _historical_state_before_source_temporal(source)
+                )
+                repairs.append("pet_relationship_historical_end_normalized")
+            elif (
+                observation["predicate"] == "life_event.died"
+                and _PET_EXPLICIT_DEATH_CUE_RE.search(content)
+            ):
+                observation["temporal"] = _example_temporal("occurrence")
+                repairs.append("pet_death_undated_occurrence_normalized")
+            elif (
+                observation["predicate"]
+                == "health.user_reported_observation"
+                and pet_entity_types.get(
+                    observation["subject_entity_ref"]
+                )
+                == "animal"
+            ):
+                observation["temporal"] = (
+                    _historical_state_before_source_temporal(source)
+                )
+                repairs.append("pet_health_historical_end_normalized")
+        predicates = {item["predicate"] for item in observations}
+
+    if _THIRD_PERSON_OCCUPATION_CUE_RE.search(content):
+        occupation_entity_types = {
+            item["entity_ref"]: item["entity_type"] for item in entities
+        }
+        for observation in observations:
+            if (
+                observation["predicate"] == "occupation.works_as"
+                and occupation_entity_types.get(
+                    observation["subject_entity_ref"]
+                )
+                == "person"
+            ):
+                observation["temporal"] = (
+                    _historical_state_before_source_temporal(source)
+                )
+                repairs.append(
+                    "third_person_occupation_historical_end_normalized"
+                )
 
     if "relationship.parent_of" in predicates and _PARENT_ROLE_RE.search(content):
         person_ref = _entity_ref(entities, "person")
@@ -4893,6 +5160,20 @@ def _compile_entity_links(
         if len(retained_deferrals) != len(value["deferrals"]):
             value["deferrals"] = retained_deferrals
             repairs.append("redundant_global_insufficient_evidence_removed")
+    elif not observations and any(
+        item["reason_code"] == "context_missing"
+        for item in value["deferrals"]
+    ):
+        retained_deferrals = [
+            item
+            for item in value["deferrals"]
+            if item["reason_code"] != "insufficient_evidence"
+        ]
+        if len(retained_deferrals) != len(value["deferrals"]):
+            value["deferrals"] = retained_deferrals
+            repairs.append(
+                "context_missing_superseded_insufficient_evidence"
+            )
 
     has_project_memory = any(
         item["predicate"].startswith("project.")
