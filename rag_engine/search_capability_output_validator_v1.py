@@ -69,6 +69,19 @@ _OVERBROAD_CAPABILITY_PATTERNS = (
     ),
 )
 
+_SCOPED_LIMITATION_SUFFIX_RE = re.compile(
+    r"""^\s+(?:"""
+    r"""(?:research\s+)?for\s*:?\s*(?:[-*]\s*)?"""
+    r"""(?:unrestricted|general[-\s]?purpose|arbitrary|broad|unsupported|"""
+    r"""user[-\s]?controlled|any\s+(?:site|source))"""
+    r"""|to\s+(?:browse|search|access|retrieve|open)\s+(?:an?\s+)?"""
+    r"""(?:arbitrary|unsupported|unrestricted|any)"""
+    r"""|outside\s+(?:the\s+)?(?:supported|authorized|listed)\s+"""
+    r"""(?:categories|routes|scope)"""
+    r""")\b""",
+    re.IGNORECASE,
+)
+
 
 class SearchCapabilityOutputValidationError(RuntimeError):
     pass
@@ -83,6 +96,15 @@ def _normalize(value: str) -> str:
     )
 
 
+def _has_unscoped_global_denial(answer: str) -> bool:
+    for pattern in _GLOBAL_DENIAL_PATTERNS:
+        for match in pattern.finditer(answer):
+            suffix = answer[match.end() : match.end() + 240]
+            if not _SCOPED_LIMITATION_SUFFIX_RE.match(suffix):
+                return True
+    return False
+
+
 def validate_search_capability_output_v1(
     answer: str,
     manifest: SearchCapabilityManifestV1 | None,
@@ -93,7 +115,7 @@ def validate_search_capability_output_v1(
         return
     SearchCapabilityManifestV1.model_validate_json(manifest.model_dump_json())
     normalized = _normalize(answer)
-    if any(pattern.search(normalized) for pattern in _GLOBAL_DENIAL_PATTERNS):
+    if _has_unscoped_global_denial(normalized):
         raise SearchCapabilityOutputValidationError(
             "search_capability_answer_denies_authorized_access"
         )

@@ -43,6 +43,31 @@ class SearchCapabilityOutputValidatorV1Tests(unittest.TestCase):
         )
         validate_search_capability_output_v1(answer, self.manifest)
 
+    def test_accepts_scoped_negative_capability_wording(self) -> None:
+        answers = (
+            (
+                "I can't use internet research for unrestricted or "
+                "general-purpose browsing, arbitrary webpage retrieval, or "
+                "broad fact-checking outside the supported categories."
+            ),
+            "I cannot search the web for arbitrary pages.",
+            (
+                "I can't use the internet for:\n"
+                "- unrestricted browsing\n"
+                "- arbitrary page retrieval"
+            ),
+            (
+                "I cannot use the internet outside the supported categories "
+                "or routes."
+            ),
+        )
+        for answer in answers:
+            with self.subTest(answer=answer):
+                validate_search_capability_output_v1(
+                    answer,
+                    self.manifest,
+                )
+
     def test_rejects_reported_overbroad_text_answer(self) -> None:
         with self.assertRaisesRegex(
             SearchCapabilityOutputValidationError,
