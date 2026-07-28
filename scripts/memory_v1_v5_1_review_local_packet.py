@@ -429,11 +429,6 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
             row = dict(packet_rows[0])
             packet = _json_value(row["normalized_packet"], "normalized packet")
             _validate_row(row, packet, profile)
-            _validate_extraction_packet(
-                packet,
-                extraction_contract=profile.extraction_contract,
-                registry_version=profile.registry_version,
-            )
             immutable = NormalizedPacket.model_validate(packet).model_dump(mode="json")
             if canonical_sha256(immutable) != row["validator_packet_sha256"]:
                 raise LocalPacketReviewError("validated packet differs from immutable packet")
