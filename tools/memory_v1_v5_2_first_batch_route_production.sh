@@ -226,7 +226,6 @@ timers_quiesced=1
 systemctl stop brains.service
 brains_stopped=1
 
-find /var/run/postgresql -maxdepth 1 -type s -name '.s.PGSQL.*' >/dev/null
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
 
 docker exec "$container" pg_dump -U sage -d "$database" \
