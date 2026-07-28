@@ -23,7 +23,7 @@ DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
 DEFAULT_TTS_SPEED = 1.0
 MAX_TTS_CHARS = 4096
-VOICE_CAPABILITIES_VERSION = "2026-07-26.1"
+VOICE_CAPABILITIES_VERSION = "2026-07-28.1"
 
 TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "gpt-4o-mini-tts": {
@@ -33,7 +33,21 @@ TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
         "supports_instructions": True,
         "default_voice": "marin",
         "recommended_voices": ["marin", "cedar"],
-        "voices": ["marin", "cedar"],
+        "voices": [
+            "alloy",
+            "ash",
+            "ballad",
+            "coral",
+            "echo",
+            "fable",
+            "nova",
+            "onyx",
+            "sage",
+            "shimmer",
+            "verse",
+            "marin",
+            "cedar",
+        ],
     },
 }
 

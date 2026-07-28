@@ -127,7 +127,7 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "invalid_voice_turn_id")
         self.assertEqual(FakeAsyncClient.calls, [])
 
-    def test_capabilities_expose_only_recommended_product_voices(self) -> None:
+    def test_capabilities_expose_authoritative_tts_voice_catalog(self) -> None:
         response = self.client.get(
             "/voice/capabilities",
             headers={"x-vs-actor-user-id": ACTOR},
@@ -137,7 +137,28 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         payload = response.json()["tts"]
         self.assertEqual(payload["default_model"], "gpt-4o-mini-tts")
         self.assertEqual(len(payload["models"]), 1)
-        self.assertEqual(payload["models"][0]["voices"], ["marin", "cedar"])
+        self.assertEqual(
+            payload["models"][0]["voices"],
+            [
+                "alloy",
+                "ash",
+                "ballad",
+                "coral",
+                "echo",
+                "fable",
+                "nova",
+                "onyx",
+                "sage",
+                "shimmer",
+                "verse",
+                "marin",
+                "cedar",
+            ],
+        )
+        self.assertEqual(
+            payload["models"][0]["recommended_voices"],
+            ["marin", "cedar"],
+        )
 
     def test_model_and_speed_are_server_owned(self) -> None:
         response = self.client.post(
@@ -157,13 +178,27 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         self.assertEqual(response.json()["voice"], "cedar")
         self.assertEqual(response.json()["speed"], 1.0)
 
-    def test_rejects_non_product_voice(self) -> None:
+    def test_accepts_supported_non_recommended_voice(self) -> None:
         response = self.client.post(
             "/voice/tts",
             headers={"x-vs-actor-user-id": ACTOR},
             json={
                 "text": "Bounded test phrase.",
                 "voice": "alloy",
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["voice"], "alloy")
+
+    def test_rejects_unknown_voice(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "voice": "unknown",
                 "dry_run": True,
             },
         )
