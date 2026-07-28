@@ -4,9 +4,12 @@ import unittest
 from typing import Any
 
 from rag_engine.response_policy_v0_2 import (
+    Closure,
     ConversationRole,
     FMLevel,
     GateState,
+    Interaction,
+    QuestionPolicy,
     ResponseMode,
     ResponsePolicyConversationMessageV0_2,
     ResponsePolicyInputV0_2,
@@ -49,6 +52,11 @@ def output(**updates: Any) -> dict[str, Any]:
         "user_fm_opt_out": False,
         "technical_procedure_requested": False,
         "coaching_consent": False,
+        "specific_experiment_consent": False,
+        "experiment_reversible_and_proportionate": False,
+        "experiment_measurement_defined": False,
+        "experiment_adverse_indicators_defined": False,
+        "experiment_stop_rule_defined": False,
         "direct_response_requested": False,
         "guided_reflection_requested": False,
         "behavioral_intervention_requested": False,
@@ -363,6 +371,364 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
 
         self.assertIsNone(result.signals.fm_explicit)
         self.assertEqual(decision.response_mode, ResponseMode.FM_EXPLICIT)
+
+    def test_provider_false_interaction_signals_remain_authoritative(self) -> None:
+        client = FakeClient(
+            output(
+                direct_response_requested=False,
+                guided_reflection_requested=True,
+                behavioral_intervention_requested=False,
+                user_declines_questions=False,
+                coaching_consent=False,
+            )
+        )
+        policy_input = request(
+            "Help me think through why I miss my target. Do not help me design "
+            "a plan or track whether it helps."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.direct_response_requested, False)
+        self.assertIs(result.signals.guided_reflection_requested, True)
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+        self.assertIs(result.signals.user_declines_questions, False)
+        self.assertIs(result.signals.coaching_consent, False)
+        self.assertIs(result.signals.specific_experiment_consent, False)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertEqual(decision.closure, Closure.GUIDED_REFLECTION)
+        self.assertFalse(decision.fm_ir_020_eligible)
+
+    def test_frozen_reflection_phrase_overrides_provider_misclassification(self) -> None:
+        client = FakeClient(
+            output(
+                direct_response_requested=True,
+                guided_reflection_requested=False,
+                behavioral_intervention_requested=True,
+            )
+        )
+        policy_input = request(
+            "Help me get unstuck creatively. I want to explore abstract work, "
+            "try a new medium, and blend visual art with storytelling."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.direct_response_requested, False)
+        self.assertIs(result.signals.guided_reflection_requested, True)
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertFalse(decision.intervention_authorized)
+
+    def test_frozen_technical_reflection_phrase_overrides_provider_false(self) -> None:
+        client = FakeClient(
+            output(
+                technical=True,
+                direct_response_requested=False,
+                guided_reflection_requested=False,
+                behavioral_intervention_requested=False,
+            )
+        )
+        policy_input = request(
+            "Ask me one useful question about making this bridge design last. "
+            "I am considering durable low-maintenance materials."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.guided_reflection_requested, True)
+        self.assertEqual(decision.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+
+    def test_ambiguous_provider_false_remains_authoritative(self) -> None:
+        client = FakeClient(output(guided_reflection_requested=False))
+        policy_input = request("I am considering what this tradeoff means.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.guided_reflection_requested, False)
+        self.assertEqual(decision.interaction, Interaction.DIRECT)
+
+    def test_direct_request_precedes_frozen_reflection_phrase(self) -> None:
+        client = FakeClient(
+            output(
+                direct_response_requested=True,
+                guided_reflection_requested=False,
+            )
+        )
+        policy_input = request(
+            "Help me think through the tradeoff, but give me your recommendation."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.direct_response_requested, True)
+        self.assertIs(result.signals.guided_reflection_requested, False)
+        self.assertEqual(decision.interaction, Interaction.DIRECT)
+
+    def test_negated_intervention_does_not_block_frozen_reflection(self) -> None:
+        client = FakeClient(
+            output(
+                direct_response_requested=True,
+                guided_reflection_requested=False,
+                behavioral_intervention_requested=True,
+            )
+        )
+        policy_input = request(
+            "Help me think through why I miss my target. Do not help me design "
+            "a plan or track whether it helps."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.guided_reflection_requested, True)
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+
+    def test_complete_specific_activation_derives_intervention_intent(self) -> None:
+        client = FakeClient(
+            output(
+                coaching=False,
+                coaching_consent=False,
+                specific_experiment_consent=True,
+                behavioral_intervention_requested=False,
+                experiment_reversible_and_proportionate=True,
+                experiment_measurement_defined=True,
+                experiment_adverse_indicators_defined=True,
+                experiment_stop_rule_defined=True,
+            )
+        )
+        policy_input = request(
+            "I accept the proposed one-week reversible behavior-change "
+            "experiment, its measure, adverse indicators, and stop rule."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.coaching, True)
+        self.assertIs(result.signals.coaching_consent, True)
+        self.assertIs(result.signals.behavioral_intervention_requested, True)
+        self.assertEqual(decision.response_mode, ResponseMode.COACHING)
+        self.assertEqual(
+            decision.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertTrue(decision.intervention_authorized)
+        self.assertTrue(decision.fm_ir_020_eligible)
+
+    def test_frozen_activation_derives_explicit_prerequisites(self) -> None:
+        client = FakeClient(output())
+        policy_input = request(
+            "I accept the proposed one-week reversible experiment for starting "
+            "one 25-minute writing block at 9 AM. Record whether I start it. "
+            "If it interferes with a required meeting, stop the experiment."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.specific_experiment_consent, True)
+        self.assertIs(
+            result.signals.experiment_reversible_and_proportionate,
+            True,
+        )
+        self.assertIs(result.signals.experiment_measurement_defined, True)
+        self.assertIs(
+            result.signals.experiment_adverse_indicators_defined,
+            True,
+        )
+        self.assertIs(result.signals.experiment_stop_rule_defined, True)
+        self.assertEqual(
+            decision.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertTrue(decision.intervention_authorized)
+
+    def test_frozen_activation_requires_every_explicit_element(self) -> None:
+        client = FakeClient(output())
+        policy_input = request(
+            "I accept the proposed one-week reversible experiment. "
+            "Record whether I start it."
+        )
+
+        result = classifier(client).classify(policy_input)
+
+        self.assertIs(result.signals.specific_experiment_consent, False)
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+
+    def test_negated_frozen_activation_does_not_authorize(self) -> None:
+        client = FakeClient(output())
+        policy_input = request(
+            "Do not use the agreed reversible experiment, measure, adverse "
+            "indicators, or stop rule."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+        self.assertFalse(decision.intervention_authorized)
+
+    def test_incomplete_specific_activation_does_not_derive_intervention(self) -> None:
+        client = FakeClient(
+            output(
+                specific_experiment_consent=True,
+                behavioral_intervention_requested=False,
+                experiment_reversible_and_proportionate=True,
+                experiment_measurement_defined=True,
+                experiment_adverse_indicators_defined=True,
+                experiment_stop_rule_defined=False,
+            )
+        )
+        policy_input = request("I accept the proposed experiment.")
+
+        result = classifier(client).classify(policy_input)
+
+        self.assertIs(result.signals.behavioral_intervention_requested, False)
+
+    def test_classifier_requires_every_fm_ir_020_prerequisite(self) -> None:
+        client = FakeClient(
+            output(
+                coaching=True,
+                coaching_consent=True,
+                specific_experiment_consent=True,
+                behavioral_intervention_requested=True,
+                experiment_reversible_and_proportionate=True,
+                experiment_measurement_defined=True,
+                experiment_adverse_indicators_defined=True,
+                experiment_stop_rule_defined=True,
+            )
+        )
+        policy_input = request(
+            "I accept the proposed one-week reversible experiment, its measure, "
+            "adverse indicators, and stop rule."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            decision.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertTrue(decision.fm_ir_020_eligible)
+        self.assertEqual(decision.closure, Closure.CONSENTED_COACHING)
+
+    def test_classifier_path_supports_accepted_technical_reflection(self) -> None:
+        client = FakeClient(
+            output(
+                technical=True,
+                guided_reflection_requested=True,
+                behavioral_intervention_requested=False,
+                coaching_consent=False,
+            )
+        )
+        policy_input = request(
+            "Ask me one useful question about making this bridge design last. "
+            "I am considering durable low-maintenance materials, safety "
+            "redundancy, and future loads."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(decision.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertEqual(
+            decision.question_policy,
+            QuestionPolicy.OPTIONAL_ONE_NON_LEADING,
+        )
+        self.assertFalse(decision.fm_ir_020_eligible)
+
+    def test_classifier_path_supports_multi_turn_reflection_continuation(self) -> None:
+        client = FakeClient(
+            output(
+                guided_reflection_requested=True,
+                behavioral_intervention_requested=False,
+                coaching_consent=False,
+            )
+        )
+        policy_input = ResponsePolicyInputV0_2.create(
+            request_id="signal-classifier-reflection-continuation",
+            conversation=(
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.USER,
+                    content="Help me think through whether this goal is still mine.",
+                ),
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.ASSISTANT,
+                    content="You are separating the goal from recognition.",
+                ),
+                ResponsePolicyConversationMessageV0_2(
+                    role=ConversationRole.USER,
+                    content=(
+                        "What matters is whether I would choose it if nobody knew."
+                    ),
+                ),
+            ),
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertEqual(decision.closure, Closure.GUIDED_REFLECTION)
+        self.assertFalse(decision.fm_ir_020_eligible)
 
 
 if __name__ == "__main__":

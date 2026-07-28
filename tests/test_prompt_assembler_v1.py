@@ -151,6 +151,7 @@ def forge_ordinary_decision(
             "fm_effective_level": FMLevel.OFF.value,
             "fm_gate_reasons": ["fm_off_by_default"],
             "user_opt_out_applied": False,
+            "controlling_policy_disposition": "NONE",
         }
     )
     payload["decision_sha256"] = hashlib.sha256(

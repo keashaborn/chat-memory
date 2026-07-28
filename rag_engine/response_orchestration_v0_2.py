@@ -50,17 +50,17 @@ from rag_engine.voice_language_v1 import (
 
 
 TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_2"
-TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_2"
+TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_3"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
-    "trusted_response_policy_signals_envelope_v0_2"
+    "trusted_response_policy_signals_envelope_v0_3"
 )
-SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_3"
-ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_2"
+SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_4"
+ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_3"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
 )
-TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_2 = (
-    "server_response_signal_classifier_v0_2",
+TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_3 = (
+    "server_response_signal_classifier_v0_3",
 )
 
 
@@ -125,7 +125,7 @@ class TrustedPolicySignalsEnvelopeV0_2(_StrictFrozenModel):
     @field_validator("source_components")
     @classmethod
     def exact_source_components(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if value != TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_2:
+        if value != TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_3:
             raise ValueError("policy-signal envelope uses an untrusted source bundle")
         return value
 
@@ -161,7 +161,7 @@ class TrustedPolicySignalsEnvelopeV0_2(_StrictFrozenModel):
         payload: dict[str, Any] = {
             "contract_version": TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,
             "conversation_snapshot_sha256": snapshot.snapshot_sha256,
-            "source_components": TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_2,
+            "source_components": TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_3,
             "signals": verified_signals.model_dump(mode="json"),
         }
         payload["envelope_sha256"] = _sha256(payload)
@@ -788,7 +788,7 @@ __all__ = [
     "ResponseOrchestrationError",
     "SafetyAssessmentProviderV0_2",
     "SanitizedResponseShadowTraceV0_2",
-    "TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_2",
+    "TRUSTED_POLICY_SIGNAL_COMPONENTS_V0_3",
     "TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION",
     "TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2",
     "TrustedPolicySignalsEnvelopeV0_2",

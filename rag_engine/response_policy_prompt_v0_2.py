@@ -24,8 +24,8 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_2"
-RESPONSE_INTERACTION_VERSION = "response_interaction_v1"
+RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_3"
+RESPONSE_INTERACTION_VERSION = "response_interaction_v2"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
@@ -56,7 +56,7 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     contract_version: Literal[RESPONSE_POLICY_PROMPT_VERSION] = (
         RESPONSE_POLICY_PROMPT_VERSION
     )
-    policy_version: Literal["response_policy_v0_2"]
+    policy_version: Literal[POLICY_VERSION]
     request_id: str
     request_sha256: str
     current_message_sha256: str
@@ -64,7 +64,7 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     safety_assessment_sha256: str
     decision_sha256: str
     response_mode: ResponseMode
-    interaction_version: Literal["response_interaction_v1"] = (
+    interaction_version: Literal["response_interaction_v2"] = (
         RESPONSE_INTERACTION_VERSION
     )
     interaction: Interaction
@@ -191,10 +191,14 @@ _INTERACTION_INSTRUCTIONS: dict[Interaction, str] = {
         "conditions."
     ),
     Interaction.BEHAVIORAL_INTERVENTION: (
-        "The user explicitly requested practical change design. Use a consented, "
-        "reversible, proportionate sequence: define the target, one plausible "
-        "change, an observation window, adverse indicators, a stop rule, and a "
-        "review criterion. Never run covert experiments or overclaim causality."
+        "The user explicitly requested practical change design. A request to "
+        "design an intervention is not consent to carry out a specific experiment. "
+        "Only when another policy instruction explicitly confirms consent may you "
+        "state the agreed reversible, proportionate sequence: the target, one "
+        "plausible measurable change, an observation window, adverse indicators, "
+        "a stop rule, and a review criterion. Otherwise present only a proposed "
+        "option and do not describe it as active or agreed. Never run covert "
+        "experiments or overclaim causality."
     ),
 }
 

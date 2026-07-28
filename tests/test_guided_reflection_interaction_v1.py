@@ -2,13 +2,25 @@ from __future__ import annotations
 
 import unittest
 
+from rag_engine.prompt_assembler_v1 import ASSEMBLY_MANIFEST_VERSION
+from rag_engine.response_orchestration_v0_2 import (
+    ORCHESTRATOR_VERSION,
+    SHADOW_TRACE_VERSION,
+    TRUSTED_PLAN_VERSION,
+    TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,
+)
 from rag_engine.response_policy_prompt_v0_2 import (
+    RESPONSE_INTERACTION_VERSION,
+    RESPONSE_POLICY_PROMPT_VERSION,
     render_response_policy_prompt_v0_2,
 )
 from rag_engine.response_policy_v0_2 import (
     Closure,
+    ControllingPolicyDisposition,
     ConversationRole,
     Interaction,
+    POLICY_DECISION_VERSION,
+    POLICY_SIGNALS_VERSION,
     QuestionPolicy,
     ResponseMode,
     ResponsePolicyConversationMessageV0_2,
@@ -127,10 +139,79 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
             result.interaction,
             Interaction.BEHAVIORAL_INTERVENTION,
         )
+        self.assertFalse(result.intervention_authorized)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(result.closure, Closure.COMPLETE)
+        self.assertIn("not consent to carry out", prompt.content)
+        self.assertIn("present only a proposed option", prompt.content)
+        self.assertNotIn("The user has consented", prompt.content)
+
+    def test_specific_experiment_consent_activates_fm_ir_020(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "I consent to the specific proposed one-week tracking "
+                    "experiment and its stop rule.",
+                )
+            ),
+            coaching=True,
+            behavioral_intervention_requested=True,
+            coaching_consent=True,
+            specific_experiment_consent=True,
+            experiment_reversible_and_proportionate=True,
+            experiment_measurement_defined=True,
+            experiment_adverse_indicators_defined=True,
+            experiment_stop_rule_defined=True,
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(
+            result.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertTrue(result.intervention_authorized)
         self.assertTrue(result.fm_ir_020_eligible)
         self.assertEqual(result.closure, Closure.CONSENTED_COACHING)
-        self.assertIn("observation window", prompt.content)
-        self.assertIn("stop rule", prompt.content)
+        self.assertIn(
+            "specific_experiment_consent_confirmed",
+            result.interaction_reasons,
+        )
+        self.assertIn("The user has consented", prompt.content)
+
+    def test_specific_consent_without_all_typed_prerequisites_stays_closed(
+        self,
+    ) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "I consent to the proposed experiment, but we have not "
+                    "defined measurement, adverse indicators, or a stop rule.",
+                )
+            ),
+            behavioral_intervention_requested=True,
+            coaching_consent=True,
+            specific_experiment_consent=True,
+            experiment_reversible_and_proportionate=True,
+            experiment_measurement_defined=False,
+            experiment_adverse_indicators_defined=False,
+            experiment_stop_rule_defined=False,
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(
+            result.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertFalse(result.intervention_authorized)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(result.closure, Closure.COMPLETE)
+        self.assertIn(
+            "fm_ir_020_prerequisites_incomplete",
+            result.interaction_reasons,
+        )
+        self.assertNotIn("The user has consented", prompt.content)
 
     def test_technical_reflection_is_not_reclassified_as_coaching(self) -> None:
         result = decide(
@@ -171,6 +252,57 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
 
         self.assertEqual(result.interaction, Interaction.GUIDED_REFLECTION)
         self.assertFalse(result.fm_ir_020_eligible)
+
+    def test_technical_project_plan_stays_direct(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "Help me design a plan to migrate the backend from "
+                    "PostgreSQL 15 to PostgreSQL 16.",
+                )
+            )
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(result.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(result.interaction, Interaction.DIRECT)
+        self.assertFalse(result.intervention_authorized)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(
+            result.controlling_policy_disposition,
+            ControllingPolicyDisposition.NONE,
+        )
+        self.assertNotIn("behavioral intervention", prompt.content.lower())
+
+    def test_general_intervention_authorization_is_separate_from_fm(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "For my software work, use the already agreed reversible "
+                    "one-week focus experiment, measure, adverse indicators, "
+                    "and stop rule.",
+                )
+            ),
+            technical=True,
+            behavioral_intervention_requested=True,
+            coaching_consent=True,
+            specific_experiment_consent=True,
+            experiment_reversible_and_proportionate=True,
+            experiment_measurement_defined=True,
+            experiment_adverse_indicators_defined=True,
+            experiment_stop_rule_defined=True,
+        )
+
+        self.assertEqual(result.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(
+            result.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertTrue(result.intervention_authorized)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(result.closure, Closure.CONSENTED_COACHING)
 
     def test_multi_turn_reflection_exits_to_direct_advice(self) -> None:
         result = decide(
@@ -229,6 +361,71 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         self.assertEqual(result.question_policy, QuestionPolicy.FORBIDDEN)
         self.assertIn("user_declined_questions", result.interaction_reasons)
 
+    def test_intervention_respects_global_question_refusal(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "Design an experiment for me, but do not ask me any questions.",
+                )
+            )
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(
+            result.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertEqual(result.question_policy, QuestionPolicy.FORBIDDEN)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertIn("user_declined_questions", result.interaction_reasons)
+        self.assertIn("Ask none", prompt.content)
+        self.assertNotIn("The user has consented", prompt.content)
+
+    def test_design_request_without_specific_consent_keeps_gate_closed(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "Help me design a plan. I do not consent to any experiment "
+                    "or tracking yet.",
+                )
+            ),
+            behavioral_intervention_requested=True,
+            coaching_consent=False,
+            specific_experiment_consent=False,
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(
+            result.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(result.closure, Closure.COMPLETE)
+        self.assertIn(
+            "specific_experiment_consent_missing",
+            result.interaction_reasons,
+        )
+        self.assertNotIn("The user has consented", prompt.content)
+
+    def test_negated_intervention_language_does_not_override_reflection(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "Help me think through why I miss my target. Do not help me "
+                    "design a plan or track whether it helps.",
+                )
+            )
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(result.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(result.closure, Closure.GUIDED_REFLECTION)
+        self.assertNotIn("The user has consented", prompt.content)
+
     def test_high_stakes_forces_direct_interaction(self) -> None:
         result = decide(
             request(
@@ -242,7 +439,12 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
 
         self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
         self.assertEqual(result.interaction, Interaction.DIRECT)
+        self.assertFalse(result.intervention_authorized)
         self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(
+            result.controlling_policy_disposition,
+            ControllingPolicyDisposition.DEFER_TO_CONTROLLING_POLICY,
+        )
 
     def test_application_boundary_vetoes_intervention(self) -> None:
         result = decide(
@@ -257,7 +459,12 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
 
         self.assertEqual(result.interaction, Interaction.DIRECT)
+        self.assertFalse(result.intervention_authorized)
         self.assertFalse(result.fm_ir_020_eligible)
+        self.assertEqual(
+            result.controlling_policy_disposition,
+            ControllingPolicyDisposition.FM_APPLICATION_VETO,
+        )
         self.assertIn(
             "fm_application_boundary_forces_direct",
             result.interaction_reasons,
@@ -298,6 +505,99 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         self.assertNotIn(
             "Help me think through the tradeoff.",
             prompt.model_dump_json(exclude={"content"}),
+        )
+
+    def test_all_six_accepted_reflection_prompts_select_reflection(self) -> None:
+        accepted = (
+            "Help me think through what I learned from a difficult quarter. I "
+            "learned that resilience matters, that we sometimes need to pivot "
+            "quickly, and that clear communication kept the team aligned when "
+            "plans changed.",
+            "Guide me with one question about my time management. I get the work "
+            "done, but I am always stressed and racing the clock. I am considering "
+            "smaller tasks or using a timer.",
+            "Help me get unstuck creatively. I want to explore abstract work, "
+            "try a new medium, and blend visual art with storytelling, but I keep "
+            "returning to what is comfortable.",
+            "Help me think through my sales problem. Emails and calls are reaching "
+            "fewer decision-makers, engagement is down, and the market is more "
+            "competitive. I do not yet know whether the problem is targeting, "
+            "message, channel, or offer.",
+            "Ask me one useful question about making this bridge design last. I "
+            "am considering durable low-maintenance materials, safety redundancy, "
+            "and future loads.",
+            "Help me think through how to explore majors before committing. I "
+            "could take electives, try internships or volunteer work, and talk "
+            "with professors and professionals.",
+        )
+
+        for index, message in enumerate(accepted, start=1):
+            with self.subTest(case=f"REFL-{index:03d}"):
+                result = decide(request((ConversationRole.USER, message)))
+                self.assertEqual(
+                    result.interaction,
+                    Interaction.GUIDED_REFLECTION,
+                )
+                self.assertFalse(result.fm_ir_020_eligible)
+
+    def test_candidate_contract_versions_are_not_silent_extensions(self) -> None:
+        result = decide(
+            request(
+                (
+                    ConversationRole.USER,
+                    "Ask me one useful question about this tradeoff.",
+                )
+            )
+        )
+        prompt = render_response_policy_prompt_v0_2(result)
+
+        self.assertEqual(result.policy_version, "response_policy_v0_2")
+        self.assertIsInstance(result.intervention_authorized, bool)
+        self.assertEqual(
+            result.controlling_policy_disposition,
+            ControllingPolicyDisposition.NONE,
+        )
+        self.assertEqual(
+            result.contract_version,
+            "response_policy_decision_v0_3",
+        )
+        self.assertEqual(
+            POLICY_DECISION_VERSION,
+            "response_policy_decision_v0_3",
+        )
+        self.assertEqual(
+            POLICY_SIGNALS_VERSION,
+            "response_policy_signals_v0_3",
+        )
+        self.assertEqual(
+            RESPONSE_POLICY_PROMPT_VERSION,
+            "response_policy_prompt_v0_3",
+        )
+        self.assertEqual(RESPONSE_INTERACTION_VERSION, "response_interaction_v2")
+        self.assertEqual(
+            prompt.contract_version,
+            "response_policy_prompt_v0_3",
+        )
+        self.assertEqual(prompt.interaction_version, "response_interaction_v2")
+        self.assertEqual(
+            ASSEMBLY_MANIFEST_VERSION,
+            "prompt_assembly_manifest_v2",
+        )
+        self.assertEqual(
+            SHADOW_TRACE_VERSION,
+            "resse_response_shadow_trace_v0_4",
+        )
+        self.assertEqual(
+            TRUSTED_PLAN_VERSION,
+            "trusted_response_plan_v0_3",
+        )
+        self.assertEqual(
+            ORCHESTRATOR_VERSION,
+            "resse_response_orchestrator_v0_3",
+        )
+        self.assertEqual(
+            TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,
+            "trusted_response_policy_signals_envelope_v0_3",
         )
 
 

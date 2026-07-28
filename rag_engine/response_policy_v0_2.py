@@ -19,8 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 POLICY_VERSION = "response_policy_v0_2"
+POLICY_DECISION_VERSION = "response_policy_decision_v0_3"
 POLICY_INPUT_VERSION = "response_policy_input_v0_2"
-POLICY_SIGNALS_VERSION = "response_policy_signals_v0_2"
+POLICY_SIGNALS_VERSION = "response_policy_signals_v0_3"
 SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
 SAFETY_ASSESSOR_VERSION = "resse_safety_assessor_v0_2"
 DEFAULT_SAFETY_COMPONENT = "server_safety_assessment_v0_2"
@@ -70,6 +71,12 @@ class QuestionPolicy(str, Enum):
     FORBIDDEN = "FORBIDDEN"
     OPTIONAL_ONE_NON_LEADING = "OPTIONAL_ONE_NON_LEADING"
     NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class ControllingPolicyDisposition(str, Enum):
+    NONE = "NONE"
+    DEFER_TO_CONTROLLING_POLICY = "DEFER_TO_CONTROLLING_POLICY"
+    FM_APPLICATION_VETO = "FM_APPLICATION_VETO"
 
 
 MODE_PRECEDENCE: tuple[ResponseMode, ...] = (
@@ -361,6 +368,11 @@ class ResponsePolicySignalsV0_2(StrictFrozenModel):
     user_fm_opt_out: bool = False
     technical_procedure_requested: bool | None = None
     coaching_consent: bool | None = None
+    specific_experiment_consent: bool | None = None
+    experiment_reversible_and_proportionate: bool | None = None
+    experiment_measurement_defined: bool | None = None
+    experiment_adverse_indicators_defined: bool | None = None
+    experiment_stop_rule_defined: bool | None = None
     direct_response_requested: bool | None = None
     guided_reflection_requested: bool | None = None
     behavioral_intervention_requested: bool | None = None
@@ -404,6 +416,7 @@ class ResponsePolicySignalsV0_2(StrictFrozenModel):
 
 
 class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
+    contract_version: Literal[POLICY_DECISION_VERSION] = POLICY_DECISION_VERSION
     policy_version: Literal[POLICY_VERSION]
     assistant_profile_id: Literal[ASSISTANT_PROFILE_ID]
     request_id: str
@@ -417,7 +430,9 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
     closure: Closure
     mode_reasons: tuple[str, ...]
     interaction_reasons: tuple[str, ...]
+    intervention_authorized: bool
     fm_ir_020_eligible: bool
+    controlling_policy_disposition: ControllingPolicyDisposition
     high_stakes_gate: GateState
     fm_application_gate: GateState
     fm_default_level: FMLevel
@@ -501,13 +516,38 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
                 raise ValueError("guided reflection requires a bounded question policy")
             if self.fm_ir_020_eligible:
                 raise ValueError("guided reflection cannot authorize FM-IR-020")
-        elif self.question_policy is not QuestionPolicy.NOT_APPLICABLE:
-            raise ValueError("non-reflective interaction cannot set a question policy")
+        elif self.question_policy not in {
+            QuestionPolicy.FORBIDDEN,
+            QuestionPolicy.NOT_APPLICABLE,
+        }:
+            raise ValueError(
+                "non-reflective interaction can only forbid questions globally"
+            )
+        if (
+            self.fm_ir_020_eligible
+            and self.closure is not Closure.CONSENTED_COACHING
+        ):
+            raise ValueError("FM-IR-020 requires a consented coaching closure")
+        if (
+            self.intervention_authorized
+            and self.closure is not Closure.CONSENTED_COACHING
+        ):
+            raise ValueError("an authorized intervention requires consented coaching")
         if (
             self.interaction is not Interaction.BEHAVIORAL_INTERVENTION
-            and self.fm_ir_020_eligible
+            and (self.intervention_authorized or self.fm_ir_020_eligible)
         ):
-            raise ValueError("FM-IR-020 requires behavioral intervention")
+            raise ValueError(
+                "intervention authorization and FM-IR-020 require "
+                "behavioral intervention"
+            )
+        if self.fm_ir_020_eligible and not self.intervention_authorized:
+            raise ValueError("FM-IR-020 requires an authorized intervention")
+        if (
+            self.fm_ir_020_eligible
+            and self.fm_effective_level is FMLevel.OFF
+        ):
+            raise ValueError("FM-IR-020 cannot be eligible while FM is off")
         if (
             self.response_mode is ResponseMode.HIGH_STAKES
             and self.interaction is not Interaction.DIRECT
@@ -518,6 +558,17 @@ class _ResponsePolicyDecisionPayloadV0_2(StrictFrozenModel):
             and self.interaction is Interaction.BEHAVIORAL_INTERVENTION
         ):
             raise ValueError("FM application veto forbids behavioral intervention")
+        expected_disposition = (
+            ControllingPolicyDisposition.DEFER_TO_CONTROLLING_POLICY
+            if self.response_mode is ResponseMode.HIGH_STAKES
+            else (
+                ControllingPolicyDisposition.FM_APPLICATION_VETO
+                if self.fm_application_gate is not GateState.PASS
+                else ControllingPolicyDisposition.NONE
+            )
+        )
+        if self.controlling_policy_disposition is not expected_disposition:
+            raise ValueError("controlling policy disposition is inconsistent")
         return self
 
 
@@ -661,7 +712,7 @@ _LOCAL_APPLICATION_BOUNDARY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _LOCAL_TECHNICAL_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(
-        r"\b(?:python|sql|api|backend|frontend|qdrant|postgres|docker|"
+        r"\b(?:python|sql|api|software|backend|frontend|qdrant|postgres|docker|"
         r"kubernetes|systemctl|journalctl|nginx|git|worktree|unit test|"
         r"function|class|database|server|service)\b"
     ),
@@ -697,6 +748,11 @@ _LOCAL_GUIDED_REFLECTION_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bthink (?:this|it) through with me\b"),
     re.compile(r"\bhelp me understand why\b"),
     re.compile(r"\bhelp me reflect (?:on|about)\b"),
+    re.compile(
+        r"\b(?:ask|guide) me (?:with )?(?:one|1) "
+        r"(?:useful |non-leading )?question\b"
+    ),
+    re.compile(r"\bhelp me get unstuck (?:creatively|without advice)\b"),
 )
 
 _LOCAL_BEHAVIORAL_INTERVENTION_RULES: tuple[re.Pattern[str], ...] = (
@@ -722,6 +778,34 @@ def _matched_codes(
 
 def _matches_any(text: str, rules: tuple[re.Pattern[str], ...]) -> bool:
     return any(pattern.search(text) for pattern in rules)
+
+
+def _local_behavioral_intervention_requested(text: str) -> bool:
+    """Match explicit intervention requests without activating negated phrases."""
+
+    for pattern in _LOCAL_BEHAVIORAL_INTERVENTION_RULES:
+        for match in pattern.finditer(text):
+            prefix = text[: match.start()]
+            clause_start = max(
+                prefix.rfind("."),
+                prefix.rfind("?"),
+                prefix.rfind("!"),
+                prefix.rfind(";"),
+                prefix.rfind(":"),
+            )
+            clause_prefix = prefix[clause_start + 1 :]
+            adversative = tuple(re.finditer(r"\b(?:but|however)\b", clause_prefix))
+            if adversative:
+                clause_prefix = clause_prefix[adversative[-1].end() :]
+            if re.search(
+                r"\b(?:do not|don't|never|"
+                r"(?:i am|i'm) not asking (?:you )?to|"
+                r"not asking (?:you )?to)\b",
+                clause_prefix,
+            ):
+                continue
+            return True
+    return False
 
 
 def _select_mode(
@@ -805,6 +889,7 @@ def _select_mode(
 def _select_closure(
     mode: ResponseMode,
     interaction: Interaction,
+    intervention_authorized: bool,
     text: str,
     signals: ResponsePolicySignalsV0_2,
     safety_assessment: SafetyAssessmentV0_2,
@@ -832,7 +917,9 @@ def _select_closure(
         return Closure.GUIDED_REFLECTION
 
     if interaction is Interaction.BEHAVIORAL_INTERVENTION:
-        return Closure.CONSENTED_COACHING
+        if intervention_authorized:
+            return Closure.CONSENTED_COACHING
+        return Closure.COMPLETE
 
     if mode is ResponseMode.TECHNICAL:
         if signals.technical_procedure_requested is True:
@@ -882,12 +969,31 @@ def _trusted_or_local(
     return detected
 
 
+def _fm_ir_020_prerequisites_satisfied(
+    signals: ResponsePolicySignalsV0_2,
+) -> bool:
+    return all(
+        value is True
+        for value in (
+            signals.specific_experiment_consent,
+            signals.experiment_reversible_and_proportionate,
+            signals.experiment_measurement_defined,
+            signals.experiment_adverse_indicators_defined,
+            signals.experiment_stop_rule_defined,
+        )
+    )
+
+
 def _select_interaction(
     mode: ResponseMode,
     text: str,
     signals: ResponsePolicySignalsV0_2,
     application_gate: GateState,
 ) -> tuple[Interaction, QuestionPolicy, tuple[str, ...], bool]:
+    declines_questions = _trusted_or_local(
+        signals.user_declines_questions,
+        _matches_any(text, _LOCAL_DECLINES_QUESTIONS_RULES),
+    )
     if mode is ResponseMode.HIGH_STAKES:
         return (
             Interaction.DIRECT,
@@ -896,24 +1002,30 @@ def _select_interaction(
             False,
         )
     if application_gate is not GateState.PASS:
+        reasons = ["fm_application_boundary_forces_direct"]
+        if declines_questions:
+            reasons.append("user_declined_questions")
         return (
             Interaction.DIRECT,
-            QuestionPolicy.NOT_APPLICABLE,
-            ("fm_application_boundary_forces_direct",),
+            (
+                QuestionPolicy.FORBIDDEN
+                if declines_questions
+                else QuestionPolicy.NOT_APPLICABLE
+            ),
+            tuple(sorted(reasons)),
             False,
         )
 
-    declines_questions = _trusted_or_local(
-        signals.user_declines_questions,
-        _matches_any(text, _LOCAL_DECLINES_QUESTIONS_RULES),
-    )
     direct = _trusted_or_local(
         signals.direct_response_requested,
         _matches_any(text, _LOCAL_DIRECT_RESPONSE_RULES),
     )
+    local_intervention = _local_behavioral_intervention_requested(text)
+    if mode is ResponseMode.TECHNICAL:
+        local_intervention = False
     intervention = _trusted_or_local(
         signals.behavioral_intervention_requested,
-        _matches_any(text, _LOCAL_BEHAVIORAL_INTERVENTION_RULES),
+        local_intervention,
     )
     reflection = _trusted_or_local(
         signals.guided_reflection_requested,
@@ -921,18 +1033,42 @@ def _select_interaction(
     )
 
     if direct:
+        reasons = ["direct_response_requested"]
+        if declines_questions:
+            reasons.append("user_declined_questions")
         return (
             Interaction.DIRECT,
-            QuestionPolicy.NOT_APPLICABLE,
-            ("direct_response_requested",),
+            (
+                QuestionPolicy.FORBIDDEN
+                if declines_questions
+                else QuestionPolicy.NOT_APPLICABLE
+            ),
+            tuple(sorted(reasons)),
             False,
         )
     if intervention:
+        reasons = ["behavioral_intervention_requested"]
+        if declines_questions:
+            reasons.append("user_declined_questions")
+        intervention_authorized = _fm_ir_020_prerequisites_satisfied(signals)
+        if signals.specific_experiment_consent is True:
+            reasons.append("specific_experiment_consent_confirmed")
+        else:
+            reasons.append("specific_experiment_consent_missing")
+        if intervention_authorized:
+            reasons.append("intervention_authorized")
+            reasons.append("fm_ir_020_prerequisites_satisfied")
+        else:
+            reasons.append("fm_ir_020_prerequisites_incomplete")
         return (
             Interaction.BEHAVIORAL_INTERVENTION,
-            QuestionPolicy.NOT_APPLICABLE,
-            ("behavioral_intervention_requested",),
-            True,
+            (
+                QuestionPolicy.FORBIDDEN
+                if declines_questions
+                else QuestionPolicy.NOT_APPLICABLE
+            ),
+            tuple(sorted(reasons)),
+            intervention_authorized,
         )
     if reflection:
         reasons = ["guided_reflection_requested"]
@@ -948,10 +1084,17 @@ def _select_interaction(
             tuple(sorted(reasons)),
             False,
         )
+    reasons = ["direct_default"]
+    if declines_questions:
+        reasons.append("user_declined_questions")
     return (
         Interaction.DIRECT,
-        QuestionPolicy.NOT_APPLICABLE,
-        ("direct_default",),
+        (
+            QuestionPolicy.FORBIDDEN
+            if declines_questions
+            else QuestionPolicy.NOT_APPLICABLE
+        ),
+        tuple(sorted(reasons)),
         False,
     )
 
@@ -1079,12 +1222,13 @@ def decide_response_policy_v0_2(
     application_gate, application_reasons = _application_gate(
         high_stakes_gate, local_boundaries, trusted
     )
-    interaction, question_policy, interaction_reasons, fm_ir_020_eligible = (
+    interaction, question_policy, interaction_reasons, intervention_authorized = (
         _select_interaction(mode, text, trusted, application_gate)
     )
     closure = _select_closure(
         mode,
         interaction,
+        intervention_authorized,
         text,
         trusted,
         safety_assessment,
@@ -1104,6 +1248,18 @@ def decide_response_policy_v0_2(
     effective_fm = default_fm
     if application_gate is not GateState.PASS or trusted.user_fm_opt_out:
         effective_fm = FMLevel.OFF
+    fm_ir_020_eligible = (
+        intervention_authorized and effective_fm is not FMLevel.OFF
+    )
+    controlling_policy_disposition = (
+        ControllingPolicyDisposition.DEFER_TO_CONTROLLING_POLICY
+        if mode is ResponseMode.HIGH_STAKES
+        else (
+            ControllingPolicyDisposition.FM_APPLICATION_VETO
+            if application_gate is not GateState.PASS
+            else ControllingPolicyDisposition.NONE
+        )
+    )
 
     reasons = list(mode_reasons)
     requested_profile = (request.requested_assistant_profile_id or "").strip()
@@ -1117,6 +1273,7 @@ def decide_response_policy_v0_2(
         reasons.append("legacy_request_fields_ignored")
 
     payload = _ResponsePolicyDecisionPayloadV0_2(
+        contract_version=POLICY_DECISION_VERSION,
         policy_version=POLICY_VERSION,
         assistant_profile_id=ASSISTANT_PROFILE_ID,
         request_id=request.request_id,
@@ -1130,7 +1287,9 @@ def decide_response_policy_v0_2(
         closure=closure,
         mode_reasons=tuple(sorted(set(reasons))),
         interaction_reasons=tuple(sorted(set(interaction_reasons))),
+        intervention_authorized=intervention_authorized,
         fm_ir_020_eligible=fm_ir_020_eligible,
+        controlling_policy_disposition=controlling_policy_disposition,
         high_stakes_gate=high_stakes_gate,
         fm_application_gate=application_gate,
         fm_default_level=default_fm,
@@ -1211,12 +1370,14 @@ __all__ = [
     "LEGACY_REQUEST_FIELDS",
     "MODE_PRECEDENCE",
     "POLICY_INPUT_VERSION",
+    "POLICY_DECISION_VERSION",
     "POLICY_SIGNALS_VERSION",
     "POLICY_VERSION",
     "SAFETY_ASSESSMENT_VERSION",
     "SAFETY_ASSESSOR_VERSION",
     "Closure",
     "ConversationRole",
+    "ControllingPolicyDisposition",
     "FMLevel",
     "GateState",
     "Interaction",
