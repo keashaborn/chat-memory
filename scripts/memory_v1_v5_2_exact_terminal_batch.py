@@ -119,7 +119,10 @@ async def finalize_terminal_rows(
         ]
         if not selected:
             raise RuntimeError("an exact V5.2 terminal packet is not currently eligible")
-        for target in selected:
+        # The database finalizer revalidates against the current first 25
+        # planned rows. Applying one row changes that window, so use only the
+        # first matching row from each fresh planner snapshot.
+        for target in selected[:1]:
             packet_id = uuid.UUID(str(target["packet_id"]))
             if target["packet_storage_sha256"] != expected[packet_id]:
                 raise RuntimeError("exact terminal packet storage hash drifted")
