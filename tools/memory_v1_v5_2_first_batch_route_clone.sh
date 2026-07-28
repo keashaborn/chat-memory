@@ -198,10 +198,15 @@ run_terminal() {
     "${terminal_args[@]}"
   )
   if [[ "$apply" == true ]]; then command+=(--apply); fi
-  runuser -u ubuntu -- env \
+  if ! runuser -u ubuntu -- env \
     POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
     MEMORY_V1_V5_2_EXACT_TERMINAL_BATCH_APPLY=memory_v1_v5_2_exact_terminal_batch_apply_v1 \
-    "${command[@]}" >"$output"
+    "${command[@]}" >"$output"; then
+    chown ubuntu:ubuntu "$output"
+    chmod 0600 "$output"
+    return 1
+  fi
+  chown ubuntu:ubuntu "$output"
   chmod 0600 "$output"
 }
 
@@ -218,6 +223,7 @@ run_review() {
     POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
     MEMORY_V1_V5_2_EXACT_REVIEW_ROUTE_APPLY=memory_v1_v5_2_exact_review_route_apply_v1 \
     "${command[@]}" >"$output"
+  chown ubuntu:ubuntu "$output"
   chmod 0600 "$output"
 }
 
