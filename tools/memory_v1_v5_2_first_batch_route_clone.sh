@@ -16,9 +16,15 @@ other=557ea042-cb82-48f8-9429-472e96c957ef
 manifest=manifests/memory_v1_v5_2_first_batch_route_20260728.json
 manifest_sha=508080c08f199326577a4992a9b4f654b1d0f6caead5b66bdc77eaf456404a9d
 terminal_worker=scripts/memory_v1_v5_2_exact_terminal_batch.py
-terminal_worker_sha=616045e95872a97727baffd216ce6c63aa3b7e7a0eba75641a946dd4f3708295
+terminal_worker_sha=d794af40576670b2112395d35214cb5ea065d98193826e1052f1d80b27679a6c
 terminal_test=tests/test_memory_v1_v5_2_exact_terminal_batch.py
 terminal_test_sha=06fab06ced363babca09148a76b3fc515076de70a400495818588adbb4a1c5b2
+migration=ops/sql/20260728_memory_v1_v5_2_zero_atom_deferral_route.sql
+migration_sha=9c6773b5e4a95c6b938b0cced7c4a1f8fde4904d3909d5e27d1a38354880170b
+rollback=ops/sql/20260728_memory_v1_v5_2_zero_atom_deferral_route_rollback.sql
+rollback_sha=c22ea48034bba15913e85b56a25f0c5224eff27fb381bda1803455620bfb0564
+sql_test=tests/memory_v1_v5_2_zero_atom_deferral_route.sql
+sql_test_sha=876cea953ef20fcdc58176044bd69e3813c9f331bb26a15c4d23ca4be733f8f3
 review_worker=scripts/memory_v1_v5_2_exact_review_route.py
 review_worker_sha=bc6d0f915b2e8bc9c42489abc0bbf7f9c8ae593d575b18291d004c58fee5e6ab
 review_test=tests/test_memory_v1_v5_2_exact_review_route.py
@@ -69,6 +75,9 @@ capture_production() {
 [[ "$(sha256sum "$manifest" | awk '{print $1}')" == "$manifest_sha" ]]
 [[ "$(sha256sum "$terminal_worker" | awk '{print $1}')" == "$terminal_worker_sha" ]]
 [[ "$(sha256sum "$terminal_test" | awk '{print $1}')" == "$terminal_test_sha" ]]
+[[ "$(sha256sum "$migration" | awk '{print $1}')" == "$migration_sha" ]]
+[[ "$(sha256sum "$rollback" | awk '{print $1}')" == "$rollback_sha" ]]
+[[ "$(sha256sum "$sql_test" | awk '{print $1}')" == "$sql_test_sha" ]]
 [[ "$(sha256sum "$review_worker" | awk '{print $1}')" == "$review_worker_sha" ]]
 [[ "$(sha256sum "$review_test" | awk '{print $1}')" == "$review_test_sha" ]]
 git merge-base --is-ancestor "$(jq -er '.required_ancestor_commit' "$manifest")" HEAD
@@ -121,6 +130,21 @@ docker exec "$container" pg_dump -U sage -d "$production" \
 docker exec "$container" createdb -U sage -T template0 "$clone"
 docker exec -i "$container" pg_restore -U sage -d "$clone" \
   --no-owner <"$backup"
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$migration" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$sql_test" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$rollback" >/dev/null
+[[ "$(scalar "$clone" "
+  SELECT to_regprocedure(
+    'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)'
+  ) IS NULL
+")" == t ]]
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$migration" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$sql_test" >/dev/null
 
 clone_dsn=$(
   SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone" "$python_bin" -c \
@@ -274,7 +298,7 @@ jq -e '
   WHERE owner_user_id='$owner'::uuid
     AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
     AND route='terminal_no_stage'
-")" == 48 ]]
+")" == 55 ]]
 [[ "$(scalar "$clone" "
   SELECT count(*) FROM memory.v5_2_local_packet_route_event
   WHERE owner_user_id='$owner'::uuid
@@ -282,17 +306,22 @@ jq -e '
     AND route='manual_review_artifact_ready'
 ")" == 11 ]]
 [[ "$(scalar "$clone" "
-  SELECT count(*) FROM memory.v5_local_packet_disposition
+  SELECT count(*) FROM memory.v5_2_local_packet_route_event
   WHERE owner_user_id='$owner'::uuid
     AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
-    AND reason_code='deferral_only_no_stage'
-")" == 2 ]]
+    AND reason_code='deferral_only_no_stage_v5_2'
+")" == 50 ]]
+[[ "$(scalar "$clone" "
+  SELECT count(*) FROM memory.v5_2_local_packet_route_event
+  WHERE owner_user_id='$owner'::uuid
+    AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
+    AND reason_code='deferral_only_review_unresolved_v5_2'
+")" == 5 ]]
 [[ "$(scalar "$clone" "
   SELECT count(*) FROM memory.v5_local_packet_disposition
   WHERE owner_user_id='$owner'::uuid
     AND packet_id=ANY(string_to_array('$packet_csv',',')::uuid[])
-    AND reason_code='deferral_only_review_unresolved'
-")" == 5 ]]
+")" == 0 ]]
 [[ "$(scalar "$clone" "
   SELECT count(*) FROM memory.relational_stage_batch
   WHERE owner_user_id='$owner'::uuid
@@ -320,8 +349,9 @@ jq -n \
     head_commit:$head_commit,
     manifest_sha256:$manifest_sha256,
     packet_count:66,
-    terminal_route_events:48,
-    no_stage_dispositions:7,
+    terminal_route_events:55,
+    zero_atom_deferral_routes:7,
+    no_stage_dispositions:0,
     review_route_events:11,
     restricted_review_artifacts:22,
     transactional_apply_proved:true,

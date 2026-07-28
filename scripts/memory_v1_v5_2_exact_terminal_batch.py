@@ -14,7 +14,6 @@ import asyncpg
 from scripts.memory_v1_v5_2_local_packet_router import stable_ids
 from scripts.memory_v1_v5_local_packet_disposition import (
     loopback_dsn,
-    operation_ids,
     sha256_text,
     stable_json,
 )
@@ -164,35 +163,68 @@ async def finalize_disposition_rows(
     owner: uuid.UUID,
     expected: dict[uuid.UUID, tuple[str, str]],
 ) -> list[dict[str, Any]]:
+    remaining = set(expected)
     applied: list[dict[str, Any]] = []
-    for packet_id in sorted(expected, key=str):
+    while remaining:
+        rows = await conn.fetch(
+            """
+            SELECT *
+            FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)
+            """,
+            25,
+        )
+        selected = [
+            dict(row)
+            for row in rows
+            if row["packet_id"] in remaining
+        ]
+        if not selected:
+            raise RuntimeError(
+                "an exact V5.2 zero-atom packet is not currently eligible"
+            )
+        target = selected[0]
+        packet_id = uuid.UUID(str(target["packet_id"]))
         storage_sha256, reason = expected[packet_id]
-        operation_id, disposition_id = operation_ids(
-            owner, packet_id, storage_sha256, reason
+        v5_2_reason = f"{reason}_v5_2"
+        if (
+            target["packet_storage_sha256"] != storage_sha256
+            or target["reason_code"] != v5_2_reason
+        ):
+            raise RuntimeError("exact V5.2 zero-atom route drifted")
+        operation_id, event_id = stable_ids(
+            owner=owner,
+            packet_id=packet_id,
+            routing_basis_sha256=target["routing_basis_sha256"],
         )
         row = await conn.fetchrow(
             """
-            SELECT * FROM memory.finalize_owner_v5_local_deferral_v1(
-              $1,$2,$3,$4,$5
+            SELECT *
+            FROM memory.finalize_owner_v5_2_zero_atom_deferral_route_v1(
+              $1,$2,$3,$4,$5,$6,$7
             )
             """,
             operation_id,
-            disposition_id,
+            event_id,
             packet_id,
             storage_sha256,
-            reason,
+            v5_2_reason,
+            target["routing_basis_sha256"],
+            list(target["source_deferral_reason_codes"]),
         )
         if row is None or row["apply_outcome"] != "applied":
-            raise RuntimeError("exact no-stage disposition was not applied")
+            raise RuntimeError("exact V5.2 zero-atom route was not applied")
         applied.append(
             {
                 "packet_id": packet_id,
                 "operation_id": operation_id,
-                "disposition_id": disposition_id,
+                "event_id": event_id,
                 "storage_sha256": storage_sha256,
                 "reason": reason,
+                "v5_2_reason": v5_2_reason,
+                "target": target,
             }
         )
+        remaining.remove(packet_id)
     return applied
 
 
@@ -221,20 +253,24 @@ async def replay_rows(
         if row is None or row["apply_outcome"] != "replayed":
             raise RuntimeError("exact V5.2 terminal replay wrote again")
     for item in disposition_rows:
+        target = item["target"]
         row = await conn.fetchrow(
             """
-            SELECT * FROM memory.finalize_owner_v5_local_deferral_v1(
-              $1,$2,$3,$4,$5
+            SELECT *
+            FROM memory.finalize_owner_v5_2_zero_atom_deferral_route_v1(
+              $1,$2,$3,$4,$5,$6,$7
             )
             """,
             item["operation_id"],
-            item["disposition_id"],
+            item["event_id"],
             item["packet_id"],
             item["storage_sha256"],
-            item["reason"],
+            item["v5_2_reason"],
+            target["routing_basis_sha256"],
+            list(target["source_deferral_reason_codes"]),
         )
         if row is None or row["apply_outcome"] != "replayed":
-            raise RuntimeError("exact no-stage disposition replay wrote again")
+            raise RuntimeError("exact V5.2 zero-atom route replay wrote again")
 
 
 async def execute(
@@ -344,6 +380,8 @@ def guarded_main() -> int:
                     "apply": False,
                     "outcome": "exact_terminal_batch_error",
                     "error_class": type(exc).__name__,
+                    "error_code": getattr(exc, "sqlstate", None),
+                    "constraint_name": getattr(exc, "constraint_name", None),
                     "error_sha256": sha256_text(str(exc)),
                     "stage_writes": 0,
                     "claim_writes": 0,
