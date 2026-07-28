@@ -30,6 +30,12 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
                 )
                 self.assertIn("server, not the browser or model", manifest.model_brief)
                 self.assertIn("unless retrieved evidence", manifest.model_brief)
+                self.assertIn(
+                    "currently supported categories are only",
+                    manifest.model_brief,
+                )
+                self.assertIn("general fact-checking", manifest.model_brief)
+                self.assertIn("arbitrary page retrieval", manifest.model_brief)
                 self.assertEqual(
                     SearchCapabilityManifestV1.from_wire_json(
                         manifest.model_dump_json()

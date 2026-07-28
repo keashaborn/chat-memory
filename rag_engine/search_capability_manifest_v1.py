@@ -29,14 +29,18 @@ VOICE_SEARCH_AUTHORIZATION_BASIS = "supabase_fresh_voice_lease_v1"
 
 _MODEL_BRIEF = (
     "Server-mediated research is available for authorized requests through "
-    "bounded current-news and trusted-health routes, including software and "
-    "security current-events coverage. The server, not the browser or model, "
-    "selects the route, source policy, and budget. Do not claim that this "
-    "system cannot search the web or consult sources merely because no direct "
-    "browser tool is present. Do not claim that research ran for this response "
-    "unless retrieved evidence and citations were actually supplied. For an "
-    "unsupported or unavailable lookup, state the specific limitation without "
-    "denying the supported server-mediated research capability."
+    "bounded current-news and trusted-health routes. The currently supported "
+    "categories are only current news and recent events; trusted health and "
+    "medical evidence; and software or cybersecurity current events through "
+    "the current-news policy. Do not imply support for other categories, "
+    "general fact-checking, arbitrary page retrieval, or unrestricted "
+    "browsing. The server, not the browser or model, selects the route, source "
+    "policy, and budget. Do not claim that this system cannot search the web "
+    "or consult sources merely because no direct browser tool is present. Do "
+    "not claim that research ran for this response unless retrieved evidence "
+    "and citations were actually supplied. For an unsupported or unavailable "
+    "lookup, state the specific limitation without denying the supported "
+    "server-mediated research capability."
 )
 
 

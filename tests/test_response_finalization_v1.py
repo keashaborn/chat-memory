@@ -10,6 +10,10 @@ from rag_engine.response_finalization_v1 import (
     ResponseFinalizationError,
     finalize_trusted_response_v1,
 )
+from rag_engine.search_capability_manifest_v1 import (
+    TEXT_SEARCH_AUTHORIZATION_BASIS,
+    SearchCapabilityManifestV1,
+)
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_prompt_assembler_v1 import governed_memory
 from tests.test_response_orchestration_v0_2 import (
@@ -26,7 +30,13 @@ ANSWER = UUID("90000000-0000-4000-8000-000000000001")
 
 
 class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
-    async def plan(self, message: str, *, with_memory: bool = False):
+    async def plan(
+        self,
+        message: str,
+        *,
+        with_memory: bool = False,
+        with_search_capability: bool = False,
+    ):
         memory_input = None
         memory_application = None
         if with_memory:
@@ -39,6 +49,13 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
             conversation=messages(message),
             memory_input=memory_input,
             memory_application=memory_application,
+            search_capability_manifest=(
+                SearchCapabilityManifestV1.create(
+                    authorization_basis=TEXT_SEARCH_AUTHORIZATION_BASIS,
+                )
+                if with_search_capability
+                else None
+            ),
         )
         return await orchestrator(FixedSafetyProvider()).build_plan(request)
 
@@ -103,6 +120,51 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
                 answer_id=ANSWER,
                 created_at=NOW,
             )
+
+    async def test_search_manifest_rejects_overbroad_capability_answer(self) -> None:
+        plan = await self.plan(
+            "What can you research?",
+            with_search_capability=True,
+        )
+        response = OpenAIChatCompletionsAdapterV1(
+            FakeClient(
+                provider_response(
+                    content=(
+                        "I can also perform other supported fact-checking or "
+                        "source-verification tasks."
+                    )
+                )
+            )
+        ).complete(plan)
+
+        with self.assertRaises(ResponseFinalizationError):
+            finalize_trusted_response_v1(
+                trusted_plan=plan,
+                provider_response=response,
+                answer_id=ANSWER,
+                created_at=NOW,
+            )
+
+    async def test_no_manifest_preserves_ordinary_answer_behavior(self) -> None:
+        plan = await self.plan("Repeat this sentence.")
+        response = OpenAIChatCompletionsAdapterV1(
+            FakeClient(
+                provider_response(
+                    content=(
+                        "Other supported fact-checking or source-verification "
+                        "tasks."
+                    )
+                )
+            )
+        ).complete(plan)
+
+        finalized = finalize_trusted_response_v1(
+            trusted_plan=plan,
+            provider_response=response,
+            answer_id=ANSWER,
+            created_at=NOW,
+        )
+        self.assertIn("fact-checking", finalized.assistant_text)
 
 
 if __name__ == "__main__":

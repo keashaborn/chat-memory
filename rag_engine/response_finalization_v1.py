@@ -25,6 +25,9 @@ from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatResponseV1,
 )
 from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from rag_engine.search_capability_output_validator_v1 import (
+    validate_search_capability_output_v1,
+)
 
 
 ASSISTANT_ATTESTATION_VERSION = "assistant_transcript_attestation_v1"
@@ -218,6 +221,10 @@ def finalize_trusted_response_v1(
             raise ValueError("provider response has no attestable output")
 
         source = plan.assembled_prompt.source_request
+        validate_search_capability_output_v1(
+            text,
+            source.search_capability_manifest,
+        )
         memory_binding: FinalAnswerMemoryBindingV1 | None = None
         if source.memory_input is not None and source.memory_application is not None:
             application = source.memory_application
