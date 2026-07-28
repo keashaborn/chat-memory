@@ -41,6 +41,7 @@ class RealtimePreviewSession:
     voice_session_id: uuid.UUID
     thread_id: uuid.UUID
     openai_call_id: str
+    language: str
     created_at_monotonic: float
     expires_at_monotonic: float
     controller: RealtimePreviewController | None = field(
@@ -146,6 +147,7 @@ class RealtimePreviewSessionRegistry:
         voice_session_id: uuid.UUID,
         thread_id: uuid.UUID,
         openai_call_id: str,
+        language: str = "en",
     ) -> RealtimePreviewSession:
         now = self._clock()
         with self._lock:
@@ -168,6 +170,7 @@ class RealtimePreviewSessionRegistry:
                 voice_session_id=voice_session_id,
                 thread_id=thread_id,
                 openai_call_id=openai_call_id,
+                language=language,
                 created_at_monotonic=now,
                 expires_at_monotonic=now + self._ttl_seconds,
             )

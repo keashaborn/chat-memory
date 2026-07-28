@@ -13,6 +13,11 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    VOICE_LANGUAGE_CONTRACT_VERSION,
+    VOICE_LANGUAGES,
+)
 from rag_engine.voice_session_router import require_active_voice_session
 
 router = APIRouter()
@@ -23,7 +28,7 @@ DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
 DEFAULT_TTS_SPEED = 1.0
 MAX_TTS_CHARS = 4096
-VOICE_CAPABILITIES_VERSION = "2026-07-28.1"
+VOICE_CAPABILITIES_VERSION = "2026-07-28.2"
 
 TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "gpt-4o-mini-tts": {
@@ -249,6 +254,12 @@ async def get_voice_capabilities(req: Request):
                 "default_voice": default_voice,
                 "maximum_input_characters": MAX_TTS_CHARS,
                 "models": models,
+            },
+            "language": {
+                "contract_version": VOICE_LANGUAGE_CONTRACT_VERSION,
+                "default": DEFAULT_VOICE_LANGUAGE,
+                "auto_detect": True,
+                "options": list(VOICE_LANGUAGES),
             },
         },
         headers=NO_STORE_HEADERS,

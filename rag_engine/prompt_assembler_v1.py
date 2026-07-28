@@ -43,6 +43,11 @@ from rag_engine.response_policy_v0_2 import (
     decide_response_policy_v0_2,
 )
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    SUPPORTED_VOICE_LANGUAGE_IDS,
+    response_language_instruction,
+)
 
 
 ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v1"
@@ -164,6 +169,14 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    response_language: str = DEFAULT_VOICE_LANGUAGE
+
+    @field_validator("response_language")
+    @classmethod
+    def valid_response_language(cls, value: str) -> str:
+        if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
+            raise ValueError("response language is unsupported")
+        return value
 
     @model_validator(mode="after")
     def paired_memory_objects(self) -> "PromptAssemblyRequestV1":
@@ -402,7 +415,11 @@ class AssembledPromptV1(_StrictFrozenModel):
         if self.context_blocks != expected_context:
             raise ValueError("reference context differs from typed source request")
         manifest = self.manifest
-        expected_system = _render_system_prompt(prompt, search_capability_manifest)
+        expected_system = _render_system_prompt(
+            prompt,
+            search_capability_manifest,
+            source.response_language,
+        )
         if self.system_prompt != expected_system:
             raise ValueError("system prompt differs from typed policy projection")
         conversation_payload = [item.model_dump(mode="json") for item in self.conversation]
@@ -519,13 +536,18 @@ _SYSTEM_BASELINE = (
 def _render_system_prompt(
     policy_prompt: ResponsePolicyPromptV0_2,
     search_capability_manifest: SearchCapabilityManifestV1 | None = None,
+    response_language: str = DEFAULT_VOICE_LANGUAGE,
 ) -> str:
     capability = (
         f"\n\nApplication capabilities:\n{search_capability_manifest.model_brief}"
         if search_capability_manifest is not None
         else ""
     )
-    return f"{_SYSTEM_BASELINE}{capability}\n\n{policy_prompt.content}"
+    language = response_language_instruction(response_language)
+    return (
+        f"{_SYSTEM_BASELINE}{capability}\n\n"
+        f"Response language:\n{language}\n\n{policy_prompt.content}"
+    )
 
 
 def _decision_prompt_bindings_match(
@@ -945,6 +967,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
     system_prompt = _render_system_prompt(
         policy_prompt,
         search_capability_manifest,
+        request.response_language,
     )
     (
         conversation_bytes,

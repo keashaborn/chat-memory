@@ -22,6 +22,10 @@ from rag_engine.trusted_web_router import (
 )
 from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
 from rag_engine.web_transcript_persistence_v1 import persist_web_exchange_v1
+from rag_engine.voice_language_v1 import (
+    AUTO_VOICE_LANGUAGE,
+    SUPPORTED_VOICE_LANGUAGE_IDS,
+)
 
 
 router = APIRouter()
@@ -42,6 +46,7 @@ class SearchExecutionRequestV1(BaseModel):
     query: str = Field(min_length=1, max_length=2_000)
     channel: Literal["text", "voice"]
     persist_transcript: bool = True
+    response_language: str = AUTO_VOICE_LANGUAGE
 
     @field_validator("user_id", "thread_id", mode="before")
     @classmethod
@@ -62,6 +67,13 @@ class SearchExecutionRequestV1(BaseModel):
         if not normalized:
             raise ValueError("query is empty")
         return normalized
+
+    @field_validator("response_language")
+    @classmethod
+    def validate_response_language(cls, value: str) -> str:
+        if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
+            raise ValueError("response language is unsupported")
+        return value
 
 
 def _model_json(value: Any) -> dict[str, Any]:
@@ -148,6 +160,7 @@ async def execute_search_plan_v1(
             CurrentNewsRequestV1(
                 user_id=owner,
                 query=payload.query,
+                response_language=payload.response_language,
             ),
             req,
             provider_response,
@@ -157,6 +170,7 @@ async def execute_search_plan_v1(
             TrustedWebRequestV1(
                 user_id=owner,
                 query=payload.query,
+                response_language=payload.response_language,
             ),
             req,
             provider_response,

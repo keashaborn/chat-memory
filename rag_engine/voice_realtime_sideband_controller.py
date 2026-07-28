@@ -12,6 +12,7 @@ import httpx
 from websockets.asyncio.client import connect
 
 from rag_engine.openai_chat_provider_v1 import safety_identifier_v1
+from rag_engine.voice_language_v1 import VOICE_LANGUAGE_HEADER
 from rag_engine.voice_realtime_session_manager import RealtimePreviewSession
 
 
@@ -348,6 +349,7 @@ class RealtimePreviewSidebandController:
             "x-vs-owner-user-id": self.session.owner_user_id,
             "x-vs-voice-session-id": str(self.session.voice_session_id),
             "x-vs-voice-turn-id": voice_turn_id,
+            VOICE_LANGUAGE_HEADER: self.session.language,
         }
 
         self.session.append_event(
@@ -357,6 +359,7 @@ class RealtimePreviewSidebandController:
                 "sequence": sequence,
                 "transcript": transcript,
                 "voice_turn_id": voice_turn_id,
+                "language": self.session.language,
             },
         )
 
@@ -375,6 +378,7 @@ class RealtimePreviewSidebandController:
                     "thread_id": str(self.session.thread_id),
                     "query": transcript,
                     "channel": "voice",
+                    "response_language": self.session.language,
                 },
             )
             if search_response.status_code != 200:
@@ -411,6 +415,7 @@ class RealtimePreviewSidebandController:
                         "request_id": request_id,
                         "timings": {},
                         "web_search": True,
+                        "language": self.session.language,
                         "search_route": (
                             search_payload.get("plan") or {}
                         ).get("selected_route"),
@@ -502,6 +507,7 @@ class RealtimePreviewSidebandController:
                 "voice_turn_id": voice_turn_id,
                 "request_id": request_id,
                 "timings": self._safe_timings(payload.get("timings")),
+                "language": self.session.language,
             },
         )
 

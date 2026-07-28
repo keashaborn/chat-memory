@@ -38,6 +38,10 @@ from rag_engine.web_search_actor_auth_v1 import (
     VOICE_SEARCH_AUTHORIZATION_VALUE,
     require_web_search_actor_v1,
 )
+from rag_engine.voice_language_v1 import (
+    AUTO_VOICE_LANGUAGE,
+    voice_language_from_request,
+)
 
 
 router = APIRouter()
@@ -110,6 +114,10 @@ async def resse_response_query(
         )
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
     voice_turn_id = voice_turn_id_from_request(req)
+    response_language = voice_language_from_request(
+        req,
+        default=AUTO_VOICE_LANGUAGE,
+    )
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
     if payload.no_store:
@@ -142,6 +150,7 @@ async def resse_response_query(
                     ),
                     stateless=stateless,
                     search_capability_manifest=search_capability_manifest,
+                    response_language=response_language,
                 ),
             ),
             timeout=RESPONSE_QUERY_DEADLINE_SECONDS,

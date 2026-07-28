@@ -20,6 +20,10 @@ from rag_engine.voice_realtime_sideband_controller import (
     RealtimePreviewSidebandNotReady,
 )
 from rag_engine.voice_session_router import require_active_voice_session
+from rag_engine.voice_language_v1 import (
+    AUTO_VOICE_LANGUAGE,
+    voice_language_from_request,
+)
 
 
 router = APIRouter()
@@ -31,7 +35,6 @@ OPENAI_REALTIME_CALLS_URL = (
     or "https://api.openai.com/v1/realtime/calls"
 ).strip()
 REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
-REALTIME_TRANSCRIPTION_LANGUAGE = "en"
 REALTIME_TRANSCRIPTION_DELAY = "low"
 MAX_SDP_BYTES = 128 * 1024
 MAX_SDP_RESPONSE_BYTES = 256 * 1024
@@ -96,16 +99,18 @@ def _call_id_from_location(raw: str | None) -> str:
     return call_id
 
 
-def _transcription_session_config() -> dict[str, Any]:
+def _transcription_session_config(language: str) -> dict[str, Any]:
+    transcription: dict[str, Any] = {
+        "model": REALTIME_TRANSCRIPTION_MODEL,
+        "delay": REALTIME_TRANSCRIPTION_DELAY,
+    }
+    if language != AUTO_VOICE_LANGUAGE:
+        transcription["language"] = language
     return {
         "type": "transcription",
         "audio": {
             "input": {
-                "transcription": {
-                    "model": REALTIME_TRANSCRIPTION_MODEL,
-                    "language": REALTIME_TRANSCRIPTION_LANGUAGE,
-                    "delay": REALTIME_TRANSCRIPTION_DELAY,
-                },
+                "transcription": transcription,
                 "turn_detection": None,
             },
         },
@@ -115,6 +120,7 @@ def _transcription_session_config() -> dict[str, Any]:
 @router.post("/voice/realtime-preview/call")
 async def create_realtime_preview_call(req: Request):
     owner_user_id = _owner_from_request(req)
+    language = voice_language_from_request(req)
     voice_session_id = await require_active_voice_session(req, owner_user_id)
     thread_id = _thread_id_from_request(req)
 
@@ -152,7 +158,7 @@ async def create_realtime_preview_call(req: Request):
     if not service_token:
         raise HTTPException(status_code=503, detail="missing_service_token")
 
-    session_config = _transcription_session_config()
+    session_config = _transcription_session_config(language)
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(15.0, connect=10.0),
@@ -217,6 +223,7 @@ async def create_realtime_preview_call(req: Request):
         voice_session_id=voice_session_id,
         thread_id=thread_id,
         openai_call_id=call_id,
+        language=language,
     )
     try:
         controller = sideband_controller_factory(

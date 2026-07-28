@@ -43,6 +43,10 @@ from rag_engine.response_policy_v0_2 import (
     decide_response_policy_v0_2,
 )
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    SUPPORTED_VOICE_LANGUAGE_IDS,
+)
 
 
 TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_2"
@@ -189,12 +193,20 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    response_language: str = DEFAULT_VOICE_LANGUAGE
 
     @field_validator("legacy_request_field_names")
     @classmethod
     def sorted_unique_field_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if value != tuple(sorted(set(value))):
             raise ValueError("legacy request field names must be sorted and unique")
+        return value
+
+    @field_validator("response_language")
+    @classmethod
+    def valid_response_language(cls, value: str) -> str:
+        if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
+            raise ValueError("response language is unsupported")
         return value
 
     @model_validator(mode="after")
@@ -266,6 +278,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         memory_application: MemoryPromptApplicationResultV1 | None = None,
         fm_token_budget: int | None = None,
         search_capability_manifest: SearchCapabilityManifestV1 | None = None,
+        response_language: str = DEFAULT_VOICE_LANGUAGE,
     ) -> "TrustedResponseRequestV0_2":
         """Create from trusted values; request values are deliberately absent."""
 
@@ -303,6 +316,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             memory_application=memory_application,
             fm_token_budget=fm_token_budget,
             search_capability_manifest=search_capability_manifest,
+            response_language=response_language,
         )
 
 
@@ -673,6 +687,7 @@ class TrustedResponseOrchestratorV0_2:
                     search_capability_manifest=(
                         request.search_capability_manifest
                     ),
+                    response_language=request.response_language,
                 )
             )
             occurred_at = self._clock()

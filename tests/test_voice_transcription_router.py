@@ -151,6 +151,57 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         )
         self.assertNotIn(ACTOR, call["headers"]["OpenAI-Safety-Identifier"])
 
+    def test_explicit_language_is_validated_and_sent_to_openai(self) -> None:
+        headers = self._headers()
+        headers["x-vs-voice-language"] = "es"
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=headers,
+                content=b"not-real-audio",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["language"], "es")
+        self.assertEqual(FakeAsyncClient.calls[0]["data"]["language"], "es")
+        self.assertIn("Spanish", FakeAsyncClient.calls[0]["data"]["prompt"])
+
+    def test_auto_detect_omits_language_hint(self) -> None:
+        headers = self._headers()
+        headers["x-vs-voice-language"] = "auto"
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=headers,
+                content=b"not-real-audio",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["language"], "auto")
+        self.assertNotIn("language", FakeAsyncClient.calls[0]["data"])
+
+    def test_rejects_unsupported_language_before_openai(self) -> None:
+        headers = self._headers()
+        headers["x-vs-voice-language"] = "xx"
+        response = self.client.post(
+            "/voice/openai/transcribe",
+            headers=headers,
+            content=b"audio",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "unsupported_voice_language",
+        )
+        self.assertEqual(FakeAsyncClient.calls, [])
+
     def test_rejects_invalid_voice_turn_id_before_openai(self) -> None:
         headers = self._headers()
         headers["x-vs-voice-turn-id"] = "not-a-uuid"

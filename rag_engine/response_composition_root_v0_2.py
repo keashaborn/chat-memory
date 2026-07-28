@@ -48,6 +48,10 @@ from rag_engine.server_response_signal_classifier_v0_2 import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    SUPPORTED_VOICE_LANGUAGE_IDS,
+)
 
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -84,6 +88,7 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    response_language: str = DEFAULT_VOICE_LANGUAGE
 
     @field_validator("request_id")
     @classmethod
@@ -99,6 +104,13 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
             raise ValueError("request field names must be sorted and unique")
         if any(not _FIELD_NAME_RE.fullmatch(item) for item in value):
             raise ValueError("request field name is invalid")
+        return value
+
+    @field_validator("response_language")
+    @classmethod
+    def valid_response_language(cls, value: str) -> str:
+        if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
+            raise ValueError("response language is unsupported")
         return value
 
     @model_validator(mode="after")
@@ -319,6 +331,7 @@ class InactiveResponseCompositionRootV0_2:
                 memory_application=memory.memory_application,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
+                response_language=command.response_language,
             )
             stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)
             stage = "orchestration"

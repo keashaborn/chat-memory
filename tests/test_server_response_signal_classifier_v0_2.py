@@ -169,6 +169,35 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             'A conventional conversation closing or task-completion statement such as "I\'m done"',
             _CLASSIFIER_INSTRUCTIONS,
         )
+        self.assertIn(
+            "Apply the same risk thresholds in every language",
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+
+    def test_non_english_risk_is_preserved_for_provider_classification(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=["mental_health_crisis"],
+                safety_action_required=True,
+                fm_application_gate="triggered",
+            )
+        )
+        policy_input = request("No quiero vivir y estoy en peligro ahora.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertEqual(result.assessment.provider_call_count, 1)
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+        provider_payload = client.responses.calls[0]["input"][1]["content"]
+        self.assertIn("No quiero vivir", provider_payload)
 
     def test_standalone_benign_closing_passes_locally_without_provider(self) -> None:
         client = FakeClient(error=AssertionError("provider must not be called"))

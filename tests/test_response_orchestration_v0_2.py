@@ -166,6 +166,23 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(private_text, repr(plan))
         self.assertEqual(len(provider.requests), 1)
 
+    async def test_explicit_response_language_is_bound_into_typed_prompt(self) -> None:
+        request = trusted_request(
+            authenticated_actor_user_id=ACTOR,
+            request_id="spanish-language-request",
+            conversation=messages("¿Cómo estás?"),
+            response_language="es",
+        )
+
+        plan = await orchestrator(FixedSafetyProvider()).build_plan(request)
+
+        self.assertEqual(plan.policy_decision.response_mode, ResponseMode.ORDINARY)
+        self.assertIn("Reply in Spanish", plan.assembled_prompt.system_prompt)
+        self.assertIn(
+            "Language choice never weakens safety",
+            plan.assembled_prompt.system_prompt,
+        )
+
     async def test_explicit_fm_is_a_separate_reference_data_block(self) -> None:
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,

@@ -59,7 +59,13 @@ from rag_engine.trusted_web_provider_v1 import (
     TrustedWebProviderSecurityError,
     TrustedWebSettingsV1,
     TrustedWebSourceV1,
+    TRUSTED_WEB_INSTRUCTIONS_V1,
     WEB_SOURCE_PROVENANCE_CONTRACT,
+)
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    SUPPORTED_VOICE_LANGUAGE_IDS,
+    response_language_instruction,
 )
 
 
@@ -91,6 +97,7 @@ class TrustedWebRequestV1(BaseModel):
 
     user_id: UUID
     query: str = Field(min_length=4, max_length=2_000)
+    response_language: str = DEFAULT_VOICE_LANGUAGE
 
     @field_validator("user_id", mode="before")
     @classmethod
@@ -113,6 +120,13 @@ class TrustedWebRequestV1(BaseModel):
         if any(ord(char) < 32 and char not in "\t\n\r" for char in value):
             raise ValueError("query contains control characters")
         return normalized
+
+    @field_validator("response_language")
+    @classmethod
+    def validate_response_language(cls, value: str) -> str:
+        if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
+            raise ValueError("response language is unsupported")
+        return value
 
 
 class TrustedWebResponseV1(BaseModel):
@@ -305,6 +319,7 @@ async def trusted_web_query(
                     ods_records=ods_records,
                     actor_user_id=str(owner),
                     safety_secret=safety_secret,
+                    response_language=payload.response_language,
                 ),
                 timeout=settings.timeout_seconds + 5.0,
             )
@@ -316,6 +331,13 @@ async def trusted_web_query(
                     policy=policy,
                     actor_user_id=str(owner),
                     safety_secret=safety_secret,
+                    instructions=(
+                        TRUSTED_WEB_INSTRUCTIONS_V1
+                        + "\n"
+                        + response_language_instruction(
+                            payload.response_language
+                        )
+                    ),
                 ),
                 timeout=settings.timeout_seconds + 5.0,
             )

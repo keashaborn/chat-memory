@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-import re
 from typing import Any
 
 import httpx
@@ -16,6 +15,11 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_response_headers,
 )
 from rag_engine.voice_session_router import require_active_voice_session
+from rag_engine.voice_language_v1 import (
+    AUTO_VOICE_LANGUAGE,
+    transcription_prompt,
+    voice_language_from_request,
+)
 
 
 router = APIRouter()
@@ -35,22 +39,8 @@ DEFAULT_TRANSCRIPTION_MODEL = (
     if _configured_model in ALLOWED_TRANSCRIPTION_MODELS
     else "gpt-4o-transcribe"
 )
-_LANGUAGE_RE = re.compile(r"^[a-z]{2}$")
-_configured_language = (
-    os.getenv("OPENAI_TRANSCRIPTION_LANGUAGE") or "en"
-).strip().lower()
-DEFAULT_TRANSCRIPTION_LANGUAGE = (
-    _configured_language if _LANGUAGE_RE.fullmatch(_configured_language) else "en"
-)
-
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_CHARACTERS = 32_000
-TRANSCRIPTION_CONTEXT_PROMPT = (
-    "Natural conversational English in LifeSwitch with the Verbal Sage assistant. "
-    "Preserve short questions and incomplete phrases exactly; do not complete or "
-    "reinterpret them. Proper names may include Fractal Monism v0.2, "
-    "FM v0.2, Sage, RESSE, Governed Memory V1, Qdrant, OpenAI, and Supabase."
-)
 SUPPORTED_AUDIO_TYPES = {
     "audio/mp4": "voice.m4a",
     "audio/mpeg": "voice.mp3",
@@ -113,6 +103,7 @@ def _confidence_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
 @router.post("/voice/openai/transcribe")
 async def transcribe_voice_audio(req: Request):
     owner_user_id = _owner_from_request(req)
+    language = voice_language_from_request(req)
     voice_turn_id = voice_turn_id_from_request(req)
     await require_active_voice_session(req, owner_user_id)
 
@@ -148,6 +139,15 @@ async def transcribe_voice_audio(req: Request):
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=10.0)
         ) as client:
+            data = {
+                "model": DEFAULT_TRANSCRIPTION_MODEL,
+                "response_format": "json",
+                "temperature": "0",
+                "include[]": "logprobs",
+                "prompt": transcription_prompt(language),
+            }
+            if language != AUTO_VOICE_LANGUAGE:
+                data["language"] = language
             upstream = await client.post(
                 OPENAI_TRANSCRIPTION_URL,
                 headers={
@@ -155,14 +155,7 @@ async def transcribe_voice_audio(req: Request):
                     "OpenAI-Safety-Identifier": safety_identifier_v1(owner_user_id),
                 },
                 files={"file": (filename, raw, content_type)},
-                data={
-                    "model": DEFAULT_TRANSCRIPTION_MODEL,
-                    "response_format": "json",
-                    "language": DEFAULT_TRANSCRIPTION_LANGUAGE,
-                    "temperature": "0",
-                    "include[]": "logprobs",
-                    "prompt": TRANSCRIPTION_CONTEXT_PROMPT,
-                },
+                data=data,
             )
     except httpx.TimeoutException as exc:
         raise HTTPException(
@@ -209,7 +202,7 @@ async def transcribe_voice_audio(req: Request):
             "transcript": transcript,
             "provider": "openai",
             "model": DEFAULT_TRANSCRIPTION_MODEL,
-            "language": DEFAULT_TRANSCRIPTION_LANGUAGE,
+            "language": language,
             "confidence": confidence,
             "provider_request_id": provider_request_id,
         },

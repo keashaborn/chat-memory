@@ -25,6 +25,10 @@ from rag_engine.trusted_web_ods_v1 import (
     ODSGuidanceRecordV1,
     format_ods_guidance_for_model,
 )
+from rag_engine.voice_language_v1 import (
+    DEFAULT_VOICE_LANGUAGE,
+    response_language_instruction,
+)
 
 
 TRUSTED_WEB_INSTRUCTIONS_V1 = """\
@@ -554,12 +558,15 @@ class OpenAITrustedWebProviderV1:
         ods_records: tuple[ODSGuidanceRecordV1, ...] = (),
         actor_user_id: str,
         safety_secret: str,
+        response_language: str = DEFAULT_VOICE_LANGUAGE,
     ) -> TrustedWebProviderResultV1:
         if not records:
             raise TrustedWebProviderError("trusted_web_ncbi_records_empty")
         response = self._client.responses.create(
             model=self._settings.model,
             instructions=TRUSTED_WEB_INSTRUCTIONS_V1
+            + "\n"
+            + response_language_instruction(response_language)
             + "\nFor this request, do not use web search. Use only the supplied ODS and PubMed records. Prefer ODS for public safety guidance, then PubMed for research detail.",
             input="\n\n".join(
                 part
