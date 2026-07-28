@@ -51,6 +51,7 @@ REVIEW_NAMESPACE = uuid.UUID("d9bbc38c-812a-53f9-bfcb-c2185db1f7ca")
 V5_2_REVIEW_NAMESPACE = uuid.UUID("f2285012-c276-52c8-a919-452274ac8ca1")
 DEFAULT_REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 EXPLICIT_CALENDAR_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+LAST_YEAR_RE = re.compile(r"\blast year\b", re.IGNORECASE)
 HASH_FIELDS = (
     "evidence_content_sha256",
     "provider_model_sha256",
@@ -299,12 +300,14 @@ def normalize_review_packet(
         )
         calendar_range = temporal["calendar_range"]
         lower = calendar_range.get("lower")
-        if len(explicit_years) != 1 or not isinstance(lower, str):
+        if not isinstance(lower, str):
             continue
         try:
             lower_year = dt.date.fromisoformat(lower).year
         except ValueError as exc:
             raise LocalPacketReviewError("review calendar lower bound is invalid") from exc
+        if len(explicit_years) != 1:
+            continue
         if explicit_years[0] != lower_year:
             raise LocalPacketReviewError(
                 "explicit source year differs from normalized calendar range"
@@ -322,6 +325,54 @@ def normalize_review_packet(
                 "from_source_form": "partial_absolute",
                 "to_source_form": "absolute",
                 "source_span_sha256": sorted(source_hashes),
+            }
+        )
+    for observation in value["observations"]:
+        temporal = observation["temporal"]
+        if not (
+            temporal["basis"] == "calendar"
+            and temporal["source_form"] == "partial_absolute"
+            and temporal["calendar_range"] is not None
+            and temporal["anchored_to_source_time"] is False
+        ):
+            continue
+        source_parts = [
+            evidence_content[span["start"] : span["end"]]
+            for span in observation["source_spans"]
+        ]
+        if not LAST_YEAR_RE.search(" ".join(source_parts)):
+            continue
+        recorded_at = value.get("source_envelope", {}).get("source_recorded_at")
+        lower = temporal["calendar_range"].get("lower")
+        if not isinstance(recorded_at, str) or not isinstance(lower, str):
+            raise LocalPacketReviewError("relative year source anchor is absent")
+        try:
+            recorded_year = dt.datetime.fromisoformat(
+                recorded_at.replace("Z", "+00:00")
+            ).year
+            lower_year = dt.date.fromisoformat(lower).year
+        except ValueError as exc:
+            raise LocalPacketReviewError("relative year source anchor is invalid") from exc
+        if lower_year != recorded_year - 1:
+            raise LocalPacketReviewError(
+                "relative year differs from source-recorded anchor"
+            )
+        temporal["anchored_to_source_time"] = True
+        temporal["reason_codes"] = [
+            code for code in temporal["reason_codes"] if code != "explicit_year"
+        ]
+        for code in (
+            "relative_year_anchored_to_source_time",
+            "review_last_year_source_anchor",
+        ):
+            if code not in temporal["reason_codes"]:
+                temporal["reason_codes"].append(code)
+        transformations.append(
+            {
+                "code": "review_last_year_source_anchor",
+                "observation_ref": observation["observation_ref"],
+                "from_anchored_to_source_time": False,
+                "to_anchored_to_source_time": True,
             }
         )
     return value, transformations

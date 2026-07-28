@@ -84,6 +84,38 @@ class ReviewPacketNormalizationTest(unittest.TestCase):
         with self.assertRaisesRegex(LocalPacketReviewError, "year differs"):
             normalize_review_packet(value, CONTENT)
 
+    def test_last_year_repairs_source_anchor_without_inventing_date(self) -> None:
+        content = "I lost Dahlia last year."
+        value = packet()
+        value["source_envelope"] = {
+            "source_recorded_at": "2026-07-28T04:04:32Z"
+        }
+        value["observations"][0]["source_spans"] = [
+            {
+                "start": 0,
+                "end": len(content),
+                "span_sha256": hashlib.sha256(content.encode()).hexdigest(),
+            }
+        ]
+        temporal = value["observations"][0]["temporal"]
+        temporal["calendar_range"] = {
+            "lower": "2025-01-01",
+            "upper": "2026-01-01",
+            "bounds": "[)",
+        }
+        temporal["reason_codes"] = ["explicit_year"]
+        reviewed, transformations = normalize_review_packet(value, content)
+        result = reviewed["observations"][0]["temporal"]
+        self.assertEqual(result["source_form"], "partial_absolute")
+        self.assertTrue(result["anchored_to_source_time"])
+        self.assertNotIn("explicit_year", result["reason_codes"])
+        self.assertIn(
+            "relative_year_anchored_to_source_time", result["reason_codes"]
+        )
+        self.assertEqual(
+            transformations[-1]["code"], "review_last_year_source_anchor"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
