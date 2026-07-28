@@ -10,7 +10,7 @@ from qdrant_client import QdrantClient
 from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.resse_response_router import router as resse_response_router
 from rag_engine.trusted_web_router import router as trusted_web_router
@@ -80,7 +80,12 @@ from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
 from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
+    AdminUsageUsersRequestV1,
+    UsageLedgerError,
+    build_admin_usage_overview_v1,
     build_admin_usage_summary_v1,
+    build_admin_usage_user_detail_v1,
+    build_admin_usage_users_v1,
 )
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
@@ -504,6 +509,40 @@ def infer_extra_tags(text: str, source: str = "frontend") -> List[str]:
 
 
 # ---------- admin usage ----------
+USAGE_ANALYTICS_CAPABILITY = "usage_analytics.view"
+
+
+def _require_usage_analytics_actor(req: Request):
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response(), None
+    actor_uuid = parse_uuid(actor)
+    if actor_uuid is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_actor_user_id"},
+            status_code=400,
+        ), None
+    capability = (
+        req.headers.get("x-vs-authorized-capability") or ""
+    ).strip()
+    if not hmac.compare_digest(capability, USAGE_ANALYTICS_CAPABILITY):
+        return JSONResponse(
+            {"ok": False, "error": "capability_required"},
+            status_code=403,
+        ), None
+    return None, str(actor_uuid)
+
+
+def _usage_window(raw: str | None, default: int) -> int:
+    value = str(raw if raw is not None else default).strip()
+    if not value or len(value) > 3:
+        raise ValueError("invalid_usage_window")
+    parsed = int(value)
+    if parsed not in {0, 7, 30, 90}:
+        raise ValueError("invalid_usage_window")
+    return parsed
+
+
 @app.post("/admin/usage/summary")
 async def admin_usage_summary(
     payload: AdminUsageSummaryRequestV1,
@@ -515,14 +554,9 @@ async def admin_usage_summary(
     The service boundary supplies the authenticated actor. The BFF supplies
     the bounded target UUID list after a fresh Supabase capability check.
     """
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response()
-    if parse_uuid(actor) is None:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_actor_user_id"},
-            status_code=400,
-        )
+    denied, _actor = _require_usage_analytics_actor(req)
+    if denied is not None:
+        return denied
 
     try:
         return await build_admin_usage_summary_v1(
@@ -537,6 +571,110 @@ async def admin_usage_summary(
                 "error": "usage_summary_unavailable",
                 "request_id": rid,
             },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+@app.get("/admin/usage/overview")
+async def admin_usage_overview(req: Request):
+    denied, _actor = _require_usage_analytics_actor(req)
+    if denied is not None:
+        return denied
+    try:
+        window_days = _usage_window(
+            req.query_params.get("window"),
+            30,
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_usage_window"},
+            status_code=400,
+        )
+    try:
+        return await build_admin_usage_overview_v1(
+            dsn=DSN,
+            window_days=window_days,
+        )
+    except UsageLedgerError:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {"ok": False, "error": "usage_overview_unavailable"},
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+@app.get("/admin/usage/users")
+async def admin_usage_users(req: Request):
+    denied, _actor = _require_usage_analytics_actor(req)
+    if denied is not None:
+        return denied
+    params = req.query_params
+    try:
+        request = AdminUsageUsersRequestV1(
+            window_days=_usage_window(params.get("window"), 30),
+            limit=int(params.get("limit") or 25),
+            sort=params.get("sort") or "total_tokens_desc",
+            cursor=params.get("cursor"),
+            query=params.get("query"),
+        )
+    except (TypeError, ValueError, ValidationError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_usage_query"},
+            status_code=400,
+        )
+    try:
+        return await build_admin_usage_users_v1(
+            dsn=DSN,
+            request=request,
+            cursor_secret=os.getenv("VS_SERVICE_TOKEN") or "",
+        )
+    except UsageLedgerError as exc:
+        if "cursor" in str(exc):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_usage_cursor"},
+                status_code=400,
+            )
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {"ok": False, "error": "usage_users_unavailable"},
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+@app.get("/admin/usage/users/{target_user_id}")
+async def admin_usage_user_detail(target_user_id: str, req: Request):
+    denied, _actor = _require_usage_analytics_actor(req)
+    if denied is not None:
+        return denied
+    target_uuid = parse_uuid(target_user_id)
+    if target_uuid is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_target_user_id"},
+            status_code=400,
+        )
+    try:
+        window_days = _usage_window(
+            req.query_params.get("window"),
+            90,
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_usage_window"},
+            status_code=400,
+        )
+    try:
+        return await build_admin_usage_user_detail_v1(
+            dsn=DSN,
+            target_user_id=target_uuid,
+            window_days=window_days,
+        )
+    except UsageLedgerError:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {"ok": False, "error": "usage_user_detail_unavailable"},
             status_code=500,
             headers={"x-request-id": rid},
         )

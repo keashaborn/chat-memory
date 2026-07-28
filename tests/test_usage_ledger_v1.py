@@ -5,8 +5,10 @@ from typing import Any
 from uuid import UUID
 
 from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
+from rag_engine import usage_ledger_v1
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
+    AdminUsageUsersRequestV1,
     UsageLedgerError,
     persist_openai_chat_usage_v1,
 )
@@ -84,7 +86,8 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
             provider_response=response,
         )
 
-        self.assertEqual(conn.execute_calls[0][1], (str(ACTOR),))
+        self.assertIn("set local role lifeswitch_usage_writer_v1", conn.execute_calls[0][0])
+        self.assertEqual(conn.execute_calls[1][1], (str(ACTOR),))
         insert = conn.fetchrow_calls[0]
         self.assertIn("lifeswitch_usage.ai_usage_event_v1", insert[0])
         self.assertNotIn(response.content or "", insert[0])
@@ -93,6 +96,7 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
             (
                 ACTOR,
                 ANSWER,
+                "openai_chat_completions_v1",
                 "chat",
                 response.response_id,
                 response.requested_model,
@@ -102,6 +106,8 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
                 20,
                 12,
                 140,
+                str(ANSWER),
+                1,
             ),
         )
 
@@ -121,6 +127,9 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
                 "output_tokens": 20,
                 "reasoning_output_tokens": 12,
                 "total_tokens": 141,
+                "helper": "openai_chat_completions_v1",
+                "idempotency_key": str(ANSWER),
+                "event_schema_version": 1,
             },
         )
         with self.assertRaisesRegex(
@@ -161,6 +170,79 @@ class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
             AdminUsageSummaryRequestV1(
                 target_user_ids=[ACTOR],
                 window_days=365,
+            )
+
+    def test_admin_summary_accepts_json_uuid_strings(self) -> None:
+        request = AdminUsageSummaryRequestV1.model_validate_json(
+            f'{{"target_user_ids":["{ACTOR}"],"window_days":30}}'
+        )
+        self.assertEqual(request.target_user_ids, [ACTOR])
+
+    def test_admin_summary_rejects_body_actor(self) -> None:
+        with self.assertRaises(ValueError):
+            AdminUsageSummaryRequestV1.model_validate(
+                {
+                    "target_user_ids": [str(ACTOR)],
+                    "window_days": 30,
+                    "actor_user_id": str(ACTOR),
+                }
+            )
+
+    def test_users_request_is_bounded_and_uuid_query_only(self) -> None:
+        request = AdminUsageUsersRequestV1(
+            window_days=30,
+            limit=25,
+            sort="total_tokens_desc",
+            query=str(ACTOR)[:8],
+        )
+        self.assertEqual(request.query, str(ACTOR)[:8])
+        with self.assertRaises(ValueError):
+            AdminUsageUsersRequestV1(limit=51)
+        with self.assertRaises(ValueError):
+            AdminUsageUsersRequestV1(query="person@example.com")
+
+    def test_cursor_is_bound_to_window_sort_and_query(self) -> None:
+        secret = "usage-test-secret-that-is-long-enough"
+        cursor = usage_ledger_v1._encode_cursor(
+            {
+                "v": 1,
+                "window_days": 30,
+                "sort": "total_tokens_desc",
+                "query_sha256": usage_ledger_v1._query_hash(None),
+                "last_value": 140,
+                "last_user_id": str(ACTOR),
+            },
+            secret,
+        )
+        self.assertEqual(
+            usage_ledger_v1._decode_cursor(
+                cursor,
+                secret=secret,
+                window_days=30,
+                sort="total_tokens_desc",
+                query=None,
+            ),
+            (140, ACTOR),
+        )
+        with self.assertRaisesRegex(
+            UsageLedgerError,
+            "does not match",
+        ):
+            usage_ledger_v1._decode_cursor(
+                cursor,
+                secret=secret,
+                window_days=90,
+                sort="total_tokens_desc",
+                query=None,
+            )
+        tampered = f"{cursor[:-1]}{'A' if cursor[-1] != 'A' else 'B'}"
+        with self.assertRaisesRegex(UsageLedgerError, "invalid"):
+            usage_ledger_v1._decode_cursor(
+                tampered,
+                secret=secret,
+                window_days=30,
+                sort="total_tokens_desc",
+                query=None,
             )
 
 
