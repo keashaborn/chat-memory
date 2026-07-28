@@ -395,6 +395,9 @@ GRANT EXECUTE ON FUNCTION
     uuid,uuid,uuid,text,text,text,text[]
   )
   TO brains_app;
+GRANT EXECUTE ON FUNCTION
+  memory.authoritative_owner_v5_2_packet_id_v1(uuid)
+  TO memory_v5_2_local_router_maintainer;
 
 COMMENT ON FUNCTION
   memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)
