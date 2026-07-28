@@ -271,11 +271,19 @@ async def plan_owner(
 ) -> dict[str, Any] | None:
     async with conn.transaction(isolation="repeatable_read", readonly=True):
         await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
-        rows = await conn.fetch(
-            "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
-            25 if packet_id else 1,
-        )
-    rows = select_plans(rows, packet_id)
+        if packet_id is not None:
+            rows = await conn.fetch(
+                """
+                SELECT *
+                FROM memory.plan_owner_v5_2_exact_packet_route_v1($1)
+                """,
+                packet_id,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
+                1,
+            )
     if len(rows) > 1:
         raise RuntimeError("V5.2 route planner exceeded its bound")
     return dict(rows[0]) if rows else None

@@ -25,6 +25,16 @@ rollback=ops/sql/20260728_memory_v1_v5_2_zero_atom_deferral_route_rollback.sql
 rollback_sha=c22ea48034bba15913e85b56a25f0c5224eff27fb381bda1803455620bfb0564
 sql_test=tests/memory_v1_v5_2_zero_atom_deferral_route.sql
 sql_test_sha=ef3d24b2437cf04eb54f41ce3f4af2403a0d9e3614b72cc52760907213fef015
+exact_migration=ops/sql/20260728_memory_v1_v5_2_exact_packet_route_planner.sql
+exact_migration_sha=7a9cefeab9b09aa5c4831280b44471020b3b064a6c0c17af759e38b22d64e4fd
+exact_rollback=ops/sql/20260728_memory_v1_v5_2_exact_packet_route_planner_rollback.sql
+exact_rollback_sha=4b73e72f887c9fb8163a665cfab8b62a90b4ba667f4d7b4d595968d6c2ab07e4
+exact_sql_test=tests/memory_v1_v5_2_exact_packet_route_planner.sql
+exact_sql_test_sha=aab5b1b4f9f45208e64602ef02f2e4304aeed648a4473f25665dba2d815abdcd
+router=scripts/memory_v1_v5_2_local_packet_router.py
+router_sha=c2f873fb4ac959b22a674868d7b7611549f184d2b5e4cc3aea17d9e524b307d9
+router_test=tests/test_memory_v1_v5_2_local_packet_router.py
+router_test_sha=edac1336cd610692190ea9936abd8280773376a4dbd22aa89a3fa12920f67b65
 review_worker=scripts/memory_v1_v5_2_exact_review_route.py
 review_worker_sha=bc6d0f915b2e8bc9c42489abc0bbf7f9c8ae593d575b18291d004c58fee5e6ab
 review_test=tests/test_memory_v1_v5_2_exact_review_route.py
@@ -82,6 +92,11 @@ capture_production() {
 [[ "$(sha256sum "$migration" | awk '{print $1}')" == "$migration_sha" ]]
 [[ "$(sha256sum "$rollback" | awk '{print $1}')" == "$rollback_sha" ]]
 [[ "$(sha256sum "$sql_test" | awk '{print $1}')" == "$sql_test_sha" ]]
+[[ "$(sha256sum "$exact_migration" | awk '{print $1}')" == "$exact_migration_sha" ]]
+[[ "$(sha256sum "$exact_rollback" | awk '{print $1}')" == "$exact_rollback_sha" ]]
+[[ "$(sha256sum "$exact_sql_test" | awk '{print $1}')" == "$exact_sql_test_sha" ]]
+[[ "$(sha256sum "$router" | awk '{print $1}')" == "$router_sha" ]]
+[[ "$(sha256sum "$router_test" | awk '{print $1}')" == "$router_test_sha" ]]
 [[ "$(sha256sum "$review_worker" | awk '{print $1}')" == "$review_worker_sha" ]]
 [[ "$(sha256sum "$review_test" | awk '{print $1}')" == "$review_test_sha" ]]
 [[ "$(sha256sum "$review_builder" | awk '{print $1}')" == "$review_builder_sha" ]]
@@ -141,16 +156,31 @@ docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$sql_test" >/dev/null
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$exact_migration" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$exact_sql_test" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$exact_rollback" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$rollback" >/dev/null
 [[ "$(scalar "$clone" "
   SELECT to_regprocedure(
     'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)'
   ) IS NULL
 ")" == t ]]
+[[ "$(scalar "$clone" "
+  SELECT to_regprocedure(
+    'memory.plan_owner_v5_2_exact_packet_route_v1(uuid)'
+  ) IS NULL
+")" == t ]]
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$migration" >/dev/null
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$sql_test" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$exact_migration" >/dev/null
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone" <"$exact_sql_test" >/dev/null
 
 clone_dsn=$(
   SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone" "$python_bin" -c \
@@ -183,6 +213,7 @@ print(urlunsplit((v.scheme,v.netloc,"/"+os.environ["CLONE_DB"],v.query,v.fragmen
 PYTHONPATH="$repo_root" "$python_bin" -m unittest \
   tests.test_memory_v1_v5_2_exact_terminal_batch \
   tests.test_memory_v1_v5_2_exact_review_route \
+  tests.test_memory_v1_v5_2_local_packet_router \
   tests.test_memory_v1_v5_1_review_local_packet
 
 terminal_args=()

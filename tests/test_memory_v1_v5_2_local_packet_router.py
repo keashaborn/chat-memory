@@ -44,6 +44,32 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _Connection:
+    def __init__(self, row: dict[str, object]) -> None:
+        self.row = row
+        self.fetch_query = ""
+        self.fetch_args: tuple[object, ...] = ()
+
+    def transaction(self, **_kwargs: object) -> _Transaction:
+        return _Transaction()
+
+    async def execute(self, *_args: object) -> None:
+        return None
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.fetch_query = query
+        self.fetch_args = args
+        return [self.row]
+
+
 class V52LocalPacketRouterTest(unittest.TestCase):
     def test_exact_packet_selection_never_falls_back(self) -> None:
         wanted = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
@@ -192,6 +218,22 @@ class V52LocalPacketRouterTest(unittest.TestCase):
                     owner=owner,
                     packet_id=packet,
                 )
+
+
+class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_packet_uses_unpaginated_owner_planner(self) -> None:
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        connection = _Connection({"packet_id": packet})
+
+        result = await MODULE.plan_owner(connection, owner, packet)
+
+        self.assertEqual(result, {"packet_id": packet})
+        self.assertIn(
+            "plan_owner_v5_2_exact_packet_route_v1",
+            connection.fetch_query,
+        )
+        self.assertEqual(connection.fetch_args, (packet,))
 
 
 if __name__ == "__main__":
