@@ -83,6 +83,20 @@ class FakeHTTPClient:
         )
 
 
+class NoSearchExecutionHTTPClient(FakeHTTPClient):
+    async def post(self, url: str, **kwargs: Any) -> FakeHTTPResponse:
+        if url.endswith("/search/execute"):
+            self.calls.append({"url": url, **kwargs})
+            return FakeHTTPResponse(
+                status_code=200,
+                payload={
+                    "executed": False,
+                    "plan": {"selected_route": "normal_chat"},
+                },
+            )
+        return await super().post(url, **kwargs)
+
+
 class FakeWebSocket:
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -272,6 +286,60 @@ class RealtimePreviewSidebandControllerTests(
             "Current sourced OpenAI news.",
         )
         self.assertTrue(response_events[-1]["web_search"])
+
+    async def test_authorized_voice_fallback_preserves_capability_manifest(self) -> None:
+        self.http = NoSearchExecutionHTTPClient()
+        self.controller = RealtimePreviewSidebandController(
+            session=self.session,
+            api_key="server-api-key",
+            service_token="server-service-token",
+            http_client_factory=lambda **kwargs: self.http,
+        )
+        websocket = FakeWebSocket()
+        self.controller._websocket = websocket
+        self.controller._connected.set()
+        await self.controller.commit(web_search_authorized=True)
+
+        worker = asyncio.create_task(self.controller._turn_worker())
+        try:
+            await self.controller._handle_message(
+                json.dumps(
+                    {
+                        "type": "input_audio_buffer.committed",
+                        "item_id": "item_stable",
+                    }
+                )
+            )
+            await self.controller._handle_message(
+                json.dumps(
+                    {
+                        "type": (
+                            "conversation.item."
+                            "input_audio_transcription.completed"
+                        ),
+                        "item_id": "item_stable",
+                        "transcript": "What is the capital of France?",
+                    }
+                )
+            )
+            await asyncio.wait_for(
+                self.controller._pending_turns.join(),
+                timeout=1.0,
+            )
+        finally:
+            worker.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await worker
+
+        response_call = next(
+            call
+            for call in self.http.calls
+            if call["url"].endswith("/response/query")
+        )
+        self.assertEqual(
+            response_call["headers"]["x-vs-web-search-authorization"],
+            "supabase_fresh_voice_lease_v1",
+        )
 
     async def test_provider_error_does_not_expose_provider_message(
         self,

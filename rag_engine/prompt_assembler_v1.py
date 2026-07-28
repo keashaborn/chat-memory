@@ -42,6 +42,7 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
 
 
 ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v1"
@@ -159,6 +160,10 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         default=None, repr=False
     )
     fm_selection: FMSelectionEnvelopeV02 | None = Field(default=None, repr=False)
+    search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
+        default=None,
+        repr=False,
+    )
 
     @model_validator(mode="after")
     def paired_memory_objects(self) -> "PromptAssemblyRequestV1":
@@ -294,6 +299,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     policy_signals_sha256: str
     policy_decision_sha256: str
     policy_prompt_sha256: str
+    search_capability_manifest_sha256: str | None = None
     response_mode: ResponseMode
     fm_level: FMLevel
     system_prompt_sha256: str
@@ -331,6 +337,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "policy_signals_sha256",
         "policy_decision_sha256",
         "policy_prompt_sha256",
+        "search_capability_manifest_sha256",
         "system_prompt_sha256",
         "memory_assembly_input_sha256",
         "memory_application_manifest_sha256",
@@ -372,6 +379,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 memory_input,
                 memory_application,
                 fm_selection,
+                search_capability_manifest,
             ) = _strict_source_chain(self.source_request)
             _validate_source_authority_chain(
                 policy_input=policy_input,
@@ -394,7 +402,7 @@ class AssembledPromptV1(_StrictFrozenModel):
         if self.context_blocks != expected_context:
             raise ValueError("reference context differs from typed source request")
         manifest = self.manifest
-        expected_system = _render_system_prompt(prompt)
+        expected_system = _render_system_prompt(prompt, search_capability_manifest)
         if self.system_prompt != expected_system:
             raise ValueError("system prompt differs from typed policy projection")
         conversation_payload = [item.model_dump(mode="json") for item in self.conversation]
@@ -428,6 +436,12 @@ class AssembledPromptV1(_StrictFrozenModel):
             ),
             (manifest.policy_decision_sha256, decision.decision_sha256),
             (manifest.policy_prompt_sha256, prompt.content_sha256),
+            (
+                manifest.search_capability_manifest_sha256,
+                search_capability_manifest.manifest_sha256
+                if search_capability_manifest is not None
+                else None,
+            ),
             (manifest.response_mode, decision.response_mode),
             (manifest.fm_level, decision.fm_effective_level),
             (manifest.system_prompt_sha256, _text_sha256(self.system_prompt)),
@@ -502,8 +516,16 @@ _SYSTEM_BASELINE = (
 )
 
 
-def _render_system_prompt(policy_prompt: ResponsePolicyPromptV0_2) -> str:
-    return f"{_SYSTEM_BASELINE}\n\n{policy_prompt.content}"
+def _render_system_prompt(
+    policy_prompt: ResponsePolicyPromptV0_2,
+    search_capability_manifest: SearchCapabilityManifestV1 | None = None,
+) -> str:
+    capability = (
+        f"\n\nApplication capabilities:\n{search_capability_manifest.model_brief}"
+        if search_capability_manifest is not None
+        else ""
+    )
+    return f"{_SYSTEM_BASELINE}{capability}\n\n{policy_prompt.content}"
 
 
 def _decision_prompt_bindings_match(
@@ -752,6 +774,13 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         if source.fm_selection is not None
         else None
     )
+    search_capability_manifest = (
+        SearchCapabilityManifestV1.from_wire_json(
+            _canonical_json_bytes(source.search_capability_manifest)
+        )
+        if source.search_capability_manifest is not None
+        else None
+    )
     return (
         source,
         policy_input,
@@ -762,6 +791,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         memory_input,
         memory_application,
         fm_selection,
+        search_capability_manifest,
     )
 
 
@@ -895,6 +925,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             memory_input,
             memory_application,
             fm_selection,
+            search_capability_manifest,
         ) = _strict_source_chain(request)
         _validate_source_authority_chain(
             policy_input=policy_input,
@@ -911,7 +942,10 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
 
     conversation = _conversation_from_policy_input(policy_input)
     context_blocks = _context_blocks_from_sources(memory_application, fm_selection)
-    system_prompt = _render_system_prompt(policy_prompt)
+    system_prompt = _render_system_prompt(
+        policy_prompt,
+        search_capability_manifest,
+    )
     (
         conversation_bytes,
         conversation_tokens,
@@ -936,6 +970,11 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
         "policy_signals_sha256": _sha256_bytes(_canonical_json_bytes(signals)),
         "policy_decision_sha256": decision.decision_sha256,
         "policy_prompt_sha256": policy_prompt.content_sha256,
+        "search_capability_manifest_sha256": (
+            search_capability_manifest.manifest_sha256
+            if search_capability_manifest is not None
+            else None
+        ),
         "response_mode": decision.response_mode,
         "fm_level": decision.fm_effective_level,
         "system_prompt_sha256": _text_sha256(system_prompt),

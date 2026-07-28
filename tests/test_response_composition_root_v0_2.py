@@ -15,6 +15,10 @@ from rag_engine.response_composition_root_v0_2 import (
     ResponseCompositionError,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from rag_engine.search_capability_manifest_v1 import (
+    VOICE_SEARCH_AUTHORIZATION_BASIS,
+    SearchCapabilityManifestV1,
+)
 from tests.test_openai_chat_provider_v1 import provider_response
 from tests.test_openai_moderation_adapter_v0_2 import categories, response as moderation_response
 
@@ -222,6 +226,31 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             conn.transactions,
             [{"isolation": "repeatable_read", "readonly": True}],
+        )
+
+    async def test_capability_manifest_reaches_provider_system_prompt(self) -> None:
+        client = CombinedOpenAIClient()
+        root = InactiveResponseCompositionRootV0_2(
+            openai_client=client,
+            classifier_model="gpt-5.1",
+            answer_id_factory=lambda: ANSWER,
+            correlation_id_factory=lambda: CORRELATION,
+        )
+        capability = SearchCapabilityManifestV1.create(
+            authorization_basis=VOICE_SEARCH_AUTHORIZATION_BASIS,
+        )
+        governed_command = command("Can this system research current news?").model_copy(
+            update={"search_capability_manifest": capability}
+        )
+
+        execution = await root.execute_detailed(SnapshotConn(), governed_command)
+
+        chat_kwargs = client.calls[-1][1]
+        system_text = chat_kwargs["messages"][0]["content"]
+        self.assertIn("Server-mediated research is available", system_text)
+        self.assertEqual(
+            execution.trusted_plan.assembled_prompt.manifest.search_capability_manifest_sha256,
+            capability.manifest_sha256,
         )
 
     async def test_detailed_execution_is_bound_to_public_finalization(self) -> None:

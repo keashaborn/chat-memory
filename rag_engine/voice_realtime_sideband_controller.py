@@ -445,7 +445,18 @@ class RealtimePreviewSidebandController:
 
         response = await client.post(
             f"{self._internal_base_url}/response/query",
-            headers=headers,
+            headers={
+                **headers,
+                **(
+                    {
+                        "x-vs-web-search-authorization": (
+                            "supabase_fresh_voice_lease_v1"
+                        )
+                    }
+                    if web_search_authorized
+                    else {}
+                ),
+            },
             json={
                 "user_id": self.session.owner_user_id,
                 "message": transcript,

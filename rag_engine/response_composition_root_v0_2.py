@@ -47,6 +47,7 @@ from rag_engine.response_policy_v0_2 import (
 from rag_engine.server_response_signal_classifier_v0_2 import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
+from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
 
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -79,6 +80,10 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
     request_field_names: tuple[str, ...] = ()
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
     stateless: bool = False
+    search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
+        default=None,
+        repr=False,
+    )
 
     @field_validator("request_id")
     @classmethod
@@ -313,6 +318,7 @@ class InactiveResponseCompositionRootV0_2:
                 memory_input=memory.memory_input,
                 memory_application=memory.memory_application,
                 fm_token_budget=command.fm_token_budget,
+                search_capability_manifest=command.search_capability_manifest,
             )
             stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)
             stage = "orchestration"

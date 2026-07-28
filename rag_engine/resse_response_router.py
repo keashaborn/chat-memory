@@ -27,6 +27,17 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
+from rag_engine.search_capability_manifest_v1 import (
+    TEXT_SEARCH_AUTHORIZATION_BASIS,
+    VOICE_SEARCH_AUTHORIZATION_BASIS,
+    SearchCapabilityManifestV1,
+)
+from rag_engine.web_search_actor_auth_v1 import (
+    TEXT_SEARCH_AUTHORIZATION_VALUE,
+    VOICE_SEARCH_AUTHORIZATION_HEADER,
+    VOICE_SEARCH_AUTHORIZATION_VALUE,
+    require_web_search_actor_v1,
+)
 
 
 router = APIRouter()
@@ -75,6 +86,28 @@ async def resse_response_query(
     if not DSN:
         raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
     owner = UUID(await require_memory_actor_v1(req, str(payload.user_id)))
+    search_capability_manifest = None
+    search_authorization = (
+        req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or ""
+    ).strip()
+    if search_authorization:
+        await require_web_search_actor_v1(
+            req,
+            str(owner),
+            internal_assertion_required=True,
+        )
+        if search_authorization == TEXT_SEARCH_AUTHORIZATION_VALUE:
+            authorization_basis = TEXT_SEARCH_AUTHORIZATION_BASIS
+        elif search_authorization == VOICE_SEARCH_AUTHORIZATION_VALUE:
+            authorization_basis = VOICE_SEARCH_AUTHORIZATION_BASIS
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail="invalid_web_search_authorization",
+            )
+        search_capability_manifest = SearchCapabilityManifestV1.create(
+            authorization_basis=authorization_basis,
+        )
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
     voice_turn_id = voice_turn_id_from_request(req)
     for name, value in voice_turn_response_headers(voice_turn_id).items():
@@ -108,6 +141,7 @@ async def resse_response_query(
                         )
                     ),
                     stateless=stateless,
+                    search_capability_manifest=search_capability_manifest,
                 ),
             ),
             timeout=RESPONSE_QUERY_DEADLINE_SECONDS,

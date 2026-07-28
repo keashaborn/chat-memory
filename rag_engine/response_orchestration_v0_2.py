@@ -42,6 +42,7 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
 
 
 TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_2"
@@ -184,6 +185,10 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         repr=False,
     )
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
+    search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
+        default=None,
+        repr=False,
+    )
 
     @field_validator("legacy_request_field_names")
     @classmethod
@@ -260,6 +265,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         memory_input: MemoryPromptAssemblyInputV1 | None = None,
         memory_application: MemoryPromptApplicationResultV1 | None = None,
         fm_token_budget: int | None = None,
+        search_capability_manifest: SearchCapabilityManifestV1 | None = None,
     ) -> "TrustedResponseRequestV0_2":
         """Create from trusted values; request values are deliberately absent."""
 
@@ -296,6 +302,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             memory_input=memory_input,
             memory_application=memory_application,
             fm_token_budget=fm_token_budget,
+            search_capability_manifest=search_capability_manifest,
         )
 
 
@@ -663,6 +670,9 @@ class TrustedResponseOrchestratorV0_2:
                     memory_input=request.memory_input,
                     memory_application=request.memory_application,
                     fm_selection=fm,
+                    search_capability_manifest=(
+                        request.search_capability_manifest
+                    ),
                 )
             )
             occurred_at = self._clock()

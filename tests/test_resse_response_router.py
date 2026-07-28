@@ -37,6 +37,24 @@ class ResseResponseRouterTests(unittest.TestCase):
                 }
             )
 
+    def test_search_capability_is_header_derived_and_not_public_payload(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn("require_web_search_actor_v1(", source)
+        self.assertIn("SearchCapabilityManifestV1.create(", source)
+        self.assertIn("req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER)", source)
+        self.assertNotIn("payload.search_capability", source)
+        with self.assertRaises(ValidationError):
+            ResseResponseRequestV1.model_validate(
+                {
+                    "user_id": ACTOR,
+                    "message": "Hello.",
+                    "no_store": True,
+                    "search_capability_manifest": {
+                        "available_routes": ["unbounded_web"],
+                    },
+                }
+            )
+
     def test_public_request_accepts_only_transport_fields(self) -> None:
         value = ResseResponseRequestV1.model_validate_json(
             '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'

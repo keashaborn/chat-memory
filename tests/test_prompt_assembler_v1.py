@@ -52,6 +52,10 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.search_capability_manifest_v1 import (
+    TEXT_SEARCH_AUTHORIZATION_BASIS,
+    SearchCapabilityManifestV1,
+)
 from tests.test_memory_v1_selection_envelope_v1 import (
     OWNER,
     request as memory_request,
@@ -180,6 +184,29 @@ def rehash_manifest(manifest: dict[str, object]) -> None:
 
 
 class TypedPromptAssemblerV1Tests(unittest.TestCase):
+    def test_server_search_capability_is_bound_to_the_system_prompt(self) -> None:
+        capability = SearchCapabilityManifestV1.create(
+            authorization_basis=TEXT_SEARCH_AUTHORIZATION_BASIS,
+        )
+        request = assembly_request().model_copy(
+            update={"search_capability_manifest": capability}
+        )
+        assembled = assemble_prompt(request)
+
+        self.assertIn("Server-mediated research is available", assembled.system_prompt)
+        self.assertIn(
+            "Do not claim that research ran for this response",
+            assembled.system_prompt,
+        )
+        self.assertEqual(
+            assembled.manifest.search_capability_manifest_sha256,
+            capability.manifest_sha256,
+        )
+        self.assertEqual(
+            AssembledPromptV1.from_wire_json(assembled.canonical_json_bytes()),
+            assembled,
+        )
+
     def test_ordinary_assembly_has_only_backend_system_and_conversation(self) -> None:
         assembled = assemble_prompt(assembly_request())
         self.assertEqual(assembled.manifest.response_mode, ResponseMode.ORDINARY)
