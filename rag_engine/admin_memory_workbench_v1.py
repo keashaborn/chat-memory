@@ -9,10 +9,27 @@ from uuid import UUID
 import asyncpg
 
 
-SCHEMA = "admin_memory_workbench_v1"
-POLICY_VERSION = "memory_owner_packet_feedback_v1"
+SCHEMA = "admin_memory_workbench_v2"
+POLICY_VERSION = "memory_owner_packet_feedback_v2"
 MAX_SOURCE_CHARS = 6000
+MAX_CONTEXT_CHARS = 12000
 MAX_ITEMS = 25
+
+DIAGNOSTIC_CATEGORIES = frozenset(
+    {
+        "context_missing",
+        "duplicate_or_repeat",
+        "missed_durable_information",
+        "incomplete_compound_extraction",
+        "incorrect_entity_or_relationship",
+        "incorrect_time_or_status",
+        "uncertainty_or_attribution_error",
+        "wrong_memory_lane",
+        "should_not_be_memory",
+        "transcription_ambiguity",
+        "other",
+    }
+)
 
 
 class MemoryWorkbenchError(RuntimeError):
@@ -235,12 +252,106 @@ def _packet_interpretations(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
     return interpretations[:64]
 
 
+def _source_context(
+    *,
+    target: str,
+    full_source: Any,
+    source_char_start: Any,
+    source_char_end: Any,
+) -> dict[str, Any]:
+    source = str(full_source or "")
+    if not source or source == target:
+        return {
+            "available": False,
+            "text": "",
+            "truncated": False,
+            "target_start": None,
+            "target_end": None,
+        }
+    try:
+        target_start = int(source_char_start)
+        target_end = int(source_char_end)
+    except (TypeError, ValueError):
+        target_start = source.find(target)
+        target_end = target_start + len(target) if target_start >= 0 else -1
+    if (
+        target_start < 0
+        or target_end <= target_start
+        or target_end > len(source)
+        or source[target_start:target_end] != target
+    ):
+        target_start = source.find(target)
+        target_end = target_start + len(target) if target_start >= 0 else -1
+    if target_start < 0 or target_end <= target_start:
+        return {
+            "available": True,
+            "text": source[:MAX_CONTEXT_CHARS],
+            "truncated": len(source) > MAX_CONTEXT_CHARS,
+            "target_start": None,
+            "target_end": None,
+        }
+    if len(source) <= MAX_CONTEXT_CHARS:
+        return {
+            "available": True,
+            "text": source,
+            "truncated": False,
+            "target_start": target_start,
+            "target_end": target_end,
+        }
+    padding = max(0, (MAX_CONTEXT_CHARS - len(target)) // 2)
+    window_start = max(0, target_start - padding)
+    window_start = min(window_start, len(source) - MAX_CONTEXT_CHARS)
+    window_end = min(len(source), window_start + MAX_CONTEXT_CHARS)
+    return {
+        "available": True,
+        "text": source[window_start:window_end],
+        "truncated": True,
+        "target_start": target_start - window_start,
+        "target_end": target_end - window_start,
+    }
+
+
+def _diagnostic_packet(
+    packet: Mapping[str, Any],
+    *,
+    route: str,
+    route_reason_code: str | None,
+    manual_review_required: bool,
+) -> dict[str, Any]:
+    def sequence(field: str) -> list[Any]:
+        value = packet.get(field)
+        return list(value)[:64] if isinstance(value, list) else []
+
+    return {
+        "contract_version": _safe_text(packet.get("contract_version"), 200)
+        or None,
+        "predicate_registry_version": _safe_text(
+            packet.get("predicate_registry_version"),
+            200,
+        )
+        or None,
+        "manual_review_required": manual_review_required,
+        "route": route,
+        "route_reason_code": route_reason_code,
+        "entity_mentions": sequence("entity_mentions"),
+        "observations": sequence("observations"),
+        "deferrals": sequence("deferrals"),
+        "comparison_hints": sequence("comparison_hints"),
+        "packet_findings": sequence("packet_findings"),
+    }
+
+
 def _workbench_item(row: Mapping[str, Any]) -> dict[str, Any]:
     source = str(row.get("source_content") or "")
     packet = row.get("normalized_packet")
     if not isinstance(packet, Mapping):
         packet = {}
     interpretations = _packet_interpretations(packet)
+    route = _safe_text(row.get("route"), 120) or "not_routed"
+    route_reason_code = (
+        _safe_text(row.get("route_reason_code"), 160) or None
+    )
+    manual_review_required = bool(row.get("manual_review_required"))
     return {
         "packet_id": str(row["packet_id"]),
         "packet_storage_sha256": str(row["packet_storage_sha256"]),
@@ -248,23 +359,36 @@ def _workbench_item(row: Mapping[str, Any]) -> dict[str, Any]:
             "text": source[:MAX_SOURCE_CHARS],
             "truncated": len(source) > MAX_SOURCE_CHARS,
             "recorded_at": _iso(row.get("source_recorded_at")),
+            "context": _source_context(
+                target=source,
+                full_source=row.get("source_context_content"),
+                source_char_start=row.get("source_char_start"),
+                source_char_end=row.get("source_char_end"),
+            ),
         },
         "gpu": {
             "interpretations": interpretations,
             "entity_count": len(packet.get("entity_mentions") or []),
             "observation_count": len(packet.get("observations") or []),
             "deferral_count": len(packet.get("deferrals") or []),
-            "manual_review_required": bool(row.get("manual_review_required")),
+            "manual_review_required": manual_review_required,
+            "diagnostic_json": _diagnostic_packet(
+                packet,
+                route=route,
+                route_reason_code=route_reason_code,
+                manual_review_required=manual_review_required,
+            ),
         },
         "routing": {
-            "route": _safe_text(row.get("route"), 120) or "not_routed",
-            "reason_code": _safe_text(row.get("route_reason_code"), 160) or None,
+            "route": route,
+            "reason_code": route_reason_code,
         },
         "review": {
             "feedback_id": (
                 str(row["feedback_id"]) if row.get("feedback_id") else None
             ),
             "decision": row.get("feedback_decision"),
+            "category": row.get("feedback_category"),
             "note": row.get("feedback_note"),
             "created_at": _iso(row.get("feedback_created_at")),
         },
@@ -302,7 +426,7 @@ async def list_admin_memory_workbench_v1(
             rows: Sequence[Mapping[str, Any]] = await conn.fetch(
                 """
                 SELECT *
-                FROM memory.list_owner_memory_workbench_v1($1,$2,$3,$4)
+                FROM memory.list_owner_memory_workbench_v2($1,$2,$3,$4)
                 """,
                 state,
                 limit,
@@ -338,7 +462,7 @@ async def list_admin_memory_workbench_v1(
     }
 
 
-async def record_admin_memory_workbench_feedback_v1(
+async def record_admin_memory_workbench_feedback_v2(
     *,
     dsn: str,
     actor_user_id: str,
@@ -346,11 +470,17 @@ async def record_admin_memory_workbench_feedback_v1(
     packet_id: UUID,
     packet_storage_sha256: str,
     decision: str,
+    diagnostic_category: str | None,
     diagnostic_note: str | None,
 ) -> dict[str, Any]:
     actor = UUID(actor_user_id)
     if decision not in {"correct", "not_correct"}:
         raise MemoryWorkbenchError("invalid_decision")
+    category = (diagnostic_category or "").strip() or None
+    if decision == "not_correct" and category not in DIAGNOSTIC_CATEGORIES:
+        raise MemoryWorkbenchError("invalid_diagnostic_category")
+    if decision == "correct" and category is not None:
+        raise MemoryWorkbenchError("unexpected_diagnostic_category")
     note = (diagnostic_note or "").strip() or None
     if note is not None and len(note) > 2000:
         raise MemoryWorkbenchError("diagnostic_note_too_long")
@@ -365,14 +495,15 @@ async def record_admin_memory_workbench_feedback_v1(
             row = await conn.fetchrow(
                 """
                 SELECT *
-                FROM memory.record_owner_memory_workbench_feedback_v1(
-                  $1,$2,$3,$4,$5
+                FROM memory.record_owner_memory_workbench_feedback_v2(
+                  $1,$2,$3,$4,$5,$6
                 )
                 """,
                 operation_id,
                 packet_id,
                 packet_storage_sha256,
                 decision,
+                category,
                 note,
             )
     finally:
@@ -386,6 +517,7 @@ async def record_admin_memory_workbench_feedback_v1(
         "feedback": {
             "feedback_id": str(row["feedback_id"]),
             "decision": row["decision"],
+            "category": row["diagnostic_category"],
             "note": row["diagnostic_note"],
             "created_at": _iso(row["created_at"]),
             "outcome": row["apply_outcome"],
@@ -395,7 +527,8 @@ async def record_admin_memory_workbench_feedback_v1(
 
 __all__ = [
     "MemoryWorkbenchError",
+    "DIAGNOSTIC_CATEGORIES",
     "SCHEMA",
     "list_admin_memory_workbench_v1",
-    "record_admin_memory_workbench_feedback_v1",
+    "record_admin_memory_workbench_feedback_v2",
 ]
