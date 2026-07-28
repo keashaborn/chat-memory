@@ -29,6 +29,10 @@ review_worker=scripts/memory_v1_v5_2_exact_review_route.py
 review_worker_sha=bc6d0f915b2e8bc9c42489abc0bbf7f9c8ae593d575b18291d004c58fee5e6ab
 review_test=tests/test_memory_v1_v5_2_exact_review_route.py
 review_test_sha=1c89259f58c2eea89c86e5263cf58f7c51104f555fe8f9f6082279ac444afd90
+review_builder=scripts/memory_v1_v5_1_review_local_packet.py
+review_builder_sha=6c98361ddc6f375ebde215631b2a61f9b0292ec5f89137da723fe794642c2c29
+review_builder_test=tests/test_memory_v1_v5_1_review_local_packet.py
+review_builder_test_sha=8acc983257865ad7049368dfbc9d234c70e1aa262d124969afb6695e361855cb
 python_bin=/opt/chat-memory/venv/bin/python
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
 artifact_dir="/home/ubuntu/memory-v1-reviews/first-batch-route-clone-$run_tag"
@@ -80,6 +84,8 @@ capture_production() {
 [[ "$(sha256sum "$sql_test" | awk '{print $1}')" == "$sql_test_sha" ]]
 [[ "$(sha256sum "$review_worker" | awk '{print $1}')" == "$review_worker_sha" ]]
 [[ "$(sha256sum "$review_test" | awk '{print $1}')" == "$review_test_sha" ]]
+[[ "$(sha256sum "$review_builder" | awk '{print $1}')" == "$review_builder_sha" ]]
+[[ "$(sha256sum "$review_builder_test" | awk '{print $1}')" == "$review_builder_test_sha" ]]
 git merge-base --is-ancestor "$(jq -er '.required_ancestor_commit' "$manifest")" HEAD
 [[ "$(jq -er '.owner_user_id' "$manifest")" == "$owner" ]]
 [[ "$(jq -er '.expected_counts.terminal_routes' "$manifest")" == 48 ]]
@@ -176,7 +182,8 @@ print(urlunsplit((v.scheme,v.netloc,"/"+os.environ["CLONE_DB"],v.query,v.fragmen
 
 PYTHONPATH="$repo_root" "$python_bin" -m unittest \
   tests.test_memory_v1_v5_2_exact_terminal_batch \
-  tests.test_memory_v1_v5_2_exact_review_route
+  tests.test_memory_v1_v5_2_exact_review_route \
+  tests.test_memory_v1_v5_1_review_local_packet
 
 terminal_args=()
 for item in "${terminal_items[@]}"; do
