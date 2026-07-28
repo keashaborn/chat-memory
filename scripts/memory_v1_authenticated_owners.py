@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Sequence
+from urllib.parse import urlparse
 import uuid
 
 import asyncpg
@@ -9,6 +10,15 @@ import asyncpg
 
 MAX_AUTHENTICATED_OWNERS = 1000
 DEFAULT_ACTIVITY_DAYS = 90
+
+
+def loopback_dsn(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise RuntimeError("authenticated owner DSN scheme is invalid")
+    if parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+        raise RuntimeError("authenticated owner DSN must be loopback-only")
+    return value
 
 
 def explicit_owners(values: Sequence[str]) -> list[uuid.UUID]:
@@ -35,7 +45,11 @@ async def resolve_authenticated_owners(
     if not 1 <= limit <= MAX_AUTHENTICATED_OWNERS:
         raise RuntimeError("authenticated owner limit is invalid")
 
-    conn = await asyncpg.connect(dsn, command_timeout=30)
+    conn = await asyncpg.connect(
+        loopback_dsn(dsn),
+        command_timeout=30,
+        ssl=False,
+    )
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("authenticated owner discovery requires brains_app")
