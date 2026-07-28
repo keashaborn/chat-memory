@@ -462,8 +462,17 @@ qdrant_after=$(qdrant_signature)
 phase=restoring_runtime
 restore_runtime
 [[ "$(systemctl is-active brains.service)" == active ]]
-curl --fail --silent --show-error --max-time 30 \
-  http://127.0.0.1:8000/health >/dev/null
+health_ready=0
+for _attempt in {1..30}; do
+  if curl --fail --silent --show-error --max-time 5 \
+    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+    http://127.0.0.1:8088/healthz >/dev/null 2>&1; then
+    health_ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "$health_ready" -eq 1 ]]
 
 phase=writing_report
 jq -n \
