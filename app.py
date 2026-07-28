@@ -81,7 +81,7 @@ from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
 from rag_engine.admin_memory_workbench_v1 import (
     MemoryWorkbenchError,
     list_admin_memory_workbench_v1,
-    record_admin_memory_workbench_feedback_v1,
+    record_admin_memory_workbench_feedback_v2,
 )
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
@@ -732,6 +732,21 @@ class AdminMemoryWorkbenchFeedbackV1(BaseModel):
     packet_id: uuid.UUID
     packet_storage_sha256: str
     decision: Literal["correct", "not_correct"]
+    diagnostic_category: Optional[
+        Literal[
+            "context_missing",
+            "duplicate_or_repeat",
+            "missed_durable_information",
+            "incomplete_compound_extraction",
+            "incorrect_entity_or_relationship",
+            "incorrect_time_or_status",
+            "uncertainty_or_attribution_error",
+            "wrong_memory_lane",
+            "should_not_be_memory",
+            "transcription_ambiguity",
+            "other",
+        ]
+    ] = None
     diagnostic_note: Optional[str] = None
 
 
@@ -817,13 +832,14 @@ async def admin_memory_workbench_feedback(
     if denied is not None:
         return denied
     try:
-        return await record_admin_memory_workbench_feedback_v1(
+        return await record_admin_memory_workbench_feedback_v2(
             dsn=DSN,
             actor_user_id=actor,
             operation_id=payload.operation_id,
             packet_id=payload.packet_id,
             packet_storage_sha256=payload.packet_storage_sha256,
             decision=payload.decision,
+            diagnostic_category=payload.diagnostic_category,
             diagnostic_note=payload.diagnostic_note,
         )
     except MemoryWorkbenchError:
