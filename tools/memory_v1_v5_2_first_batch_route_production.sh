@@ -65,6 +65,7 @@ timers_quiesced=0
 brains_stopped=0
 schema_installed=0
 data_committed=0
+phase=initialization
 
 scalar() {
   docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
@@ -129,6 +130,20 @@ cleanup() {
     run_sql <"$rollback" >/dev/null 2>&1 || status=1
   fi
   restore_runtime || status=1
+  if [[ "$status" -ne 0 && -d "$artifact_dir" ]]; then
+    for diagnostic in "$terminal_dry" "$terminal_apply" "$terminal_other" \
+      "$review_dry" "$review_apply" "$review_replay" "$review_other"; do
+      if [[ -s "$diagnostic" ]]; then
+        install -o ubuntu -g ubuntu -m 0600 "$diagnostic" \
+          "$artifact_dir/diagnostic-$(basename "$diagnostic").json"
+      fi
+    done
+    {
+      printf 'phase=%s\nexit_code=%s\n' "$phase" "$status"
+    } >"$artifact_dir/failure-status.txt"
+    chown ubuntu:ubuntu "$artifact_dir/failure-status.txt"
+    chmod 0600 "$artifact_dir/failure-status.txt"
+  fi
   rm -f "$timer_state" "$timer_restored" "$table_list" "$before" "$after" \
     "$terminal_dry" "$terminal_apply" "$terminal_other" "$review_dry" \
     "$review_apply" "$review_replay" "$review_other"
@@ -219,6 +234,7 @@ chown ubuntu:ubuntu "$backup"
 chmod 0600 "$backup"
 
 capture_timer_state "$timer_state"
+phase=quiescing_runtime
 while IFS=$'\t' read -r unit _enabled _active; do
   systemctl stop "$unit"
 done <"$timer_state"
@@ -228,6 +244,7 @@ brains_stopped=1
 
 docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
 
+phase=creating_backup
 docker exec "$container" pg_dump -U sage -d "$database" \
   -Fc --no-owner >"$backup"
 [[ -s "$backup" ]]
@@ -239,6 +256,7 @@ docker exec "$container" psql -X -A -F $'\t' -t -U sage -d "$database" \
       WHERE table_schema='memory' AND table_type='BASE TABLE'
         AND table_name<>'v5_2_local_packet_route_event'
       ORDER BY 1,2" >"$table_list"
+phase=capturing_protected_baseline
 capture_protected_tables "$before"
 qdrant_before=$(qdrant_signature)
 non_target_route_before=$(scalar "
@@ -261,10 +279,12 @@ non_target_route_before=$(scalar "
     AND evidence_id=ANY(string_to_array('$evidence_csv',',')::uuid[])
 ")" == 0 ]]
 
+phase=installing_schema
 run_sql <"$migration" >/dev/null
 schema_installed=1
 run_sql <"$sql_test" >/dev/null
 
+phase=running_preflight
 set -a
 source /opt/chat-memory/.env
 set +a
@@ -331,6 +351,7 @@ jq -e '.apply==false and (.plans|length)==11
   and .database_writes==0 and .filesystem_writes==0' \
   "$review_other" >/dev/null
 
+phase=applying_exact_routes
 run_terminal "$owner" "$terminal_apply" true
 jq -e '.apply==true and .database_writes==55
   and .transactional_apply_proved==true
@@ -349,6 +370,7 @@ jq -e '.apply==true and .outcome=="manual_review_artifacts_ready"
   "$review_apply" >/dev/null
 data_committed=1
 
+phase=verifying_replay
 run_review "$owner" "$review_replay"
 jq -e '.apply==false and (.plans|length)==11
   and ([.plans[].route]|all(.=="no_work"))
@@ -386,6 +408,7 @@ jq -e '.apply==false and (.plans|length)==11
 ")" == 0 ]]
 [[ "$(find "$reviews" -maxdepth 1 -type f -name '*.json' | wc -l)" == 22 ]]
 
+phase=verifying_protected_state
 capture_protected_tables "$after"
 cmp -s "$before" "$after"
 non_target_route_after=$(scalar "
@@ -405,11 +428,13 @@ non_target_route_after=$(scalar "
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_before" == "$qdrant_after" ]]
 
+phase=restoring_runtime
 restore_runtime
 [[ "$(systemctl is-active brains.service)" == active ]]
 curl --fail --silent --show-error --max-time 30 \
   http://127.0.0.1:8000/health >/dev/null
 
+phase=writing_report
 jq -n \
   --arg production_commit "$(git rev-parse HEAD)" \
   --arg backup "$backup" \
