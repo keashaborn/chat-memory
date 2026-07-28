@@ -78,6 +78,11 @@ from rag_engine.thread_title_v1 import (
 )
 from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
 from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
+from rag_engine.admin_memory_workbench_v1 import (
+    MemoryWorkbenchError,
+    list_admin_memory_workbench_v1,
+    record_admin_memory_workbench_feedback_v1,
+)
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
     AdminUsageUsersRequestV1,
@@ -714,6 +719,137 @@ async def admin_memory_health(req: Request):
             {
                 "ok": False,
                 "error": "memory_health_unavailable",
+                "request_id": rid,
+            },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+# ---------- owner memory workbench ----------
+class AdminMemoryWorkbenchFeedbackV1(BaseModel):
+    operation_id: uuid.UUID
+    packet_id: uuid.UUID
+    packet_storage_sha256: str
+    decision: Literal["correct", "not_correct"]
+    diagnostic_note: Optional[str] = None
+
+
+def _require_memory_workbench_actor(
+    req: Request,
+    required_capability: str,
+):
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response(), None
+    actor_uuid = parse_uuid(actor)
+    if actor_uuid is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_actor_user_id"},
+            status_code=400,
+        ), None
+    capability = (
+        req.headers.get("x-vs-authorized-capability") or ""
+    ).strip()
+    if not hmac.compare_digest(capability, required_capability):
+        return JSONResponse(
+            {"ok": False, "error": "capability_required"},
+            status_code=403,
+        ), None
+    return None, str(actor_uuid)
+
+
+@app.get("/admin/memory/workbench")
+async def admin_memory_workbench(req: Request):
+    denied, actor = _require_memory_workbench_actor(
+        req,
+        "memory_system.view",
+    )
+    if denied is not None:
+        return denied
+    params = req.query_params
+    state = (params.get("state") or "pending").strip()
+    try:
+        limit = int(params.get("limit") or 12)
+        raw_before = (params.get("before_created_at") or "").strip()
+        raw_packet = (params.get("before_packet_id") or "").strip()
+        before_created_at = (
+            datetime.fromisoformat(raw_before.replace("Z", "+00:00"))
+            if raw_before
+            else None
+        )
+        before_packet_id = uuid.UUID(raw_packet) if raw_packet else None
+        return await list_admin_memory_workbench_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            state=state,
+            limit=limit,
+            before_created_at=before_created_at,
+            before_packet_id=before_packet_id,
+        )
+    except (TypeError, ValueError, MemoryWorkbenchError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_memory_workbench_query"},
+            status_code=400,
+        )
+    except Exception:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "memory_workbench_unavailable",
+                "request_id": rid,
+            },
+            status_code=500,
+            headers={"x-request-id": rid},
+        )
+
+
+@app.post("/admin/memory/workbench/feedback")
+async def admin_memory_workbench_feedback(
+    payload: AdminMemoryWorkbenchFeedbackV1,
+    req: Request,
+):
+    denied, actor = _require_memory_workbench_actor(
+        req,
+        "memory_system.manage",
+    )
+    if denied is not None:
+        return denied
+    try:
+        return await record_admin_memory_workbench_feedback_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            operation_id=payload.operation_id,
+            packet_id=payload.packet_id,
+            packet_storage_sha256=payload.packet_storage_sha256,
+            decision=payload.decision,
+            diagnostic_note=payload.diagnostic_note,
+        )
+    except MemoryWorkbenchError:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_memory_workbench_feedback"},
+            status_code=400,
+        )
+    except asyncpg.PostgresError as exc:
+        status = 409 if exc.sqlstate in {"22023", "23514"} else 500
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "memory_workbench_feedback_conflict"
+                    if status == 409
+                    else "memory_workbench_feedback_unavailable"
+                ),
+            },
+            status_code=status,
+        )
+    except Exception:
+        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "memory_workbench_feedback_unavailable",
                 "request_id": rid,
             },
             status_code=500,
