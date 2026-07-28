@@ -110,7 +110,7 @@ async def finalize_terminal_rows(
     while remaining:
         rows = await conn.fetch(
             "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
-            min(25, len(remaining)),
+            25,
         )
         selected = [
             dict(row)
