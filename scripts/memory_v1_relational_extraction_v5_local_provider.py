@@ -2148,6 +2148,59 @@ _PET_BREED_CUE_RE = re.compile(
     r"bulldog|terrier|spaniel|mastiff|husky|collie)\b",
     re.IGNORECASE,
 )
+_PET_BREED_CANONICAL_PATTERNS = (
+    (
+        re.compile(r"\bgerman\s+shepherd\b", re.IGNORECASE),
+        "German Shepherd",
+        "dog",
+    ),
+    (
+        re.compile(r"\blabrador(?:\s+retriever)?\b", re.IGNORECASE),
+        "Labrador Retriever",
+        "dog",
+    ),
+    (
+        re.compile(r"\bgolden\s+retriever\b", re.IGNORECASE),
+        "Golden Retriever",
+        "dog",
+    ),
+    (re.compile(r"\bmaine\s+coon\b", re.IGNORECASE), "Maine Coon", "cat"),
+    (re.compile(r"\bpoodle\b", re.IGNORECASE), "Poodle", "dog"),
+    (re.compile(r"\bbeagle\b", re.IGNORECASE), "Beagle", "dog"),
+    (re.compile(r"\brottweiler\b", re.IGNORECASE), "Rottweiler", "dog"),
+    (re.compile(r"\bboxer\b", re.IGNORECASE), "Boxer", "dog"),
+    (re.compile(r"\bbulldog\b", re.IGNORECASE), "Bulldog", "dog"),
+    (re.compile(r"\bterrier\b", re.IGNORECASE), "Terrier", "dog"),
+    (re.compile(r"\bspaniel\b", re.IGNORECASE), "Spaniel", "dog"),
+    (re.compile(r"\bmastiff\b", re.IGNORECASE), "Mastiff", "dog"),
+    (re.compile(r"\bhusky\b", re.IGNORECASE), "Husky", "dog"),
+    (re.compile(r"\bcollie\b", re.IGNORECASE), "Collie", "dog"),
+)
+_PET_DIRECT_SPECIES_PATTERNS = (
+    (re.compile(r"\b(?:dog|puppy)\b", re.IGNORECASE), "dog"),
+    (re.compile(r"\b(?:cat|kitten)\b", re.IGNORECASE), "cat"),
+    (re.compile(r"\brabbit\b", re.IGNORECASE), "rabbit"),
+    (re.compile(r"\b(?:parrot|bird)\b", re.IGNORECASE), "bird"),
+    (re.compile(r"\bhorse\b", re.IGNORECASE), "horse"),
+    (re.compile(r"\bllama\b", re.IGNORECASE), "llama"),
+)
+_HISTORICAL_PET_RELATIONSHIP_RE = re.compile(
+    r"\bafter\s+i\s+(?:got|earned|received)\s+my\s+"
+    r"(?:doctorate|degree)\b.*\bi\s+got\b|"
+    r"\b(?:years?|decades?)\s+ago\b.*\b"
+    r"(?:i|we)\s+(?:got|had|owned|adopted|raised)\b|"
+    r"\b(?:was|were)\s+(?:my|our)\s+"
+    r"(?:(?:first|next)\s+)*(?:dog|cat|pet|"
+    r"german\s+shepherd|maine\s+coon)\b|"
+    r"\b(?:my|our)\s+(?:(?:first|next)\s+)+"
+    r"(?:dog|cat|pet|german\s+shepherd|maine\s+coon)\s+was\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_AMBIGUOUS_BREEDING_TRANSCRIPT_RE = re.compile(
+    r"\b(?:read|bread)\b.*\b(?:german\s+shepherd|dog|cat|pet)s?\b|"
+    r"\b(?:german\s+shepherd|dog|cat|pet)s?\b.*\b(?:read|bread)\b",
+    re.IGNORECASE | re.DOTALL,
+)
 _PET_COAT_COLOR_CUE_RE = re.compile(
     r"\b(?:black|white|red|brown|gray|grey|blue|cream|golden|"
     r"silver|tan|sable|brindle|merle|bicolor|bi-color|tricolor|"
@@ -3062,6 +3115,10 @@ def _deterministic_policy_packet(
         return _guard_deferral_packet(
             source, ("insufficient_evidence",)
         ), "memory_injection"
+    if _AMBIGUOUS_BREEDING_TRANSCRIPT_RE.search(content):
+        return _guard_deferral_packet(
+            source, ("ambiguous_transcription",)
+        ), "ambiguous_breeding_transcription"
     if _MIXED_AUTHOR_RE.search(content) and _UNVERIFIED_RE.search(content):
         return _guard_deferral_packet(
             source, ("mixed_authorship",)
@@ -3201,16 +3258,32 @@ def _add_compiler_entity(
 
 def _pet_name(content: str) -> str | None:
     patterns = (
-        r"\bmy\s+(?:(?:male|female)\s+)?"
+        r"\b(?i:dog|cat|pet|german\s+shepherd|maine\s+coon)\s+"
+        r"(?i:by\s+the\s+name\s+of|named|called)\s+"
+        r"([A-Z][\w'’-]{0,79}(?:\s+(?:(?:von|van|de|del|du|la)\s+)?"
+        r"[A-Z][\w'’-]{0,79}){0,5})"
+        r"(?=\s*(?:[.,;!?]|$))",
+        r"\b(?i:my\s+(?:(?:first|next|male|female)\s+)*"
+        r"(?:dog|cat|pet|german\s+shepherd|maine\s+coon)\s+was)\s+"
+        r"([A-Z][\w'’-]{0,79}(?:\s+(?:(?:von|van|de|del|du|la)\s+)?"
+        r"[A-Z][\w'’-]{0,79}){0,5})"
+        r"(?=\s*(?:[.,;!?]|$))",
+        r"\b([A-Z][\w'’-]{0,79}(?:\s+(?:(?:von|van|de|del|du|la)\s+)?"
+        r"[A-Z][\w'’-]{0,79}){0,5})\s+"
+        r"(?i:(?:what\s+)?was\s+my\s+"
+        r"(?:(?:first|next|male|female)\s+)*"
+        r"(?:dog|cat|pet|german\s+shepherd|maine\s+coon))\b",
+        r"\b(?i:my\s+(?:(?:male|female)\s+)?"
         r"(?:german\s+shepherd|labrador(?:\s+retriever)?|"
         r"golden\s+retriever|poodle|beagle|rottweiler|boxer|"
         r"bulldog|terrier|spaniel|mastiff|husky|collie)\s+"
+        r")"
         r"([A-Z][\w'’-]{0,79})\b",
-        r"\bmy\s+(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\s+"
+        r"\b(?i:my\s+(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\s+)"
         r"([A-Z][\w'’-]{0,79})\b",
-        r"\b([A-Z][\w'’-]{0,79})\s*,?\s+my\s+"
-        r"(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\b",
-        r"\b(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\s+is\s+"
+        r"\b([A-Z][\w'’-]{0,79})\s*,?\s+"
+        r"(?i:my\s+(?:dog|cat|rabbit|parrot|bird|horse|llama|pet))\b",
+        r"\b(?i:(?:dog|cat|rabbit|parrot|bird|horse|llama|pet)\s+is\s+)"
         r"([A-Z][\w'’-]{0,79})\b",
     )
     for pattern in patterns:
@@ -3218,6 +3291,18 @@ def _pet_name(content: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _explicit_pet_breed_and_species(
+    content: str,
+) -> tuple[str | None, str | None]:
+    for pattern, breed, species in _PET_BREED_CANONICAL_PATTERNS:
+        if pattern.search(content):
+            return breed, species
+    for pattern, species in _PET_DIRECT_SPECIES_PATTERNS:
+        if pattern.search(content):
+            return None, species
+    return None, None
 
 
 def _explicit_education_organization(
@@ -4557,6 +4642,9 @@ def _compile_entity_links(
     ) or "relationship.has_pet" in predicates
     if pet_source and pet_predicates:
         explicit_pet_name = _pet_name(content)
+        explicit_pet_breed, explicit_pet_species = (
+            _explicit_pet_breed_and_species(content)
+        )
         animal_ref = _entity_ref(entities, "animal")
         if animal_ref is None:
             animal_ref = _add_compiler_entity(
@@ -4603,6 +4691,36 @@ def _compile_entity_links(
                 relationship_role="user:self",
             )
             repairs.append("self_entity_link")
+        pet_identity_observations = [
+            item
+            for item in observations
+            if item["predicate"] == "identity.name"
+        ]
+        if explicit_pet_name is not None:
+            if pet_identity_observations:
+                for observation in pet_identity_observations:
+                    observation["subject_entity_ref"] = animal_ref
+                    observation["object"] = _literal(
+                        "text",
+                        explicit_pet_name,
+                    )
+                    observation["source_spans"] = [_source_span(source)]
+                repairs.append("explicit_pet_name_observation_canonicalized")
+            else:
+                observations.append(
+                    _example_observation(
+                        content,
+                        observation_ref=_next_observation_ref(observations),
+                        subject_entity_ref=animal_ref,
+                        predicate="identity.name",
+                        object_value=_literal("text", explicit_pet_name),
+                        projection_class="direct_claim",
+                        surface_policy="direct_or_relevant",
+                        sensitivity="medium",
+                        reason_code="explicit_pet_name",
+                    )
+                )
+                repairs.append("explicit_pet_name_observation_completed")
         for observation in observations:
             predicate = observation["predicate"]
             if predicate.startswith("pet.") or predicate in {
@@ -4618,6 +4736,35 @@ def _compile_entity_links(
                     "kind": "entity",
                     "entity_ref": animal_ref,
                 }
+                if _HISTORICAL_PET_RELATIONSHIP_RE.search(content):
+                    observation["temporal"] = (
+                        _historical_state_before_source_temporal(source)
+                    )
+                    observation["reason_codes"] = list(
+                        dict.fromkeys(
+                            [
+                                *observation.get("reason_codes", []),
+                                "historical_pet_relationship_from_past_acquisition",
+                            ]
+                        )
+                    )
+                    repairs.append(
+                        "past_pet_acquisition_not_marked_current"
+                    )
+            if predicate == "pet.species" and explicit_pet_species is not None:
+                observation["object"] = _literal(
+                    "text",
+                    explicit_pet_species,
+                )
+                observation["source_spans"] = [_source_span(source)]
+                repairs.append("explicit_pet_species_canonicalized")
+            if predicate == "pet.breed" and explicit_pet_breed is not None:
+                observation["object"] = _literal(
+                    "text",
+                    explicit_pet_breed,
+                )
+                observation["source_spans"] = [_source_span(source)]
+                repairs.append("explicit_pet_breed_canonicalized")
             if predicate == "pet.hearing_status":
                 for hearing_pattern, hearing_value in _PET_HEARING_PATTERNS:
                     if hearing_pattern.search(content):
@@ -4626,6 +4773,48 @@ def _compile_entity_links(
                         )
                         repairs.append("pet_hearing_status_normalized")
                         break
+        if (
+            explicit_pet_species is not None
+            and not any(
+                item["predicate"] == "pet.species"
+                for item in observations
+            )
+        ):
+            observations.append(
+                _example_observation(
+                    content,
+                    observation_ref=_next_observation_ref(observations),
+                    subject_entity_ref=animal_ref,
+                    predicate="pet.species",
+                    object_value=_literal("text", explicit_pet_species),
+                    projection_class="direct_claim",
+                    surface_policy="direct_or_relevant",
+                    sensitivity="low",
+                    reason_code="explicit_pet_species",
+                )
+            )
+            repairs.append("explicit_pet_species_observation_completed")
+        if (
+            explicit_pet_breed is not None
+            and not any(
+                item["predicate"] == "pet.breed"
+                for item in observations
+            )
+        ):
+            observations.append(
+                _example_observation(
+                    content,
+                    observation_ref=_next_observation_ref(observations),
+                    subject_entity_ref=animal_ref,
+                    predicate="pet.breed",
+                    object_value=_literal("text", explicit_pet_breed),
+                    projection_class="direct_claim",
+                    surface_policy="direct_or_relevant",
+                    sensitivity="low",
+                    reason_code="explicit_pet_breed",
+                )
+            )
+            repairs.append("explicit_pet_breed_observation_completed")
         if (
             _PET_LOSS_CUE_RE.search(content)
             and not _PET_EXPLICIT_DEATH_CUE_RE.search(content)
@@ -5321,6 +5510,39 @@ def _compile_entity_links(
             value["deferrals"] = retained_deferrals
             repairs.append("orphan_project_scope_deferral_removed")
 
+    duplicate_observation_refs: set[str] = set()
+    seen_observation_semantics: set[str] = set()
+    for observation in observations:
+        semantic_value = {
+            key: child
+            for key, child in observation.items()
+            if key not in {
+                "observation_ref",
+                "reason_codes",
+                "extraction_confidence",
+            }
+        }
+        semantic_key = canonical_json(semantic_value)
+        if semantic_key in seen_observation_semantics:
+            duplicate_observation_refs.add(
+                observation["observation_ref"]
+            )
+        else:
+            seen_observation_semantics.add(semantic_key)
+    if duplicate_observation_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in duplicate_observation_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"]
+            not in duplicate_observation_refs
+        ]
+        repairs.append("duplicate_semantic_observations_removed")
+
     referenced_entity_refs = {
         item["subject_entity_ref"] for item in observations
     } | {
@@ -5892,14 +6114,26 @@ class LocalLlamaCppProvider:
         *,
         evidence_context: MemoryEvidenceContext | None = None,
     ) -> ProviderPacket:
-        deterministic = (
-            None
-            if evidence_context is not None
-            else _deterministic_policy_packet(
+        if (
+            evidence_context is not None
+            and _AMBIGUOUS_BREEDING_TRANSCRIPT_RE.search(
+                source.content.strip()
+            )
+        ):
+            deterministic = (
+                _guard_deferral_packet(
+                    source,
+                    ("ambiguous_transcription",),
+                ),
+                "ambiguous_breeding_transcription",
+            )
+        elif evidence_context is None:
+            deterministic = _deterministic_policy_packet(
                 source,
                 registry_version=self._registry.get("registry_version"),
             )
-        )
+        else:
+            deterministic = None
         if deterministic is not None:
             packet, guard_code = deterministic
             packet_sha256 = canonical_sha256(packet.model_dump(mode="json"))

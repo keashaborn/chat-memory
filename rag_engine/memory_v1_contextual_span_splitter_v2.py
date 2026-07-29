@@ -7,7 +7,7 @@ from typing import Any
 
 
 CONTRACT_VERSION = "memory_v1_contextual_span_splitter_v2"
-SPLITTER_VERSION = "memory_v1_contextual_span_splitter_20260728_v2"
+SPLITTER_VERSION = "memory_v1_contextual_span_splitter_20260728_v3"
 DEFAULT_MAX_SPAN_CHARS = 520
 MAX_SPANS = 64
 
@@ -49,6 +49,15 @@ _TEMPORAL_FRAGMENT_RE = re.compile(
     r"(?:when|then|during|before|after|in|at)\b",
     re.IGNORECASE,
 )
+_BARE_NAME_LIST_RE = re.compile(
+    r"^\s*[A-Z][\w'’\-]{0,79}"
+    r"(?:\s+(?:and|&)\s+[A-Z][\w'’\-]{0,79})+"
+    r"\s*[.!?]?\s*$"
+)
+_NAME_LIST_ANTECEDENT_RE = re.compile(
+    r"\b(?:names?|called|sisters?|brothers?|dogs?|cats?|pets?|animals?)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -62,7 +71,7 @@ class ContextualSpanV2:
     context_needed: bool
     primary_lane: str
     epistemic_role: str
-    span_origin: str = "contextual_split_v2"
+    span_origin: str = "contextual_split_v3"
 
     def public_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -184,6 +193,7 @@ def _context_needed(content: str) -> bool:
     return bool(
         _LEADING_CONTEXT_RE.search(content)
         or _TEMPORAL_FRAGMENT_RE.search(content)
+        or _BARE_NAME_LIST_RE.fullmatch(content)
         or (
             len(content) < 80
             and re.search(
@@ -193,6 +203,41 @@ def _context_needed(content: str) -> bool:
             )
         )
     )
+
+
+def _coalesce_bare_name_lists(
+    text: str,
+    ranges: list[tuple[int, int, str]],
+    *,
+    max_span_chars: int,
+) -> list[tuple[int, int, str]]:
+    """Keep a bare appositive name list with its explicit antecedent.
+
+    A span such as ``Bella and Beauty.`` has no independent relationship or
+    species assertion. Splitting it away from ``two ... sisters`` destroys the
+    source-grounded naming relation and causes downstream role-only entities.
+    """
+
+    coalesced: list[tuple[int, int, str]] = []
+    for start, end, reason in ranges:
+        content = text[start:end]
+        if (
+            coalesced
+            and _BARE_NAME_LIST_RE.fullmatch(content)
+            and _NAME_LIST_ANTECEDENT_RE.search(
+                text[coalesced[-1][0]:coalesced[-1][1]]
+            )
+        ):
+            prior_start, _prior_end, _prior_reason = coalesced[-1]
+            if end - prior_start <= max_span_chars:
+                coalesced[-1] = (
+                    prior_start,
+                    end,
+                    "appositive_name_list_coalesced",
+                )
+                continue
+        coalesced.append((start, end, reason))
+    return coalesced
 
 
 def contextual_spans_v2(
@@ -218,6 +263,11 @@ def contextual_spans_v2(
                     max_span_chars=max_span_chars,
                 )
             )
+    raw_ranges = _coalesce_bare_name_lists(
+        text,
+        raw_ranges,
+        max_span_chars=max_span_chars,
+    )
     if not 1 <= len(raw_ranges) <= MAX_SPANS:
         raise ValueError("contextual source must produce one to 64 spans")
 

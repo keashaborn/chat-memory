@@ -4,6 +4,7 @@ import hashlib
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.memory_v1_predicate_runtime_profile_v2 import load_runtime_profile_v2
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
@@ -11,13 +12,16 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LocalProviderAdapterError,
     SEMANTIC_V5_2_REGISTRY_VERSION,
     SEMANTIC_V5_2_POLICY_COMPILER_VERSION,
+    _HISTORICAL_PET_RELATIONSHIP_RE,
     _compile_entity_links,
     _credential_packet,
     _deterministic_policy_packet,
     _example_entity,
     _example_observation,
+    _explicit_pet_breed_and_species,
     _literal,
     _packet,
+    _pet_name,
     _structured_result,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
@@ -193,6 +197,7 @@ class LocalProviderV52Test(unittest.TestCase):
                 "life_event.died",
                 "pet.breed",
                 "pet.sex",
+                "pet.species",
                 "relationship.has_pet",
             ],
         )
@@ -202,7 +207,7 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(
             request.output_schema["properties"]["observations"]["minItems"],
-            5,
+            6,
         )
 
     def test_generic_lost_cat_uses_compact_governed_route(self) -> None:
@@ -227,11 +232,11 @@ class LocalProviderV52Test(unittest.TestCase):
         ]["predicate"]
         self.assertEqual(
             predicate["enum"],
-            ["relationship.has_pet"],
+            ["pet.species", "relationship.has_pet"],
         )
         self.assertEqual(
             request.output_schema["properties"]["observations"]["minItems"],
-            1,
+            2,
         )
         self.assertIn(
             "does not by itself prove death",
@@ -486,6 +491,231 @@ class LocalProviderV52Test(unittest.TestCase):
             },
             {"identity.name:nemo"},
         )
+
+    def test_historical_pet_name_patterns_preserve_names_and_taxonomy(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "After I got my doctorate, I got a German Shepherd "
+                "by the name of Max.",
+                "Max",
+                ("German Shepherd", "dog"),
+            ),
+            (
+                "My next German Shepherd was Keasha von Steffen Haus.",
+                "Keasha von Steffen Haus",
+                ("German Shepherd", "dog"),
+            ),
+            (
+                "Neko what was my first cat she slept on my chest.",
+                "Neko",
+                (None, "cat"),
+            ),
+        )
+        for content, name, taxonomy in cases:
+            with self.subTest(content=content):
+                self.assertEqual(_pet_name(content), name)
+                self.assertEqual(
+                    _explicit_pet_breed_and_species(content),
+                    taxonomy,
+                )
+                self.assertIsNotNone(
+                    _HISTORICAL_PET_RELATIONSHIP_RE.search(content)
+                )
+        self.assertIsNone(
+            _HISTORICAL_PET_RELATIONSHIP_RE.search(
+                "I got a German Shepherd named Koda last week."
+            )
+        )
+
+    def test_pet_name_breed_species_and_history_are_canonicalized(
+        self,
+    ) -> None:
+        content = (
+            "After I got my doctorate, I got a German Shepherd "
+            "by the name of Max."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        self_entity = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="self",
+            mention_kind="self_reference",
+            name_text=None,
+            relationship_role="user:self",
+            reason_code="explicit_self_reference",
+        )
+        animal_entity = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="animal",
+            mention_kind="role_only",
+            name_text=None,
+            relationship_role="pet:reported",
+            reason_code="reported_pet",
+        )
+        relationship = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="relationship.has_pet",
+            object_value={"kind": "entity", "entity_ref": "e01"},
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_pet_relationship",
+            temporal_semantic="state_validity",
+        )
+        wrong_breed = _example_observation(
+            content,
+            observation_ref="o01",
+            subject_entity_ref="e01",
+            predicate="pet.breed",
+            object_value=_literal("text", "Max"),
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_pet_breed",
+        )
+        wrong_species = _example_observation(
+            content,
+            observation_ref="o02",
+            subject_entity_ref="e01",
+            predicate="pet.species",
+            object_value=_literal("text", "German Shepherd"),
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="low",
+            reason_code="reported_pet_species",
+        )
+        duplicate_species = {
+            **wrong_species,
+            "observation_ref": "o03",
+            "reason_codes": ["second_model_guess"],
+            "extraction_confidence": 0.71,
+        }
+        packet = ProviderPacket.model_validate(
+            _packet(
+                entities=[self_entity, animal_entity],
+                observations=[
+                    relationship,
+                    wrong_breed,
+                    wrong_species,
+                    duplicate_species,
+                ],
+            )
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            packet,
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        animal = next(
+            item
+            for item in value["entity_mentions"]
+            if item["entity_type"] == "animal"
+        )
+        self.assertEqual(animal["name_text"], "Max")
+        self.assertEqual(animal["mention_kind"], "named")
+        by_predicate = {}
+        for observation in value["observations"]:
+            by_predicate.setdefault(
+                observation["predicate"],
+                [],
+            ).append(observation)
+        self.assertEqual(
+            by_predicate["identity.name"][0]["object"]["value"],
+            "Max",
+        )
+        self.assertEqual(
+            by_predicate["pet.breed"][0]["object"]["value"],
+            "German Shepherd",
+        )
+        self.assertEqual(len(by_predicate["pet.species"]), 1)
+        self.assertEqual(
+            by_predicate["pet.species"][0]["object"]["value"],
+            "dog",
+        )
+        self.assertIn(
+            "historical_pet_relationship_from_past_acquisition",
+            by_predicate["relationship.has_pet"][0]["reason_codes"],
+        )
+        self.assertIn(
+            "trusted_source_time_upper_bound",
+            by_predicate["relationship.has_pet"][0]["temporal"][
+                "reason_codes"
+            ],
+        )
+        self.assertIn(
+            "duplicate_semantic_observations_removed",
+            repairs,
+        )
+
+    def test_ambiguous_breeding_transcript_defers_before_stance_route(
+        self,
+    ) -> None:
+        content = (
+            "I think I've read German Shepherd's five times and then "
+            "I eventually bread Helsing and Dahlia."
+        )
+        result = _deterministic_policy_packet(
+            self.source(content),
+            registry_version=SEMANTIC_V5_2_REGISTRY_VERSION,
+        )
+        self.assertIsNotNone(result)
+        packet, guard_code = result
+        value = packet.model_dump(mode="json")
+        self.assertEqual(
+            guard_code,
+            "ambiguous_breeding_transcription",
+        )
+        self.assertEqual(value["observations"], [])
+        self.assertEqual(
+            [item["reason_code"] for item in value["deferrals"]],
+            ["ambiguous_transcription"],
+        )
+
+    def test_contextual_ambiguous_breeding_transcript_defers_without_model(
+        self,
+    ) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(
+            profile.registry_path.read_text(encoding="utf-8")
+        )
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=SimpleNamespace(
+                local_model_calls=0,
+                external_model_calls=0,
+            ),
+        )
+        source = self.source(
+            "I think I've read German Shepherd's five times and then "
+            "I eventually bread Helsing and Dahlia."
+        )
+        packet = provider.extract(
+            source,
+            evidence_context=object(),
+        )
+        value = packet.model_dump(mode="json")
+        self.assertEqual(value["observations"], [])
+        self.assertEqual(
+            [item["reason_code"] for item in value["deferrals"]],
+            ["ambiguous_transcription"],
+        )
+        self.assertEqual(
+            provider.last_audit["policy_guard_code"],
+            "ambiguous_breeding_transcription",
+        )
+        self.assertEqual(provider.local_model_calls, 0)
+        self.assertEqual(provider.external_model_calls, 0)
 
     def test_compound_named_caregiving_uses_deterministic_split_path(self) -> None:
         content = (
@@ -971,9 +1201,19 @@ class LocalProviderV52Test(unittest.TestCase):
         value = compiled.model_dump(mode="json")
         self.assertEqual(
             {item["predicate"] for item in value["observations"]},
-            {"relationship.has_pet"},
+            {"pet.species", "relationship.has_pet"},
         )
-        ownership = value["observations"][0]
+        ownership = next(
+            item
+            for item in value["observations"]
+            if item["predicate"] == "relationship.has_pet"
+        )
+        species = next(
+            item
+            for item in value["observations"]
+            if item["predicate"] == "pet.species"
+        )
+        self.assertEqual(species["object"]["value"], "cat")
         self.assertIn(
             "historical_relationship_ended_before_source",
             ownership["temporal"]["reason_codes"],
