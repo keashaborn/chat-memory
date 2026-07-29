@@ -364,7 +364,7 @@ if POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
   exit 1
 fi
 
-/opt/chat-memory/venv/bin/python "$entity_authorizer" \
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$entity_authorizer" \
   --plan "$work/entity-plan.json" \
   --output "$work/entity-authorization.json" \
   --head "$head"
