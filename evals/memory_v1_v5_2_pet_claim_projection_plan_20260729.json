@@ -1,0 +1,106 @@
+{
+  "contract_version": "memory_v1_v5_2_pet_claim_projection_plan_v1",
+  "required_ancestor_commit": "fa4cb3b099b9abd7322dac69eccd73fd43814820",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "other_owner_user_id": "557ea042-cb82-48f8-9429-472e96c957ef",
+  "items": [
+    {
+      "claim_id": "779588f9-71ca-42c9-8ec1-a21919a20b9c",
+      "predicate": "identity.name",
+      "revision_number": 2,
+      "canonical_text_sha256": "080bf47a883ccbb0b9baa5345b8c9cfb6c1b7e539a629d91fa6bfc05c0ca4b23",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "7507ef28-449b-4353-87ca-185e7e755054",
+      "predicate": "pet.species",
+      "revision_number": 2,
+      "canonical_text_sha256": "91ac394e2a2aec3619cd606b04fd717baa277f6f9531713641660159e215ef28",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "d134faa6-f6e0-42d5-9d63-e04be4fcb55c",
+      "predicate": "pet.breed",
+      "revision_number": 2,
+      "canonical_text_sha256": "67336c3984f8d7d3e3a928cec98dce5c6ce9482f65d1fc0f17b43218206a85dc",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "21d11284-e02d-4d1b-b51f-9951be4e6d93",
+      "predicate": "pet.species",
+      "revision_number": 2,
+      "canonical_text_sha256": "e272709f0cbf7dc369d2ffec635cc7f812d007ba3c1adf69ebbefa584df16a92",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "ada8f33b-0fb6-4410-ae5e-ca2b56e6657a",
+      "predicate": "pet.species",
+      "revision_number": 2,
+      "canonical_text_sha256": "65aaa4a01ada5c0a1f0e0a077452b13118db95ca6b2852daa2727af31cd8dab0",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "8153ff74-0357-48e6-b341-39be1a54353d",
+      "predicate": "identity.name",
+      "revision_number": 2,
+      "canonical_text_sha256": "cd170ad761186f1e91647047f6e8a4b1eb4d0b6d4e59a2529feb96609a03022b",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "54891e8e-be21-4530-a270-cc418c2595e5",
+      "predicate": "pet.breed",
+      "revision_number": 2,
+      "canonical_text_sha256": "5f58c15a2ede773352650a8f917bd42183004d60d00eab05b4c2488fd1d37893",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "954062a9-a31a-4fd5-af4b-87ed1a4c53e6",
+      "predicate": "identity.name",
+      "revision_number": 2,
+      "canonical_text_sha256": "8e4d342d9ba65c5679dc3c0bb79cfa1834fe9fbf9b97617269d2cebc69dd8bf8",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "69167558-bd50-4041-97a2-2d525a308581",
+      "predicate": "relationship.has_pet",
+      "revision_number": 2,
+      "canonical_text_sha256": "38decbce0cb851f0beb4f965d55b4acb025f725e8a5bcc805ce76d449c658686",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "eacf254a-dcef-4790-b705-fb7a1e1a2f79",
+      "predicate": "relationship.has_pet",
+      "revision_number": 2,
+      "canonical_text_sha256": "ea3c5fc14b215f4ffad88a7de93878199d23aefff3c22f919bb74be55047e9d5",
+      "prior_outbox": "absent",
+      "prior_qdrant": "absent"
+    },
+    {
+      "claim_id": "bd20dd0a-9fa0-4a21-8a93-e828c8044150",
+      "predicate": "relationship.has_pet",
+      "revision_number": 3,
+      "canonical_text_sha256": "38bc93de83fa1e367aa7b9afa6f1a94cdf1bfdf34ff8ef30f785dab2de4f9614",
+      "prior_outbox": "done_revision_2",
+      "prior_qdrant": "revision_2"
+    }
+  ],
+  "projection": {
+    "collection": "memory_claim_v1",
+    "embedding_model": "text-embedding-3-large",
+    "vector_size": 3072,
+    "maximum_embedding_requests": 11,
+    "automatic_http_retries": 0,
+    "answer_generation": false,
+    "prompt_influence": false,
+    "owner_only_shadow_retrieval": true
+  }
+}
