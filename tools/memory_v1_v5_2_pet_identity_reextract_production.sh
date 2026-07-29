@@ -13,7 +13,7 @@ test "$(id -u)" -eq 0
 
 live=/opt/chat-memory
 target=/tmp/chat-memory-pet-temporal-integration-v2
-expected_live_head=3e8d56b06b37894d77dcbccd03d5a5f0e41bf3c6
+expected_live_head=ee66c151f19e895aa961b22a938682d7a54de139
 required_target_ancestor=e3318a2885b54a29f5892f81993103510b8d7309
 target_head=$(git -C "$target" rev-parse HEAD)
 container=brains-postgres-1
@@ -178,7 +178,7 @@ qdrant_signature() {
 
 protected_snapshot() {
   local output=$1
-  docker exec "$container" psql -U sage -d "$database" -X -Atq \
+  docker exec -i "$container" psql -U sage -d "$database" -X -Atq \
     -v ON_ERROR_STOP=1 >"$output" <<'SQL'
 SELECT 'claim', count(*), coalesce(max(created_at)::text, '')
 FROM memory.claim
@@ -202,7 +202,7 @@ SQL
 
 isolation_snapshot() {
   local output=$1
-  docker exec "$container" psql -U sage -d "$database" -X -Atq \
+  docker exec -i "$container" psql -U sage -d "$database" -X -Atq \
     -v ON_ERROR_STOP=1 >"$output" <<SQL
 WITH rows(label, value) AS (
   SELECT 'other_jobs', to_jsonb(value)::text
@@ -337,13 +337,13 @@ stage=restart_brains
 systemctl restart brains.service
 for _attempt in $(seq 1 60); do
   if [[ "$(systemctl is-active brains.service)" == active ]] \
-     && ss -ltn | grep -q '127.0.0.1:8088'; then
+     && ss -H -ltn | awk '$4 ~ /:8088$/ { found=1 } END { exit !found }'; then
     break
   fi
   sleep 1
 done
 test "$(systemctl is-active brains.service)" = active
-ss -ltn | grep -q '127.0.0.1:8088'
+ss -H -ltn | awk '$4 ~ /:8088$/ { found=1 } END { exit !found }'
 
 stage=enqueue_and_replay
 for index in 0 1; do
