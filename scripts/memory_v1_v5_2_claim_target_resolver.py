@@ -107,6 +107,7 @@ async def resolve_claim_projection_target(
     source: Mapping[str, Any],
     plan_id: str,
     registry: Mapping[str, Mapping[str, Any]],
+    allow_existing_plan: bool = False,
 ) -> dict[str, Any]:
     """Resolve one exact source observation without mutating any store."""
 
@@ -128,7 +129,8 @@ async def resolve_claim_projection_target(
     if create_preflight_row is None:
         raise ClaimTargetResolutionError("create preflight returned no row")
     create_preflight = dict(create_preflight_row)
-    if int(create_preflight["existing_plans"]) != 0:
+    create_existing_plans = int(create_preflight["existing_plans"])
+    if create_existing_plans not in ({0, 1} if allow_existing_plan else {0}):
         raise ClaimTargetResolutionError("an equivalent projection plan already exists")
     aggregate_count = int(create_preflight["existing_aggregates"])
     semantic_key = str(create_preflight["semantic_key_sha256"])
@@ -230,7 +232,8 @@ async def resolve_claim_projection_target(
     reinforcement_preflight = dict(reinforcement_preflight_row)
     if (
         int(reinforcement_preflight["existing_aggregates"]) != 1
-        or int(reinforcement_preflight["existing_plans"]) != 0
+        or int(reinforcement_preflight["existing_plans"])
+        not in ({0, 1} if allow_existing_plan else {0})
         or str(reinforcement_preflight["target_claim_id"])
         != str(claim["claim_id"])
         or int(reinforcement_preflight["target_revision_number"])
