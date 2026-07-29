@@ -23,6 +23,7 @@ timer_state=$artifact_dir/timers.tsv
 protected_before=$artifact_dir/protected-before.tsv
 protected_after=$artifact_dir/protected-after.tsv
 timers_restored=0
+stage=preflight
 
 restore_timers() {
   if [[ "$timers_restored" == 1 || ! -s "$timer_state" ]]; then
@@ -46,6 +47,20 @@ restore_timers() {
 cleanup() {
   rc=$?
   trap - EXIT
+  if [[ "$rc" != 0 ]]; then
+    printf 'memory_v1_dahlia_helsing_contextual_resplit_clone: FAIL stage=%s rc=%s\n' \
+      "$stage" "$rc" >&2
+    for report in "$artifact_dir"/report-*.json; do
+      [[ -f "$report" ]] || continue
+      jq -c '{
+        outcome,
+        rejection_codes,
+        local_model_calls,
+        external_model_calls,
+        write_counts
+      }' "$report" >&2 || true
+    done
+  fi
   restore_timers
   docker exec "$container" dropdb -U sage --if-exists --force "$clone_db" \
     >/dev/null 2>&1 || true
@@ -122,6 +137,7 @@ SQL
 }
 
 qdrant_before=$(qdrant_signature)
+stage=clone_create
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
 docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
   | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
@@ -147,6 +163,7 @@ PY
 )
 
 protected_snapshot "$protected_before"
+stage=contextual_split_dry_run
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
   --owner-user-id "$owner" \
   --evidence-id "$parent" \
@@ -157,6 +174,7 @@ plan_sha=$("$python_bin" -c \
   'import json,sys; print(json.load(open(sys.argv[1]))["owners"][0]["plan_sha256"])' \
   "$artifact_dir/dry.json")
 
+stage=contextual_split_apply
 MEMORY_V1_CONTEXTUAL_EXACT_RESPLIT_APPLY=memory_v1_contextual_exact_resplit_apply_v3 \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
   --owner-user-id "$owner" \
@@ -241,6 +259,7 @@ SQL
 done <"$artifact_dir/children.tsv"
 
 for ordinal in 0 3 4; do
+  stage="private_canary_ordinal_$ordinal"
   IFS=$'\t' read -r _ordinal child child_sha < <(
     awk -F $'\t' -v wanted="$ordinal" '$1==wanted {print}' \
       "$artifact_dir/children.tsv"
@@ -256,6 +275,7 @@ for ordinal in 0 3 4; do
     >"$artifact_dir/report-$ordinal.json"
 done
 
+stage=semantic_assertions
 "$python_bin" - "$artifact_dir" <<'PY'
 from __future__ import annotations
 
@@ -332,11 +352,13 @@ print(json.dumps({
 PY
 
 protected_snapshot "$protected_after"
+stage=protected_store_comparison
 cmp "$protected_before" "$protected_after"
 qdrant_after=$(qdrant_signature)
 test "$qdrant_before" = "$qdrant_after"
 
 restore_timers
+stage=final_health
 test "$(systemctl is-active brains.service)" = active
 printf '%s\n' \
   'memory_v1_dahlia_helsing_contextual_resplit_clone: PASS' \
