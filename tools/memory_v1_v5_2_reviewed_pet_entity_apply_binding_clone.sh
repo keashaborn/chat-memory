@@ -228,7 +228,7 @@ jq -n \
     expected_head_commit:$head,target_server:"seebx",
     scope:"apply_reviewed_pet_entities_and_bind_only",
     owner_user_id:$owner,plan_sha256:$plan_sha,expected_item_count:3,
-    expected_new_entities:1,expected_total_bindings:3,expected_new_rows:11,
+    expected_new_entities:1,expected_total_bindings:3,expected_new_rows:13,
     confirmation:"APPLY_THREE_REVIEWED_PET_ENTITY_RESOLUTIONS_AND_BIND_ONLY"
   }' >"$authorization"
 chmod 0600 "$authorization"
@@ -253,12 +253,12 @@ MEMORY_V1_V5_2_REVIEWED_PET_ENTITY_APPLY=authorized \
   --confirm APPLY_THREE_REVIEWED_PET_ENTITY_RESOLUTIONS_AND_BIND_ONLY \
   --output "$report"
 
-assert_equal report_rows "$(jq -r '.new_rows' "$report")" 11
+assert_equal report_rows "$(jq -r '.new_rows' "$report")" 13
 assert_equal report_entities "$(jq -r '.new_entities' "$report")" 1
 assert_equal report_applies \
   "$(jq -r '.new_entity_resolution_applies' "$report")" 3
 assert_equal report_aliases \
-  "$(jq -r '.new_alias_observations' "$report")" 1
+  "$(jq -r '.new_alias_observations' "$report")" 3
 assert_equal report_bindings \
   "$(jq -r '.new_observation_bindings' "$report")" 3
 assert_equal report_operations \
@@ -276,7 +276,7 @@ IFS=',' read -r final_entity_count final_apply_count final_alias_count \
   final_binding_count final_operation_count <<<"$final_counts"
 assert_equal entity_delta "$((final_entity_count-initial_entity_count))" 1
 assert_equal exact_applies "$final_apply_count" 3
-assert_equal exact_aliases "$final_alias_count" 1
+assert_equal exact_aliases "$final_alias_count" 3
 assert_equal exact_bindings "$final_binding_count" 3
 assert_equal exact_operations "$final_operation_count" 3
 
@@ -347,7 +347,7 @@ assert_equal production_head_unchanged \
   "$(git -C /opt/chat-memory rev-parse HEAD)" "$production_head_before"
 
 printf 'REVIEWED_PET_ENTITY_APPLY_BINDING_CLONE=PASS\n'
-printf 'NEW_ENTITIES=1\nENTITY_APPLIES=3\nALIASES=1\nBINDINGS=3\n'
+printf 'NEW_ENTITIES=1\nENTITY_APPLIES=3\nALIASES=3\nBINDINGS=3\n'
 printf 'CLAIMS=0\nPROJECTIONS=0\nQDRANT_WRITES=0\n'
 printf 'ACCOUNT_ISOLATION=PASS\nZERO_WRITE_REPLAY=PASS\n'
 printf 'REPORT_SHA256=%s\n' "$(sha256sum "$report" | awk '{print $1}')"
