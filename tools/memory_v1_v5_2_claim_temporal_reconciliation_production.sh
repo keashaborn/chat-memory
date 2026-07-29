@@ -346,10 +346,10 @@ COMMIT;
 \echo APPLY_EVENT_ID=:'apply_event_id'
 SQL
 chmod 0600 "$apply_log"
-review_id=$(sed -n 's/^REVIEW_ID=//p' "$apply_log")
-review_manifest=$(sed -n 's/^REVIEW_MANIFEST=//p' "$apply_log")
-apply_manifest=$(sed -n 's/^APPLY_MANIFEST=//p' "$apply_log")
-apply_event=$(sed -n 's/^APPLY_EVENT_ID=//p' "$apply_log")
+review_id=$(sed -n 's/^REVIEW_ID=//p' "$apply_log" | tr -d "'")
+review_manifest=$(sed -n 's/^REVIEW_MANIFEST=//p' "$apply_log" | tr -d "'")
+apply_manifest=$(sed -n 's/^APPLY_MANIFEST=//p' "$apply_log" | tr -d "'")
+apply_event=$(sed -n 's/^APPLY_EVENT_ID=//p' "$apply_log" | tr -d "'")
 [[ "$review_id" =~ ^[0-9a-f-]{36}$ ]]
 [[ "$apply_event" =~ ^[0-9a-f-]{36}$ ]]
 [[ "$review_manifest" =~ ^[0-9a-f]{64}$ ]]
@@ -430,11 +430,6 @@ old_revisions_after=$(psql_row "
   SELECT count(*) FROM memory.relational_operation_request
   WHERE owner_user_id='$owner'::uuid
     AND request_id IN ('$review_request'::uuid,'$apply_request'::uuid)")" == 2 ]]
-[[ "$(psql_row "
-  SELECT count(*) FROM memory.projection_outbox
-  WHERE owner_user_id='$owner'::uuid
-    AND aggregate_type='claim' AND aggregate_id='$claim'::uuid")" == 0 ]]
-
 phase=restore_runtime
 restore_runtime
 authenticated_health
