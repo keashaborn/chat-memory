@@ -5755,6 +5755,38 @@ def _compile_entity_links(
             entity["relationship_role"] = "|".join(unique_role_parts)
             repairs.append("duplicate_relationship_roles_removed")
 
+    deduplicated_deferrals: list[dict[str, Any]] = []
+    deferral_indexes: dict[tuple[str, str, str], int] = {}
+    for deferral in value["deferrals"]:
+        source_bounds = [
+            {
+                key: span.get(key)
+                for key in ("start", "end")
+                if key in span
+            }
+            for span in deferral.get("source_spans", [])
+            if isinstance(span, dict)
+        ]
+        deferral_key = (
+            str(deferral.get("reason_code", "")),
+            str(deferral.get("memory_shape", "")),
+            canonical_sha256(source_bounds),
+        )
+        existing_index = deferral_indexes.get(deferral_key)
+        if existing_index is None:
+            deferral_indexes[deferral_key] = len(deduplicated_deferrals)
+            deduplicated_deferrals.append(deferral)
+            continue
+        existing = deduplicated_deferrals[existing_index]
+        if _SENSITIVITY_RANK.get(
+            str(deferral.get("sensitivity")), -1
+        ) > _SENSITIVITY_RANK.get(str(existing.get("sensitivity")), -1):
+            existing["sensitivity"] = deferral["sensitivity"]
+        if deferral.get("review_required") is True:
+            existing["review_required"] = True
+        repairs.append("duplicate_semantic_deferrals_removed")
+    value["deferrals"] = deduplicated_deferrals
+
     compiled = ProviderPacket.model_validate(value)
     return compiled, tuple(sorted(set(repairs)))
 

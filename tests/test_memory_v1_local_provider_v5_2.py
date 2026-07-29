@@ -1557,6 +1557,32 @@ class LocalProviderV52Test(unittest.TestCase):
                 _packet(
                     entities=[animal],
                     observations=[invented_death],
+                    deferrals=[
+                        {
+                            "reason_code": "sensitive_manual_review",
+                            "memory_shape": "direct_claim",
+                            "source_spans": [
+                                {
+                                    "start": 0,
+                                    "end": len(content),
+                                    "quote": content,
+                                }
+                            ],
+                            "sensitivity": "high",
+                        },
+                        {
+                            "reason_code": "sensitive_manual_review",
+                            "memory_shape": "direct_claim",
+                            "source_spans": [
+                                {
+                                    "start": 0,
+                                    "end": len(content),
+                                    "quote": content,
+                                }
+                            ],
+                            "sensitivity": "high",
+                        },
+                    ],
                 )
             ),
             registry,
@@ -1582,7 +1608,9 @@ class LocalProviderV52Test(unittest.TestCase):
             {item["reason_code"] for item in value["deferrals"]},
             {"sensitive_manual_review"},
         )
+        self.assertEqual(len(value["deferrals"]), 1)
         self.assertIn("pet_loss_not_promoted_to_death", repairs)
+        self.assertIn("duplicate_semantic_deferrals_removed", repairs)
         self.assertIn(
             "source_supported_pet_identity_preserved",
             repairs,
