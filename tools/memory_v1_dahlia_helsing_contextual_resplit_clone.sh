@@ -189,9 +189,55 @@ PY
 )
 
 protected_snapshot "$protected_before"
-write_children() {
-  docker exec "$container" psql -U sage -d "$clone_db" -X -Atq \
-    -v ON_ERROR_STOP=1 -F $'\t' -c "
+stage=contextual_split_dry_run
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
+  --owner-user-id "$owner" \
+  --evidence-id "$parent" \
+  --limit 1 \
+  --report-path "$artifact_dir/dry.json" \
+  >"$artifact_dir/dry.out"
+plan_sha=$("$python_bin" -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["owners"][0]["plan_sha256"])' \
+  "$artifact_dir/dry.json")
+
+stage=contextual_split_apply
+MEMORY_V1_CONTEXTUAL_EXACT_RESPLIT_APPLY=memory_v1_contextual_exact_resplit_apply_v3 \
+POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
+  --owner-user-id "$owner" \
+  --evidence-id "$parent" \
+  --limit 1 \
+  --expected-plan-sha256 "$plan_sha" \
+  --apply \
+  --report-path "$artifact_dir/apply.json" \
+  >"$artifact_dir/apply.out"
+
+jq -e '
+  .apply==true
+  and .model_calls==0
+  and .packet_writes==0
+  and .claim_writes==0
+  and .qdrant_writes==0
+  and .prompt_influence==0
+  and (.owners|length)==1
+  and .owners[0].rows==1
+  and .owners[0].outcomes=={"deferred":1}
+  and .owners[0].reasons=={"contextual_split_required":1}
+  and (.owners[0].contextual_splits|length)==1
+  and .owners[0].contextual_splits[0].span_count==5
+  and .owners[0].contextual_splits[0].context_needed==2
+  and .owners[0].contextual_splits[0].apply=={
+    "children_applied":5,
+    "children_queued":5,
+    "children_replayed":5,
+    "context_needed":2,
+    "parent_terminal_applied":1,
+    "parent_terminal_replayed":1,
+    "queue_replayed":5
+  }
+' "$artifact_dir/apply.json" >/dev/null
+
+docker exec "$container" psql -U sage -d "$clone_db" -X -Atq \
+  -v ON_ERROR_STOP=1 -F $'\t' -c "
     SELECT span.ordinal,span.child_evidence_id,evidence.content_sha256
     FROM memory.evidence_contextual_span_v2 AS span
     JOIN memory.evidence AS evidence
@@ -203,84 +249,26 @@ write_children() {
           'memory_v1_contextual_span_splitter_20260728_v3'
     ORDER BY span.ordinal;
   " >"$artifact_dir/children.tsv"
-}
-
-write_children
-existing_children=$(wc -l <"$artifact_dir/children.tsv")
-if [[ "$existing_children" == 0 ]]; then
-  stage=contextual_split_dry_run
-  POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
-    --owner-user-id "$owner" \
-    --evidence-id "$parent" \
-    --limit 1 \
-    --report-path "$artifact_dir/dry.json" \
-    >"$artifact_dir/dry.out"
-  plan_sha=$("$python_bin" -c \
-    'import json,sys; print(json.load(open(sys.argv[1]))["owners"][0]["plan_sha256"])' \
-    "$artifact_dir/dry.json")
-
-  stage=contextual_split_apply
-  MEMORY_V1_CONTEXTUAL_EXACT_RESPLIT_APPLY=memory_v1_contextual_exact_resplit_apply_v3 \
-  POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo" "$python_bin" "$runner" \
-    --owner-user-id "$owner" \
-    --evidence-id "$parent" \
-    --limit 1 \
-    --expected-plan-sha256 "$plan_sha" \
-    --apply \
-    --report-path "$artifact_dir/apply.json" \
-    >"$artifact_dir/apply.out"
-
-  jq -e '
-    .apply==true
-    and .model_calls==0
-    and .packet_writes==0
-    and .claim_writes==0
-    and .qdrant_writes==0
-    and .prompt_influence==0
-    and (.owners|length)==1
-    and .owners[0].rows==1
-    and .owners[0].outcomes=={"deferred":1}
-    and .owners[0].reasons=={"contextual_split_required":1}
-    and (.owners[0].contextual_splits|length)==1
-    and .owners[0].contextual_splits[0].span_count==5
-    and .owners[0].contextual_splits[0].context_needed==2
-    and .owners[0].contextual_splits[0].apply=={
-      "children_applied":5,
-      "children_queued":5,
-      "children_replayed":5,
-      "context_needed":2,
-      "parent_terminal_applied":1,
-      "parent_terminal_replayed":1,
-      "queue_replayed":5
-    }
-  ' "$artifact_dir/apply.json" >/dev/null
-  write_children
-
-  test "$(
-    docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
-      SELECT count(*)
-      FROM memory.evidence_extraction_job
-      WHERE owner_user_id='$owner'::uuid
-        AND evidence_id IN (
-          SELECT child_evidence_id
-          FROM memory.evidence_contextual_span_v2
-          WHERE owner_user_id='$owner'::uuid
-            AND parent_evidence_id='$parent'::uuid
-            AND splitter_version=
-                'memory_v1_contextual_span_splitter_20260728_v3'
-        )
-        AND selector_version='$selector'
-        AND status='pending'
-        AND attempts=0;
-    "
-  )" = 5
-elif [[ "$existing_children" != 5 ]]; then
-  printf 'unexpected existing contextual child count: %s\n' \
-    "$existing_children" >&2
-  exit 1
-fi
-
 test "$(wc -l <"$artifact_dir/children.tsv")" = 5
+
+test "$(
+  docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
+    SELECT count(*)
+    FROM memory.evidence_extraction_job
+    WHERE owner_user_id='$owner'::uuid
+      AND evidence_id IN (
+        SELECT child_evidence_id
+        FROM memory.evidence_contextual_span_v2
+        WHERE owner_user_id='$owner'::uuid
+          AND parent_evidence_id='$parent'::uuid
+          AND splitter_version=
+              'memory_v1_contextual_span_splitter_20260728_v3'
+      )
+      AND selector_version='$selector'
+      AND status='pending'
+      AND attempts=0;
+  "
+)" = 5
 
 while IFS=$'\t' read -r _ordinal child _child_sha; do
   test "$(
@@ -356,9 +344,40 @@ def death_observations(packet: dict) -> list[dict]:
     ]
 
 assert not death_observations(packets[0]), "Keasha acquired a false death event"
+keasha_refs = named_refs(packets[0], "Keasha von Steffen Haus")
+assert len(keasha_refs) == 1, "Keasha safe identity was not preserved"
+keasha = next(
+    item
+    for item in packets[0]["entity_mentions"]
+    if item["entity_ref"] in keasha_refs
+)
+assert keasha["relationship_role"] == "pet:reported"
+assert any(
+    item["predicate"] == "identity.name"
+    and item["subject_entity_ref"] in keasha_refs
+    and item["object"].get("value") == "Keasha von Steffen Haus"
+    for item in packets[0]["observations"]
+), "Keasha name observation was not preserved"
 assert not death_observations(
     packets[3]
 ), "Dahlia loss was incorrectly promoted to death"
+dahlia_refs = named_refs(packets[3], "Dahlia")
+assert len(dahlia_refs) == 1, "Dahlia safe identity was not preserved"
+dahlia = next(
+    item
+    for item in packets[3]["entity_mentions"]
+    if item["entity_ref"] in dahlia_refs
+)
+assert dahlia["relationship_role"] == "pet:reported"
+assert any(
+    item["predicate"] == "identity.name"
+    and item["subject_entity_ref"] in dahlia_refs
+    and item["object"].get("value") == "Dahlia"
+    for item in packets[3]["observations"]
+), "Dahlia name observation was not preserved"
+assert "sensitive_manual_review" in {
+    item["reason_code"] for item in packets[3]["deferrals"]
+}
 
 refs = named_refs(packets[4], "Helsing")
 assert len(refs) == 1, "Helsing did not resolve to one named animal"
@@ -386,7 +405,9 @@ if temporal["source_form"] == "partial_absolute":
 print(json.dumps({
     "semantic_checks": {
         "keasha_false_death": 0,
+        "keasha_safe_identity": 1,
         "dahlia_loss_promoted_to_death": 0,
+        "dahlia_safe_identity": 1,
         "helsing_death": 1,
     },
     "local_model_calls": 3,
