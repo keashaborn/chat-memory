@@ -128,38 +128,39 @@ jq -n \
        expected_action:"link_existing",expected_decision_state:"auto_link_eligible",
        review_reason:null}
     ]
-  }' >"$work/entity-manifest.json"
-chmod 0600 "$work/entity-manifest.json"
+  }' >"$work/entity-reviewed-create-manifest.json"
+chmod 0600 "$work/entity-reviewed-create-manifest.json"
 
 POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
   "$python_bin" "$runner" plan \
-  --manifest "$work/entity-manifest.json" \
-  --review-root "$review_root" \
-  --output "$work/entity-plan.json"
+  --manifest "$work/entity-reviewed-create-manifest.json" \
+  --review-root "$work" \
+  --output "$work/entity-reviewed-create-plan.json"
 PYTHONPATH="$repo_root" "$python_bin" "$authorizer" \
-  --plan "$work/entity-plan.json" \
-  --output "$work/entity-authorization.json" \
+  --plan "$work/entity-reviewed-create-plan.json" \
+  --output "$work/entity-reviewed-create-authorization.json" \
   --head "$head"
 
 jq --arg owner "$other_owner" '.owner_user_id=$owner' \
-  "$work/entity-manifest.json" >"$work/entity-cross-owner-manifest.json"
-chmod 0600 "$work/entity-cross-owner-manifest.json"
+  "$work/entity-reviewed-create-manifest.json" \
+  >"$work/entity-reviewed-create-cross-owner-manifest.json"
+chmod 0600 "$work/entity-reviewed-create-cross-owner-manifest.json"
 if POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
   "$python_bin" "$runner" plan \
-  --manifest "$work/entity-cross-owner-manifest.json" \
-  --review-root "$review_root" \
-  --output "$work/entity-cross-owner-plan.json" >/dev/null 2>&1; then
+  --manifest "$work/entity-reviewed-create-cross-owner-manifest.json" \
+  --review-root "$work" \
+  --output "$work/entity-reviewed-create-cross-owner-plan.json" >/dev/null 2>&1; then
   echo 'cross-owner entity plan unexpectedly passed' >&2
   exit 1
 fi
 
 printf '%s\n' \
   'MEMORY_V1_V5_2_PET_SPECIES_ENTITY_PREPARE=PASS' \
-  "manifest=$work/entity-manifest.json" \
-  "manifest_sha256=$(sha256sum "$work/entity-manifest.json" | awk '{print $1}')" \
-  "plan=$work/entity-plan.json" \
-  "plan_sha256=$(sha256sum "$work/entity-plan.json" | awk '{print $1}')" \
-  "authorization=$work/entity-authorization.json" \
+  "manifest=$work/entity-reviewed-create-manifest.json" \
+  "manifest_sha256=$(sha256sum "$work/entity-reviewed-create-manifest.json" | awk '{print $1}')" \
+  "plan=$work/entity-reviewed-create-plan.json" \
+  "plan_sha256=$(sha256sum "$work/entity-reviewed-create-plan.json" | awk '{print $1}')" \
+  "authorization=$work/entity-reviewed-create-authorization.json" \
   'database_writes=0' \
   'qdrant_writes=0' \
   'cross_owner_plan_rejected=true'
