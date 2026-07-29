@@ -166,6 +166,37 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(private_text, repr(plan))
         self.assertEqual(len(provider.requests), 1)
 
+    async def test_classifier_unavailable_trace_is_degraded_not_high_stakes(self) -> None:
+        request = trusted_request(
+            authenticated_actor_user_id=ACTOR,
+            request_id="classifier-unavailable-request",
+            conversation=messages("What is 2 + 2?"),
+            trusted_policy_signals=ResponsePolicySignalsV0_2(
+                domain_risk_gate=GateState.UNCERTAIN,
+                domain_risk_reason_codes=("domain_classifier_unavailable",),
+                fm_application_gate=GateState.UNCERTAIN,
+            ),
+        )
+
+        plan = await orchestrator(FixedSafetyProvider()).build_plan(request)
+
+        self.assertEqual(plan.policy_decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(plan.policy_decision.high_stakes_gate, GateState.PASS)
+        self.assertEqual(plan.policy_decision.interaction.value, "DIRECT")
+        self.assertEqual(plan.policy_decision.fm_effective_level, FMLevel.OFF)
+        self.assertEqual(plan.fm_selection.status, "OFF")
+        self.assertEqual(plan.assembled_prompt.context_blocks, ())
+        self.assertEqual(plan.shadow_trace.high_stakes_gate, GateState.PASS.value)
+        self.assertFalse(plan.shadow_trace.safety_action_required)
+        self.assertIn(
+            "domain_risk:domain_classifier_unavailable",
+            plan.shadow_trace.safety_reason_codes,
+        )
+        self.assertIn(
+            "domain_classifier_unavailable",
+            plan.shadow_trace.mode_reason_codes,
+        )
+
     async def test_explicit_response_language_is_bound_into_typed_prompt(self) -> None:
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,

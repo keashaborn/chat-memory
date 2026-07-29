@@ -6,7 +6,9 @@ OpenAI moderation remains a separate content-safety signal.  This classifier
 adds the application-specific risk surface that moderation does not cover,
 including consequential medical, medication, eating-disorder, legal,
 financial, coercion, and substance-withdrawal requests.  Provider failure or
-ambiguous output fails closed to an UNCERTAIN domain-risk gate.
+ambiguous output yields an UNCERTAIN domain-risk gate.  Transient provider
+unavailability is distinguished from invalid classifier output so response
+policy can use a bounded degraded mode without enabling FM or intervention.
 """
 
 import hashlib
@@ -17,9 +19,11 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal, Mapping
 
+from openai import APIConnectionError, APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from rag_engine.response_policy_v0_2 import (
+    DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,
     GateState,
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
@@ -39,6 +43,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _SAFETY_ID_RE = re.compile(r"^vs1_[0-9a-f]{60}$")
 _DATED_MODEL_RE = re.compile(r"^(?P<base>.+)-(?P<date>\d{4}-\d{2}-\d{2})$")
+_TRANSIENT_PROVIDER_STATUS_CODES = frozenset({408, 409, 429})
 
 
 class DomainRiskCategory(str, Enum):
@@ -745,6 +750,44 @@ def _compatible_model(requested: str, returned: str) -> bool:
     return True
 
 
+def _provider_is_unavailable(error: Exception) -> bool:
+    if isinstance(error, (APIConnectionError, TimeoutError)):
+        return True
+    if isinstance(error, APIStatusError):
+        status_code = getattr(error, "status_code", None)
+        return bool(
+            status_code in _TRANSIENT_PROVIDER_STATUS_CODES
+            or (
+                isinstance(status_code, int)
+                and 500 <= status_code <= 599
+            )
+        )
+    return False
+
+
+def _provider_failure(
+    request: ResponsePolicyInputV0_2,
+    *,
+    model: str,
+    reason_code: str,
+) -> tuple[ResponsePolicySignalsV0_2, DomainRiskAssessmentV0_2]:
+    signals = ResponsePolicySignalsV0_2(
+        domain_risk_gate=GateState.UNCERTAIN,
+        domain_risk_reason_codes=(reason_code,),
+        fm_application_gate=GateState.UNCERTAIN,
+    )
+    assessment = _assessment(
+        request,
+        outcome=ClassificationOutcome.PROVIDER_UNCERTAIN,
+        gate=GateState.UNCERTAIN,
+        fm_application_gate=GateState.UNCERTAIN,
+        reason_codes=(reason_code,),
+        provider_model=model,
+        provider_call_count=1,
+    )
+    return signals, assessment
+
+
 def _parsed_output(
     response: Any,
     *,
@@ -965,6 +1008,23 @@ class OpenAIServerResponseSignalClassifierV0_2:
                 store=False,
                 safety_identifier=self._safety_identifier,
             )
+        except Exception as error:
+            reason_code = (
+                DOMAIN_CLASSIFIER_UNAVAILABLE_REASON
+                if _provider_is_unavailable(error)
+                else "domain_classifier_provider_error"
+            )
+            signals, assessment = _provider_failure(
+                verified,
+                model=self._model,
+                reason_code=reason_code,
+            )
+            return ResponseSignalClassificationResultV0_2.create(
+                assessment=assessment,
+                signals=signals,
+            )
+
+        try:
             output, returned_model, response_id = _parsed_output(
                 response, requested_model=self._model
             )
@@ -995,19 +1055,10 @@ class OpenAIServerResponseSignalClassifierV0_2:
                 provider_call_count=1,
             )
         except Exception:
-            signals = ResponsePolicySignalsV0_2(
-                domain_risk_gate=GateState.UNCERTAIN,
-                domain_risk_reason_codes=("domain_classifier_provider_error",),
-                fm_application_gate=GateState.UNCERTAIN,
-            )
-            assessment = _assessment(
+            signals, assessment = _provider_failure(
                 verified,
-                outcome=ClassificationOutcome.PROVIDER_UNCERTAIN,
-                gate=GateState.UNCERTAIN,
-                fm_application_gate=GateState.UNCERTAIN,
-                reason_codes=("domain_classifier_provider_error",),
-                provider_model=self._model,
-                provider_call_count=1,
+                model=self._model,
+                reason_code="domain_classifier_provider_error",
             )
         return ResponseSignalClassificationResultV0_2.create(
             assessment=assessment,

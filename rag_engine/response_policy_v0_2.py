@@ -26,6 +26,7 @@ SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
 SAFETY_ASSESSOR_VERSION = "resse_safety_assessor_v0_2"
 DEFAULT_SAFETY_COMPONENT = "server_safety_assessment_v0_2"
 ASSISTANT_PROFILE_ID = "RESSE"
+DOMAIN_CLASSIFIER_UNAVAILABLE_REASON = "domain_classifier_unavailable"
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,159}$")
@@ -876,7 +877,15 @@ def _select_mode(
                 for code in signals.domain_risk_reason_codes
             ),
         )
-    if signals.domain_risk_gate is GateState.UNCERTAIN:
+    classifier_unavailable = (
+        signals.domain_risk_gate is GateState.UNCERTAIN
+        and signals.domain_risk_reason_codes
+        == (DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,)
+    )
+    if (
+        signals.domain_risk_gate is GateState.UNCERTAIN
+        and not classifier_unavailable
+    ):
         return (
             ResponseMode.HIGH_STAKES,
             GateState.UNCERTAIN,
@@ -886,6 +895,11 @@ def _select_mode(
             ),
         )
 
+    degraded_reasons = (
+        (DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,)
+        if classifier_unavailable
+        else ()
+    )
     checks = (
         (
             ResponseMode.TECHNICAL,
@@ -905,10 +919,30 @@ def _select_mode(
     )
     for mode, trusted, detected in checks:
         if trusted is True:
-            return mode, GateState.PASS, (f"trusted_{mode.value.lower()}_signal",)
+            return (
+                mode,
+                GateState.PASS,
+                tuple(
+                    sorted(
+                        (*degraded_reasons, f"trusted_{mode.value.lower()}_signal")
+                    )
+                ),
+            )
         if trusted is None and detected:
-            return mode, GateState.PASS, (f"local_{mode.value.lower()}_signal",)
-    return ResponseMode.ORDINARY, GateState.PASS, ("ordinary_default",)
+            return (
+                mode,
+                GateState.PASS,
+                tuple(
+                    sorted(
+                        (*degraded_reasons, f"local_{mode.value.lower()}_signal")
+                    )
+                ),
+            )
+    return (
+        ResponseMode.ORDINARY,
+        GateState.PASS,
+        tuple(sorted((*degraded_reasons, "ordinary_default"))),
+    )
 
 
 def _select_closure(
@@ -1406,6 +1440,7 @@ def parse_response_policy_decision_v0_2(
 __all__ = [
     "ASSISTANT_PROFILE_ID",
     "DEFAULT_SAFETY_COMPONENT",
+    "DOMAIN_CLASSIFIER_UNAVAILABLE_REASON",
     "LEGACY_REQUEST_FIELDS",
     "MODE_PRECEDENCE",
     "POLICY_INPUT_VERSION",

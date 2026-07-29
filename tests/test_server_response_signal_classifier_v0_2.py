@@ -3,6 +3,9 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
+import httpx
+from openai import APITimeoutError
+
 from rag_engine.response_policy_v0_2 import (
     Closure,
     ConversationRole,
@@ -512,7 +515,13 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
 
     def test_provider_error_fails_closed_without_leaking_details(self) -> None:
         client = FakeClient(error=RuntimeError("private credential text"))
-        result = classifier(client).classify(request("This is ambiguous."))
+        policy_input = request("This is ambiguous.")
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
 
         self.assertEqual(result.assessment.outcome, ClassificationOutcome.PROVIDER_UNCERTAIN)
         self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
@@ -520,7 +529,44 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             result.assessment.reason_codes,
             ("domain_classifier_provider_error",),
         )
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
         self.assertNotIn("credential", result.model_dump_json())
+
+    def test_provider_timeout_uses_bounded_degraded_policy(self) -> None:
+        timeout = APITimeoutError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+        )
+        client = FakeClient(error=timeout)
+        policy_input = request(
+            "For this response-trace test only: what is 2 + 2? "
+            "Answer with the number."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.PROVIDER_UNCERTAIN,
+        )
+        self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
+        self.assertEqual(
+            result.assessment.reason_codes,
+            ("domain_classifier_unavailable",),
+        )
+        self.assertEqual(decision.response_mode, ResponseMode.TECHNICAL)
+        self.assertNotEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(decision.high_stakes_gate, GateState.PASS)
+        self.assertEqual(decision.fm_application_gate, GateState.UNCERTAIN)
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+        self.assertEqual(decision.interaction, Interaction.DIRECT)
+        self.assertIn("domain_classifier_unavailable", decision.mode_reasons)
+        self.assertEqual(result.assessment.provider_call_count, 1)
+        self.assertEqual(len(client.responses.calls), 1)
 
     def test_provider_cannot_trigger_domain_risk_while_leaving_fm_enabled(self) -> None:
         client = FakeClient(

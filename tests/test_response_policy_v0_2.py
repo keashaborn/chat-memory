@@ -200,6 +200,41 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
         self.assertEqual(result.high_stakes_gate, GateState.UNCERTAIN)
         self.assertEqual(result.fm_effective_level, FMLevel.OFF)
 
+    def test_classifier_unavailable_degrades_without_claiming_high_stakes(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("What is 2 + 2?"),
+            signals=ResponsePolicySignalsV0_2(
+                domain_risk_gate=GateState.UNCERTAIN,
+                domain_risk_reason_codes=("domain_classifier_unavailable",),
+                fm_application_gate=GateState.UNCERTAIN,
+            ),
+        )
+
+        self.assertEqual(result.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(result.high_stakes_gate, GateState.PASS)
+        self.assertEqual(result.fm_application_gate, GateState.UNCERTAIN)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+        self.assertEqual(result.interaction.value, "DIRECT")
+        self.assertIn("domain_classifier_unavailable", result.mode_reasons)
+        self.assertNotIn(
+            "domain_risk:domain_classifier_unavailable",
+            result.mode_reasons,
+        )
+
+    def test_other_domain_uncertainty_remains_high_stakes(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("This may be a consequential health decision."),
+            signals=ResponsePolicySignalsV0_2(
+                domain_risk_gate=GateState.UNCERTAIN,
+                domain_risk_reason_codes=("medical_or_health_decision",),
+                fm_application_gate=GateState.UNCERTAIN,
+            ),
+        )
+
+        self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(result.high_stakes_gate, GateState.UNCERTAIN)
+        self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+
     def test_fm_application_gate_is_independent_of_mode(self) -> None:
         result = decide_response_policy_v0_2(
             request(
