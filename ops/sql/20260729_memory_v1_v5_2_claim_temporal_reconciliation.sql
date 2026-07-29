@@ -339,8 +339,9 @@ BEGIN
   END IF;
 
   SELECT max(revision_number) INTO current_revision
-  FROM memory.claim_revision
-  WHERE owner_user_id=actor AND claim_id=p_claim_id;
+  FROM memory.claim_revision AS revision
+  WHERE revision.owner_user_id=actor
+    AND revision.claim_id=p_claim_id;
   IF current_revision IS NULL THEN
     RAISE EXCEPTION 'claim revision history is absent'
       USING ERRCODE='23514';
@@ -644,13 +645,15 @@ BEGIN
     RETURN;
   END IF;
 
-  PERFORM 1 FROM memory.claim
-  WHERE owner_user_id=actor AND claim_id=p_claim_id FOR UPDATE;
+  PERFORM 1 FROM memory.claim AS target
+  WHERE target.owner_user_id=actor
+    AND target.claim_id=p_claim_id
+  FOR UPDATE;
   PERFORM 1
-  FROM memory.claim_temporal_reconciliation_review_v5_2
-  WHERE owner_user_id=actor
-    AND claim_id=p_claim_id
-    AND review_id=p_review_id
+  FROM memory.claim_temporal_reconciliation_review_v5_2 AS selected_review
+  WHERE selected_review.owner_user_id=actor
+    AND selected_review.claim_id=p_claim_id
+    AND selected_review.review_id=p_review_id
   FOR UPDATE;
   SELECT * INTO preflight
   FROM memory.preflight_claim_temporal_reconciliation_apply_v5_2(
@@ -661,10 +664,10 @@ BEGIN
       USING ERRCODE='23514';
   END IF;
   SELECT * INTO STRICT review
-  FROM memory.claim_temporal_reconciliation_review_v5_2
-  WHERE owner_user_id=actor
-    AND claim_id=p_claim_id
-    AND review_id=p_review_id;
+  FROM memory.claim_temporal_reconciliation_review_v5_2 AS selected_review
+  WHERE selected_review.owner_user_id=actor
+    AND selected_review.claim_id=p_claim_id
+    AND selected_review.review_id=p_review_id;
 
   INSERT INTO memory.claim_observation(
     owner_user_id,claim_id,observation_id,stance,relevance,rationale
