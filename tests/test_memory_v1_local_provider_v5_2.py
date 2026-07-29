@@ -27,6 +27,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
 from scripts.memory_v1_relational_extraction_v5_provider import (
     ProviderPacket,
     TrustedExtractionSource,
+    validate_and_normalize,
 )
 
 
@@ -1462,16 +1463,18 @@ class LocalProviderV52Test(unittest.TestCase):
             "Helsing",
         )
         temporal = value["observations"][0]["temporal"]
-        self.assertTrue(temporal["anchored_to_source_time"])
-        self.assertEqual(temporal["basis"], "calendar")
-        self.assertEqual(temporal["shape"], "bounded_interval")
+        self.assertFalse(temporal["anchored_to_source_time"])
+        self.assertEqual(temporal["basis"], "relative")
+        self.assertEqual(temporal["shape"], "instant")
         self.assertEqual(temporal["precision"], "year")
         self.assertEqual(
-            temporal["calendar_range"],
+            temporal["relative_offset"],
             {
-                "lower": "2025-01-01",
-                "upper": "2026-01-01",
-                "bounds": "[)",
+                "direction": "past",
+                "magnitude": 1.0,
+                "unit": "year",
+                "approximate": True,
+                "anchor_source": "evidence_observed_at",
             },
         )
         self.assertIn(
@@ -1479,6 +1482,33 @@ class LocalProviderV52Test(unittest.TestCase):
             repairs,
         )
         self.assertIn("explicit_death_time_canonicalized", repairs)
+
+        provider = SimpleNamespace(
+            provider_id="local_llama_cpp",
+            provider_version="v1",
+            external_call_capability=False,
+            external_model_calls=0,
+            extract=lambda _source: compiled,
+        )
+        validated = validate_and_normalize(
+            provider,
+            source=source,
+            registry=registry,
+            schema=json.loads(
+                profile.schema_path.read_text(encoding="utf-8")
+            ),
+            allowed_provider_versions={"local_llama_cpp": "v1"},
+            max_external_model_calls=0,
+        )
+        trusted_temporal = validated.normalized_packet["observations"][0][
+            "temporal"
+        ]
+        self.assertFalse(trusted_temporal["anchored_to_source_time"])
+        self.assertEqual(trusted_temporal["basis"], "relative")
+        self.assertEqual(
+            trusted_temporal["relative_offset"]["anchor_source"],
+            "evidence_observed_at",
+        )
 
     def test_named_pet_loss_does_not_prove_death(self) -> None:
         content = "That was Dahlia who I lost last year."

@@ -717,28 +717,26 @@ def _reported_death_temporal(
 ) -> dict[str, Any]:
     if not _LAST_CALENDAR_YEAR_RE.search(source.content):
         return _example_temporal("occurrence")
-    source_year = int(source.source_recorded_at[:4])
-    event_year = source_year - 1
     return {
-        "anchored_to_source_time": True,
-        "basis": "calendar",
-        "calendar_range": {
-            "lower": f"{event_year:04d}-01-01",
-            "upper": f"{source_year:04d}-01-01",
-            "bounds": "[)",
-        },
-        "certainty": "bounded",
+        "anchored_to_source_time": False,
+        "basis": "relative",
+        "calendar_range": None,
+        "certainty": "approximate",
         "instant": None,
         "instant_range": None,
         "precision": "year",
-        "reason_codes": [
-            "relative_calendar_year_anchored_to_source_time"
-        ],
+        "reason_codes": ["reported_relative_year"],
         "recurrence": None,
-        "relative_offset": None,
+        "relative_offset": {
+            "direction": "past",
+            "magnitude": 1.0,
+            "unit": "year",
+            "approximate": True,
+            "anchor_source": "evidence_observed_at",
+        },
         "semantic": "occurrence",
-        "shape": "bounded_interval",
-        "source_form": "partial_absolute",
+        "shape": "instant",
+        "source_form": "relative",
     }
 
 
