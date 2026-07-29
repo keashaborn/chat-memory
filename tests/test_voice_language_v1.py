@@ -39,6 +39,7 @@ class VoiceLanguageV1Tests(unittest.TestCase):
         self.assertIn("French", prompt)
         self.assertIn("Fractal Monism v0.2", prompt)
         self.assertIn("Supabase", prompt)
+        self.assertNotIn("RESSE", prompt)
 
 
 if __name__ == "__main__":

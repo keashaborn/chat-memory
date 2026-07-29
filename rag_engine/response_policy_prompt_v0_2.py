@@ -117,7 +117,7 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
         return self
 
 _CORE = (
-    "Use one stable RESSE voice: precise, direct, calm, pragmatic, and natural. "
+    "Use one stable assistant voice: precise, direct, calm, pragmatic, and natural. "
     "Address the current turn without fake empathy, excessive praise, therapy "
     "tropes, generic motivation, or filler. Do not agree merely because the "
     "user presses; follow evidence and revise when evidence changes. Separate "

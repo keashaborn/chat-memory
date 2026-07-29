@@ -984,6 +984,13 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             + assembled.manifest.reserved_output_tokens,
         )
 
+    def test_model_facing_identity_is_product_neutral(self) -> None:
+        assembled = assemble_prompt(assembly_request())
+        system_prompt = assembled.system_prompt
+        self.assertIn("You are an AI assistant for Verbal Sage", system_prompt)
+        self.assertNotIn("You are RESSE", system_prompt)
+        self.assertNotIn("RESSE voice", system_prompt)
+
     def test_manifest_rejects_rehashed_internal_count_tamper(self) -> None:
         assembled = assemble_prompt(assembly_request())
         payload = json.loads(assembled.canonical_json_bytes())

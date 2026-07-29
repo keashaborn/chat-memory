@@ -140,7 +140,7 @@ def transcription_prompt(language: str) -> str:
         f"Natural conversational {language_text} in LifeSwitch with the Verbal "
         "Sage assistant. Preserve short questions and incomplete phrases "
         "exactly; do not complete or reinterpret them. Proper names may include "
-        "Fractal Monism v0.2, FM v0.2, Sage, RESSE, Governed Memory V1, Qdrant, "
+        "Fractal Monism v0.2, FM v0.2, Sage, Governed Memory V1, Qdrant, "
         "OpenAI, and Supabase."
     )
 

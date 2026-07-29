@@ -54,6 +54,9 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertIn("unsolicited task menu", rendered.content)
         self.assertIn("Effective Fractal Monism level: OFF", rendered.content)
 
+        self.assertIn("stable assistant voice", rendered.content)
+        self.assertNotIn("RESSE voice", rendered.content)
+
     def test_ordinary_standalone_closing_forbids_crisis_reinterpretation(self) -> None:
         rendered = render_response_policy_prompt_v0_2(decision("I'm done."))
 
