@@ -81,7 +81,7 @@ TARGETS: dict[str, dict[str, Any]] = {
         "subject_canonical_name": "Keasha von Steffen Haus",
         "object_kind": "literal",
         "object_literal": literal("Keasha von Steffen Haus"),
-        "canonical_text": "Keasha von Steffen Haus' name is Keasha von Steffen Haus.",
+        "canonical_text": "This animal's name is Keasha von Steffen Haus.",
     },
     # Max
     "978c1972-82d5-4d19-a32f-b45c7f4cfbaa": {
@@ -136,7 +136,7 @@ TARGETS: dict[str, dict[str, Any]] = {
         "subject_canonical_name": "Max",
         "object_kind": "literal",
         "object_literal": literal("Max"),
-        "canonical_text": "Max's name is Max.",
+        "canonical_text": "This animal's name is Max.",
     },
     # Neko
     "6151f123-d05f-404d-b3f6-d7079de6b4e6": {
@@ -163,7 +163,7 @@ TARGETS: dict[str, dict[str, Any]] = {
         "subject_canonical_name": "Neko",
         "object_kind": "literal",
         "object_literal": literal("Neko"),
-        "canonical_text": "Neko's name is Neko.",
+        "canonical_text": "This animal's name is Neko.",
     },
 }
 

@@ -93,11 +93,11 @@ PYTHONPATH="$repo_root:$repo_root/scripts" \
 [[ "$(jq -er '.action_counts.create' "$result")" == 1 ]]
 [[ "$(jq -er '.action_counts.manual_review' "$result")" == 1 ]]
 [[ "$(jq -er '.action_counts.reinforce' "$result")" == 1 ]]
-[[ "$(jq -er --arg id "$keasha" \
-  '.items[]|select(.observation_id==$id)|.action' "$result")" == reinforce ]]
 [[ "$(jq -er --arg id "$dahlia" \
+  '.items[]|select(.observation_id==$id)|.action' "$result")" == reinforce ]]
+[[ "$(jq -er --arg id "$keasha" \
   '.items[]|select(.observation_id==$id)|.action' "$result")" == manual_review ]]
-[[ "$(jq -cer --arg id "$dahlia" \
+[[ "$(jq -cer --arg id "$keasha" \
   '.items[]|select(.observation_id==$id)|.reason_codes' "$result")" \
   == '["existing_semantic_aggregate_render_drift"]' ]]
 [[ "$(jq -er --arg id "$helsing" \

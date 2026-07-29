@@ -227,6 +227,25 @@ class ProjectionDispatchTests(unittest.TestCase):
             "The user's canonical name is Avery.",
         )
 
+    def test_animal_identity_name_uses_type_not_tautological_label(self) -> None:
+        entry = self.registry_by_name["identity.name"]
+        value = source(entry)
+        value["subject_entity_type"] = "animal"
+        value["subject_canonical_name"] = "Dahlia"
+        value["object_literal"] = {
+            "kind": "literal",
+            "datatype": "text",
+            "value": "Dahlia",
+            "unit": None,
+            "approximate": False,
+        }
+        value["object_literal_sha256"] = sha256(value["object_literal"])
+        projection = build_packet(OWNER, value)["projections"][0]
+        self.assertEqual(
+            projection["payload"]["canonical_text"],
+            "This animal's name is Dahlia.",
+        )
+
     def test_reinforcement_rejects_non_claim_lane(self) -> None:
         entry = self.registry_by_name["preference.life"]
         with self.assertRaisesRegex(

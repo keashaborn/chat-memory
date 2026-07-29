@@ -92,6 +92,17 @@ PROJECT_KIND = {
     "project.requirement": "requirement",
 }
 
+IDENTITY_SUBJECT_LABELS = {
+    "self": "The user",
+    "person": "This person",
+    "animal": "This animal",
+    "organization": "This organization",
+    "place": "This place",
+    "project": "This project",
+    "object": "This object",
+    "concept": "This concept",
+}
+
 
 def _safe_text(value: Any, label: str, *, maximum: int = 2000) -> str:
     if not isinstance(value, str):
@@ -229,7 +240,14 @@ def render_claim_text(source: Mapping[str, Any]) -> str:
     if predicate in {"identity.name", "identity.name_canonical"}:
         name = _safe_text(value, "name", maximum=200)
         qualifier = "canonical name" if predicate.endswith("_canonical") else "name"
-        return f"{_possessive(subject)} {qualifier} is {name}."
+        identity_subject = IDENTITY_SUBJECT_LABELS.get(
+            str(source["subject_entity_type"])
+        )
+        if identity_subject is None:
+            raise ProjectionDispatchError(
+                "no identity-name renderer for subject entity type"
+            )
+        return f"{_possessive(identity_subject)} {qualifier} is {name}."
     if predicate == "age.reported":
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ProjectionDispatchError("reported age is not numeric")

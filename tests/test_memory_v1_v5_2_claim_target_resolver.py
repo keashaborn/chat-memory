@@ -26,9 +26,7 @@ class ClaimTargetResolverTest(unittest.TestCase):
                 "semantic_key_sha256": "a" * 64,
             },
             "payload": {
-                "canonical_text": (
-                    "Keasha von Steffen Haus' name is Keasha von Steffen Haus."
-                ),
+                "canonical_text": "This animal's name is Keasha von Steffen Haus.",
                 "surface_policy": "direct_or_relevant",
             },
         }
@@ -47,9 +45,7 @@ class ClaimTargetResolverTest(unittest.TestCase):
                 "unit": None,
                 "approximate": False,
             },
-            "canonical_text": (
-                "Keasha von Steffen Haus' name is Keasha von Steffen Haus."
-            ),
+            "canonical_text": "This animal's name is Keasha von Steffen Haus.",
             "canonical_key": f"v5:{'a' * 64}",
             "retrieval_policy": {"surface_policy": "direct_or_relevant"},
             "current_revision_number": 2,
@@ -81,7 +77,9 @@ class ClaimTargetResolverTest(unittest.TestCase):
         projection["identity"]["object_literal_sha256"] = sha256(
             claim["object_literal"]
         )
-        claim["canonical_text"] = "This animal's name is Keasha von Steffen Haus."
+        claim["canonical_text"] = (
+            "Keasha von Steffen Haus' name is Keasha von Steffen Haus."
+        )
         self.assertEqual(
             _claim_review_reason_codes(claim, projection),
             ["existing_semantic_aggregate_render_drift"],
