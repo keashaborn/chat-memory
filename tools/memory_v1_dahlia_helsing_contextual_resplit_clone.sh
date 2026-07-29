@@ -60,6 +60,30 @@ cleanup() {
         write_counts
       }' "$report" >&2 || true
     done
+    for packet in "$artifact_dir"/packet-*.json; do
+      [[ -f "$packet" ]] || continue
+      jq -c '{
+        packet: input_filename,
+        entities: [
+          .entity_mentions[]? | {
+            entity_ref,
+            entity_type,
+            name_text,
+            relationship_role
+          }
+        ],
+        observations: [
+          .observations[]? | {
+            observation_ref,
+            predicate,
+            subject_entity_ref,
+            object,
+            reason_codes
+          }
+        ],
+        deferrals: [.deferrals[]?.reason_code]
+      }' "$packet" >&2 || true
+    done
   fi
   restore_timers
   docker exec "$container" dropdb -U sage --if-exists --force "$clone_db" \
