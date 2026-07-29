@@ -17,6 +17,9 @@ SOURCE_ID = "ed91f3b9-a4b8-4e63-aac7-53e370412483"
 THREAD_ID = "2f6e6a6c-f43e-45e2-8137-8b1b01e67976"
 REQUEST_ID = "bfca3e63-e670-4601-a06d-6345c18554f4"
 TARGET_ID = "049205b4-9a6c-5e1a-bb8f-2ab9f05f8964"
+PARENT_ID = "4eb60741-7020-51f4-80b3-30b40c2fc8b1"
+V3_SPLITTER = "memory_v1_contextual_span_splitter_20260728_v3"
+V3_PLAN_SHA256 = "9" * 64
 SOURCE_TEXT = (
     "Much of the app is turning into life switch, so I’m thinking about "
     "making the verbal sage fractal monistic data that just be the kind of "
@@ -108,9 +111,17 @@ class Transaction:
 
 
 class Connection:
-    def __init__(self, *, actor: str = OWNER) -> None:
+    def __init__(
+        self,
+        *,
+        actor: str = OWNER,
+        generation_rows: list[dict] | None = None,
+        generation_evidence: list[dict] | None = None,
+    ) -> None:
         self.actor = actor
         self.source, self.evidence, self.target = records()
+        self.generation_rows = generation_rows or []
+        self.generation_evidence = generation_evidence
         self.entered_readonly = False
         self.exited = False
         self.queries: list[str] = []
@@ -136,6 +147,12 @@ class Connection:
 
     async def fetch(self, query: str, *_args):
         self.queries.append(query)
+        if "select_owner_contextual_generation_v1" in query:
+            return list(self.generation_rows)
+        if "WITH requested AS" in query:
+            if self.generation_evidence is None:
+                raise AssertionError("generation evidence is absent")
+            return list(reversed(self.generation_evidence))
         return list(reversed(self.evidence))
 
 
@@ -254,6 +271,116 @@ class EvidenceContextLoaderV1Test(unittest.TestCase):
         queries = "\n".join(connection.queries)
         self.assertIn("row_number() OVER", queries)
         self.assertIn("target_position", queries)
+
+    def test_contextual_target_uses_only_its_authoritative_generation(
+        self,
+    ) -> None:
+        connection = Connection()
+        for row in connection.evidence:
+            row["metadata"]["span_origin"] = "contextual_split_v3"
+        connection.target = next(
+            row
+            for row in connection.evidence
+            if row["evidence_id"] == TARGET_ID
+        )
+        connection.generation_rows = [
+            {
+                "owner_user_id": OWNER,
+                "parent_evidence_id": PARENT_ID,
+                "child_evidence_id": row["evidence_id"],
+                "source_id": SOURCE_ID,
+                "thread_id": THREAD_ID,
+                "request_id": REQUEST_ID,
+                "splitter_version": V3_SPLITTER,
+                "child_content_sha256": row["content_sha256"],
+                "source_content_sha256": sha(SOURCE_TEXT),
+                "span_origin": "contextual_split_v3",
+                "plan_sha256": V3_PLAN_SHA256,
+            }
+            for row in connection.evidence
+        ]
+        connection.generation_evidence = list(connection.evidence)
+        overlapping_v2 = []
+        for row in connection.evidence:
+            clone = {
+                **row,
+                "evidence_id": str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"overlapping-v2:{row['evidence_id']}",
+                    )
+                ),
+                "metadata": {
+                    **row["metadata"],
+                    "span_origin": "contextual_split_v2",
+                },
+            }
+            overlapping_v2.append(clone)
+        connection.evidence.extend(overlapping_v2)
+
+        envelope = asyncio.run(
+            load_memory_evidence_context_v1(
+                connection,
+                expected_owner_user_id=OWNER,
+                target_evidence_id=TARGET_ID,
+                expected_target_content_sha256=connection.target[
+                    "content_sha256"
+                ],
+            )
+        )
+
+        self.assertEqual(len(envelope.spans), 3)
+        self.assertEqual(
+            {span.span_origin for span in envelope.spans},
+            {"contextual_split_v3"},
+        )
+        queries = "\n".join(connection.queries)
+        self.assertIn(
+            "memory.select_owner_contextual_generation_v1($1,$2)",
+            queries,
+        )
+        self.assertIn("WITH requested AS", queries)
+        self.assertNotIn("FROM memory.evidence_contextual_span_v2", queries)
+        self.assertNotIn("legacy_full_turn_rebind_v1", queries)
+
+    def test_contextual_generation_hash_mismatch_fails_closed(self) -> None:
+        connection = Connection()
+        connection.target["metadata"]["span_origin"] = (
+            "contextual_split_v3"
+        )
+        connection.generation_rows = [
+            {
+                "owner_user_id": OWNER,
+                "parent_evidence_id": PARENT_ID,
+                "child_evidence_id": TARGET_ID,
+                "source_id": SOURCE_ID,
+                "thread_id": THREAD_ID,
+                "request_id": REQUEST_ID,
+                "splitter_version": V3_SPLITTER,
+                "child_content_sha256": connection.target[
+                    "content_sha256"
+                ],
+                "source_content_sha256": "0" * 64,
+                "span_origin": "contextual_split_v3",
+                "plan_sha256": V3_PLAN_SHA256,
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            EvidenceContextContractError,
+            "generation binding differs",
+        ):
+            asyncio.run(
+                load_memory_evidence_context_v1(
+                    connection,
+                    expected_owner_user_id=OWNER,
+                    target_evidence_id=TARGET_ID,
+                    expected_target_content_sha256=connection.target[
+                        "content_sha256"
+                    ],
+                )
+            )
+        self.assertEqual(len(connection.queries), 4)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,108 @@ def _metadata(value: Any) -> Mapping[str, Any]:
     return value
 
 
+def _generation_binding(
+    row: Any,
+    *,
+    owner: uuid.UUID,
+    target: uuid.UUID,
+    target_content_sha256: str,
+    source_id: uuid.UUID,
+    source_content_sha256: str,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Validate an authoritative contextual-span generation binding."""
+
+    if row is None:
+        return None
+    binding = _mapping(row, "target contextual generation")
+    try:
+        bound_owner = uuid.UUID(str(binding.get("owner_user_id")))
+        bound_target = uuid.UUID(str(binding.get("child_evidence_id")))
+        parent = uuid.UUID(str(binding.get("parent_evidence_id")))
+        bound_source = uuid.UUID(str(binding.get("source_id")))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise EvidenceContextContractError(
+            "target contextual generation identifiers are invalid"
+        ) from exc
+    splitter_version = binding.get("splitter_version")
+    plan_sha256 = binding.get("plan_sha256")
+    span_origin = binding.get("span_origin")
+    if (
+        bound_owner != owner
+        or bound_target != target
+        or bound_source != source_id
+        or binding.get("child_content_sha256") != target_content_sha256
+        or binding.get("source_content_sha256") != source_content_sha256
+        or not isinstance(splitter_version, str)
+        or not splitter_version
+        or not isinstance(plan_sha256, str)
+        or len(plan_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in plan_sha256)
+        or not isinstance(span_origin, str)
+        or span_origin != metadata.get("span_origin")
+    ):
+        raise EvidenceContextContractError(
+            "target contextual generation binding differs from evidence"
+        )
+    return {
+        "parent_evidence_id": parent,
+        "source_id": bound_source,
+        "splitter_version": splitter_version,
+        "plan_sha256": plan_sha256,
+        "source_content_sha256": source_content_sha256,
+        "span_origin": span_origin,
+    }
+
+
+def _generation_evidence_ids(
+    rows: Sequence[Any],
+    *,
+    owner: uuid.UUID,
+    target: uuid.UUID,
+    binding: Mapping[str, Any],
+    max_spans: int,
+) -> list[uuid.UUID]:
+    if not rows or len(rows) > max_spans:
+        raise EvidenceContextContractError(
+            "contextual generation window is invalid"
+        )
+    evidence_ids: list[uuid.UUID] = []
+    for row in rows:
+        item = _mapping(row, "contextual generation sibling")
+        try:
+            item_owner = uuid.UUID(str(item.get("owner_user_id")))
+            item_parent = uuid.UUID(str(item.get("parent_evidence_id")))
+            item_source = uuid.UUID(str(item.get("source_id")))
+            item_child = uuid.UUID(str(item.get("child_evidence_id")))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise EvidenceContextContractError(
+                "contextual generation sibling identifiers are invalid"
+            ) from exc
+        if (
+            item_owner != owner
+            or item_parent != binding["parent_evidence_id"]
+            or item_source != binding["source_id"]
+            or item.get("splitter_version") != binding["splitter_version"]
+            or item.get("plan_sha256") != binding["plan_sha256"]
+            or item.get("source_content_sha256")
+            != binding["source_content_sha256"]
+            or item.get("span_origin") != binding["span_origin"]
+        ):
+            raise EvidenceContextContractError(
+                "contextual generation siblings differ from target binding"
+            )
+        evidence_ids.append(item_child)
+    if (
+        len(evidence_ids) != len(set(evidence_ids))
+        or evidence_ids.count(target) != 1
+    ):
+        raise EvidenceContextContractError(
+            "contextual generation target membership is invalid"
+        )
+    return evidence_ids
+
+
 def _target_centered_window(
     rows: Sequence[Any],
     *,
@@ -173,6 +275,43 @@ async def load_memory_evidence_context_v1(
             raise EvidenceContextContractError(
                 "target full-source hash is absent"
             )
+        generation_rows = await conn.fetch(
+            """
+            SELECT *
+            FROM memory.select_owner_contextual_generation_v1($1,$2)
+            """,
+            target,
+            max_spans,
+        )
+        target_generation_rows = [
+            row
+            for row in generation_rows
+            if str(dict(row).get("child_evidence_id")) == str(target)
+        ]
+        if generation_rows and len(target_generation_rows) != 1:
+            raise EvidenceContextContractError(
+                "target contextual generation is ambiguous"
+            )
+        generation = _generation_binding(
+            target_generation_rows[0] if target_generation_rows else None,
+            owner=owner,
+            target=target,
+            target_content_sha256=expected_target_content_sha256,
+            source_id=source_id,
+            source_content_sha256=source_hash,
+            metadata=metadata,
+        )
+        generation_evidence_ids = (
+            _generation_evidence_ids(
+                generation_rows,
+                owner=owner,
+                target=target,
+                binding=generation,
+                max_spans=max_spans,
+            )
+            if generation is not None
+            else []
+        )
         source_row = _mapping(
             await conn.fetchrow(
                 """
@@ -187,8 +326,31 @@ async def load_memory_evidence_context_v1(
             "raw source",
         )
         preceding_budget = ((max_spans - 1) * 2) // 3
-        siblings = _target_centered_window(
-            await conn.fetch(
+        if generation is not None:
+            sibling_rows = await conn.fetch(
+                """
+                WITH requested AS (
+                  SELECT evidence_id,source_ordinal
+                  FROM unnest($2::uuid[]) WITH ORDINALITY
+                       AS value(evidence_id,source_ordinal)
+                )
+                SELECT evidence.evidence_id,evidence.owner_user_id,
+                       evidence.source_system,evidence.external_id,
+                       evidence.content,evidence.content_sha256,
+                       evidence.recorded_at,evidence.metadata
+                FROM requested
+                JOIN memory.evidence AS evidence
+                  ON evidence.evidence_id=requested.evidence_id
+                 AND evidence.owner_user_id=$1
+                WHERE evidence.source_system='public.chat_log'
+                  AND evidence.status='active'
+                ORDER BY requested.source_ordinal
+                """,
+                owner,
+                generation_evidence_ids,
+            )
+        else:
+            sibling_rows = await conn.fetch(
                 """
                 WITH ranked AS (
                   SELECT evidence_id,owner_user_id,source_system,external_id,
@@ -239,7 +401,9 @@ async def load_memory_evidence_context_v1(
                 target,
                 max_spans,
                 preceding_budget,
-            ),
+            )
+        siblings = _target_centered_window(
+            sibling_rows,
             target_evidence_id=target,
             max_spans=max_spans,
         )
