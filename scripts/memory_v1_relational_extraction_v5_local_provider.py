@@ -712,6 +712,36 @@ def _example_temporal(semantic: str = "observation_time") -> dict[str, Any]:
     }
 
 
+def _reported_death_temporal(
+    source: TrustedExtractionSource,
+) -> dict[str, Any]:
+    if not _LAST_CALENDAR_YEAR_RE.search(source.content):
+        return _example_temporal("occurrence")
+    source_year = int(source.source_recorded_at[:4])
+    event_year = source_year - 1
+    return {
+        "anchored_to_source_time": True,
+        "basis": "calendar",
+        "calendar_range": {
+            "lower": f"{event_year:04d}-01-01",
+            "upper": f"{source_year:04d}-01-01",
+            "bounds": "[)",
+        },
+        "certainty": "bounded",
+        "instant": None,
+        "instant_range": None,
+        "precision": "year",
+        "reason_codes": [
+            "relative_calendar_year_anchored_to_source_time"
+        ],
+        "recurrence": None,
+        "relative_offset": None,
+        "semantic": "occurrence",
+        "shape": "bounded_interval",
+        "source_form": "partial_absolute",
+    }
+
+
 def _example_entity(
     source: str,
     *,
@@ -2138,6 +2168,7 @@ _PET_EXPLICIT_DEATH_CUE_RE = re.compile(
     r"(?:down|to\s+sleep)|euthani[sz]ed)\b",
     re.IGNORECASE,
 )
+_LAST_CALENDAR_YEAR_RE = re.compile(r"\blast\s+year\b", re.IGNORECASE)
 _EXPLICIT_NAMED_PET_DEATH_SUBJECT_RE = re.compile(
     r"\b(?i:my)\s+[^\n.!?]{0,120}?"
     r"(?P<name>[A-Z][\w'’-]{0,79}"
@@ -4872,6 +4903,10 @@ def _compile_entity_links(
                 repairs.append(
                     "explicit_death_subject_name_canonicalized"
                 )
+        for observation in observations:
+            if observation["predicate"] == "life_event.died":
+                observation["temporal"] = _reported_death_temporal(source)
+                repairs.append("explicit_death_time_canonicalized")
 
     unsupported_death_refs = {
         item["observation_ref"]
@@ -5142,8 +5177,12 @@ def _compile_entity_links(
                 observation["predicate"] == "life_event.died"
                 and _PET_EXPLICIT_DEATH_CUE_RE.search(content)
             ):
-                observation["temporal"] = _example_temporal("occurrence")
-                repairs.append("pet_death_undated_occurrence_normalized")
+                observation["temporal"] = _reported_death_temporal(source)
+                repairs.append(
+                    "pet_death_occurrence_time_normalized"
+                    if _LAST_CALENDAR_YEAR_RE.search(content)
+                    else "pet_death_undated_occurrence_normalized"
+                )
             elif (
                 observation["predicate"]
                 == "health.user_reported_observation"

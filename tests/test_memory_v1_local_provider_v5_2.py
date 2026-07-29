@@ -1461,10 +1461,24 @@ class LocalProviderV52Test(unittest.TestCase):
             value["entity_mentions"][0]["name_text"],
             "Helsing",
         )
+        temporal = value["observations"][0]["temporal"]
+        self.assertTrue(temporal["anchored_to_source_time"])
+        self.assertEqual(temporal["basis"], "calendar")
+        self.assertEqual(temporal["shape"], "bounded_interval")
+        self.assertEqual(temporal["precision"], "year")
+        self.assertEqual(
+            temporal["calendar_range"],
+            {
+                "lower": "2025-01-01",
+                "upper": "2026-01-01",
+                "bounds": "[)",
+            },
+        )
         self.assertIn(
             "explicit_death_subject_name_canonicalized",
             repairs,
         )
+        self.assertIn("explicit_death_time_canonicalized", repairs)
 
     def test_named_pet_loss_does_not_prove_death(self) -> None:
         content = "That was Dahlia who I lost last year."
