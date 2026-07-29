@@ -299,7 +299,7 @@ SQL
 done
 
 snapshot_with_exclusions "$clone_db" "$work/clone-before.tsv" \
-  "v5_local_packet_supersession,v5_2_local_packet_route_event,v5_local_packet_review_artifact"
+  "v5_local_packet_supersession,v5_2_local_packet_route_event"
 supersession_before=$(docker exec "$container" psql -U sage -d "$clone_db" \
   -X -Atqc "SELECT count(*) FROM memory.v5_local_packet_supersession")
 route_before=$(docker exec "$container" psql -U sage -d "$clone_db" \
@@ -378,7 +378,7 @@ jq -e '
 ' "$work/route-apply.json" >/dev/null
 
 stage=postconditions
-test "$(
+supersession_scope_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_local_packet_supersession
     WHERE owner_user_id='$owner'::uuid
@@ -386,8 +386,8 @@ test "$(
         '${prior_packets[0]}'::uuid,'${prior_packets[1]}'::uuid
       ]);
   "
-)" = 2
-test "$(
+)
+target_routes_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_2_local_packet_route_event
     WHERE owner_user_id='$owner'::uuid
@@ -398,8 +398,8 @@ test "$(
       ])
       AND route='manual_review_artifact_ready';
   "
-)" = 3
-test "$(
+)
+terminal_routes_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_2_local_packet_route_event
     WHERE owner_user_id='$owner'::uuid
@@ -409,22 +409,33 @@ test "$(
       ])
       AND route='terminal_no_stage';
   "
-)" = 2
-test "$(
+)
+supersession_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_local_packet_supersession
   "
-)" = "$((supersession_before + 2))"
-test "$(
+)
+route_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_2_local_packet_route_event
   "
-)" = "$((route_before + 3))"
-test "$(
+)
+review_after=$(
   docker exec "$container" psql -U sage -d "$clone_db" -X -Atqc "
     SELECT count(*) FROM memory.v5_local_packet_review_artifact
   "
-)" = "$((review_before + 3))"
+)
+printf 'postconditions supersession_scope=%s target_routes=%s terminal_routes=%s supersessions=%s/%s routes=%s/%s reviews=%s/%s\n' \
+  "$supersession_scope_after" "$target_routes_after" "$terminal_routes_after" \
+  "$supersession_after" "$((supersession_before + 2))" \
+  "$route_after" "$((route_before + 3))" \
+  "$review_after" "$review_before"
+test "$supersession_scope_after" = 2
+test "$target_routes_after" = 3
+test "$terminal_routes_after" = 2
+test "$supersession_after" = "$((supersession_before + 2))"
+test "$route_after" = "$((route_before + 3))"
+test "$review_after" = "$review_before"
 for prior in "${prior_packets[@]}"; do
   test "$(
     psql "$clone_dsn" -X -Atq -v ON_ERROR_STOP=1 <<SQL | tail -1
@@ -439,7 +450,7 @@ SQL
 done
 
 snapshot_with_exclusions "$clone_db" "$work/clone-after.tsv" \
-  "v5_local_packet_supersession,v5_2_local_packet_route_event,v5_local_packet_review_artifact"
+  "v5_local_packet_supersession,v5_2_local_packet_route_event"
 cmp "$work/clone-before.tsv" "$work/clone-after.tsv"
 snapshot_with_exclusions "$source_db" "$work/production-after.tsv" \
   "__none__"
