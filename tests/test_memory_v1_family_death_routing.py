@@ -47,6 +47,36 @@ class MemoryV1FamilyDeathRoutingTests(unittest.TestCase):
             ],
         )
 
+    def test_plural_pet_history_recall_routes_to_profile_not_loss(self) -> None:
+        query = "Which pets have I had?"
+        plan = classify_memory_intent(query, request_classification="GENERAL")
+
+        self.assertEqual(plan["memory_intent"], "personal_recall")
+        self.assertEqual(plan["domains"], ["pet_profile"])
+        self.assertTrue(plan["direct_relevance"])
+        self.assertTrue(plan["claim_context"]["explicit_recall"])
+        self.assertTrue(plan["claim_context"]["broad_profile_recall"])
+        self.assertEqual(
+            plan["claim_context"]["allowed_predicates"],
+            [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        )
+        shadow = classify_v5_shadow_context(query, "GENERAL")
+        self.assertEqual(shadow["domain"], "pet_profile")
+        self.assertEqual(
+            shadow["allowed_predicate_prefixes"],
+            [
+                "identity.name",
+                "pet.breed",
+                "pet.sex",
+                "relationship.has_pet",
+            ],
+        )
+
     def test_explicit_pet_loss_routes_only_to_entity_scoped_death(self) -> None:
         plan = classify_memory_intent(
             "Do you remember when I lost my pet?",

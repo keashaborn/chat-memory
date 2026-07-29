@@ -334,7 +334,9 @@ PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
 BROAD_PET_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:current )?pets|"
     r"do you know (?:anything )?about my (?:current )?pets|"
-    r"tell me (?:what you know )?about my (?:current )?pets)\b"
+    r"tell me (?:what you know )?about my (?:current )?pets|"
+    r"(?:what|which) (?:pets?|dogs?|cats?) "
+    r"(?:do|did|have) i (?:have|had|own|owned))\b"
 )
 BROAD_PARENT_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:mother|mom|mum|father|dad)|"
