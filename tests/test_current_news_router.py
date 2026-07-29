@@ -9,10 +9,12 @@ from fastapi import Response
 from pydantic import ValidationError
 
 from rag_engine.current_news_router import (
+    CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
     CurrentNewsRequestV1,
     CurrentNewsResponseV1,
     _current_news_skeleton_answer,
     _current_news_sources_from_trusted_sources,
+    _search_current_news_with_exact_page_repair,
     apply_current_news_no_store_headers,
     current_news_fetch_enabled_from_env,
     current_news_provider_settings_from_env,
@@ -22,10 +24,45 @@ from rag_engine.trusted_web_policy_v1 import (
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
-from rag_engine.trusted_web_provider_v1 import TrustedWebSourceV1
+from rag_engine.trusted_web_provider_v1 import (
+    TrustedWebProviderResultV1,
+    TrustedWebProviderSecurityError,
+    TrustedWebSourceV1,
+)
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+
+
+def provider_result(
+    response_id: str,
+    url: str,
+) -> TrustedWebProviderResultV1:
+    source = TrustedWebSourceV1(
+        url=url,
+        title=url,
+        authority_type="official_web",
+        evidence_type="web_source",
+    )
+    return TrustedWebProviderResultV1(
+        provider_response_id=response_id,
+        answer_text="Verified answer.",
+        cited_sources=(source,),
+        consulted_sources=(source,),
+    )
+
+
+class FakeProvider:
+    def __init__(
+        self,
+        results: tuple[TrustedWebProviderResultV1, ...],
+    ) -> None:
+        self.results = list(results)
+        self.calls: list[dict[str, object]] = []
+
+    def search(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return self.results.pop(0)
 
 
 class CurrentNewsRouterTests(unittest.TestCase):
@@ -34,6 +71,97 @@ class CurrentNewsRouterTests(unittest.TestCase):
 
         self.assertIn("Never claim that you lack access", CURRENT_NEWS_INSTRUCTIONS_V1)
         self.assertIn("current-news sources", CURRENT_NEWS_INSTRUCTIONS_V1)
+
+    def test_generic_index_citation_gets_one_exact_page_repair(self) -> None:
+        provider = FakeProvider(
+            (
+                provider_result("resp-first", "https://openai.com/news"),
+                provider_result(
+                    "resp-repaired",
+                    "https://openai.com/index/exact-update",
+                ),
+            )
+        )
+        policy = route_trusted_web_query(
+            "What happened with OpenAI today?"
+        )
+
+        result, admission, repaired = (
+            _search_current_news_with_exact_page_repair(
+                provider=provider,
+                query="What happened with OpenAI today?",
+                policy=policy,
+                actor_user_id=str(ACTOR),
+                safety_secret="x" * 32,
+                response_language="en",
+            )
+        )
+
+        self.assertTrue(repaired)
+        self.assertEqual(result.provider_response_id, "resp-repaired")
+        self.assertEqual(admission.exact_page_source_count, 1)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertNotIn(
+            CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
+            str(provider.calls[0]["instructions"]),
+        )
+        self.assertIn(
+            CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
+            str(provider.calls[1]["instructions"]),
+        )
+
+    def test_generic_index_repair_exhaustion_fails_closed(self) -> None:
+        provider = FakeProvider(
+            (
+                provider_result("resp-first", "https://openai.com/news"),
+                provider_result("resp-second", "https://openai.com/news"),
+            )
+        )
+        policy = route_trusted_web_query(
+            "What happened with OpenAI today?"
+        )
+
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_repair_exhausted_generic_index",
+        ):
+            _search_current_news_with_exact_page_repair(
+                provider=provider,
+                query="What happened with OpenAI today?",
+                policy=policy,
+                actor_user_id=str(ACTOR),
+                safety_secret="x" * 32,
+                response_language="en",
+            )
+
+        self.assertEqual(len(provider.calls), 2)
+
+    def test_non_generic_policy_failure_is_not_retried(self) -> None:
+        result = TrustedWebProviderResultV1(
+            provider_response_id="resp-missing",
+            answer_text="No citation.",
+            cited_sources=(),
+            consulted_sources=(),
+        )
+        provider = FakeProvider((result,))
+        policy = route_trusted_web_query(
+            "What happened with OpenAI today?"
+        )
+
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_cited_sources_missing",
+        ):
+            _search_current_news_with_exact_page_repair(
+                provider=provider,
+                query="What happened with OpenAI today?",
+                policy=policy,
+                actor_user_id=str(ACTOR),
+                safety_secret="x" * 32,
+                response_language="en",
+            )
+
+        self.assertEqual(len(provider.calls), 1)
 
     def test_public_contract_rejects_client_policy_controls(self) -> None:
         with self.assertRaises(ValidationError):

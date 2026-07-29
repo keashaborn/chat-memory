@@ -120,6 +120,27 @@ def _response_headers(
     }
 
 
+_SOURCE_POLICY_VIOLATIONS = frozenset(
+    {
+        "current_news_source_policy_violation",
+        "trusted_web_source_policy_violation",
+    }
+)
+
+
+def _source_policy_violation_headers(
+    *,
+    route: str,
+    exc: HTTPException,
+) -> dict[str, str] | None:
+    if (
+        exc.status_code != 502
+        or str(exc.detail or "") not in _SOURCE_POLICY_VIOLATIONS
+    ):
+        return None
+    return _response_headers(route=route, searched=True)
+
+
 @router.post("/execute")
 async def execute_search_plan_v1(
     payload: SearchExecutionRequestV1,
@@ -155,26 +176,39 @@ async def execute_search_plan_v1(
         )
 
     provider_response = Response()
-    if plan.selected_route == "current_news":
-        provider_result = await current_news_query(
-            CurrentNewsRequestV1(
-                user_id=owner,
-                query=payload.query,
-                response_language=payload.response_language,
-            ),
-            req,
-            provider_response,
+    try:
+        if plan.selected_route == "current_news":
+            provider_result = await current_news_query(
+                CurrentNewsRequestV1(
+                    user_id=owner,
+                    query=payload.query,
+                    response_language=payload.response_language,
+                ),
+                req,
+                provider_response,
+            )
+        else:
+            provider_result = await trusted_web_query(
+                TrustedWebRequestV1(
+                    user_id=owner,
+                    query=payload.query,
+                    response_language=payload.response_language,
+                ),
+                req,
+                provider_response,
+            )
+    except HTTPException as exc:
+        headers = _source_policy_violation_headers(
+            route=plan.selected_route,
+            exc=exc,
         )
-    else:
-        provider_result = await trusted_web_query(
-            TrustedWebRequestV1(
-                user_id=owner,
-                query=payload.query,
-                response_language=payload.response_language,
-            ),
-            req,
-            provider_response,
-        )
+        if headers is None:
+            raise
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            headers=headers,
+        ) from None
 
     result = _model_json(provider_result)
     searched = bool(result.get("searched"))

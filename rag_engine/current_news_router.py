@@ -35,17 +35,20 @@ from rag_engine.trusted_web_audit_v1 import (
 )
 from rag_engine.trusted_web_admission_v1 import (
     CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+    TrustedWebEvidenceAdmissionV1,
     WEB_EVIDENCE_ADMISSION_CONTRACT,
     admit_trusted_web_sources_v1,
 )
 from rag_engine.trusted_web_policy_v1 import (
     TrustedWebDispositionV1,
+    TrustedWebPolicyDecisionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
 from rag_engine.trusted_web_provider_v1 import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,
+    TrustedWebProviderResultV1,
     TrustedWebProviderSecurityError,
     TrustedWebSettingsV1,
     TrustedWebSourceV1,
@@ -86,6 +89,78 @@ Answer style:
 - State what is confirmed, what is unconfirmed, and what changed recently.
 - Keep the answer concise and cite only the returned trusted sources.
 """
+
+CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1 = """\
+Citation verification repair (second and final attempt):
+- The prior attempt cited a generic landing, newsroom, headlines, tag, category,
+  search, or listing page. That page cannot support the answer.
+- Use exact article, release, advisory, or incident-page URLs only.
+- Keep the same narrow topic and allowed domains. Do not broaden the research.
+- If exact-page evidence is unavailable, state that the returned exact pages do
+  not establish a current update. Never substitute a generic index citation.
+"""
+
+
+def _search_current_news_with_exact_page_repair(
+    *,
+    provider: OpenAITrustedWebProviderV1,
+    query: str,
+    policy: TrustedWebPolicyDecisionV1,
+    actor_user_id: str,
+    safety_secret: str,
+    response_language: str,
+) -> tuple[
+    TrustedWebProviderResultV1,
+    TrustedWebEvidenceAdmissionV1,
+    bool,
+]:
+    instructions = (
+        CURRENT_NEWS_INSTRUCTIONS_V1
+        + "\n"
+        + response_language_instruction(response_language)
+    )
+
+    def execute(
+        attempt_instructions: str,
+    ) -> tuple[
+        TrustedWebProviderResultV1,
+        TrustedWebEvidenceAdmissionV1,
+    ]:
+        result = provider.search(
+            query=query,
+            policy=policy,
+            actor_user_id=actor_user_id,
+            safety_secret=safety_secret,
+            instructions=attempt_instructions,
+        )
+        admission = admit_trusted_web_sources_v1(
+            cited_sources=result.cited_sources,
+            consulted_sources=result.consulted_sources,
+            max_sources=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+            policy_pack="current_news",
+        )
+        return result, admission
+
+    try:
+        result, admission = execute(instructions)
+        return result, admission, False
+    except TrustedWebProviderSecurityError as exc:
+        if str(exc) != "citation_evidence_cited_generic_index":
+            raise
+
+    try:
+        result, admission = execute(
+            instructions
+            + "\n"
+            + CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1
+        )
+        return result, admission, True
+    except TrustedWebProviderSecurityError as exc:
+        if str(exc) == "citation_evidence_cited_generic_index":
+            raise TrustedWebProviderSecurityError(
+                "citation_evidence_repair_exhausted_generic_index"
+            ) from None
+        raise
 
 
 class CurrentNewsRequestV1(BaseModel):
@@ -434,26 +509,17 @@ async def current_news_query(
             get_openai_client(),
             settings,
         )
-        result = await asyncio.wait_for(
+        result, admission, citation_repair_attempted = await asyncio.wait_for(
             asyncio.to_thread(
-                provider.search,
+                _search_current_news_with_exact_page_repair,
+                provider=provider,
                 query=payload.query,
                 policy=policy,
                 actor_user_id=str(owner),
                 safety_secret=safety_secret,
-                instructions=(
-                    CURRENT_NEWS_INSTRUCTIONS_V1
-                    + "\n"
-                    + response_language_instruction(payload.response_language)
-                ),
+                response_language=payload.response_language,
             ),
             timeout=settings.timeout_seconds + 5.0,
-        )
-        admission = admit_trusted_web_sources_v1(
-            cited_sources=result.cited_sources,
-            consulted_sources=result.consulted_sources,
-            max_sources=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
-            policy_pack="current_news",
         )
         cited_news_sources = _current_news_sources_from_trusted_sources(
             admission.validated_cited_sources
@@ -481,13 +547,14 @@ async def current_news_query(
             rejected_source_reasons=admission.rejected_source_reasons,
         )
         logger.info(
-            "[current_news] search_id=%s status=completed topic=%s cited_source_count=%s admitted_source_count=%s provider_consulted_source_count=%s rejected_source_count=%s latency_ms=%s",
+            "[current_news] search_id=%s status=completed topic=%s cited_source_count=%s admitted_source_count=%s provider_consulted_source_count=%s rejected_source_count=%s citation_repair_attempted=%s latency_ms=%s",
             search_id,
             policy.topic.value,
             len(cited_news_sources),
             len(admitted_news_sources),
             len(consulted_news_sources),
             rejected_news_source_count,
+            str(citation_repair_attempted).lower(),
             latency_ms,
         )
         return CurrentNewsResponseV1(
