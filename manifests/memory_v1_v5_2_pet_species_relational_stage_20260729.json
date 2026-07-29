@@ -1,0 +1,43 @@
+{
+  "bundles": [
+    {
+      "expected_counts": {
+        "candidates": 1,
+        "mentions": 2,
+        "observations": 4,
+        "resolutions": 2,
+        "temporals": 4
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-pet-species-domain-v1-24bcaf1f-f74c-59db-896d-06e05e83d7d9-stage.json",
+      "sha256": "5e011e10d7c9ca2ae314d86e741057fa719053c8c28c2301415b1b437a260d71"
+    },
+    {
+      "expected_counts": {
+        "candidates": 2,
+        "mentions": 2,
+        "observations": 3,
+        "resolutions": 2,
+        "temporals": 3
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-pet-species-domain-v1-c6adc46c-20e3-5e9e-80fd-ab53bfb65869-stage.json",
+      "sha256": "7d885de019dc5e8f8374d4ad470a58930a3ff68294898dd417d9c1be2fec9946"
+    },
+    {
+      "expected_counts": {
+        "candidates": 1,
+        "mentions": 2,
+        "observations": 4,
+        "resolutions": 2,
+        "temporals": 4
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-pet-species-domain-v1-c2c0a8e7-d9e7-53f4-a5a6-27f9d3a3570a-stage.json",
+      "sha256": "ca203b435f526b4df7212a8312642a4ad03e06e0ce96f1ae2a494cb3bc39b7dc"
+    }
+  ],
+  "contract_version": "memory_v1_v5_2_stage_batch_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "target_server": "seebx"
+}
