@@ -195,6 +195,7 @@ SELECT 1 / ((:'apply_replay_outcome'='replayed')::integer);
 SELECT 1 / ((:'apply_replay_rows_written'::integer=0)::integer);
 SELECT 1 / ((:'apply_replay_event_id'=:'apply_event_id')::integer);
 
+RESET SESSION AUTHORIZATION;
 SELECT 1 / (((
   SELECT count(*) FROM memory.claim
   WHERE owner_user_id=:'owner'::uuid
@@ -222,6 +223,7 @@ SELECT 1 / (((
     AND stance='supports'
 )=1)::integer);
 
+SET SESSION AUTHORIZATION brains_app;
 SELECT set_config('app.user_id', :'other_owner', true);
 DO $isolation$
 BEGIN
