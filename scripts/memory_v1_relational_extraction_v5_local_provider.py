@@ -2138,6 +2138,13 @@ _PET_EXPLICIT_DEATH_CUE_RE = re.compile(
     r"(?:down|to\s+sleep)|euthani[sz]ed)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_NAMED_PET_DEATH_SUBJECT_RE = re.compile(
+    r"\b(?i:my)\s+[^\n.!?]{0,120}?"
+    r"(?P<name>[A-Z][\w'’-]{0,79}"
+    r"(?:\s+(?:(?:von|van|de|del|du|la)\s+)?"
+    r"[A-Z][\w'’-]{0,79}){0,5})"
+    r"\s+(?i:(?:also\s+)?(?:died|passed\s+away))\b",
+)
 _PET_SEX_CUE_RE = re.compile(
     r"\b(?:male|female)\b",
     re.IGNORECASE,
@@ -3291,6 +3298,13 @@ def _pet_name(content: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _explicit_named_pet_death_subject(content: str) -> str | None:
+    match = _EXPLICIT_NAMED_PET_DEATH_SUBJECT_RE.search(content)
+    if match is None:
+        return None
+    return match.group("name").strip()
 
 
 def _explicit_pet_breed_and_species(
@@ -4831,6 +4845,33 @@ def _compile_entity_links(
                 ]
                 repairs.append("pet_loss_not_promoted_to_death")
         repairs.append("pet_relation_normalized")
+
+    explicit_death_subject_name = _explicit_named_pet_death_subject(content)
+    if explicit_death_subject_name is not None:
+        death_subject_refs = {
+            item["subject_entity_ref"]
+            for item in observations
+            if item["predicate"] == "life_event.died"
+        }
+        for entity in entities:
+            if (
+                entity["entity_ref"] in death_subject_refs
+                and entity["entity_type"] == "animal"
+                and entity.get("name_text") != explicit_death_subject_name
+            ):
+                entity["name_text"] = explicit_death_subject_name
+                entity["mention_kind"] = "named"
+                entity["reason_codes"] = list(
+                    dict.fromkeys(
+                        [
+                            *entity.get("reason_codes", []),
+                            "explicit_named_death_subject",
+                        ]
+                    )
+                )
+                repairs.append(
+                    "explicit_death_subject_name_canonicalized"
+                )
 
     unsupported_death_refs = {
         item["observation_ref"]

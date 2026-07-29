@@ -1418,6 +1418,54 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertIn("death_requires_explicit_target_cue", repairs)
 
+    def test_named_death_subject_drops_descriptive_prefix(self) -> None:
+        content = (
+            "And my amazing Tiekerhook male Helsing also died last year."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        animal = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="animal",
+            mention_kind="named",
+            name_text="Tiekerhook male Helsing",
+            relationship_role="pet:deceased",
+            reason_code="explicit_reported_death",
+        )
+        death = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="life_event.died",
+            object_value=_literal("boolean", True),
+            projection_class="direct_claim",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="explicit_reported_death",
+            temporal_semantic="occurrence",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[animal],
+                    observations=[death],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        self.assertEqual(
+            value["entity_mentions"][0]["name_text"],
+            "Helsing",
+        )
+        self.assertIn(
+            "explicit_death_subject_name_canonicalized",
+            repairs,
+        )
+
     def test_named_pet_loss_does_not_prove_death(self) -> None:
         content = "That was Dahlia who I lost last year."
         source = self.source(content)
