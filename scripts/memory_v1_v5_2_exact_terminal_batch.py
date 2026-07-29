@@ -107,53 +107,49 @@ async def finalize_terminal_rows(
     remaining = set(expected)
     applied: list[dict[str, Any]] = []
     while remaining:
-        rows = await conn.fetch(
-            "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
-            25,
+        requested_packet_id = sorted(remaining, key=str)[0]
+        row = await conn.fetchrow(
+            """
+            SELECT *
+            FROM memory.plan_owner_v5_2_exact_packet_route_v1($1::uuid)
+            """,
+            requested_packet_id,
         )
-        selected = [
-            dict(row)
-            for row in rows
-            if row["packet_id"] in remaining and row["route"] == "terminal_no_stage"
-        ]
-        if not selected:
+        if row is None or row["route"] != "terminal_no_stage":
             raise RuntimeError("an exact V5.2 terminal packet is not currently eligible")
-        # The database finalizer revalidates against the current first 25
-        # planned rows. Applying one row changes that window, so use only the
-        # first matching row from each fresh planner snapshot.
-        for target in selected[:1]:
-            packet_id = uuid.UUID(str(target["packet_id"]))
-            if target["packet_storage_sha256"] != expected[packet_id]:
-                raise RuntimeError("exact terminal packet storage hash drifted")
-            operation_id, event_id = stable_ids(
-                owner=owner,
-                packet_id=packet_id,
-                routing_basis_sha256=target["routing_basis_sha256"],
+        target = dict(row)
+        packet_id = uuid.UUID(str(target["packet_id"]))
+        if target["packet_storage_sha256"] != expected[packet_id]:
+            raise RuntimeError("exact terminal packet storage hash drifted")
+        operation_id, event_id = stable_ids(
+            owner=owner,
+            packet_id=packet_id,
+            routing_basis_sha256=target["routing_basis_sha256"],
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT * FROM memory.finalize_owner_v5_2_terminal_route_v1(
+              $1,$2,$3,$4,$5,$6
             )
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM memory.finalize_owner_v5_2_terminal_route_v1(
-                  $1,$2,$3,$4,$5,$6
-                )
-                """,
-                operation_id,
-                event_id,
-                packet_id,
-                target["packet_storage_sha256"],
-                target["routing_basis_sha256"],
-                list(target["source_deferral_reason_codes"]),
-            )
-            if row is None or row["apply_outcome"] != "applied":
-                raise RuntimeError("exact V5.2 terminal packet was not applied")
-            applied.append(
-                {
-                    "packet_id": packet_id,
-                    "operation_id": operation_id,
-                    "event_id": event_id,
-                    "target": target,
-                }
-            )
-            remaining.remove(packet_id)
+            """,
+            operation_id,
+            event_id,
+            packet_id,
+            target["packet_storage_sha256"],
+            target["routing_basis_sha256"],
+            list(target["source_deferral_reason_codes"]),
+        )
+        if row is None or row["apply_outcome"] != "applied":
+            raise RuntimeError("exact V5.2 terminal packet was not applied")
+        applied.append(
+            {
+                "packet_id": packet_id,
+                "operation_id": operation_id,
+                "event_id": event_id,
+                "target": target,
+            }
+        )
+        remaining.remove(packet_id)
     return applied
 
 
@@ -166,23 +162,19 @@ async def finalize_disposition_rows(
     remaining = set(expected)
     applied: list[dict[str, Any]] = []
     while remaining:
-        rows = await conn.fetch(
+        requested_packet_id = sorted(remaining, key=str)[0]
+        row = await conn.fetchrow(
             """
             SELECT *
-            FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)
+            FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1::uuid)
             """,
-            25,
+            requested_packet_id,
         )
-        selected = [
-            dict(row)
-            for row in rows
-            if row["packet_id"] in remaining
-        ]
-        if not selected:
+        if row is None:
             raise RuntimeError(
                 "an exact V5.2 zero-atom packet is not currently eligible"
             )
-        target = selected[0]
+        target = dict(row)
         packet_id = uuid.UUID(str(target["packet_id"]))
         storage_sha256, reason = expected[packet_id]
         v5_2_reason = f"{reason}_v5_2"
