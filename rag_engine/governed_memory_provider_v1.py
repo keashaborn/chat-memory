@@ -29,6 +29,7 @@ from rag_engine.memory_v1_projection import ClaimVectorIndex
 from rag_engine.memory_v1_selection_envelope import (
     AuthoritativeGovernedMemorySelectorV1,
     MemoryLane,
+    MemoryLaneLimitV1,
     MemoryPromptAssemblyContextV1,
     MemoryPromptAssemblyInputV1,
     MemorySelectionBudgetPolicyV1,
@@ -62,6 +63,34 @@ CLAIM_SOURCE = SourceContractVersionV1(
 PREFERENCE_SOURCE = SourceContractVersionV1(
     name="preference_projection", version="memory_preference_projection_v1"
 )
+
+
+def _memory_selection_budget_policy_v1(
+    *,
+    broad_profile_recall: bool,
+) -> MemorySelectionBudgetPolicyV1:
+    standard = MemorySelectionBudgetPolicyV1.standard()
+    if not broad_profile_recall:
+        return standard
+    return MemorySelectionBudgetPolicyV1(
+        policy_version=standard.policy_version,
+        token_estimator_version=standard.token_estimator_version,
+        max_records=standard.max_records,
+        max_tokens=standard.max_tokens,
+        max_controls=standard.max_controls,
+        lane_limits=tuple(
+            (
+                MemoryLaneLimitV1(
+                    lane=limit.lane,
+                    max_records=8,
+                    max_tokens=600,
+                )
+                if limit.lane is MemoryLane.CLAIM
+                else limit
+            )
+            for limit in standard.lane_limits
+        ),
+    )
 
 
 class LiveGovernedMemoryAssemblyProviderV1:
@@ -166,7 +195,9 @@ class LiveGovernedMemoryAssemblyProviderV1:
                     )
                 ),
                 selected_at=datetime.now(timezone.utc),
-                budget_policy=MemorySelectionBudgetPolicyV1.standard(),
+                budget_policy=_memory_selection_budget_policy_v1(
+                    broad_profile_recall=broad_profile_recall,
+                ),
             )
             stance_topic_scope = resolve_stance_topic_scope_v1(
                 request=request,

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from rag_engine.governed_memory_provider_v1 import (
     LiveGovernedMemoryAssemblyProviderV1,
+    _memory_selection_budget_policy_v1,
 )
 from rag_engine.memory_v1_entity_scope_resolver_v2 import (
     EntityScopeResolutionError,
@@ -52,6 +53,33 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         self.activation.stop()
+
+    def test_broad_profile_budget_uses_existing_global_ceiling(self) -> None:
+        standard = _memory_selection_budget_policy_v1(
+            broad_profile_recall=False,
+        )
+        broad = _memory_selection_budget_policy_v1(
+            broad_profile_recall=True,
+        )
+        standard_claim = next(
+            item for item in standard.lane_limits if item.lane is MemoryLane.CLAIM
+        )
+        broad_claim = next(
+            item for item in broad.lane_limits if item.lane is MemoryLane.CLAIM
+        )
+
+        self.assertEqual(
+            (standard_claim.max_records, standard_claim.max_tokens),
+            (4, 500),
+        )
+        self.assertEqual(
+            (broad_claim.max_records, broad_claim.max_tokens),
+            (8, 600),
+        )
+        self.assertEqual(
+            (broad.max_records, broad.max_tokens),
+            (standard.max_records, standard.max_tokens),
+        )
 
     async def test_non_activated_owner_returns_empty_before_classification(self) -> None:
         snapshot = create_current_only_conversation_snapshot_v1(
