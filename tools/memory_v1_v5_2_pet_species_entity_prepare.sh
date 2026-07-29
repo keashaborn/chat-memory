@@ -77,7 +77,7 @@ expected_state=$(psql_row "
     plan.decision_state::text || '|' ||
     coalesce(plan.selected_entity_id::text,'') || '|' ||
     coalesce(plan.proposed_entity->>'canonical_name',''),
-    E'\\n' ORDER BY plan.evidence_id,mention.entity_ref
+    ';' ORDER BY plan.evidence_id,mention.entity_ref
   )
   FROM memory.entity_resolution_plan AS plan
   JOIN memory.entity_mention AS mention USING(owner_user_id,mention_id)
