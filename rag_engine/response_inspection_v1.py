@@ -45,7 +45,9 @@ class BeforeOpenAIInspectionV1(_StrictFrozenModel):
     memory_included: bool
     memory_record_count: int = Field(ge=0)
     memory_estimated_tokens: int = Field(ge=0)
-    context_block_count: int = Field(ge=0, le=2)
+    prior_web_provenance_included: bool
+    prior_web_response_count: int = Field(ge=0, le=3)
+    context_block_count: int = Field(ge=0, le=3)
     conversation_message_count: int = Field(ge=1)
     total_message_count: int = Field(ge=2)
     estimated_input_tokens: int = Field(ge=1)
@@ -113,6 +115,7 @@ def build_response_inspection_v1(
     manifest = plan.assembled_prompt.manifest
     application = plan.assembled_prompt.source_request.memory_application
     memory_included = bool(application and application.memory_content_included)
+    provenance = plan.prior_web_provenance
 
     return ResponseInspectionV1(
         delivery=(
@@ -138,6 +141,10 @@ def build_response_inspection_v1(
             ),
             memory_estimated_tokens=(
                 application.actual_prompt_tokens if application else 0
+            ),
+            prior_web_provenance_included=provenance is not None,
+            prior_web_response_count=(
+                len(provenance.responses) if provenance is not None else 0
             ),
             context_block_count=manifest.context_block_count,
             conversation_message_count=manifest.conversation_count,

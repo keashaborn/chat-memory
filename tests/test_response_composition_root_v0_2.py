@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,10 +16,15 @@ from rag_engine.response_composition_root_v0_2 import (
     InactiveResponseCompositionRootV0_2,
     ResponseCompositionError,
 )
+from rag_engine.response_conversation_snapshot_v1 import USER_SOURCE
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from rag_engine.search_capability_manifest_v1 import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
+)
+from rag_engine.web_transcript_persistence_v1 import (
+    WEB_ASSISTANT_SOURCE,
+    WEB_USER_SOURCE,
 )
 from tests.test_openai_chat_provider_v1 import provider_response
 from tests.test_openai_moderation_adapter_v0_2 import categories, response as moderation_response
@@ -27,6 +34,13 @@ ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 THREAD = UUID("d776c8ef-7f3d-45b2-8820-4be87b7ca19d")
 ANSWER = UUID("90000000-0000-4000-8000-000000000001")
 CORRELATION = UUID("90000000-0000-4000-8000-000000000002")
+CURRENT_LOG = UUID("90000000-0000-4000-8000-000000000099")
+WEB_USER_LOG = UUID("90000000-0000-4000-8000-000000000010")
+WEB_RESPONSE = UUID("90000000-0000-4000-8000-000000000011")
+WEB_SEARCH = UUID("80000000-0000-4000-8000-000000000011")
+NOW = datetime(2026, 7, 28, 14, 0, tzinfo=timezone.utc)
+PRIOR_QUERY = "What happened with OpenAI today?"
+PRIOR_ANSWER = "OpenAI published a current update."
 
 
 class FakeTransaction:
@@ -60,6 +74,87 @@ class SnapshotConn:
     async def fetch(self, query: str, *args: Any) -> list[Any]:
         if "FROM public.chat_log" in query:
             return []
+        raise AssertionError(f"unexpected fetch: {query}")
+
+
+class BoundProvenanceConn(SnapshotConn):
+    async def fetch(self, query: str, *args: Any) -> list[Any]:
+        if "LEFT JOIN trusted_web.response_transcript_v1" in query:
+            return [
+                {
+                    "id": WEB_RESPONSE,
+                    "owner_user_id": ACTOR,
+                    "thread_id": THREAD,
+                    "source": WEB_ASSISTANT_SOURCE,
+                    "text": PRIOR_ANSWER,
+                    "request_id": "prior-web-request",
+                    "created_at": NOW - timedelta(minutes=1),
+                    "assistant_text_sha256": None,
+                    "attestation_sha256": None,
+                    "web_response_id": WEB_RESPONSE,
+                    "web_query_sha256": hashlib.sha256(
+                        PRIOR_QUERY.encode("utf-8")
+                    ).hexdigest(),
+                    "web_answer_sha256": hashlib.sha256(
+                        PRIOR_ANSWER.encode("utf-8")
+                    ).hexdigest(),
+                },
+                {
+                    "id": WEB_USER_LOG,
+                    "owner_user_id": ACTOR,
+                    "thread_id": THREAD,
+                    "source": WEB_USER_SOURCE,
+                    "text": PRIOR_QUERY,
+                    "request_id": "prior-web-request",
+                    "created_at": NOW - timedelta(minutes=2),
+                    "assistant_text_sha256": None,
+                    "attestation_sha256": None,
+                    "web_response_id": WEB_RESPONSE,
+                    "web_query_sha256": hashlib.sha256(
+                        PRIOR_QUERY.encode("utf-8")
+                    ).hexdigest(),
+                    "web_answer_sha256": hashlib.sha256(
+                        PRIOR_ANSWER.encode("utf-8")
+                    ).hexdigest(),
+                },
+            ]
+        if "JOIN trusted_web.response_transcript_v1 AS web" in query:
+            return [
+                {
+                    "log_id": WEB_RESPONSE,
+                    "owner_user_id": ACTOR,
+                    "thread_id": THREAD,
+                    "assistant_text": PRIOR_ANSWER,
+                    "created_at": NOW - timedelta(minutes=1),
+                    "response_id": WEB_RESPONSE,
+                    "assistant_chat_log_id": WEB_RESPONSE,
+                    "search_id": WEB_SEARCH,
+                    "route": "current_news",
+                    "policy_version": "search_decision_v1_2",
+                    "decision": "live",
+                    "answer_sha256": hashlib.sha256(
+                        PRIOR_ANSWER.encode("utf-8")
+                    ).hexdigest(),
+                    "cited_sources": [
+                        {"url": "https://openai.com/news/"}
+                    ],
+                    "admitted_sources": [
+                        {"url": "https://openai.com/news/"}
+                    ],
+                }
+            ]
+        if "FROM public.chat_log" in query:
+            return [
+                {
+                    "id": CURRENT_LOG,
+                    "owner_user_id": ACTOR,
+                    "thread_id": THREAD,
+                    "source": USER_SOURCE,
+                    "request_id": "composition-request",
+                    "text": "What sources did you use for your last answer?",
+                    "created_at": NOW,
+                }
+            ]
         raise AssertionError(f"unexpected fetch: {query}")
 
 
@@ -163,6 +258,44 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
 
 
 class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_source_followup_uses_prior_provenance_without_new_search(self) -> None:
+        client = CombinedOpenAIClient()
+        conn = BoundProvenanceConn()
+        root = InactiveResponseCompositionRootV0_2(
+            openai_client=client,
+            classifier_model="gpt-5.1",
+            answer_id_factory=lambda: ANSWER,
+            correlation_id_factory=lambda: CORRELATION,
+        )
+
+        execution = await root.execute_detailed(
+            conn,
+            command("What sources did you use for your last answer?"),
+        )
+
+        self.assertEqual(
+            [name for name, _ in client.calls],
+            ["classifier", "moderation", "chat"],
+        )
+        messages = client.calls[-1][1]["messages"]
+        provenance = [
+            item
+            for item in messages
+            if item.get("name") == "prior_web_provenance_v1"
+        ]
+        self.assertEqual(len(provenance), 1)
+        self.assertEqual(
+            execution.trusted_plan.assembled_prompt.manifest.context_block_count,
+            1,
+        )
+        self.assertEqual(
+            conn.transactions,
+            [
+                {"isolation": "repeatable_read", "readonly": True},
+                {"isolation": "repeatable_read", "readonly": True},
+            ],
+        )
+
     async def test_failure_reports_only_the_composition_stage(self) -> None:
         root = InactiveResponseCompositionRootV0_2(
             openai_client=CombinedOpenAIClient(),

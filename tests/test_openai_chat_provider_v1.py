@@ -21,6 +21,11 @@ from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatResponseV1,
     safety_identifier_v1,
 )
+from rag_engine.prior_web_provenance_v1 import (
+    PriorWebProvenanceEnvelopeV1,
+    PriorWebResponseV1,
+    PriorWebSourceV1,
+)
 from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotOutcome,
     _snapshot,
@@ -61,6 +66,7 @@ def trusted_plan(
     current: str = "What should I prioritize today?",
     prior: tuple[tuple[str, str], ...] = (),
     fm_explicit: bool = False,
+    include_prior_web_provenance: bool = False,
 ):
     conversation = tuple(
         ResponsePolicyConversationMessageV0_2(
@@ -94,9 +100,45 @@ def trusted_plan(
             current_message=current,
         )
     )
+    prior_web_provenance = (
+        PriorWebProvenanceEnvelopeV1.create(
+            authenticated_actor_user_id=actor,
+            thread_id=THREAD,
+            conversation_snapshot_sha256=snapshot.snapshot_sha256,
+            current_request_id=snapshot.current_request_id,
+            current_query=current,
+            responses=(
+                PriorWebResponseV1(
+                    relative_ordinal=0,
+                    response_id=uuid.UUID(
+                        "90000000-0000-4000-8000-000000000001"
+                    ),
+                    assistant_chat_log_id=uuid.UUID(
+                        "90000000-0000-4000-8000-000000000001"
+                    ),
+                    search_id=uuid.UUID(
+                        "80000000-0000-4000-8000-000000000001"
+                    ),
+                    route="current_news",
+                    policy_version="search_decision_v1_2",
+                    decision="live",
+                    answer_sha256="b" * 64,
+                    cited_sources=(
+                        PriorWebSourceV1(
+                            url="https://openai.com/news/",
+                            host="openai.com",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        if include_prior_web_provenance
+        else None
+    )
     request = TrustedResponseRequestV0_2.create_from_snapshot(
         authenticated_actor_user_id=actor,
         conversation_snapshot=snapshot,
+        prior_web_provenance=prior_web_provenance,
         trusted_policy_signals_envelope=(
             TrustedPolicySignalsEnvelopeV0_2.create(
                 conversation_snapshot=snapshot,
@@ -172,6 +214,29 @@ class FakeClient:
 
 
 class OpenAIChatProviderV1Tests(unittest.TestCase):
+    def test_prior_web_provenance_is_reference_json_before_current_turn(self) -> None:
+        current = "What sources did you use for your last answer?"
+        request = OpenAIChatRequestV1.create(
+            trusted_plan=trusted_plan(
+                current=current,
+                include_prior_web_provenance=True,
+            )
+        )
+
+        self.assertEqual(
+            request.messages[-2].name,
+            "prior_web_provenance_v1",
+        )
+        self.assertEqual(request.messages[-2].role, "user")
+        self.assertEqual(request.messages[-1].content, current)
+        payload = json.loads(request.messages[-2].content)
+        self.assertEqual(payload["authority"], "reference_data")
+        self.assertEqual(payload["block_id"], "prior_web_provenance_v1")
+        self.assertNotIn("prior_web_provenance_v1", request.messages[0].content)
+        serialized = request.canonical_json_bytes().decode("utf-8")
+        self.assertNotIn(ACTOR, serialized)
+        self.assertNotIn(str(THREAD), serialized)
+
     def test_safety_identifier_is_stable_pseudonymous_and_bounded(self) -> None:
         first = safety_identifier_v1(ACTOR)
         second = safety_identifier_v1(ACTOR)

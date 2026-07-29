@@ -29,6 +29,7 @@ from rag_engine.memory_prompt_renderer_v1 import (
     render_governed_memory_v1,
 )
 from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
+from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.response_policy_prompt_v0_2 import (
     ResponsePolicyPromptV0_2,
     render_response_policy_prompt_v0_2,
@@ -78,6 +79,7 @@ class PromptAssemblyError(RuntimeError):
 class ContextKind(str, Enum):
     MEMORY = "memory"
     FRACTAL_MONISM = "fractal_monism"
+    WEB_PROVENANCE = "web_provenance"
 
 
 class _StrictFrozenModel(BaseModel):
@@ -166,6 +168,10 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         default=None, repr=False
     )
     fm_selection: FMSelectionEnvelopeV02 | None = Field(default=None, repr=False)
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
+        default=None,
+        repr=False,
+    )
     search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
         default=None,
         repr=False,
@@ -214,7 +220,11 @@ class PromptReferenceFragmentV1(_StrictFrozenModel):
 
 class PromptReferenceContextBlockV1(_StrictFrozenModel):
     contract_version: Literal[CONTEXT_BLOCK_VERSION] = CONTEXT_BLOCK_VERSION
-    block_id: Literal["governed_memory_v1", "fractal_monism_v0_2"]
+    block_id: Literal[
+        "governed_memory_v1",
+        "fractal_monism_v0_2",
+        "prior_web_provenance_v1",
+    ]
     kind: ContextKind
     authority: Literal["reference_data"] = "reference_data"
     source_contract_version: str = Field(min_length=1, max_length=160)
@@ -250,11 +260,14 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
         expected_block = {
             ContextKind.MEMORY: "governed_memory_v1",
             ContextKind.FRACTAL_MONISM: "fractal_monism_v0_2",
+            ContextKind.WEB_PROVENANCE: "prior_web_provenance_v1",
         }[self.kind]
         if self.block_id != expected_block:
             raise ValueError("context block id differs from kind")
         if self.kind is ContextKind.FRACTAL_MONISM and self.fragments:
             raise ValueError("FM context does not accept generic fragments")
+        if self.kind is ContextKind.WEB_PROVENANCE and self.fragments:
+            raise ValueError("Web provenance context does not accept generic fragments")
         if self.kind is ContextKind.MEMORY:
             if not self.fragments:
                 raise ValueError("Memory context requires exact fragment manifests")
@@ -277,7 +290,11 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
 
 
 class PromptContextManifestEntryV1(_StrictFrozenModel):
-    block_id: Literal["governed_memory_v1", "fractal_monism_v0_2"]
+    block_id: Literal[
+        "governed_memory_v1",
+        "fractal_monism_v0_2",
+        "prior_web_provenance_v1",
+    ]
     kind: ContextKind
     source_contract_version: str
     source_manifest_sha256: str
@@ -324,13 +341,13 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     system_prompt_bytes: int = Field(ge=1)
     system_prompt_estimated_tokens: int = Field(ge=1)
     context_blocks: tuple[PromptContextManifestEntryV1, ...]
-    context_block_count: int = Field(ge=0, le=2)
+    context_block_count: int = Field(ge=0, le=3)
     conversation_count: int = Field(ge=1, le=HARD_MAX_CONVERSATION_MESSAGES)
     conversation_content_bytes: int = Field(ge=0)
     conversation_estimated_tokens: int = Field(ge=0)
     total_input_bytes: int = Field(ge=1, le=HARD_MAX_TOTAL_INPUT_BYTES)
     total_input_tokens: int = Field(ge=1, le=HARD_MAX_TOTAL_INPUT_TOKENS)
-    total_message_count: int = Field(ge=2, le=HARD_MAX_CONVERSATION_MESSAGES + 3)
+    total_message_count: int = Field(ge=2, le=HARD_MAX_CONVERSATION_MESSAGES + 4)
     per_message_overhead_tokens: Literal[PER_MESSAGE_OVERHEAD_TOKENS] = (
         PER_MESSAGE_OVERHEAD_TOKENS
     )
@@ -344,6 +361,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     memory_application_manifest_sha256: str | None = None
     fm_selection_sha256: str | None = None
     fm_bundle_sha256: str | None = None
+    prior_web_provenance_manifest_sha256: str | None = None
     assembly_sha256: str
 
     @field_validator(
@@ -363,6 +381,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "memory_application_manifest_sha256",
         "fm_selection_sha256",
         "fm_bundle_sha256",
+        "prior_web_provenance_manifest_sha256",
         "assembly_sha256",
     )
     @classmethod
@@ -399,6 +418,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 memory_input,
                 memory_application,
                 fm_selection,
+                prior_web_provenance,
                 search_capability_manifest,
             ) = _strict_source_chain(self.source_request)
             _validate_source_authority_chain(
@@ -410,10 +430,13 @@ class AssembledPromptV1(_StrictFrozenModel):
                 memory_input=memory_input,
                 memory_application=memory_application,
                 fm_selection=fm_selection,
+                prior_web_provenance=prior_web_provenance,
             )
             expected_conversation = _conversation_from_policy_input(policy_input)
             expected_context = _context_blocks_from_sources(
-                memory_application, fm_selection
+                memory_application,
+                fm_selection,
+                prior_web_provenance,
             )
         except Exception:
             raise ValueError("assembled prompt source chain is invalid") from None
@@ -514,6 +537,12 @@ class AssembledPromptV1(_StrictFrozenModel):
             (
                 manifest.fm_bundle_sha256,
                 fm_selection.bundle_sha256 if fm_selection is not None else None,
+            ),
+            (
+                manifest.prior_web_provenance_manifest_sha256,
+                prior_web_provenance.manifest_sha256
+                if prior_web_provenance is not None
+                else None,
             ),
             (decision.current_message_sha256, current_message_sha256),
             (decision.conversation_sha256, conversation_sha256),
@@ -659,6 +688,23 @@ def _fm_context_block(selection: FMSelectionEnvelopeV02) -> PromptReferenceConte
         content_sha256=_text_sha256(content),
         content_bytes=len(content.encode("utf-8")),
         estimated_tokens=selection.used_tokens,
+    )
+
+
+def _prior_web_provenance_context_block(
+    provenance: PriorWebProvenanceEnvelopeV1,
+) -> PromptReferenceContextBlockV1:
+    return PromptReferenceContextBlockV1(
+        block_id="prior_web_provenance_v1",
+        kind=ContextKind.WEB_PROVENANCE,
+        source_contract_version=provenance.contract_version,
+        source_manifest_sha256=provenance.manifest_sha256,
+        request_id_sha256=provenance.current_request_id_sha256,
+        query_sha256=provenance.current_query_sha256,
+        content=provenance.content,
+        content_sha256=provenance.content_sha256,
+        content_bytes=provenance.content_bytes,
+        estimated_tokens=_tokens(provenance.content),
     )
 
 
@@ -815,6 +861,13 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         if source.fm_selection is not None
         else None
     )
+    prior_web_provenance = (
+        PriorWebProvenanceEnvelopeV1.from_wire_json(
+            source.prior_web_provenance.canonical_json_bytes()
+        )
+        if source.prior_web_provenance is not None
+        else None
+    )
     search_capability_manifest = (
         SearchCapabilityManifestV1.from_wire_json(
             _canonical_json_bytes(source.search_capability_manifest)
@@ -832,6 +885,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         memory_input,
         memory_application,
         fm_selection,
+        prior_web_provenance,
         search_capability_manifest,
     )
 
@@ -846,6 +900,7 @@ def _validate_source_authority_chain(
     memory_input: MemoryPromptAssemblyInputV1 | None,
     memory_application: MemoryPromptApplicationResultV1 | None,
     fm_selection: FMSelectionEnvelopeV02 | None,
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
 ) -> None:
     _validate_policy_chain(policy_input, safety, signals, decision, policy_prompt)
     if (memory_input is None) != (memory_application is None):
@@ -853,6 +908,16 @@ def _validate_source_authority_chain(
     if memory_input is not None and memory_application is not None:
         _validate_memory_chain(policy_input, memory_input, memory_application)
     _validate_fm_chain(policy_input, decision, fm_selection)
+    if prior_web_provenance is not None:
+        if (
+            prior_web_provenance.current_request_id_sha256
+            != _text_sha256(policy_input.request_id)
+            or prior_web_provenance.current_query_sha256
+            != policy_input.current_message_sha256
+        ):
+            raise PromptAssemblyError(
+                "prior web provenance differs from the current request"
+            )
 
 
 def _conversation_from_policy_input(
@@ -867,6 +932,7 @@ def _conversation_from_policy_input(
 def _context_blocks_from_sources(
     memory_application: MemoryPromptApplicationResultV1 | None,
     fm_selection: FMSelectionEnvelopeV02 | None,
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
 ) -> tuple[PromptReferenceContextBlockV1, ...]:
     blocks: list[PromptReferenceContextBlockV1] = []
     if memory_application is not None:
@@ -877,6 +943,10 @@ def _context_blocks_from_sources(
         fm_block = _fm_context_block(fm_selection)
         if fm_block is not None:
             blocks.append(fm_block)
+    if prior_web_provenance is not None:
+        blocks.append(
+            _prior_web_provenance_context_block(prior_web_provenance)
+        )
     return tuple(blocks)
 
 
@@ -891,6 +961,7 @@ def _validate_context_shape(
         raise ValueError("context blocks must be unique and canonically ordered")
     has_memory = ContextKind.MEMORY in kinds
     has_fm = ContextKind.FRACTAL_MONISM in kinds
+    has_web_provenance = ContextKind.WEB_PROVENANCE in kinds
     if has_memory != (manifest.memory_application_manifest_sha256 is not None):
         # A suppressed/no-content Memory result is audited without a context block.
         if has_memory or manifest.memory_application_manifest_sha256 is None:
@@ -901,6 +972,10 @@ def _validate_context_shape(
             raise ValueError("FM context and manifest state differ")
     if has_fm and decision.fm_effective_level is FMLevel.OFF:
         raise ValueError("FM context is forbidden when FM is OFF")
+    if has_web_provenance != (
+        manifest.prior_web_provenance_manifest_sha256 is not None
+    ):
+        raise ValueError("Web provenance context and manifest state differ")
 
 
 def _validate_message_budgets(
@@ -966,6 +1041,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             memory_input,
             memory_application,
             fm_selection,
+            prior_web_provenance,
             search_capability_manifest,
         ) = _strict_source_chain(request)
         _validate_source_authority_chain(
@@ -977,12 +1053,17 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             memory_input=memory_input,
             memory_application=memory_application,
             fm_selection=fm_selection,
+            prior_web_provenance=prior_web_provenance,
         )
     except Exception:
         raise PromptAssemblyError("invalid typed prompt assembly input") from None
 
     conversation = _conversation_from_policy_input(policy_input)
-    context_blocks = _context_blocks_from_sources(memory_application, fm_selection)
+    context_blocks = _context_blocks_from_sources(
+        memory_application,
+        fm_selection,
+        prior_web_provenance,
+    )
     system_prompt = _render_system_prompt(
         policy_prompt,
         search_capability_manifest,
@@ -1054,6 +1135,11 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
         ),
         "fm_bundle_sha256": (
             fm_selection.bundle_sha256 if fm_selection is not None else None
+        ),
+        "prior_web_provenance_manifest_sha256": (
+            prior_web_provenance.manifest_sha256
+            if prior_web_provenance is not None
+            else None
         ),
     }
     manifest_without_hash = PromptAssemblyManifestV1(

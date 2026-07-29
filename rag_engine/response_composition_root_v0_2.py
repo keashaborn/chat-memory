@@ -25,6 +25,10 @@ from rag_engine.openai_chat_provider_v1 import (
     safety_identifier_v1,
 )
 from rag_engine.openai_moderation_adapter_v0_2 import OpenAIModerationAdapterV0_2
+from rag_engine.prior_web_provenance_v1 import (
+    PriorWebProvenanceError,
+    load_prior_web_provenance_v1,
+)
 from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotV1,
     create_current_only_conversation_snapshot_v1,
@@ -282,6 +286,20 @@ class InactiveResponseCompositionRootV0_2:
                     current_request_id=command.request_id,
                     current_message=command.current_message,
                 )
+            prior_web_provenance = None
+            if not command.stateless:
+                try:
+                    prior_web_provenance = await load_prior_web_provenance_v1(
+                        conn,
+                        authenticated_actor_user_id=(
+                            command.authenticated_actor_user_id
+                        ),
+                        conversation_snapshot=snapshot,
+                    )
+                except PriorWebProvenanceError:
+                    # Provenance is optional lower-authority context. Failure
+                    # cannot weaken transcript ownership or block normal chat.
+                    prior_web_provenance = None
             stage_timings["conversation_snapshot_ms"] = _elapsed_ms(stage_started_ns)
             stage = "policy_input"
             stage_started_ns = time.monotonic_ns()
@@ -329,6 +347,7 @@ class InactiveResponseCompositionRootV0_2:
                 trusted_policy_signals_envelope=signal_envelope,
                 memory_input=memory.memory_input,
                 memory_application=memory.memory_application,
+                prior_web_provenance=prior_web_provenance,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
                 response_language=command.response_language,

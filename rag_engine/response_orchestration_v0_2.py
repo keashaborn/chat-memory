@@ -25,6 +25,7 @@ from rag_engine.fm_selection_envelope_v0_2 import (
 )
 from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
 from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
+from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.prompt_assembler_v1 import (
     AssembledPromptV1,
     PromptAssemblyRequestV1,
@@ -188,6 +189,10 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
+        default=None,
+        repr=False,
+    )
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
     search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
         default=None,
@@ -240,6 +245,22 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             current_message_sha256 = _text_sha256(self.conversation[-1].content)
             if context.query_sha256 != current_message_sha256:
                 raise ValueError("Memory query differs from the current user message")
+        if self.prior_web_provenance is not None:
+            provenance = self.prior_web_provenance
+            if (
+                provenance.authenticated_actor_user_id_sha256
+                != _text_sha256(self.authenticated_actor_user_id)
+                or provenance.thread_id_sha256 != _text_sha256(self.thread_id)
+                or provenance.conversation_snapshot_sha256
+                != self.conversation_snapshot_sha256
+                or provenance.current_request_id_sha256
+                != _text_sha256(self.request_id)
+                or provenance.current_query_sha256
+                != _text_sha256(self.conversation[-1].content)
+            ):
+                raise ValueError(
+                    "Prior web provenance differs from the trusted response request"
+                )
         return self
 
     @property
@@ -276,6 +297,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         ) = None,
         memory_input: MemoryPromptAssemblyInputV1 | None = None,
         memory_application: MemoryPromptApplicationResultV1 | None = None,
+        prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
         fm_token_budget: int | None = None,
         search_capability_manifest: SearchCapabilityManifestV1 | None = None,
         response_language: str = DEFAULT_VOICE_LANGUAGE,
@@ -307,6 +329,15 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
                 raise ResponseOrchestrationError(
                     "trusted request requires a valid policy-signal envelope"
                 ) from None
+        if prior_web_provenance is not None:
+            try:
+                prior_web_provenance = PriorWebProvenanceEnvelopeV1.from_wire_json(
+                    prior_web_provenance.canonical_json_bytes()
+                )
+            except Exception:
+                raise ResponseOrchestrationError(
+                    "trusted request requires valid prior web provenance"
+                ) from None
         return cls(
             authenticated_actor_user_id=authenticated_actor_user_id,
             conversation_snapshot=snapshot,
@@ -314,6 +345,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             trusted_policy_signals_envelope=signal_envelope,
             memory_input=memory_input,
             memory_application=memory_application,
+            prior_web_provenance=prior_web_provenance,
             fm_token_budget=fm_token_budget,
             search_capability_manifest=search_capability_manifest,
             response_language=response_language,
@@ -349,7 +381,7 @@ class SanitizedResponseShadowTraceV0_2(_StrictFrozenModel):
     fm_selection_status: str
     fm_selected_record_count: int = Field(ge=0, le=8)
     memory_present: bool
-    context_block_count: int = Field(ge=0, le=2)
+    context_block_count: int = Field(ge=0, le=3)
     total_input_bytes: int = Field(ge=1)
     total_input_tokens: int = Field(ge=1)
     ignored_legacy_request_fields: tuple[str, ...]
@@ -413,6 +445,10 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
     policy_decision: ResponsePolicyDecisionV0_2 = Field(repr=False)
     policy_prompt: ResponsePolicyPromptV0_2 = Field(repr=False)
     fm_selection: FMSelectionEnvelopeV02 = Field(repr=False)
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
+        default=None,
+        repr=False,
+    )
     assembled_prompt: AssembledPromptV1 = Field(repr=False)
     shadow_trace: SanitizedResponseShadowTraceV0_2
     plan_sha256: str
@@ -445,11 +481,24 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             (self.policy_decision.decision_sha256, manifest.policy_decision_sha256),
             (self.policy_prompt.content_sha256, manifest.policy_prompt_sha256),
             (self.fm_selection.selection_sha256, manifest.fm_selection_sha256),
+            (
+                self.prior_web_provenance.manifest_sha256
+                if self.prior_web_provenance is not None
+                else None,
+                manifest.prior_web_provenance_manifest_sha256,
+            ),
         )
         if any(actual != expected for actual, expected in checks):
             raise ValueError("trusted plan bindings do not reconcile")
         if self.policy_signals != self.assembled_prompt.source_request.policy_signals:
             raise ValueError("trusted plan signals differ from prompt assembly")
+        if (
+            self.prior_web_provenance
+            != self.assembled_prompt.source_request.prior_web_provenance
+        ):
+            raise ValueError(
+                "trusted plan provenance differs from prompt assembly"
+            )
         expected_trace_values = (
             (self.shadow_trace.response_mode, self.policy_decision.response_mode.value),
             (
@@ -535,6 +584,10 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             "assembly_sha256": manifest.assembly_sha256,
             "shadow_trace_sha256": self.shadow_trace.trace_sha256,
         }
+        if self.prior_web_provenance is not None:
+            payload["prior_web_provenance_manifest_sha256"] = (
+                self.prior_web_provenance.manifest_sha256
+            )
         if self.plan_sha256 != _sha256(payload):
             raise ValueError("trusted plan manifest hash mismatch")
         return self
@@ -555,11 +608,11 @@ def _plan_sha256(
     decision: ResponsePolicyDecisionV0_2,
     prompt: ResponsePolicyPromptV0_2,
     fm: FMSelectionEnvelopeV02,
+    prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
     assembled: AssembledPromptV1,
     trace: SanitizedResponseShadowTraceV0_2,
 ) -> str:
-    return _sha256(
-        {
+    payload: dict[str, Any] = {
             "contract_version": TRUSTED_PLAN_VERSION,
             "actor_user_id_sha256": _text_sha256(actor),
             "thread_id_sha256": _text_sha256(thread_id),
@@ -572,8 +625,12 @@ def _plan_sha256(
             "fm_selection_sha256": fm.selection_sha256,
             "assembly_sha256": assembled.manifest.assembly_sha256,
             "shadow_trace_sha256": trace.trace_sha256,
-        }
-    )
+    }
+    if prior_web_provenance is not None:
+        payload["prior_web_provenance_manifest_sha256"] = (
+            prior_web_provenance.manifest_sha256
+        )
+    return _sha256(payload)
 
 
 def _combined_safety_reason_codes(
@@ -723,6 +780,7 @@ class TrustedResponseOrchestratorV0_2:
                     memory_input=request.memory_input,
                     memory_application=request.memory_application,
                     fm_selection=fm,
+                    prior_web_provenance=request.prior_web_provenance,
                     search_capability_manifest=(
                         request.search_capability_manifest
                     ),
@@ -755,6 +813,7 @@ class TrustedResponseOrchestratorV0_2:
                 policy_decision=decision,
                 policy_prompt=prompt,
                 fm_selection=fm,
+                prior_web_provenance=request.prior_web_provenance,
                 assembled_prompt=assembled,
                 shadow_trace=trace,
                 plan_sha256=_plan_sha256(
@@ -771,6 +830,7 @@ class TrustedResponseOrchestratorV0_2:
                     decision=decision,
                     prompt=prompt,
                     fm=fm,
+                    prior_web_provenance=request.prior_web_provenance,
                     assembled=assembled,
                     trace=trace,
                 ),

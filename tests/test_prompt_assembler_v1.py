@@ -5,6 +5,7 @@ import ast
 import hashlib
 import json
 import unittest
+import uuid
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -35,6 +36,11 @@ from rag_engine.prompt_assembler_v1 import (
     PromptReferenceContextBlockV1,
     PromptReferenceFragmentV1,
     assemble_prompt,
+)
+from rag_engine.prior_web_provenance_v1 import (
+    PriorWebProvenanceEnvelopeV1,
+    PriorWebResponseV1,
+    PriorWebSourceV1,
 )
 from rag_engine.response_policy_prompt_v0_2 import (
     render_response_policy_prompt_v0_2,
@@ -107,6 +113,44 @@ def assembly_request(message: str = "What is the weather like?") -> PromptAssemb
         policy_signals=signals,
         policy_decision=decision,
         policy_prompt=prompt,
+    )
+
+
+def prior_web_provenance(
+    message: str = "What sources did you use for your last answer?",
+) -> PriorWebProvenanceEnvelopeV1:
+    return PriorWebProvenanceEnvelopeV1.create(
+        authenticated_actor_user_id=uuid.UUID(
+            "1240822d-ac9a-4096-95aa-e2b24d36ef50"
+        ),
+        thread_id=uuid.UUID("d776c8ef-7f3d-45b2-8820-4be87b7ca19d"),
+        conversation_snapshot_sha256="a" * 64,
+        current_request_id="request-123",
+        current_query=message,
+        responses=(
+            PriorWebResponseV1(
+                relative_ordinal=0,
+                response_id=uuid.UUID(
+                    "90000000-0000-4000-8000-000000000001"
+                ),
+                assistant_chat_log_id=uuid.UUID(
+                    "90000000-0000-4000-8000-000000000001"
+                ),
+                search_id=uuid.UUID(
+                    "80000000-0000-4000-8000-000000000001"
+                ),
+                route="current_news",
+                policy_version="search_decision_v1_2",
+                decision="live",
+                answer_sha256="b" * 64,
+                cited_sources=(
+                    PriorWebSourceV1(
+                        url="https://openai.com/news/",
+                        host="openai.com",
+                    ),
+                ),
+            ),
+        ),
     )
 
 
@@ -185,6 +229,39 @@ def rehash_manifest(manifest: dict[str, object]) -> None:
 
 
 class TypedPromptAssemblerV1Tests(unittest.TestCase):
+    def test_prior_web_provenance_is_exact_lower_authority_context(self) -> None:
+        message = "What sources did you use for your last answer?"
+        provenance = prior_web_provenance(message)
+        request = assembly_request(message).model_copy(
+            update={"prior_web_provenance": provenance}
+        )
+
+        assembled = assemble_prompt(request)
+
+        self.assertEqual(len(assembled.context_blocks), 1)
+        block = assembled.context_blocks[0]
+        self.assertEqual(block.block_id, "prior_web_provenance_v1")
+        self.assertIs(block.kind, ContextKind.WEB_PROVENANCE)
+        self.assertEqual(block.content, provenance.content)
+        self.assertNotIn(provenance.content, assembled.system_prompt)
+        self.assertEqual(
+            assembled.manifest.prior_web_provenance_manifest_sha256,
+            provenance.manifest_sha256,
+        )
+
+    def test_cross_request_prior_web_provenance_is_rejected(self) -> None:
+        message = "What sources did you use for your last answer?"
+        request = assembly_request(message).model_copy(
+            update={
+                "prior_web_provenance": prior_web_provenance(
+                    "Did you check those links?"
+                )
+            }
+        )
+
+        with self.assertRaises(PromptAssemblyError):
+            assemble_prompt(request)
+
     def test_server_search_capability_is_bound_to_the_system_prompt(self) -> None:
         capability = SearchCapabilityManifestV1.create(
             authorization_basis=TEXT_SEARCH_AUTHORIZATION_BASIS,
