@@ -13,6 +13,7 @@ from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.resse_response_router import router as resse_response_router
+from rag_engine.lifeswitch_sage_router import router as lifeswitch_sage_router
 from rag_engine.trusted_web_router import router as trusted_web_router
 from rag_engine.current_news_router import router as current_news_router
 from rag_engine.search_execution_router_v1 import (
@@ -98,6 +99,7 @@ from scripts.review_promotion_plan import build_personal_event_promotion_preview
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(resse_response_router, prefix="/response")
+app.include_router(lifeswitch_sage_router, prefix="/lifeswitch/sage")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")
