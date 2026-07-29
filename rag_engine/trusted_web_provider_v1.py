@@ -50,6 +50,9 @@ Evidence:
 - Identify relevant publication dates, software versions, and material limitations.
 - Identify the study type and material limitations. Never write "PubMed says".
 - If only an abstract is available, avoid claims that require full-text verification.
+- Cite exact articles, releases, advisories, studies, or guidance pages. Never cite
+  a generic newsroom, headlines, tag, category, search, or monthly index page.
+- Never describe evidence as current or published today unless the source verifies it.
 - Distinguish broad public guidance from individual research findings.
 - Use concise plain language and make every material factual claim traceable to a source.
 - When this component is invoked, approved sources or records are available to you.
@@ -89,7 +92,21 @@ _CAPABILITY_DENIAL_PATTERNS = (
         re.IGNORECASE,
     ),
 )
-_TRACKING_QUERY_KEYS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid"})
+_TRACKING_QUERY_KEYS = frozenset(
+    {
+        "aff_id",
+        "campaign",
+        "campaignid",
+        "fbclid",
+        "gclid",
+        "gbraid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+        "wbraid",
+    }
+)
+_TRACKING_QUERY_PREFIXES = ("utm_", "hsa_")
 WEB_SOURCE_PROVENANCE_CONTRACT = "web_source_provenance_v2"
 
 
@@ -154,6 +171,8 @@ class TrustedWebSourceV1(BaseModel):
     authority_type: str = Field(default="openai_web", min_length=1, max_length=80)
     evidence_type: str = Field(default="web_source", min_length=1, max_length=80)
     source_id: str = Field(default="", max_length=120)
+    published_at: str = Field(default="", max_length=80)
+    freshness_status: str = Field(default="unverified", max_length=40)
 
 
 class TrustedWebProviderResultV1(BaseModel):
@@ -304,7 +323,7 @@ def _canonical_source_url(
         [
             (key, value)
             for key, value in parse_qsl(parsed.query, keep_blank_values=False)
-            if not key.lower().startswith("utm_")
+            if not key.lower().startswith(_TRACKING_QUERY_PREFIXES)
             and key.lower() not in _TRACKING_QUERY_KEYS
         ]
     )
@@ -632,6 +651,8 @@ class OpenAITrustedWebProviderV1:
                             record.publication_types
                         ),
                         source_id=record.source_id,
+                        published_at=record.publication_date,
+                        freshness_status="verified_date",
                     ),
                 )
                 for record in records

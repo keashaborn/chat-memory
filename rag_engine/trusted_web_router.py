@@ -25,6 +25,7 @@ except ImportError:
         )
 
 from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
+from rag_engine.citation_evidence_v1 import CITATION_EVIDENCE_CONTRACT
 from rag_engine.trusted_web_audit_v1 import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
@@ -141,6 +142,18 @@ class TrustedWebResponseV1(BaseModel):
     answer: str = Field(min_length=1, max_length=40_000)
     source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
     admission_contract: str = WEB_EVIDENCE_ADMISSION_CONTRACT
+    citation_evidence_contract: str = CITATION_EVIDENCE_CONTRACT
+    citation_exact_page_source_count: int = Field(default=0, ge=0, le=50)
+    citation_freshness_verified_source_count: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+    )
+    citation_archived_source_count: int = Field(default=0, ge=0, le=50)
+    citation_freshness_status: str = Field(
+        default="not_applicable",
+        max_length=40,
+    )
     sources: tuple[TrustedWebSourceV1, ...] = ()
     cited_sources: tuple[TrustedWebSourceV1, ...] = ()
     admitted_sources: tuple[TrustedWebSourceV1, ...] = ()
@@ -359,7 +372,7 @@ async def trusted_web_query(
             latency_ms=latency_ms,
             provider_response_id=result.provider_response_id,
             sources=result.consulted_sources,
-            cited_sources=result.cited_sources,
+            cited_sources=admission.validated_cited_sources,
             admitted_sources=admission.admitted_sources,
             rejected_source_reasons=admission.rejected_source_reasons,
         )
@@ -381,8 +394,17 @@ async def trusted_web_query(
             reason=policy.reason,
             searched=True,
             answer=result.answer_markdown(),
-            sources=result.cited_sources,
-            cited_sources=result.cited_sources,
+            sources=admission.validated_cited_sources,
+            cited_sources=admission.validated_cited_sources,
+            citation_evidence_contract=admission.citation_evidence_contract,
+            citation_exact_page_source_count=(
+                admission.exact_page_source_count
+            ),
+            citation_freshness_verified_source_count=(
+                admission.freshness_verified_source_count
+            ),
+            citation_archived_source_count=admission.archived_source_count,
+            citation_freshness_status=admission.freshness_status,
             admitted_sources=admission.admitted_sources,
             consulted_sources=result.consulted_sources,
             provider_consulted_source_count=len(result.consulted_sources),

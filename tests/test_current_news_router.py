@@ -178,6 +178,14 @@ class CurrentNewsRouterTests(unittest.TestCase):
             response.admission_contract,
             "web_evidence_admission_v1",
         )
+        self.assertEqual(
+            response.citation_evidence_contract,
+            "citation_evidence_v1",
+        )
+        self.assertEqual(
+            response.citation_freshness_status,
+            "not_applicable",
+        )
 
 
 if __name__ == "__main__":

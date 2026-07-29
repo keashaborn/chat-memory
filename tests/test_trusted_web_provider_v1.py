@@ -194,6 +194,31 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         )
         self.assertNotIn("utm_source", result.consulted_sources[0].url)
 
+    def test_provider_strips_marketing_parameters_from_canonical_url(
+        self,
+    ) -> None:
+        url = (
+            "https://dietaryguidelines.gov/report.pdf"
+            "?aff_id=G001&hsa_acc=123&utm_source=openai&section=protein"
+        )
+        client = FakeClient(FakeResponse(url))
+        policy = route_trusted_web_query(
+            "What do current dietary guidelines say about protein?"
+        )
+        result = OpenAITrustedWebProviderV1(
+            client,
+            self.settings(),
+        ).search(
+            query="What do current dietary guidelines say about protein?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+        )
+        self.assertEqual(
+            result.cited_sources[0].url,
+            "https://dietaryguidelines.gov/report.pdf?section=protein",
+        )
+
     def test_provider_fails_closed_without_citation_annotations(self) -> None:
         client = FakeClient(
             FakeResponse(

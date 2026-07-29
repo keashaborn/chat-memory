@@ -26,6 +26,7 @@ except ImportError:
         )
 
 from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
+from rag_engine.citation_evidence_v1 import CITATION_EVIDENCE_CONTRACT
 from rag_engine.trusted_web_audit_v1 import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
@@ -77,6 +78,9 @@ Security and scope:
   Never claim that you lack access to news, web, sources, citations, or current
   information. If evidence is insufficient, say what the cited sources do and do
   not support.
+- Cite exact articles, releases, advisories, or incident pages. Never cite a
+  generic newsroom, headlines, tag, category, search, or listing page.
+- Do not call an item "today" unless its publication date is verified in the page.
 
 Answer style:
 - State what is confirmed, what is unconfirmed, and what changed recently.
@@ -141,6 +145,7 @@ class CurrentNewsSourceV1(BaseModel):
     publisher: str = Field(min_length=1, max_length=120)
     published_at: str = Field(default="", max_length=40)
     source_type: str = Field(min_length=1, max_length=80)
+    freshness_status: str = Field(default="unverified", max_length=40)
 
 
 class CurrentNewsResponseV1(BaseModel):
@@ -155,6 +160,18 @@ class CurrentNewsResponseV1(BaseModel):
     answer: str = Field(min_length=1, max_length=40_000)
     source_contract: str = WEB_SOURCE_PROVENANCE_CONTRACT
     admission_contract: str = WEB_EVIDENCE_ADMISSION_CONTRACT
+    citation_evidence_contract: str = CITATION_EVIDENCE_CONTRACT
+    citation_exact_page_source_count: int = Field(default=0, ge=0, le=50)
+    citation_freshness_verified_source_count: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+    )
+    citation_archived_source_count: int = Field(default=0, ge=0, le=50)
+    citation_freshness_status: str = Field(
+        default="not_applicable",
+        max_length=40,
+    )
     sources: tuple[CurrentNewsSourceV1, ...] = ()
     cited_sources: tuple[CurrentNewsSourceV1, ...] = ()
     admitted_sources: tuple[CurrentNewsSourceV1, ...] = ()
@@ -281,8 +298,9 @@ def _current_news_sources_from_trusted_sources(
                 url=card_url,
                 title=title,
                 publisher=publisher,
-                published_at="",
+                published_at=source.published_at[:40],
                 source_type=_source_type_from_publisher(publisher),
+                freshness_status=source.freshness_status,
             )
         )
         if len(result) >= _CURRENT_NEWS_MAX_SOURCES:
@@ -438,7 +456,7 @@ async def current_news_query(
             policy_pack="current_news",
         )
         cited_news_sources = _current_news_sources_from_trusted_sources(
-            result.cited_sources
+            admission.validated_cited_sources
         )
         admitted_news_sources = _current_news_sources_from_trusted_sources(
             admission.admitted_sources
@@ -482,6 +500,15 @@ async def current_news_query(
             answer=result.answer_text,
             sources=cited_news_sources,
             cited_sources=cited_news_sources,
+            citation_evidence_contract=admission.citation_evidence_contract,
+            citation_exact_page_source_count=(
+                admission.exact_page_source_count
+            ),
+            citation_freshness_verified_source_count=(
+                admission.freshness_verified_source_count
+            ),
+            citation_archived_source_count=admission.archived_source_count,
+            citation_freshness_status=admission.freshness_status,
             admitted_sources=admitted_news_sources,
             consulted_sources=consulted_news_sources,
             provider_consulted_source_count=len(consulted_news_sources),

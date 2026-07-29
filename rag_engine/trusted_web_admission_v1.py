@@ -3,8 +3,14 @@ from __future__ import annotations
 """Server-owned admission of provider-observed web evidence."""
 
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 
+from rag_engine.citation_evidence_v1 import (
+    CITATION_EVIDENCE_CONTRACT,
+    assess_citation_evidence_v1,
+    citation_source_rank_v1,
+    qualify_source_freshness_v1,
+    source_rejection_reason_v1,
+)
 from rag_engine.trusted_web_provider_v1 import (
     TrustedWebProviderSecurityError,
     TrustedWebSourceV1,
@@ -15,45 +21,21 @@ WEB_EVIDENCE_ADMISSION_CONTRACT = "web_evidence_admission_v1"
 CURRENT_NEWS_MAX_ADMITTED_SOURCES = 10
 TRUSTED_HEALTH_MAX_ADMITTED_SOURCES = 5
 
-_CURRENT_NEWS_GENERIC_PATHS = {
-    ("openai.com", "/"),
-    ("openai.com", "/news"),
-    ("openai.com", "/news/company-announcements"),
-    ("openai.com", "/news/product-releases"),
-    ("arstechnica.com", "/ai"),
-    ("arstechnica.com", "/tag/openai"),
-}
-
-
 @dataclass(frozen=True)
 class TrustedWebEvidenceAdmissionV1:
+    validated_cited_sources: tuple[TrustedWebSourceV1, ...]
     admitted_sources: tuple[TrustedWebSourceV1, ...]
     rejected_source_reasons: tuple[tuple[str, str], ...]
     max_sources: int
+    citation_evidence_contract: str
+    exact_page_source_count: int
+    freshness_verified_source_count: int
+    archived_source_count: int
+    freshness_status: str
 
     @property
     def rejected_source_count(self) -> int:
         return len(self.rejected_source_reasons)
-
-
-def _host_and_path(url: str) -> tuple[str, str]:
-    parsed = urlsplit(url)
-    host = (parsed.hostname or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    path = (parsed.path or "/").rstrip("/") or "/"
-    return host, path
-
-
-def _current_news_rejection_reason(source: TrustedWebSourceV1) -> str | None:
-    host, path = _host_and_path(source.url)
-    if path.lower().endswith(".pdf"):
-        return "uncited_document"
-    if host == "status.openai.com" and path.startswith("/incidents/"):
-        return "uncited_incident"
-    if (host, path) in _CURRENT_NEWS_GENERIC_PATHS:
-        return "generic_index"
-    return None
 
 
 def admit_trusted_web_sources_v1(
@@ -82,30 +64,48 @@ def admit_trusted_web_sources_v1(
         raise TrustedWebProviderSecurityError(
             "trusted_web_cited_sources_exceed_budget"
         )
+    citation = assess_citation_evidence_v1(
+        cited_sources=cited_sources,
+        policy_pack=policy_pack,
+    )
 
-    admitted: list[TrustedWebSourceV1] = list(cited_sources)
+    admitted: list[TrustedWebSourceV1] = list(citation.cited_sources)
     admitted_urls = set(cited_urls)
     rejected: list[tuple[str, str]] = []
 
-    for source in consulted_sources:
+    supporting_sources = sorted(
+        consulted_sources,
+        key=citation_source_rank_v1,
+    )
+    for source in supporting_sources:
         if source.url in admitted_urls:
             continue
-        rejection_reason = None
-        if policy_pack == "current_news":
-            rejection_reason = _current_news_rejection_reason(source)
+        rejection_reason = source_rejection_reason_v1(
+            source,
+            policy_pack=policy_pack,
+            cited=False,
+        )
         if rejection_reason is not None:
             rejected.append((source.url, rejection_reason))
             continue
         if len(admitted) >= max_sources:
             rejected.append((source.url, "budget_exceeded"))
             continue
-        admitted.append(source)
+        admitted.append(qualify_source_freshness_v1(source))
         admitted_urls.add(source.url)
 
     return TrustedWebEvidenceAdmissionV1(
+        validated_cited_sources=citation.cited_sources,
         admitted_sources=tuple(admitted),
         rejected_source_reasons=tuple(rejected),
         max_sources=max_sources,
+        citation_evidence_contract=CITATION_EVIDENCE_CONTRACT,
+        exact_page_source_count=citation.exact_page_source_count,
+        freshness_verified_source_count=(
+            citation.freshness_verified_source_count
+        ),
+        archived_source_count=citation.archived_source_count,
+        freshness_status=citation.freshness_status,
     )
 
 

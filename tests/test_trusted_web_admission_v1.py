@@ -21,7 +21,7 @@ def source(url: str) -> TrustedWebSourceV1:
 
 
 class TrustedWebAdmissionV1Tests(unittest.TestCase):
-    def test_current_news_preserves_cited_and_rejects_noisy_sources(self) -> None:
+    def test_current_news_qualifies_cited_and_rejects_noisy_sources(self) -> None:
         cited = (
             source("https://status.openai.com/incidents/cited"),
             source("https://openai.com/index/cited-article"),
@@ -56,6 +56,66 @@ class TrustedWebAdmissionV1Tests(unittest.TestCase):
                 "https://cdn.openai.com/report.pdf": "uncited_document",
             },
         )
+        self.assertEqual(
+            result.citation_evidence_contract,
+            "citation_evidence_v1",
+        )
+        self.assertEqual(result.exact_page_source_count, 2)
+        self.assertEqual(result.freshness_status, "unverified")
+
+    def test_generic_cited_current_news_page_fails_closed(self) -> None:
+        cited = (source("https://openai.com/news?author=someone"),)
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_cited_generic_index",
+        ):
+            admit_trusted_web_sources_v1(
+                cited_sources=cited,
+                consulted_sources=cited,
+                max_sources=10,
+                policy_pack="current_news",
+            )
+
+    def test_generic_cited_health_page_fails_closed(self) -> None:
+        cited = (source("https://www.who.int/news-room/headlines"),)
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_cited_generic_index",
+        ):
+            admit_trusted_web_sources_v1(
+                cited_sources=cited,
+                consulted_sources=cited,
+                max_sources=5,
+                policy_pack="trusted_health",
+            )
+
+    def test_current_reference_ranks_ahead_of_archived_guidance(self) -> None:
+        cited = (
+            source(
+                "https://dietaryguidelines.gov/sites/default/files/2020-12/"
+                "Dietary_Guidelines_for_Americans_2020-2025.pdf"
+            ),
+            source(
+                "https://odphp.health.gov/our-work/nutrition-physical-activity/"
+                "dietary-guidelines/current-dietary-guidelines"
+            ),
+        )
+        result = admit_trusted_web_sources_v1(
+            cited_sources=cited,
+            consulted_sources=cited,
+            max_sources=5,
+            policy_pack="trusted_health",
+        )
+        self.assertEqual(
+            result.validated_cited_sources[0].freshness_status,
+            "current_reference",
+        )
+        self.assertEqual(
+            result.validated_cited_sources[1].freshness_status,
+            "historical",
+        )
+        self.assertEqual(result.archived_source_count, 1)
+        self.assertEqual(result.freshness_status, "mixed")
 
     def test_admission_caps_sources_after_preserving_citations(self) -> None:
         cited = (source("https://openai.com/index/cited"),)
