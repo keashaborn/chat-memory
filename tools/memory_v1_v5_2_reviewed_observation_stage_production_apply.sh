@@ -234,8 +234,8 @@ report_file="$snapshot_root/memory_v1_v5_2_reviewed_observation_${run_tag}.json"
 
 phase=inventory_timers
 while IFS= read -r unit; do
-  enabled=$(systemctl is-enabled "$unit")
-  active=$(systemctl is-active "$unit")
+  enabled=$(systemctl is-enabled "$unit" || true)
+  active=$(systemctl is-active "$unit" || true)
   [[ "$enabled" == enabled || "$enabled" == disabled ]]
   [[ "$active" == active || "$active" == inactive ]]
   printf '%s\t%s\t%s\n' "$unit" "$enabled" "$active" >>"$timer_state"
