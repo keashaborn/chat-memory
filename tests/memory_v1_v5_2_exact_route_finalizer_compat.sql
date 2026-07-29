@@ -105,6 +105,28 @@ BEGIN
   )=0 THEN
     RAISE EXCEPTION 'zero-atom finalizer is not exact-packet bound';
   END IF;
+
+  IF position(
+    'unregistered_predicate'
+    IN pg_get_functiondef(
+      'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(uuid)'
+        ::regprocedure
+    )
+  )=0 THEN
+    RAISE EXCEPTION 'exact zero-atom planner lacks predicate-review deferral';
+  END IF;
+
+  IF position(
+    'unregistered_predicate'
+    IN pg_get_constraintdef((
+      SELECT oid
+      FROM pg_constraint
+      WHERE conrelid='memory.v5_2_local_packet_route_event'::regclass
+        AND conname='v5_2_local_packet_route_event_check'
+    ))
+  )=0 THEN
+    RAISE EXCEPTION 'route event constraint lacks predicate-review deferral';
+  END IF;
 END
 $test$;
 

@@ -1,20 +1,20 @@
 {
   "artifacts": {
     "exact_terminal_batch_sha256": "50fbab4c4181bb9fe9cb4cc34c6a5b4ab3a4a9ff8f1a3f782ef5ca41dd47d043",
-    "migration_sha256": "98afc98e408d999892b71ecaada101ba330b2a577e3b62273d4ebeb9eac276d6",
+    "migration_sha256": "ad34d5d17aba6ec6e2559f76aea21839cd80b756ceb206069e0814692888c464",
     "review_builder_sha256": "6c98361ddc6f375ebde215631b2a61f9b0292ec5f89137da723fe794642c2c29",
-    "rollback_sha256": "fb24ca3b03d8a4921d824d7771449cc00d9f798d1cf510faa9306ffded0e9600",
+    "rollback_sha256": "dca6da86ca73fc4864afa61edf791e5e99113a4aff9dadf3383b53f1ce9a88b8",
     "router_sha256": "c2f873fb4ac959b22a674868d7b7611549f184d2b5e4cc3aea17d9e524b307d9",
-    "security_test_sha256": "af2524cedc626e79bbe8a6e26bd066feaaadcb4e5e1a18770d5ba9cf0e77f67c"
+    "security_test_sha256": "42d5ac8ce48ae88dd9c1e41769439e4afb30729901f73ffc9367655fa55c146c"
   },
   "claim_writes": 0,
   "contract_version": "memory_v1_contextual_exact_23_route_v1",
   "expected_counts": {
-    "exact_zero_atom_routes": 3,
-    "manual_review_routes": 7,
+    "exact_zero_atom_routes": 4,
+    "manual_review_routes": 6,
     "model_calls": 0,
     "packets": 23,
-    "restricted_review_artifacts": 14,
+    "restricted_review_artifacts": 12,
     "route_events": 23,
     "standard_terminal_routes": 13
   },

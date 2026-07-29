@@ -18,38 +18,6 @@ BEGIN
     RAISE EXCEPTION 'exact packet planner definition drifted';
   END IF;
 
-  needle := $needle$      packet.manual_review_required,
-      ARRAY($needle$;
-  replacement := $replacement$      packet.manual_review_required,
-      packet.normalized_packet,
-      ARRAY($replacement$;
-  IF (length(ddl) - length(replace(ddl, needle, ''))) / length(needle) <> 1 THEN
-    RAISE EXCEPTION 'exact packet planner payload insertion point drifted';
-  END IF;
-  ddl := replace(ddl, needle, replacement);
-
-  needle := $needle$        WHEN value.entity_mention_count+value.observation_count
-               +value.comparison_hint_count>=1
-          THEN 'manual_review_artifact_ready'$needle$;
-  replacement := $replacement$        WHEN value.entity_mention_count+value.observation_count
-               +value.comparison_hint_count>=1
-          OR (
-            value.manual_review_required
-            AND value.normalized_packet @? '$.deferrals[*] ? (
-              @.review_required == true
-              && @.reason_code != "structured_domain"
-              && @.reason_code != "question_only"
-              && @.reason_code != "transient_state"
-              && @.reason_code != "insufficient_evidence"
-              && @.reason_code != "entity_resolution_unresolved"
-            )'
-          )
-          THEN 'manual_review_artifact_ready'$replacement$;
-  IF (length(ddl) - length(replace(ddl, needle, ''))) / length(needle) <> 1 THEN
-    RAISE EXCEPTION 'exact packet planner review branch drifted';
-  END IF;
-  EXECUTE replace(ddl, needle, replacement);
-
   SELECT pg_get_functiondef(
     'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)'::regprocedure
   ) INTO ddl;
@@ -81,6 +49,26 @@ BEGIN
   replacement := '    ORDER BY value.created_at,value.packet_id';
   IF (length(ddl) - length(replace(ddl, needle, ''))) / length(needle) <> 1 THEN
     RAISE EXCEPTION 'zero-atom planner limit clause drifted';
+  END IF;
+  ddl := replace(ddl, needle, replacement);
+
+  needle := $needle$@.reason_code == "entity_resolution_unresolved"$needle$;
+  replacement := $replacement$(
+                  @.reason_code == "entity_resolution_unresolved"
+                  || @.reason_code == "unregistered_predicate"
+                )$replacement$;
+  IF (length(ddl) - length(replace(ddl, needle, ''))) / length(needle) <> 1 THEN
+    RAISE EXCEPTION 'zero-atom review reason branch drifted';
+  END IF;
+  ddl := replace(ddl, needle, replacement);
+
+  needle := $needle$            && @.reason_code != "entity_resolution_unresolved"
+          )'$needle$;
+  replacement := $replacement$            && @.reason_code != "entity_resolution_unresolved"
+            && @.reason_code != "unregistered_predicate"
+          )'$replacement$;
+  IF (length(ddl) - length(replace(ddl, needle, ''))) / length(needle) <> 1 THEN
+    RAISE EXCEPTION 'zero-atom review exclusion branch drifted';
   END IF;
   EXECUTE replace(ddl, needle, replacement);
 
@@ -140,6 +128,103 @@ BEGIN
 END
 $migration$;
 
+DO $constraint_guard$
+DECLARE
+  actual_sha256 text;
+BEGIN
+  SELECT encode(public.digest(convert_to(pg_get_constraintdef(oid),'UTF8'),'sha256'),'hex')
+    INTO actual_sha256
+  FROM pg_constraint
+  WHERE conrelid='memory.v5_2_local_packet_route_event'::regclass
+    AND conname='v5_2_local_packet_route_event_check';
+  IF actual_sha256 <> '7a097abfe9800c2b192d29e532b4200ca5b4a5bdd16e0b8c38e85227bf7c8d00' THEN
+    RAISE EXCEPTION 'local packet route event constraint drifted';
+  END IF;
+END
+$constraint_guard$;
+
+ALTER TABLE memory.v5_2_local_packet_route_event
+  DROP CONSTRAINT v5_2_local_packet_route_event_check,
+  ADD CONSTRAINT v5_2_local_packet_route_event_check
+  CHECK (
+    (
+      route='terminal_no_stage'
+      AND reason_code='deferral_only_no_stage_v5_2'
+      AND entity_mention_count=0
+      AND observation_count=0
+      AND comparison_hint_count=0
+      AND deferral_count BETWEEN 1 AND 32
+      AND cardinality(source_deferral_reason_codes) BETWEEN 1 AND 4
+      AND source_deferral_reason_codes <@ ARRAY[
+        'structured_domain','question_only','transient_state',
+        'insufficient_evidence'
+      ]::text[]
+      AND review_id IS NULL
+      AND request_id IS NULL
+      AND review_contract IS NULL
+      AND bundle_contract IS NULL
+      AND review_report_sha256 IS NULL
+      AND stage_bundle_sha256 IS NULL
+      AND repository_commit IS NULL
+      AND auto_link_count IS NULL
+      AND manual_review_count IS NULL
+      AND deferred_resolution_count IS NULL
+      AND rejected_count IS NULL
+      AND blocking_code_count IS NULL
+    )
+    OR
+    (
+      route='terminal_no_stage'
+      AND reason_code='deferral_only_review_unresolved_v5_2'
+      AND entity_mention_count=0
+      AND observation_count=0
+      AND comparison_hint_count=0
+      AND deferral_count BETWEEN 1 AND 32
+      AND cardinality(source_deferral_reason_codes) BETWEEN 1 AND 6
+      AND source_deferral_reason_codes <@ ARRAY[
+        'structured_domain','question_only','transient_state',
+        'insufficient_evidence','entity_resolution_unresolved',
+        'unregistered_predicate'
+      ]::text[]
+      AND source_deferral_reason_codes && ARRAY[
+        'entity_resolution_unresolved','unregistered_predicate'
+      ]::text[]
+      AND review_id IS NULL
+      AND request_id IS NULL
+      AND review_contract IS NULL
+      AND bundle_contract IS NULL
+      AND review_report_sha256 IS NULL
+      AND stage_bundle_sha256 IS NULL
+      AND repository_commit IS NULL
+      AND auto_link_count IS NULL
+      AND manual_review_count IS NULL
+      AND deferred_resolution_count IS NULL
+      AND rejected_count IS NULL
+      AND blocking_code_count IS NULL
+    )
+    OR
+    (
+      route='manual_review_artifact_ready'
+      AND reason_code='reviewable_relational_packet_v5_2'
+      AND entity_mention_count+observation_count+comparison_hint_count>=1
+      AND cardinality(source_deferral_reason_codes)=0
+      AND review_id IS NOT NULL
+      AND request_id IS NOT NULL
+      AND review_contract='memory_v1_v5_2_local_packet_review_v1'
+      AND bundle_contract='memory_v1_v5_2_stage_preflight_v1'
+      AND review_report_sha256 ~ '^[0-9a-f]{64}$'
+      AND stage_bundle_sha256 ~ '^[0-9a-f]{64}$'
+      AND repository_commit ~ '^[0-9a-f]{40}$'
+      AND auto_link_count BETWEEN 0 AND 32
+      AND manual_review_count BETWEEN 0 AND 32
+      AND deferred_resolution_count BETWEEN 0 AND 32
+      AND rejected_count BETWEEN 0 AND 32
+      AND blocking_code_count BETWEEN 0 AND 32
+      AND auto_link_count+manual_review_count
+            +deferred_resolution_count+rejected_count=entity_mention_count
+    )
+  );
+
 ALTER FUNCTION memory.plan_owner_v5_2_exact_packet_route_v1(uuid)
   OWNER TO memory_v5_2_local_router_maintainer;
 ALTER FUNCTION memory.plan_owner_v5_2_zero_atom_deferral_route_v1(integer)
@@ -177,5 +262,34 @@ TO brains_app;
 COMMENT ON FUNCTION
   memory.plan_owner_v5_2_zero_atom_deferral_route_v1(uuid)
 IS 'Owner-scoped exact-packet V5.2 zero-atom deferral planner. It removes global queue-order dependence without widening packet eligibility.';
+
+DO $verify$
+DECLARE
+  actual_sha256 text;
+BEGIN
+  SELECT encode(public.digest(convert_to(pg_get_functiondef(
+    'memory.plan_owner_v5_2_exact_packet_route_v1(uuid)'::regprocedure
+  ),'UTF8'),'sha256'),'hex') INTO actual_sha256;
+  IF actual_sha256 <> '190e99d80d0b5d7ce6d742415384103b19d1dd68a20199a47b0ffcf772c7209b' THEN
+    RAISE EXCEPTION 'exact packet planner verification failed';
+  END IF;
+
+  SELECT encode(public.digest(convert_to(pg_get_functiondef(
+    'memory.plan_owner_v5_2_zero_atom_deferral_route_v1(uuid)'::regprocedure
+  ),'UTF8'),'sha256'),'hex') INTO actual_sha256;
+  IF actual_sha256 <> '57ade956b6b1bb34e937536adff359d08d797ac2ad0ec45f7794830d72494aa6' THEN
+    RAISE EXCEPTION 'exact zero-atom planner verification failed';
+  END IF;
+
+  SELECT encode(public.digest(convert_to(pg_get_constraintdef(oid),'UTF8'),'sha256'),'hex')
+    INTO actual_sha256
+  FROM pg_constraint
+  WHERE conrelid='memory.v5_2_local_packet_route_event'::regclass
+    AND conname='v5_2_local_packet_route_event_check';
+  IF actual_sha256 <> 'd86e11b41c1a4a88f6d2d4dea45acff757293f26be86ec3ec300ed268202985c' THEN
+    RAISE EXCEPTION 'route event constraint verification failed';
+  END IF;
+END
+$verify$;
 
 COMMIT;
