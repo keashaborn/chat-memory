@@ -1,0 +1,21 @@
+{
+  "contract_version": "memory_v1_v5_2_temporal_review_spec_v1",
+  "items": [
+    {
+      "case_id": "pet_identity_helsing_relative_year",
+      "evidence_id": "88161526-0c53-5291-8601-0bd0ba41da53",
+      "observation_ref": "o00",
+      "packet_id": "afe46ab5-6243-5568-bc71-b23772008c63",
+      "review_reason_codes": [
+        "reviewed_relative_year_source_anchor",
+        "immutable_provider_packet_preserved"
+      ],
+      "review_report_sha256": "01865185b3f043a538618629a90d90a83e578f861957b6af029dd9fea1682f22",
+      "stage_bundle_path": "/home/ubuntu/memory-v1-reviews/v5-2-router-ff9fe6350d3ad9d7aed3e0784379e5df7f253dde5f277d85746c9c24508873a7-stage.json",
+      "stage_bundle_sha256": "ae33f0aef4c0df1249eddcab2fb0746e24a09f9d996c47b974663b7fc7d7a9b6"
+    }
+  ],
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "review_root": "/home/ubuntu/memory-v1-reviews",
+  "target_server": "seebx"
+}

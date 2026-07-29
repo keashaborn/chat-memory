@@ -28,6 +28,9 @@ atom_manifest_runner=scripts/memory_v1_v5_2_atom_admission_manifest_batch.py
 atom_apply_runner=scripts/memory_v1_v5_2_atom_admission_apply_v2.py
 atom_stage_runner=scripts/memory_v1_v5_2_atom_stage_bundle_v2.py
 atom_spec=manifests/memory_v1_v5_2_pet_identity_atom_admission_spec_20260729.json
+temporal_migration=ops/sql/20260729_memory_v1_v5_2_reviewed_temporal_atom_compat.sql
+temporal_runner=scripts/memory_v1_v5_2_temporal_review_registration.py
+temporal_spec=manifests/memory_v1_v5_2_pet_temporal_review_spec_20260729.json
 source_stage_manifest=manifests/memory_v1_v5_2_pet_identity_relational_stage_20260729.json
 backup=$(mktemp /tmp/memory-v1-v5-2-pet-stage-review.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-pet-stage-review-roles.XXXXXX.sql)
@@ -266,9 +269,14 @@ printf '%s\n' \
   "ALTER ROLE brains_app PASSWORD 'clone_only_brains_password';" | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists <"$backup"
+run_sql <"$repo_root/$temporal_migration"
 
 assert_equal initial_target_counts "$(target_counts)" '0,0,0,0,0,0,0,0,0'
 assert_equal initial_atom_counts "$(atom_counts)" '0,0,0,0'
+assert_equal initial_temporal_review_count "$(scalar "
+  SELECT count(*)
+  FROM memory.v5_2_temporal_review_registration
+  WHERE owner_user_id='$target_owner'::uuid")" 0
 assert_equal route_rls "$(scalar "
   SELECT relrowsecurity::int::text||':'||relforcerowsecurity::int::text
   FROM pg_class
@@ -285,7 +293,8 @@ for atom_table in \
   v5_2_atom_admission_proposal \
   v5_2_atom_admission_review \
   v5_2_atom_admission_apply \
-  v5_2_atom_admission_operation
+  v5_2_atom_admission_operation \
+  v5_2_temporal_review_registration
 do
   assert_equal "atom_${atom_table}_rls" "$(scalar "
     SELECT relrowsecurity::int::text||':'||relforcerowsecurity::int::text
@@ -298,6 +307,147 @@ target_entities_before=$(scalar "
 target_claims_before=$(scalar "
   SELECT count(*) FROM memory.claim
   WHERE owner_user_id='$target_owner'::uuid")
+
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$temporal_runner" manifest \
+  --spec "$repo_root/$temporal_spec" \
+  --output "$work/temporal-review-manifest.json" \
+  >"$work/temporal-review-manifest-report.json"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$temporal_runner" run \
+  --mode preflight \
+  --manifest "$work/temporal-review-manifest.json" \
+  >"$work/temporal-review-preflight.json"
+assert_equal temporal_preflight_rows \
+  "$(jq -r '.persistent_writes' "$work/temporal-review-preflight.json")" 0
+assert_equal temporal_preflight_outcome \
+  "$(jq -r '.results[0].outcome' "$work/temporal-review-preflight.json")" applied
+assert_equal temporal_preflight_persisted "$(scalar "
+  SELECT count(*)
+  FROM memory.v5_2_temporal_review_registration
+  WHERE owner_user_id='$target_owner'::uuid")" 0
+runuser -u ubuntu -- env \
+  MEMORY_V1_V5_2_TEMPORAL_REVIEW_APPLY=authorized \
+  POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+  /opt/chat-memory/venv/bin/python "$repo_root/$temporal_runner" run \
+  --mode apply \
+  --manifest "$work/temporal-review-manifest.json" \
+  --confirm REGISTER_REVIEWED_TEMPORAL_PROJECTIONS_ONLY \
+  >"$work/temporal-review-apply.json"
+assert_equal temporal_apply_rows \
+  "$(jq -r '.persistent_writes' "$work/temporal-review-apply.json")" 1
+assert_equal temporal_registration_count "$(scalar "
+  SELECT count(*)
+  FROM memory.v5_2_temporal_review_registration
+  WHERE owner_user_id='$target_owner'::uuid")" 1
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$temporal_runner" run \
+  --mode replay \
+  --manifest "$work/temporal-review-manifest.json" \
+  >"$work/temporal-review-replay.json"
+assert_equal temporal_replay_rows \
+  "$(jq -r '.persistent_writes' "$work/temporal-review-replay.json")" 0
+assert_equal temporal_replay_outcome \
+  "$(jq -r '.results[0].outcome' "$work/temporal-review-replay.json")" replayed
+
+TARGET_OWNER="$target_owner" OTHER_OWNER="$other_owner" \
+  TEMPORAL_MANIFEST="$work/temporal-review-manifest.json" \
+  POSTGRES_DSN="$dsn" /opt/chat-memory/venv/bin/python - <<'PY'
+import asyncio
+import json
+import os
+import uuid
+
+import asyncpg
+
+
+async def must_fail(operation, sqlstates):
+    try:
+        await operation()
+    except asyncpg.PostgresError as exc:
+        if exc.sqlstate not in sqlstates:
+            raise
+    else:
+        raise RuntimeError("expected reviewed-temporal security failure")
+
+
+async def main() -> None:
+    conn = await asyncpg.connect(os.environ["POSTGRES_DSN"])
+    target = os.environ["TARGET_OWNER"]
+    other = os.environ["OTHER_OWNER"]
+    row = json.loads(open(os.environ["TEMPORAL_MANIFEST"], encoding="utf-8").read())[
+        "items"
+    ][0]
+
+    async def cross_owner():
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.user_id',$1,true)", other)
+            await conn.fetchrow(
+                """
+                SELECT * FROM memory.review_owner_v5_2_temporal_projection_v1(
+                  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::jsonb
+                )
+                """,
+                uuid.uuid4(),
+                uuid.UUID(row["registration_id"]),
+                uuid.UUID(row["packet_id"]),
+                uuid.UUID(row["evidence_id"]),
+                row["observation_ref"],
+                row["packet_storage_sha256"],
+                row["stage_bundle_sha256"],
+                row["review_report_sha256"],
+                row["raw_temporal_sha256"],
+                json.dumps(row["reviewed_temporal"]),
+                row["reviewed_temporal_sha256"],
+                json.dumps(row["review_reason_codes"]),
+            )
+
+    async def invalid_transform():
+        changed = dict(row["reviewed_temporal"])
+        changed["relative_offset"] = {
+            **changed["relative_offset"],
+            "magnitude": 2.0,
+        }
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.user_id',$1,true)", target)
+            await conn.fetchrow(
+                """
+                SELECT * FROM memory.review_owner_v5_2_temporal_projection_v1(
+                  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::jsonb
+                )
+                """,
+                uuid.uuid4(),
+                uuid.uuid4(),
+                uuid.UUID(row["packet_id"]),
+                uuid.UUID(row["evidence_id"]),
+                row["observation_ref"],
+                row["packet_storage_sha256"],
+                row["stage_bundle_sha256"],
+                row["review_report_sha256"],
+                row["raw_temporal_sha256"],
+                json.dumps(changed),
+                "0" * 64,
+                json.dumps(row["review_reason_codes"]),
+            )
+
+    async def direct_insert():
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.user_id',$1,true)", target)
+            await conn.execute(
+                "INSERT INTO memory.v5_2_temporal_review_registration DEFAULT VALUES"
+            )
+
+    await must_fail(cross_owner, {"23514", "42501"})
+    await must_fail(invalid_transform, {"23514"})
+    await must_fail(direct_insert, {"42501"})
+    await conn.close()
+
+
+asyncio.run(main())
+PY
 
 runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
@@ -401,6 +551,10 @@ runuser -u ubuntu -- env MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
 
 assert_equal staged_target_counts "$(target_counts)" '3,3,3,2,3,3,0,0,3'
 assert_equal staged_atom_counts "$(atom_counts)" '2,2,2,6'
+assert_equal staged_temporal_review_count "$(scalar "
+  SELECT count(*)
+  FROM memory.v5_2_temporal_review_registration
+  WHERE owner_user_id='$target_owner'::uuid")" 1
 assert_equal stage_rows \
   "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 20
 assert_equal stage_replay_rows \
@@ -542,6 +696,7 @@ docker exec brains-postgres-1 pg_isready -U sage -d memory >/dev/null
 
 printf '%s\n' \
   'MEMORY_V1_V5_2_PET_RELATIONAL_STAGE_REVIEW_CLONE=PASS' \
+  'clone_temporal_review_rows_created=1' \
   'clone_atom_admission_rows_created=12' \
   'clone_stage_rows_created=20' \
   'clone_review_rows_created=6' \
