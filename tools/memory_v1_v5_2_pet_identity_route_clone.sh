@@ -19,6 +19,7 @@ backup=$work/source.dump
 review_root=$work/reviews
 timer_state=$work/timers.tsv
 mkdir -m 0700 "$review_root"
+: >"$backup"
 chmod 0600 "$backup"
 timers_restored=0
 stage=preflight
