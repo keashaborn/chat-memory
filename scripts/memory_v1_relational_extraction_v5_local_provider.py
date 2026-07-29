@@ -4832,6 +4832,36 @@ def _compile_entity_links(
                 repairs.append("pet_loss_not_promoted_to_death")
         repairs.append("pet_relation_normalized")
 
+    unsupported_death_refs = {
+        item["observation_ref"]
+        for item in observations
+        if item["predicate"] == "life_event.died"
+        and not _PET_EXPLICIT_DEATH_CUE_RE.search(content)
+    }
+    if unsupported_death_refs:
+        observations[:] = [
+            item
+            for item in observations
+            if item["observation_ref"] not in unsupported_death_refs
+        ]
+        value["comparison_hints"] = [
+            item
+            for item in value["comparison_hints"]
+            if item["observation_ref"] not in unsupported_death_refs
+        ]
+        _append_deferral_once(
+            value["deferrals"],
+            reason_code="insufficient_evidence",
+            memory_shape="none",
+            source_spans=[_source_span(source)],
+            sensitivity="medium",
+        )
+        repairs.append(
+            "pet_loss_not_promoted_to_death"
+            if _PET_LOSS_CUE_RE.search(content)
+            else "death_requires_explicit_target_cue"
+        )
+
     entity_roles = {
         item["entity_ref"]: item.get("relationship_role")
         for item in entities

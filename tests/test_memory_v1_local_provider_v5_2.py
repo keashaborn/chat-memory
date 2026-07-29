@@ -1368,6 +1368,99 @@ class LocalProviderV52Test(unittest.TestCase):
             repairs,
         )
 
+    def test_context_cannot_originate_death_without_target_death_cue(
+        self,
+    ) -> None:
+        content = (
+            "Her name was Keasha von Steffen Haus; she was from an "
+            "excellent breeder in Wisconsin."
+        )
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        animal = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="animal",
+            mention_kind="named",
+            name_text="Keasha von Steffen Haus",
+            relationship_role="pet:reported",
+            reason_code="context_pet_name",
+        )
+        invented_death = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="life_event.died",
+            object_value=_literal("boolean", True),
+            projection_class="direct_claim",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="context_only_death",
+            temporal_semantic="occurrence",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[animal],
+                    observations=[invented_death],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        self.assertEqual(value["observations"], [])
+        self.assertEqual(value["entity_mentions"], [])
+        self.assertEqual(
+            {item["reason_code"] for item in value["deferrals"]},
+            {"insufficient_evidence"},
+        )
+        self.assertIn("death_requires_explicit_target_cue", repairs)
+
+    def test_named_pet_loss_does_not_prove_death(self) -> None:
+        content = "That was Dahlia who I lost last year."
+        source = self.source(content)
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        animal = _example_entity(
+            content,
+            entity_ref="e00",
+            entity_type="animal",
+            mention_kind="named",
+            name_text="Dahlia",
+            relationship_role="pet:reported",
+            reason_code="explicit_pet_name",
+        )
+        invented_death = _example_observation(
+            content,
+            observation_ref="o00",
+            subject_entity_ref="e00",
+            predicate="life_event.died",
+            object_value=_literal("boolean", True),
+            projection_class="direct_claim",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="high",
+            reason_code="inferred_from_loss",
+            temporal_semantic="occurrence",
+        )
+        compiled, repairs = _compile_entity_links(
+            source,
+            ProviderPacket.model_validate(
+                _packet(
+                    entities=[animal],
+                    observations=[invented_death],
+                )
+            ),
+            registry,
+        )
+        value = compiled.model_dump(mode="json")
+        self.assertNotIn(
+            "life_event.died",
+            {item["predicate"] for item in value["observations"]},
+        )
+        self.assertIn("pet_loss_not_promoted_to_death", repairs)
+
     def test_third_person_occupation_never_becomes_self_occupation(self) -> None:
         content = "I talked to Bob Fry who was the president at the time."
         source = self.source(content)

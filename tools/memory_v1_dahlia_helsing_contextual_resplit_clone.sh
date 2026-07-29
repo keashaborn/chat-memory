@@ -318,31 +318,31 @@ def death_observations(packet: dict) -> list[dict]:
     ]
 
 assert not death_observations(packets[0]), "Keasha acquired a false death event"
-for ordinal, name, verb in (
-    (3, "Dahlia", "lost"),
-    (4, "Helsing", "died"),
-):
-    refs = named_refs(packets[ordinal], name)
-    assert len(refs) == 1, f"{name} did not resolve to one named animal"
-    deaths = death_observations(packets[ordinal])
-    assert len(deaths) == 1, f"{name} did not receive exactly one death event"
-    death = deaths[0]
-    assert death["subject_entity_ref"] in refs
-    quotes = [
-        str(span.get("quote", "")).lower()
-        for span in death.get("source_spans", [])
-    ]
-    assert any(verb in quote for quote in quotes)
-    temporal = death["temporal"]
-    assert temporal["basis"] in {"relative", "calendar"}
-    assert temporal["shape"] in {"instant", "bounded_interval"}
-    if temporal["source_form"] == "partial_absolute":
-        assert temporal["anchored_to_source_time"] is True
+assert not death_observations(
+    packets[3]
+), "Dahlia loss was incorrectly promoted to death"
+
+refs = named_refs(packets[4], "Helsing")
+assert len(refs) == 1, "Helsing did not resolve to one named animal"
+deaths = death_observations(packets[4])
+assert len(deaths) == 1, "Helsing did not receive exactly one death event"
+death = deaths[0]
+assert death["subject_entity_ref"] in refs
+quotes = [
+    str(span.get("quote", "")).lower()
+    for span in death.get("source_spans", [])
+]
+assert any("died" in quote for quote in quotes)
+temporal = death["temporal"]
+assert temporal["basis"] in {"relative", "calendar"}
+assert temporal["shape"] in {"instant", "bounded_interval"}
+if temporal["source_form"] == "partial_absolute":
+    assert temporal["anchored_to_source_time"] is True
 
 print(json.dumps({
     "semantic_checks": {
         "keasha_false_death": 0,
-        "dahlia_death": 1,
+        "dahlia_loss_promoted_to_death": 0,
         "helsing_death": 1,
     },
     "local_model_calls": 3,
