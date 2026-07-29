@@ -389,6 +389,73 @@ def normalize_review_packet(
                 "to_anchored_to_source_time": True,
             }
         )
+    for observation in value["observations"]:
+        temporal = observation["temporal"]
+        if not (
+            temporal["basis"] == "relative"
+            and temporal["semantic"] == "occurrence"
+            and temporal["shape"] == "instant"
+            and temporal["source_form"] == "relative"
+            and temporal["relative_offset"] is not None
+            and temporal["anchored_to_source_time"] is False
+        ):
+            continue
+        source_text_parts: list[str] = []
+        source_hashes: list[str] = []
+        for span in observation["source_spans"]:
+            start, end = span["start"], span["end"]
+            if not (
+                isinstance(start, int)
+                and isinstance(end, int)
+                and 0 <= start < end <= len(evidence_content)
+            ):
+                raise LocalPacketReviewError("review temporal source span is invalid")
+            source_text = evidence_content[start:end]
+            source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+            if source_hash != span["span_sha256"]:
+                raise LocalPacketReviewError("review temporal source span hash mismatch")
+            source_text_parts.append(source_text)
+            source_hashes.append(source_hash)
+        if not LAST_YEAR_RE.search(" ".join(source_text_parts)):
+            continue
+        expected_offset = {
+            "direction": "past",
+            "magnitude": 1.0,
+            "unit": "year",
+            "approximate": True,
+            "anchor_source": "evidence_observed_at",
+        }
+        if temporal["relative_offset"] != expected_offset:
+            raise LocalPacketReviewError(
+                "relative year offset differs from source expression"
+            )
+        recorded_at = value.get("source_envelope", {}).get("source_recorded_at")
+        if not isinstance(recorded_at, str):
+            raise LocalPacketReviewError("relative year source anchor is absent")
+        try:
+            dt.datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise LocalPacketReviewError("relative year source anchor is invalid") from exc
+        temporal["anchored_to_source_time"] = True
+        for code in (
+            "relative_year_anchored_to_source_time",
+            "review_last_year_relative_source_anchor",
+        ):
+            if code not in temporal["reason_codes"]:
+                if len(temporal["reason_codes"]) >= 10:
+                    raise LocalPacketReviewError(
+                        "temporal reason-code budget is exhausted"
+                    )
+                temporal["reason_codes"].append(code)
+        transformations.append(
+            {
+                "code": "review_last_year_relative_source_anchor",
+                "observation_ref": observation["observation_ref"],
+                "from_anchored_to_source_time": False,
+                "to_anchored_to_source_time": True,
+                "source_span_sha256": sorted(source_hashes),
+            }
+        )
     return value, transformations
 
 

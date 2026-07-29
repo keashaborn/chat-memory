@@ -172,6 +172,97 @@ class ReviewPacketNormalizationTest(unittest.TestCase):
             transformations[-1]["code"], "review_last_year_source_anchor"
         )
 
+    def test_relative_last_year_trusts_anchor_without_inventing_date(self) -> None:
+        content = "My male German shepherd Helsing also died last year."
+        value = packet()
+        value["source_envelope"] = {
+            "source_recorded_at": "2026-07-28T04:04:32Z"
+        }
+        value["observations"][0]["source_spans"] = [
+            {
+                "start": 0,
+                "end": len(content),
+                "span_sha256": hashlib.sha256(content.encode()).hexdigest(),
+            }
+        ]
+        temporal = value["observations"][0]["temporal"]
+        temporal.update(
+            {
+                "basis": "relative",
+                "semantic": "occurrence",
+                "shape": "instant",
+                "source_form": "relative",
+                "certainty": "approximate",
+                "precision": "year",
+                "instant": None,
+                "calendar_range": None,
+                "instant_range": None,
+                "relative_offset": {
+                    "direction": "past",
+                    "magnitude": 1.0,
+                    "unit": "year",
+                    "approximate": True,
+                    "anchor_source": "evidence_observed_at",
+                },
+                "recurrence": None,
+                "anchored_to_source_time": False,
+                "reason_codes": ["reported_relative_year"],
+            }
+        )
+        original = copy.deepcopy(value)
+        reviewed, transformations = normalize_review_packet(value, content)
+        result = reviewed["observations"][0]["temporal"]
+        self.assertEqual(value, original)
+        self.assertTrue(result["anchored_to_source_time"])
+        self.assertEqual(result["basis"], "relative")
+        self.assertEqual(result["relative_offset"], temporal["relative_offset"])
+        self.assertIsNone(result["instant"])
+        self.assertIsNone(result["calendar_range"])
+        self.assertIsNone(result["instant_range"])
+        self.assertIn(
+            "relative_year_anchored_to_source_time", result["reason_codes"]
+        )
+        self.assertEqual(
+            transformations[-1]["code"],
+            "review_last_year_relative_source_anchor",
+        )
+        self.assertNotIn(content, str(transformations))
+
+    def test_relative_last_year_offset_mismatch_fails_closed(self) -> None:
+        content = "Helsing died last year."
+        value = packet()
+        value["source_envelope"] = {
+            "source_recorded_at": "2026-07-28T04:04:32Z"
+        }
+        value["observations"][0]["source_spans"] = [
+            {
+                "start": 0,
+                "end": len(content),
+                "span_sha256": hashlib.sha256(content.encode()).hexdigest(),
+            }
+        ]
+        value["observations"][0]["temporal"].update(
+            {
+                "basis": "relative",
+                "semantic": "occurrence",
+                "shape": "instant",
+                "source_form": "relative",
+                "relative_offset": {
+                    "direction": "past",
+                    "magnitude": 2.0,
+                    "unit": "year",
+                    "approximate": True,
+                    "anchor_source": "evidence_observed_at",
+                },
+                "anchored_to_source_time": False,
+            }
+        )
+        with self.assertRaisesRegex(
+            LocalPacketReviewError,
+            "relative year offset differs",
+        ):
+            normalize_review_packet(value, content)
+
 
 if __name__ == "__main__":
     unittest.main()
