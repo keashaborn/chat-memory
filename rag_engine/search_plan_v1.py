@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 SEARCH_PLAN_CONTRACT = "search_plan_v1"
-SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_4"
+SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_5"
 
 SearchDecision = Literal["no_search", "indexed", "live", "research"]
 SearchPolicyPack = Literal[
@@ -21,6 +21,7 @@ SearchPolicyPack = Literal[
     "exercise",
     "software_security",
     "legal_financial",
+    "behavior_change",
 ]
 SearchRoute = Literal["normal_chat", "trusted_health", "current_news"]
 
@@ -154,6 +155,8 @@ EVIDENCE_PATTERNS = _patterns(
     r"\bpeer[- ]reviewed\b",
     r"\bwhat (?:does|do) the research\b",
     r"\bfind (?:a |the )?(?:study|studies|paper|papers)\b",
+    r"\bfind (?:me )?(?:evidence|research)\b",
+    r"\bsearch (?:for )?(?:evidence|research)\b",
 )
 REFERENCE_LOOKUP_PATTERNS = _patterns(
     r"\bofficial (?:source|guidance|documentation|docs|recommendations?)\b",
@@ -223,6 +226,19 @@ EXERCISE_TOPIC_PATTERNS = _patterns(
     r"\bhypertrophy\b",
     r"\btraining volume\b",
     r"\btraining frequency\b",
+)
+BEHAVIOR_CHANGE_TOPIC_PATTERNS = _patterns(
+    r"\bbaseline phase\b",
+    r"\bchange phase\b",
+    r"\bself[- ]experiment\b",
+    r"\bsingle[- ]case\b",
+    r"\bself[- ]monitoring\b",
+    r"\badherence\b",
+    r"\bhabit tracking\b",
+    r"\bone change at a time\b",
+    r"\bplanned sets completed\b",
+    r"\bbehavior change\b",
+    r"\bbehaviour change\b",
 )
 HEALTH_RISK_PATTERNS = _patterns(
     r"\bis (?:it|this|that) safe\b",
@@ -296,6 +312,8 @@ def _budget(decision: SearchDecision) -> SearchBudgetV1:
 
 
 def _policy_pack(value: str) -> SearchPolicyPack:
+    if _matches(value, BEHAVIOR_CHANGE_TOPIC_PATTERNS):
+        return "behavior_change"
     if _matches(value, TRUSTED_CURRENT_NEWS_ENTITY_PATTERNS):
         return "software_security"
     if _matches(value, NUTRITION_TOPIC_PATTERNS):
@@ -322,7 +340,12 @@ def _route(
         return "normal_chat"
     if decision == "research" or "specific_source_requested" in reasons:
         return "normal_chat"
-    if policy_pack in {"health", "nutrition", "exercise"}:
+    if policy_pack in {
+        "health",
+        "nutrition",
+        "exercise",
+        "behavior_change",
+    }:
         return "trusted_health"
     if (
         "trusted_current_news_scope" in reasons
@@ -404,6 +427,24 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
     weak_freshness = _matches(value, WEAK_FRESHNESS_PATTERNS) and (
         _matches(value, VOLATILE_FACT_PATTERNS) or trusted_current_news
     )
+    reference_lookup = _matches(value, REFERENCE_LOOKUP_PATTERNS)
+    if reference_lookup and pack in {
+        "health",
+        "nutrition",
+        "exercise",
+        "behavior_change",
+        "software_security",
+    }:
+        return _plan(
+            "live",
+            (
+                ("explicit_web_request",)
+                if explicit_web
+                else ("evidence_requested",)
+            ),
+            pack,
+            "high",
+        )
     if strong_freshness or weak_freshness:
         reasons = ["freshness_required"]
         if explicit_web:
@@ -429,6 +470,7 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
                     "nutrition",
                     "exercise",
                     "software_security",
+                    "behavior_change",
                 }
                 else "indexed"
             ),
@@ -438,12 +480,12 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
         )
 
     evidence = _matches(value, EVIDENCE_PATTERNS)
-    reference_lookup = _matches(value, REFERENCE_LOOKUP_PATTERNS)
     if reference_lookup and pack in {
         "health",
         "nutrition",
         "exercise",
         "software_security",
+        "behavior_change",
     }:
         return _plan(
             "live",

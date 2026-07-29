@@ -241,6 +241,37 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         self.assertNotIn(APNEWS_DOMAIN, decision.allowed_domains)
         self.assertNotIn(ARSTECHNICA_DOMAIN, decision.allowed_domains)
 
+    def test_current_official_docs_prefer_reference_pack_over_news(self) -> None:
+        decision = route_trusted_web_query(
+            "Check the official Supabase documentation for current RLS guidance."
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.SOFTWARE_SECURITY_REFERENCE,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            SOFTWARE_SECURITY_ALLOWED_DOMAINS,
+        )
+        self.assertNotIn(APNEWS_DOMAIN, decision.allowed_domains)
+        self.assertNotIn(ARSTECHNICA_DOMAIN, decision.allowed_domains)
+
+    def test_current_news_wording_is_not_stolen_by_reference_pack(self) -> None:
+        for query in (
+            "Search the latest OpenAI news.",
+            "What is the latest OpenAI research news?",
+        ):
+            with self.subTest(query=query):
+                decision = route_trusted_web_query(query)
+                self.assertEqual(
+                    decision.topic,
+                    TrustedWebTopicV1.CURRENT_NEWS,
+                )
+                self.assertEqual(
+                    decision.allowed_domains,
+                    CURRENT_NEWS_ALLOWED_DOMAINS,
+                )
+
     def test_behavior_route_keeps_bacb_off_by_default(self) -> None:
         default = route_trusted_web_query(
             "How can I use a baseline phase for training adherence?"

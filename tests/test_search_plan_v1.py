@@ -126,6 +126,39 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.selected_route, "trusted_health")
         self.assertEqual(plan.policy_pack, "exercise")
 
+    def test_find_evidence_imperative_uses_exercise_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Find evidence about resistance training frequency."
+        )
+        self.assertEqual(plan.decision, "indexed")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "exercise")
+
+    def test_behavior_change_evidence_uses_registered_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Find evidence about self-monitoring and adherence."
+        )
+        self.assertEqual(plan.decision, "indexed")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "behavior_change")
+
+    def test_current_official_docs_use_reference_route_not_news(self) -> None:
+        plan = create_search_plan_v1(
+            "Check the official Supabase documentation for current RLS guidance."
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "software_security")
+        self.assertEqual(plan.reason_codes, ("evidence_requested",))
+
+    def test_current_software_news_remains_on_news_route(self) -> None:
+        plan = create_search_plan_v1(
+            "What is the latest Supabase security news?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "current_news")
+        self.assertEqual(plan.policy_pack, "software_security")
+
     def test_nutrition_evidence_uses_nutrition_pack(self) -> None:
         plan = create_search_plan_v1(
             "Cite evidence about protein intake."

@@ -14,7 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
-SEARCH_CAPABILITY_MANIFEST_VERSION = "search_capability_manifest_v1"
+SEARCH_CAPABILITY_MANIFEST_VERSION = "search_capability_manifest_v1_1"
 SEARCH_CAPABILITY_AUTHORITY = "seebx_search_plan_v1"
 SEARCH_CAPABILITY_ROUTES = ("current_news", "trusted_health")
 SEARCH_CAPABILITY_MODES = ("indexed", "live")
@@ -24,6 +24,7 @@ SEARCH_CAPABILITY_POLICY_PACKS = (
     "nutrition",
     "exercise",
     "software_security",
+    "behavior_change",
 )
 
 TEXT_SEARCH_AUTHORIZATION_BASIS = "supabase_fresh_web_search_v1"
@@ -34,9 +35,10 @@ _MODEL_BRIEF = (
     "bounded current-news and trusted-evidence routes. The currently supported "
     "categories are only current news and recent events; trusted health and "
     "medical evidence; nutrition and food evidence; exercise and training "
-    "evidence; and official software or cybersecurity references and current "
-    "events. Do not imply support for other categories, "
-    "general fact-checking, arbitrary page retrieval, or unrestricted "
+    "evidence; behavior-change and self-monitoring evidence; and official "
+    "software or cybersecurity references and current events. Do not imply "
+    "support for other categories, general fact-checking, arbitrary page "
+    "retrieval, or unrestricted "
     "browsing. The server, not the browser or model, selects the route, source "
     "policy, and budget. Do not claim that this system cannot search the web "
     "or consult sources merely because no direct browser tool is present. Do "
@@ -95,6 +97,7 @@ class SearchCapabilityManifestV1(_StrictFrozenModel):
             "nutrition",
             "exercise",
             "software_security",
+            "behavior_change",
         ],
         ...,
     ] = SEARCH_CAPABILITY_POLICY_PACKS
@@ -139,6 +142,7 @@ class SearchCapabilityManifestV1(_StrictFrozenModel):
                 "nutrition",
                 "exercise",
                 "software_security",
+                "behavior_change",
             ],
             ...,
         ],
@@ -149,6 +153,7 @@ class SearchCapabilityManifestV1(_StrictFrozenModel):
             "nutrition",
             "exercise",
             "software_security",
+            "behavior_change",
         ],
         ...,
     ]:

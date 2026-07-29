@@ -32,7 +32,7 @@ from rag_engine.trusted_source_registry_v1 import (
     trusted_source_pack_v1,
 )
 
-POLICY_VERSION = "trusted_web_policy_v1_3"
+POLICY_VERSION = "trusted_web_policy_v1_4"
 
 CORE_ALLOWED_DOMAINS = ALL_REGISTERED_DOMAINS
 
@@ -456,6 +456,20 @@ _OFFICIAL_REFERENCE_INTENT_TERMS = (
     "check the web",
 )
 
+_REFERENCE_OVER_NEWS_TERMS = (
+    "documentation",
+    "docs",
+    "official source",
+    "official guidance",
+    "guideline",
+    "guidelines",
+    "recommendation",
+    "recommendations",
+    "specification",
+    "standard",
+    "advisory",
+)
+
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
@@ -561,6 +575,52 @@ def route_trusted_web_query(
             reason="safety_signal",
         )
     if (
+        _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS)
+        and _contains_any(
+            normalized,
+            _REFERENCE_OVER_NEWS_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.NUTRITION_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_nutrition_reference",
+            allowed_domains=NUTRITION_FOOD_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _TRAINING_EVIDENCE_TERMS)
+        and _contains_any(
+            normalized,
+            _REFERENCE_OVER_NEWS_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.EXERCISE_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_exercise_reference",
+            allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _MEDICAL_EVIDENCE_TERMS)
+        and _contains_any(normalized, _REFERENCE_OVER_NEWS_TERMS)
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.MEDICAL_ADJACENT,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_medical_evidence",
+            allowed_domains=MEDICAL_HEALTH_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _SOFTWARE_SECURITY_REFERENCE_TERMS)
+        and _contains_any(normalized, _REFERENCE_OVER_NEWS_TERMS)
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.SOFTWARE_SECURITY_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_software_security_reference",
+            allowed_domains=SOFTWARE_SECURITY_ALLOWED_DOMAINS,
+        )
+    if (
         _contains_any(normalized, _CURRENT_NEWS_INTENT_TERMS)
         and _contains_any(
             normalized,
@@ -656,20 +716,6 @@ def route_trusted_web_query(
             reason="approved_exercise_reference",
             allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
         )
-    if _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS):
-        return TrustedWebPolicyDecisionV1(
-            topic=TrustedWebTopicV1.NUTRITION_EVIDENCE,
-            disposition=TrustedWebDispositionV1.SEARCH,
-            reason="approved_nutrition_evidence",
-            allowed_domains=NUTRITION_FOOD_ALLOWED_DOMAINS,
-        )
-    if _contains_any(normalized, _TRAINING_EVIDENCE_TERMS):
-        return TrustedWebPolicyDecisionV1(
-            topic=TrustedWebTopicV1.TRAINING_EVIDENCE,
-            disposition=TrustedWebDispositionV1.SEARCH,
-            reason="approved_training_evidence",
-            allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
-        )
     if (
         _contains_any(normalized, _MEDICAL_EVIDENCE_TERMS)
         and _contains_any(normalized, _REFERENCE_INTENT_TERMS)
@@ -689,6 +735,20 @@ def route_trusted_web_query(
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_software_security_reference",
             allowed_domains=SOFTWARE_SECURITY_ALLOWED_DOMAINS,
+        )
+    if _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.NUTRITION_EVIDENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_nutrition_evidence",
+            allowed_domains=NUTRITION_FOOD_ALLOWED_DOMAINS,
+        )
+    if _contains_any(normalized, _TRAINING_EVIDENCE_TERMS):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.TRAINING_EVIDENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_training_evidence",
+            allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
         )
     if (
         _GENERAL_CURRENT_NEWS_RE.search(normalized)

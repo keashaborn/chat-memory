@@ -36,6 +36,7 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
                         "nutrition",
                         "exercise",
                         "software_security",
+                        "behavior_change",
                     ),
                 )
                 self.assertIn("server, not the browser or model", manifest.model_brief)
@@ -48,6 +49,10 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
                 self.assertIn("arbitrary page retrieval", manifest.model_brief)
                 self.assertIn("nutrition and food evidence", manifest.model_brief)
                 self.assertIn("exercise and training evidence", manifest.model_brief)
+                self.assertIn(
+                    "behavior-change and self-monitoring evidence",
+                    manifest.model_brief,
+                )
                 self.assertIn(
                     "official software or cybersecurity references",
                     manifest.model_brief,
