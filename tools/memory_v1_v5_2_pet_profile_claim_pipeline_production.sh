@@ -23,6 +23,7 @@ python_bin=/opt/chat-memory/venv/bin/python
 review_root=/home/ubuntu/memory-v1-reviews
 snapshot_root=/home/ubuntu/brains/snapshots
 lock_file=/home/ubuntu/brains/.memory_v1_v5_2_pet_profile_claim.lock
+resume_from=${MEMORY_V1_V5_2_PET_PROFILE_CLAIM_RESUME_FROM:-}
 
 migration=ops/sql/20260729_memory_v1_v5_2_historical_pet_claim_projection.sql
 rollback=ops/sql/20260729_memory_v1_v5_2_historical_pet_claim_projection_rollback.sql
@@ -207,6 +208,19 @@ source /opt/chat-memory/.env
 set +a
 [[ -n "${POSTGRES_DSN:-}" ]]
 authenticated_health
+if [[ -n "$resume_from" ]]; then
+  resume_from=$(realpath "$resume_from")
+  [[ "$resume_from" == "$review_root"/pet-profile-claim-production-* ]]
+  for name in stage-manifest.json stage-authorization.json \
+    stage-cross-owner.json stage-apply.json stage-replay.json; do
+    [[ -f "$resume_from/$name" ]]
+    [[ "$(stat -c %a "$resume_from/$name")" == 600 ]]
+  done
+  [[ "$(jq -er '.rows_written' "$resume_from/stage-apply.json")" == 60 ]]
+  [[ "$(jq -er '.rows_written' "$resume_from/stage-replay.json")" == 0 ]]
+  [[ "$(jq -er '.cross_owner_rejected' \
+    "$resume_from/stage-cross-owner.json")" == true ]]
+fi
 
 exec 9>"$lock_file"
 flock -n 9
@@ -329,20 +343,45 @@ for observation in "${observations[@]}"; do
   observation_args+=(--observation "$observation")
 done
 
-stage_manifest="$artifact_dir/stage-manifest.json"
-stage_authorization="$artifact_dir/stage-authorization.json"
+stage_manifest="${resume_from:+$resume_from/stage-manifest.json}"
+stage_authorization="${resume_from:+$resume_from/stage-authorization.json}"
 stage_cross_owner="$artifact_dir/stage-cross-owner.json"
-stage_apply="$artifact_dir/stage-apply.json"
-stage_replay="$artifact_dir/stage-replay.json"
+stage_apply="${resume_from:+$resume_from/stage-apply.json}"
+stage_replay="${resume_from:+$resume_from/stage-replay.json}"
 
 phase=stage_manifest
-POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
-  "$python_bin" "$repo_root/$stage_runner" manifest \
-  --owner "$owner" "${observation_args[@]}" \
-  --required-head "$head" --output "$stage_manifest"
-PYTHONPATH="$repo_root:$repo_root/scripts" \
-  "$python_bin" "$repo_root/$stage_runner" authorize \
-  --manifest "$stage_manifest" --output "$stage_authorization"
+if [[ -z "$resume_from" ]]; then
+  stage_manifest="$artifact_dir/stage-manifest.json"
+  stage_authorization="$artifact_dir/stage-authorization.json"
+  stage_apply="$artifact_dir/stage-apply.json"
+  stage_replay="$artifact_dir/stage-replay.json"
+  POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
+    "$python_bin" "$repo_root/$stage_runner" manifest \
+    --owner "$owner" "${observation_args[@]}" \
+    --required-head "$head" --output "$stage_manifest"
+  PYTHONPATH="$repo_root:$repo_root/scripts" \
+    "$python_bin" "$repo_root/$stage_runner" authorize \
+    --manifest "$stage_manifest" --output "$stage_authorization"
+else
+  [[ "$(psql_row "
+    SELECT count(DISTINCT link.observation_id)
+    FROM memory.projection_plan_observation AS link
+    JOIN memory.projection_plan AS plan
+      USING(owner_user_id,plan_id)
+    WHERE link.owner_user_id='$owner'::uuid
+      AND link.observation_id=ANY(ARRAY[
+        '2e668700-7ae6-4752-ab6a-423e6c6a8c6d'::uuid,
+        'eed6cae7-33c9-43e9-8736-98861a057fa5'::uuid,
+        'e5939e3f-b732-4f72-b7c4-b60ee7c55244'::uuid,
+        '37c05103-3e18-4444-9722-4ab384896aa7'::uuid,
+        '978c1972-82d5-4d19-a32f-b45c7f4cfbaa'::uuid,
+        'cb711085-b49b-4b9c-be3b-c34d2d8456da'::uuid,
+        '6db9a4fd-e109-48ed-8d95-c97eef75382c'::uuid,
+        '8c4476ae-b917-4678-8d63-f4949982e196'::uuid,
+        '6151f123-d05f-404d-b3f6-d7079de6b4e6'::uuid,
+        '82c87916-a90c-4af8-b4cb-fbd2981f9f96'::uuid
+      ])")" == 10 ]]
+fi
 POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
   "$python_bin" "$repo_root/$stage_runner" cross-owner \
   --manifest "$stage_manifest" --other-owner "$other_owner" \
@@ -350,22 +389,24 @@ POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
 [[ "$(jq -er '.cross_owner_rejected' "$stage_cross_owner")" == true ]]
 
 phase=stage_apply
-MEMORY_V1_REQUIRED_HEAD="$head" \
-MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
-POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
-  "$python_bin" "$repo_root/$stage_runner" apply \
-  --manifest "$stage_manifest" --authorization "$stage_authorization" \
-  --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
-  --output "$stage_apply"
-[[ "$(jq -er '.rows_written' "$stage_apply")" == 60 ]]
-MEMORY_V1_REQUIRED_HEAD="$head" \
-MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
-POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
-  "$python_bin" "$repo_root/$stage_runner" replay \
-  --manifest "$stage_manifest" --authorization "$stage_authorization" \
-  --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
-  --output "$stage_replay"
-[[ "$(jq -er '.rows_written' "$stage_replay")" == 0 ]]
+if [[ -z "$resume_from" ]]; then
+  MEMORY_V1_REQUIRED_HEAD="$head" \
+  MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
+  POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
+    "$python_bin" "$repo_root/$stage_runner" apply \
+    --manifest "$stage_manifest" --authorization "$stage_authorization" \
+    --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
+    --output "$stage_apply"
+  [[ "$(jq -er '.rows_written' "$stage_apply")" == 60 ]]
+  MEMORY_V1_REQUIRED_HEAD="$head" \
+  MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
+  POSTGRES_DSN="$POSTGRES_DSN" PYTHONPATH="$repo_root:$repo_root/scripts" \
+    "$python_bin" "$repo_root/$stage_runner" replay \
+    --manifest "$stage_manifest" --authorization "$stage_authorization" \
+    --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
+    --output "$stage_replay"
+  [[ "$(jq -er '.rows_written' "$stage_replay")" == 0 ]]
+fi
 
 review_decisions="$artifact_dir/review-decisions.json"
 review_manifest="$artifact_dir/review-manifest.json"
@@ -400,8 +441,6 @@ for item in stage["items"]:
     ]
     value["decisions"].append({
         "observation_id": item["observation_id"],
-        "plan_id": item["plan_id"],
-        "projection_ref": "p01",
         "decision": "authorized",
         "reason": (
             "Reviewed atomic pet-profile observation with bound owner-scoped "
@@ -495,6 +534,20 @@ printf '%s\n' \
   $'projection_review\t10' \
   $'relational_operation_request\t30' \
   >"$expected"
+if [[ -n "$resume_from" ]]; then
+  printf '%s\n' \
+    $'claim\t10' \
+    $'claim_assessment\t10' \
+    $'claim_assessment_apply_v5\t10' \
+    $'claim_assessment_review_v5\t10' \
+    $'claim_observation\t10' \
+    $'claim_revision\t20' \
+    $'projection_apply_event\t10' \
+    $'projection_dispatch_v5\t10' \
+    $'projection_review\t10' \
+    $'relational_operation_request\t20' \
+    >"$expected"
+fi
 chmod 0600 "$expected"
 capture_partition target "$target_after"
 capture_partition non_target "$non_target_after"
