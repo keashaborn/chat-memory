@@ -266,6 +266,63 @@ async def prepare_item(
     }
 
 
+async def validate_live_item(
+    conn: Any,
+    manifest: dict[str, Any],
+    item: dict[str, Any],
+    registry: dict[str, dict[str, Any]],
+    *,
+    replay: bool,
+) -> tuple[list[dict[str, Any]], str]:
+    source, spans, observation_ref = await source_snapshot(
+        conn, item["observation_id"], manifest["owner_user_id"]
+    )
+    packet = stage.build_projection_packet(
+        manifest["owner_user_id"], source
+    )
+    stage.validate_packet(packet, manifest["owner_user_id"], registry)
+    packet_text = stage.stable_json(packet)
+    if (
+        observation_ref != item["observation_ref"]
+        or str(source["evidence_id"]) != item["evidence_id"]
+        or source["predicate"] != item["predicate"]
+        or source["temporal"]["state_relation"]
+        != item["state_relation"]
+        or source["observation_sha256"] != item["observation_sha256"]
+        or stage.canonical_hash(spans) != item["source_spans_sha256"]
+        or packet != item["packet"]
+        or hashlib.sha256(packet_text.encode("utf-8")).hexdigest()
+        != item["packet_text_sha256"]
+    ):
+        raise stage.ProjectionStageError(
+            "live deterministic pet source drifted"
+        )
+    packet_preflight = await stage.preflight_projection(
+        conn, item["plan_id"], packet_text
+    )
+    entailment_preflight = await stage.preflight_entailment(
+        conn, item["observation_id"], spans
+    )
+    expected_plans = 1 if replay else 0
+    expected_aggregates = int(
+        TARGETS[item["observation_id"]].get(
+            "expected_existing_aggregates", 0
+        )
+    )
+    if (
+        packet_preflight["existing_aggregates"] != expected_aggregates
+        or packet_preflight["existing_plans"] != expected_plans
+        or packet_preflight["owner_manifest_sha256"]
+        != item["owner_manifest_sha256"]
+        or entailment_preflight["authorization_manifest_sha256"]
+        != item["entailment_authorization_manifest_sha256"]
+    ):
+        raise stage.ProjectionStageError(
+            "live pet database preflight drifted"
+        )
+    return spans, packet_text
+
+
 async def source_snapshot(
     conn: Any, observation_id: str, expected_owner: str
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
@@ -371,6 +428,7 @@ def configure_stage() -> None:
     stage.TARGETS = TARGETS
     stage.source_snapshot = source_snapshot
     stage.prepare_item = prepare_item
+    stage.validate_live_item = validate_live_item
 
 
 if __name__ == "__main__":
