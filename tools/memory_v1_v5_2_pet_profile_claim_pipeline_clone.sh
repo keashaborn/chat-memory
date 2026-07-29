@@ -22,6 +22,8 @@ other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 deferred_observation=bc8866ad-95e8-4413-832e-813f601eece6
 env_file=/opt/chat-memory/.env
 head=$(git -C "$repo_root" rev-parse HEAD)
+compatibility_sql=ops/sql/20260729_memory_v1_v5_2_historical_pet_claim_projection.sql
+compatibility_test=tests/memory_v1_v5_2_historical_pet_claim_projection_security.sql
 
 stage_runner=scripts/memory_v1_v5_2_pet_profile_claim_stage.py
 review_manifest_runner=scripts/memory_v1_v5_2_pet_profile_claim_review_manifest.py
@@ -93,6 +95,10 @@ production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
 docker exec "$container" pg_dump -U sage -d "$source_db" -Fc \
   | docker exec -i "$container" pg_restore -U sage -d "$clone_db"
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" < "$repo_root/$compatibility_sql"
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+  -U sage -d "$clone_db" < "$repo_root/$compatibility_test"
 
 clone_dsn=$(SOURCE_DSN="$POSTGRES_DSN" CLONE_DB="$clone_db" python3 - <<'PY'
 import os
