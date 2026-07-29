@@ -1,0 +1,43 @@
+{
+  "bundles": [
+    {
+      "expected_counts": {
+        "candidates": 1,
+        "mentions": 1,
+        "observations": 1,
+        "resolutions": 1,
+        "temporals": 1
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-router-48ac84f6a649b7cc3a61326115c2b2e2e04025e28ebc16becf60cce76d3a6016-stage.json",
+      "sha256": "d3a10682dd71600091914c7346da4ad4c1e0c0f9925d0e7b2f60efa09da36c40"
+    },
+    {
+      "expected_counts": {
+        "candidates": 1,
+        "mentions": 1,
+        "observations": 1,
+        "resolutions": 1,
+        "temporals": 1
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-router-1c3b2f3aa6a26f76363f5d5c12107bf86e06cd337219d8ca8fe28b3b826cac51-stage.json",
+      "sha256": "2fe00686c1138ccc0681ff79395fd76905ce84a38168e7a6fabf3103f8244e65"
+    },
+    {
+      "expected_counts": {
+        "candidates": 0,
+        "mentions": 1,
+        "observations": 1,
+        "resolutions": 1,
+        "temporals": 1
+      },
+      "expected_outcome": "applied",
+      "path": "/home/ubuntu/memory-v1-reviews/v5-2-router-ff9fe6350d3ad9d7aed3e0784379e5df7f253dde5f277d85746c9c24508873a7-stage.json",
+      "sha256": "ae33f0aef4c0df1249eddcab2fb0746e24a09f9d996c47b974663b7fc7d7a9b6"
+    }
+  ],
+  "contract_version": "memory_v1_v5_2_stage_batch_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "target_server": "seebx"
+}

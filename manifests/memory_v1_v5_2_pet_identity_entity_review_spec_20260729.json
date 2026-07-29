@@ -1,0 +1,54 @@
+{
+  "contract_version": "memory_v1_v5_2_entity_review_spec_v1",
+  "items": [
+    {
+      "entity_ref": "e00",
+      "entity_type": "animal",
+      "evidence_id": "c5d6f5cf-c6d6-554c-85d9-02150e8b8ae7",
+      "expected_action": "link_existing",
+      "expected_proposed_entity": null,
+      "expected_review_reason_codes": [
+        "relationship_role_unverified",
+        "sensitive_context_review"
+      ],
+      "expected_selected_entity_id": "6db538e2-b7f9-48ff-b2bc-db757708b660",
+      "name_text": "Keasha von Steffen Haus",
+      "review_reason": "Approve review of the exact Keasha von Steffen Haus mention linking to the existing owner-scoped animal entity; stop before entity apply."
+    },
+    {
+      "entity_ref": "e00",
+      "entity_type": "animal",
+      "evidence_id": "2be95051-30c8-5f87-8ff9-e0999600b447",
+      "expected_action": "link_existing",
+      "expected_proposed_entity": null,
+      "expected_review_reason_codes": [
+        "relationship_role_unverified",
+        "sensitive_context_review"
+      ],
+      "expected_selected_entity_id": "0c620047-b302-44ef-b04a-810de3b311fc",
+      "name_text": "Dahlia",
+      "review_reason": "Approve review of the exact Dahlia mention linking to the existing owner-scoped animal entity; stop before entity apply."
+    },
+    {
+      "entity_ref": "e00",
+      "entity_type": "animal",
+      "evidence_id": "88161526-0c53-5291-8601-0bd0ba41da53",
+      "expected_action": "create_new",
+      "expected_proposed_entity": {
+        "canonical_name": "Helsing",
+        "creation_reason": "new_named_entity_no_exact_owner_match",
+        "display_label": "Helsing",
+        "entity_type": "animal",
+        "identity_state": "named"
+      },
+      "expected_review_reason_codes": [
+        "new_named_entity_requires_review"
+      ],
+      "expected_selected_entity_id": null,
+      "name_text": "Helsing",
+      "review_reason": "Approve review of the exact named animal Helsing as a new owner-scoped entity; stop before entity apply."
+    }
+  ],
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "target_server": "seebx"
+}
