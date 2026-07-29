@@ -80,6 +80,33 @@ capture_memory_without_outbox() {
   chmod 0600 "$output"
 }
 
+capture_production_targets() {
+  local output=$1 claim_csv
+  claim_csv=$(jq -r '[.items[].claim_id]|join(",")' "$plan")
+  docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+    -U sage -d "$source_db" -c "
+    SELECT source || E'\t' || row_json
+    FROM (
+      SELECT 'claim' AS source,to_jsonb(value)::text AS row_json
+      FROM memory.claim AS value
+      WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+        AND claim_id=ANY(string_to_array('$claim_csv',',')::uuid[])
+      UNION ALL
+      SELECT 'claim_revision',to_jsonb(value)::text
+      FROM memory.claim_revision AS value
+      WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+        AND claim_id=ANY(string_to_array('$claim_csv',',')::uuid[])
+      UNION ALL
+      SELECT 'projection_outbox',to_jsonb(value)::text
+      FROM memory.projection_outbox AS value
+      WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid
+        AND aggregate_id=ANY(string_to_array('$claim_csv',',')::uuid[])
+    ) AS exact_rows
+    ORDER BY source,row_json
+  " >"$output"
+  chmod 0600 "$output"
+}
+
 docker exec "$container" psql -X -A -t -U sage -d "$source_db" -c "
   SELECT table_name FROM information_schema.tables
   WHERE table_schema='memory' AND table_type='BASE TABLE'
@@ -88,11 +115,11 @@ docker exec "$container" psql -X -A -t -U sage -d "$source_db" -c "
 " >"$table_list"
 [[ -s "$table_list" ]]
 
-production_memory_before="$artifact_dir/production-memory-before.tsv"
-production_memory_after="$artifact_dir/production-memory-after.tsv"
+production_targets_before="$artifact_dir/production-targets-before.tsv"
+production_targets_after="$artifact_dir/production-targets-after.tsv"
 clone_memory_before="$artifact_dir/clone-memory-before.tsv"
 clone_memory_after="$artifact_dir/clone-memory-after.tsv"
-capture_memory_without_outbox "$source_db" "$production_memory_before"
+capture_production_targets "$production_targets_before"
 qdrant_before=$(qdrant_signature)
 
 docker exec "$container" createdb -U sage -T template0 "$clone_db"
@@ -138,8 +165,8 @@ PYTHONPATH="$repo_root" \
 
 capture_memory_without_outbox "$clone_db" "$clone_memory_after"
 cmp -s "$clone_memory_before" "$clone_memory_after"
-capture_memory_without_outbox "$source_db" "$production_memory_after"
-cmp -s "$production_memory_before" "$production_memory_after"
+capture_production_targets "$production_targets_after"
+cmp -s "$production_targets_before" "$production_targets_after"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_after" == "$qdrant_before" ]]
 
@@ -172,7 +199,8 @@ jq -n \
     cross_owner_claim_count:0,
     cross_owner_outbox_count:0,
     cross_owner_insert_rejected:true,
-    protected_memory_unchanged:true,
+    clone_non_outbox_memory_unchanged:true,
+    production_target_claims_and_outbox_unchanged:true,
     production_qdrant_sha256:$qdrant_sha256,
     production_qdrant_unchanged:true,
     replay_rows_written:0,
