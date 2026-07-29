@@ -104,6 +104,12 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(literal_properties["unit"], {"type": "null"})
         self.assertEqual(literal_properties["approximate"]["const"], False)
+        self.assertEqual(
+            request.output_schema["$defs"]["ProviderTemporal"]["properties"][
+                "anchored_to_source_time"
+            ],
+            {"const": False, "type": "boolean"},
+        )
         self.assertEqual(request.output_schema["properties"]["observations"]["minItems"], 1)
         self.assertEqual(
             provider._policy_compiler_version,
@@ -644,7 +650,7 @@ class LocalProviderV52Test(unittest.TestCase):
             "historical_pet_relationship_from_past_acquisition",
             by_predicate["relationship.has_pet"][0]["reason_codes"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "trusted_source_time_upper_bound",
             by_predicate["relationship.has_pet"][0]["temporal"][
                 "reason_codes"
@@ -1055,12 +1061,13 @@ class LocalProviderV52Test(unittest.TestCase):
             "historical_relationship_ended_before_source",
             observation["temporal"]["reason_codes"],
         )
-        self.assertTrue(observation["temporal"]["anchored_to_source_time"])
-        self.assertEqual(
-            observation["temporal"]["instant_range"]["upper"],
-            "2026-07-21T12:00:00.000000Z",
+        self.assertFalse(
+            observation["temporal"]["anchored_to_source_time"]
         )
-        self.assertIn(
+        self.assertIsNone(
+            observation["temporal"]["instant_range"]["upper"]
+        )
+        self.assertNotIn(
             "trusted_source_time_upper_bound",
             observation["temporal"]["reason_codes"],
         )
@@ -1218,12 +1225,13 @@ class LocalProviderV52Test(unittest.TestCase):
             "historical_relationship_ended_before_source",
             ownership["temporal"]["reason_codes"],
         )
-        self.assertTrue(ownership["temporal"]["anchored_to_source_time"])
-        self.assertEqual(
-            ownership["temporal"]["instant_range"]["upper"],
-            "2026-07-21T12:00:00.000000Z",
+        self.assertFalse(
+            ownership["temporal"]["anchored_to_source_time"]
         )
-        self.assertIn(
+        self.assertIsNone(
+            ownership["temporal"]["instant_range"]["upper"]
+        )
+        self.assertNotIn(
             "trusted_source_time_upper_bound",
             ownership["temporal"]["reason_codes"],
         )
@@ -1337,12 +1345,13 @@ class LocalProviderV52Test(unittest.TestCase):
             "health.user_reported_observation",
         ):
             temporal_value = by_predicate[predicate]["temporal"]
-            self.assertTrue(temporal_value["anchored_to_source_time"])
-            self.assertEqual(
-                temporal_value["instant_range"]["upper"],
-                "2026-07-21T12:00:00.000000Z",
+            self.assertFalse(
+                temporal_value["anchored_to_source_time"]
             )
-            self.assertIn(
+            self.assertIsNone(
+                temporal_value["instant_range"]["upper"]
+            )
+            self.assertNotIn(
                 "trusted_source_time_upper_bound",
                 temporal_value["reason_codes"],
             )
@@ -1417,12 +1426,13 @@ class LocalProviderV52Test(unittest.TestCase):
             "self",
             {item["entity_type"] for item in value["entity_mentions"]},
         )
-        self.assertTrue(observation["temporal"]["anchored_to_source_time"])
-        self.assertEqual(
-            observation["temporal"]["instant_range"]["upper"],
-            "2026-07-21T12:00:00.000000Z",
+        self.assertFalse(
+            observation["temporal"]["anchored_to_source_time"]
         )
-        self.assertIn(
+        self.assertIsNone(
+            observation["temporal"]["instant_range"]["upper"]
+        )
+        self.assertNotIn(
             "trusted_source_time_upper_bound",
             observation["temporal"]["reason_codes"],
         )

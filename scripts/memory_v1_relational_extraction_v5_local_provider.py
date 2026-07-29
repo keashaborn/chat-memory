@@ -4076,22 +4076,15 @@ def _relationship_v5_1_temporal(
 def _historical_state_before_source_temporal(
     source: TrustedExtractionSource,
 ) -> dict[str, Any]:
-    value = _relationship_v5_1_temporal(
+    # This compiler stage is still on the untrusted provider side of the
+    # temporal boundary. Preserve the proposed historical interval, but leave
+    # source-time anchoring to validate_and_normalize(), which owns the trusted
+    # source_recorded_at value.
+    return _relationship_v5_1_temporal(
         source,
         temporal_profile="active_interval",
         historical_end=True,
     )
-    if value["basis"] == "instant" and value["instant_range"] is not None:
-        value["anchored_to_source_time"] = True
-        value["instant_range"]["upper"] = source.source_recorded_at
-        if (
-            "trusted_source_time_upper_bound"
-            not in value["reason_codes"]
-        ):
-            value["reason_codes"].append(
-                "trusted_source_time_upper_bound"
-            )
-    return value
 
 
 def _relationship_v5_1_complete_explicit_assertions(
@@ -6458,6 +6451,26 @@ def _llama_cpp_output_schema(
                 normalize(child, property_name)
 
     normalize(schema)
+    definitions = schema.get("$defs", {})
+    provider_temporal = definitions.get("ProviderTemporal", {})
+    temporal_properties = provider_temporal.get("properties", {})
+    anchored_to_source_time = temporal_properties.get(
+        "anchored_to_source_time"
+    )
+    if not all(
+        isinstance(item, dict)
+        for item in (
+            definitions,
+            provider_temporal,
+            temporal_properties,
+            anchored_to_source_time,
+        )
+    ):
+        raise ValueError("provider temporal output schema is missing")
+    temporal_properties["anchored_to_source_time"] = {
+        "const": False,
+        "type": "boolean",
+    }
     observation = schema.get("$defs", {}).get("ProviderObservation", {})
     predicate = observation.get("properties", {}).get("predicate")
     if allowed_predicates and isinstance(predicate, dict):

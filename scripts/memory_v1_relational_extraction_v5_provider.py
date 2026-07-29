@@ -1370,6 +1370,12 @@ def _normalize_temporal(
                 # conservative upper bound. This is a one-sided open interval,
                 # not a falsely precise closed/bounded interval.
                 temporal["instant_range"]["upper"] = trusted
+                repair_code = "trusted_source_time_upper_bound"
+                if (
+                    repair_code not in temporal["reason_codes"]
+                    and len(temporal["reason_codes"]) < 10
+                ):
+                    temporal["reason_codes"].append(repair_code)
             else:
                 temporal["instant_range"]["lower"] = trusted
                 temporal["instant_range"]["upper"] = None
