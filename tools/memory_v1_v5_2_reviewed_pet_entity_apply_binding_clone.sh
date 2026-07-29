@@ -17,7 +17,7 @@ compose=(
 )
 migration=ops/sql/20260725_memory_v1_v5_2_entity_apply_planner_v1.sql
 rollback=ops/sql/20260725_memory_v1_v5_2_entity_apply_planner_v1_rollback.sql
-sql_test=tests/memory_v1_v5_2_entity_apply_planner_v1.sql
+sql_test=tests/memory_v1_v5_2_reviewed_pet_entity_apply_planner.sql
 runner=scripts/memory_v1_v5_2_reviewed_pet_entity_apply_batch.py
 backup=$(mktemp /tmp/memory-v1-v5-2-reviewed-pet-entity-apply.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-reviewed-pet-entity-apply-roles.XXXXXX.sql)
