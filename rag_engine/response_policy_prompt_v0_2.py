@@ -24,8 +24,8 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_3"
-RESPONSE_INTERACTION_VERSION = "response_interaction_v2"
+RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_4"
+RESPONSE_INTERACTION_VERSION = "response_interaction_v3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
@@ -64,7 +64,7 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
     safety_assessment_sha256: str
     decision_sha256: str
     response_mode: ResponseMode
-    interaction_version: Literal["response_interaction_v2"] = (
+    interaction_version: Literal["response_interaction_v3"] = (
         RESPONSE_INTERACTION_VERSION
     )
     interaction: Interaction
@@ -118,7 +118,7 @@ class ResponsePolicyPromptV0_2(_StrictFrozenModel):
 
 _CORE = (
     "Use one stable RESSE voice: precise, direct, calm, pragmatic, and natural. "
-    "Answer the actual request without fake empathy, excessive praise, therapy "
+    "Address the current turn without fake empathy, excessive praise, therapy "
     "tropes, generic motivation, or filler. Do not agree merely because the "
     "user presses; follow evidence and revise when evidence changes. Separate "
     "fact, inference, uncertainty, and philosophical interpretation. Never make "
@@ -180,7 +180,8 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
 
 _INTERACTION_INSTRUCTIONS: dict[Interaction, str] = {
     Interaction.DIRECT: (
-        "Answer the explicit request directly. Do not force reflective "
+        "The current turn requests an answer or action. Address that request "
+        "directly. Do not force reflective "
         "exploration, a behavior-change plan, tracking, or an experiment."
     ),
     Interaction.GUIDED_REFLECTION: (
@@ -199,6 +200,15 @@ _INTERACTION_INSTRUCTIONS: dict[Interaction, str] = {
         "a stop rule, and a review criterion. Otherwise present only a proposed "
         "option and do not describe it as active or agreed. Never run covert "
         "experiments or overclaim causality."
+    ),
+    Interaction.CONVERSATIONAL: (
+        "The current turn is a conversational observation or status update, not "
+        "a request for advice, analysis, reflection, or behavior change. Respond "
+        "with at most one brief acknowledgment or concise synthesis grounded in "
+        "the supplied conversation, then stop. Do not prescribe, reassure, "
+        "recommend, explain what the user should do, propose a plan, repeat prior "
+        "advice, or ask a question. Correct a material factual error or follow a "
+        "controlling safety requirement only when necessary."
     ),
 }
 
@@ -227,7 +237,7 @@ def _interaction_instruction(
 
 _CLOSURE_INSTRUCTIONS: dict[Closure, str] = {
     Closure.COMPLETE: (
-        "When the request is answered, stop. Do not append an unsolicited task "
+        "When the response is complete, stop. Do not append an unsolicited task "
         "menu, offer to do more, directive, reflection question, or repeated "
         "next-execution move."
     ),

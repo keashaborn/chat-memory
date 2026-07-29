@@ -54,7 +54,7 @@ from rag_engine.voice_language_v1 import (
 
 ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v1"
 ASSEMBLY_RESULT_VERSION = "assembled_prompt_v1"
-ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v2"
+ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v3"
 CONTEXT_BLOCK_VERSION = "prompt_reference_context_block_v1"
 CONTEXT_FRAGMENT_VERSION = "prompt_reference_fragment_v1"
 ASSEMBLER_VERSION = "resse_typed_prompt_assembler_v2"

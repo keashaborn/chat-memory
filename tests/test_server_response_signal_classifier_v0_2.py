@@ -647,7 +647,11 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
         )
 
         self.assertIs(result.signals.guided_reflection_requested, False)
-        self.assertEqual(decision.interaction, Interaction.DIRECT)
+        self.assertEqual(decision.interaction, Interaction.CONVERSATIONAL)
+        self.assertEqual(
+            decision.interaction_reasons,
+            ("conversational_update_default",),
+        )
 
     def test_direct_request_precedes_frozen_reflection_phrase(self) -> None:
         client = FakeClient(

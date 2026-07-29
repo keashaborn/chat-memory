@@ -20,7 +20,7 @@ from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     InactiveResponseCompositionRootV0_2,
 )
-from rag_engine.response_inspection_v1 import build_response_inspection_v1
+from rag_engine.response_inspection_v2 import build_response_inspection_v2
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.voice_observability_v1 import (
@@ -192,7 +192,7 @@ async def resse_response_query(
         }
         if payload.include_inspection:
             try:
-                result["inspection"] = build_response_inspection_v1(
+                result["inspection"] = build_response_inspection_v2(
                     trusted_plan=execution.trusted_plan,
                     provider_response=execution.provider_response,
                     finalized=finalized,

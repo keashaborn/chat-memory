@@ -559,11 +559,11 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             result.contract_version,
-            "response_policy_decision_v0_3",
+            "response_policy_decision_v0_4",
         )
         self.assertEqual(
             POLICY_DECISION_VERSION,
-            "response_policy_decision_v0_3",
+            "response_policy_decision_v0_4",
         )
         self.assertEqual(
             POLICY_SIGNALS_VERSION,
@@ -571,29 +571,29 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             RESPONSE_POLICY_PROMPT_VERSION,
-            "response_policy_prompt_v0_3",
+            "response_policy_prompt_v0_4",
         )
-        self.assertEqual(RESPONSE_INTERACTION_VERSION, "response_interaction_v2")
+        self.assertEqual(RESPONSE_INTERACTION_VERSION, "response_interaction_v3")
         self.assertEqual(
             prompt.contract_version,
-            "response_policy_prompt_v0_3",
+            "response_policy_prompt_v0_4",
         )
-        self.assertEqual(prompt.interaction_version, "response_interaction_v2")
+        self.assertEqual(prompt.interaction_version, "response_interaction_v3")
         self.assertEqual(
             ASSEMBLY_MANIFEST_VERSION,
-            "prompt_assembly_manifest_v2",
+            "prompt_assembly_manifest_v3",
         )
         self.assertEqual(
             SHADOW_TRACE_VERSION,
-            "resse_response_shadow_trace_v0_4",
+            "resse_response_shadow_trace_v0_5",
         )
         self.assertEqual(
             TRUSTED_PLAN_VERSION,
-            "trusted_response_plan_v0_3",
+            "trusted_response_plan_v0_4",
         )
         self.assertEqual(
             ORCHESTRATOR_VERSION,
-            "resse_response_orchestrator_v0_3",
+            "resse_response_orchestrator_v0_4",
         )
         self.assertEqual(
             TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,

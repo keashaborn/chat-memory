@@ -50,7 +50,7 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertEqual(rendered.response_mode, ResponseMode.ORDINARY)
         self.assertEqual(rendered.closure, Closure.COMPLETE)
         self.assertEqual(rendered.fm_effective_level, FMLevel.OFF)
-        self.assertIn("When the request is answered, stop", rendered.content)
+        self.assertIn("When the response is complete, stop", rendered.content)
         self.assertIn("unsolicited task menu", rendered.content)
         self.assertIn("Effective Fractal Monism level: OFF", rendered.content)
 

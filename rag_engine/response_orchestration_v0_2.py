@@ -51,12 +51,12 @@ from rag_engine.voice_language_v1 import (
 
 
 TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_2"
-TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_3"
+TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_4"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_3"
 )
-SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_4"
-ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_3"
+SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_5"
+ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_4"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
 )

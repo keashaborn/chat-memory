@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 POLICY_VERSION = "response_policy_v0_2"
-POLICY_DECISION_VERSION = "response_policy_decision_v0_3"
+POLICY_DECISION_VERSION = "response_policy_decision_v0_4"
 POLICY_INPUT_VERSION = "response_policy_input_v0_2"
 POLICY_SIGNALS_VERSION = "response_policy_signals_v0_3"
 SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
@@ -65,6 +65,7 @@ class Interaction(str, Enum):
     DIRECT = "DIRECT"
     GUIDED_REFLECTION = "GUIDED_REFLECTION"
     BEHAVIORAL_INTERVENTION = "BEHAVIORAL_INTERVENTION"
+    CONVERSATIONAL = "CONVERSATIONAL"
 
 
 class QuestionPolicy(str, Enum):
@@ -740,6 +741,30 @@ _LOCAL_DIRECT_RESPONSE_RULES: tuple[re.Pattern[str], ...] = (
     ),
 )
 
+_LOCAL_RESPONSE_REQUEST_SHAPE_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\?"),
+    re.compile(
+        r"^(?:please )?(?:(?:can|could|would|will|should) "
+        r"(?:you|we|i|this|that|it)|"
+        r"(?:do|does|did|is|are|am|was|were|what|why|how|when|where|who|which))\b"
+    ),
+    re.compile(
+        r"^(?:please )?(?:answer|tell|explain|describe|summarize|compare|"
+        r"review|analyze|show|give|write|create|make|set|use|find|check|"
+        r"fix|implement|deploy|restart|run|list|identify|recommend|advise|"
+        r"calculate|continue|help)\b"
+    ),
+    re.compile(
+        r"^i (?:want|need|would like) "
+        r"(?:you to|your help|help(?: with| to)?)\b"
+    ),
+    re.compile(
+        r"\b(?:let us|let's) "
+        r"(?:continue|implement|design|build|make|set|try|test|track|"
+        r"review|analyze)\b"
+    ),
+)
+
 _LOCAL_GUIDED_REFLECTION_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"\b(?:help me|i want to|can we) "
@@ -1084,11 +1109,25 @@ def _select_interaction(
             tuple(sorted(reasons)),
             False,
         )
-    reasons = ["direct_default"]
+    if _matches_any(text, _LOCAL_RESPONSE_REQUEST_SHAPE_RULES):
+        reasons = ["direct_request_shape"]
+        if declines_questions:
+            reasons.append("user_declined_questions")
+        return (
+            Interaction.DIRECT,
+            (
+                QuestionPolicy.FORBIDDEN
+                if declines_questions
+                else QuestionPolicy.NOT_APPLICABLE
+            ),
+            tuple(sorted(reasons)),
+            False,
+        )
+    reasons = ["conversational_update_default"]
     if declines_questions:
         reasons.append("user_declined_questions")
     return (
-        Interaction.DIRECT,
+        Interaction.CONVERSATIONAL,
         (
             QuestionPolicy.FORBIDDEN
             if declines_questions
