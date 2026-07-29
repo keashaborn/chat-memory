@@ -3329,6 +3329,29 @@ def _pet_name(content: str) -> str | None:
     return None
 
 
+def _source_supported_named_pet_entities(
+    content: str,
+    entities: list[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    supported: list[dict[str, Any]] = []
+    for entity in entities:
+        name_text = entity.get("name_text")
+        if (
+            entity.get("entity_type") != "animal"
+            or not isinstance(name_text, str)
+            or not name_text.strip()
+            or not _role_has_any(entity.get("relationship_role"), {"pet"})
+        ):
+            continue
+        name_pattern = re.compile(
+            rf"(?<![\w'’-]){re.escape(name_text.strip())}(?![\w'’-])",
+            re.IGNORECASE,
+        )
+        if name_pattern.search(content):
+            supported.append(entity)
+    return tuple(supported)
+
+
 def _explicit_named_pet_death_subject(content: str) -> str | None:
     match = _EXPLICIT_NAMED_PET_DEATH_SUBJECT_RE.search(content)
     if match is None:
@@ -4923,18 +4946,79 @@ def _compile_entity_links(
             for item in value["comparison_hints"]
             if item["observation_ref"] not in unsupported_death_refs
         ]
-        _append_deferral_once(
-            value["deferrals"],
-            reason_code="insufficient_evidence",
-            memory_shape="none",
-            source_spans=[_source_span(source)],
-            sensitivity="medium",
+        supported_named_pets = _source_supported_named_pet_entities(
+            content,
+            entities,
         )
+        for entity in supported_named_pets:
+            entity_ref = entity["entity_ref"]
+            if not any(
+                item["predicate"] == "identity.name"
+                and item["subject_entity_ref"] == entity_ref
+                for item in observations
+            ):
+                observations.append(
+                    _example_observation(
+                        content,
+                        observation_ref=_next_observation_ref(observations),
+                        subject_entity_ref=entity_ref,
+                        predicate="identity.name",
+                        object_value=_literal(
+                            "text",
+                            str(entity["name_text"]).strip(),
+                        ),
+                        projection_class="direct_claim",
+                        surface_policy="direct_or_relevant",
+                        sensitivity="medium",
+                        reason_code="source_supported_pet_name",
+                    )
+                )
+                repairs.append(
+                    "source_supported_pet_identity_preserved"
+                )
+        if not observations:
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="insufficient_evidence",
+                memory_shape="none",
+                source_spans=[_source_span(source)],
+                sensitivity="medium",
+            )
+        elif _PET_LOSS_CUE_RE.search(content):
+            _append_deferral_once(
+                value["deferrals"],
+                reason_code="sensitive_manual_review",
+                memory_shape="direct_claim",
+                source_spans=[_source_span(source)],
+                sensitivity="high",
+            )
         repairs.append(
             "pet_loss_not_promoted_to_death"
             if _PET_LOSS_CUE_RE.search(content)
             else "death_requires_explicit_target_cue"
         )
+
+    retained_death_subject_refs = {
+        item["subject_entity_ref"]
+        for item in observations
+        if item["predicate"] == "life_event.died"
+    }
+    for entity in entities:
+        if (
+            entity.get("entity_type") == "animal"
+            and entity.get("entity_ref") not in retained_death_subject_refs
+            and entity.get("relationship_role") == "pet:deceased"
+        ):
+            entity["relationship_role"] = "pet:reported"
+            entity["reason_codes"] = list(
+                dict.fromkeys(
+                    [
+                        *entity.get("reason_codes", []),
+                        "death_status_not_supported_by_target",
+                    ]
+                )
+            )
+            repairs.append("unsupported_pet_deceased_role_normalized")
 
     entity_roles = {
         item["entity_ref"]: item.get("relationship_role")

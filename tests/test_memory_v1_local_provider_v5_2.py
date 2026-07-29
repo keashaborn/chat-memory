@@ -1385,7 +1385,7 @@ class LocalProviderV52Test(unittest.TestCase):
             entity_type="animal",
             mention_kind="named",
             name_text="Keasha von Steffen Haus",
-            relationship_role="pet:reported",
+            relationship_role="pet:deceased",
             reason_code="context_pet_name",
         )
         invented_death = _example_observation(
@@ -1411,13 +1411,28 @@ class LocalProviderV52Test(unittest.TestCase):
             registry,
         )
         value = compiled.model_dump(mode="json")
-        self.assertEqual(value["observations"], [])
-        self.assertEqual(value["entity_mentions"], [])
         self.assertEqual(
-            {item["reason_code"] for item in value["deferrals"]},
-            {"insufficient_evidence"},
+            [item["predicate"] for item in value["observations"]],
+            ["identity.name"],
+        )
+        self.assertEqual(
+            value["observations"][0]["object"]["value"],
+            "Keasha von Steffen Haus",
+        )
+        self.assertEqual(len(value["entity_mentions"]), 1)
+        self.assertEqual(
+            value["entity_mentions"][0]["relationship_role"],
+            "pet:reported",
         )
         self.assertIn("death_requires_explicit_target_cue", repairs)
+        self.assertIn(
+            "source_supported_pet_identity_preserved",
+            repairs,
+        )
+        self.assertIn(
+            "unsupported_pet_deceased_role_normalized",
+            repairs,
+        )
 
     def test_named_death_subject_drops_descriptive_prefix(self) -> None:
         content = (
@@ -1551,7 +1566,27 @@ class LocalProviderV52Test(unittest.TestCase):
             "life_event.died",
             {item["predicate"] for item in value["observations"]},
         )
+        self.assertEqual(
+            [item["predicate"] for item in value["observations"]],
+            ["identity.name"],
+        )
+        self.assertEqual(
+            value["observations"][0]["object"]["value"],
+            "Dahlia",
+        )
+        self.assertEqual(
+            value["entity_mentions"][0]["relationship_role"],
+            "pet:reported",
+        )
+        self.assertEqual(
+            {item["reason_code"] for item in value["deferrals"]},
+            {"sensitive_manual_review"},
+        )
         self.assertIn("pet_loss_not_promoted_to_death", repairs)
+        self.assertIn(
+            "source_supported_pet_identity_preserved",
+            repairs,
+        )
 
     def test_third_person_occupation_never_becomes_self_occupation(self) -> None:
         content = "I talked to Bob Fry who was the president at the time."
