@@ -282,9 +282,14 @@ for packet in "${route_packets[@]}"; do
 done
 
 phase=deploy_code
-git -C "$production_repo" merge --ff-only "$target_commit"
-[[ "$(git -C "$production_repo" rev-parse HEAD)" == "$target_commit" ]]
-[[ -z "$(git -C "$production_repo" status --porcelain)" ]]
+runuser -u ubuntu -- sh -c '
+  set -eu
+  umask 022
+  git -C "$1" merge --ff-only "$2"
+' sh "$production_repo" "$target_commit"
+[[ "$(runuser -u ubuntu -- git -C "$production_repo" rev-parse HEAD)" \
+  == "$target_commit" ]]
+[[ -z "$(runuser -u ubuntu -- git -C "$production_repo" status --porcelain)" ]]
 
 phase=install_migration
 docker exec -i "$container" psql -U sage -d "$database" -X \
