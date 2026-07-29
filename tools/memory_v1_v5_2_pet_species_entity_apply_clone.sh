@@ -19,6 +19,7 @@ stage_runner=scripts/memory_v1_v5_2_stage_batch.py
 stage_authorizer=tests/memory_v1_v5_2_stage_batch_fixture.py
 entity_runner=scripts/memory_v1_v5_2_entity_resolution_batch.py
 entity_authorizer=tests/memory_v1_v5_2_entity_resolution_batch_fixture.py
+budget_verifier=scripts/memory_v1_v5_2_entity_resolution_budget.py
 review_root=/home/ubuntu/memory-v1-reviews
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
@@ -35,12 +36,13 @@ neko_sha=7d885de019dc5e8f8374d4ad470a58930a3ff68294898dd417d9c1be2fec9946
 keasha_sha=ca203b435f526b4df7212a8312642a4ad03e06e0ce96f1ae2a494cb3bc39b7dc
 backup=$(mktemp /tmp/memory-v1-v5-2-pet-entity.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-pet-entity-roles.XXXXXX.sql)
+table_list=$(mktemp /tmp/memory-v1-v5-2-pet-entity-tables.XXXXXX)
 work=$(mktemp -d "$review_root/pet-species-entity-clone.XXXXXX")
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
-  rm -f "$backup" "$role_sql"
+  rm -f "$backup" "$role_sql" "$table_list"
   sudo rm -rf "$work"
 }
 trap cleanup EXIT
@@ -66,6 +68,25 @@ run_stage_root() {
     GIT_CONFIG_KEY_0=safe.directory \
     GIT_CONFIG_VALUE_0="$repo_root" \
     "$@"
+}
+
+capture_target() {
+  local output=$1 table state
+  : >"$output"
+  while IFS= read -r table; do
+    [[ "$table" =~ ^[a-z][a-z0-9_]*$ ]]
+    state=$(scalar "
+      SELECT count(*)::text || E'\\t' || encode(public.digest(convert_to(
+        coalesce(string_agg(row_json,E'\\n' ORDER BY row_json),''),
+        'UTF8'),'sha256'),'hex')
+      FROM (
+        SELECT to_jsonb(value)::text AS row_json
+        FROM memory.\"$table\" AS value
+        WHERE owner_user_id='$owner'::uuid
+      ) AS rows")
+    printf '%s\t%s\n' "$table" "$state" >>"$output"
+  done <"$table_list"
+  chmod 0600 "$output"
 }
 
 assert_equal() {
@@ -174,6 +195,13 @@ run_sql <"$role_sql"
 printf '%s\n' "ALTER ROLE brains_app PASSWORD 'clone_only_brains_password';" | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
   --clean --if-exists <"$backup"
+"${compose[@]}" exec -T postgres psql -X -A -t -v ON_ERROR_STOP=1 \
+  -U sage -d memory -c "
+    SELECT DISTINCT table_name
+    FROM information_schema.columns
+    WHERE table_schema='memory' AND column_name='owner_user_id'
+    ORDER BY table_name" >"$table_list"
+[[ -s "$table_list" ]]
 
 assert_equal initial_target_counts "$(target_counts)" '0,0,0,0,0,0,0'
 entities_before=$(scalar "SELECT count(*) FROM memory.entity WHERE owner_user_id='$owner'::uuid")
@@ -351,6 +379,7 @@ POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
   --manifest "$work/entity-manifest.json" \
   --review-root "$review_root" \
   --output "$work/entity-plan.json"
+capture_target "$work/entity-before.tsv"
 
 jq --arg owner "$other_owner" '.owner_user_id=$owner' \
   "$work/entity-manifest.json" >"$work/cross-owner-manifest.json"
@@ -376,6 +405,11 @@ MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
   --review-root "$review_root" \
   --confirm RECONCILE_REVIEW_AND_APPLY_OWNER_V5_2_ENTITY_RESOLUTIONS_ONLY \
   --output "$work/entity-apply.json"
+capture_target "$work/entity-after.tsv"
+PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python "$budget_verifier" \
+  --plan "$work/entity-plan.json" \
+  --before "$work/entity-before.tsv" \
+  --after "$work/entity-after.tsv"
 
 assert_equal entity_rows "$(jq -r '.database_rows_created' "$work/entity-apply.json")" 34
 assert_equal entity_bindings "$(jq -r '.bindings_created' "$work/entity-apply.json")" 11

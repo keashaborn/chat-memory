@@ -24,6 +24,7 @@ container=brains-postgres-1
 database=memory
 snapshot_dir=/home/ubuntu/brains/snapshots
 runner=scripts/memory_v1_v5_2_entity_resolution_batch.py
+budget_verifier=scripts/memory_v1_v5_2_entity_resolution_budget.py
 lock_file=/home/ubuntu/brains/.memory_v1_v5_2_entity_batch_apply.lock
 phase=initialization
 run_tag=
@@ -113,45 +114,9 @@ capture_partition() {
 }
 
 verify_target_delta() {
-  PLAN="$plan" BEFORE="$target_before" AFTER="$target_after" \
-    python3 - <<'PY'
-import json, os
-from pathlib import Path
-
-def load(path):
-    rows = {}
-    for line in Path(path).read_text().splitlines():
-        table, count, digest = line.split("\t")
-        rows[table] = (int(count), digest)
-    return rows
-
-plan = json.loads(Path(os.environ["PLAN"]).read_text())
-before = load(os.environ["BEFORE"])
-after = load(os.environ["AFTER"])
-if before.keys() != after.keys():
-    raise SystemExit("target-owner table set changed")
-items = [entry["manifest_item"] for entry in plan["items"]]
-manual = sum(item["operation"] != "auto_apply" for item in items)
-expected = {
-    "entity_resolution_reconciliation_v5_2": manual,
-    "entity_resolution_plan": manual,
-    "entity_resolution_candidate": manual,
-    "entity_alias_observation": manual,
-    "entity_resolution_review": manual,
-    "entity_resolution_apply": int(plan["item_count"]),
-    "observation_entity_binding": int(plan["expected_total_bindings"]),
-    "relational_operation_request": int(plan["item_count"]) + manual,
-}
-for table in before:
-    delta = after[table][0] - before[table][0]
-    wanted = expected.get(table, 0)
-    if delta != wanted:
-        raise SystemExit(f"unexpected target-owner delta {table}: {delta} != {wanted}")
-    if wanted == 0 and before[table][1] != after[table][1]:
-        raise SystemExit(f"unexpected target-owner mutation {table}")
-if sum(expected.values()) != int(plan["expected_new_rows"]):
-    raise SystemExit("plan row budget does not match mapped entity tables")
-PY
+  PYTHONPATH="$repo_root" /opt/chat-memory/venv/bin/python \
+    "$repo_root/$budget_verifier" \
+    --plan "$plan" --before "$target_before" --after "$target_after"
 }
 
 for input in "$plan" "$authorization"; do
