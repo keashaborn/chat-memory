@@ -28,6 +28,7 @@ _GENERIC_SOURCE_PATHS = frozenset(
         ("openai.com", "/news/company-announcements"),
         ("openai.com", "/news/product-releases"),
         ("reuters.com", "/"),
+        ("status.openai.com", "/history"),
         ("theverge.com", "/"),
         ("who.int", "/news-room/headlines"),
         ("who.int", "/news-room/releases"),

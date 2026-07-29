@@ -72,13 +72,16 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertIn("Never claim that you lack access", CURRENT_NEWS_INSTRUCTIONS_V1)
         self.assertIn("current-news sources", CURRENT_NEWS_INSTRUCTIONS_V1)
 
-    def test_generic_index_citation_gets_one_exact_page_repair(self) -> None:
+    def test_status_history_citation_gets_one_exact_incident_repair(self) -> None:
         provider = FakeProvider(
             (
-                provider_result("resp-first", "https://openai.com/news"),
+                provider_result(
+                    "resp-first",
+                    "https://status.openai.com/history",
+                ),
                 provider_result(
                     "resp-repaired",
-                    "https://openai.com/index/exact-update",
+                    "https://status.openai.com/incidents/01KXYZEXACT",
                 ),
             )
         )
@@ -110,11 +113,17 @@ class CurrentNewsRouterTests(unittest.TestCase):
             str(provider.calls[1]["instructions"]),
         )
 
-    def test_generic_index_repair_exhaustion_fails_closed(self) -> None:
+    def test_status_history_repair_exhaustion_fails_closed(self) -> None:
         provider = FakeProvider(
             (
-                provider_result("resp-first", "https://openai.com/news"),
-                provider_result("resp-second", "https://openai.com/news"),
+                provider_result(
+                    "resp-first",
+                    "https://status.openai.com/history",
+                ),
+                provider_result(
+                    "resp-second",
+                    "https://status.openai.com/history",
+                ),
             )
         )
         policy = route_trusted_web_query(

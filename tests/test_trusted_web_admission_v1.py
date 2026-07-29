@@ -76,6 +76,23 @@ class TrustedWebAdmissionV1Tests(unittest.TestCase):
                 policy_pack="current_news",
             )
 
+    def test_status_history_is_a_generic_current_news_index(self) -> None:
+        cited = (
+            source(
+                "https://status.openai.com/history?utm_source=openai"
+            ),
+        )
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_cited_generic_index",
+        ):
+            admit_trusted_web_sources_v1(
+                cited_sources=cited,
+                consulted_sources=cited,
+                max_sources=10,
+                policy_pack="current_news",
+            )
+
     def test_generic_cited_health_page_fails_closed(self) -> None:
         cited = (source("https://www.who.int/news-room/headlines"),)
         with self.assertRaisesRegex(
