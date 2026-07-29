@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from typing import Any
@@ -165,6 +166,7 @@ TARGETS: dict[str, dict[str, Any]] = {
         "object_entity_type": "animal",
         "object_canonical_name": "Neko",
         "canonical_text": "The user formerly had a pet named Neko.",
+        "expected_existing_aggregates": 1,
     },
     "82c87916-a90c-4af8-b4cb-fbd2981f9f96": {
         "evidence_id": "ca637d00-7ff6-5147-8f6b-a82386dbc1c1",
@@ -180,6 +182,88 @@ TARGETS: dict[str, dict[str, Any]] = {
         "canonical_text": "Neko's name is Neko.",
     },
 }
+
+
+async def prepare_item(
+    conn: Any,
+    owner: str,
+    observation_id: str,
+    plan_id: str,
+    entailment_request_id: str,
+    registry: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    target = TARGETS[observation_id]
+    source, spans, observation_ref = await source_snapshot(
+        conn, observation_id, owner
+    )
+    packet = stage.build_projection_packet(owner, source)
+    stage.validate_packet(packet, owner, registry)
+    packet_text = stage.stable_json(packet)
+    packet_preflight = await stage.preflight_projection(
+        conn, plan_id, packet_text
+    )
+    entailment_preflight = await stage.preflight_entailment(
+        conn, observation_id, spans
+    )
+    expected_aggregates = int(
+        target.get("expected_existing_aggregates", 0)
+    )
+    canonical_match = (
+        packet["projections"][0]["payload"]["canonical_text"]
+        == target["canonical_text"]
+    )
+    if (
+        packet_preflight is None
+        or packet_preflight["existing_aggregates"] != expected_aggregates
+        or packet_preflight["existing_plans"] != 0
+        or not canonical_match
+    ):
+        aggregate_count = (
+            None
+            if packet_preflight is None
+            else packet_preflight["existing_aggregates"]
+        )
+        plan_count = (
+            None
+            if packet_preflight is None
+            else packet_preflight["existing_plans"]
+        )
+        raise stage.ProjectionStageError(
+            "pet projection source is not exact and stageable: "
+            f"observation={observation_id} "
+            f"existing_aggregates={aggregate_count} "
+            f"expected_aggregates={expected_aggregates} "
+            f"existing_plans={plan_count} "
+            f"canonical_match={canonical_match}"
+        )
+    return {
+        "observation_ref": observation_ref,
+        "evidence_id": target["evidence_id"],
+        "predicate": target["predicate"],
+        "state_relation": target["state_relation"],
+        "observation_id": observation_id,
+        "observation_sha256": source["observation_sha256"],
+        "plan_id": plan_id,
+        "entailment_request_id": entailment_request_id,
+        "source_spans_sha256": stage.canonical_hash(spans),
+        "packet": packet,
+        "packet_text_sha256": hashlib.sha256(
+            packet_text.encode("utf-8")
+        ).hexdigest(),
+        "packet_sha256": packet["packet_sha256"],
+        "owner_manifest_sha256": packet_preflight[
+            "owner_manifest_sha256"
+        ],
+        "entailment_authorization_manifest_sha256": entailment_preflight[
+            "authorization_manifest_sha256"
+        ],
+        "canonical_text_sha256": stage.canonical_hash(
+            packet["projections"][0]["payload"]["canonical_text"]
+        ),
+        "canonical_text": packet["projections"][0]["payload"][
+            "canonical_text"
+        ],
+    }
 
 
 async def source_snapshot(
@@ -286,6 +370,7 @@ def configure_stage() -> None:
     stage.TARGET_OWNER = OWNER
     stage.TARGETS = TARGETS
     stage.source_snapshot = source_snapshot
+    stage.prepare_item = prepare_item
 
 
 if __name__ == "__main__":

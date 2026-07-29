@@ -40,6 +40,21 @@ class PetProfileClaimStageTest(unittest.TestCase):
             all(" has a pet named " not in target["canonical_text"] for target in relations)
         )
 
+    def test_only_neko_historical_relationship_has_existing_aggregate(self) -> None:
+        overlaps = [
+            observation_id
+            for observation_id, target in TARGETS.items()
+            if target.get("expected_existing_aggregates", 0) != 0
+        ]
+        self.assertEqual(
+            overlaps,
+            ["bc8866ad-95e8-4413-832e-813f601eece6"],
+        )
+        self.assertEqual(
+            TARGETS[overlaps[0]]["expected_existing_aggregates"],
+            1,
+        )
+
     def test_literal_contract_is_exact(self) -> None:
         self.assertEqual(
             literal("dog"),
