@@ -252,12 +252,12 @@ $function$;
 
 ALTER FUNCTION
 memory.plan_owner_v5_2_pet_identity_packet_supersession_v1(uuid,uuid)
-OWNER TO memory_v5_local_reextract_maintainer;
+OWNER TO memory_v5_local_supersession_maintainer;
 ALTER FUNCTION
 memory.finalize_owner_v5_2_pet_identity_packet_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text
 )
-OWNER TO memory_v5_local_reextract_maintainer;
+OWNER TO memory_v5_local_supersession_maintainer;
 
 REVOKE ALL ON FUNCTION
 memory.plan_owner_v5_2_pet_identity_packet_supersession_v1(uuid,uuid)
