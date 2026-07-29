@@ -1,5 +1,16 @@
 BEGIN;
 
+ALTER TABLE memory.v5_local_packet_supersession
+  DROP CONSTRAINT v5_local_packet_supersession_reason_code_check;
+ALTER TABLE memory.v5_local_packet_supersession
+  ADD CONSTRAINT v5_local_packet_supersession_reason_code_check
+  CHECK (
+    reason_code IN (
+      'temporal_persistence_matrix_reextracted',
+      'pet_identity_semantics_reextracted'
+    )
+  );
+
 CREATE OR REPLACE FUNCTION
 memory.plan_owner_v5_2_pet_identity_packet_supersession_v1(
   p_prior_packet_id uuid,
