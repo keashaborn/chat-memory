@@ -9,7 +9,8 @@ set -euo pipefail
 
 live_repo=/opt/chat-memory
 candidate_repo=$(git rev-parse --show-toplevel)
-required_live_head=6cc11242cc8f216738488355881b665503ea0322
+required_live_head=878150a3430423ff2c6921800fc47e4fdb2fd6a3
+deployment_base=6cc11242cc8f216738488355881b665503ea0322
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=673d64a3-c4ba-4d1c-89e3-e0c579022fad
 selector=20260729_v5_context_generation_retry_v1
@@ -134,12 +135,12 @@ target_head=$(git -C "$candidate_repo" rev-parse HEAD)
 [[ -z "$(git -C "$live_repo" status --porcelain)" ]]
 [[ -z "$(git -C "$candidate_repo" status --porcelain)" ]]
 git -C "$candidate_repo" merge-base --is-ancestor \
-  "$required_live_head" "$target_head"
-git -C "$candidate_repo" diff --check "$required_live_head..$target_head"
+  "$deployment_base" "$target_head"
+git -C "$candidate_repo" diff --check "$deployment_base..$target_head"
 
 mapfile -t changed_files < <(
   git -C "$candidate_repo" diff --name-only \
-    "$required_live_head..$target_head" | sort
+    "$deployment_base..$target_head" | sort
 )
 [[ "${#changed_files[@]}" -eq 2 ]]
 [[ "${changed_files[0]}" == \
@@ -191,10 +192,10 @@ docker exec -i "$container" pg_restore -l <"$backup" \
 sha256sum "$backup" \
   >"$snapshot_dir/memory_before_exact_three_route.dump.sha256"
 git -C "$candidate_repo" diff --name-status \
-  "$required_live_head..$target_head" \
+  "$deployment_base..$target_head" \
   >"$snapshot_dir/code_diff.name-status"
 git -C "$candidate_repo" diff --stat \
-  "$required_live_head..$target_head" \
+  "$deployment_base..$target_head" \
   >"$snapshot_dir/code_diff.stat"
 printf '%s\n' "$required_live_head" >"$snapshot_dir/rollback_commit.txt"
 printf '%s\n' "$target_head" >"$snapshot_dir/target_commit.txt"
@@ -216,10 +217,9 @@ ambiguous="$snapshot_dir/ambiguous.tsv"
 : >"$zero_items"
 : >"$ambiguous"
 
-psql "$POSTGRES_DSN" -X -Atq -F $'\t' -v ON_ERROR_STOP=1 \
-  >"$targets" <<SQL
-BEGIN READ ONLY;
-SET LOCAL app.user_id='$owner';
+docker exec -i "$container" psql -X -U sage -d memory \
+  -Atq -F $'\t' -v ON_ERROR_STOP=1 >"$targets" <<SQL
+SET app.user_id='$owner';
 WITH target AS (
   SELECT packet.packet_id,packet.packet_storage_sha256
   FROM memory.evidence_extraction_packet_v5_local AS packet
@@ -244,7 +244,6 @@ WITH target AS (
 SELECT packet_id,packet_storage_sha256
 FROM target
 ORDER BY packet_id;
-ROLLBACK;
 SQL
 [[ "$(wc -l <"$targets" | tr -d '[:space:]')" -eq 3 ]]
 
@@ -274,25 +273,19 @@ done <"$targets"
 
 ambiguous_packet=$(cut -f1 "$ambiguous")
 ambiguous_storage=$(cut -f2 "$ambiguous")
-ambiguous_valid=$(
-  psql "$POSTGRES_DSN" -X -Atq -v ON_ERROR_STOP=1 <<SQL
-BEGIN READ ONLY;
-SET LOCAL app.user_id='$owner';
-SELECT count(*)
-FROM memory.evidence_extraction_packet_v5_local AS packet
-WHERE packet.owner_user_id='$owner'::uuid
-  AND packet.packet_id='$ambiguous_packet'::uuid
-  AND packet.packet_storage_sha256='$ambiguous_storage'
-  AND packet.entity_mention_count=0
-  AND packet.observation_count=0
-  AND packet.comparison_hint_count=0
-  AND packet.deferral_count=1
-  AND packet.manual_review_required
-  AND packet.normalized_packet->'deferrals' @>
-    '[{"reason_code":"ambiguous_transcription"}]'::jsonb;
-ROLLBACK;
-SQL
-)
+ambiguous_valid=$(scalar \
+  "SELECT count(*)
+   FROM memory.evidence_extraction_packet_v5_local AS packet
+   WHERE packet.owner_user_id='$owner'::uuid
+     AND packet.packet_id='$ambiguous_packet'::uuid
+     AND packet.packet_storage_sha256='$ambiguous_storage'
+     AND packet.entity_mention_count=0
+     AND packet.observation_count=0
+     AND packet.comparison_hint_count=0
+     AND packet.deferral_count=1
+     AND packet.manual_review_required
+     AND packet.normalized_packet->'deferrals' @>
+       '[{\"reason_code\":\"ambiguous_transcription\"}]'::jsonb")
 [[ "$ambiguous_valid" -eq 1 ]]
 
 {
@@ -429,64 +422,52 @@ jq -e '
      AND reason_code='ambiguous_transcription'
      AND NOT promotion_eligible")" -eq 1 ]]
 
-selector_accounted=$(
-  psql "$POSTGRES_DSN" -X -Atq -v ON_ERROR_STOP=1 <<SQL
-BEGIN READ ONLY;
-SET LOCAL app.user_id='$owner';
-WITH packet AS (
-  SELECT p.owner_user_id,p.packet_id
-  FROM memory.evidence_extraction_packet_v5_local AS p
-  JOIN memory.evidence_extraction_job AS job
-    ON job.owner_user_id=p.owner_user_id
-   AND job.job_id=p.job_id
-  WHERE job.owner_user_id='$owner'::uuid
-    AND job.selector_version='$selector'
-),
-accounted AS (
-  SELECT route.owner_user_id,route.packet_id
-  FROM memory.v5_2_local_packet_route_event AS route
-  JOIN packet
-    ON packet.owner_user_id=route.owner_user_id
-   AND packet.packet_id=route.packet_id
-  UNION
-  SELECT disposition.owner_user_id,disposition.packet_id
-  FROM memory.v5_local_packet_disposition AS disposition
-  JOIN packet
-    ON packet.owner_user_id=disposition.owner_user_id
-   AND packet.packet_id=disposition.packet_id
-)
-SELECT count(*) FROM accounted;
-ROLLBACK;
-SQL
-)
+selector_accounted=$(scalar \
+  "WITH packet AS (
+     SELECT p.owner_user_id,p.packet_id
+     FROM memory.evidence_extraction_packet_v5_local AS p
+     JOIN memory.evidence_extraction_job AS job
+       ON job.owner_user_id=p.owner_user_id
+      AND job.job_id=p.job_id
+     WHERE job.owner_user_id='$owner'::uuid
+       AND job.selector_version='$selector'
+   ),
+   accounted AS (
+     SELECT route.owner_user_id,route.packet_id
+     FROM memory.v5_2_local_packet_route_event AS route
+     JOIN packet
+       ON packet.owner_user_id=route.owner_user_id
+      AND packet.packet_id=route.packet_id
+     UNION
+     SELECT disposition.owner_user_id,disposition.packet_id
+     FROM memory.v5_local_packet_disposition AS disposition
+     JOIN packet
+       ON packet.owner_user_id=disposition.owner_user_id
+      AND packet.packet_id=disposition.packet_id
+   )
+   SELECT count(*) FROM accounted")
 [[ "$selector_accounted" -eq 18 ]]
 
-selector_unaccounted=$(
-  psql "$POSTGRES_DSN" -X -Atq -v ON_ERROR_STOP=1 <<SQL
-BEGIN READ ONLY;
-SET LOCAL app.user_id='$owner';
-SELECT count(*)
-FROM memory.evidence_extraction_packet_v5_local AS packet
-JOIN memory.evidence_extraction_job AS job
-  ON job.owner_user_id=packet.owner_user_id
- AND job.job_id=packet.job_id
-WHERE job.owner_user_id='$owner'::uuid
-  AND job.selector_version='$selector'
-  AND NOT EXISTS (
-    SELECT 1
-    FROM memory.v5_2_local_packet_route_event AS route
-    WHERE route.owner_user_id=packet.owner_user_id
-      AND route.packet_id=packet.packet_id
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM memory.v5_local_packet_disposition AS disposition
-    WHERE disposition.owner_user_id=packet.owner_user_id
-      AND disposition.packet_id=packet.packet_id
-  );
-ROLLBACK;
-SQL
-)
+selector_unaccounted=$(scalar \
+  "SELECT count(*)
+   FROM memory.evidence_extraction_packet_v5_local AS packet
+   JOIN memory.evidence_extraction_job AS job
+     ON job.owner_user_id=packet.owner_user_id
+    AND job.job_id=packet.job_id
+   WHERE job.owner_user_id='$owner'::uuid
+     AND job.selector_version='$selector'
+     AND NOT EXISTS (
+       SELECT 1
+       FROM memory.v5_2_local_packet_route_event AS route
+       WHERE route.owner_user_id=packet.owner_user_id
+         AND route.packet_id=packet.packet_id
+     )
+     AND NOT EXISTS (
+       SELECT 1
+       FROM memory.v5_local_packet_disposition AS disposition
+       WHERE disposition.owner_user_id=packet.owner_user_id
+         AND disposition.packet_id=packet.packet_id
+     )")
 [[ "$selector_unaccounted" -eq 0 ]]
 
 protected_snapshot "$snapshot_dir/protected_after.tsv"
