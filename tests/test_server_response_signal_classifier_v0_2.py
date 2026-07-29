@@ -186,6 +186,186 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             _CLASSIFIER_INSTRUCTIONS,
         )
 
+    def test_provider_contract_distinguishes_ordinary_fitness_nutrition(self) -> None:
+        self.assertIn(
+            "Ordinary fitness and nutrition language is not evidence",
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+        self.assertIn(
+            "cancels independently supported medical",
+            _CLASSIFIER_INSTRUCTIONS,
+        )
+
+    def test_provider_macro_false_positive_is_calibrated_to_reflection(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=["eating_disorder_or_dangerous_restriction"],
+                fm_application_gate="triggered",
+                coaching=True,
+                guided_reflection_requested=False,
+            )
+        )
+        policy_input = request(
+            "Help me think through why missing my macro target bothers me. "
+            "I want reflection, not a plan or experiment."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.PROVIDER_CLASSIFIED,
+        )
+        self.assertEqual(result.assessment.gate, GateState.PASS)
+        self.assertEqual(result.assessment.categories, ())
+        self.assertEqual(result.assessment.provider_call_count, 1)
+        self.assertEqual(decision.response_mode, ResponseMode.COACHING)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertEqual(decision.closure, Closure.GUIDED_REFLECTION)
+
+    def test_fitness_calibration_covers_product_vocabulary(self) -> None:
+        messages = (
+            "I keep missing my macros while bulking.",
+            "Help me review my protein target for strength training.",
+            "My calorie target is hard to hit during this cut.",
+            "My nutrition adherence was inconsistent this week.",
+            "Can we discuss my meal-plan targets for bodybuilding?",
+            "My weightlifting macro targets changed this month.",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                client = FakeClient(
+                    output(
+                        domain_risk_gate="triggered",
+                        categories=["eating_disorder_or_dangerous_restriction"],
+                        fm_application_gate="triggered",
+                    )
+                )
+                result = classifier(client).classify(request(message))
+                self.assertEqual(result.assessment.gate, GateState.PASS)
+                self.assertEqual(result.assessment.categories, ())
+                self.assertEqual(result.assessment.provider_call_count, 1)
+
+    def test_fitness_calibration_does_not_erase_other_risk_categories(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=[
+                    "eating_disorder_or_dangerous_restriction",
+                    "medical_or_health_decision",
+                ],
+                fm_application_gate="triggered",
+            )
+        )
+        result = classifier(client).classify(
+            request("My macro target changed after a new medical diagnosis.")
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertEqual(
+            result.assessment.categories,
+            (
+                DomainRiskCategory.EATING_DISORDER_OR_DANGEROUS_RESTRICTION,
+                DomainRiskCategory.MEDICAL_OR_HEALTH_DECISION,
+            ),
+        )
+
+    def test_fitness_calibration_does_not_erase_additional_risk_evidence(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=["eating_disorder_or_dangerous_restriction"],
+                fm_application_gate="triggered",
+            )
+        )
+        result = classifier(client).classify(
+            request(
+                "I am cutting, feel dizzy, and only eat 1,000 calories. "
+                "Help me lower my macro target again."
+            )
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertEqual(
+            result.assessment.categories,
+            (DomainRiskCategory.EATING_DISORDER_OR_DANGEROUS_RESTRICTION,),
+        )
+
+    def test_fitness_calibration_preserves_broader_disorder_evidence(self) -> None:
+        messages = (
+            "I am obsessed with macros and terrified of gaining weight.",
+            "I fast for three days when I miss my macro target.",
+            "I hide food and avoid eating while cutting.",
+            "I overexercise to compensate for missing my macro target.",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                client = FakeClient(
+                    output(
+                        domain_risk_gate="triggered",
+                        categories=["eating_disorder_or_dangerous_restriction"],
+                        fm_application_gate="triggered",
+                    )
+                )
+                result = classifier(client).classify(request(message))
+                self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+                self.assertEqual(
+                    result.assessment.categories,
+                    (
+                        DomainRiskCategory.EATING_DISORDER_OR_DANGEROUS_RESTRICTION,
+                    ),
+                )
+
+    def test_fitness_calibration_does_not_override_uncertain_provider(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="uncertain",
+                categories=["eating_disorder_or_dangerous_restriction"],
+                fm_application_gate="uncertain",
+            )
+        )
+        result = classifier(client).classify(
+            request("My macro target is difficult to hit while cutting.")
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
+
+    def test_fitness_calibration_does_not_override_safety_action(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=["eating_disorder_or_dangerous_restriction"],
+                safety_action_required=True,
+                fm_application_gate="triggered",
+            )
+        )
+        result = classifier(client).classify(
+            request("My macro target is difficult to hit while cutting.")
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertTrue(result.assessment.safety_action_required)
+
+    def test_local_dangerous_restriction_precedes_fitness_calibration(self) -> None:
+        client = FakeClient(error=AssertionError("provider must not be called"))
+        result = classifier(client).classify(
+            request("I am weightlifting while starving myself to hit my macros.")
+        )
+
+        self.assertEqual(
+            result.assessment.outcome,
+            ClassificationOutcome.LOCAL_TRIGGERED,
+        )
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertEqual(result.assessment.provider_call_count, 0)
+        self.assertEqual(client.responses.calls, [])
+
     def test_non_english_risk_is_preserved_for_provider_classification(self) -> None:
         client = FakeClient(
             output(

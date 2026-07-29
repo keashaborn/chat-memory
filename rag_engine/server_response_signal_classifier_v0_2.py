@@ -242,6 +242,29 @@ _LOCAL_RISK_RULES: tuple[
 )
 
 
+_ORDINARY_FITNESS_NUTRITION_RE = re.compile(
+    r"\b(?:macros?|macro targets?|protein targets?|calorie targets?|"
+    r"nutrition (?:plan|planning|adherence|targets?)|meal[- ]plan|"
+    r"bulking|cutting|bodybuilding|weightlifting|strength training)\b"
+)
+
+_FITNESS_NUTRITION_RISK_EVIDENCE_RE = re.compile(
+    r"\b(?:anorex\w*|bulimi\w*|eating disorder|purg(?:e|ed|ing)|"
+    r"binge(?: and)? purge|starv\w*|faint\w*|dizz\w*|"
+    r"pass(?:ed|ing)? out|(?:have not|haven't|not) eaten|not eating|"
+    r"avoid(?:ing)? (?:food|eating)|refus(?:e|ing) to eat|hide food|"
+    r"skip(?:ping)? meals?|fast(?:ing)?|restrict(?:ing|ion|ive)?|"
+    r"cutting myself|self[- ]harm|over[- ]?exercis\w*|"
+    r"(?:under|below|less than|only(?: eat(?:ing)?| ate| consum(?:e|ing))?) "
+    r"(?:\d{2,4}|[1-9],\d{3}) (?:calories|kcal)|"
+    r"afraid to eat|fear of eating|guilt(?:y)? (?:about|after) eating|"
+    r"(?:afraid|scared|terrified) (?:of )?gaining weight|hate my body|"
+    r"body dysmorph\w*|underweight|obsess\w*|compuls\w*|"
+    r"vomit\w*|laxative\w*|compensat\w* for eating|"
+    r"extreme(?:ly)? (?:low|restrictive)|rapid weight loss)\b"
+)
+
+
 _STANDALONE_BENIGN_CLOSING_RE = re.compile(
     r"^(?:i(?:['\N{RIGHT SINGLE QUOTATION MARK}]?m| am) done|"
     r"that(?:['\N{RIGHT SINGLE QUOTATION MARK}]?s| is) all|all done)[.!?]*$"
@@ -307,6 +330,16 @@ personal decision or active risk may pass. Set uncertain when context is insuffi
 to distinguish those cases. safety_action_required is true only for imminent or
 active danger requiring immediate practical action. High-stakes classification is
 not a diagnosis and does not decide the substantive answer.
+
+Ordinary fitness and nutrition language is not evidence of an eating disorder or
+dangerous restriction by itself. Discussion of macros, macro or protein targets,
+calorie targets, meal-plan adherence, bodybuilding, weightlifting, bulking, or
+cutting may pass or use ordinary coaching. Do not trigger domain risk merely because
+the user is bothered by missing a target. Preserve eating-disorder or dangerous-
+restriction risk when the conversation supplies additional evidence such as
+starvation, purging, very low intake, fainting, dizziness, prolonged lack of food,
+compensatory behavior, or an active eating disorder. Fitness vocabulary never
+cancels independently supported medical, mental-health, or other domain risk.
 
 A conventional conversation closing or task-completion statement such as "I'm done",
 "that's all", or "all done" is not mental-health crisis evidence by itself. When it is
@@ -417,6 +450,44 @@ def _frozen_experiment_activation_ready(text: str) -> bool:
             bool(_FROZEN_EXPERIMENT_ADVERSE_INDICATOR_RE.search(text)),
             bool(_FROZEN_EXPERIMENT_STOP_RULE_RE.search(text)),
         )
+    )
+
+
+def _apply_ordinary_fitness_nutrition_calibration(
+    output: _DomainRiskModelOutput,
+    *,
+    conversation_text: str,
+) -> _DomainRiskModelOutput:
+    """Correct a single narrow provider false-positive class.
+
+    Explicit local danger rules run before the provider. This correction applies
+    only when the provider claims eating-disorder/dangerous-restriction risk from
+    ordinary fitness vocabulary, claims no safety action or other category, and
+    the full user conversation contains no additional risk evidence.
+    """
+
+    if (
+        output.domain_risk_gate != "triggered"
+        or output.fm_application_gate != "triggered"
+        or output.safety_action_required
+        or set(output.categories)
+        != {DomainRiskCategory.EATING_DISORDER_OR_DANGEROUS_RESTRICTION}
+    ):
+        return output
+    text = _normalized(conversation_text)
+    if (
+        not _ORDINARY_FITNESS_NUTRITION_RE.search(text)
+        or _FITNESS_NUTRITION_RISK_EVIDENCE_RE.search(text)
+    ):
+        return output
+    return _DomainRiskModelOutput.model_validate(
+        {
+            **output.model_dump(mode="json"),
+            "domain_risk_gate": "pass",
+            "categories": [],
+            "safety_action_required": False,
+            "fm_application_gate": "pass",
+        }
     )
 
 
@@ -896,6 +967,10 @@ class OpenAIServerResponseSignalClassifierV0_2:
             )
             output, returned_model, response_id = _parsed_output(
                 response, requested_model=self._model
+            )
+            output = _apply_ordinary_fitness_nutrition_calibration(
+                output,
+                conversation_text=normalized,
             )
             output = _apply_frozen_interaction_authority(
                 output,
