@@ -80,6 +80,53 @@ class CompilerV8ClaimApplyManifestTest(unittest.TestCase):
         self.assertEqual(MODULE.ASSESSMENT["opposition_score"], "0.000")
         self.assertEqual(MODULE.ASSESSMENT["claim_confidence"], "0.920")
 
+    def test_mixed_review_batch_materializes_only_authorized_targets(self) -> None:
+        target_plan = next(iter(MODULE.TARGETS))
+        deferred_plan = "00000000-0000-4000-8000-000000000001"
+        target_observation = MODULE.TARGETS[target_plan]["observation_id"]
+        review_manifest = {
+            "items": [
+                {
+                    "plan_id": target_plan,
+                    "observation_id": target_observation,
+                    "decision": "authorized",
+                },
+                {
+                    "plan_id": deferred_plan,
+                    "observation_id": "00000000-0000-4000-8000-000000000002",
+                    "decision": "deferred",
+                },
+            ]
+        }
+        review_result = {
+            "outcomes": [
+                {
+                    "plan_id": target_plan,
+                    "observation_id": target_observation,
+                    "decision": "authorized",
+                    "outcome": "applied",
+                    "rows_written": 1,
+                },
+                {
+                    "plan_id": deferred_plan,
+                    "observation_id": "00000000-0000-4000-8000-000000000002",
+                    "decision": "deferred",
+                    "outcome": "applied",
+                    "rows_written": 1,
+                },
+            ]
+        }
+        original = MODULE.TARGETS
+        MODULE.TARGETS = {target_plan: original[target_plan]}
+        try:
+            reviewed, staged = MODULE.authorized_review_items(
+                review_manifest, review_result
+            )
+        finally:
+            MODULE.TARGETS = original
+        self.assertEqual(set(reviewed), {target_plan})
+        self.assertEqual(set(staged), {target_plan})
+
 
 if __name__ == "__main__":
     unittest.main()

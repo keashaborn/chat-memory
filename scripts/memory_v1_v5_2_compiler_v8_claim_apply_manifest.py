@@ -23,6 +23,7 @@ REVIEW_RESULT_CONTRACT = (
     "memory_v1_v5_2_compiler_v8_claim_review_result_v1"
 )
 REQUEST_NAMESPACE = "memory-v1-v5-2-compiler-v8-claim"
+VALID_REVIEW_DECISIONS = {"authorized", "rejected", "deferred"}
 ASSESSMENT = {
     "action": "promote_supported",
     "support_score": "1.000",
@@ -129,6 +130,55 @@ def request_id(owner: str, plan_id: str, operation: str) -> str:
     )
 
 
+def authorized_review_items(
+    review_manifest: dict[str, Any],
+    review_result: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    reviewed_items = review_result.get("outcomes", [])
+    staged_items = review_manifest.get("items", [])
+    if not isinstance(reviewed_items, list) or not isinstance(staged_items, list):
+        raise ManifestError("review items must be lists")
+    reviewed: dict[str, dict[str, Any]] = {}
+    staged: dict[str, dict[str, Any]] = {}
+    for item in reviewed_items:
+        if not isinstance(item, dict) or item.get("plan_id") in reviewed:
+            raise ManifestError("duplicate or invalid review result item")
+        reviewed[item["plan_id"]] = item
+    for item in staged_items:
+        if not isinstance(item, dict) or item.get("plan_id") in staged:
+            raise ManifestError("duplicate or invalid review manifest item")
+        staged[item["plan_id"]] = item
+    if reviewed.keys() != staged.keys():
+        raise ManifestError("review and staged plan identities differ")
+    for plan_id, review in reviewed.items():
+        source = staged[plan_id]
+        decision = review.get("decision")
+        if (
+            decision not in VALID_REVIEW_DECISIONS
+            or source.get("decision") != decision
+            or review.get("outcome") != "applied"
+            or review.get("rows_written") != 1
+            or review.get("observation_id") != source.get("observation_id")
+        ):
+            raise ManifestError("review outcome and staged decision differ")
+    authorized_reviewed = {
+        plan_id: item
+        for plan_id, item in reviewed.items()
+        if item["decision"] == "authorized"
+    }
+    authorized_staged = {
+        plan_id: item
+        for plan_id, item in staged.items()
+        if item["decision"] == "authorized"
+    }
+    if (
+        authorized_reviewed.keys() != authorized_staged.keys()
+        or authorized_reviewed.keys() != TARGETS.keys()
+    ):
+        raise ManifestError("authorized review identities differ from targets")
+    return authorized_reviewed, authorized_staged
+
+
 async def run() -> int:
     import asyncpg
 
@@ -154,10 +204,9 @@ async def run() -> int:
         != len(review_manifest.get("items", []))
     ):
         raise ManifestError("review artifacts do not describe the authorized batch")
-    reviewed = {item["plan_id"]: item for item in review_result.get("outcomes", [])}
-    staged = {item["plan_id"]: item for item in review_manifest.get("items", [])}
-    if reviewed.keys() != staged.keys() or reviewed.keys() != TARGETS.keys():
-        raise ManifestError("review and staged plan identities differ")
+    reviewed, staged = authorized_review_items(
+        review_manifest, review_result
+    )
 
     dsn = os.environ.get("POSTGRES_DSN", "").strip()
     if not dsn:
