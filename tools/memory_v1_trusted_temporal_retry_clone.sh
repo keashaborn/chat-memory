@@ -270,7 +270,7 @@ jq -e '
   .outcome=="accepted"
   and .local_model_calls==1
   and .external_model_calls==0
-  and .job_status=="review_required"
+  and .manual_review_required==true
   and .write_counts.claims==0
   and .write_counts.qdrant==0
   and .write_counts.prompt_influence==0
