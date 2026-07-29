@@ -37,6 +37,7 @@ MAX_ITEMS = 32
 MAX_NEW_ROWS = 500
 OPERATIONS = {
     "auto_apply",
+    "manual_create_new_and_apply",
     "manual_link_existing_and_apply",
     "reconcile_existing_and_apply",
 }
@@ -84,6 +85,7 @@ def _digest(value: Any, field: str) -> str:
 def _expected_base_rows(items: list[dict[str, Any]]) -> int:
     rows_by_operation = {
         "auto_apply": 2,
+        "manual_create_new_and_apply": 6,
         "manual_link_existing_and_apply": 5,
         "reconcile_existing_and_apply": 8,
     }
@@ -150,6 +152,18 @@ def load_manifest(
                 or item["review_reason"] is not None
             ):
                 raise EntityResolutionBatchError("auto-apply item contract is invalid")
+        elif operation == "manual_create_new_and_apply":
+            reason = item["review_reason"]
+            if (
+                item["expected_action"] != "create_new"
+                or item["expected_decision_state"] != "manual_review_required"
+                or not isinstance(reason, str)
+                or not reason.strip()
+                or len(reason) > 500
+            ):
+                raise EntityResolutionBatchError(
+                    "manual-create-new-and-apply item contract is invalid"
+                )
         elif operation == "manual_link_existing_and_apply":
             reason = item["review_reason"]
             if (
@@ -295,6 +309,13 @@ async def _apply_preflight(
     if item["operation"] == "auto_apply" and output["prospective_entity_id"] is None:
         raise EntityResolutionBatchError("auto-apply has no prospective entity")
     if (
+        item["operation"] == "manual_create_new_and_apply"
+        and output["prospective_entity_id"] is not None
+    ):
+        raise EntityResolutionBatchError(
+            "manual-create-new preflight unexpectedly selected an existing entity"
+        )
+    if (
         item["operation"] == "reconcile_existing_and_apply"
         and output["prospective_entity_id"] != item["expected_entity_id"]
     ):
@@ -388,7 +409,10 @@ async def create_plan(args: argparse.Namespace) -> dict[str, Any]:
             for item in metadata["items"]:
                 if item["operation"] == "auto_apply":
                     preflight = await _apply_preflight(conn, item, None)
-                elif item["operation"] == "manual_link_existing_and_apply":
+                elif item["operation"] in {
+                    "manual_create_new_and_apply",
+                    "manual_link_existing_and_apply",
+                }:
                     preflight = await _review_preflight(conn, item)
                 else:
                     preflight = await _reconciliation_preflight(conn, item)
@@ -690,7 +714,10 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                         raise EntityResolutionBatchError("review outcome is not applied")
                     review_id = uuid.UUID(review_result["review_id"])
                     apply_preflight = await _apply_preflight(conn, effective, review_id)
-                elif item["operation"] == "manual_link_existing_and_apply":
+                elif item["operation"] in {
+                    "manual_create_new_and_apply",
+                    "manual_link_existing_and_apply",
+                }:
                     current_review = await _review_preflight(conn, effective)
                     if current_review != entry["preflight"]:
                         raise EntityResolutionBatchError("review preflight drifted")
@@ -732,6 +759,13 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                 ):
                     raise EntityResolutionBatchError(
                         "reviewed resolution applied to a different entity"
+                    )
+                if (
+                    item["operation"] == "manual_create_new_and_apply"
+                    and not apply_result["applied_entity_id"]
+                ):
+                    raise EntityResolutionBatchError(
+                        "reviewed new-entity resolution created no entity"
                     )
                 applied.append(
                     {
@@ -807,7 +841,10 @@ async def apply_plan(args: argparse.Namespace) -> dict[str, Any]:
                         or replay_review["review_id"] != prior["review_id"]
                     ):
                         raise EntityResolutionBatchError("review replay is not zero-write")
-                elif item["operation"] == "manual_link_existing_and_apply":
+                elif item["operation"] in {
+                    "manual_create_new_and_apply",
+                    "manual_link_existing_and_apply",
+                }:
                     replay_review = await _review(
                         conn,
                         effective,

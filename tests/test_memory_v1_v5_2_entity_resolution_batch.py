@@ -86,6 +86,60 @@ class V52EntityResolutionBatchManifestTest(unittest.TestCase):
         with self.assertRaisesRegex(StageBatchError, "fields"):
             load_manifest(str(self.write(value)), root=self.root)
 
+    def test_accepts_manual_create_new_with_exact_row_budget(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 7
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_create_new_and_apply",
+                "expected_action": "create_new",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": (
+                    "The exact named owner-scoped entity has no matching candidate."
+                ),
+            }
+        ]
+        metadata, _, _ = load_manifest(str(self.write(value)), root=self.root)
+        self.assertEqual(metadata["expected_new_rows"], 7)
+
+    def test_rejects_manual_create_new_with_link_action(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 7
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_create_new_and_apply",
+                "expected_action": "link_existing",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": "A review reason exists.",
+            }
+        ]
+        with self.assertRaisesRegex(
+            EntityResolutionBatchError, "manual-create-new"
+        ):
+            load_manifest(str(self.write(value)), root=self.root)
+
+    def test_rejects_manual_create_new_without_review_reason(self) -> None:
+        value = self.manifest()
+        value["expected_total_bindings"] = 1
+        value["expected_new_rows"] = 7
+        value["items"] = [
+            {
+                "resolution_id": SOURCE_RESOLUTION,
+                "operation": "manual_create_new_and_apply",
+                "expected_action": "create_new",
+                "expected_decision_state": "manual_review_required",
+                "review_reason": None,
+            }
+        ]
+        with self.assertRaisesRegex(
+            EntityResolutionBatchError, "manual-create-new"
+        ):
+            load_manifest(str(self.write(value)), root=self.root)
+
     def test_rejects_reused_successor_id(self) -> None:
         value = self.manifest()
         value["items"][1]["successor_resolution_id"] = SELF_RESOLUTION
