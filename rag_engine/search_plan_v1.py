@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 SEARCH_PLAN_CONTRACT = "search_plan_v1"
-SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_3"
+SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_4"
 
 SearchDecision = Literal["no_search", "indexed", "live", "research"]
 SearchPolicyPack = Literal[
@@ -17,6 +17,8 @@ SearchPolicyPack = Literal[
     "general",
     "current_news",
     "health",
+    "nutrition",
+    "exercise",
     "software_security",
     "legal_financial",
 ]
@@ -88,7 +90,9 @@ STRONG_FRESHNESS_PATTERNS = _patterns(
     r"\bjust happened\b",
     r"\bbreaking (?:news|story|update)\b",
     r"\bcurrent news\b",
-    r"\bnews (?:about|on)\b",
+    r"\bnews (?:about|on|in|from)\b",
+    r"\b(?:biggest|top|major)\s+(?:news|headline|story|stories)\b",
+    r"\b(?:top|major)\s+headlines?\b",
     r"\bany (?:new|recent|current) (?:news|updates?)\b",
     r"\bwhat updates? (?:are there )?(?:about|on)\b",
     r"\bupdates? (?:about|on)\b",
@@ -96,7 +100,9 @@ STRONG_FRESHNESS_PATTERNS = _patterns(
     r"\bup[- ]to[- ]date\b",
 )
 GENERAL_CURRENT_NEWS_PATTERNS = _patterns(
-    r"\bnews (?:about|on)\b",
+    r"\bnews (?:about|on|in|from)\b",
+    r"\b(?:biggest|top|major)\s+(?:news|headline|story|stories)\b",
+    r"\b(?:top|major)\s+headlines?\b",
 )
 WEAK_FRESHNESS_PATTERNS = _patterns(
     r"\blatest\b",
@@ -149,6 +155,12 @@ EVIDENCE_PATTERNS = _patterns(
     r"\bwhat (?:does|do) the research\b",
     r"\bfind (?:a |the )?(?:study|studies|paper|papers)\b",
 )
+REFERENCE_LOOKUP_PATTERNS = _patterns(
+    r"\bofficial (?:source|guidance|documentation|docs|recommendations?)\b",
+    r"\bofficial\b[a-z0-9 ._-]{0,80}\b(?:guidance|documentation|docs|recommendations?)\b",
+    r"\b(?:documentation|docs|specification|standard|advisory)\b",
+    r"\b(?:guideline|guidelines)\b",
+)
 TRANSFORM_PATTERNS = _patterns(
     r"\b(?:summarize|rewrite|edit|translate|proofread|reformat)\b[\s\S]*\b(?:the following|this text|below|above|provided|attached)\b",
     r"\b(?:the following|this text|text below|text above)\b[\s\S]*\b(?:summarize|rewrite|edit|translate|proofread|reformat)\b",
@@ -163,6 +175,13 @@ INTERNAL_CONTEXT_PATTERNS = _patterns(
     r"\bfrom (?:my|our) (?:records|memory|conversation|thread|notes)\b",
 )
 HEALTH_TOPIC_PATTERNS = _patterns(
+    r"\bhealth\b",
+    r"\bmedical\b",
+    r"\bmedicine\b",
+    r"\bpublic health\b",
+    r"\bdiseases?\b",
+    r"\binfections?\b",
+    r"\bvaccines?\b",
     r"\bmedications?\b",
     r"\bdrugs?\b",
     r"\bdos(?:e|age|ing)\b",
@@ -183,6 +202,27 @@ HEALTH_TOPIC_PATTERNS = _patterns(
     r"\bliver\b",
     r"\bheart\b",
     r"\bblood pressure\b",
+)
+NUTRITION_TOPIC_PATTERNS = _patterns(
+    r"\bnutrition\b",
+    r"\bdiet(?:ary)?\b",
+    r"\bfood composition\b",
+    r"\bprotein intake\b",
+    r"\benergy balance\b",
+    r"\bcalorie deficit\b",
+    r"\bmeal timing\b",
+    r"\bnutrient timing\b",
+)
+EXERCISE_TOPIC_PATTERNS = _patterns(
+    r"\bexercise\b",
+    r"\btraining\b",
+    r"\bweightlifting\b",
+    r"\bweight lifting\b",
+    r"\bresistance training\b",
+    r"\bstrength training\b",
+    r"\bhypertrophy\b",
+    r"\btraining volume\b",
+    r"\btraining frequency\b",
 )
 HEALTH_RISK_PATTERNS = _patterns(
     r"\bis (?:it|this|that) safe\b",
@@ -256,11 +296,15 @@ def _budget(decision: SearchDecision) -> SearchBudgetV1:
 
 
 def _policy_pack(value: str) -> SearchPolicyPack:
+    if _matches(value, TRUSTED_CURRENT_NEWS_ENTITY_PATTERNS):
+        return "software_security"
+    if _matches(value, NUTRITION_TOPIC_PATTERNS):
+        return "nutrition"
+    if _matches(value, EXERCISE_TOPIC_PATTERNS):
+        return "exercise"
     if _matches(value, HEALTH_TOPIC_PATTERNS):
         return "health"
-    if _matches(value, SOFTWARE_SECURITY_PATTERNS) or _matches(
-        value, TRUSTED_CURRENT_NEWS_ENTITY_PATTERNS
-    ):
+    if _matches(value, SOFTWARE_SECURITY_PATTERNS):
         return "software_security"
     if _matches(value, GENERAL_CURRENT_NEWS_PATTERNS):
         return "current_news"
@@ -278,7 +322,7 @@ def _route(
         return "normal_chat"
     if decision == "research" or "specific_source_requested" in reasons:
         return "normal_chat"
-    if policy_pack == "health":
+    if policy_pack in {"health", "nutrition", "exercise"}:
         return "trusted_health"
     if (
         "trusted_current_news_scope" in reasons
@@ -293,6 +337,15 @@ def _route(
         and "freshness_required" in reasons
     ):
         return "current_news"
+    if policy_pack == "software_security" and any(
+        reason in reasons
+        for reason in (
+            "explicit_web_request",
+            "evidence_requested",
+            "high_stakes_verification",
+        )
+    ):
+        return "trusted_health"
     return "normal_chat"
 
 
@@ -366,17 +419,38 @@ def create_search_plan_v1(query: str) -> SearchPlanV1:
             "high" if strong_freshness else "medium",
         )
     if explicit_web:
-        reasons = ["explicit_web_request"]
-        if trusted_current_news:
-            reasons.append("trusted_current_news_scope")
         return _plan(
-            "live" if trusted_current_news else "indexed",
-            tuple(reasons),
+            (
+                "live"
+                if pack
+                in {
+                    "current_news",
+                    "health",
+                    "nutrition",
+                    "exercise",
+                    "software_security",
+                }
+                else "indexed"
+            ),
+            ("explicit_web_request",),
             pack,
             "high",
         )
 
     evidence = _matches(value, EVIDENCE_PATTERNS)
+    reference_lookup = _matches(value, REFERENCE_LOOKUP_PATTERNS)
+    if reference_lookup and pack in {
+        "health",
+        "nutrition",
+        "exercise",
+        "software_security",
+    }:
+        return _plan(
+            "live",
+            ("evidence_requested",),
+            pack,
+            "high",
+        )
     high_stakes_health = _matches(
         value, HEALTH_TOPIC_PATTERNS
     ) and _matches(value, HEALTH_RISK_PATTERNS)

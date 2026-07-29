@@ -46,6 +46,38 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.budget.max_searches, 4)
         self.assertEqual(plan.budget.max_sources, 10)
 
+    def test_regional_biggest_news_uses_current_news_route(self) -> None:
+        plan = create_search_plan_v1(
+            "What's the biggest news in Japan right now?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "current_news")
+        self.assertEqual(plan.policy_pack, "current_news")
+        self.assertIn("freshness_required", plan.reason_codes)
+        self.assertIn("general_current_news_scope", plan.reason_codes)
+
+    def test_current_medical_news_uses_trusted_health_route(self) -> None:
+        plan = create_search_plan_v1("Any current medical news?")
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "health")
+
+    def test_vaccine_news_uses_medical_pack_not_general_news(self) -> None:
+        plan = create_search_plan_v1(
+            "Is there any news about vaccine safety today?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "health")
+
+    def test_named_software_product_news_wins_over_health_word(self) -> None:
+        plan = create_search_plan_v1(
+            "What is the latest OpenAI Health news?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "current_news")
+        self.assertEqual(plan.policy_pack, "software_security")
+
     def test_health_news_stays_on_trusted_health_route(self) -> None:
         plan = create_search_plan_v1(
             "Is there any news about creatine safety today?"
@@ -67,6 +99,58 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.policy_pack, "health")
         self.assertIn("evidence_requested", plan.reason_codes)
         self.assertIn("high_stakes_verification", plan.reason_codes)
+
+    def test_official_software_docs_use_trusted_evidence_route(self) -> None:
+        plan = create_search_plan_v1(
+            "Search the web for the official OpenAI API documentation."
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "software_security")
+        self.assertEqual(plan.reason_codes, ("explicit_web_request",))
+
+    def test_named_official_security_guidance_uses_live_reference_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Use official OWASP guidance for this security question."
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertTrue(plan.external_web_access)
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "software_security")
+
+    def test_exercise_evidence_uses_exercise_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "What does the evidence say about training frequency?"
+        )
+        self.assertEqual(plan.decision, "indexed")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "exercise")
+
+    def test_nutrition_evidence_uses_nutrition_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Cite evidence about protein intake."
+        )
+        self.assertEqual(plan.decision, "indexed")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "nutrition")
+
+    def test_official_nutrition_guidelines_use_live_reference_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "What do official dietary guidelines recommend for protein?"
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertTrue(plan.external_web_access)
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "nutrition")
+
+    def test_official_exercise_guidance_uses_live_reference_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "Search official guidance on resistance training volume."
+        )
+        self.assertEqual(plan.decision, "live")
+        self.assertTrue(plan.external_web_access)
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "exercise")
 
     def test_internal_context_does_not_search(self) -> None:
         plan = create_search_plan_v1(

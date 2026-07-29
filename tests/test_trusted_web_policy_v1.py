@@ -2,18 +2,29 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.trusted_web_policy_v1 import (
-    BACB_DOMAIN,
+from rag_engine.trusted_source_registry_v1 import (
+    ACSM_DOMAIN,
     APNEWS_DOMAIN,
     ARSTECHNICA_DOMAIN,
-    CURRENT_NEWS_ALLOWED_DOMAINS,
-    GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+    BACB_DOMAIN,
+    CLINICAL_TRIALS_DOMAIN,
+    COCHRANE_DOMAIN,
     HUGGINGFACE_DOMAIN,
+    NHK_DOMAIN,
+    NSCA_DOMAIN,
     ODS_DOMAIN,
     OPENAI_DOMAIN,
     PMC_DOMAIN,
     PUBMED_DOMAIN,
     REUTERS_DOMAIN,
+)
+from rag_engine.trusted_web_policy_v1 import (
+    CURRENT_NEWS_ALLOWED_DOMAINS,
+    EXERCISE_TRAINING_ALLOWED_DOMAINS,
+    GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+    MEDICAL_HEALTH_ALLOWED_DOMAINS,
+    NUTRITION_FOOD_ALLOWED_DOMAINS,
+    SOFTWARE_SECURITY_ALLOWED_DOMAINS,
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
@@ -68,7 +79,46 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             decision.allowed_domains,
-            (APNEWS_DOMAIN, REUTERS_DOMAIN),
+            (APNEWS_DOMAIN, REUTERS_DOMAIN, NHK_DOMAIN),
+        )
+
+    def test_japan_news_uses_bounded_general_news_pack(self) -> None:
+        decision = route_trusted_web_query(
+            "What's the biggest news in Japan right now?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.SEARCH)
+        self.assertEqual(
+            decision.reason,
+            "approved_general_current_news_lookup",
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,
+        )
+        self.assertIn(NHK_DOMAIN, decision.allowed_domains)
+
+    def test_current_medical_news_uses_medical_pack(self) -> None:
+        decision = route_trusted_web_query("Any current medical news?")
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.MEDICAL_CURRENT_NEWS,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            MEDICAL_HEALTH_ALLOWED_DOMAINS,
+        )
+        self.assertIn(CLINICAL_TRIALS_DOMAIN, decision.allowed_domains)
+        self.assertIn(COCHRANE_DOMAIN, decision.allowed_domains)
+
+    def test_named_software_product_news_wins_over_health_word(self) -> None:
+        decision = route_trusted_web_query(
+            "What is the latest OpenAI Health news?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.CURRENT_NEWS)
+        self.assertEqual(
+            decision.allowed_domains,
+            CURRENT_NEWS_ALLOWED_DOMAINS,
         )
 
     def test_general_current_news_does_not_steal_health_topics(self) -> None:
@@ -86,6 +136,15 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         decision = route_trusted_web_query("What's going on?")
         self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
         self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+
+    def test_user_search_prohibition_fails_closed_inside_provider_policy(self) -> None:
+        decision = route_trusted_web_query(
+            "Do not search the web. What happened with OpenAI today?"
+        )
+        self.assertEqual(decision.topic, TrustedWebTopicV1.UNSUPPORTED)
+        self.assertEqual(decision.disposition, TrustedWebDispositionV1.DECLINE)
+        self.assertEqual(decision.reason, "search_prohibited_by_user")
+        self.assertEqual(decision.allowed_domains, ())
 
     def test_current_news_does_not_steal_health_or_medical_queries(self) -> None:
         supplement = route_trusted_web_query(
@@ -116,15 +175,71 @@ class TrustedWebPolicyV1Tests(unittest.TestCase):
         self.assertIn(PUBMED_DOMAIN, decision.allowed_domains)
         self.assertNotIn(BACB_DOMAIN, decision.allowed_domains)
 
-    def test_training_evidence_is_pubmed_and_pmc_only(self) -> None:
+    def test_training_evidence_uses_exercise_pack(self) -> None:
         decision = route_trusted_web_query(
             "What does evidence say about training volume for hypertrophy?"
         )
         self.assertEqual(decision.topic, TrustedWebTopicV1.TRAINING_EVIDENCE)
         self.assertEqual(
             decision.allowed_domains,
-            (PUBMED_DOMAIN, PMC_DOMAIN),
+            EXERCISE_TRAINING_ALLOWED_DOMAINS,
         )
+        self.assertIn(ACSM_DOMAIN, decision.allowed_domains)
+        self.assertIn(NSCA_DOMAIN, decision.allowed_domains)
+
+    def test_nutrition_evidence_uses_nutrition_pack(self) -> None:
+        decision = route_trusted_web_query(
+            "Cite evidence about protein intake and meal timing."
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.NUTRITION_EVIDENCE,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            NUTRITION_FOOD_ALLOWED_DOMAINS,
+        )
+
+    def test_official_nutrition_guidance_uses_live_reference_topic(self) -> None:
+        decision = route_trusted_web_query(
+            "What do official dietary guidelines recommend for protein?"
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.NUTRITION_REFERENCE,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            NUTRITION_FOOD_ALLOWED_DOMAINS,
+        )
+
+    def test_official_exercise_guidance_uses_live_reference_topic(self) -> None:
+        decision = route_trusted_web_query(
+            "Search official guidance on resistance training volume."
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.EXERCISE_REFERENCE,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            EXERCISE_TRAINING_ALLOWED_DOMAINS,
+        )
+
+    def test_software_reference_uses_only_official_reference_pack(self) -> None:
+        decision = route_trusted_web_query(
+            "Search the official OpenAI API documentation."
+        )
+        self.assertEqual(
+            decision.topic,
+            TrustedWebTopicV1.SOFTWARE_SECURITY_REFERENCE,
+        )
+        self.assertEqual(
+            decision.allowed_domains,
+            SOFTWARE_SECURITY_ALLOWED_DOMAINS,
+        )
+        self.assertNotIn(APNEWS_DOMAIN, decision.allowed_domains)
+        self.assertNotIn(ARSTECHNICA_DOMAIN, decision.allowed_domains)
 
     def test_behavior_route_keeps_bacb_off_by_default(self) -> None:
         default = route_trusted_web_query(

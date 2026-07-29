@@ -28,6 +28,16 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
                     manifest.available_routes,
                     ("current_news", "trusted_health"),
                 )
+                self.assertEqual(
+                    manifest.policy_packs,
+                    (
+                        "current_news",
+                        "health",
+                        "nutrition",
+                        "exercise",
+                        "software_security",
+                    ),
+                )
                 self.assertIn("server, not the browser or model", manifest.model_brief)
                 self.assertIn("unless retrieved evidence", manifest.model_brief)
                 self.assertIn(
@@ -36,6 +46,12 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
                 )
                 self.assertIn("general fact-checking", manifest.model_brief)
                 self.assertIn("arbitrary page retrieval", manifest.model_brief)
+                self.assertIn("nutrition and food evidence", manifest.model_brief)
+                self.assertIn("exercise and training evidence", manifest.model_brief)
+                self.assertIn(
+                    "official software or cybersecurity references",
+                    manifest.model_brief,
+                )
                 self.assertEqual(
                     SearchCapabilityManifestV1.from_wire_json(
                         manifest.model_dump_json()

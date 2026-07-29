@@ -171,7 +171,11 @@ def _decline_answer(policy: TrustedWebPolicyDecisionV1) -> str:
             "Stop the experiment and seek appropriate professional or emergency care "
             "if there may be immediate danger or serious symptoms."
         )
-    return "Web search is limited to approved nutrition, lifting, physique, supplement, and self-experimentation evidence."
+    return (
+        "Internet research is limited to the server's approved source packs "
+        "for current news, health and medical evidence, nutrition, exercise "
+        "and training, and official software or cybersecurity references."
+    )
 
 
 def _safe_error_code(exc: Exception) -> str:

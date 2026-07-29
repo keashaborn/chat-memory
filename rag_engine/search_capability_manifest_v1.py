@@ -21,6 +21,8 @@ SEARCH_CAPABILITY_MODES = ("indexed", "live")
 SEARCH_CAPABILITY_POLICY_PACKS = (
     "current_news",
     "health",
+    "nutrition",
+    "exercise",
     "software_security",
 )
 
@@ -29,10 +31,11 @@ VOICE_SEARCH_AUTHORIZATION_BASIS = "supabase_fresh_voice_lease_v1"
 
 _MODEL_BRIEF = (
     "Server-mediated research is available for authorized requests through "
-    "bounded current-news and trusted-health routes. The currently supported "
+    "bounded current-news and trusted-evidence routes. The currently supported "
     "categories are only current news and recent events; trusted health and "
-    "medical evidence; and software or cybersecurity current events through "
-    "the current-news policy. Do not imply support for other categories, "
+    "medical evidence; nutrition and food evidence; exercise and training "
+    "evidence; and official software or cybersecurity references and current "
+    "events. Do not imply support for other categories, "
     "general fact-checking, arbitrary page retrieval, or unrestricted "
     "browsing. The server, not the browser or model, selects the route, source "
     "policy, and budget. Do not claim that this system cannot search the web "
@@ -86,7 +89,14 @@ class SearchCapabilityManifestV1(_StrictFrozenModel):
         SEARCH_CAPABILITY_MODES
     )
     policy_packs: tuple[
-        Literal["current_news", "health", "software_security"], ...
+        Literal[
+            "current_news",
+            "health",
+            "nutrition",
+            "exercise",
+            "software_security",
+        ],
+        ...,
     ] = SEARCH_CAPABILITY_POLICY_PACKS
     model_brief: Literal[_MODEL_BRIEF] = _MODEL_BRIEF
     manifest_sha256: str
@@ -123,9 +133,25 @@ class SearchCapabilityManifestV1(_StrictFrozenModel):
     def exact_policy_packs(
         cls,
         value: tuple[
-            Literal["current_news", "health", "software_security"], ...
+            Literal[
+                "current_news",
+                "health",
+                "nutrition",
+                "exercise",
+                "software_security",
+            ],
+            ...,
         ],
-    ) -> tuple[Literal["current_news", "health", "software_security"], ...]:
+    ) -> tuple[
+        Literal[
+            "current_news",
+            "health",
+            "nutrition",
+            "exercise",
+            "software_security",
+        ],
+        ...,
+    ]:
         if value != SEARCH_CAPABILITY_POLICY_PACKS:
             raise ValueError("search capability policy packs differ from server policy")
         return value

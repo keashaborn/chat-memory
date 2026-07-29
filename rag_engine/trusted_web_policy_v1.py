@@ -9,52 +9,51 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
-
-POLICY_VERSION = "trusted_web_policy_v1_2"
-
-ODS_DOMAIN = "ods.od.nih.gov"
-MEDLINEPLUS_DOMAIN = "medlineplus.gov"
-DGA_DOMAIN = "dietaryguidelines.gov"
-REALFOOD_DOMAIN = "realfood.gov"
-ODPHP_DOMAIN = "odphp.health.gov"
-FDA_DOMAIN = "fda.gov"
-PUBMED_DOMAIN = "pubmed.ncbi.nlm.nih.gov"
-PMC_DOMAIN = "pmc.ncbi.nlm.nih.gov"
-BACB_DOMAIN = "bacb.com"
-OPENAI_DOMAIN = "openai.com"
-HUGGINGFACE_DOMAIN = "huggingface.co"
-APNEWS_DOMAIN = "apnews.com"
-REUTERS_DOMAIN = "reuters.com"
-ARSTECHNICA_DOMAIN = "arstechnica.com"
-WIRED_DOMAIN = "wired.com"
-THEVERGE_DOMAIN = "theverge.com"
-
-CORE_ALLOWED_DOMAINS = frozenset(
-    {
-        ODS_DOMAIN,
-        MEDLINEPLUS_DOMAIN,
-        DGA_DOMAIN,
-        REALFOOD_DOMAIN,
-        ODPHP_DOMAIN,
-        FDA_DOMAIN,
-        PUBMED_DOMAIN,
-        PMC_DOMAIN,
-    }
-)
-
-CURRENT_NEWS_ALLOWED_DOMAINS = (
-    OPENAI_DOMAIN,
-    HUGGINGFACE_DOMAIN,
+from rag_engine.trusted_source_registry_v1 import (
+    ALL_REGISTERED_DOMAINS,
     APNEWS_DOMAIN,
-    REUTERS_DOMAIN,
     ARSTECHNICA_DOMAIN,
-    WIRED_DOMAIN,
-    THEVERGE_DOMAIN,
-)
-GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS = (
-    APNEWS_DOMAIN,
+    BACB_DOMAIN,
+    DGA_DOMAIN,
+    FDA_DOMAIN,
+    HUGGINGFACE_DOMAIN,
+    MEDLINEPLUS_DOMAIN,
+    NHK_DOMAIN,
+    ODS_DOMAIN,
+    ODPHP_DOMAIN,
+    OPENAI_DOMAIN,
+    PMC_DOMAIN,
+    PUBMED_DOMAIN,
+    REALFOOD_DOMAIN,
     REUTERS_DOMAIN,
+    THEVERGE_DOMAIN,
+    TrustedSourcePackIdV1,
+    WIRED_DOMAIN,
+    trusted_source_pack_v1,
 )
+
+POLICY_VERSION = "trusted_web_policy_v1_3"
+
+CORE_ALLOWED_DOMAINS = ALL_REGISTERED_DOMAINS
+
+CURRENT_NEWS_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.AI_TECH_CURRENT_NEWS
+).allowed_domains
+GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.GENERAL_CURRENT_NEWS
+).allowed_domains
+MEDICAL_HEALTH_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.MEDICAL_HEALTH
+).allowed_domains
+NUTRITION_FOOD_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.NUTRITION_FOOD
+).allowed_domains
+EXERCISE_TRAINING_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.EXERCISE_TRAINING
+).allowed_domains
+SOFTWARE_SECURITY_ALLOWED_DOMAINS = trusted_source_pack_v1(
+    TrustedSourcePackIdV1.SOFTWARE_SECURITY_REFERENCE
+).allowed_domains
 
 
 class TrustedWebTopicV1(str, Enum):
@@ -67,6 +66,10 @@ class TrustedWebTopicV1(str, Enum):
     INTERNAL_EXERCISE_LIBRARY = "internal_exercise_library"
     SAFETY_STOP = "safety_stop"
     CURRENT_NEWS = "current_news"
+    MEDICAL_CURRENT_NEWS = "medical_current_news"
+    NUTRITION_REFERENCE = "nutrition_reference"
+    EXERCISE_REFERENCE = "exercise_reference"
+    SOFTWARE_SECURITY_REFERENCE = "software_security_reference"
     UNSUPPORTED = "unsupported"
 
 
@@ -88,6 +91,18 @@ class TrustedWebPolicyDecisionV1(BaseModel):
 
 
 _URL_RE = re.compile(r"https?://[^\s<>{}\[\]\"']+", re.IGNORECASE)
+
+_NO_SEARCH_RE = re.compile(
+    r"(?:"
+    r"\bdo not (?:search|browse|look online|use the web)\b"
+    r"|\bdon't (?:search|browse|look online|use the web)\b"
+    r"|\bnever (?:search|browse|look online|use the web)\b"
+    r"|\bno (?:web|internet|online) (?:access|search(?:ing)?|browsing)\b"
+    r"|\boffline only\b"
+    r"|\bdo not (?:access|consult|use) (?:any )?external sources?\b"
+    r")",
+    re.IGNORECASE,
+)
 
 _SAFETY_TERMS = (
     "suicidal",
@@ -174,7 +189,6 @@ _MEDICAL_ADJACENT_TERMS = (
 _USDA_TERMS = (
     "fooddata central",
     "fooddata",
-    "usda",
     "barcode",
     "nutrition facts",
     "food composition",
@@ -224,6 +238,41 @@ _CURRENT_NEWS_ENTITY_TERMS = (
     "fda",
     "ftc",
     "nist",
+    "supabase",
+    "next.js",
+    "nextjs",
+    "react",
+    "postgres",
+    "postgresql",
+    "qdrant",
+    "github",
+    "mozilla",
+    "owasp",
+    "cisa",
+)
+
+_SOFTWARE_CURRENT_NEWS_ENTITY_TERMS = (
+    "openai",
+    "hugging face",
+    "huggingface",
+    "anthropic",
+    "google deepmind",
+    "deepmind",
+    "nvidia",
+    "meta ai",
+    "mistral",
+    "supabase",
+    "next.js",
+    "nextjs",
+    "react",
+    "postgres",
+    "postgresql",
+    "qdrant",
+    "github",
+    "mozilla",
+    "owasp",
+    "nist",
+    "cisa",
 )
 
 _CURRENT_NEWS_INTENT_TERMS = (
@@ -263,7 +312,11 @@ _CURRENT_NEWS_INTENT_TERMS = (
 )
 
 _GENERAL_CURRENT_NEWS_RE = re.compile(
-    r"\bnews\s+(?:about|on)\b",
+    r"(?:"
+    r"\bnews\s+(?:about|on|in|from)\b"
+    r"|\b(?:biggest|top|major)\s+(?:news|headline|story|stories)\b"
+    r"|\b(?:top|major)\s+headlines?\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -319,6 +372,88 @@ _TRAINING_EVIDENCE_TERMS = (
     "estimated 1rm",
     "one rep max",
     "progressive overload",
+)
+
+_MEDICAL_EVIDENCE_TERMS = (
+    "health",
+    "medical",
+    "medicine",
+    "public health",
+    "health research",
+    "clinical trial",
+    "clinical trials",
+    "disease",
+    "infection",
+    "vaccine",
+    "vaccines",
+)
+
+_SOFTWARE_SECURITY_REFERENCE_TERMS = (
+    "openai",
+    "supabase",
+    "next.js",
+    "nextjs",
+    "react",
+    "postgres",
+    "postgresql",
+    "qdrant",
+    "github",
+    "mozilla",
+    "mdn",
+    "owasp",
+    "nist",
+    "cisa",
+    "ietf",
+    "w3c",
+    "api",
+    "software",
+    "cybersecurity",
+    "security",
+    "vulnerability",
+    "vulnerabilities",
+    "cve-",
+)
+
+_REFERENCE_INTENT_TERMS = (
+    "documentation",
+    "docs",
+    "official source",
+    "official guidance",
+    "guideline",
+    "guidelines",
+    "recommendation",
+    "recommendations",
+    "specification",
+    "standard",
+    "advisory",
+    "cite",
+    "citation",
+    "citations",
+    "evidence",
+    "research",
+    "verify",
+    "fact check",
+    "fact-check",
+    "search",
+    "look up",
+    "check the web",
+)
+
+_OFFICIAL_REFERENCE_INTENT_TERMS = (
+    "documentation",
+    "docs",
+    "official source",
+    "official guidance",
+    "guideline",
+    "guidelines",
+    "recommendation",
+    "recommendations",
+    "specification",
+    "standard",
+    "advisory",
+    "search",
+    "look up",
+    "check the web",
 )
 
 
@@ -413,11 +548,40 @@ def route_trusted_web_query(
             disposition=TrustedWebDispositionV1.DECLINE,
             reason="unapproved_news_source",
         )
+    if _NO_SEARCH_RE.search(normalized):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.UNSUPPORTED,
+            disposition=TrustedWebDispositionV1.DECLINE,
+            reason="search_prohibited_by_user",
+        )
     if _contains_any(normalized, _SAFETY_TERMS):
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.SAFETY_STOP,
             disposition=TrustedWebDispositionV1.SAFETY_STOP,
             reason="safety_signal",
+        )
+    if (
+        _contains_any(normalized, _CURRENT_NEWS_INTENT_TERMS)
+        and _contains_any(
+            normalized,
+            _SOFTWARE_CURRENT_NEWS_ENTITY_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.CURRENT_NEWS,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_current_news_lookup",
+            allowed_domains=CURRENT_NEWS_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _CURRENT_NEWS_INTENT_TERMS)
+        and _contains_any(normalized, _MEDICAL_EVIDENCE_TERMS)
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.MEDICAL_CURRENT_NEWS,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_medical_current_news_lookup",
+            allowed_domains=MEDICAL_HEALTH_ALLOWED_DOMAINS,
         )
     if _contains_any(normalized, _CURRENT_NEWS_INTENT_TERMS) and _contains_any(
         normalized,
@@ -434,30 +598,25 @@ def route_trusted_web_query(
             topic=TrustedWebTopicV1.SUPPLEMENTS,
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_supplement_evidence",
-            allowed_domains=(
-                ODS_DOMAIN,
-                MEDLINEPLUS_DOMAIN,
-                FDA_DOMAIN,
-                PUBMED_DOMAIN,
-                PMC_DOMAIN,
-            ),
+            allowed_domains=MEDICAL_HEALTH_ALLOWED_DOMAINS,
         )
     if _contains_any(normalized, _BEHAVIOR_TERMS):
-        domains = [PUBMED_DOMAIN, PMC_DOMAIN]
-        if allow_bacb:
-            domains.append(BACB_DOMAIN)
+        domains = trusted_source_pack_v1(
+            TrustedSourcePackIdV1.BEHAVIOR_CHANGE,
+            allow_bacb=allow_bacb,
+        ).allowed_domains
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.BEHAVIOR_CHANGE,
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_self_experimentation_evidence",
-            allowed_domains=tuple(domains),
+            allowed_domains=domains,
         )
     if _contains_any(normalized, _MEDICAL_ADJACENT_TERMS):
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.MEDICAL_ADJACENT,
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_plain_language_safety",
-            allowed_domains=(ODS_DOMAIN, MEDLINEPLUS_DOMAIN, FDA_DOMAIN),
+            allowed_domains=MEDICAL_HEALTH_ALLOWED_DOMAINS,
         )
     if _contains_any(normalized, _USDA_TERMS):
         return TrustedWebPolicyDecisionV1(
@@ -471,19 +630,65 @@ def route_trusted_web_query(
             disposition=TrustedWebDispositionV1.ROUTE_INTERNAL,
             reason="use_internal_exercise_library",
         )
+    if (
+        _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS)
+        and _contains_any(
+            normalized,
+            _OFFICIAL_REFERENCE_INTENT_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.NUTRITION_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_nutrition_reference",
+            allowed_domains=NUTRITION_FOOD_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _TRAINING_EVIDENCE_TERMS)
+        and _contains_any(
+            normalized,
+            _OFFICIAL_REFERENCE_INTENT_TERMS,
+        )
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.EXERCISE_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_exercise_reference",
+            allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
+        )
     if _contains_any(normalized, _NUTRITION_EVIDENCE_TERMS):
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.NUTRITION_EVIDENCE,
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_nutrition_evidence",
-            allowed_domains=(DGA_DOMAIN, REALFOOD_DOMAIN, ODPHP_DOMAIN, PUBMED_DOMAIN, PMC_DOMAIN),
+            allowed_domains=NUTRITION_FOOD_ALLOWED_DOMAINS,
         )
     if _contains_any(normalized, _TRAINING_EVIDENCE_TERMS):
         return TrustedWebPolicyDecisionV1(
             topic=TrustedWebTopicV1.TRAINING_EVIDENCE,
             disposition=TrustedWebDispositionV1.SEARCH,
             reason="approved_training_evidence",
-            allowed_domains=(PUBMED_DOMAIN, PMC_DOMAIN),
+            allowed_domains=EXERCISE_TRAINING_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _MEDICAL_EVIDENCE_TERMS)
+        and _contains_any(normalized, _REFERENCE_INTENT_TERMS)
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.MEDICAL_ADJACENT,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_medical_evidence",
+            allowed_domains=MEDICAL_HEALTH_ALLOWED_DOMAINS,
+        )
+    if (
+        _contains_any(normalized, _SOFTWARE_SECURITY_REFERENCE_TERMS)
+        and _contains_any(normalized, _REFERENCE_INTENT_TERMS)
+    ):
+        return TrustedWebPolicyDecisionV1(
+            topic=TrustedWebTopicV1.SOFTWARE_SECURITY_REFERENCE,
+            disposition=TrustedWebDispositionV1.SEARCH,
+            reason="approved_software_security_reference",
+            allowed_domains=SOFTWARE_SECURITY_ALLOWED_DOMAINS,
         )
     if (
         _GENERAL_CURRENT_NEWS_RE.search(normalized)
@@ -515,9 +720,14 @@ __all__ = [
     "CORE_ALLOWED_DOMAINS",
     "CURRENT_NEWS_ALLOWED_DOMAINS",
     "GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS",
+    "EXERCISE_TRAINING_ALLOWED_DOMAINS",
     "HUGGINGFACE_DOMAIN",
+    "MEDICAL_HEALTH_ALLOWED_DOMAINS",
+    "NHK_DOMAIN",
+    "NUTRITION_FOOD_ALLOWED_DOMAINS",
     "OPENAI_DOMAIN",
     "REUTERS_DOMAIN",
+    "SOFTWARE_SECURITY_ALLOWED_DOMAINS",
     "THEVERGE_DOMAIN",
     "WIRED_DOMAIN",
     "POLICY_VERSION",
