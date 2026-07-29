@@ -41,7 +41,7 @@ dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
   rm -f "$backup" "$role_sql"
-  rm -rf "$work"
+  sudo rm -rf "$work"
 }
 trap cleanup EXIT
 chmod 0600 "$backup" "$role_sql"
@@ -55,6 +55,17 @@ run_sql() {
 scalar() {
   "${compose[@]}" exec -T postgres psql -X -A -t -v ON_ERROR_STOP=1 \
     -U sage -d memory -c "$1"
+}
+
+run_stage_root() {
+  sudo env \
+    POSTGRES_DSN="$dsn" \
+    PYTHONPATH="$repo_root" \
+    GIT_OPTIONAL_LOCKS=0 \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=safe.directory \
+    GIT_CONFIG_VALUE_0="$repo_root" \
+    "$@"
 }
 
 assert_equal() {
@@ -217,24 +228,31 @@ output.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 os.chmod(output, 0o600)
 PY
 
-POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
-  /opt/chat-memory/venv/bin/python "$stage_runner" plan \
+run_stage_root /opt/chat-memory/venv/bin/python "$stage_runner" plan \
   --manifest "$work/stage-manifest.json" \
   --review-root "$review_root" \
   --output "$work/stage-plan.json"
+sudo chown "$(id -un):$(id -gn)" "$work/stage-plan.json"
 head=$(git rev-parse HEAD)
 /opt/chat-memory/venv/bin/python "$stage_authorizer" authorize \
   --plan "$work/stage-plan.json" \
   --output "$work/stage-authorization.json" \
   --head "$head"
-MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
-  POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+sudo env \
+  MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
+  POSTGRES_DSN="$dsn" \
+  PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 \
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0=safe.directory \
+  GIT_CONFIG_VALUE_0="$repo_root" \
   /opt/chat-memory/venv/bin/python "$stage_runner" apply \
   --plan "$work/stage-plan.json" \
   --authorization "$work/stage-authorization.json" \
   --review-root "$review_root" \
   --confirm STAGE_REVIEWED_OWNER_V5_2_PACKETS_ONLY \
   --output "$work/stage-apply.json"
+sudo chown "$(id -un):$(id -gn)" "$work/stage-apply.json"
 
 assert_equal stage_rows "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 44
 assert_equal stage_replay "$(jq -r '.checks.replay_rows_written' "$work/stage-apply.json")" 0
