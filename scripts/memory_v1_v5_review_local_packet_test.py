@@ -55,6 +55,24 @@ def main() -> int:
     ]
     assert "private breed" not in json.dumps(findings)
 
+    for canonical_species in (
+        "bird",
+        "cat",
+        "dog",
+        "horse",
+        "llama",
+        "rabbit",
+    ):
+        governed_species = copy.deepcopy(species)
+        governed_species["observations"][0]["object"]["value"] = canonical_species
+        assert packet_quality_findings(governed_species) == []
+
+    unnormalized_species = copy.deepcopy(species)
+    unnormalized_species["observations"][0]["object"]["value"] = "Dog"
+    assert packet_quality_findings(unnormalized_species)[0]["code"] == (
+        "open_pet_species_domain_review_required"
+    )
+
     breed = copy.deepcopy(species)
     breed["observations"][0]["predicate"] = "pet.breed"
     assert packet_quality_findings(breed) == []

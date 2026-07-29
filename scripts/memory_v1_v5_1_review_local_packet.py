@@ -50,6 +50,9 @@ BUNDLE_CONTRACT = "memory_v1_v5_1_stage_preflight_v1"
 REVIEW_NAMESPACE = uuid.UUID("d9bbc38c-812a-53f9-bfcb-c2185db1f7ca")
 V5_2_REVIEW_NAMESPACE = uuid.UUID("f2285012-c276-52c8-a919-452274ac8ca1")
 DEFAULT_REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
+CANONICAL_PET_SPECIES = frozenset(
+    {"bird", "cat", "dog", "horse", "llama", "rabbit"}
+)
 EXPLICIT_CALENDAR_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 LAST_YEAR_RE = re.compile(r"\blast year\b", re.IGNORECASE)
 HASH_FIELDS = (
@@ -209,7 +212,18 @@ def packet_quality_findings(packet: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for observation in packet["observations"]:
         predicate = observation["predicate"]
-        if predicate == "pet.species":
+        object_value = observation.get("object")
+        canonical_species = (
+            object_value.get("value")
+            if isinstance(object_value, dict)
+            and object_value.get("kind") == "literal"
+            and object_value.get("datatype") == "text"
+            else None
+        )
+        if (
+            predicate == "pet.species"
+            and canonical_species not in CANONICAL_PET_SPECIES
+        ):
             findings.append(
                 {
                     "code": "open_pet_species_domain_review_required",

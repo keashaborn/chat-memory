@@ -40,6 +40,9 @@ REVIEW_CONTRACT = "memory_v1_v5_local_packet_review_v1"
 BUNDLE_CONTRACT = "memory_v1_v5_stage_preflight_v1"
 REVIEW_NAMESPACE = uuid.UUID("2d94531b-0547-56e0-8f09-b7e66a5699a9")
 DEFAULT_REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
+CANONICAL_PET_SPECIES = frozenset(
+    {"bird", "cat", "dog", "horse", "llama", "rabbit"}
+)
 HASH_FIELDS = (
     "evidence_content_sha256",
     "provider_model_sha256",
@@ -151,7 +154,18 @@ def packet_quality_findings(packet: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for observation in packet["observations"]:
         predicate = observation["predicate"]
-        if predicate == "pet.species":
+        object_value = observation.get("object")
+        canonical_species = (
+            object_value.get("value")
+            if isinstance(object_value, dict)
+            and object_value.get("kind") == "literal"
+            and object_value.get("datatype") == "text"
+            else None
+        )
+        if (
+            predicate == "pet.species"
+            and canonical_species not in CANONICAL_PET_SPECIES
+        ):
             findings.append(
                 {
                     "code": "open_pet_species_domain_review_required",

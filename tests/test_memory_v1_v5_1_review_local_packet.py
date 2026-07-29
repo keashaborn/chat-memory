@@ -7,6 +7,7 @@ import unittest
 from scripts.memory_v1_v5_1_review_local_packet import (
     LocalPacketReviewError,
     normalize_review_packet,
+    packet_quality_findings,
 )
 
 
@@ -41,6 +42,61 @@ def packet() -> dict:
 
 
 class ReviewPacketNormalizationTest(unittest.TestCase):
+    def test_canonical_pet_species_do_not_require_open_domain_review(self) -> None:
+        for species in (
+            "bird",
+            "cat",
+            "dog",
+            "horse",
+            "llama",
+            "rabbit",
+        ):
+            value = {
+                "observations": [
+                    {
+                        "observation_ref": "o00",
+                        "predicate": "pet.species",
+                        "projection_class": "direct_claim",
+                        "project_scope": {"state": "not_applicable"},
+                        "object": {
+                            "kind": "literal",
+                            "datatype": "text",
+                            "value": species,
+                        },
+                    }
+                ],
+                "packet_findings": [],
+                "deferrals": [],
+                "comparison_hints": [],
+            }
+            self.assertEqual(packet_quality_findings(value), [])
+
+    def test_unknown_or_unnormalized_pet_species_remain_blocked(self) -> None:
+        for species in ("Dog", "private breed value"):
+            value = {
+                "observations": [
+                    {
+                        "observation_ref": "o00",
+                        "predicate": "pet.species",
+                        "projection_class": "direct_claim",
+                        "project_scope": {"state": "not_applicable"},
+                        "object": {
+                            "kind": "literal",
+                            "datatype": "text",
+                            "value": species,
+                        },
+                    }
+                ],
+                "packet_findings": [],
+                "deferrals": [],
+                "comparison_hints": [],
+            }
+            findings = packet_quality_findings(value)
+            self.assertEqual(
+                findings[0]["code"],
+                "open_pet_species_domain_review_required",
+            )
+
     def test_explicit_year_repairs_source_form_without_mutating_input(self) -> None:
         source = packet()
         original = copy.deepcopy(source)
