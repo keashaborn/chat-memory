@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # seebx backend only. Restores production into a disposable database, stages
-# exactly 11 pet-profile claim candidates, records 10 authorized reviews plus
-# one temporal-conflict deferral, materializes only the 10 authorized claims,
+# exactly 10 new pet-profile claim candidates, documents one existing Neko
+# temporal conflict for later reconciliation, materializes the 10 new claims,
 # proves replay and owner isolation, then removes the clone.
 
 if [[ "$#" -ne 1 ]]; then
@@ -145,7 +145,6 @@ observations=(
   6db9a4fd-e109-48ed-8d95-c97eef75382c
   8c4476ae-b917-4678-8d63-f4949982e196
   6151f123-d05f-404d-b3f6-d7079de6b4e6
-  bc8866ad-95e8-4413-832e-813f601eece6
   82c87916-a90c-4af8-b4cb-fbd2981f9f96
 )
 observation_args=()
@@ -173,21 +172,20 @@ MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root:$repo_root/scripts" \
   /opt/chat-memory/venv/bin/python "$repo_root/$stage_runner" apply \
   --manifest "$stage_manifest" --authorization "$stage_authorization" \
-  --confirm STAGE_EXACT_ELEVEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
+  --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
   --output "$stage_apply"
-[[ "$(jq -er '.rows_written' "$stage_apply")" == 66 ]]
+[[ "$(jq -er '.rows_written' "$stage_apply")" == 60 ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
 MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root:$repo_root/scripts" \
   /opt/chat-memory/venv/bin/python "$repo_root/$stage_runner" replay \
   --manifest "$stage_manifest" --authorization "$stage_authorization" \
-  --confirm STAGE_EXACT_ELEVEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
+  --confirm STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY \
   --output "$stage_replay"
 [[ "$(jq -er '.rows_written' "$stage_replay")" == 0 ]]
 
 MANIFEST="$stage_manifest" OUTPUT="$review_decisions" \
-DEFERRED_OBSERVATION="$deferred_observation" \
 PYTHONPATH="$repo_root:$repo_root/scripts" \
   /opt/chat-memory/venv/bin/python - <<'PY'
 import json
@@ -197,7 +195,6 @@ from pathlib import Path
 from scripts.memory_v1_projection_v5_contract_test import sha256
 
 stage = json.loads(Path(os.environ["MANIFEST"]).read_text())
-deferred = os.environ["DEFERRED_OBSERVATION"]
 value = {
     "contract_version": "memory_v1_v5_2_pet_profile_claim_review_decisions_v1",
     "owner_user_id": stage["owner_user_id"],
@@ -205,31 +202,20 @@ value = {
     "decisions": [],
 }
 for item in stage["items"]:
-    if item["observation_id"] == deferred:
-        decision = "deferred"
-        reason = (
-            "A prior supported Neko pet-relationship claim uses current-tense "
-            "wording; defer this historical version for controlled reconciliation."
-        )
-        codes = [
-            "historical_interval_reviewed",
-            "prior_current_tense_claim_requires_reconciliation",
-        ]
-    else:
-        decision = "authorized"
-        reason = (
-            "Reviewed atomic pet-profile observation with bound owner-scoped "
-            "entities, exact source evidence, and deterministic temporal rendering."
-        )
-        codes = [
-            "bound_entities_reviewed",
-            "pet_profile_semantics_reviewed",
-            (
-                "historical_interval_reviewed"
-                if item["state_relation"] == "historical"
-                else "observation_time_reviewed"
-            ),
-        ]
+    decision = "authorized"
+    reason = (
+        "Reviewed atomic pet-profile observation with bound owner-scoped "
+        "entities, exact source evidence, and deterministic temporal rendering."
+    )
+    codes = [
+        "bound_entities_reviewed",
+        "pet_profile_semantics_reviewed",
+        (
+            "historical_interval_reviewed"
+            if item["state_relation"] == "historical"
+            else "observation_time_reviewed"
+        ),
+    ]
     value["decisions"].append(
         {
             "observation_id": item["observation_id"],
@@ -261,9 +247,9 @@ MEMORY_V1_V5_2_PET_PROFILE_CLAIM_REVIEW_APPLY=authorized \
 POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root:$repo_root/scripts" \
   /opt/chat-memory/venv/bin/python "$repo_root/$review_runner" \
   --mode apply --manifest "$review_manifest" --output "$review_apply"
-[[ "$(jq -er '.rows_written' "$review_apply")" == 11 ]]
+[[ "$(jq -er '.rows_written' "$review_apply")" == 10 ]]
 [[ "$(jq -er '.decision_counts.authorized' "$review_apply")" == 10 ]]
-[[ "$(jq -er '.decision_counts.deferred' "$review_apply")" == 1 ]]
+[[ "$(jq -er '.decision_counts.deferred // 0' "$review_apply")" == 0 ]]
 
 MEMORY_V1_REQUIRED_HEAD="$head" \
 MEMORY_V1_V5_2_PET_PROFILE_CLAIM_REVIEW_APPLY=authorized \
@@ -302,13 +288,13 @@ POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root:$repo_root/scripts" \
 [[ "$(jq -er '.insert_rows' "$claim_replay")" == 0 ]]
 [[ "$(jq -er '.mutated_rows' "$claim_replay")" == 0 ]]
 
-[[ "$(scalar "SELECT count(*) FROM memory.relational_operation_request WHERE owner_user_id='$target_owner'")" == "$((before_requests + 31))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.observation_entailment_v5 WHERE owner_user_id='$target_owner'")" == "$((before_entailments + 11))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_plan WHERE owner_user_id='$target_owner'")" == "$((before_plans + 11))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_plan_item WHERE owner_user_id='$target_owner'")" == "$((before_items + 11))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_claim_payload WHERE owner_user_id='$target_owner'")" == "$((before_payloads + 11))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_plan_observation WHERE owner_user_id='$target_owner'")" == "$((before_plan_links + 11))" ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_review WHERE owner_user_id='$target_owner'")" == "$((before_reviews + 11))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.relational_operation_request WHERE owner_user_id='$target_owner'")" == "$((before_requests + 30))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.observation_entailment_v5 WHERE owner_user_id='$target_owner'")" == "$((before_entailments + 10))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.projection_plan WHERE owner_user_id='$target_owner'")" == "$((before_plans + 10))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.projection_plan_item WHERE owner_user_id='$target_owner'")" == "$((before_items + 10))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.projection_claim_payload WHERE owner_user_id='$target_owner'")" == "$((before_payloads + 10))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.projection_plan_observation WHERE owner_user_id='$target_owner'")" == "$((before_plan_links + 10))" ]]
+[[ "$(scalar "SELECT count(*) FROM memory.projection_review WHERE owner_user_id='$target_owner'")" == "$((before_reviews + 10))" ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner'")" == "$((before_claims + 10))" ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim_revision WHERE owner_user_id='$target_owner'")" == "$((before_revisions + 20))" ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner'")" == "$((before_claim_links + 10))" ]]
@@ -317,7 +303,7 @@ claim_ids=$(jq -r '[.outcomes[].claim_id] | join(",")' "$claim_apply")
 [[ "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND status='supported'")" == 10 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner' AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 0 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim_observation WHERE owner_user_id='$target_owner' AND observation_id='$deferred_observation'::uuid")" == 0 ]]
-[[ "$(scalar "SELECT count(*) FROM memory.projection_review r JOIN memory.projection_plan_observation l USING(owner_user_id,plan_id,projection_ref) WHERE r.owner_user_id='$target_owner' AND l.observation_id='$deferred_observation'::uuid AND r.decision='deferred'")" == 1 ]]
+[[ "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id='bd20dd0a-9fa0-4a21-8a93-e828c8044150'::uuid AND status='supported' AND canonical_text='The user has a pet named Neko.'")" == 1 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND predicate='relationship.has_pet' AND canonical_text LIKE 'The user formerly had a pet named %'")" == 2 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[]) AND canonical_text LIKE 'The user has a pet named %'")" == 0 ]]
 
@@ -372,13 +358,13 @@ value = {
     "review_manifest_sha256": review["manifest_sha256"],
     "claim_manifest_sha256": claim["manifest_sha256"],
     "claim_apply_result_sha256": applied["result_sha256"],
-    "candidate_count": 11,
+    "candidate_count": 10,
     "authorized_count": 10,
-    "deferred_count": 1,
+    "deferred_reconciliation_count": 1,
     "supported_claim_count": 10,
     "verification": {
-        "stage_rows_written": 66,
-        "review_rows_written": 11,
+        "stage_rows_written": 60,
+        "review_rows_written": 10,
         "claim_insert_rows": 110,
         "claim_mutated_rows": 120,
         "stage_replay_zero_write": True,

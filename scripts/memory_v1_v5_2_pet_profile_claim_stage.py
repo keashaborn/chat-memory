@@ -152,22 +152,6 @@ TARGETS: dict[str, dict[str, Any]] = {
         "object_literal": literal("cat"),
         "canonical_text": "Neko has recorded species cat.",
     },
-    "bc8866ad-95e8-4413-832e-813f601eece6": {
-        "evidence_id": "ca637d00-7ff6-5147-8f6b-a82386dbc1c1",
-        "evidence_content_sha256": "1a3d471b848c5267f15e80d137ac094cbe5eed583e2ec40026ca6e4e4e2b7df9",
-        "observation_sha256": "e13b73f82fb1feb3189efddaf2c5752b5c56f7d2292438c4366f54a0f5cd7b86",
-        "predicate": "relationship.has_pet",
-        "state_relation": "historical",
-        "subject_entity_id": SELF_ENTITY,
-        "subject_entity_type": "self",
-        "subject_canonical_name": "Self",
-        "object_kind": "entity",
-        "object_entity_id": NEKO_ENTITY,
-        "object_entity_type": "animal",
-        "object_canonical_name": "Neko",
-        "canonical_text": "The user formerly had a pet named Neko.",
-        "expected_existing_aggregates": 1,
-    },
     "82c87916-a90c-4af8-b4cb-fbd2981f9f96": {
         "evidence_id": "ca637d00-7ff6-5147-8f6b-a82386dbc1c1",
         "evidence_content_sha256": "1a3d471b848c5267f15e80d137ac094cbe5eed583e2ec40026ca6e4e4e2b7df9",
@@ -181,6 +165,22 @@ TARGETS: dict[str, dict[str, Any]] = {
         "object_literal": literal("Neko"),
         "canonical_text": "Neko's name is Neko.",
     },
+}
+
+DEFERRED_CONFLICTS: dict[str, dict[str, Any]] = {
+    "bc8866ad-95e8-4413-832e-813f601eece6": {
+        "evidence_id": "ca637d00-7ff6-5147-8f6b-a82386dbc1c1",
+        "evidence_content_sha256": "1a3d471b848c5267f15e80d137ac094cbe5eed583e2ec40026ca6e4e4e2b7df9",
+        "observation_sha256": "e13b73f82fb1feb3189efddaf2c5752b5c56f7d2292438c4366f54a0f5cd7b86",
+        "predicate": "relationship.has_pet",
+        "state_relation": "historical",
+        "subject_entity_id": SELF_ENTITY,
+        "object_entity_id": NEKO_ENTITY,
+        "canonical_text": "The user formerly had a pet named Neko.",
+        "existing_claim_id": "bd20dd0a-9fa0-4a21-8a93-e828c8044150",
+        "existing_canonical_text": "The user has a pet named Neko.",
+        "disposition": "deferred_for_temporal_reconciliation",
+    }
 }
 
 
@@ -422,7 +422,7 @@ def configure_stage() -> None:
     stage.ENTAILMENT_APPLY_OUTCOME = "applied"
     stage.ENTAILMENT_REPLAY_OUTCOME = "replayed"
     stage.ASSESSOR_REF = "controlled_v5_2_pet_profile_bound_claim_stage"
-    stage.CONFIRMATION = "STAGE_EXACT_ELEVEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY"
+    stage.CONFIRMATION = "STAGE_EXACT_TEN_PET_PROFILE_CLAIM_CANDIDATES_ONLY"
     stage.APPLY_ENV = "MEMORY_V1_V5_2_PET_PROFILE_CLAIM_STAGE_APPLY"
     stage.TARGET_OWNER = OWNER
     stage.TARGETS = TARGETS

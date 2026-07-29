@@ -15,7 +15,7 @@ from scripts import memory_v1_v5_2_compiler_v8_claim_apply_manifest as base
 class PetProfileClaimApplyManifestTest(unittest.TestCase):
     def test_exactly_one_temporal_conflict_is_not_materialized(self) -> None:
         targets = plan_targets()
-        self.assertEqual(len(TARGETS), 11)
+        self.assertEqual(len(TARGETS), 10)
         self.assertEqual(len(targets), 10)
         self.assertNotIn(
             DEFERRED_OBSERVATION,

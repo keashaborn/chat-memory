@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from scripts.memory_v1_v5_2_pet_profile_claim_stage import (
+    DEFERRED_CONFLICTS,
     TARGETS,
     literal,
 )
@@ -11,25 +12,25 @@ from scripts.memory_v1_v5_2_projection_dispatch import render_claim_text
 
 
 class PetProfileClaimStageTest(unittest.TestCase):
-    def test_exact_eleven_atomic_targets(self) -> None:
-        self.assertEqual(len(TARGETS), 11)
+    def test_exact_ten_new_claim_targets(self) -> None:
+        self.assertEqual(len(TARGETS), 10)
         self.assertEqual(
             sorted(target["predicate"] for target in TARGETS.values()),
             sorted(
                 ["identity.name"] * 3
                 + ["pet.breed"] * 2
                 + ["pet.species"] * 3
-                + ["relationship.has_pet"] * 3
+                + ["relationship.has_pet"] * 2
             ),
         )
 
-    def test_three_pet_relationships_are_explicitly_historical(self) -> None:
+    def test_two_new_pet_relationships_are_explicitly_historical(self) -> None:
         relations = [
             target
             for target in TARGETS.values()
             if target["predicate"] == "relationship.has_pet"
         ]
-        self.assertEqual(len(relations), 3)
+        self.assertEqual(len(relations), 2)
         self.assertTrue(
             all(target["state_relation"] == "historical" for target in relations)
         )
@@ -40,19 +41,19 @@ class PetProfileClaimStageTest(unittest.TestCase):
             all(" has a pet named " not in target["canonical_text"] for target in relations)
         )
 
-    def test_only_neko_historical_relationship_has_existing_aggregate(self) -> None:
-        overlaps = [
-            observation_id
-            for observation_id, target in TARGETS.items()
-            if target.get("expected_existing_aggregates", 0) != 0
-        ]
+    def test_neko_historical_relationship_is_separate_reconciliation(self) -> None:
+        overlaps = list(DEFERRED_CONFLICTS)
         self.assertEqual(
             overlaps,
             ["bc8866ad-95e8-4413-832e-813f601eece6"],
         )
         self.assertEqual(
-            TARGETS[overlaps[0]]["expected_existing_aggregates"],
-            1,
+            DEFERRED_CONFLICTS[overlaps[0]]["existing_claim_id"],
+            "bd20dd0a-9fa0-4a21-8a93-e828c8044150",
+        )
+        self.assertEqual(
+            DEFERRED_CONFLICTS[overlaps[0]]["disposition"],
+            "deferred_for_temporal_reconciliation",
         )
 
     def test_literal_contract_is_exact(self) -> None:

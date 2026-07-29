@@ -14,8 +14,6 @@ DEFERRED_OBSERVATION = "bc8866ad-95e8-4413-832e-813f601eece6"
 def plan_targets() -> dict[str, dict[str, str]]:
     targets: dict[str, dict[str, str]] = {}
     for observation_id, target in TARGETS.items():
-        if observation_id == DEFERRED_OBSERVATION:
-            continue
         plan_id = base_stage.stable_id(
             "plan",
             OWNER,
