@@ -356,9 +356,40 @@ def death_observations(packet: dict) -> list[dict]:
     ]
 
 assert not death_observations(packets[0]), "Keasha acquired a false death event"
+keasha_refs = named_refs(packets[0], "Keasha von Steffen Haus")
+assert len(keasha_refs) == 1, "Keasha safe identity was not preserved"
+keasha = next(
+    item
+    for item in packets[0]["entity_mentions"]
+    if item["entity_ref"] in keasha_refs
+)
+assert keasha["relationship_role"] == "pet:reported"
+assert any(
+    item["predicate"] == "identity.name"
+    and item["subject_entity_ref"] in keasha_refs
+    and item["object"].get("value") == "Keasha von Steffen Haus"
+    for item in packets[0]["observations"]
+), "Keasha name observation was not preserved"
 assert not death_observations(
     packets[3]
 ), "Dahlia loss was incorrectly promoted to death"
+dahlia_refs = named_refs(packets[3], "Dahlia")
+assert len(dahlia_refs) == 1, "Dahlia safe identity was not preserved"
+dahlia = next(
+    item
+    for item in packets[3]["entity_mentions"]
+    if item["entity_ref"] in dahlia_refs
+)
+assert dahlia["relationship_role"] == "pet:reported"
+assert any(
+    item["predicate"] == "identity.name"
+    and item["subject_entity_ref"] in dahlia_refs
+    and item["object"].get("value") == "Dahlia"
+    for item in packets[3]["observations"]
+), "Dahlia name observation was not preserved"
+assert "sensitive_manual_review" in {
+    item["reason_code"] for item in packets[3]["deferrals"]
+}
 
 refs = named_refs(packets[4], "Helsing")
 assert len(refs) == 1, "Helsing did not resolve to one named animal"
@@ -386,7 +417,9 @@ if temporal["source_form"] == "partial_absolute":
 print(json.dumps({
     "semantic_checks": {
         "keasha_false_death": 0,
+        "keasha_safe_identity": 1,
         "dahlia_loss_promoted_to_death": 0,
+        "dahlia_safe_identity": 1,
         "helsing_death": 1,
     },
     "local_model_calls": 3,
