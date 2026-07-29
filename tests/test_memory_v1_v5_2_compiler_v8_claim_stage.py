@@ -58,6 +58,54 @@ class CompilerV8ClaimStageTest(unittest.TestCase):
             "The user is a spouse of Monika.",
         )
 
+    def test_historical_pet_relationship_renderer_is_not_current_tense(self) -> None:
+        source = {
+            "predicate": "relationship.has_pet",
+            "subject_entity_type": "self",
+            "subject_canonical_name": "Self",
+            "object_kind": "entity",
+            "object_entity_type": "animal",
+            "object_canonical_name": "Max",
+            "polarity": "affirmed",
+            "modality": "asserted",
+            "temporal": {"state_relation": "historical"},
+        }
+        self.assertEqual(
+            render_claim_text(source),
+            "The user formerly had a pet named Max.",
+        )
+
+    def test_historical_pet_relationship_renderer_preserves_uncertainty(self) -> None:
+        source = {
+            "predicate": "relationship.has_pet",
+            "subject_entity_type": "self",
+            "subject_canonical_name": "Self",
+            "object_kind": "entity",
+            "object_entity_type": "animal",
+            "object_canonical_name": "Max",
+            "polarity": "affirmed",
+            "modality": "uncertain",
+            "temporal": {"state_relation": "historical"},
+        }
+        self.assertEqual(
+            render_claim_text(source),
+            "The user may formerly have had a pet named Max.",
+        )
+
+    def test_current_pet_relationship_renderer_remains_current(self) -> None:
+        source = {
+            "predicate": "relationship.has_pet",
+            "subject_entity_type": "self",
+            "subject_canonical_name": "Self",
+            "object_kind": "entity",
+            "object_entity_type": "animal",
+            "object_canonical_name": "Max",
+            "polarity": "affirmed",
+            "modality": "asserted",
+            "temporal": {"state_relation": "current"},
+        }
+        self.assertEqual(render_claim_text(source), "The user has a pet named Max.")
+
 
 if __name__ == "__main__":
     unittest.main()

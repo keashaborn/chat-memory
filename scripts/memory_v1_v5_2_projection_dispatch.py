@@ -181,6 +181,18 @@ def render_claim_text(source: Mapping[str, Any]) -> str:
             str(source["object_entity_type"]), source.get("object_canonical_name")
         )
         if predicate == "relationship.has_pet":
+            temporal = source.get("temporal")
+            state_relation = (
+                temporal.get("state_relation")
+                if isinstance(temporal, Mapping)
+                else None
+            )
+            if state_relation == "historical":
+                if source["polarity"] == "negated":
+                    return f"{subject} did not formerly have a pet named {target}."
+                if source["modality"] == "uncertain":
+                    return f"{subject} may formerly have had a pet named {target}."
+                return f"{subject} formerly had a pet named {target}."
             return _sentence(subject, f"has a pet named {target}", f"does not have a pet named {target}", source)
         if predicate == "relationship.lives_with":
             return _sentence(subject, f"lives with {target}", f"does not live with {target}", source)
