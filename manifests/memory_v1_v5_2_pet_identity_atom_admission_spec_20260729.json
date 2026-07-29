@@ -1,0 +1,58 @@
+{
+  "contract_version": "memory_v1_v5_2_atom_admission_spec_v1",
+  "items": [
+    {
+      "case_id": "pet_identity_dahlia",
+      "evidence_id": "2be95051-30c8-5f87-8ff9-e0999600b447",
+      "expected_counts": {
+        "admitted_comparison_hint_count": 0,
+        "admitted_entity_mention_count": 1,
+        "admitted_observation_count": 1,
+        "deferred_atom_count": 2,
+        "rejected_atom_count": 0,
+        "retained_source_only_count": 0,
+        "source_atom_count": 4
+      },
+      "expected_entity_refs": [
+        "e00"
+      ],
+      "expected_predicates": [
+        "identity.name"
+      ],
+      "packet_id": "4f091b92-3db2-5c44-8676-7a2cdc989d01",
+      "review_decision": "authorized",
+      "review_reason_codes": [
+        "explicit_named_pet_atom_reviewed",
+        "deferred_unresolved_atoms_excluded_from_stage_projection"
+      ]
+    },
+    {
+      "case_id": "pet_identity_helsing",
+      "evidence_id": "88161526-0c53-5291-8601-0bd0ba41da53",
+      "expected_counts": {
+        "admitted_comparison_hint_count": 0,
+        "admitted_entity_mention_count": 1,
+        "admitted_observation_count": 1,
+        "deferred_atom_count": 1,
+        "rejected_atom_count": 0,
+        "retained_source_only_count": 0,
+        "source_atom_count": 3
+      },
+      "expected_entity_refs": [
+        "e00"
+      ],
+      "expected_predicates": [
+        "life_event.died"
+      ],
+      "packet_id": "afe46ab5-6243-5568-bc71-b23772008c63",
+      "review_decision": "authorized",
+      "review_reason_codes": [
+        "explicit_named_pet_life_event_atom_reviewed",
+        "source_anchored_relative_time_preserved",
+        "deferred_unresolved_atom_excluded_from_stage_projection"
+      ]
+    }
+  ],
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "target_server": "seebx"
+}

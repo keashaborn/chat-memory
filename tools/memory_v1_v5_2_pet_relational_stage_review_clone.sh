@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Restores production into a disposable clone, stages the
-# three exact pet packets, and records three manual entity reviews. It never
-# applies an entity, creates a claim, or changes Qdrant/retrieval/prompts.
+# seebx backend only. Restores production into a disposable clone, atom-admits
+# only the reviewed Dahlia and Helsing projections, stages those projections
+# plus the deferral-free Keasha packet, and records three manual entity reviews.
+# It never applies an entity, creates a claim, or changes Qdrant/retrieval/prompts.
 
 if [[ "$EUID" -ne 0 ]]; then
   echo 'run through sudo; root is required for the disposable clone' >&2
@@ -23,7 +24,11 @@ stage_runner=scripts/memory_v1_v5_2_stage_batch.py
 stage_fixture=tests/memory_v1_v5_2_stage_batch_fixture.py
 review_runner=scripts/memory_v1_v5_2_entity_resolution_review_batch.py
 review_spec=manifests/memory_v1_v5_2_pet_identity_entity_review_spec_20260729.json
-stage_manifest_source=manifests/memory_v1_v5_2_pet_identity_relational_stage_20260729.json
+atom_manifest_runner=scripts/memory_v1_v5_2_atom_admission_manifest_batch.py
+atom_apply_runner=scripts/memory_v1_v5_2_atom_admission_apply_v2.py
+atom_stage_runner=scripts/memory_v1_v5_2_atom_stage_bundle_v2.py
+atom_spec=manifests/memory_v1_v5_2_pet_identity_atom_admission_spec_20260729.json
+source_stage_manifest=manifests/memory_v1_v5_2_pet_identity_relational_stage_20260729.json
 backup=$(mktemp /tmp/memory-v1-v5-2-pet-stage-review.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-pet-stage-review-roles.XXXXXX.sql)
 review_root=/home/ubuntu/memory-v1-reviews
@@ -35,6 +40,7 @@ keasha_evidence=c5d6f5cf-c6d6-554c-85d9-02150e8b8ae7
 dahlia_evidence=2be95051-30c8-5f87-8ff9-e0999600b447
 helsing_evidence=88161526-0c53-5291-8601-0bd0ba41da53
 evidence_sql="'$keasha_evidence'::uuid,'$dahlia_evidence'::uuid,'$helsing_evidence'::uuid"
+atom_packet_sql="'4f091b92-3db2-5c44-8676-7a2cdc989d01'::uuid,'afe46ab5-6243-5568-bc71-b23772008c63'::uuid"
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
@@ -140,6 +146,100 @@ target_counts() {
     )"
 }
 
+atom_counts() {
+  scalar "
+    SELECT concat_ws(',',
+      (SELECT count(*) FROM memory.v5_2_atom_admission_proposal
+       WHERE owner_user_id='$target_owner'::uuid
+         AND packet_id IN ($atom_packet_sql)),
+      (SELECT count(*) FROM memory.v5_2_atom_admission_review AS review
+       JOIN memory.v5_2_atom_admission_proposal AS proposal
+         USING(owner_user_id,proposal_id)
+       WHERE proposal.owner_user_id='$target_owner'::uuid
+         AND proposal.packet_id IN ($atom_packet_sql)),
+      (SELECT count(*) FROM memory.v5_2_atom_admission_apply
+       WHERE owner_user_id='$target_owner'::uuid
+         AND packet_id IN ($atom_packet_sql)),
+      (SELECT count(*) FROM memory.v5_2_atom_admission_operation
+       WHERE owner_user_id='$target_owner'::uuid
+         AND operation_id IN (
+           SELECT operation_id
+           FROM memory.v5_2_atom_admission_proposal
+           WHERE owner_user_id='$target_owner'::uuid
+             AND packet_id IN ($atom_packet_sql)
+           UNION ALL
+           SELECT review.operation_id
+           FROM memory.v5_2_atom_admission_review AS review
+           JOIN memory.v5_2_atom_admission_proposal AS proposal
+             USING(owner_user_id,proposal_id)
+           WHERE proposal.owner_user_id='$target_owner'::uuid
+             AND proposal.packet_id IN ($atom_packet_sql)
+           UNION ALL
+           SELECT operation_id
+           FROM memory.v5_2_atom_admission_apply
+           WHERE owner_user_id='$target_owner'::uuid
+             AND packet_id IN ($atom_packet_sql)
+         ))
+    )"
+}
+
+owner_atom_stage_plan() {
+  local apply_id=$1
+  runuser -u ubuntu -- env PGPASSWORD=clone_only_brains_password \
+    psql "$dsn" -X -q -A -t -v ON_ERROR_STOP=1 -c "
+      SELECT memory.plan_owner_v5_2_atom_stage_v2('$apply_id'::uuid)
+      FROM (
+        SELECT set_config('app.user_id','$target_owner',true)
+      ) AS owner_scope"
+}
+
+make_atom_stage_manifest() {
+  local case_id=$1 output=$2
+  local admission_item apply_id evidence_id stage_plan resolution
+  admission_item=$(jq -c --arg case "$case_id" \
+    '.items[] | select(.case_id==$case)' "$work/atom-admission-manifest.json")
+  [[ -n "$admission_item" ]]
+  apply_id=$(jq -r '.apply_id' <<<"$admission_item")
+  evidence_id=$(jq -r '.evidence_id' <<<"$admission_item")
+  stage_plan=$(owner_atom_stage_plan "$apply_id")
+  resolution=$(jq -c --arg evidence "$evidence_id" '
+    .items[]
+    | select(.evidence_id==$evidence)
+    | {
+        action:.expected_action,
+        decision_state:"manual_review_required",
+        selected_entity_id:.expected_selected_entity_id,
+        proposed_entity:.expected_proposed_entity,
+        review_reason_codes:.expected_review_reason_codes
+      }
+  ' "$repo_root/$review_spec")
+  [[ -n "$stage_plan" && -n "$resolution" ]]
+  jq -n \
+    --arg case "$case_id" \
+    --arg owner "$target_owner" \
+    --argjson item "$admission_item" \
+    --argjson plan "$stage_plan" \
+    --argjson resolution "$resolution" \
+    '{
+      contract_version:"memory_v1_v5_2_atom_stage_build_manifest_v2",
+      target_server:"seebx",
+      owner_user_id:$owner,
+      case_id:$case,
+      apply_id:$item.apply_id,
+      proposal_id:$item.proposal_id,
+      review_id:$item.review_id,
+      packet_id:$item.packet_id,
+      evidence_id:$item.evidence_id,
+      apply_manifest_sha256:$plan.apply_manifest_sha256,
+      proposal_sha256:$plan.proposal_sha256,
+      stage_projection_sha256:$plan.stage_projection_sha256,
+      expected_counts:$plan.counts,
+      expected_resolutions:{"e00":$resolution}
+    }' >"$output"
+  chown ubuntu:ubuntu "$output"
+  chmod 0600 "$output"
+}
+
 qdrant_before=$(qdrant_signature)
 production_before=$(production_signature)
 production_head_before=$(git -C /opt/chat-memory rev-parse HEAD)
@@ -168,6 +268,7 @@ printf '%s\n' \
   --clean --if-exists <"$backup"
 
 assert_equal initial_target_counts "$(target_counts)" '0,0,0,0,0,0,0,0,0'
+assert_equal initial_atom_counts "$(atom_counts)" '0,0,0,0'
 assert_equal route_rls "$(scalar "
   SELECT relrowsecurity::int::text||':'||relforcerowsecurity::int::text
   FROM pg_class
@@ -180,6 +281,17 @@ assert_equal review_rls "$(scalar "
   SELECT relrowsecurity::int::text||':'||relforcerowsecurity::int::text
   FROM pg_class
   WHERE oid='memory.entity_resolution_review'::regclass")" '1:1'
+for atom_table in \
+  v5_2_atom_admission_proposal \
+  v5_2_atom_admission_review \
+  v5_2_atom_admission_apply \
+  v5_2_atom_admission_operation
+do
+  assert_equal "atom_${atom_table}_rls" "$(scalar "
+    SELECT relrowsecurity::int::text||':'||relforcerowsecurity::int::text
+    FROM pg_class
+    WHERE oid='memory.${atom_table}'::regclass")" '1:1'
+done
 target_entities_before=$(scalar "
   SELECT count(*) FROM memory.entity
   WHERE owner_user_id='$target_owner'::uuid")
@@ -187,8 +299,85 @@ target_claims_before=$(scalar "
   SELECT count(*) FROM memory.claim
   WHERE owner_user_id='$target_owner'::uuid")
 
-install -o ubuntu -g ubuntu -m 0600 \
-  "$repo_root/$stage_manifest_source" "$work/stage-manifest.json"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$atom_manifest_runner" \
+  --spec "$repo_root/$atom_spec" \
+  --output "$work/atom-admission-manifest.json"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$atom_apply_runner" \
+  --mode preflight \
+  --manifest "$work/atom-admission-manifest.json" \
+  --output "$work/atom-admission-preflight.json"
+assert_equal atom_preflight_rows \
+  "$(jq -r '.persistent_writes' "$work/atom-admission-preflight.json")" 0
+runuser -u ubuntu -- env MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY_V2=authorized \
+  POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+  /opt/chat-memory/venv/bin/python "$repo_root/$atom_apply_runner" \
+  --mode apply \
+  --manifest "$work/atom-admission-manifest.json" \
+  --output "$work/atom-admission-apply.json"
+assert_equal atom_rows "$(atom_counts)" '2,2,2,6'
+assert_equal atom_apply_rows \
+  "$(jq -r '.persistent_writes' "$work/atom-admission-apply.json")" 12
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$atom_apply_runner" \
+  --mode replay \
+  --manifest "$work/atom-admission-manifest.json" \
+  --output "$work/atom-admission-replay.json"
+assert_equal atom_replay_rows \
+  "$(jq -r '.persistent_writes' "$work/atom-admission-replay.json")" 0
+
+make_atom_stage_manifest \
+  pet_identity_dahlia "$work/dahlia-atom-stage-build.json"
+make_atom_stage_manifest \
+  pet_identity_helsing "$work/helsing-atom-stage-build.json"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$atom_stage_runner" build \
+  --manifest "$work/dahlia-atom-stage-build.json" \
+  --output-root "$work/dahlia-atom-stage"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
+  "$repo_root/$atom_stage_runner" build \
+  --manifest "$work/helsing-atom-stage-build.json" \
+  --output-root "$work/helsing-atom-stage"
+
+dahlia_apply_id=$(jq -r '
+  .items[] | select(.case_id=="pet_identity_dahlia") | .apply_id
+' "$work/atom-admission-manifest.json")
+helsing_apply_id=$(jq -r '
+  .items[] | select(.case_id=="pet_identity_helsing") | .apply_id
+' "$work/atom-admission-manifest.json")
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$atom_stage_runner" probe \
+  --bundle "$work/dahlia-atom-stage/bundle.json" \
+  --apply-id "$dahlia_apply_id" \
+  --other-owner-user-id "$other_owner"
+runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$atom_stage_runner" probe \
+  --bundle "$work/helsing-atom-stage/bundle.json" \
+  --apply-id "$helsing_apply_id" \
+  --other-owner-user-id "$other_owner"
+
+jq -n \
+  --arg owner "$target_owner" \
+  --argjson keasha "$(jq -c '.bundles[0]' \
+    "$repo_root/$source_stage_manifest")" \
+  --argjson dahlia "$(jq -c '.bundles[0]' \
+    "$work/dahlia-atom-stage/stage-manifest.json")" \
+  --argjson helsing "$(jq -c '.bundles[0]' \
+    "$work/helsing-atom-stage/stage-manifest.json")" \
+  '{
+    contract_version:"memory_v1_v5_2_stage_batch_manifest_v1",
+    target_server:"seebx",
+    owner_user_id:$owner,
+    bundles:[$keasha,$dahlia,$helsing]
+  }' >"$work/stage-manifest.json"
+chown ubuntu:ubuntu "$work/stage-manifest.json"
+chmod 0600 "$work/stage-manifest.json"
 runuser -u ubuntu -- env POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" \
   GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python \
   "$repo_root/$stage_runner" plan \
@@ -211,6 +400,7 @@ runuser -u ubuntu -- env MEMORY_V1_V5_2_STAGE_BATCH_APPLY=authorized \
   --output "$work/stage-apply.json"
 
 assert_equal staged_target_counts "$(target_counts)" '3,3,3,2,3,3,0,0,3'
+assert_equal staged_atom_counts "$(atom_counts)" '2,2,2,6'
 assert_equal stage_rows \
   "$(jq -r '.database_rows_created' "$work/stage-apply.json")" 20
 assert_equal stage_replay_rows \
@@ -352,6 +542,7 @@ docker exec brains-postgres-1 pg_isready -U sage -d memory >/dev/null
 
 printf '%s\n' \
   'MEMORY_V1_V5_2_PET_RELATIONAL_STAGE_REVIEW_CLONE=PASS' \
+  'clone_atom_admission_rows_created=12' \
   'clone_stage_rows_created=20' \
   'clone_review_rows_created=6' \
   'manual_reviews=3' \
