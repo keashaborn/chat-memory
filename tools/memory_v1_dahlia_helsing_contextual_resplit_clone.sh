@@ -78,7 +78,9 @@ cleanup() {
             predicate,
             subject_entity_ref,
             object,
-            reason_codes
+            reason_codes,
+            source_spans,
+            temporal
           }
         ],
         deferrals: [.deferrals[]?.reason_code]
@@ -356,10 +358,16 @@ quotes = [
     str(span.get("quote", "")).lower()
     for span in death.get("source_spans", [])
 ]
-assert any("died" in quote for quote in quotes)
+assert any("died" in quote for quote in quotes), "death source span lost target cue"
 temporal = death["temporal"]
-assert temporal["basis"] in {"relative", "calendar"}
-assert temporal["shape"] in {"instant", "bounded_interval"}
+assert temporal["basis"] in {
+    "relative",
+    "calendar",
+}, f"death time basis is unsupported: {temporal}"
+assert temporal["shape"] in {
+    "instant",
+    "bounded_interval",
+}, f"death time shape is unsupported: {temporal}"
 if temporal["source_form"] == "partial_absolute":
     assert temporal["anchored_to_source_time"] is True
 
