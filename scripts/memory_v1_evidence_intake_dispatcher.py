@@ -19,6 +19,7 @@ from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 
 
 TERMINAL_OUTCOMES = {"empty", "skipped"}
+DISPATCHED_OUTCOMES = TERMINAL_OUTCOMES | {"eligible"}
 
 
 def arguments() -> argparse.Namespace:
@@ -59,6 +60,44 @@ def serialize(row: asyncpg.Record) -> dict[str, Any]:
         "source_job_pipeline_version": row["source_job_pipeline_version"],
         "upstream_candidate_count": int(row["upstream_candidate_count"]),
     }
+
+
+def validate_dispatch_transition(
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+    *,
+    limit: int,
+    apply: bool,
+) -> None:
+    before_ids = [row["evidence_id"] for row in before]
+    after_ids = [row["evidence_id"] for row in after]
+    if len(before_ids) != len(set(before_ids)):
+        raise RuntimeError("intake plan returned duplicate evidence before dispatch")
+    if len(after_ids) != len(set(after_ids)):
+        raise RuntimeError("intake plan returned duplicate evidence after dispatch")
+    if not apply:
+        if before_ids != after_ids:
+            raise RuntimeError("dry-run intake plan changed without dispatch")
+        return
+
+    dispatched_ids = {
+        row["evidence_id"]
+        for row in before
+        if row["outcome"] in DISPATCHED_OUTCOMES
+    }
+    after_id_set = set(after_ids)
+    if dispatched_ids & after_id_set:
+        raise RuntimeError("dispatch did not remove applied rows from intake plan")
+
+    deferred_ids = set(before_ids) - dispatched_ids
+    if not deferred_ids.issubset(after_id_set):
+        raise RuntimeError("dispatch removed deferred rows from intake plan")
+
+    # A full page can be refilled from the backlog after its applied rows are
+    # removed. A partial page represents the complete current plan and must
+    # therefore shrink by exactly the dispatched set.
+    if len(before) < limit and after_id_set != deferred_ids:
+        raise RuntimeError("partial intake plan changed unexpectedly")
 
 
 async def plan(
@@ -138,9 +177,7 @@ async def dispatch_owner(
                 raise RuntimeError(f"unexpected plan outcome: {row['outcome']}")
 
     after = await plan(conn, owner, selector_version, limit)
-    removed = terminal_applied + queue_applied
-    if apply and len(after) != len(before) - removed:
-        raise RuntimeError("dispatch did not remove applied rows from intake plan")
+    validate_dispatch_transition(before, after, limit=limit, apply=apply)
 
     return {
         "owner_user_id": str(owner),

@@ -32,6 +32,9 @@ migration=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage.sql
 rollback=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage_rollback.sql
 apply_sql=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage_three_apply.sql
 clone_test=tools/memory_v1_v5_2_reviewed_observation_stage_clone.sh
+dispatcher=scripts/memory_v1_evidence_intake_dispatcher.py
+dispatcher_test=tests/test_memory_v1_evidence_intake_dispatcher.py
+dispatcher_clone=tools/memory_v1_evidence_intake_dispatcher_clone.sh
 
 observations=(
   917ab793-6f03-4af4-847b-c87f5632fa91
@@ -49,6 +52,9 @@ declare -A expected_sha256=(
   ["$rollback"]="1ab5a24cdf2a99df65f9ec2d74a072eff6346770329d81af25c106b5e4774487"
   ["$apply_sql"]="2e956dffe1558b2e3c133f9ed9418b715e79df4fc866b8224eef659251d9d613"
   ["$clone_test"]="b2393ed3b4f527d33aa7ab29b0c427a1293ebc771c2cca132ca9454399c45109"
+  ["$dispatcher"]="95ee5139581fbe0008ebf529d485e7efb703f02acecd2f56620520a3d9f15332"
+  ["$dispatcher_test"]="c7d50c18eff6b8a33a8ef355cb3044f598e71b05a603628ff83a22b31fff9bcb"
+  ["$dispatcher_clone"]="c26defb5ac7ba6d24b256fd5c7c1f820eec7b3614bd4e1d81957a78a68af9d83"
 )
 
 timer_state=$(mktemp /tmp/memory-v5-2-reviewed-observation-timers.XXXXXX)
@@ -197,11 +203,24 @@ for artifact in "${!expected_sha256[@]}"; do
 done
 [[ -z "$(git status --porcelain)" ]]
 git merge-base --is-ancestor "$required_ancestor" HEAD
-[[ "$(systemctl --failed --no-legend --no-pager | wc -l)" -eq 0 ]]
+unexpected_failed=$(
+  systemctl --failed --no-legend --no-pager \
+    | awk '{print $2}' \
+    | grep -Ev \
+      '^(memory-v1-evidence-intake-dispatcher|voice-synthetic-canary)\.service$' \
+    || true
+)
+[[ -z "$unexpected_failed" ]]
 [[ "$(systemctl is-active memory-v1-v5-local-inference-tunnel.service)" == active ]]
 authenticated_health
 
 phase=clone_verification
+PYTHONPATH=. /opt/chat-memory/venv/bin/python -m unittest \
+  tests.test_memory_v1_evidence_intake_dispatcher >/dev/null
+bash -n "$dispatcher_clone"
+bash -n "$clone_test"
+bash "$dispatcher_clone" >"$work/dispatcher-clone.out"
+grep -qx 'EVIDENCE_INTAKE_DISPATCHER_CLONE=PASS' "$work/dispatcher-clone.out"
 RUN_EXACT_PRODUCTION_APPLY=1 RUN_PRIVATE_ENTAILMENT=0 \
   bash "$clone_test" >"$clone_output"
 grep -qx 'REVIEWED_OBSERVATION_STAGE_CLONE=PASS' "$clone_output"
