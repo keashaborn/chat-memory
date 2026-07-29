@@ -398,7 +398,7 @@ assert_equal self_links "$(scalar "
   SELECT count(*)
   FROM memory.entity_resolution_apply
   WHERE owner_user_id='$owner'::uuid
-    AND entity_id='$self_entity'::uuid
+    AND applied_entity_id='$self_entity'::uuid
     AND resolution_id IN (
       '$max_self_resolution'::uuid,
       '$neko_self_resolution'::uuid,
@@ -409,7 +409,7 @@ assert_equal neko_link "$(scalar "
   FROM memory.entity_resolution_apply
   WHERE owner_user_id='$owner'::uuid
     AND resolution_id='$neko_pet_resolution'::uuid
-    AND entity_id='$neko_entity'::uuid")" 1
+    AND applied_entity_id='$neko_entity'::uuid")" 1
 assert_equal claims_unchanged \
   "$(scalar "SELECT count(*) FROM memory.claim WHERE owner_user_id='$owner'::uuid")" \
   "$claims_before"
