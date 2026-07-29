@@ -152,12 +152,6 @@ BEGIN
     )
     AND NOT EXISTS (
       SELECT 1
-      FROM memory.v5_local_packet_supersession AS supersession
-      WHERE supersession.owner_user_id = actor
-        AND supersession.prior_packet_id = packet.packet_id
-    )
-    AND NOT EXISTS (
-      SELECT 1
       FROM memory.evidence_extraction_job AS next_job
       WHERE next_job.owner_user_id = actor
         AND next_job.evidence_id = packet.evidence_id
