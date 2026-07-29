@@ -95,9 +95,8 @@ BEGIN
           <>'The user formerly had a pet named Neko.'
      OR value.desired_valid_to
           <>'2026-07-28 04:04:34.272603+00'::timestamptz
-     OR NOT memory.v5_sha256_valid(
-          value.authorization_manifest_sha256
-        ) THEN
+     OR value.authorization_manifest_sha256
+          !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'exact owner preflight changed';
   END IF;
 END
