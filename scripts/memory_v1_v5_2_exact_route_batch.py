@@ -166,6 +166,10 @@ async def foreign_visible(
 
 async def run() -> int:
     args = arguments()
+    repository_root = Path(__file__).resolve().parents[1]
+    if not (repository_root / ".git").exists():
+        raise RuntimeError("exact route batch repository root is invalid")
+    os.chdir(repository_root)
     manifest_path = Path(args.manifest).resolve(strict=True)
     owner, packets, expected = load_manifest(manifest_path)
     other_owner = uuid.UUID(args.other_owner_user_id)

@@ -1,6 +1,6 @@
 {
   "artifacts": {
-    "exact_route_batch_sha256": "83419160c0a9dabca23be7dd019182c73175102b936ae4af12824c8cd7277ef1",
+    "exact_route_batch_sha256": "d8cb2d071a967f2acf9aaa3c94ad706aef30e0c9b6463f5736bbd1c8d1891ced",
     "exact_route_batch_test_sha256": "4e36a152a54b4710500d0b0c5fd59cdaf523ca8702e21faf87ce18c5d16c1e24",
     "exact_terminal_batch_sha256": "50fbab4c4181bb9fe9cb4cc34c6a5b4ab3a4a9ff8f1a3f782ef5ca41dd47d043",
     "migration_sha256": "ad34d5d17aba6ec6e2559f76aea21839cd80b756ceb206069e0814692888c464",
