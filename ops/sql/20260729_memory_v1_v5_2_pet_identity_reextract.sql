@@ -152,12 +152,6 @@ BEGIN
     )
     AND NOT EXISTS (
       SELECT 1
-      FROM memory.v5_2_atom_admission_apply AS admission
-      WHERE admission.owner_user_id = actor
-        AND admission.packet_id = packet.packet_id
-    )
-    AND NOT EXISTS (
-      SELECT 1
       FROM memory.v5_local_packet_supersession AS supersession
       WHERE supersession.owner_user_id = actor
         AND supersession.prior_packet_id = packet.packet_id
