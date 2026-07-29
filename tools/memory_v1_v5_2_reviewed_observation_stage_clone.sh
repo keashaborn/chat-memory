@@ -13,10 +13,12 @@ compose=(
 migration=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage.sql
 rollback=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage_rollback.sql
 test_sql=tests/memory_v1_v5_2_reviewed_observation_stage.sql
+exact_apply_sql=ops/sql/20260729_memory_v1_v5_2_reviewed_observation_stage_three_apply.sql
 backup=$(mktemp /tmp/memory-v1-v5-2-reviewed-observation.XXXXXX.dump)
 role_sql=$(mktemp /tmp/memory-v1-v5-2-reviewed-observation-roles.XXXXXX.sql)
 work=$(mktemp -d /tmp/memory-v1-v5-2-reviewed-observation.XXXXXX)
 private_entailment=${RUN_PRIVATE_ENTAILMENT:-0}
+exact_apply=${RUN_EXACT_PRODUCTION_APPLY:-0}
 
 cleanup() {
   "${compose[@]}" down -v >/dev/null 2>&1 || true
@@ -111,17 +113,35 @@ run_sql <"$rollback"
 ")" == t ]]
 
 run_sql <"$migration"
-run_sql <"$test_sql"
+if [[ "$exact_apply" == 1 ]]; then
+  {
+    printf '%s\n' 'SET SESSION AUTHORIZATION brains_app;'
+    cat "$exact_apply_sql"
+    printf '%s\n' 'RESET SESSION AUTHORIZATION;'
+  } | run_sql
+  admission_ids=(
+    35febb7e-0993-5ddf-b9b0-71a22d1b8501
+    28f7e091-252e-5357-b64f-144f6445e2e8
+    daa5a659-ba7c-5841-adb2-6aaa7c0481ae
+  )
+else
+  run_sql <"$test_sql"
+  admission_ids=(
+    10000000-0000-4000-8000-000000000001
+    20000000-0000-4000-8000-000000000002
+    30000000-0000-4000-8000-000000000003
+  )
+fi
+
+admission_array=$(
+  printf "'%s'::uuid," "${admission_ids[@]}" | sed 's/,$//'
+)
 
 [[ "$(scalar "
   SELECT count(*)
   FROM memory.v5_2_reviewed_observation_stage_admission
   WHERE owner_user_id='1240822d-ac9a-4096-95aa-e2b24d36ef50'
-    AND admission_id=ANY(ARRAY[
-      '10000000-0000-4000-8000-000000000001'::uuid,
-      '20000000-0000-4000-8000-000000000002'::uuid,
-      '30000000-0000-4000-8000-000000000003'::uuid
-    ])
+    AND admission_id=ANY(ARRAY[$admission_array])
 ")" == 3 ]]
 [[ "$(scalar "
   SELECT count(*)
@@ -145,6 +165,19 @@ run_sql <"$test_sql"
     '14e21c6b-1728-439b-9613-7d9b933d33b8'::uuid
   ])
 ")" == 0 ]]
+
+if [[ "$exact_apply" == 1 ]]; then
+  cross_owner=$(
+    {
+      printf '%s\n' \
+        'SET SESSION AUTHORIZATION brains_app;' \
+        "SELECT set_config('app.user_id','557ea042-cb82-48f8-9429-472e96c957ef',false);" \
+        "SELECT coalesce(sum((SELECT count(*) FROM memory.v5_local_stage_admission_batch_v2(value.admission_id))),0) FROM unnest(ARRAY[$admission_array]) AS value(admission_id);" \
+        'RESET SESSION AUTHORIZATION;'
+    } | run_sql -A -t -q | tail -n 1
+  )
+  [[ "$cross_owner" == 0 ]]
+fi
 
 if [[ "$private_entailment" == 1 ]]; then
   dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
