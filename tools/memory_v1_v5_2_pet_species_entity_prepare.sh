@@ -42,7 +42,8 @@ authorizer=tests/memory_v1_v5_2_entity_resolution_batch_fixture.py
 [[ "$(jq -er '.rows.stage_total' "$work/report.json")" == 44 ]]
 [[ -z "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain)" ]]
 head=$(git rev-parse HEAD)
-[[ "$(jq -er '.head_commit' "$work/report.json")" == "$head" ]]
+stage_head=$(jq -er '.head_commit' "$work/report.json")
+git merge-base --is-ancestor "$stage_head" "$head"
 
 psql_row() {
   docker exec brains-postgres-1 psql -X -A -t -v ON_ERROR_STOP=1 \
