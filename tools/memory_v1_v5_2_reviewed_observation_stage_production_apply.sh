@@ -108,6 +108,14 @@ other_intended_signature() {
       SELECT 'request',to_jsonb(value)::text
       FROM memory.relational_operation_request AS value
       WHERE owner_user_id<>'$owner'::uuid
+      UNION ALL
+      SELECT 'inference_event',to_jsonb(value)::text
+      FROM memory.v5_local_inference_event AS value
+      WHERE owner_user_id<>'$owner'::uuid
+      UNION ALL
+      SELECT 'inference_outcome',to_jsonb(value)::text
+      FROM memory.v5_local_inference_outcome_event AS value
+      WHERE owner_user_id<>'$owner'::uuid
     )
     SELECT encode(public.digest(convert_to(
       coalesce(string_agg(label||E'\\t'||row_json,E'\\n'
@@ -282,7 +290,9 @@ docker exec "$container" psql -X -A -t -U sage -d "$database" -c "
       'v5_local_packet_stage_admission',
       'v5_local_entailment_assessment',
       'observation_entailment_v5',
-      'relational_operation_request'
+      'relational_operation_request',
+      'v5_local_inference_event',
+      'v5_local_inference_outcome_event'
     )
   ORDER BY table_name
 " >"$table_list"
