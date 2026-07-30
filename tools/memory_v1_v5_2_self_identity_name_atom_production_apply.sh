@@ -356,36 +356,25 @@ cmp -s "$non_target_before" "$non_target_after"
 [[ "$(qdrant_signature)" == "$qdrant_before" ]]
 
 phase=owner_isolation
-runuser -u ubuntu -- env POSTGRES_DSN="$POSTGRES_DSN" \
-  OWNER="$owner" OTHER="$other" PACKET="$packet" \
-  /opt/chat-memory/venv/bin/python - <<'PY'
-import asyncio, os
-import asyncpg
-
-async def main():
-    connection = await asyncpg.connect(os.environ["POSTGRES_DSN"])
-    try:
-        if await connection.fetchval("SELECT session_user") != "brains_app":
-            raise SystemExit("owner-isolation probe requires brains_app")
-        async with connection.transaction(readonly=True):
-            await connection.execute(
-                "SELECT set_config('app.user_id',$1,true)", os.environ["OTHER"]
-            )
-            visible = await connection.fetchval(
-                """
-                SELECT count(*)
-                FROM memory.v5_2_atom_admission_proposal
-                WHERE owner_user_id=$1::uuid AND packet_id=$2::uuid
-                """,
-                os.environ["OWNER"], os.environ["PACKET"],
-            )
-            if visible != 0:
-                raise SystemExit("cross-owner atom proposal became visible")
-    finally:
-        await connection.close()
-
-asyncio.run(main())
-PY
+docker exec "$container" psql -X -A -t -v ON_ERROR_STOP=1 \
+  -U sage -d "$database" <<SQL >/dev/null
+BEGIN READ ONLY;
+SET LOCAL ROLE memory_v5_2_atom_admission_maintainer;
+SELECT set_config('app.user_id','$other',true);
+DO \$probe\$
+BEGIN
+  IF (
+    SELECT count(*)
+    FROM memory.v5_2_atom_admission_proposal
+    WHERE owner_user_id='$owner'::uuid
+      AND packet_id='$packet'::uuid
+  ) <> 0 THEN
+    RAISE EXCEPTION 'cross-owner atom proposal became visible';
+  END IF;
+END
+\$probe\$;
+ROLLBACK;
+SQL
 authenticated_health
 
 phase=restore_timers
