@@ -8,6 +8,7 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
 port=${MEMORY_V1_V5_2_V9_STANCE_ATOM_CLONE_PORT:-55519}
+export MEMORY_V1_STAGE_BATCH_CLONE_PORT="$port"
 project=memoryv1v52v9stanceatomclone
 compose=(
   docker compose
