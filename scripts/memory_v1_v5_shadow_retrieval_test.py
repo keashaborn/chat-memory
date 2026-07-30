@@ -75,6 +75,18 @@ def main() -> None:
     assert selected["retrieval_activation"] is False
     assert selected["rejected_counts"] == {}
 
+    directly_relevant = record()
+    directly_relevant["retrieval_policy"][
+        "surface_policy"
+    ] = "mention_when_directly_relevant"
+    directly_relevant_selected = evaluate(directly_relevant)
+    assert directly_relevant_selected["selected_count"] == 1
+    assert (
+        directly_relevant_selected["claims"][0]["use_instruction"]
+        == "mention_only_when_directly_relevant"
+    )
+    assert directly_relevant_selected["rejected_counts"] == {}
+
     candidate = record()
     candidate["status"] = "candidate"
     blocked = evaluate(candidate)

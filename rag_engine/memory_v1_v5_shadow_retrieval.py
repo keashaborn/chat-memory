@@ -12,6 +12,7 @@ RETRIEVABLE_STATUSES = {"supported", "uncertain", "disputed"}
 SENSITIVITY_RANK = {"low": 0, "medium": 1, "high": 2, "restricted": 3}
 CONTENT_SURFACES = {
     "direct_or_relevant",
+    "mention_when_directly_relevant",
     "relevant_recommendation_or_explicit_recall",
     "relevant_recall_or_explicit_recall",
     "exact_project_scope_only",
@@ -135,6 +136,10 @@ def _surface_allowed(
         return False
     if surface == "direct_or_relevant":
         return True
+    if surface == "mention_when_directly_relevant":
+        # Semantic candidate selection plus predicate permission establishes
+        # direct relevance before the surface gate.
+        return True
     if surface == "relevant_recommendation_or_explicit_recall":
         return explicit_recall or intent in {
             "recommendation",
@@ -168,6 +173,8 @@ def _use_instruction(status: str, surface: str) -> str:
         return "use_only_for_relevant_recommendation_or_explicit_recall"
     if surface == "relevant_recall_or_explicit_recall":
         return "use_only_for_relevant_or_explicit_recall"
+    if surface == "mention_when_directly_relevant":
+        return "mention_only_when_directly_relevant"
     if surface == "exact_project_scope_only":
         return "use_only_inside_exact_project_scope"
     if surface == "restricted_explicit_recall_only":
