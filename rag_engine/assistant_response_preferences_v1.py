@@ -174,6 +174,26 @@ class AssistantResponsePreferencesInputV1(_StrictFrozenModel):
     def normalize_assistant_name(cls, value: Any) -> str | None:
         return normalize_assistant_name_v1(value)
 
+    @field_validator("response_length", mode="before")
+    @classmethod
+    def response_length_from_wire(cls, value: Any) -> Any:
+        return ResponseLength(value) if isinstance(value, str) else value
+
+    @field_validator("technical_depth", mode="before")
+    @classmethod
+    def technical_depth_from_wire(cls, value: Any) -> Any:
+        return TechnicalDepth(value) if isinstance(value, str) else value
+
+    @field_validator("response_format", mode="before")
+    @classmethod
+    def response_format_from_wire(cls, value: Any) -> Any:
+        return ResponseFormat(value) if isinstance(value, str) else value
+
+    @field_validator("conversation_style", mode="before")
+    @classmethod
+    def conversation_style_from_wire(cls, value: Any) -> Any:
+        return ConversationStyle(value) if isinstance(value, str) else value
+
 
 class AssistantResponsePreferencesV1(_StrictFrozenModel):
     contract_version: Literal[ASSISTANT_RESPONSE_PREFERENCES_VERSION] = (
