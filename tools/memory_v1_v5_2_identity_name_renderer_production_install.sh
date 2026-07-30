@@ -30,6 +30,7 @@ security_test=tests/memory_v1_v5_2_identity_name_renderer.sql
 clone_test=tools/memory_v1_v5_2_identity_name_renderer_clone.sh
 timer_state=$(mktemp /tmp/memory-v5-2-identity-renderer-timers.XXXXXX)
 timers_quiesced=0
+migration_applied=0
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
 status="$snapshot_root/memory_v1_v5_2_identity_name_renderer_${run_tag}.status"
 
@@ -62,6 +63,10 @@ restore_timers() {
 cleanup() {
   code=$?
   trap - EXIT
+  if [[ "$code" -ne 0 && "$migration_applied" -eq 1 ]]; then
+    docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
+      -U sage -d "$database" <"$rollback" >/dev/null || code=1
+  fi
   restore_timers || code=1
   rm -f "$timer_state"
   {
@@ -76,6 +81,7 @@ trap cleanup EXIT
 data_signature() {
   docker exec "$container" pg_dump -U sage -d "$database" \
     --data-only --schema=memory --inserts --rows-per-insert=1 \
+    --restrict-key=memory_v5_2_identity_renderer_v1 \
     | sha256sum | awk '{print $1}'
 }
 
@@ -144,6 +150,7 @@ projection_before=$(docker exec "$container" psql -X -A -t -U sage -d "$database
 
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$database" <"$migration" >/dev/null
+migration_applied=1
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$database" <"$security_test" >/dev/null
 
@@ -156,6 +163,7 @@ docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   == "$projection_before" ]]
 
 restore_timers
+migration_applied=0
 [[ "$(systemctl is-active brains.service)" == active ]]
 curl --fail --silent --max-time 5 \
   -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
