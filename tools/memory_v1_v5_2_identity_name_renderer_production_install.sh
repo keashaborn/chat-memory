@@ -81,7 +81,7 @@ trap cleanup EXIT
 data_signature() {
   docker exec "$container" pg_dump -U sage -d "$database" \
     --data-only --schema=memory --inserts --rows-per-insert=1 \
-    --restrict-key=memory_v5_2_identity_renderer_v1 \
+    --restrict-key=6d656d6f72797635326964656e7469747972656e64657265727631 \
     | sha256sum | awk '{print $1}'
 }
 
