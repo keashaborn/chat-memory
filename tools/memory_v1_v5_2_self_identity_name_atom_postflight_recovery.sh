@@ -7,7 +7,7 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-required_head=2430e2ec3c49d2cd1cc5e968a03ebd83a4e926f3
+required_base=2430e2ec3c49d2cd1cc5e968a03ebd83a4e926f3
 run_tag=20260730T074819Z_7140d441718b
 container=brains-postgres-1
 database=memory
@@ -46,7 +46,7 @@ qdrant_signature() {
 }
 
 [[ "$(id -u)" == 0 ]]
-[[ "$(git rev-parse HEAD)" == "$required_head" ]]
+git merge-base --is-ancestor "$required_base" HEAD
 [[ -z "$(git status --porcelain)" ]]
 for file in \
   "$status_file" "$timer_state" "$target_before" "$target_after" \
@@ -180,7 +180,7 @@ backup_sha=$(sha256sum "$backup" | awk '{print $1}')
 
 jq -n \
   --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg head "$required_head" --arg run_tag "$run_tag" \
+  --arg head "$(git rev-parse HEAD)" --arg run_tag "$run_tag" \
   --arg manifest "$manifest" --arg manifest_sha256 "$manifest_sha" \
   --arg backup "$backup" --arg backup_sha256 "$backup_sha" \
   --arg qdrant_sha256 "$qdrant_sha" \
