@@ -124,6 +124,25 @@ class AssistantResponsePreferencesV1Tests(unittest.TestCase):
                 assistant_name="Sage 🚀",
             )
 
+    def test_json_wire_enum_strings_cross_strict_boundary(self) -> None:
+        value = AssistantResponsePreferencesInputV1.model_validate(
+            {
+                "expected_revision": 0,
+                "response_length": "concise",
+                "technical_depth": "expert",
+                "response_format": "steps",
+                "conversation_style": "warm",
+            }
+        )
+        self.assertIs(value.response_length, ResponseLength.CONCISE)
+        self.assertIs(value.technical_depth, TechnicalDepth.EXPERT)
+        self.assertIs(value.response_format, ResponseFormat.STEPS)
+        self.assertIs(value.conversation_style, ConversationStyle.WARM)
+        with self.assertRaises(ValidationError):
+            AssistantResponsePreferencesInputV1.model_validate(
+                {"expected_revision": 0, "response_length": "verbose"}
+            )
+
     def test_private_values_are_absent_from_inspection(self) -> None:
         _, inspection = render_assistant_response_preferences_v1(
             stored(
