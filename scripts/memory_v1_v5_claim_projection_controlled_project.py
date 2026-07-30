@@ -609,7 +609,7 @@ async def run() -> int:
             if admission_path is not None else None
         ),
         "apply_manifest_file_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-        "apply_manifest_sha256": manifest_sha,
+        "apply_manifest_sha256": manifest["manifest_sha256"],
         "collection": args.collection,
         "embedding_model": model,
         "embedding_requests": calls,
