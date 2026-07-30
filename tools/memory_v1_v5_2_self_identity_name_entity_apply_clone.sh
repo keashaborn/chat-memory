@@ -150,7 +150,8 @@ if runuser -u ubuntu -- env POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
 fi
 
 head=$(git rev-parse HEAD)
-runuser -u ubuntu -- /opt/chat-memory/venv/bin/python "$repo_root/$fixture" \
+runuser -u ubuntu -- env PYTHONPATH="$repo_root" \
+  /opt/chat-memory/venv/bin/python "$repo_root/$fixture" \
   --plan "$work/plan.json" --output "$work/authorization.json" --head "$head"
 runuser -u ubuntu -- env \
   MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
