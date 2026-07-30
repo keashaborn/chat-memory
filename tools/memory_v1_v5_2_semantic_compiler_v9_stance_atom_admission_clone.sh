@@ -26,6 +26,9 @@ evidence=61d4fb6f-b211-491e-8edc-d160efefe17e
 proposal=e4b17ef6-5012-5f1a-ae2a-90681fd71d8f
 review=aa43ff43-3d9d-5eaf-8972-229f6f2e261c
 apply=237451bc-2fcc-5272-b357-9dd2f6452e0d
+proposal_operation=ac3c747b-d8e4-5d61-b0d4-0c0964495241
+review_operation=7eb805c2-2545-5428-a8cd-31e9ca6f6477
+apply_operation=239d3aed-e211-5cb1-becd-34c5baac84e1
 manifest_file_sha=9ed0a6a5b726da412ca1404ffe6a9746f4e97167099ed4c54196edf2e3ba366a
 manifest_contract_sha=8ea964ad2dd9cf2bb6024de775e21f05c96fd4e949b0ca5b8908418a038b54af
 runner_sha=721184f8eebf5f4d14b553eb0cf0134960456d8834029263da1d10963868c5e7
@@ -156,7 +159,11 @@ equal target_atom_rows_before "$(scalar "
      WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation
      WHERE owner_user_id='$owner'::uuid
-       AND manifest_sha256='$manifest_contract_sha')
+       AND operation_id IN (
+         '$proposal_operation'::uuid,
+         '$review_operation'::uuid,
+         '$apply_operation'::uuid
+       ))
   )
 ")" 0,0,0,0
 equal target_downstream_before "$(target_downstream)" 0,0,0,0
@@ -191,7 +198,11 @@ equal target_atom_rows_after_apply "$(scalar "
      WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation
      WHERE owner_user_id='$owner'::uuid
-       AND manifest_sha256='$manifest_contract_sha')
+       AND operation_id IN (
+         '$proposal_operation'::uuid,
+         '$review_operation'::uuid,
+         '$apply_operation'::uuid
+       ))
   )
 ")" 1,1,1,3
 equal target_downstream_after_apply "$(target_downstream)" 0,0,0,0
@@ -211,7 +222,11 @@ equal target_atom_rows_after_replay "$(scalar "
      WHERE owner_user_id='$owner'::uuid AND packet_id='$packet'::uuid),
     (SELECT count(*) FROM memory.v5_2_atom_admission_operation
      WHERE owner_user_id='$owner'::uuid
-       AND manifest_sha256='$manifest_contract_sha')
+       AND operation_id IN (
+         '$proposal_operation'::uuid,
+         '$review_operation'::uuid,
+         '$apply_operation'::uuid
+       ))
   )
 ")" 1,1,1,3
 
