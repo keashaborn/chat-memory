@@ -87,6 +87,16 @@ class AssistantResponsePreferencesRouterV1Tests(unittest.TestCase):
         self.assertIn("char_length(preference_narrative) > 1200", rollback)
         self.assertNotIn("left(preference_narrative", rollback.lower())
         self.assertNotIn("substring(preference_narrative", rollback.lower())
+        self.assertIn("char_length(source_narrative) <= 8000", migration)
+        self.assertIn("cardinality(rule_ids) <= 8", migration)
+        self.assertIn("cardinality(summary) <= 12", migration)
+        self.assertIn("'assistant_preference_compiler_v2'", migration)
+        self.assertIn("'contextual_playfulness'", migration)
+        self.assertIn("'precise_plain_language'", migration)
+        self.assertIn("'evidence_first_conclusions'", migration)
+        self.assertIn("'information_dense'", migration)
+        self.assertIn("v2 preference compilation candidates exist", rollback)
+        self.assertIn("an active v2 preference compilation exists", rollback)
 
 
 if __name__ == "__main__":
