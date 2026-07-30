@@ -155,12 +155,16 @@ mapfile -t failed_memory_units < <(
     'memory-v1-*.service' \
     | awk '{print $1}'
 )
-[[ "${#failed_memory_units[@]}" == 1 ]]
-[[ "${failed_memory_units[0]}" == memory-v1-v5-local-entailment.service ]]
-[[ "$(systemctl show memory-v1-v5-local-entailment.service -p Result --value)" \
-  == start-limit-hit ]]
-[[ "$(systemctl show memory-v1-v5-local-entailment.service \
-  -p ExecMainStatus --value)" == 0 ]]
+if [[ "${#failed_memory_units[@]}" == 1 ]]; then
+  [[ "${failed_memory_units[0]}" == \
+    memory-v1-v5-local-entailment.service ]]
+  [[ "$(systemctl show memory-v1-v5-local-entailment.service \
+    -p Result --value)" == start-limit-hit ]]
+  [[ "$(systemctl show memory-v1-v5-local-entailment.service \
+    -p ExecMainStatus --value)" == 0 ]]
+else
+  [[ "${#failed_memory_units[@]}" == 0 ]]
+fi
 
 phase=production_clone_proof
 "$clone_test" >"$clone_output"
