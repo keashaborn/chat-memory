@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# seebx backend only. Deploys compiler v9 and its single-hash persistence
-# compatibility, enqueues exactly seven reviewed records, runs private local
-# extraction, and stops before routing, staging, claims, Qdrant, or prompts.
+# seebx backend only. Resumes the exact-seven private extraction after the
+# v9 schema/code deployment and selector enqueue have already succeeded.
 
 if [[ "$EUID" -ne 0 ]]; then
   echo 'run through sudo; root is required for the private endpoint key' >&2
   exit 1
 fi
-if [[ "${MEMORY_V1_V5_2_SEMANTIC_COMPILER_V9_EXACT_SEVEN:-}" != authorized ]]; then
-  echo 'MEMORY_V1_V5_2_SEMANTIC_COMPILER_V9_EXACT_SEVEN=authorized is required' >&2
+if [[ "${MEMORY_V1_V5_2_SEMANTIC_COMPILER_V9_RECOVERY:-}" != authorized ]]; then
+  echo 'MEMORY_V1_V5_2_SEMANTIC_COMPILER_V9_RECOVERY=authorized is required' >&2
   exit 1
 fi
 
@@ -20,78 +19,54 @@ set -a
 source "${MEMORY_V1_ENV_FILE:-/opt/chat-memory/.env}"
 set +a
 
-live=/opt/chat-memory
 container=brains-postgres-1
 database=memory
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other=557ea042-cb82-48f8-9429-472e96c957ef
-expected_live_head=e6d8bbc46138eb95b53188ac66b82c9e00bbf0df
-required_source_commit=ca8dcbd7db6d9b8eb572d87cb28f93b4da1321dd
 selector=20260730_v5_2_semantic_compiler_v9_reextract_v1
-compiler_version=memory_v1_semantic_policy_compiler_v9
 compiler_sha=738cc80f374e3c7e441fd03f964b77d01401422d286a9bc52205c6e060767ae6
 manifest_sha=dab07b531eb987fba80b67cbc4c106a4d1fe3375add7cb9bb0de7842eaa6b91e
-old_writer_sha=4dcbd998364abc91d5f6abd0844546c74387f4c057fc876efbee7c222eb0c8ab
-new_writer_sha=2b3182f59091a7d93697ae79ee6a8e1cc7541829f957b5a859c47cf28707d190
-snapshot_dir=/home/ubuntu/brains/snapshots
-lock_file=/home/ubuntu/brains/.memory_v1_v5_2_semantic_compiler_v9_exact_seven.lock
-
+writer_sha=2b3182f59091a7d93697ae79ee6a8e1cc7541829f957b5a859c47cf28707d190
 manifest=manifests/memory_v1_v5_2_semantic_compiler_v9_reextract_20260730.json
-compat_migration=ops/sql/20260730_memory_v1_v5_2_compiler_v9_persistence_compat.sql
-compat_rollback=ops/sql/20260730_memory_v1_v5_2_compiler_v9_persistence_compat_rollback.sql
-compat_test=tests/memory_v1_v5_2_compiler_v9_persistence_compat.sql
-compat_clone=tools/memory_v1_v5_2_compiler_v9_persistence_compat_clone.sh
-selector_migration=ops/sql/20260730_memory_v1_v5_2_semantic_compiler_v9_reextract.sql
-selector_rollback=ops/sql/20260730_memory_v1_v5_2_semantic_compiler_v9_reextract_rollback.sql
-selector_test=tests/memory_v1_v5_2_semantic_compiler_v9_reextract.sql
-selector_clone=tools/memory_v1_v5_2_semantic_compiler_v9_reextract_clone.sh
 provider=scripts/memory_v1_relational_extraction_v5_local_provider.py
 canary=tools/memory_v1_v5_local_inference_canary_apply.sh
+snapshot_dir=/home/ubuntu/brains/snapshots
+lock_file=/home/ubuntu/brains/.memory_v1_v5_2_semantic_compiler_v9_recovery.lock
+required_live_ancestor=335d046dee3006a528aa40a020382076008ae1ff
+expected_provider_sha=d30a59c35d671610dc06af12f0fa55b8b1520bb0c3ffdaef9041afe3949af134
+expected_canary_sha=5b553819663f95406a82494611e0423be64f995833b4df302ee234dbd97b2cb3
 
-declare -A expected_sha256=(
-  ["$manifest"]=c09aed8251a981baaecbf4ecedd3d243ac24a40e7f68697643e3b2409138ac57
-  ["$compat_migration"]=b219f9e1c5682cbb3fbc70b0793bfb06d9d167d13d75246e283d8eea28b930fa
-  ["$compat_rollback"]=4723e18d1d826a6a3fc7597feac9cfcf7486b11eac7223663f69e3e8db52ee30
-  ["$compat_test"]=518ea14e6d4bac7cf83321934355dd9ccc4f3407e7fb05e6b7781b36f46cc245
-  ["$compat_clone"]=b765bdbfc37d907aecf14ab0918f70b06844bb1dadc8b2aa9771168d0c5ad984
-  ["$selector_migration"]=20eeba37b35d462e482f2b2d4314e5976a422decc917b172afa2d48d8600cdaf
-  ["$selector_rollback"]=e4028100d2860c9d3afef7702812bd526a9f9907561f94d8a93e0c06897c2bc9
-  ["$selector_test"]=07b776d95f378a01f05cce06bb950b48b3c814648a93b92bb6ecdf05acb843ee
-  ["$selector_clone"]=951fbdc569edf75ffd80d8a816b7e55fb07a9564ee932d32623598859514a715
-  ["$provider"]=d30a59c35d671610dc06af12f0fa55b8b1520bb0c3ffdaef9041afe3949af134
-  ["$canary"]=5b553819663f95406a82494611e0423be64f995833b4df302ee234dbd97b2cb3
-)
+target_jobs_sql="'bcab0f19-5f3c-54b3-97e1-deac045021f0'::uuid,
+  'ad81be18-93b0-5907-aefa-9a03e00e79cf'::uuid,
+  'fa71da24-d450-5447-8f4d-766c4d4ab446'::uuid,
+  '93c0eec3-8968-5aa7-b5de-e81f27aac982'::uuid,
+  '18525bf1-a1d6-579e-8252-d12296f64b6d'::uuid,
+  '46b47a61-68d6-587c-8daf-f009e2de76f6'::uuid,
+  '547a1438-e984-538c-8739-4a4dc53b283c'::uuid"
+target_terminals_sql="'1c9280ec-e637-5378-8010-bbfab2b0d42a'::uuid,
+  'b7e4ddcc-0af1-5bbd-9ba7-eefa0f519c85'::uuid,
+  '1279f066-6e56-5c86-ab73-e27023121547'::uuid,
+  '37b49e89-e6b5-569f-bea3-663f33532dd7'::uuid,
+  '0e5fd9da-b8b6-55fa-95a9-2019fe1e49ad'::uuid,
+  '670b0089-f011-5d64-8b14-a89ec6c98762'::uuid,
+  '040dd3d9-15a7-5f5d-b525-bba19c1c5de1'::uuid"
 
-timer_state=$(mktemp /tmp/memory-v9-exact-seven-timers.XXXXXX)
-table_list=$(mktemp /tmp/memory-v9-exact-seven-tables.XXXXXX)
-before_static=$(mktemp /tmp/memory-v9-exact-seven-static-before.XXXXXX)
-after_static=$(mktemp /tmp/memory-v9-exact-seven-static-after.XXXXXX)
-before_isolation=$(mktemp /tmp/memory-v9-exact-seven-isolation-before.XXXXXX)
-after_isolation=$(mktemp /tmp/memory-v9-exact-seven-isolation-after.XXXXXX)
-apply_output=$(mktemp /tmp/memory-v9-exact-seven-apply.XXXXXX)
-replay_output=$(mktemp /tmp/memory-v9-exact-seven-replay.XXXXXX)
-canary_dir=$(mktemp -d /tmp/memory-v9-exact-seven-canaries.XXXXXX)
+timer_state=$(mktemp /tmp/memory-v9-recovery-timers.XXXXXX)
+table_list=$(mktemp /tmp/memory-v9-recovery-tables.XXXXXX)
+before_static=$(mktemp /tmp/memory-v9-recovery-static-before.XXXXXX)
+after_static=$(mktemp /tmp/memory-v9-recovery-static-after.XXXXXX)
+before_isolation=$(mktemp /tmp/memory-v9-recovery-isolation-before.XXXXXX)
+after_isolation=$(mktemp /tmp/memory-v9-recovery-isolation-after.XXXXXX)
+canary_dir=$(mktemp -d /tmp/memory-v9-recovery-canaries.XXXXXX)
 chmod 0600 "$timer_state" "$table_list" "$before_static" "$after_static" \
-  "$before_isolation" "$after_isolation" "$apply_output" "$replay_output"
+  "$before_isolation" "$after_isolation"
 timers_quiesced=0
-brains_was_active=0
 phase=initialization
 status_file=
 
 scalar() {
   docker exec "$container" psql -U sage -d "$database" -X -At \
     -v ON_ERROR_STOP=1 -c "$1" | tr -d '[:space:]'
-}
-
-run_sql() {
-  docker exec -i "$container" psql -U sage -d "$database" -X \
-    -v ON_ERROR_STOP=1 "$@"
-}
-
-writer_sha() {
-  scalar "SELECT encode(public.digest(convert_to(pg_get_functiondef(
-    'memory.persist_owner_v5_2_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)'::regprocedure
-  ),'UTF8'),'sha256'),'hex')"
 }
 
 qdrant_signature() {
@@ -125,15 +100,11 @@ restore_timers() {
 record_exit() {
   rc=$?
   trap - EXIT
-  if [[ "$brains_was_active" -eq 1 ]] \
-     && [[ "$(systemctl is-active brains.service)" != active ]]; then
-    systemctl start brains.service || rc=1
-  fi
   if [[ "$timers_quiesced" -eq 1 ]]; then
     restore_timers || rc=1
   fi
   rm -f "$timer_state" "$table_list" "$before_static" "$after_static" \
-    "$before_isolation" "$after_isolation" "$apply_output" "$replay_output"
+    "$before_isolation" "$after_isolation"
   rm -rf "$canary_dir"
   if [[ -n "$status_file" ]]; then
     printf 'phase=%s\nexit_code=%s\ncompleted_at=%s\n' \
@@ -160,15 +131,7 @@ capture_static_state() {
 capture_isolation_state() {
   local output=$1
   docker exec "$container" psql -U sage -d "$database" -X -Atqc "
-    WITH target_jobs AS (
-      SELECT (value->>'job_id')::uuid AS job_id,
-             (value->>'terminal_id')::uuid AS terminal_id
-      FROM jsonb_array_elements(
-        \$manifest\$$(
-          jq -cS '.items' "$manifest"
-        )\$manifest\$::jsonb
-      )
-    ), state(label,row_json) AS (
+    WITH state(label,row_json) AS (
       SELECT 'other_jobs',to_jsonb(value)::text
       FROM memory.evidence_extraction_job AS value
       WHERE owner_user_id<>'$owner'::uuid
@@ -191,31 +154,25 @@ capture_isolation_state() {
       UNION ALL
       SELECT 'same_owner_other_jobs',to_jsonb(value)::text
       FROM memory.evidence_extraction_job AS value
-      WHERE owner_user_id='$owner'::uuid
-        AND job_id NOT IN (SELECT job_id FROM target_jobs)
+      WHERE owner_user_id='$owner'::uuid AND job_id NOT IN ($target_jobs_sql)
       UNION ALL
       SELECT 'same_owner_other_terminals',to_jsonb(value)::text
       FROM memory.evidence_intake_terminal AS value
       WHERE owner_user_id='$owner'::uuid
-        AND terminal_id NOT IN (SELECT terminal_id FROM target_jobs)
+        AND terminal_id NOT IN ($target_terminals_sql)
       UNION ALL
       SELECT 'same_owner_other_events',to_jsonb(value)::text
       FROM memory.evidence_extraction_event AS value
-      WHERE owner_user_id='$owner'::uuid
-        AND job_id NOT IN (SELECT job_id FROM target_jobs)
+      WHERE owner_user_id='$owner'::uuid AND job_id NOT IN ($target_jobs_sql)
       UNION ALL
       SELECT 'same_owner_other_ledger',to_jsonb(value)::text
       FROM memory.v5_local_inference_event AS value
       WHERE owner_user_id='$owner'::uuid
-        AND (
-          job_id IS NULL
-          OR job_id NOT IN (SELECT job_id FROM target_jobs)
-        )
+        AND (job_id IS NULL OR job_id NOT IN ($target_jobs_sql))
       UNION ALL
       SELECT 'same_owner_other_packets',to_jsonb(value)::text
       FROM memory.evidence_extraction_packet_v5_local AS value
-      WHERE owner_user_id='$owner'::uuid
-        AND job_id NOT IN (SELECT job_id FROM target_jobs)
+      WHERE owner_user_id='$owner'::uuid AND job_id NOT IN ($target_jobs_sql)
     ), labels(label) AS (VALUES
       ('other_jobs'),('other_terminals'),('other_events'),
       ('other_ledger'),('other_packets'),
@@ -231,64 +188,35 @@ capture_isolation_state() {
   " >"$output"
 }
 
-enqueue_items() {
-  local expected_outcome=$1 output=$2 item
-  : >"$output"
-  while IFS= read -r item; do
-    operation=$(jq -r '.operation_id' <<<"$item")
-    job=$(jq -r '.job_id' <<<"$item")
-    terminal=$(jq -r '.terminal_id' <<<"$item")
-    evidence=$(jq -r '.evidence_id' <<<"$item")
-    content=$(jq -r '.content_sha256' <<<"$item")
-    prior_packet=$(jq -r '.prior_packet_id' <<<"$item")
-    prior_storage=$(jq -r '.prior_packet_storage_sha256' <<<"$item")
-    psql "$POSTGRES_DSN" -X -v ON_ERROR_STOP=1 -At -F $'\t' \
-      -v owner="$owner" >>"$output" <<SQL
-BEGIN;
-SELECT set_config('app.user_id', :'owner', true);
-SELECT * FROM memory.enqueue_owner_v5_2_semantic_compiler_v9_reextract_v1(
-  '$operation','$job','$terminal','$evidence','$content',
-  '$prior_packet','$prior_storage','$manifest_sha','$compiler_sha'
-);
-COMMIT;
-SQL
-  done < <(jq -cS '.items[]' "$manifest")
-  [[ "$(grep -c $'\tpending\t'"$expected_outcome"'$' "$output")" == 7 ]]
-}
-
-for artifact in "${!expected_sha256[@]}"; do
-  [[ -f "$artifact" ]]
-  [[ "$(sha256sum "$artifact" | awk '{print $1}')" == \
-    "${expected_sha256[$artifact]}" ]]
-done
 [[ -z "$(git status --porcelain)" ]]
-git merge-base --is-ancestor "$required_source_commit" HEAD
-target_commit=$(git rev-parse HEAD)
-[[ "$(git -C "$live" rev-parse HEAD)" == "$expected_live_head" ]]
-[[ -z "$(git -C "$live" status --porcelain)" ]]
-git -C "$live" merge-base --is-ancestor "$expected_live_head" "$target_commit"
+git merge-base --is-ancestor "$required_live_ancestor" HEAD
+[[ "$(sha256sum "$provider" | awk '{print $1}')" == "$expected_provider_sha" ]]
+[[ "$(sha256sum "$canary" | awk '{print $1}')" == "$expected_canary_sha" ]]
 [[ "$(jq -cS . "$manifest" | tr -d '\n' | sha256sum | awk '{print $1}')" \
   == "$manifest_sha" ]]
-[[ "$(jq -r '.items|length' "$manifest")" == 7 ]]
-[[ "$(jq -r '.owner_user_id' "$manifest")" == "$owner" ]]
-[[ "$(jq -r '.policy_compiler_sha256' "$manifest")" == "$compiler_sha" ]]
-[[ "$(writer_sha)" == "$old_writer_sha" ]]
 [[ "$(systemctl is-active brains.service)" == active ]]
+[[ "$(curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8088/docs)" == 200 ]]
+[[ "$(scalar "SELECT encode(public.digest(convert_to(pg_get_functiondef(
+  'memory.persist_owner_v5_2_local_packet_v1(uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,jsonb,boolean,integer)'::regprocedure
+),'UTF8'),'sha256'),'hex')")" == "$writer_sha" ]]
 [[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
-  WHERE selector_version='$selector'")" == 0 ]]
-
-phase=clone_tests
-[[ "$(bash "$compat_clone")" == \
-  'memory_v1_v5_2_compiler_v9_persistence_compat_clone: PASS' ]]
-[[ "$(bash "$selector_clone")" == \
-  'memory_v1_v5_2_semantic_compiler_v9_reextract_clone: PASS' ]]
+  WHERE owner_user_id='$owner'::uuid AND selector_version='$selector'")" == 7 ]]
+[[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
+  WHERE owner_user_id='$other'::uuid AND selector_version='$selector'")" == 0 ]]
+[[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
+  WHERE owner_user_id='$owner'::uuid AND selector_version='$selector'
+    AND status='pending' AND attempts=0
+    AND lease_token IS NULL AND lease_expires_at IS NULL")" == 7 ]]
+[[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
+  WHERE owner_user_id='$owner'::uuid AND job_id IN ($target_jobs_sql)")" == 0 ]]
 
 exec 9>"$lock_file"
 flock -n 9
 umask 077
 run_tag="$(date -u +%Y%m%dT%H%M%SZ)_$(git rev-parse --short=12 HEAD)"
-status_file="$snapshot_dir/memory_v1_v5_2_semantic_compiler_v9_exact_seven_${run_tag}.status"
-report="$snapshot_dir/memory_v1_v5_2_semantic_compiler_v9_exact_seven_${run_tag}.json"
+status_file="$snapshot_dir/memory_v1_v5_2_semantic_compiler_v9_recovery_${run_tag}.status"
+report="$snapshot_dir/memory_v1_v5_2_semantic_compiler_v9_recovery_${run_tag}.json"
 
 phase=inventory_timers
 while IFS= read -r unit; do
@@ -314,8 +242,8 @@ while IFS=$'\t' read -r unit _enabled _active; do
 done <"$timer_state"
 
 phase=fresh_backup
-partial="$snapshot_dir/.memory_pre_v9_exact_seven_${run_tag}.dump.partial"
-backup="$snapshot_dir/memory_pre_v9_exact_seven_${run_tag}.dump"
+partial="$snapshot_dir/.memory_pre_v9_recovery_${run_tag}.dump.partial"
+backup="$snapshot_dir/memory_pre_v9_recovery_${run_tag}.dump"
 docker exec "$container" pg_dump -U sage -d "$database" \
   -Fc --no-owner --no-privileges >"$partial"
 [[ -s "$partial" ]]
@@ -347,51 +275,6 @@ events_before=$(scalar 'SELECT count(*) FROM memory.evidence_extraction_event')
 ledger_before=$(scalar 'SELECT count(*) FROM memory.v5_local_inference_event')
 packets_before=$(scalar 'SELECT count(*) FROM memory.evidence_extraction_packet_v5_local')
 
-phase=stop_brains
-brains_was_active=1
-systemctl stop brains.service
-[[ "$(systemctl is-active brains.service)" == inactive ]]
-
-phase=install_schema
-run_sql <"$compat_migration" >/dev/null
-run_sql <"$selector_migration" >/dev/null
-run_sql <"$compat_test" >/dev/null
-first=$(jq -cS '.items[0]' "$manifest")
-run_sql \
-  -v target_owner="$owner" \
-  -v other_owner="$other" \
-  -v evidence_id="$(jq -r '.evidence_id' <<<"$first")" \
-  -v content_sha256="$(jq -r '.content_sha256' <<<"$first")" \
-  -v prior_packet_id="$(jq -r '.prior_packet_id' <<<"$first")" \
-  -v prior_packet_storage_sha256="$(jq -r '.prior_packet_storage_sha256' <<<"$first")" \
-  -v operation_id="$(jq -r '.operation_id' <<<"$first")" \
-  -v job_id="$(jq -r '.job_id' <<<"$first")" \
-  -v terminal_id="$(jq -r '.terminal_id' <<<"$first")" \
-  -v manifest_sha256="$manifest_sha" \
-  -v compiler_sha256="$compiler_sha" \
-  <"$selector_test" >/dev/null
-[[ "$(writer_sha)" == "$new_writer_sha" ]]
-
-phase=deploy_code
-git -C "$live" merge --ff-only "$target_commit"
-[[ "$(git -C "$live" rev-parse HEAD)" == "$target_commit" ]]
-[[ -z "$(git -C "$live" status --porcelain)" ]]
-systemctl start brains.service
-[[ "$(systemctl is-active brains.service)" == active ]]
-for _attempt in $(seq 1 30); do
-  http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-    http://127.0.0.1:8088/docs || true)
-  [[ "$http_code" == 200 ]] && break
-  sleep 1
-done
-[[ "$http_code" == 200 ]]
-
-phase=transactional_enqueue
-enqueue_items applied "$apply_output"
-
-phase=selector_replay
-enqueue_items replayed "$replay_output"
-
 phase=private_extraction
 index=0
 while IFS= read -r item; do
@@ -418,11 +301,11 @@ cmp -s "$before_isolation" "$after_isolation"
 qdrant_after=$(qdrant_signature)
 [[ "$qdrant_before" == "$qdrant_after" ]]
 [[ "$(scalar 'SELECT count(*) FROM memory.evidence_extraction_job')" \
-  == "$((jobs_before+7))" ]]
+  == "$jobs_before" ]]
 [[ "$(scalar 'SELECT count(*) FROM memory.evidence_intake_terminal')" \
-  == "$((terminals_before+7))" ]]
+  == "$terminals_before" ]]
 [[ "$(scalar 'SELECT count(*) FROM memory.evidence_extraction_event')" \
-  == "$((events_before+21))" ]]
+  == "$((events_before+14))" ]]
 [[ "$(scalar 'SELECT count(*) FROM memory.v5_local_inference_event')" \
   == "$((ledger_before+14))" ]]
 [[ "$(scalar 'SELECT count(*) FROM memory.evidence_extraction_packet_v5_local')" \
@@ -430,49 +313,24 @@ qdrant_after=$(qdrant_signature)
 [[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
   WHERE owner_user_id='$owner'::uuid AND selector_version='$selector'
     AND status='review_required' AND attempts=1")" == 7 ]]
-[[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_job
-  WHERE owner_user_id='$other'::uuid AND selector_version='$selector'")" == 0 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
-  WHERE owner_user_id='$owner'::uuid
+  WHERE owner_user_id='$owner'::uuid AND job_id IN ($target_jobs_sql)
     AND policy_compiler_sha256='$compiler_sha'
-    AND job_id IN (
-      SELECT (value->>'job_id')::uuid
-      FROM jsonb_array_elements(
-        \$manifest\$$(
-          jq -cS '.items' "$manifest"
-        )\$manifest\$::jsonb
-      )
-    ) AND external_model_calls=0")" == 7 ]]
+    AND external_model_calls=0")" == 7 ]]
 local_calls=$(scalar "SELECT coalesce(sum(local_model_calls),0)
   FROM memory.evidence_extraction_packet_v5_local
-  WHERE owner_user_id='$owner'::uuid
-    AND policy_compiler_sha256='$compiler_sha'
-    AND job_id IN (
-      SELECT (value->>'job_id')::uuid
-      FROM jsonb_array_elements(
-        \$manifest\$$(
-          jq -cS '.items' "$manifest"
-        )\$manifest\$::jsonb
-      )
-    )")
+  WHERE owner_user_id='$owner'::uuid AND job_id IN ($target_jobs_sql)")
 (( local_calls >= 0 && local_calls <= 1 ))
 [[ "$(scalar "SELECT coalesce(sum(local_model_calls),0)
   FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$owner'::uuid
-    AND job_id<>'ad81be18-93b0-5907-aefa-9a03e00e79cf'::uuid
-    AND job_id IN (
-      SELECT (value->>'job_id')::uuid
-      FROM jsonb_array_elements(
-        \$manifest\$$(
-          jq -cS '.items' "$manifest"
-        )\$manifest\$::jsonb
-      )
-    )")" == 0 ]]
+    AND job_id IN ($target_jobs_sql)
+    AND job_id<>'ad81be18-93b0-5907-aefa-9a03e00e79cf'::uuid")" == 0 ]]
 [[ "$(scalar "SELECT count(*) FROM memory.v5_local_packet_disposition
   WHERE owner_user_id='$owner'::uuid
     AND packet_id IN (
       SELECT packet_id FROM memory.evidence_extraction_packet_v5_local
-      WHERE policy_compiler_sha256='$compiler_sha'
+      WHERE job_id IN ($target_jobs_sql)
     )")" == 0 ]]
 
 phase=restore_timers
@@ -494,24 +352,14 @@ packet_summary=$(docker exec "$container" psql -U sage -d "$database" \
     'deferrals',jsonb_array_length(normalized_packet->'deferrals')
   ) ORDER BY job_id),'[]'::jsonb)
   FROM memory.evidence_extraction_packet_v5_local
-  WHERE owner_user_id='$owner'::uuid
-    AND policy_compiler_sha256='$compiler_sha'
-    AND job_id IN (
-      SELECT (value->>'job_id')::uuid
-      FROM jsonb_array_elements(
-        \$manifest\$$(
-          jq -cS '.items' "$manifest"
-        )\$manifest\$::jsonb
-      )
-    )")
+  WHERE owner_user_id='$owner'::uuid AND job_id IN ($target_jobs_sql)")
 jq -n \
-  --arg contract_version memory_v1_v5_2_semantic_compiler_v9_exact_seven_v1 \
-  --arg commit "$target_commit" \
+  --arg contract_version memory_v1_v5_2_semantic_compiler_v9_recovery_v1 \
+  --arg commit "$(git rev-parse HEAD)" \
   --arg manifest_sha256 "$manifest_sha" \
   --arg backup "$backup" \
   --arg backup_sha256 "$backup_sha" \
   --arg qdrant_sha256 "$qdrant_after" \
-  --arg writer_sha256 "$(writer_sha)" \
   --argjson timer_count "$timer_count" \
   --argjson local_model_calls "$local_calls" \
   --argjson packet_summary "$packet_summary" \
@@ -521,15 +369,14 @@ jq -n \
     commit:$commit,
     manifest_sha256:$manifest_sha256,
     compiler_version:"memory_v1_semantic_policy_compiler_v9",
-    packet_writer_sha256:$writer_sha256,
-    bounded_writes:{
-      jobs:7,terminals:7,extraction_events:21,
-      local_inference_events:14,immutable_packets:7
+    bounded_recovery_writes:{
+      extraction_events:14,local_inference_events:14,immutable_packets:7
     },
     local_model_calls:$local_model_calls,
     external_model_calls:0,
     packets:$packet_summary,
-    zero_write_replay_proved:true,
+    selector_replay_previously_proved:true,
+    packet_replay_proved:true,
     account_isolation_proved:true,
     non_target_memory_rows_unchanged:true,
     qdrant_unchanged:true,
@@ -546,6 +393,6 @@ printf '%s  %s\n' "$report_sha" "$report" >"$report.sha256"
 chmod 0600 "$report.sha256"
 
 phase=complete
-printf 'memory_v1_v5_2_semantic_compiler_v9_exact_seven: PASS\n'
+printf 'memory_v1_v5_2_semantic_compiler_v9_recovery: PASS\n'
 printf 'report=%s\nreport_sha256=%s\nbackup=%s\nbackup_sha256=%s\n' \
   "$report" "$report_sha" "$backup" "$backup_sha"
