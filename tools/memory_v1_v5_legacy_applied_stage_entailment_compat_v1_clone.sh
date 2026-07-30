@@ -17,6 +17,7 @@ clone="memory_legacy_stage_compat_${$}"
 migration=ops/sql/20260730_memory_v1_v5_legacy_applied_stage_entailment_compat_v1.sql
 rollback=ops/sql/20260730_memory_v1_v5_legacy_applied_stage_entailment_compat_v1_rollback.sql
 security_test=tests/memory_v1_v5_legacy_applied_stage_entailment_compat_v1_security.sql
+apply=ops/sql/20260730_memory_v1_v5_legacy_applied_stage_entailment_two_batch_apply.sql
 backup=$(mktemp /tmp/memory-legacy-stage-compat.XXXXXX.dump)
 head=$(git rev-parse HEAD)
 role_preexisting=$(
@@ -54,7 +55,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for file in "$migration" "$rollback" "$security_test"; do
+for file in "$migration" "$rollback" "$security_test" "$apply"; do
   [[ -s "$file" ]]
 done
 [[ "$head" =~ ^[0-9a-f]{40}$ ]]
@@ -82,6 +83,28 @@ protected_before=$(
         'entailments',(SELECT count(*) FROM memory.observation_entailment_v5),
         'packets',(SELECT count(*) FROM memory.evidence_extraction_packet_v5_local),
         'stage_admissions',(SELECT count(*) FROM memory.v5_local_packet_stage_admission),
+        'operation_requests',(SELECT count(*) FROM memory.relational_operation_request)
+      )::text
+    "
+)
+stage_before=$(
+  sudo docker exec "$container" psql -U sage -d "$clone" \
+    -X -Atqc \
+    'SELECT count(*) FROM memory.v5_local_packet_stage_admission'
+)
+protected_nonstage_before=$(
+  sudo docker exec "$container" psql -U sage -d "$clone" \
+    -X -Atqc "
+      SELECT jsonb_build_object(
+        'claims',(SELECT count(*) FROM memory.claim),
+        'claim_revisions',(SELECT count(*) FROM memory.claim_revision),
+        'claim_links',(SELECT count(*) FROM memory.claim_observation),
+        'entities',(SELECT count(*) FROM memory.entity),
+        'observations',(SELECT count(*) FROM memory.observation),
+        'bindings',(SELECT count(*) FROM memory.observation_entity_binding),
+        'assessments',(SELECT count(*) FROM memory.v5_local_entailment_assessment),
+        'entailments',(SELECT count(*) FROM memory.observation_entailment_v5),
+        'packets',(SELECT count(*) FROM memory.evidence_extraction_packet_v5_local),
         'operation_requests',(SELECT count(*) FROM memory.relational_operation_request)
       )::text
     "
@@ -167,6 +190,41 @@ protected_after_tests=$(
     "
 )
 [[ "$protected_after_tests" == "$protected_before" ]]
+
+psql "$clone_dsn" -X -v ON_ERROR_STOP=1 \
+  -v repository_commit="$head" <"$apply" >/dev/null
+[[ "$(
+  sudo docker exec "$container" psql -U sage -d "$clone" \
+    -X -Atqc "
+      SELECT count(*) - $stage_before
+      FROM memory.v5_local_packet_stage_admission
+    "
+)" == 2 ]]
+[[ "$(
+  sudo docker exec "$container" psql -U sage -d "$clone" \
+    -X -Atqc "
+      SELECT count(*)
+      FROM memory.v5_local_legacy_stage_admission_observation
+    "
+)" == 20 ]]
+protected_nonstage_after_apply=$(
+  sudo docker exec "$container" psql -U sage -d "$clone" \
+    -X -Atqc "
+      SELECT jsonb_build_object(
+        'claims',(SELECT count(*) FROM memory.claim),
+        'claim_revisions',(SELECT count(*) FROM memory.claim_revision),
+        'claim_links',(SELECT count(*) FROM memory.claim_observation),
+        'entities',(SELECT count(*) FROM memory.entity),
+        'observations',(SELECT count(*) FROM memory.observation),
+        'bindings',(SELECT count(*) FROM memory.observation_entity_binding),
+        'assessments',(SELECT count(*) FROM memory.v5_local_entailment_assessment),
+        'entailments',(SELECT count(*) FROM memory.observation_entailment_v5),
+        'packets',(SELECT count(*) FROM memory.evidence_extraction_packet_v5_local),
+        'operation_requests',(SELECT count(*) FROM memory.relational_operation_request)
+      )::text
+    "
+)
+[[ "$protected_nonstage_after_apply" == "$protected_nonstage_before" ]]
 
 sudo docker exec -i "$container" psql -U sage -d "$clone" \
   -X -v ON_ERROR_STOP=1 <"$rollback" >/dev/null
