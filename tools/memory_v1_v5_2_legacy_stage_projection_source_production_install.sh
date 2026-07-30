@@ -39,7 +39,7 @@ migration_sha256=f065af7daa69b2d5e396e73def8f1c6aa66807d447ac49dd37d91651318433b
 rollback_sha256=c0f8b984e7f434c04bb04ebd8ce49dee72219d1b55c357da0ed9532d0b941cf6
 clone_test_sha256=1c95f51c53cbbded825f28e4da12d17026aba246905a4b9473ee49a34fa7ad1a
 entailment_service_sha256=01cc9b84e22e2ed3f8b817895dc3e6bd34589453fda6a90711cdeaa5fa3ee725
-entailment_service_prior_sha256=dda5d1bdbce7464091cab9a1382d6cab98ea9960b6e8b72640728d0b30b62e58
+entailment_service_prior_sha256=9dd02f66f0240e491a04b45471f998fbbd551666371cd5bf494c8260d35d3340
 
 timer_state=$(mktemp /tmp/memory-v1-v5-2-legacy-source-timers.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-v5-2-legacy-source-tables.XXXXXX)
@@ -151,7 +151,8 @@ qdrant_signature() {
 git merge-base --is-ancestor "$required_ancestor" HEAD
 [[ "$(systemctl is-active brains.service)" == active ]]
 mapfile -t failed_memory_units < <(
-  systemctl --failed --no-legend --no-pager 'memory-v1-*.service' \
+  systemctl list-units --failed --no-legend --no-pager \
+    'memory-v1-*.service' \
     | awk '{print $1}'
 )
 [[ "${#failed_memory_units[@]}" == 1 ]]
@@ -360,7 +361,8 @@ done <"$timer_state"
 [[ "$(systemctl is-failed memory-v1-v5-local-entailment.service)" \
   != failed ]]
 [[ -z "$(
-  systemctl --failed --no-legend --no-pager 'memory-v1-*.service' \
+  systemctl list-units --failed --no-legend --no-pager \
+    'memory-v1-*.service' \
     | awk '{print $1}'
 )" ]]
 health=$(
