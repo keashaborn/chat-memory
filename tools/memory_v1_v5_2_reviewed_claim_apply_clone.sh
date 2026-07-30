@@ -21,7 +21,7 @@ clone_db="memory_reviewed_claim_apply_$(date -u +%Y%m%d%H%M%S)_$$"
 runner=scripts/memory_v1_v5_2_reviewed_claim_apply_batch.py
 
 set -a
-source "$repo_root/.env"
+source /opt/chat-memory/.env
 set +a
 [[ -n "${POSTGRES_DSN:-}" ]]
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
