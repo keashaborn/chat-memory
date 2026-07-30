@@ -465,7 +465,7 @@ if [[ "$stage_test" == 1 ]]; then
       fail cross_owner_entity_plan_was_not_rejected
     fi
 
-    "$python_bin" "$entity_fixture" \
+    PYTHONPATH="$repo_root" "$python_bin" "$entity_fixture" \
       --plan "$reviews/entity-plan.json" \
       --output "$reviews/entity-authorization.json" \
       --head "$(git rev-parse HEAD)"
