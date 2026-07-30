@@ -235,10 +235,10 @@ docker exec "$container" psql -X -A -F $'\t' -t -v ON_ERROR_STOP=1 \
            EXISTS(
              SELECT 1 FROM information_schema.columns AS c
               WHERE c.table_schema='memory'
-                AND c.table_name=table.table_name
+                AND c.table_name=t.table_name
                 AND c.column_name='owner_user_id'
            )
-      FROM information_schema.tables AS table
+      FROM information_schema.tables AS t
      WHERE table_schema='memory' AND table_type='BASE TABLE'
      ORDER BY table_name" >"$table_list"
 capture_partition target "$target_before"
