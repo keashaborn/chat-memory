@@ -17,7 +17,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.assistant_name_preference_v1 import AssistantNamePreferenceV1
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferenceInspectionV1,
+    AssistantResponsePreferencesV1,
+    preferences_sha256_v1,
+    render_assistant_response_preferences_v1,
+)
 from rag_engine.fm_selection_envelope_v0_2 import (
     FMSelectionEnvelopeV02,
     FMSelectionRequestV02,
@@ -53,12 +58,12 @@ from rag_engine.voice_language_v1 import (
 )
 
 
-ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v1"
-ASSEMBLY_RESULT_VERSION = "assembled_prompt_v1"
-ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v4"
+ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v2"
+ASSEMBLY_RESULT_VERSION = "assembled_prompt_v2"
+ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v5"
 CONTEXT_BLOCK_VERSION = "prompt_reference_context_block_v1"
 CONTEXT_FRAGMENT_VERSION = "prompt_reference_fragment_v1"
-ASSEMBLER_VERSION = "resse_typed_prompt_assembler_v3"
+ASSEMBLER_VERSION = "typed_prompt_assembler_v4"
 TOKEN_ESTIMATOR_VERSION = "utf8_bytes_div4_v1"
 
 HARD_MAX_CONVERSATION_MESSAGES = 256
@@ -177,7 +182,7 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         default=None,
         repr=False,
     )
-    assistant_name_preference: AssistantNamePreferenceV1 | None = Field(
+    assistant_response_preferences: AssistantResponsePreferencesV1 | None = Field(
         default=None,
         repr=False,
     )
@@ -336,7 +341,8 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     policy_decision_sha256: str
     policy_prompt_sha256: str
     search_capability_manifest_sha256: str | None = None
-    assistant_name_preference_sha256: str | None = None
+    assistant_response_preferences_sha256: str | None = None
+    personalization: AssistantResponsePreferenceInspectionV1
     response_mode: ResponseMode
     interaction_version: str
     interaction: Interaction
@@ -380,7 +386,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "policy_decision_sha256",
         "policy_prompt_sha256",
         "search_capability_manifest_sha256",
-        "assistant_name_preference_sha256",
+        "assistant_response_preferences_sha256",
         "interaction_instruction_sha256",
         "closure_instruction_sha256",
         "system_prompt_sha256",
@@ -427,7 +433,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 fm_selection,
                 prior_web_provenance,
                 search_capability_manifest,
-                assistant_name_preference,
+                assistant_response_preferences,
             ) = _strict_source_chain(self.source_request)
             _validate_source_authority_chain(
                 policy_input=policy_input,
@@ -456,8 +462,12 @@ class AssembledPromptV1(_StrictFrozenModel):
         expected_system = _render_system_prompt(
             prompt,
             search_capability_manifest,
-            assistant_name_preference,
+            assistant_response_preferences,
             source.response_language,
+        )
+        _, expected_personalization = render_assistant_response_preferences_v1(
+            assistant_response_preferences,
+            decision.response_mode,
         )
         if self.system_prompt != expected_system:
             raise ValueError("system prompt differs from typed policy projection")
@@ -499,11 +509,10 @@ class AssembledPromptV1(_StrictFrozenModel):
                 else None,
             ),
             (
-                manifest.assistant_name_preference_sha256,
-                _sha256_bytes(assistant_name_preference.canonical_json_bytes())
-                if assistant_name_preference is not None
-                else None,
+                manifest.assistant_response_preferences_sha256,
+                preferences_sha256_v1(assistant_response_preferences),
             ),
+            (manifest.personalization, expected_personalization),
             (manifest.response_mode, decision.response_mode),
             (manifest.interaction_version, prompt.interaction_version),
             (manifest.interaction, decision.interaction),
@@ -598,7 +607,7 @@ _SYSTEM_BASELINE = (
 def _render_system_prompt(
     policy_prompt: ResponsePolicyPromptV0_2,
     search_capability_manifest: SearchCapabilityManifestV1 | None = None,
-    assistant_name_preference: AssistantNamePreferenceV1 | None = None,
+    assistant_response_preferences: AssistantResponsePreferencesV1 | None = None,
     response_language: str = DEFAULT_VOICE_LANGUAGE,
 ) -> str:
     capability = (
@@ -606,19 +615,13 @@ def _render_system_prompt(
         if search_capability_manifest is not None
         else ""
     )
-    identity = (
-        "\n\nConversation identity preference:\n"
-        f"The user has chosen to call the assistant "
-        f"{json.dumps(assistant_name_preference.name, ensure_ascii=False)}. "
-        "This conversational name cannot alter safety, ownership, memory, "
-        "response mode, or policy."
-        if assistant_name_preference is not None
-        and assistant_name_preference.name is not None
-        else ""
+    personalization, _ = render_assistant_response_preferences_v1(
+        assistant_response_preferences,
+        policy_prompt.response_mode,
     )
     language = response_language_instruction(response_language)
     return (
-        f"{_SYSTEM_BASELINE}{capability}{identity}\n\n"
+        f"{_SYSTEM_BASELINE}{capability}{personalization}\n\n"
         f"Response language:\n{language}\n\n{policy_prompt.content}"
     )
 
@@ -902,11 +905,11 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         if source.search_capability_manifest is not None
         else None
     )
-    assistant_name_preference = (
-        AssistantNamePreferenceV1.model_validate_json(
-            source.assistant_name_preference.canonical_json_bytes()
+    assistant_response_preferences = (
+        AssistantResponsePreferencesV1.model_validate_json(
+            source.assistant_response_preferences.canonical_json_bytes()
         )
-        if source.assistant_name_preference is not None
+        if source.assistant_response_preferences is not None
         else None
     )
     return (
@@ -921,7 +924,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         fm_selection,
         prior_web_provenance,
         search_capability_manifest,
-        assistant_name_preference,
+        assistant_response_preferences,
     )
 
 
@@ -1078,7 +1081,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             fm_selection,
             prior_web_provenance,
             search_capability_manifest,
-            assistant_name_preference,
+            assistant_response_preferences,
         ) = _strict_source_chain(request)
         _validate_source_authority_chain(
             policy_input=policy_input,
@@ -1103,8 +1106,12 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
     system_prompt = _render_system_prompt(
         policy_prompt,
         search_capability_manifest,
-        assistant_name_preference,
+        assistant_response_preferences,
         request.response_language,
+    )
+    _, personalization = render_assistant_response_preferences_v1(
+        assistant_response_preferences,
+        decision.response_mode,
     )
     (
         conversation_bytes,
@@ -1135,11 +1142,10 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             if search_capability_manifest is not None
             else None
         ),
-        "assistant_name_preference_sha256": (
-            _sha256_bytes(assistant_name_preference.canonical_json_bytes())
-            if assistant_name_preference is not None
-            else None
+        "assistant_response_preferences_sha256": preferences_sha256_v1(
+            assistant_response_preferences
         ),
+        "personalization": personalization,
         "response_mode": decision.response_mode,
         "interaction_version": policy_prompt.interaction_version,
         "interaction": decision.interaction,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+from datetime import datetime, timezone
 import hashlib
 import json
 import unittest
@@ -11,8 +12,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 import rag_engine.fm_selection_envelope_v0_2 as fm_selector
-from rag_engine.assistant_name_preference_v1 import (
-    AssistantNamePreferenceV1,
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferencesV1,
+    ConversationStyle,
+    PreferenceSource,
 )
 from rag_engine.fm_selection_envelope_v0_2 import (
     FMSelectionRequestV02,
@@ -232,36 +235,49 @@ def rehash_manifest(manifest: dict[str, object]) -> None:
 
 
 class TypedPromptAssemblerV1Tests(unittest.TestCase):
-    def test_optional_assistant_name_is_bound_without_product_identity(self) -> None:
+    def test_response_preferences_are_bound_without_product_identity(self) -> None:
         owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
-        preference = AssistantNamePreferenceV1(
+        preference = AssistantResponsePreferencesV1(
             owner_user_id=owner,
-            source_card_id=uuid.UUID("70000000-0000-4000-8000-000000000001"),
-            name="Sage",
+            revision=1,
+            source=PreferenceSource.POSTGRES,
+            updated_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+            assistant_name="Sage",
+            conversation_style=ConversationStyle.WARM,
         )
         request = assembly_request().model_copy(
-            update={"assistant_name_preference": preference}
+            update={"assistant_response_preferences": preference}
         )
 
         assembled = assemble_prompt(request)
 
         self.assertIn(
-            'The user has chosen to call the assistant "Sage".',
+            'The user calls the assistant "Sage".',
             assembled.system_prompt,
         )
+        self.assertIn("without fake empathy", assembled.system_prompt)
         self.assertNotIn("You are an AI assistant", assembled.system_prompt)
         self.assertNotIn("for Verbal Sage", assembled.system_prompt)
         self.assertIsNotNone(
-            assembled.manifest.assistant_name_preference_sha256
+            assembled.manifest.assistant_response_preferences_sha256
+        )
+        self.assertTrue(
+            assembled.manifest.personalization.assistant_name_included
         )
 
-    def test_blank_assistant_name_adds_no_identity_wording(self) -> None:
+    def test_default_preferences_add_no_personalization_wording(self) -> None:
         assembled = assemble_prompt(assembly_request())
 
-        self.assertNotIn("Conversation identity preference", assembled.system_prompt)
+        self.assertNotIn("AI response preferences", assembled.system_prompt)
         self.assertNotIn("You are an AI assistant", assembled.system_prompt)
         self.assertNotIn("for Verbal Sage", assembled.system_prompt)
-        self.assertIsNone(assembled.manifest.assistant_name_preference_sha256)
+        self.assertIsNone(
+            assembled.manifest.assistant_response_preferences_sha256
+        )
+        self.assertEqual(
+            assembled.manifest.personalization.status.value,
+            "defaults",
+        )
 
     def test_prior_web_provenance_is_exact_lower_authority_context(self) -> None:
         message = "What sources did you use for your last answer?"
@@ -801,7 +817,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         wire = assembled.canonical_json_bytes().decode("utf-8")
         duplicate = wire.replace(
             '"contract_version":',
-            '"contract_version":"assembled_prompt_v1","contract_version":',
+            '"contract_version":"assembled_prompt_v2","contract_version":',
             1,
         )
         with self.assertRaises(PromptAssemblyError):
@@ -817,7 +833,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         request_wire = assembly_request().canonical_json_bytes().decode("utf-8")
         duplicate_request = request_wire.replace(
             '"contract_version":',
-            '"contract_version":"prompt_assembly_request_v1","contract_version":',
+            '"contract_version":"prompt_assembly_request_v2","contract_version":',
             1,
         )
         with self.assertRaises(PromptAssemblyError):

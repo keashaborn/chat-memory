@@ -16,7 +16,9 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.assistant_name_preference_v1 import AssistantNamePreferenceV1
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferencesV1,
+)
 from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
 from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
@@ -93,7 +95,7 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
-    assistant_name_preference: AssistantNamePreferenceV1 | None = Field(
+    assistant_response_preferences: AssistantResponsePreferencesV1 | None = Field(
         default=None,
         repr=False,
     )
@@ -127,12 +129,12 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         if len(self.current_message.encode("utf-8")) > 32_768:
             raise ValueError("current message exceeds the byte limit")
         if (
-            self.assistant_name_preference is not None
-            and self.assistant_name_preference.owner_user_id
+            self.assistant_response_preferences is not None
+            and self.assistant_response_preferences.owner_user_id
             != self.authenticated_actor_user_id
         ):
             raise ValueError(
-                "assistant name preference owner differs from authenticated actor"
+                "assistant response preference owner differs from authenticated actor"
             )
         return self
 
@@ -363,7 +365,9 @@ class InactiveResponseCompositionRootV0_2:
                 prior_web_provenance=prior_web_provenance,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
-                assistant_name_preference=command.assistant_name_preference,
+                assistant_response_preferences=(
+                    command.assistant_response_preferences
+                ),
                 response_language=command.response_language,
             )
             stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)

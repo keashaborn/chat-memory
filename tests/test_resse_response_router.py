@@ -55,11 +55,11 @@ class ResseResponseRouterTests(unittest.TestCase):
                 }
             )
 
-    def test_assistant_name_is_owner_loaded_and_not_public_payload(self) -> None:
+    def test_response_preferences_are_owner_loaded_and_not_public_payload(self) -> None:
         source = (ROOT / "rag_engine/resse_response_router.py").read_text()
-        self.assertIn("load_assistant_name_preference_v1(owner)", source)
+        self.assertIn("load_assistant_response_preferences_v1(conn, owner)", source)
         self.assertIn(
-            "assistant_name_preference=assistant_name_preference",
+            "assistant_response_preferences=(",
             source,
         )
         self.assertNotIn("payload.assistant_name", source)

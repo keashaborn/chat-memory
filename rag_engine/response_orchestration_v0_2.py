@@ -17,7 +17,9 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.assistant_name_preference_v1 import AssistantNamePreferenceV1
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferencesV1,
+)
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 from rag_engine.fm_selection_envelope_v0_2 import (
     FMSelectionEnvelopeV02,
@@ -51,13 +53,13 @@ from rag_engine.voice_language_v1 import (
 )
 
 
-TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_3"
-TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_4"
+TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_4"
+TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_5"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_3"
 )
 SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_5"
-ORCHESTRATOR_VERSION = "resse_response_orchestrator_v0_4"
+ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_5"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
 )
@@ -199,7 +201,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
-    assistant_name_preference: AssistantNamePreferenceV1 | None = Field(
+    assistant_response_preferences: AssistantResponsePreferencesV1 | None = Field(
         default=None,
         repr=False,
     )
@@ -267,12 +269,12 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
                     "Prior web provenance differs from the trusted response request"
                 )
         if (
-            self.assistant_name_preference is not None
-            and self.assistant_name_preference.owner_user_id
+            self.assistant_response_preferences is not None
+            and self.assistant_response_preferences.owner_user_id
             != self.authenticated_actor_user_id
         ):
             raise ValueError(
-                "Assistant name preference owner differs from authenticated actor"
+                "Assistant response preference owner differs from authenticated actor"
             )
         return self
 
@@ -313,7 +315,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
         fm_token_budget: int | None = None,
         search_capability_manifest: SearchCapabilityManifestV1 | None = None,
-        assistant_name_preference: AssistantNamePreferenceV1 | None = None,
+        assistant_response_preferences: AssistantResponsePreferencesV1 | None = None,
         response_language: str = DEFAULT_VOICE_LANGUAGE,
     ) -> "TrustedResponseRequestV0_2":
         """Create from trusted values; request values are deliberately absent."""
@@ -362,7 +364,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             prior_web_provenance=prior_web_provenance,
             fm_token_budget=fm_token_budget,
             search_capability_manifest=search_capability_manifest,
-            assistant_name_preference=assistant_name_preference,
+            assistant_response_preferences=assistant_response_preferences,
             response_language=response_language,
         )
 
@@ -799,7 +801,9 @@ class TrustedResponseOrchestratorV0_2:
                     search_capability_manifest=(
                         request.search_capability_manifest
                     ),
-                    assistant_name_preference=request.assistant_name_preference,
+                    assistant_response_preferences=(
+                        request.assistant_response_preferences
+                    ),
                     response_language=request.response_language,
                 )
             )

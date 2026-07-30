@@ -10,8 +10,9 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.assistant_name_preference_v1 import (
-    AssistantNamePreferenceV1,
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferencesV1,
+    PreferenceSource,
 )
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
@@ -261,7 +262,7 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
 
 
 class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
-    def test_authenticated_command_rejects_cross_owner_assistant_name(self) -> None:
+    def test_authenticated_command_rejects_cross_owner_preferences(self) -> None:
         other = UUID("2240822d-ac9a-4096-95aa-e2b24d36ef50")
         with self.assertRaises(ValidationError):
             AuthenticatedResponseCommandV0_2(
@@ -269,12 +270,12 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
                 thread_id=THREAD,
                 request_id="composition-request",
                 current_message="Hello",
-                assistant_name_preference=AssistantNamePreferenceV1(
+                assistant_response_preferences=AssistantResponsePreferencesV1(
                     owner_user_id=other,
-                    source_card_id=UUID(
-                        "70000000-0000-4000-8000-000000000001"
-                    ),
-                    name="Sage",
+                    revision=1,
+                    source=PreferenceSource.POSTGRES,
+                    updated_at=NOW,
+                    assistant_name="Sage",
                 ),
             )
 

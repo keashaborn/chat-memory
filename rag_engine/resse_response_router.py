@@ -12,8 +12,12 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from rag_engine.assistant_name_preference_provider_v1 import (
-    load_assistant_name_preference_v1,
+from rag_engine.assistant_response_preferences_store_v1 import (
+    load_assistant_response_preferences_v1,
+    set_preference_actor_v1,
+)
+from rag_engine.assistant_response_preferences_v1 import (
+    default_assistant_response_preferences_v1,
 )
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
 from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
@@ -121,17 +125,6 @@ async def resse_response_query(
         req,
         default=AUTO_VOICE_LANGUAGE,
     )
-    try:
-        assistant_name_preference = await asyncio.wait_for(
-            load_assistant_name_preference_v1(owner),
-            timeout=3.0,
-        )
-    except Exception:
-        logger.warning(
-            "assistant name preference unavailable request_id=%s",
-            request_id,
-        )
-        assistant_name_preference = None
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
     if payload.no_store:
@@ -143,6 +136,20 @@ async def resse_response_query(
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
+        try:
+            async with conn.transaction():
+                await set_preference_actor_v1(conn, owner)
+                assistant_response_preferences = (
+                    await load_assistant_response_preferences_v1(conn, owner)
+                )
+        except Exception:
+            logger.warning(
+                "assistant response preferences unavailable request_id=%s",
+                request_id,
+            )
+            assistant_response_preferences = (
+                default_assistant_response_preferences_v1(owner)
+            )
         root = InactiveResponseCompositionRootV0_2(
             openai_client=get_openai_client(),
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
@@ -164,7 +171,9 @@ async def resse_response_query(
                     ),
                     stateless=stateless,
                     search_capability_manifest=search_capability_manifest,
-                    assistant_name_preference=assistant_name_preference,
+                    assistant_response_preferences=(
+                        assistant_response_preferences
+                    ),
                     response_language=response_language,
                 ),
             ),

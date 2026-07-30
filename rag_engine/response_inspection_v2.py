@@ -7,6 +7,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from rag_engine.assistant_response_preferences_v1 import (
+    AssistantResponsePreferenceInspectionV1,
+)
 from rag_engine.openai_chat_provider_v1 import OpenAIChatResponseV1
 from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
 from rag_engine.response_inspection_v1 import (
@@ -37,6 +40,7 @@ class BeforeOpenAIInspectionV2(BeforeOpenAIInspectionV1):
     interaction: str
     question_policy: str
     interaction_reason_codes: tuple[str, ...]
+    personalization: AssistantResponsePreferenceInspectionV1 | None = None
 
 
 class ResponseInspectionV2(_StrictFrozenModel):
@@ -78,6 +82,7 @@ def build_response_inspection_v2(
             interaction=trace.interaction,
             question_policy=plan.policy_decision.question_policy.value,
             interaction_reason_codes=trace.interaction_reason_codes,
+            personalization=plan.assembled_prompt.manifest.personalization,
         ),
         openai=base.openai,
         after_openai=base.after_openai,
