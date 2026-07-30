@@ -123,7 +123,7 @@ production_before=$(production_signature)
 head_before=$(git -C /opt/chat-memory rev-parse HEAD)
 
 docker exec brains-postgres-1 pg_dump -U sage -d memory \
-  -Fc --no-owner --no-privileges >"$backup"
+  -Fc --no-owner >"$backup"
 [[ -s "$backup" ]] || fail empty_backup
 docker exec brains-postgres-1 psql -X -A -t -U sage -d memory -c "
   SELECT format(
@@ -144,7 +144,7 @@ run_sql <"$roles"
 printf '%s\n' "ALTER ROLE brains_app PASSWORD 'clone_only_brains_password';" \
   | run_sql
 "${compose[@]}" exec -T postgres pg_restore -U sage -d memory \
-  --clean --if-exists --no-owner --no-privileges <"$backup"
+  --clean --if-exists --no-owner <"$backup"
 
 equal target_atom_rows_before "$(scalar "
   SELECT concat_ws(',',
