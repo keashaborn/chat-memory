@@ -115,7 +115,7 @@ expected_plan_sha=$(jq -er '.plan_sha256' "$plan")
 [[ "$(jq -er '[.items[]|select(.prior_qdrant=="absent")]|length' "$plan")" == 19 ]]
 [[ "$(jq -er '[.items[]|select(.prior_outbox=="absent")]|length' "$plan")" == 19 ]]
 [[ "$(jq -er '.projection.maximum_embedding_requests' "$plan")" == 19 ]]
-[[ "$(jq -er '.required_head_commit' "$plan")" == "$head" ]]
+[[ "$(jq -er '.required_ancestor_commit' "$plan")" == "$head" ]]
 
 docker exec "$container" psql -X -A -t -U sage -d "$source_db" -c "
   SELECT table_name FROM information_schema.tables
@@ -154,7 +154,7 @@ capture_memory_without_outbox "$clone_db" "$clone_memory_before"
 
 result="$artifact_dir/runner-result.json"
 collection_exists=1
-MEMORY_V1_REQUIRED_HEAD="$head" POSTGRES_DSN="$clone_dsn" \
+MEMORY_V1_REQUIRED_ANCESTOR="$head" POSTGRES_DSN="$clone_dsn" \
 QDRANT_URL="$QDRANT_URL" PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$clone_runner" --plan "$plan" --output "$result" \
   --collection "$collection"

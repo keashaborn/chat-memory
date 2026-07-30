@@ -70,8 +70,8 @@ def load_plan(path: Path) -> dict[str, Any]:
         or plan_hash != calculated_hash
         or value.get("owner_user_id") != OWNER
         or value.get("other_owner_user_id") != OTHER_OWNER
-        or value.get("required_head_commit")
-        != os.environ.get("MEMORY_V1_REQUIRED_HEAD", "").strip()
+        or value.get("required_ancestor_commit")
+        != os.environ.get("MEMORY_V1_REQUIRED_ANCESTOR", "").strip()
         or not isinstance(items, list)
         or len(items) != EXPECTED_CLAIMS
         or len({item.get("claim_id") for item in items}) != EXPECTED_CLAIMS

@@ -229,7 +229,7 @@ async def run() -> int:
         raise ProjectionPlanError("exact claim count differs")
     plan = {
         "contract_version": CONTRACT,
-        "required_head_commit": required_head,
+        "required_ancestor_commit": required_head,
         "source_required_head_commit": manifest.get("required_head_commit"),
         "owner_user_id": str(OWNER),
         "other_owner_user_id": str(OTHER_OWNER),
