@@ -156,6 +156,22 @@ class FakePreferenceConnection:
 class AssistantResponsePreferenceStoreV1Tests(
     unittest.IsolatedAsyncioTestCase
 ):
+    def preference_row(self, revision: int) -> dict[str, object]:
+        return {
+            "owner_user_id": OWNER,
+            "revision": revision,
+            "assistant_name": "Sage",
+            "nickname": None,
+            "occupation": None,
+            "more_about_you": None,
+            "custom_instructions": None,
+            "response_length": "balanced",
+            "technical_depth": "balanced",
+            "response_format": "auto",
+            "conversation_style": "natural",
+            "updated_at": datetime(2026, 7, 30, tzinfo=timezone.utc),
+        }
+
     async def test_absent_row_returns_owner_bound_defaults(self) -> None:
         conn = FakePreferenceConnection()
         value = await load_assistant_response_preferences_v1(conn, OWNER)  # type: ignore[arg-type]
@@ -194,6 +210,41 @@ class AssistantResponsePreferenceStoreV1Tests(
                 OWNER,
                 AssistantResponsePreferencesInputV1(expected_revision=2),
             )
+        self.assertIn("UPDATE", conn.calls[0][0])
+
+    async def test_revision_zero_uses_insert_only(self) -> None:
+        conn = FakePreferenceConnection(self.preference_row(1))
+        saved = await save_assistant_response_preferences_v1(  # type: ignore[arg-type]
+            conn,
+            OWNER,
+            AssistantResponsePreferencesInputV1(
+                expected_revision=0,
+                assistant_name="Sage",
+            ),
+        )
+        query, args = conn.calls[0]
+        self.assertIn("INSERT INTO", query)
+        self.assertIn("ON CONFLICT (owner_user_id) DO NOTHING", query)
+        self.assertNotIn("DO UPDATE", query)
+        self.assertEqual(args[0], OWNER)
+        self.assertEqual(saved.revision, 1)
+
+    async def test_existing_revision_uses_guarded_update(self) -> None:
+        conn = FakePreferenceConnection(self.preference_row(3))
+        saved = await save_assistant_response_preferences_v1(  # type: ignore[arg-type]
+            conn,
+            OWNER,
+            AssistantResponsePreferencesInputV1(
+                expected_revision=2,
+                assistant_name="Sage",
+            ),
+        )
+        query, args = conn.calls[0]
+        self.assertIn("UPDATE user_settings", query)
+        self.assertIn("AND revision=$2", query)
+        self.assertNotIn("INSERT INTO", query)
+        self.assertEqual(args[:2], (OWNER, 2))
+        self.assertEqual(saved.revision, 3)
 
     async def test_actor_is_set_with_transaction_local_scope(self) -> None:
         conn = FakePreferenceConnection()

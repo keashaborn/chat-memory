@@ -84,51 +84,8 @@ async def save_assistant_response_preferences_v1(
     owner_user_id: UUID,
     value: AssistantResponsePreferencesInputV1,
 ) -> AssistantResponsePreferencesV1:
-    row = await conn.fetchrow(
-        """
-        INSERT INTO user_settings.assistant_response_preference_v1 (
-          owner_user_id,
-          revision,
-          assistant_name,
-          nickname,
-          occupation,
-          more_about_you,
-          custom_instructions,
-          response_length,
-          technical_depth,
-          response_format,
-          conversation_style
-        )
-        SELECT $1,1,$3,$4,$5,$6,$7,$8,$9,$10,$11
-         WHERE $2=0
-        ON CONFLICT (owner_user_id) DO UPDATE
-          SET revision=user_settings.assistant_response_preference_v1.revision+1,
-              assistant_name=EXCLUDED.assistant_name,
-              nickname=EXCLUDED.nickname,
-              occupation=EXCLUDED.occupation,
-              more_about_you=EXCLUDED.more_about_you,
-              custom_instructions=EXCLUDED.custom_instructions,
-              response_length=EXCLUDED.response_length,
-              technical_depth=EXCLUDED.technical_depth,
-              response_format=EXCLUDED.response_format,
-              conversation_style=EXCLUDED.conversation_style,
-              updated_at=clock_timestamp()
-        WHERE user_settings.assistant_response_preference_v1.revision=$2
-        RETURNING owner_user_id,
-                  revision,
-                  assistant_name,
-                  nickname,
-                  occupation,
-                  more_about_you,
-                  custom_instructions,
-                  response_length,
-                  technical_depth,
-                  response_format,
-                  conversation_style,
-                  updated_at
-        """,
+    fields = (
         owner_user_id,
-        value.expected_revision,
         value.assistant_name,
         value.nickname,
         value.occupation,
@@ -139,6 +96,73 @@ async def save_assistant_response_preferences_v1(
         value.response_format.value,
         value.conversation_style.value,
     )
+    if value.expected_revision == 0:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO user_settings.assistant_response_preference_v1 (
+              owner_user_id,
+              revision,
+              assistant_name,
+              nickname,
+              occupation,
+              more_about_you,
+              custom_instructions,
+              response_length,
+              technical_depth,
+              response_format,
+              conversation_style
+            )
+            VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (owner_user_id) DO NOTHING
+            RETURNING owner_user_id,
+                      revision,
+                      assistant_name,
+                      nickname,
+                      occupation,
+                      more_about_you,
+                      custom_instructions,
+                      response_length,
+                      technical_depth,
+                      response_format,
+                      conversation_style,
+                      updated_at
+            """,
+            *fields,
+        )
+    else:
+        row = await conn.fetchrow(
+            """
+            UPDATE user_settings.assistant_response_preference_v1
+               SET revision=revision+1,
+                   assistant_name=$3,
+                   nickname=$4,
+                   occupation=$5,
+                   more_about_you=$6,
+                   custom_instructions=$7,
+                   response_length=$8,
+                   technical_depth=$9,
+                   response_format=$10,
+                   conversation_style=$11,
+                   updated_at=clock_timestamp()
+             WHERE owner_user_id=$1
+               AND revision=$2
+            RETURNING owner_user_id,
+                      revision,
+                      assistant_name,
+                      nickname,
+                      occupation,
+                      more_about_you,
+                      custom_instructions,
+                      response_length,
+                      technical_depth,
+                      response_format,
+                      conversation_style,
+                      updated_at
+            """,
+            owner_user_id,
+            value.expected_revision,
+            *fields[1:],
+        )
     if row is None:
         raise AssistantResponsePreferenceConflictV1(
             "assistant response preferences changed since they were loaded"
