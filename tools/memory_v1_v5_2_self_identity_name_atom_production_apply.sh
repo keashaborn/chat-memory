@@ -188,9 +188,11 @@ done
   SELECT count(*)
   FROM memory.v5_2_atom_admission_apply AS applied
   JOIN memory.v5_2_atom_admission_review AS review
-    USING(owner_user_id,review_id)
+    ON review.owner_user_id=applied.owner_user_id
+   AND review.review_id=applied.review_id
   JOIN memory.v5_2_atom_admission_proposal AS proposal
-    USING(owner_user_id,proposal_id)
+    ON proposal.owner_user_id=review.owner_user_id
+   AND proposal.proposal_id=review.proposal_id
   WHERE proposal.owner_user_id='$owner'::uuid
     AND proposal.packet_id='$packet'::uuid
 ")" == 0 ]]
