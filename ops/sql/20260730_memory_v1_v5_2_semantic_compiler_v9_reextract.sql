@@ -48,7 +48,7 @@ DECLARE
   selector constant text :=
     '20260730_v5_2_semantic_compiler_v9_reextract_v1';
   compiler_sha constant text :=
-    'ba8739cfa7e49ddbf855be6697b372d4da938aeec5aba357bbfdc47d7a2fede1';
+    '738cc80f374e3c7e441fd03f964b77d01401422d286a9bc52205c6e060767ae6';
   prior_compiler_sha constant text :=
     'f82e6f4339dfe4aada7e5c3edb71fde8125a819f33677b3f47b98f3726b60419';
   allowed_content_sha text;
