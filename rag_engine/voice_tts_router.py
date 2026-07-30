@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from enum import Enum
 from typing import Any
 
 import httpx
@@ -28,7 +29,29 @@ DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
 DEFAULT_TTS_SPEED = 1.0
 MAX_TTS_CHARS = 4096
-VOICE_CAPABILITIES_VERSION = "2026-07-28.2"
+VOICE_CAPABILITIES_VERSION = "2026-07-30.1"
+
+
+class TTSConversationStyle(str, Enum):
+    DIRECT = "direct"
+    NATURAL = "natural"
+    WARM = "warm"
+
+
+TTS_STYLE_INSTRUCTIONS: dict[TTSConversationStyle, str] = {
+    TTSConversationStyle.DIRECT: (
+        "Speak clearly and directly in a calm, matter-of-fact manner. "
+        "Avoid theatrical emphasis."
+    ),
+    TTSConversationStyle.NATURAL: (
+        "Speak naturally in a relaxed, conversational manner. "
+        "Avoid sounding formal, clinical, or theatrical."
+    ),
+    TTSConversationStyle.WARM: (
+        "Speak naturally with a calm, warm, friendly delivery. "
+        "Do not sound flattering, overly enthusiastic, or theatrical."
+    ),
+}
 
 TTS_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "gpt-4o-mini-tts": {
@@ -99,6 +122,21 @@ def _clean_voice(raw: Any, model: str) -> str:
     return value
 
 
+def _clean_conversation_style(raw: Any) -> TTSConversationStyle:
+    value = str(raw or TTSConversationStyle.NATURAL.value).strip().lower()
+    try:
+        return TTSConversationStyle(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "unsupported_tts_conversation_style",
+                "field": "conversation_style",
+                "allowed": [item.value for item in TTSConversationStyle],
+            },
+        ) from exc
+
+
 @router.post("/voice/tts")
 async def create_tts(req: Request):
     actor_user_id = _require_actor(req)
@@ -124,7 +162,15 @@ async def create_tts(req: Request):
     model = DEFAULT_TTS_MODEL
     voice = _clean_voice(body.get("voice"), model)
     speed = DEFAULT_TTS_SPEED
-    instructions = str(body.get("instructions") or "").strip()
+    if str(body.get("instructions") or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "freeform_tts_instructions_not_supported"},
+        )
+    conversation_style = _clean_conversation_style(
+        body.get("conversation_style")
+    )
+    instructions = TTS_STYLE_INSTRUCTIONS[conversation_style]
 
     if body.get("dry_run") is True:
         return JSONResponse(
@@ -134,6 +180,7 @@ async def create_tts(req: Request):
                 "model": model,
                 "voice": voice,
                 "speed": speed,
+                "conversation_style": conversation_style.value,
                 "chars": len(text),
                 "audio_format": "pcm_s16le",
                 "audio_sample_rate": 24000,
@@ -155,8 +202,8 @@ async def create_tts(req: Request):
         "speed": speed,
     }
 
-    if instructions and model == "gpt-4o-mini-tts":
-        payload["instructions"] = instructions[:2000]
+    if model == "gpt-4o-mini-tts":
+        payload["instructions"] = instructions
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
     try:

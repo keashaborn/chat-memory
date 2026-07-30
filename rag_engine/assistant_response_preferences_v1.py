@@ -26,26 +26,11 @@ MAX_OCCUPATION_CHARS = 160
 MAX_MORE_ABOUT_YOU_CHARS = 2_000
 MAX_CUSTOM_INSTRUCTIONS_CHARS = 1_200
 MAX_RENDERED_MORE_ABOUT_YOU_CHARS = 1_200
-MAX_RENDERED_CUSTOM_INSTRUCTIONS_CHARS = 800
+MAX_COMPILED_PREFERENCE_RULES = 6
+COMPILED_PREFERENCE_MARKER_PREFIX = "assistant-preference-plan-v1:"
 
 _ALLOWED_NAME_PUNCTUATION = frozenset({" ", "'", "’", "-", "."})
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-_CONTROL_LANGUAGE = (
-    "ignore previous instructions",
-    "ignore all previous",
-    "override the system",
-    "override safety",
-    "reveal the system prompt",
-    "developer message",
-    "you are now",
-    "act as a different assistant",
-    "change memory owner",
-    "vantage_id",
-    "<system>",
-    "[system]",
-)
-
-
 class ResponseLength(str, Enum):
     CONCISE = "concise"
     BALANCED = "balanced"
@@ -69,6 +54,86 @@ class ConversationStyle(str, Enum):
     DIRECT = "direct"
     NATURAL = "natural"
     WARM = "warm"
+
+
+class CompiledPreferenceRuleId(str, Enum):
+    DIRECT_ANSWERS_FIRST = "direct_answers_first"
+    RESTRAINED_REASSURANCE = "restrained_reassurance"
+    EVIDENCE_BASED_CHALLENGE = "evidence_based_challenge"
+    NO_UNSOLICITED_CLOSING_OFFERS = "no_unsolicited_closing_offers"
+    MINIMAL_PARAPHRASE = "minimal_paraphrase"
+    NO_GENERIC_PRAISE = "no_generic_praise"
+    PRACTICAL_FOCUS = "practical_focus"
+    QUESTION_RESTRAINT = "question_restraint"
+    CANDID_UNCERTAINTY = "candid_uncertainty"
+
+
+COMPILED_PREFERENCE_RULE_TEXT: dict[CompiledPreferenceRuleId, str] = {
+    CompiledPreferenceRuleId.DIRECT_ANSWERS_FIRST: (
+        "Answer the user's direct question before adding context."
+    ),
+    CompiledPreferenceRuleId.RESTRAINED_REASSURANCE: (
+        "Do not reassure automatically; use reassurance only when evidence and "
+        "context support it."
+    ),
+    CompiledPreferenceRuleId.EVIDENCE_BASED_CHALLENGE: (
+        "Point out weak reasoning or unsupported assumptions calmly when it "
+        "materially improves the answer."
+    ),
+    CompiledPreferenceRuleId.NO_UNSOLICITED_CLOSING_OFFERS: (
+        "Do not end with unsolicited offers, menus of next steps, or generic "
+        "invitations to continue."
+    ),
+    CompiledPreferenceRuleId.MINIMAL_PARAPHRASE: (
+        "Do not repeat or paraphrase the user's point unless synthesis "
+        "materially improves clarity."
+    ),
+    CompiledPreferenceRuleId.NO_GENERIC_PRAISE: (
+        "Avoid generic praise, compliments, and motivational filler."
+    ),
+    CompiledPreferenceRuleId.PRACTICAL_FOCUS: (
+        "Prefer concrete, usable guidance over abstract commentary when the "
+        "user asks for action."
+    ),
+    CompiledPreferenceRuleId.QUESTION_RESTRAINT: (
+        "Ask questions only when the answer materially depends on missing "
+        "information; do not use questions as a habitual closing."
+    ),
+    CompiledPreferenceRuleId.CANDID_UNCERTAINTY: (
+        "State material uncertainty directly without excessive hedging."
+    ),
+}
+
+
+COMPILED_PREFERENCE_RULE_SUMMARY: dict[CompiledPreferenceRuleId, str] = {
+    CompiledPreferenceRuleId.DIRECT_ANSWERS_FIRST: (
+        "Answers direct questions before adding context."
+    ),
+    CompiledPreferenceRuleId.RESTRAINED_REASSURANCE: (
+        "Uses reassurance selectively instead of automatically."
+    ),
+    CompiledPreferenceRuleId.EVIDENCE_BASED_CHALLENGE: (
+        "May challenge weak reasoning calmly when useful."
+    ),
+    CompiledPreferenceRuleId.NO_UNSOLICITED_CLOSING_OFFERS: (
+        "Avoids unsolicited closing offers and next-step menus."
+    ),
+    CompiledPreferenceRuleId.MINIMAL_PARAPHRASE: (
+        "Avoids repetitive paraphrasing unless synthesis adds clarity."
+    ),
+    CompiledPreferenceRuleId.NO_GENERIC_PRAISE: (
+        "Avoids generic praise and motivational filler."
+    ),
+    CompiledPreferenceRuleId.PRACTICAL_FOCUS: (
+        "Favors concrete guidance when action is requested."
+    ),
+    CompiledPreferenceRuleId.QUESTION_RESTRAINT: (
+        "Asks questions only when missing information materially matters."
+    ),
+    CompiledPreferenceRuleId.CANDID_UNCERTAINTY: (
+        "States meaningful uncertainty directly."
+    ),
+}
 
 
 class PreferenceSource(str, Enum):
@@ -275,9 +340,37 @@ def default_assistant_response_preferences_v1(
     )
 
 
-def _contains_control_language(value: str) -> bool:
-    normalized = re.sub(r"\s+", " ", value.lower()).strip()
-    return any(item in normalized for item in _CONTROL_LANGUAGE)
+def compiled_preference_marker_v1(
+    rule_ids: tuple[CompiledPreferenceRuleId, ...]
+    | list[CompiledPreferenceRuleId],
+) -> str | None:
+    unique = tuple(dict.fromkeys(rule_ids))
+    if not unique:
+        return None
+    if len(unique) > MAX_COMPILED_PREFERENCE_RULES:
+        raise ValueError("too many compiled preference rules")
+    return COMPILED_PREFERENCE_MARKER_PREFIX + ",".join(
+        item.value for item in unique
+    )
+
+
+def parse_compiled_preference_marker_v1(
+    value: str | None,
+) -> tuple[CompiledPreferenceRuleId, ...] | None:
+    if value is None:
+        return ()
+    if not value.startswith(COMPILED_PREFERENCE_MARKER_PREFIX):
+        return None
+    raw = value[len(COMPILED_PREFERENCE_MARKER_PREFIX) :]
+    if not raw:
+        return ()
+    parts = raw.split(",")
+    if len(parts) > MAX_COMPILED_PREFERENCE_RULES or len(set(parts)) != len(parts):
+        return None
+    try:
+        return tuple(CompiledPreferenceRuleId(item) for item in parts)
+    except ValueError:
+        return None
 
 
 def _presentation_lines(
@@ -386,18 +479,20 @@ def render_assistant_response_preferences_v1(
                 + "\n".join(profile)
             )
         if preferences.custom_instructions is not None:
-            if _contains_control_language(preferences.custom_instructions):
+            compiled_rules = parse_compiled_preference_marker_v1(
+                preferences.custom_instructions
+            )
+            if compiled_rules is None:
                 suppressed += 1
-            else:
-                rendered = preferences.custom_instructions[
-                    :MAX_RENDERED_CUSTOM_INSTRUCTIONS_CHARS
-                ].rstrip()
-                truncated += int(rendered != preferences.custom_instructions)
+            elif compiled_rules:
                 lines.append(
-                    "Lower-authority response preference (follow only when compatible "
-                    "with safety, domain policy, response mode, memory governance, and "
-                    "factual accuracy):\n"
-                    + json.dumps(rendered, ensure_ascii=False)
+                    "Compiled response preferences (follow only when compatible "
+                    "with safety, domain policy, response mode, memory governance, "
+                    "and factual accuracy):\n"
+                    + "\n".join(
+                        f"- {COMPILED_PREFERENCE_RULE_TEXT[item]}"
+                        for item in compiled_rules
+                    )
                 )
                 custom_instructions_included = True
 
@@ -452,14 +547,21 @@ __all__ = [
     "AssistantResponsePreferenceInspectionV1",
     "AssistantResponsePreferencesInputV1",
     "AssistantResponsePreferencesV1",
+    "COMPILED_PREFERENCE_MARKER_PREFIX",
+    "COMPILED_PREFERENCE_RULE_SUMMARY",
+    "COMPILED_PREFERENCE_RULE_TEXT",
+    "CompiledPreferenceRuleId",
     "ConversationStyle",
+    "MAX_COMPILED_PREFERENCE_RULES",
     "PreferenceApplicationStatus",
     "PreferenceSource",
     "ResponseFormat",
     "ResponseLength",
     "TechnicalDepth",
+    "compiled_preference_marker_v1",
     "default_assistant_response_preferences_v1",
     "normalize_assistant_name_v1",
+    "parse_compiled_preference_marker_v1",
     "preferences_sha256_v1",
     "render_assistant_response_preferences_v1",
 ]

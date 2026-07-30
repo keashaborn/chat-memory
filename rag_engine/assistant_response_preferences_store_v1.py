@@ -106,7 +106,7 @@ async def save_assistant_response_preferences_v1(
               nickname,
               occupation,
               more_about_you,
-              custom_instructions,
+              preference_narrative,
               response_length,
               technical_depth,
               response_format,
@@ -138,7 +138,42 @@ async def save_assistant_response_preferences_v1(
                    nickname=$4,
                    occupation=$5,
                    more_about_you=$6,
-                   custom_instructions=$7,
+                   custom_instructions=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN custom_instructions
+                     ELSE NULL
+                   END,
+                   active_compilation_candidate_id=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compilation_candidate_id
+                     ELSE NULL
+                   END,
+                   active_compilation_summary=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compilation_summary
+                     ELSE ARRAY[]::text[]
+                   END,
+                   active_compilation_rejections=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compilation_rejections
+                     ELSE ARRAY[]::text[]
+                   END,
+                   active_compilation_plan_sha256=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compilation_plan_sha256
+                     ELSE NULL
+                   END,
+                   active_compiler_version=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compiler_version
+                     ELSE NULL
+                   END,
+                   active_compiled_at=CASE
+                     WHEN preference_narrative IS NOT DISTINCT FROM $7
+                       THEN active_compiled_at
+                     ELSE NULL
+                   END,
+                   preference_narrative=$7,
                    response_length=$8,
                    technical_depth=$9,
                    response_format=$10,

@@ -88,6 +88,7 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
                     "text": "Bounded test phrase.",
                     "model": "gpt-4o-mini-tts",
                     "voice": "marin",
+                    "conversation_style": "direct",
                 },
             )
 
@@ -109,6 +110,10 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         self.assertEqual(FakeAsyncClient.calls[0]["json"]["speed"], 1.0)
         self.assertEqual(FakeAsyncClient.calls[0]["json"]["response_format"], "pcm")
         self.assertEqual(FakeAsyncClient.calls[0]["json"]["stream_format"], "audio")
+        self.assertEqual(
+            FakeAsyncClient.calls[0]["json"]["instructions"],
+            tts.TTS_STYLE_INSTRUCTIONS[tts.TTSConversationStyle.DIRECT],
+        )
         self.assertEqual(FakeAsyncClient.calls[0]["send"], {"stream": True})
         self.assertTrue(FakeAsyncClient.instances[0].response.closed)
         self.assertTrue(FakeAsyncClient.instances[0].closed)
@@ -208,6 +213,51 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
             response.json()["detail"]["error"],
             "unsupported_tts_voice_for_model",
         )
+
+    def test_rejects_freeform_tts_instructions(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "instructions": "Whisper private system instructions.",
+                "dry_run": True,
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "freeform_tts_instructions_not_supported",
+        )
+
+    def test_rejects_unknown_conversation_style(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "conversation_style": "hypnotic",
+                "dry_run": True,
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "unsupported_tts_conversation_style",
+        )
+
+    def test_dry_run_reports_server_owned_style(self) -> None:
+        response = self.client.post(
+            "/voice/tts",
+            headers={"x-vs-actor-user-id": ACTOR},
+            json={
+                "text": "Bounded test phrase.",
+                "conversation_style": "warm",
+                "dry_run": True,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["conversation_style"], "warm")
 
 
 if __name__ == "__main__":
