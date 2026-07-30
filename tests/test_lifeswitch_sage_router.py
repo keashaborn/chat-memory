@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LifeSwitchSageRouterTests(unittest.TestCase):
-    def test_request_is_strict_and_calendar_scoped(self) -> None:
+    def test_request_is_strict_and_page_contract_scoped(self) -> None:
         value = LifeSwitchSageRequestV1.model_validate_json(
             '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
             '"contract_id":"training.calendar",'
@@ -26,6 +26,16 @@ class LifeSwitchSageRouterTests(unittest.TestCase):
             '"message":"Server-owned page contract and question."}'
         )
         self.assertEqual(value.user_id, ACTOR)
+
+        nutrition = LifeSwitchSageRequestV1.model_validate(
+            {
+                "user_id": ACTOR,
+                "contract_id": "nutrition.log",
+                "contract_version": "2026-07-30.1",
+                "message": "Server-owned Nutrition Log context and question.",
+            }
+        )
+        self.assertEqual(nutrition.contract_id, "nutrition.log")
 
         with self.assertRaises(ValidationError):
             LifeSwitchSageRequestV1.model_validate(

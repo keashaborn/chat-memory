@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Training-scoped LifeSwitch Sage generation without general chat context."""
+"""Page-scoped LifeSwitch Sage generation without general chat context."""
 
 import asyncio
 import logging
@@ -44,7 +44,7 @@ class LifeSwitchSageRequestV1(BaseModel):
     )
 
     user_id: UUID
-    contract_id: Literal["training.calendar"]
+    contract_id: Literal["nutrition.log", "training.calendar"]
     contract_version: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}\.\d+$")
     message: str = Field(min_length=1, max_length=32_768, repr=False)
 
