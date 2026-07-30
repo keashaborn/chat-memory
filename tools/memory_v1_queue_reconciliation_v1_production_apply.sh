@@ -48,6 +48,9 @@ trap restore_timers EXIT
 trap 'printf "QUEUE_RECONCILIATION_PRODUCTION_FAILED line=%s\n" "$LINENO" >&2' ERR
 
 install -d -m 0700 "$report_dir"
+set -a
+source "$repo/.env"
+set +a
 test "$(git -C "$repo" rev-parse HEAD)" = "$base_commit"
 test -z "$(git -C "$repo" status --short)"
 test "$(git -C "$worktree" rev-parse HEAD)" = "$expected_commit"
@@ -60,7 +63,8 @@ test "$(sha256sum "$worktree/$rollback_rel" | cut -d' ' -f1)" = \
 test "$(sha256sum "$worktree/$worker_rel" | cut -d' ' -f1)" = \
   "$expected_worker_sha"
 test "$(systemctl is-active brains.service)" = active
-curl -fsS http://127.0.0.1:8088/healthz |
+curl -fsS -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+  http://127.0.0.1:8088/healthz |
   jq -e '.status=="ok"' >/dev/null
 
 mapfile -t timers < <(
@@ -92,9 +96,6 @@ for _ in $(seq 1 120); do
 done
 test "$running" -eq 0
 
-set -a
-source "$repo/.env"
-set +a
 source_database=$(
   "$repo/venv/bin/python" - "$POSTGRES_DSN" <<'PY'
 import sys
@@ -298,7 +299,8 @@ test "$(scalar "
     'memory.evidence_context_queue_reconciliation_v1'::regclass
 ")" -eq 1
 test "$(systemctl is-active brains.service)" = active
-curl -fsS http://127.0.0.1:8088/healthz |
+curl -fsS -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+  http://127.0.0.1:8088/healthz |
   jq -e '.status=="ok"' >/dev/null
 
 restore_timers
