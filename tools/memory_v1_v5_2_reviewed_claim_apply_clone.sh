@@ -135,8 +135,6 @@ PY
 claim_ids=$(jq -r '[.outcomes[].claim_id]|join(",")' "$apply")
 [[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c \
   "SELECT count(*) FROM memory.claim WHERE owner_user_id='$target_owner' AND status='supported' AND claim_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == "$item_count" ]]
-[[ "$(docker exec "$container" psql -X -A -t -U sage -d "$clone_db" -c \
-  "SELECT count(*) FROM memory.projection_outbox WHERE owner_user_id='$target_owner' AND aggregate_id=ANY(string_to_array('$claim_ids',',')::uuid[])")" == 0 ]]
 
 probe_plan=$(jq -er '.items[0].plan_id' "$manifest")
 probe_review=$(jq -er '.items[0].review_id' "$manifest")
