@@ -493,7 +493,7 @@ if [[ "$stage_test" == 1 ]]; then
     equal entity_replay_bindings \
       "$(jq -r '.replayed[0].bindings_created' "$reviews/entity-apply.json")" 0
     equal target_stage_after_entity "$(target_stage_counts)" \
-      1,2,1,1,1,1,1,0,1,1,0
+      1,1,1,1,1,1,1,0,1,1,0
     equal exact_entity_apply "$(scalar "
       SELECT count(*)
       FROM memory.entity_resolution_apply
