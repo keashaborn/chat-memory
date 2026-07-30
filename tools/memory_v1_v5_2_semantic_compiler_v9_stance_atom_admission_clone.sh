@@ -175,7 +175,7 @@ equal target_atom_rows_after_preflight "$(scalar "
   )
 ")" 0,0,0
 
-MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY=authorized \
+MEMORY_V1_V5_2_ATOM_ADMISSION_APPLY_V2=authorized \
 POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" "$python_bin" "$runner" \
   --mode apply --manifest "$manifest" --output "$work/apply.json"
 equal apply_writes "$(jq -r .persistent_writes "$work/apply.json")" 6
