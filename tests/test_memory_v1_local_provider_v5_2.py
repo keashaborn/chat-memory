@@ -22,6 +22,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     _literal,
     _packet,
     _pet_name,
+    _reported_stance_durability_profile,
     _structured_result,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import (
@@ -118,7 +119,7 @@ class LocalProviderV52Test(unittest.TestCase):
         )
         self.assertEqual(
             provider._policy_compiler_version,
-            "memory_v1_semantic_policy_compiler_v8",
+            "memory_v1_semantic_policy_compiler_v9",
         )
 
     def test_multiple_explicit_stance_cues_require_atomic_split(self) -> None:
@@ -146,6 +147,106 @@ class LocalProviderV52Test(unittest.TestCase):
             request.output_schema["properties"]["observations"]["minItems"],
             2,
         )
+
+    def test_non_durable_stance_cues_defer_without_model_call(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        cases = (
+            (
+                "I think it's probably 4 to 5 million tokens by now.",
+                "transient_estimate",
+                "insufficient_evidence",
+            ),
+            (
+                "I think what you're describing is exactly what I'm "
+                "building and I agree.",
+                "context_dependent_agreement",
+                "context_missing",
+            ),
+            (
+                "That's actually the way I think all of life should work.",
+                "context_dependent_agreement",
+                "context_missing",
+            ),
+            (
+                "I think creating a gating system for technical and "
+                "personal requests is what we are building.",
+                "project_scope_required",
+                "project_scope_unresolved",
+            ),
+            (
+                "The song For Crying Out Loud is really I think the most "
+                "loving one, thanking her for sticking around.",
+                "media_identification",
+                "insufficient_evidence",
+            ),
+            (
+                "No, I don't think that's right. I think this is something "
+                "like either REO Speedwagon or Air Supply.",
+                "tentative_identification",
+                "insufficient_evidence",
+            ),
+            (
+                "I believe you should jump into the mock of the dualistic "
+                "world and live in it.",
+                "ambiguous_transcription",
+                "ambiguous_transcription",
+            ),
+        )
+        for content, expected_profile, expected_reason in cases:
+            with self.subTest(content=content):
+                self.assertEqual(
+                    _reported_stance_durability_profile(content),
+                    expected_profile,
+                )
+                packet = provider.extract(self.source(content))
+                value = packet.model_dump(mode="json")
+                self.assertEqual(value["entity_mentions"], [])
+                self.assertEqual(value["observations"], [])
+                self.assertEqual(
+                    [item["reason_code"] for item in value["deferrals"]],
+                    [expected_reason],
+                )
+                self.assertEqual(
+                    provider.last_audit["policy_guard_code"],
+                    f"reported_stance_{expected_profile}",
+                )
+                self.assertEqual(provider.last_audit["prompt_tokens"], 0)
+                self.assertEqual(provider.last_audit["completion_tokens"], 0)
+
+    def test_complete_philosophical_stances_remain_model_eligible(self) -> None:
+        profile = load_runtime_profile_v2(ROOT, "v5_2")
+        registry = json.loads(profile.registry_path.read_text(encoding="utf-8"))
+        provider = LocalLlamaCppProvider(
+            model="qwen3-14b-local-extractor",
+            model_file_sha256=MODEL_SHA256,
+            runtime_revision="llama.cpp-b10066-86a9c79f8",
+            registry=registry,
+            transport=object(),
+        )
+        for content in (
+            "I think public opinion is not the same as evidence.",
+            "I believe a human being is a fractal and has the same "
+            "functions as any fractal above or below it.",
+            "I think the philosophy helps people in life.",
+        ):
+            with self.subTest(content=content):
+                self.assertEqual(
+                    _reported_stance_durability_profile(content),
+                    "durable_candidate",
+                )
+                request = provider.request(self.source(content))
+                self.assertEqual(
+                    request.prompt_profile,
+                    "semantic_stance_compact_v1",
+                )
 
     def test_education_source_uses_compact_governed_route(self) -> None:
         profile = load_runtime_profile_v2(ROOT, "v5_2")

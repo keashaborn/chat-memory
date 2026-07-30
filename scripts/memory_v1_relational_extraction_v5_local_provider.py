@@ -54,7 +54,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v8"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v9"
 EVIDENCE_CONTEXT_COREFERENCE_VERSION = (
     "memory_v1_evidence_context_coreference_v1"
 )
@@ -1815,14 +1815,62 @@ def _registry_contract_for_predicates(
     )
 
 
+def _reported_stance_durability_profile(content: str) -> str | None:
+    """Classify stance-shaped text by durable assertion authority."""
+    if (
+        not _REPORTED_BELIEF_CUE_RE.search(content)
+        or _PERSONAL_HEALTH_REPORT_RE.search(content)
+    ):
+        return None
+    if (
+        _AMBIGUOUS_CAUSAL_TRANSCRIPTION_RE.search(content)
+        or _REPORTED_STANCE_AMBIGUOUS_TRANSCRIPTION_RE.search(content)
+    ):
+        return "ambiguous_transcription"
+    if _REPORTED_STANCE_TRANSIENT_ESTIMATE_RE.search(content):
+        return "transient_estimate"
+    if _REPORTED_STANCE_CONTEXT_AGREEMENT_RE.search(content):
+        return "context_dependent_agreement"
+    if (
+        _PROJECT_TECHNICAL_RE.search(content)
+        and _REPORTED_STANCE_PROJECT_STATE_RE.search(content)
+    ):
+        return "project_scope_required"
+    if _REPORTED_STANCE_TENTATIVE_IDENTIFICATION_RE.search(content):
+        return "tentative_identification"
+    if _REPORTED_STANCE_MEDIA_IDENTIFICATION_RE.search(content):
+        return "media_identification"
+    return "durable_candidate"
+
+
+def _reported_stance_durability_guard(
+    source: TrustedExtractionSource,
+) -> tuple[ProviderPacket, str] | None:
+    profile = _reported_stance_durability_profile(source.content.strip())
+    if profile in {None, "durable_candidate"}:
+        return None
+    reason_code = {
+        "ambiguous_transcription": "ambiguous_transcription",
+        "transient_estimate": "insufficient_evidence",
+        "context_dependent_agreement": "context_missing",
+        "project_scope_required": "project_scope_unresolved",
+        "tentative_identification": "insufficient_evidence",
+        "media_identification": "insufficient_evidence",
+    }[profile]
+    return (
+        _guard_deferral_packet(source, (reason_code,)),
+        f"reported_stance_{profile}",
+    )
+
+
 def _semantic_stance_prompt_enabled(
     registry: dict[str, Any],
     content: str,
 ) -> bool:
     return bool(
         registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION
-        and _REPORTED_BELIEF_CUE_RE.search(content)
-        and not _PERSONAL_HEALTH_REPORT_RE.search(content)
+        and _reported_stance_durability_profile(content)
+        == "durable_candidate"
     )
 
 
@@ -1849,7 +1897,12 @@ def _semantic_stance_prompt_instructions(
         "one to four distinct explicitly attributed positions as separate "
         "atomic observations. Do not encode a reported belief as a health, "
         "biographical, relationship, preference, or project fact. If the "
-        "wording cannot support an attributed position, defer it.\n\n"
+        "wording cannot support an attributed position, defer it. A belief "
+        "cue alone is not durable evidence: never convert temporary numeric "
+        "estimates, bare agreement with prior text, project implementation "
+        "state, media identification, or apparently malformed transcription "
+        "into a stance. Preserve unconventional beliefs when their wording "
+        "is explicit and semantically complete.\n\n"
         f"{atomicity}"
         f"{SEMANTIC_STANCE_EXAMPLE}\n"
     )
@@ -2092,6 +2145,45 @@ _TEMPORARY_PREFERENCE_SCOPE_RE = re.compile(
 _REPORTED_BELIEF_CUE_RE = re.compile(
     r"\b(?:i\s+(?:believe|think|see|view|consider)|"
     r"in\s+my\s+(?:view|opinion)|it\s+seems\s+to\s+me)\b",
+    re.IGNORECASE,
+)
+_REPORTED_STANCE_TRANSIENT_ESTIMATE_RE = re.compile(
+    r"\b(?:i\s+(?:believe|think|see|view|consider)|"
+    r"in\s+my\s+(?:view|opinion)|it\s+seems\s+to\s+me)\b"
+    r".{0,160}\b\d+(?:\.\d+)?(?:\s*(?:to|-)\s*\d+(?:\.\d+)?)?\b"
+    r".{0,80}\b(?:by\s+now|currently|right\s+now|at\s+the\s+moment)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_REPORTED_STANCE_CONTEXT_AGREEMENT_RE = re.compile(
+    r"\b(?:i\s+think\s+)?what\s+you(?:['’]re|\s+are)\s+describing\b|"
+    r"\b(?:that|this|it)(?:['’]s|\s+is)\b.{0,80}"
+    r"\b(?:the\s+way|what)\b.{0,80}\bi\s+think\b|"
+    r"\bi\s+(?:agree|concur)\b(?:\s+with\s+(?:that|this|it))?\s*[.!?]?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_REPORTED_STANCE_PROJECT_STATE_RE = re.compile(
+    r"\b(?:i|we)\s+(?:(?:am|are|['’]m|['’]re)\s+)?"
+    r"(?:building|creating|developing|designing|implementing|"
+    r"working\s+on|rebuilding)\b|"
+    r"\b(?:architecture|pipeline|runtime|scheduler|gating\s+system)\b",
+    re.IGNORECASE,
+)
+_REPORTED_STANCE_TENTATIVE_IDENTIFICATION_RE = re.compile(
+    r"\bi\s+think\s+(?:this|that|it)\s+(?:is|was)\s+"
+    r"(?:something\s+like|probably|maybe|either)\b",
+    re.IGNORECASE,
+)
+_REPORTED_STANCE_MEDIA_IDENTIFICATION_RE = re.compile(
+    r"^\s*(?:the\s+)?(?:song|track|movie|film|book)\b"
+    r".{0,220}\bi\s+(?:think|believe)\b|"
+    r"\b(?:song|track|lyrics?|artist|album|movie|film|book)\b"
+    r".{0,180}\b(?:called|titled|written|performed|sung|by|is|was)\b|"
+    r"\b(?:called|titled|written|performed|sung|by|is|was)\b"
+    r".{0,180}\b(?:song|track|lyrics?|artist|album|movie|film|book)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_REPORTED_STANCE_AMBIGUOUS_TRANSCRIPTION_RE = re.compile(
+    r"\b(?:jump|step|move)\s+into\s+the\s+(?:mock|muck)\s+of\b",
     re.IGNORECASE,
 )
 _EMPLOYMENT_CUE_RE = re.compile(
@@ -3192,6 +3284,10 @@ def _deterministic_policy_packet(
                 project_name,
                 project_current.group(2),
             ), "project_current_state"
+    if registry_version == SEMANTIC_V5_2_REGISTRY_VERSION:
+        stance_guard = _reported_stance_durability_guard(source)
+        if stance_guard is not None:
+            return stance_guard
     credential = _CREDENTIAL_RE.search(content)
     if credential:
         return _credential_packet(
@@ -6349,6 +6445,11 @@ class LocalLlamaCppProvider:
                 source,
                 registry_version=self._registry.get("registry_version"),
             )
+        elif (
+            self._registry.get("registry_version")
+            == SEMANTIC_V5_2_REGISTRY_VERSION
+        ):
+            deterministic = _reported_stance_durability_guard(source)
         else:
             deterministic = None
         if deterministic is not None:
