@@ -13,14 +13,23 @@ fi
 
 [[ "$EUID" -eq 0 ]]
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-plan="$repo_root/evals/memory_v1_v5_2_canonical_name_claim_projection_plan.json"
-expected_plan_sha=65301f43f8c224fb93f0ebcd1d821502d1b1e168215a1bbfa05b1f37d2b3fd12
+plan=${MEMORY_V1_V5_2_PROJECTION_PLAN_PATH:-"$repo_root/evals/memory_v1_v5_2_canonical_name_claim_projection_plan.json"}
+expected_plan_sha=${MEMORY_V1_V5_2_PROJECTION_PLAN_SHA256:-65301f43f8c224fb93f0ebcd1d821502d1b1e168215a1bbfa05b1f37d2b3fd12}
+project_runner=${MEMORY_V1_V5_2_PROJECTION_PROJECT_RUNNER:-scripts/memory_v1_v5_claim_projection_controlled_project.py}
+artifact_label=${MEMORY_V1_V5_2_PROJECTION_ARTIFACT_LABEL:-canonical-name-projection}
+report_contract=${MEMORY_V1_V5_2_PROJECTION_REPORT_CONTRACT:-memory_v1_v5_2_canonical_name_projection_report_v1}
+plan=$(realpath "$plan")
+[[ "$plan" == "$repo_root/evals/"* ]]
+[[ "$project_runner" =~ ^scripts/[a-z0-9_]+\.py$ ]]
+[[ -f "$repo_root/$project_runner" ]]
+[[ "$artifact_label" =~ ^[a-z0-9-]+$ ]]
+[[ "$report_contract" =~ ^[a-z0-9_]+$ ]]
+[[ "$expected_plan_sha" =~ ^[0-9a-f]{64}$ ]]
 container=brains-postgres-1
 database=memory
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 admission_runner=scripts/memory_v1_v5_deferred_projection_admission.py
-project_runner=scripts/memory_v1_v5_claim_projection_controlled_project.py
 python_bin="$repo_root/venv/bin/python"
 review_root=/home/ubuntu/memory-v1-reviews
 snapshot_root=/home/ubuntu/brains/snapshots
@@ -209,7 +218,7 @@ exec 9>"$lock_file"
 flock -n 9
 umask 077
 run_id="$(date -u +%Y%m%dT%H%M%SZ)_${head:0:12}"
-artifact_dir="$review_root/canonical-name-projection-$run_id"
+artifact_dir="$review_root/$artifact_label-$run_id"
 status_file="$snapshot_root/memory_v1_v5_2_canonical_name_projection_${run_id}.status"
 mkdir -p "$artifact_dir"
 chmod 0700 "$artifact_dir"
@@ -313,6 +322,7 @@ env "${env_common[@]}" "$python_bin" "$repo_root/$admission_runner" \
 
 phase=controlled_projection
 MEMORY_V1_CONTROLLED_PROJECTION=authorized \
+MEMORY_V1_CONTROLLED_PROJECTION_APPLY_MANIFEST="$apply_manifest" \
 PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$project_runner" \
   --mode apply --apply-result "$apply_result" \
@@ -330,6 +340,7 @@ PYTHONPATH="$repo_root/scripts:$repo_root" \
 phase=zero_write_projection_replay
 unset OPENAI_API_KEY
 MEMORY_V1_CONTROLLED_PROJECTION_REPLAY=authorized \
+MEMORY_V1_CONTROLLED_PROJECTION_APPLY_MANIFEST="$apply_manifest" \
 PYTHONPATH="$repo_root/scripts:$repo_root" \
   "$python_bin" "$repo_root/$project_runner" \
   --mode replay --apply-result "$apply_result" \
@@ -415,8 +426,9 @@ jq -n \
   --arg admission_result_sha256 "$(jq -er '.result_sha256' "$admission")" \
   --arg project_result_sha256 "$(jq -er '.result_sha256' "$project")" \
   --arg replay_result_sha256 "$(jq -er '.result_sha256' "$project_replay")" \
+  --arg report_contract "$report_contract" \
   '{
-    contract_version:"memory_v1_v5_2_canonical_name_projection_report_v1",
+    contract_version:$report_contract,
     head_commit:$head,
     owner_user_id:"1240822d-ac9a-4096-95aa-e2b24d36ef50",
     plan_sha256:$plan_sha256,

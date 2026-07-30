@@ -411,6 +411,43 @@ async def shadow_tests(
     return results
 
 
+def resolve_apply_manifest(
+    manifest_sha: str,
+) -> tuple[Path, dict[str, Any]]:
+    exact_path = os.environ.get(
+        "MEMORY_V1_CONTROLLED_PROJECTION_APPLY_MANIFEST", ""
+    ).strip()
+    candidates = (
+        [private_path(exact_path)]
+        if exact_path
+        else list(REVIEW_ROOT.rglob("*apply*manifest*.json"))
+    )
+    manifests: list[tuple[Path, dict[str, Any]]] = []
+    for candidate in candidates:
+        if stat.S_IMODE(candidate.stat().st_mode) != 0o600:
+            continue
+        value = json.loads(candidate.read_text())
+        if (
+            value.get("contract_version")
+            == "memory_v1_claim_projection_apply_batch_manifest_v1"
+            and value.get("manifest_sha256") == manifest_sha
+        ):
+            if value["manifest_sha256"] != sha256(
+                {
+                    key: item
+                    for key, item in value.items()
+                    if key != "manifest_sha256"
+                }
+            ):
+                raise ControlledProjectionError(
+                    "exact immutable apply manifest content hash mismatch"
+                )
+            manifests.append((candidate, value))
+    if len(manifests) != 1:
+        raise ControlledProjectionError("exact immutable apply manifest was not found")
+    return manifests[0]
+
+
 async def run() -> int:
     args = arguments()
     apply_path = private_path(args.apply_result)
@@ -436,22 +473,7 @@ async def run() -> int:
         if item.get("claim_revision_number") != 2 or item.get("predicate") not in QUERY_BY_PREDICATE:
             raise ControlledProjectionError("apply outcome cannot be projected")
     # Canonical text hashes are recovered from the apply manifest, not from claim prose.
-    manifest_sha = apply["manifest_sha256"]
-    manifest_candidates = list(REVIEW_ROOT.rglob("*apply*manifest*.json"))
-    manifests = []
-    for candidate in manifest_candidates:
-        if stat.S_IMODE(candidate.stat().st_mode) != 0o600:
-            continue
-        value = json.loads(candidate.read_text())
-        if (
-            value.get("contract_version")
-            == "memory_v1_claim_projection_apply_batch_manifest_v1"
-            and value.get("manifest_sha256") == manifest_sha
-        ):
-            manifests.append((candidate, value))
-    if len(manifests) != 1:
-        raise ControlledProjectionError("exact immutable apply manifest was not found")
-    manifest_path, manifest = manifests[0]
+    manifest_path, manifest = resolve_apply_manifest(apply["manifest_sha256"])
     source_by_plan = {item["plan_id"]: item for item in manifest["items"]}
     for item in items:
         source = source_by_plan.get(item["plan_id"])

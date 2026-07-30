@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 import uuid
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from memory_v1_projection_v5_contract_test import sha256  # noqa: E402
+import memory_v1_v5_claim_projection_controlled_project as controlled_project  # noqa: E402
 from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
     ControlledProjectionError,
     OWNER,
@@ -21,6 +24,7 @@ from memory_v1_v5_claim_projection_controlled_project import (  # noqa: E402
     load_replay_state,
     load_admission,
     load_apply,
+    resolve_apply_manifest,
 )
 from rag_engine.memory_v1_projection import projection_payload  # noqa: E402
 
@@ -44,6 +48,70 @@ class ControlledProjectionBoundaryTest(unittest.TestCase):
         path = Path(directory) / "apply.json"
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
+
+    def write_manifest(self, directory: str) -> tuple[Path, dict[str, object]]:
+        value: dict[str, object] = {
+            "contract_version": (
+                "memory_v1_claim_projection_apply_batch_manifest_v1"
+            ),
+            "owner_user_id": OWNER,
+            "items": [],
+        }
+        value["manifest_sha256"] = sha256(value)
+        path = Path(directory) / "materialization-manifest.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        path.chmod(0o600)
+        return path, value
+
+    def test_exact_manifest_path_avoids_ambiguous_global_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path, manifest = self.write_manifest(directory)
+            duplicate = Path(directory) / "duplicate-apply-manifest.json"
+            duplicate.write_text(manifest_path.read_text(), encoding="utf-8")
+            duplicate.chmod(0o600)
+            with (
+                patch.object(
+                    controlled_project, "REVIEW_ROOT", Path(directory)
+                ),
+                patch.dict(
+                    os.environ,
+                    {
+                        "MEMORY_V1_CONTROLLED_PROJECTION_APPLY_MANIFEST": str(
+                            manifest_path
+                        )
+                    },
+                ),
+            ):
+                resolved_path, resolved = resolve_apply_manifest(
+                    str(manifest["manifest_sha256"])
+                )
+            self.assertEqual(resolved_path, manifest_path)
+            self.assertEqual(resolved, manifest)
+
+    def test_exact_manifest_path_rejects_content_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path, manifest = self.write_manifest(directory)
+            value = json.loads(manifest_path.read_text())
+            value["owner_user_id"] = "tampered"
+            manifest_path.write_text(json.dumps(value), encoding="utf-8")
+            manifest_path.chmod(0o600)
+            with (
+                patch.object(
+                    controlled_project, "REVIEW_ROOT", Path(directory)
+                ),
+                patch.dict(
+                    os.environ,
+                    {
+                        "MEMORY_V1_CONTROLLED_PROJECTION_APPLY_MANIFEST": str(
+                            manifest_path
+                        )
+                    },
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ControlledProjectionError, "content hash mismatch"
+                ):
+                    resolve_apply_manifest(str(manifest["manifest_sha256"]))
 
     def test_accepts_one_through_four_claims(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

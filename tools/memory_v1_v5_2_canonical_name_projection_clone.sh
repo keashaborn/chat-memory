@@ -7,8 +7,13 @@ set -euo pipefail
 
 [[ "$EUID" -eq 0 ]]
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-plan="$repo_root/evals/memory_v1_v5_2_canonical_name_claim_projection_plan.json"
-expected_plan_sha=65301f43f8c224fb93f0ebcd1d821502d1b1e168215a1bbfa05b1f37d2b3fd12
+plan=${MEMORY_V1_V5_2_PROJECTION_PLAN_PATH:-"$repo_root/evals/memory_v1_v5_2_canonical_name_claim_projection_plan.json"}
+expected_plan_sha=${MEMORY_V1_V5_2_PROJECTION_PLAN_SHA256:-65301f43f8c224fb93f0ebcd1d821502d1b1e168215a1bbfa05b1f37d2b3fd12}
+artifact_label=${MEMORY_V1_V5_2_PROJECTION_ARTIFACT_LABEL:-canonical-name-projection-clone}
+plan=$(realpath "$plan")
+[[ "$plan" == "$repo_root/evals/"* ]]
+[[ "$artifact_label" =~ ^[a-z0-9-]+$ ]]
+[[ "$expected_plan_sha" =~ ^[0-9a-f]{64}$ ]]
 container=brains-postgres-1
 source_db=memory
 clone_db="memory_v5_compiler_v8_projection_$(date -u +%Y%m%d%H%M%S)_$$"
@@ -16,7 +21,7 @@ owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 runner=scripts/memory_v1_v5_deferred_projection_admission.py
 python_bin=/opt/chat-memory/venv/bin/python
-artifact_dir="/home/ubuntu/memory-v1-reviews/canonical-name-projection-clone-$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$repo_root" rev-parse --short=12 HEAD)"
+artifact_dir="/home/ubuntu/memory-v1-reviews/$artifact_label-$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$repo_root" rev-parse --short=12 HEAD)"
 
 [[ -z "$(git -C "$repo_root" status --porcelain)" ]]
 [[ "$(sha256sum "$plan" | awk '{print $1}')" == "$expected_plan_sha" ]]

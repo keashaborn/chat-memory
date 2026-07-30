@@ -1,0 +1,43 @@
+{
+  "contract_version": "memory_v1_v5_2_self_identity_name_claim_projection_plan_v1",
+  "required_ancestor_commit": "4bb2d41f7cbd6d5bdd40300624bc9120a282cc96",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "source": {
+    "apply_manifest_path": "/home/ubuntu/memory-v1-reviews/self-identity-name-claim-materialization-production-20260730T083416Z-4bb2d41f7cbd/materialization-manifest.json",
+    "apply_manifest_file_sha256": "e81a7af5eff4603691cb5de69a9562c2eb3cbf8923a1f81481a0636006ae5761",
+    "apply_manifest_sha256": "74e652b34a9db7883be21be4e1e5de537a53544ffa007a0d9dc1a14fb8efca22",
+    "apply_result_path": "/home/ubuntu/memory-v1-reviews/self-identity-name-claim-materialization-production-20260730T083416Z-4bb2d41f7cbd/materialization-apply.json",
+    "apply_result_file_sha256": "0ab97243d20e6ba4a1c166d71dca759866c0deef5d10172700aa24ac2277e3b6",
+    "apply_result_sha256": "1dbfd766b1c809eb20d5263e09a72b0bb3ef7e3e3e44a53279ec1a2ba87daa97"
+  },
+  "projection": {
+    "collection": "memory_claim_v1",
+    "embedding_model": "text-embedding-3-large",
+    "vector_size": 3072,
+    "maximum_embedding_requests": 1,
+    "automatic_http_retries": 0
+  },
+  "items": [
+    {
+      "claim_id": "93f717d1-ebf5-4b19-8271-2bd069e2a8be",
+      "predicate": "identity.name",
+      "canonical_text_sha256": "88f9fa4e3f33c58cd5dae06deb9db8c2ee6a1406b0a4ba55794f1ca89ba1092b",
+      "revision_number": 2
+    }
+  ],
+  "shadow_queries": {
+    "identity.name": "What is my name?"
+  },
+  "required_proofs": {
+    "fresh_postgres_backup": true,
+    "exact_timer_restoration": true,
+    "zero_write_admission_replay": true,
+    "zero_call_projection_replay": true,
+    "owner_only_qdrant_filter": true,
+    "postgres_revalidation": true,
+    "non_target_postgres_unchanged": true,
+    "non_target_qdrant_unchanged": true,
+    "prompt_influence": false,
+    "general_account_activation": false
+  }
+}
