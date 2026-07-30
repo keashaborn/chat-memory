@@ -11,6 +11,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 import rag_engine.fm_selection_envelope_v0_2 as fm_selector
+from rag_engine.assistant_name_preference_v1 import (
+    AssistantNamePreferenceV1,
+)
 from rag_engine.fm_selection_envelope_v0_2 import (
     FMSelectionRequestV02,
     select_fm_v0_2,
@@ -229,6 +232,37 @@ def rehash_manifest(manifest: dict[str, object]) -> None:
 
 
 class TypedPromptAssemblerV1Tests(unittest.TestCase):
+    def test_optional_assistant_name_is_bound_without_product_identity(self) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        preference = AssistantNamePreferenceV1(
+            owner_user_id=owner,
+            source_card_id=uuid.UUID("70000000-0000-4000-8000-000000000001"),
+            name="Sage",
+        )
+        request = assembly_request().model_copy(
+            update={"assistant_name_preference": preference}
+        )
+
+        assembled = assemble_prompt(request)
+
+        self.assertIn(
+            'The user has chosen to call the assistant "Sage".',
+            assembled.system_prompt,
+        )
+        self.assertNotIn("You are an AI assistant", assembled.system_prompt)
+        self.assertNotIn("for Verbal Sage", assembled.system_prompt)
+        self.assertIsNotNone(
+            assembled.manifest.assistant_name_preference_sha256
+        )
+
+    def test_blank_assistant_name_adds_no_identity_wording(self) -> None:
+        assembled = assemble_prompt(assembly_request())
+
+        self.assertNotIn("Conversation identity preference", assembled.system_prompt)
+        self.assertNotIn("You are an AI assistant", assembled.system_prompt)
+        self.assertNotIn("for Verbal Sage", assembled.system_prompt)
+        self.assertIsNone(assembled.manifest.assistant_name_preference_sha256)
+
     def test_prior_web_provenance_is_exact_lower_authority_context(self) -> None:
         message = "What sources did you use for your last answer?"
         provenance = prior_web_provenance(message)
@@ -987,7 +1021,8 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
     def test_model_facing_identity_is_product_neutral(self) -> None:
         assembled = assemble_prompt(assembly_request())
         system_prompt = assembled.system_prompt
-        self.assertIn("You are an AI assistant for Verbal Sage", system_prompt)
+        self.assertNotIn("You are an AI assistant", system_prompt)
+        self.assertNotIn("Verbal Sage", system_prompt)
         self.assertNotIn("You are RESSE", system_prompt)
         self.assertNotIn("RESSE voice", system_prompt)
 

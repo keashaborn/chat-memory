@@ -581,7 +581,7 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         self.assertEqual(prompt.interaction_version, "response_interaction_v3")
         self.assertEqual(
             ASSEMBLY_MANIFEST_VERSION,
-            "prompt_assembly_manifest_v3",
+            "prompt_assembly_manifest_v4",
         )
         self.assertEqual(
             SHADOW_TRACE_VERSION,

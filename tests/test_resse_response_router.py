@@ -55,6 +55,24 @@ class ResseResponseRouterTests(unittest.TestCase):
                 }
             )
 
+    def test_assistant_name_is_owner_loaded_and_not_public_payload(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn("load_assistant_name_preference_v1(owner)", source)
+        self.assertIn(
+            "assistant_name_preference=assistant_name_preference",
+            source,
+        )
+        self.assertNotIn("payload.assistant_name", source)
+        with self.assertRaises(ValidationError):
+            ResseResponseRequestV1.model_validate(
+                {
+                    "user_id": ACTOR,
+                    "message": "Hello.",
+                    "no_store": True,
+                    "assistant_name": "Sage",
+                }
+            )
+
     def test_public_request_accepts_only_transport_fields(self) -> None:
         value = ResseResponseRequestV1.model_validate_json(
             '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'

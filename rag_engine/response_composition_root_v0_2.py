@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from rag_engine.assistant_name_preference_v1 import AssistantNamePreferenceV1
 from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
 from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
@@ -92,6 +93,10 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    assistant_name_preference: AssistantNamePreferenceV1 | None = Field(
+        default=None,
+        repr=False,
+    )
     response_language: str = DEFAULT_VOICE_LANGUAGE
 
     @field_validator("request_id")
@@ -121,6 +126,14 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
     def bounded_message_bytes(self) -> "AuthenticatedResponseCommandV0_2":
         if len(self.current_message.encode("utf-8")) > 32_768:
             raise ValueError("current message exceeds the byte limit")
+        if (
+            self.assistant_name_preference is not None
+            and self.assistant_name_preference.owner_user_id
+            != self.authenticated_actor_user_id
+        ):
+            raise ValueError(
+                "assistant name preference owner differs from authenticated actor"
+            )
         return self
 
 
@@ -350,6 +363,7 @@ class InactiveResponseCompositionRootV0_2:
                 prior_web_provenance=prior_web_provenance,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
+                assistant_name_preference=command.assistant_name_preference,
                 response_language=command.response_language,
             )
             stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)

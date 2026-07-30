@@ -12,6 +12,9 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from rag_engine.assistant_name_preference_provider_v1 import (
+    load_assistant_name_preference_v1,
+)
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
 from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
@@ -118,6 +121,17 @@ async def resse_response_query(
         req,
         default=AUTO_VOICE_LANGUAGE,
     )
+    try:
+        assistant_name_preference = await asyncio.wait_for(
+            load_assistant_name_preference_v1(owner),
+            timeout=3.0,
+        )
+    except Exception:
+        logger.warning(
+            "assistant name preference unavailable request_id=%s",
+            request_id,
+        )
+        assistant_name_preference = None
     for name, value in voice_turn_response_headers(voice_turn_id).items():
         response.headers[name] = value
     if payload.no_store:
@@ -150,6 +164,7 @@ async def resse_response_query(
                     ),
                     stateless=stateless,
                     search_capability_manifest=search_capability_manifest,
+                    assistant_name_preference=assistant_name_preference,
                     response_language=response_language,
                 ),
             ),
