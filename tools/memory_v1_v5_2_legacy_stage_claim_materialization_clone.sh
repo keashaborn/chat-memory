@@ -13,7 +13,7 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 container=brains-postgres-1
 source_db=memory
-clone_db="memory_v5_2_legacy_claim_materialization_$(date -u +%Y%m%d%H%M%S)_$$"
+clone_db="memory_v5_2_claim_target_review_legacy_$(date -u +%Y%m%d%H%M%S)_$$"
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 policy_held=1a498c5b-29ee-4b91-a038-7cc3987162f9
