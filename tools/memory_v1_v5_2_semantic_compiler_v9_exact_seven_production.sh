@@ -167,6 +167,7 @@ capture_isolation_state() {
         \$manifest\$$(
           jq -cS '.items' "$manifest"
         )\$manifest\$::jsonb
+      )
     ), state(label,row_json) AS (
       SELECT 'other_jobs',to_jsonb(value)::text
       FROM memory.evidence_extraction_job AS value
