@@ -4,7 +4,7 @@ After=network-online.target brains.service memory-v1-v5-local-inference-tunnel.s
 Wants=network-online.target
 Requires=memory-v1-v5-local-inference-tunnel.service
 StartLimitIntervalSec=30min
-StartLimitBurst=3
+StartLimitBurst=8
 
 [Service]
 Type=oneshot

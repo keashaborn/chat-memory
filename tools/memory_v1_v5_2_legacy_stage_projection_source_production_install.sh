@@ -29,6 +29,8 @@ migration=ops/sql/20260730_memory_v1_v5_2_legacy_stage_projection_source_compat_
 rollback=ops/sql/20260730_memory_v1_v5_2_legacy_stage_projection_source_compat_v1_rollback.sql
 clone_test=tools/memory_v1_v5_legacy_stage_claim_target_review_clone.sh
 reviewer=scripts/memory_v1_v5_2_claim_target_review.py
+entailment_service_source=ops/systemd/memory-v1-v5-local-entailment.service
+entailment_service_live=/etc/systemd/system/memory-v1-v5-local-entailment.service
 python_bin=/opt/chat-memory/venv/bin/python
 snapshot_dir=/home/ubuntu/brains/snapshots
 review_root=/home/ubuntu/memory-v1-reviews
@@ -36,6 +38,8 @@ lock_file=/home/ubuntu/brains/.memory_v1_v5_2_legacy_stage_source_install.lock
 migration_sha256=f065af7daa69b2d5e396e73def8f1c6aa66807d447ac49dd37d91651318433b3
 rollback_sha256=c0f8b984e7f434c04bb04ebd8ce49dee72219d1b55c357da0ed9532d0b941cf6
 clone_test_sha256=1c95f51c53cbbded825f28e4da12d17026aba246905a4b9473ee49a34fa7ad1a
+entailment_service_sha256=01cc9b84e22e2ed3f8b817895dc3e6bd34589453fda6a90711cdeaa5fa3ee725
+entailment_service_prior_sha256=dda5d1bdbce7464091cab9a1382d6cab98ea9960b6e8b72640728d0b30b62e58
 
 timer_state=$(mktemp /tmp/memory-v1-v5-2-legacy-source-timers.XXXXXX)
 table_list=$(mktemp /tmp/memory-v1-v5-2-legacy-source-tables.XXXXXX)
@@ -46,8 +50,10 @@ chmod 0600 "$timer_state" "$table_list" "$before" "$after" "$clone_output"
 timers_quiesced=0
 migration_installed=0
 installation_committed=0
+entailment_service_installed=0
 phase=initialization
 status_file=
+entailment_service_backup=
 
 set -a
 source "$repo_root/.env"
@@ -89,6 +95,16 @@ record_exit() {
   if [[ "$migration_installed" -eq 1 && "$installation_committed" -eq 0 ]]; then
     run_sql <"$rollback" >/dev/null 2>&1 || exit_code=1
   fi
+  if [[ "$entailment_service_installed" -eq 1 \
+        && "$installation_committed" -eq 0 \
+        && -n "$entailment_service_backup" ]]; then
+    install -o root -g root -m 0644 \
+      "$entailment_service_backup" "$entailment_service_live" \
+      || exit_code=1
+    systemctl daemon-reload || exit_code=1
+    systemctl reset-failed memory-v1-v5-local-entailment.service \
+      >/dev/null 2>&1 || true
+  fi
   restore_timers || exit_code=1
   rm -f "$timer_state" "$table_list" "$before" "$after" "$clone_output"
   if [[ -n "$status_file" ]]; then
@@ -126,11 +142,24 @@ qdrant_signature() {
 [[ "$(sha256sum "$migration" | cut -d' ' -f1)" == "$migration_sha256" ]]
 [[ "$(sha256sum "$rollback" | cut -d' ' -f1)" == "$rollback_sha256" ]]
 [[ "$(sha256sum "$clone_test" | cut -d' ' -f1)" == "$clone_test_sha256" ]]
+[[ "$(sha256sum "$entailment_service_source" | cut -d' ' -f1)" \
+  == "$entailment_service_sha256" ]]
+[[ "$(sha256sum "$entailment_service_live" | cut -d' ' -f1)" \
+  == "$entailment_service_prior_sha256" ]]
 [[ -x "$clone_test" && -f "$reviewer" ]]
 [[ -z "$(git status --porcelain)" ]]
 git merge-base --is-ancestor "$required_ancestor" HEAD
 [[ "$(systemctl is-active brains.service)" == active ]]
-[[ "$(systemctl --failed --no-legend --no-pager | wc -l)" -eq 0 ]]
+mapfile -t failed_memory_units < <(
+  systemctl --failed --no-legend --no-pager 'memory-v1-*.service' \
+    | awk '{print $1}'
+)
+[[ "${#failed_memory_units[@]}" == 1 ]]
+[[ "${failed_memory_units[0]}" == memory-v1-v5-local-entailment.service ]]
+[[ "$(systemctl show memory-v1-v5-local-entailment.service -p Result --value)" \
+  == start-limit-hit ]]
+[[ "$(systemctl show memory-v1-v5-local-entailment.service \
+  -p ExecMainStatus --value)" == 0 ]]
 
 phase=production_clone_proof
 "$clone_test" >"$clone_output"
@@ -188,6 +217,14 @@ chmod 0600 "$backup" "$backup.catalog"
 backup_sha256=$(sha256sum "$backup" | cut -d' ' -f1)
 printf '%s  %s\n' "$backup_sha256" "$backup" >"$backup.sha256"
 chmod 0600 "$backup.sha256"
+entailment_service_backup="$snapshot_dir/memory-v1-v5-local-entailment_${run_tag}.service"
+install -o root -g root -m 0600 \
+  "$entailment_service_live" "$entailment_service_backup"
+entailment_service_backup_sha256=$(
+  sha256sum "$entailment_service_backup" | cut -d' ' -f1
+)
+[[ "$entailment_service_backup_sha256" == \
+  "$entailment_service_prior_sha256" ]]
 
 phase=baseline
 docker exec "$container" psql -U sage -d "$database" -X -At -F $'\t' \
@@ -223,6 +260,15 @@ target_sha256=$(printf '%s\n' "${targets[@]}" | sha256sum | cut -d' ' -f1)
 [[ "$target_sha256" == "$expected_target_sha256" ]]
 
 phase=install_functions
+install -o root -g root -m 0644 \
+  "$entailment_service_source" "$entailment_service_live"
+entailment_service_installed=1
+systemctl daemon-reload
+systemctl reset-failed memory-v1-v5-local-entailment.service
+[[ "$(systemctl show memory-v1-v5-local-entailment.service \
+  -p StartLimitIntervalUSec --value)" == 30min ]]
+[[ "$(systemctl show memory-v1-v5-local-entailment.service \
+  -p StartLimitBurst --value)" == 8 ]]
 run_sql <"$migration" >/dev/null
 migration_installed=1
 [[ "$(scalar "SELECT to_regprocedure(
@@ -311,6 +357,12 @@ while IFS=$'\t' read -r unit enabled active; do
   [[ "$(systemctl is-active "$unit")" == "$active" ]]
 done <"$timer_state"
 [[ "$(systemctl is-active brains.service)" == active ]]
+[[ "$(systemctl is-failed memory-v1-v5-local-entailment.service)" \
+  != failed ]]
+[[ -z "$(
+  systemctl --failed --no-legend --no-pager 'memory-v1-*.service' \
+    | awk '{print $1}'
+)" ]]
 health=$(
   curl -fsS -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
     http://127.0.0.1:8088/healthz | jq -r '.status'
@@ -319,6 +371,7 @@ health=$(
 
 installation_committed=1
 migration_installed=0
+entailment_service_installed=0
 phase=report
 jq -nS \
   --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -330,6 +383,10 @@ jq -nS \
   --arg backup_sha256 "$backup_sha256" \
   --arg qdrant_sha256 "$qdrant_after" \
   --arg review_artifact_dir "$artifact_dir" \
+  --arg entailment_service_sha256 "$entailment_service_sha256" \
+  --arg entailment_service_backup "$entailment_service_backup" \
+  --arg entailment_service_backup_sha256 \
+    "$entailment_service_backup_sha256" \
   --argjson timer_count "$timer_count" \
   --argjson action_counts "$action_counts" \
   --argjson predicate_counts "$predicate_counts" \
@@ -342,6 +399,13 @@ jq -nS \
     rollback_sha256:$rollback_sha256,
     target_set_sha256:$target_set_sha256,
     backup:{path:$backup,sha256:$backup_sha256},
+    entailment_service:{
+      installed_sha256:$entailment_service_sha256,
+      backup_path:$entailment_service_backup,
+      backup_sha256:$entailment_service_backup_sha256,
+      start_limit_interval:"30min",
+      start_limit_burst:8
+    },
     review_artifact_dir:$review_artifact_dir,
     result:{
       targets:20,
@@ -381,6 +445,7 @@ printf '%s\n' \
   "HEAD=$(git rev-parse HEAD)" \
   "MIGRATION_SHA256=$migration_sha256" \
   "ROLLBACK_SHA256=$rollback_sha256" \
+  "ENTAILMENT_SERVICE_SHA256=$entailment_service_sha256" \
   "TARGET_SET_SHA256=$target_sha256" \
   "VALID_CREATE_TARGETS=19" \
   "SURFACE_POLICY_CONTRACT_HOLDS=1" \
