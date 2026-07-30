@@ -82,8 +82,8 @@ def _memory_selection_budget_policy_v1(
             (
                 MemoryLaneLimitV1(
                     lane=limit.lane,
-                    max_records=8,
-                    max_tokens=600,
+                    max_records=4,
+                    max_tokens=360,
                 )
                 if limit.lane is MemoryLane.CLAIM
                 else limit

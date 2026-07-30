@@ -59,8 +59,10 @@ Information-providing turns do not trigger retrieval.
 ## Budget
 
 Specific self-name recall uses the normal claim budget. Broad self-profile
-recall uses the existing broad-profile ceiling: at most eight claim records and
-600 claim tokens, still bounded by the global memory ceiling.
+recall uses a conservative renderer-safe ceiling: at most four claim records
+and 360 estimated claim tokens, still bounded by the global memory ceiling.
+This limit may increase only after the estimator and exact rendered-token
+accounting are reconciled.
 
 ## Initial data package
 

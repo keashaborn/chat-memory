@@ -74,7 +74,7 @@ class GovernedMemoryProviderV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             (broad_claim.max_records, broad_claim.max_tokens),
-            (8, 600),
+            (4, 360),
         )
         self.assertEqual(
             (broad.max_records, broad.max_tokens),
