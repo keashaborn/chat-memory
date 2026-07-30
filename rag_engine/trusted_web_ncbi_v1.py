@@ -88,6 +88,7 @@ _PUBMED_STOPWORDS = frozenset(
         "does",
         "effect",
         "evidence",
+        "find",
         "for",
         "from",
         "have",
@@ -104,6 +105,8 @@ _PUBMED_STOPWORDS = frozenset(
         "reasonably",
         "show",
         "someone",
+        "studies",
+        "study",
         "say",
         "taking",
         "that",
@@ -146,6 +149,53 @@ _PUBMED_SYNONYMS = {
     "protein": ("dietary protein",),
 }
 
+_REQUIRED_CONCEPT_PATTERNS = (
+    (re.compile(r"\bresistance[- ]training\b"), "resistance training"),
+    (re.compile(r"\bself[- ]monitoring\b"), "self-monitoring"),
+)
+
+
+def _required_pubmed_concepts(query: str) -> tuple[str, ...]:
+    raw_text = " ".join(str(query or "").lower().split())
+    residual = raw_text
+    concepts: list[str] = []
+    for pattern, concept in _REQUIRED_CONCEPT_PATTERNS:
+        if pattern.search(raw_text):
+            concepts.append(concept)
+            residual = pattern.sub(" ", residual)
+    if not concepts:
+        return ()
+
+    seen = set(concepts)
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", residual):
+        if token in _PUBMED_STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        concepts.append(token)
+    return tuple(concepts[:8])
+
+
+def _title_abstract_term(concept: str) -> str:
+    if " " in concept or "-" in concept:
+        return f'"{concept}"[Title/Abstract]'
+    return f"{concept}[Title/Abstract]"
+
+
+def _record_matches_required_concepts(
+    record: NCBIResearchRecordV1,
+    concepts: tuple[str, ...],
+) -> bool:
+    if not concepts:
+        return True
+    searchable = " ".join((record.title, record.abstract)).lower()
+    searchable = re.sub(r"[^a-z0-9]+", " ", searchable)
+    padded = f" {searchable} "
+    for concept in concepts:
+        normalized = re.sub(r"[^a-z0-9]+", " ", concept.lower()).strip()
+        if not normalized or f" {normalized} " not in padded:
+            return False
+    return True
+
 
 def _normalize_pubmed_query(query: str) -> str:
     raw_text = " ".join(str(query or "").lower().split())
@@ -178,7 +228,15 @@ def _build_term(query: str) -> str:
 
 
 def _build_terms(query: str) -> tuple[str, ...]:
-    text = _normalize_pubmed_query(query)
+    required_concepts = _required_pubmed_concepts(query)
+    text = (
+        " AND ".join(
+            _title_abstract_term(concept)
+            for concept in required_concepts
+        )
+        if required_concepts
+        else _normalize_pubmed_query(query)
+    )
     quality = "(systematic review[Publication Type] OR meta-analysis[Publication Type] OR randomized controlled trial[Publication Type] OR clinical trial[Publication Type] OR review[Publication Type])"
     humans = "humans[MeSH Terms]"
     return (
@@ -207,8 +265,23 @@ class NCBIPubMedClientV1:
         if not ids:
             raise NCBIClientError("ncbi_no_pubmed_results")
         records = self._efetch(ids)
+        required_concepts = _required_pubmed_concepts(query)
+        if required_concepts:
+            records = tuple(
+                record
+                for record in records
+                if _record_matches_required_concepts(
+                    record,
+                    required_concepts,
+                )
+            )
         if not records:
-            raise NCBIClientError("ncbi_no_fetchable_records")
+            error_code = (
+                "ncbi_no_relevant_records"
+                if required_concepts
+                else "ncbi_no_fetchable_records"
+            )
+            raise NCBIClientError(error_code)
         return records[: self.max_records]
 
     def _request_xml(self, endpoint: str, params: dict[str, str]) -> ET.Element:

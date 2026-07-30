@@ -4,7 +4,9 @@ import unittest
 import xml.etree.ElementTree as ET
 
 from rag_engine.trusted_web_ncbi_v1 import (
+    NCBIClientError,
     NCBIPubMedClientV1,
+    NCBIResearchRecordV1,
     _build_terms,
     _normalize_pubmed_query,
     classify_publication_types,
@@ -50,6 +52,36 @@ class FallbackNCBIClient(FakeNCBIClient):
             return ET.fromstring("<eSearchResult><IdList /></eSearchResult>")
         return ET.fromstring(
             "<eSearchResult><IdList><Id>123</Id></IdList></eSearchResult>"
+        )
+
+
+class ConceptFilteringNCBIClient(NCBIPubMedClientV1):
+    def _esearch(self, query: str) -> tuple[str, ...]:
+        return ("101", "202")
+
+    def _efetch(
+        self,
+        ids: tuple[str, ...],
+    ) -> tuple[NCBIResearchRecordV1, ...]:
+        return (
+            NCBIResearchRecordV1(
+                pmid="101",
+                title="Resistance training frequency and muscular strength",
+                abstract=(
+                    "This review evaluates resistance training frequency "
+                    "in healthy adults."
+                ),
+                publication_types=("Systematic Review",),
+            ),
+            NCBIResearchRecordV1(
+                pmid="202",
+                title="Antimicrobial stewardship",
+                abstract=(
+                    "This review discusses antimicrobial resistance and "
+                    "clinical training programs."
+                ),
+                publication_types=("Review",),
+            ),
         )
 
 
@@ -104,6 +136,48 @@ class TrustedWebNCBIV1Tests(unittest.TestCase):
         records = client.search(query)
         self.assertEqual(records[0].pmid, "123")
         self.assertEqual(client.terms, list(terms))
+
+    def test_resistance_training_query_requires_title_abstract_concepts(
+        self,
+    ) -> None:
+        terms = _build_terms(
+            "Find evidence about resistance training frequency."
+        )
+        self.assertTrue(
+            all(
+                '"resistance training"[Title/Abstract]' in term
+                for term in terms
+            )
+        )
+        self.assertTrue(
+            all("frequency[Title/Abstract]" in term for term in terms)
+        )
+        self.assertTrue(all("find" not in term.lower() for term in terms))
+
+        records = ConceptFilteringNCBIClient().search(
+            "Find evidence about resistance training frequency."
+        )
+        self.assertEqual([record.pmid for record in records], ["101"])
+
+    def test_behavior_query_uses_self_monitoring_and_adherence_concepts(
+        self,
+    ) -> None:
+        terms = _build_terms(
+            "Find evidence about self-monitoring and adherence."
+        )
+        self.assertTrue(
+            all('"self-monitoring"[Title/Abstract]' in term for term in terms)
+        )
+        self.assertTrue(
+            all("adherence[Title/Abstract]" in term for term in terms)
+        )
+        with self.assertRaisesRegex(
+            NCBIClientError,
+            "ncbi_no_relevant_records",
+        ):
+            ConceptFilteringNCBIClient().search(
+                "Find evidence about self-monitoring and adherence."
+            )
 
 
 if __name__ == "__main__":
