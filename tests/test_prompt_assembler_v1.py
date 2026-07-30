@@ -538,6 +538,68 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         )
         self.assertEqual(assembled.manifest.response_mode, ResponseMode.HIGH_STAKES)
 
+    def test_high_stakes_memory_is_independent_from_suppressed_preferences(
+        self,
+    ) -> None:
+        message = "I have a plan to kill myself; what do you remember about Dahlia?"
+        policy_input, safety, signals, decision, prompt = policy_chain(message)
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        memory_input, application = governed_memory(message)
+        preference = AssistantResponsePreferencesV1(
+            owner_user_id=OWNER,
+            revision=1,
+            source=PreferenceSource.POSTGRES,
+            updated_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+            nickname="Private nickname",
+            occupation="Private occupation",
+            more_about_you="Private background",
+            custom_instructions="Use a poetic response.",
+            conversation_style=ConversationStyle.WARM,
+        )
+
+        assembled = assemble_prompt(
+            PromptAssemblyRequestV1(
+                policy_input=policy_input,
+                safety_assessment=safety,
+                policy_signals=signals,
+                policy_decision=decision,
+                policy_prompt=prompt,
+                memory_input=memory_input,
+                memory_application=application,
+                assistant_response_preferences=preference,
+            )
+        )
+
+        self.assertEqual(
+            tuple(block.kind for block in assembled.context_blocks),
+            (ContextKind.MEMORY,),
+        )
+        self.assertEqual(
+            assembled.context_blocks[0].content,
+            application.content,
+        )
+        self.assertNotIn("Private nickname", assembled.system_prompt)
+        self.assertNotIn("Private occupation", assembled.system_prompt)
+        self.assertNotIn("Private background", assembled.system_prompt)
+        self.assertNotIn("poetic response", assembled.system_prompt)
+        self.assertNotIn("friendly, expressive", assembled.system_prompt)
+        self.assertTrue(assembled.manifest.personalization.high_stakes_override)
+        self.assertEqual(
+            assembled.manifest.personalization.status.value,
+            "suppressed",
+        )
+        self.assertIsNotNone(
+            assembled.manifest.assistant_response_preferences_sha256
+        )
+        self.assertEqual(
+            assembled.manifest.memory_assembly_input_sha256,
+            memory_input.assembly_input_sha256,
+        )
+        self.assertEqual(
+            assembled.manifest.memory_application_manifest_sha256,
+            application.application_manifest_sha256,
+        )
+
     def test_manifest_and_repr_omit_reference_prose(self) -> None:
         message = "What do you remember about Dahlia and this project?"
         policy_input, safety, signals, decision, prompt = policy_chain(message)
