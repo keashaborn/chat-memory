@@ -23,7 +23,7 @@ from .memory_v1_selection_envelope import (
 
 
 ENTITY_SCOPE_SNAPSHOT_VERSION = "memory_entity_scope_snapshot_v2"
-ENTITY_SCOPE_RESOLUTION_POLICY_VERSION = "memory_entity_resolution_policy_v2_1"
+ENTITY_SCOPE_RESOLUTION_POLICY_VERSION = "memory_entity_resolution_policy_v2_2"
 MAX_SNAPSHOT_ENTITIES = 1000
 MAX_SNAPSHOT_EDGES = 2000
 ENTITY_TYPES = frozenset(
@@ -62,6 +62,7 @@ ENTITY_OBJECT_PREDICATES = frozenset(
 )
 SELF_LITERAL_PREDICATES = frozenset(
     {
+        "identity.name",
         "health.user_reported_observation",
         "preference.life",
         "stance.reported",
@@ -456,6 +457,47 @@ def resolve_memory_claim_selector_context_v2(
                 raise EntityScopeResolutionError(
                     "family scope requested an invalid predicate"
                 )
+    elif domain in {"self_identity", "self_profile"}:
+        mode = EntityScopeModeV2.SELF_PROFILE
+        for predicate in allowed:
+            if predicate in SELF_LITERAL_PREDICATES:
+                rules.append(_literal_rule(predicate, {self_id}))
+                continue
+            if predicate not in ENTITY_OBJECT_PREDICATES:
+                raise EntityScopeResolutionError(
+                    "self-profile scope requested an invalid predicate"
+                )
+            if predicate in FAMILY_RELATION_PREDICATES:
+                matching = [
+                    edge
+                    for edge in snapshot.edges
+                    if edge.predicate == predicate
+                    and (
+                        edge.subject_entity_id == self_id
+                        or edge.object_entity_id == self_id
+                    )
+                ]
+            else:
+                matching = [
+                    edge
+                    for edge in snapshot.edges
+                    if edge.predicate == predicate
+                    and edge.subject_entity_id == self_id
+                ]
+            if matching:
+                rules.append(
+                    _entity_rule(
+                        predicate,
+                        {edge.subject_entity_id for edge in matching},
+                        {edge.object_entity_id for edge in matching},
+                    )
+                )
+        if domain == "self_identity" and any(
+            rule.predicate != "identity.name" for rule in rules
+        ):
+            raise EntityScopeResolutionError(
+                "self-identity scope requested an invalid predicate"
+            )
     elif domain in {"stance_recall", "health_behavior"}:
         mode = EntityScopeModeV2.SELF_PROFILE
         for predicate in allowed:

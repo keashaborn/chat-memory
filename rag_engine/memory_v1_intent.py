@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v15"
+VERSION = "memory_intent_adapter_v16"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -52,6 +52,17 @@ FAMILY_DEATH_PREDICATES = (
 )
 NAME_PREDICATES = (
     "identity.name_canonical",
+)
+SELF_NAME_PREDICATES = (
+    "identity.name",
+)
+SELF_PROFILE_PREDICATES = (
+    "identity.name",
+    "occupation.works_as",
+    "relationship.has_pet",
+    "relationship.parent_of",
+    "relationship.spouse_of",
+    "stance.reported",
 )
 LIFE_CONTEXT_PREDICATES = (
     "occupation.works_as",
@@ -331,6 +342,24 @@ CAREGIVING_RECALL_RE = re.compile(
     r")\b"
 )
 PERSONAL_ANCHOR_RE = re.compile(r"\b(?:my|mine|me|i)\b")
+SELF_NAME_RECALL_RE = re.compile(
+    r"\b(?:"
+    r"what(?:'s| is) my name|"
+    r"do you (?:know|remember) my name|"
+    r"what do you (?:know|remember) my name (?:is|was)|"
+    r"tell me (?:what|the name) you (?:know|remember) (?:as )?my name"
+    r")\b"
+)
+SELF_PROFILE_RECALL_RE = re.compile(
+    r"\b(?:"
+    r"what do you (?:know|remember) about me|"
+    r"do you (?:know|remember) (?:anything )?about me|"
+    r"tell me (?:what you (?:know|remember) |anything )?about me|"
+    r"what personal (?:information|details|facts) do you "
+    r"(?:know|remember) about me|"
+    r"who am i based on what (?:i have|i've) told you"
+    r")\b"
+)
 BROAD_PET_RECALL_RE = re.compile(
     r"\b(?:what do you (?:know|remember) about my (?:current )?pets|"
     r"do you know (?:anything )?about my (?:current )?pets|"
@@ -544,12 +573,16 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     stance_recall = bool(STANCE_RECALL_RE.search(text))
     profession_recall = bool(PROFESSION_RECALL_RE.search(text))
     caregiving_recall = bool(CAREGIVING_RECALL_RE.search(text))
+    self_name_recall = bool(SELF_NAME_RECALL_RE.search(text))
+    self_profile_recall = bool(SELF_PROFILE_RECALL_RE.search(text))
     recall_requested = (
         _looks_like_personal_recall(text)
         or family_death_recall
         or stance_recall
         or profession_recall
         or caregiving_recall
+        or self_name_recall
+        or self_profile_recall
     )
     normalization_requested = _contains(text, NAME_TERMS) and _contains(
         text, NORMALIZATION_TERMS
@@ -586,7 +619,11 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
     support_requested = caregiving_context and _contains(text, SUPPORT_NEED_TERMS)
 
     domain = None
-    if normalization_requested or name_recall_requested:
+    if self_name_recall:
+        domain = "self_identity"
+    elif self_profile_recall:
+        domain = "self_profile"
+    elif normalization_requested or name_recall_requested:
         domain = "name_correction"
     elif stance_recall:
         domain = "stance_recall"
@@ -621,7 +658,11 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
         return {"eligible": False, "reason": "unclassified_domain"}
 
     allowed_predicates: list[str] = []
-    if domain == "pet_loss":
+    if domain == "self_identity":
+        allowed_predicates = list(SELF_NAME_PREDICATES)
+    elif domain == "self_profile":
+        allowed_predicates = list(SELF_PROFILE_PREDICATES)
+    elif domain == "pet_loss":
         allowed_predicates = ["life_event.died"]
     elif domain == "stance_recall":
         allowed_predicates = ["stance.reported"]
@@ -698,11 +739,15 @@ def _claim_context(text: str, request_classification: str) -> Dict[str, Any]:
             or broad_family_recall
             or pet_profile_recall
             or stance_recall
+            or self_name_recall
+            or self_profile_recall
         ),
         "entity_hints": entity_hints,
         "allowed_predicates": allowed_predicates,
         "broad_profile_recall": bool(
-            broad_family_profile_recall or broad_pet_recall
+            broad_family_profile_recall
+            or broad_pet_recall
+            or self_profile_recall
         ),
     }
 
