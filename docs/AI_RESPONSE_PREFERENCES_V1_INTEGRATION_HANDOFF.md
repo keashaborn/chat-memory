@@ -1,9 +1,11 @@
 # AI Response Preferences V1 — Integration Handoff
 
-Status: isolated candidate only  
-Backend original base: `80f21e0f477eec538d118d897d19afa51c2738ef`  
-Backend refreshed base: `1fdf3832787f060a36a15a117f0d5f0afded57db`  
+Status: isolated integration candidate only
+Backend original base: `80f21e0f477eec538d118d897d19afa51c2738ef`
+Backend prior refreshed base: `1fdf3832787f060a36a15a117f0d5f0afded57db`
+Backend integration base: `d11d3bdf15a225899f9abacade819c159fe116cc`
 Frontend base: `11cfad46ec959fb27359836158583ef1faedf94f`
+Frontend candidate head: `74c3df708cfd9670c640df4ffd6522cd83095f5b`
 
 ## Purpose
 
@@ -45,6 +47,9 @@ flattery, excessive reassurance, or automatic agreement.
 ## Authority and safety
 
 - Supabase authentication establishes the owner UUID.
+- Supabase user metadata is not a preference authority. The browser obtains the
+  saved conversation style from the authenticated preference API and retains
+  only a local delivery cache for voice playback.
 - PostgreSQL RLS and `FORCE ROW LEVEL SECURITY` bind the row to
   `app.user_id`.
 - The browser cannot supply preferences to `/response/query`.
@@ -71,6 +76,10 @@ Target:
 The row is owner keyed and revisioned. PUT uses optimistic concurrency through
 `expected_revision`; stale updates return HTTP 409. No legacy Qdrant card is
 imported automatically.
+
+Revision zero uses insert-only semantics. Existing records use an explicit
+owner-and-revision-guarded update. This avoids an invalid `INSERT ... SELECT`
+upsert shape that the disposable database preflight caught before activation.
 
 API:
 
@@ -141,17 +150,26 @@ retirement review.
 Backend:
 
 - Python compilation passed.
-- 159 focused response, prompt, interaction, inspection, preference, ownership,
-  and legacy-regression tests passed.
-- `git diff --check` passed.
+- 297 focused response, prompt, interaction, inspection, preference, ownership,
+  Memory boundary, FM boundary, provider, persistence, and legacy-regression
+  tests passed on the rebased candidate.
+- The candidate migration passed in a disposable PostgreSQL 16 container:
+  owner read, cross-owner read/update/insert denial, legitimate revision
+  update, stale-revision rejection, and automatic container teardown.
+- Two committed Memory V1 schema-snapshot tests fail identically on unchanged
+  production and the candidate. They are recorded as pre-existing Memory
+  schema drift; this candidate does not regenerate or modify those schemas.
+- `git diff --check` passed after the handoff whitespace cleanup.
 
 Frontend:
 
 - 15 personalization and Response Trace tests passed.
 - Prettier check passed.
-- Next.js compiled and TypeScript passed.
-- Static prerender then stopped because the isolated worktree intentionally had
-  no Supabase environment values (`supabaseUrl is required`).
+- The normal production-environment preflight passed without printing values.
+- The complete Next.js production build passed: compilation, TypeScript,
+  72-page static generation, build traces, and Turnstile artifact verification.
+- `VS_DEV_ALLOW_GUEST` is disabled in the live service environment.
+- Temporary environment links were removed after the isolated build.
 
 No production checkout, service, database, Qdrant collection, environment
 variable, authentication rule, Memory V1 record, FM corpus, or live prompt was
@@ -159,18 +177,15 @@ changed.
 
 ## Required review before activation
 
-1. Refresh both production heads and check for overlapping work.
-2. Memory V1 reviews the three shared boundaries:
+1. Reconfirm both production heads immediately before promotion.
+2. Complete joint Memory V1 review of the three shared boundaries:
    `response_composition_root_v0_2.py`,
    `response_orchestration_v0_2.py`, and `prompt_assembler_v1.py`.
 3. Response-policy review verifies high-stakes precedence and contract-version
    changes.
-4. Apply the candidate SQL in a disposable database and prove RLS isolation,
-   optimistic-concurrency behavior, and rollback.
-5. Run the frontend build with its normal deployment environment.
-6. Review exact diffs and approve migration/promotion separately.
-7. Apply the database migration before backend activation.
-8. Promote backend, then frontend, run authenticated two-owner canaries, and
+4. Review exact diffs and approve migration/promotion separately.
+5. Apply the database migration before backend activation.
+6. Promote backend, then frontend, run authenticated two-owner canaries, and
    verify content-free Inspector output.
 
 Rollback does not require dropping the settings table. Reverting the application
