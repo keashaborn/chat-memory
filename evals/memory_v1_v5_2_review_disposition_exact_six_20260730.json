@@ -1,0 +1,65 @@
+{
+  "contract_version": "memory_v1_v5_2_review_disposition_manifest_v1",
+  "items": [
+    {
+      "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+      "packet_id": "44359bb9-2b52-5933-9041-91cce49e412f",
+      "packet_storage_sha256": "9aa73d89a4e425d0add617c31c9542ced72843cec1d5acc3e674eca8dc9cb56b",
+      "operation_id": "6754def9-68bb-4bcf-a574-2978b67bcc52",
+      "disposition_id": "d72c9b62-3f00-4dd0-8c71-05db3fde3b65",
+      "review_decision": "rejected",
+      "reason_code": "semantic_predicate_misclassification",
+      "review_basis_sha256": "9f376ce7f0059acf23e457f9c8e9f46e9120585451c59e0afa2aae872e633073"
+    },
+    {
+      "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+      "packet_id": "6224cab9-44fa-5a60-ba61-fa4d6cdfc737",
+      "packet_storage_sha256": "e7d66f1e2a186623910e5c0f84a52b7ace02f394fbf6f6e7e1c124e9389ae6d8",
+      "operation_id": "93a63fc7-cfd8-49a8-8baf-7e39b4abf1f9",
+      "disposition_id": "f3384238-c7fe-4c36-8f16-bb2e0dc18e60",
+      "review_decision": "rejected",
+      "reason_code": "turn_local_instruction_not_durable",
+      "review_basis_sha256": "d63790a4c27a79cb0317af81f5a5d3cfcd68190ebbd8ec22a7ad3f6d4469960f"
+    },
+    {
+      "owner_user_id": "9dd7426d-77eb-4765-9db2-13e33ad7444d",
+      "packet_id": "05f7fb7f-2aea-5a12-8453-effe25dbebc6",
+      "packet_storage_sha256": "33aac18c68756abf05127b26cf9ee825283810d5c2905fab035ef1d769b38e9c",
+      "operation_id": "7daea41f-d7a3-4070-a96e-e9af6f9d723e",
+      "disposition_id": "0264a869-785f-4ed2-9325-cedcd21ee4b9",
+      "review_decision": "rejected",
+      "reason_code": "turn_local_instruction_not_durable",
+      "review_basis_sha256": "29bc570781d957c9efd310afc3f4241d11007ba332a33a78afed107c18ea4e37"
+    },
+    {
+      "owner_user_id": "9dd7426d-77eb-4765-9db2-13e33ad7444d",
+      "packet_id": "27e502fd-9560-5996-bb7f-9a15e289139a",
+      "packet_storage_sha256": "73f89c7c61104881376c80c264bd987b28a2d353871ccb79debc391de1a98a98",
+      "operation_id": "f93fd22a-1c19-4552-880c-dc494a6da20f",
+      "disposition_id": "86a93d02-a489-4c2a-b713-be3433c6e97a",
+      "review_decision": "rejected",
+      "reason_code": "semantic_predicate_misclassification",
+      "review_basis_sha256": "4e9f4e46cf39361550824e995111e62b1c2d90c40b6c88ca22608badc76d81c4"
+    },
+    {
+      "owner_user_id": "9dd7426d-77eb-4765-9db2-13e33ad7444d",
+      "packet_id": "b962f49b-73f8-5a10-8f07-afbe9d0c54dc",
+      "packet_storage_sha256": "4e640f21cada7a01a5ecb133109e2d9a78c1da3247ebae0e0c05b3ee79cbadf7",
+      "operation_id": "8c65cc60-5415-4218-9167-628f314360b8",
+      "disposition_id": "6152e3b4-656f-45bb-a1fc-656fb09d472d",
+      "review_decision": "deferred",
+      "reason_code": "contextual_state_not_durable",
+      "review_basis_sha256": "afd42740f17880b0eb5411bab33f5bd4e0b100968a224a128379c13e59f8a7ee"
+    },
+    {
+      "owner_user_id": "9dd7426d-77eb-4765-9db2-13e33ad7444d",
+      "packet_id": "bce7b3ad-fe2c-579f-9c68-01802595ec08",
+      "packet_storage_sha256": "2f7aa1be6d4c6c0d26c651477029e6ed92cdce4b1a2c8d22819249c0c68e2247",
+      "operation_id": "0dbd5149-81dc-4019-bdf8-434ce7fa67ff",
+      "disposition_id": "586cbd74-d901-4eb9-b5b9-5ac8a8eb9faf",
+      "review_decision": "rejected",
+      "reason_code": "hypothetical_or_scenario_not_durable",
+      "review_basis_sha256": "c7b7701909afa2e00d2bb57c7f961fd141f9fd04eda7d9ed725932b68efe75ac"
+    }
+  ]
+}
