@@ -233,10 +233,10 @@ docker exec "$container" psql -X -A -F $'\t' -t -v ON_ERROR_STOP=1 \
   -U sage -d "$database" -c "
     SELECT table_name,
            EXISTS(
-             SELECT 1 FROM information_schema.columns AS column
-              WHERE column.table_schema='memory'
-                AND column.table_name=table.table_name
-                AND column.column_name='owner_user_id'
+             SELECT 1 FROM information_schema.columns AS c
+              WHERE c.table_schema='memory'
+                AND c.table_name=table.table_name
+                AND c.column_name='owner_user_id'
            )
       FROM information_schema.tables AS table
      WHERE table_schema='memory' AND table_type='BASE TABLE'
