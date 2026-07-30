@@ -21,8 +21,11 @@ runner=scripts/memory_v1_v5_2_atom_admission_apply_v2.py
 bundle_builder=scripts/memory_v1_v5_2_atom_stage_bundle_v2.py
 stage_runner=scripts/memory_v1_v5_2_stage_batch.py
 stage_fixture=tests/memory_v1_v5_2_stage_batch_fixture.py
+entity_runner=scripts/memory_v1_v5_2_entity_resolution_batch.py
+entity_fixture=tests/memory_v1_v5_2_entity_resolution_batch_fixture.py
 python_bin=/opt/chat-memory/venv/bin/python
 stage_test=${MEMORY_V1_V5_2_V9_STANCE_STAGE_TEST:-0}
+entity_test=${MEMORY_V1_V5_2_V9_STANCE_ENTITY_TEST:-0}
 owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other_owner=557ea042-cb82-48f8-9429-472e96c957ef
 self_entity=35029129-27bd-457b-8cb5-82dd37ba32ba
@@ -40,6 +43,8 @@ runner_sha=721184f8eebf5f4d14b553eb0cf0134960456d8834029263da1d10963868c5e7
 bundle_builder_sha=5a611180ecbb3fa3b9220459ef870879e74a8d487847ef76084b379c32ac30bb
 stage_runner_sha=3dddef3dbf71862fc42252d6263075ad8d407bc292a4f06760866c816c3699b9
 stage_fixture_sha=96461968b5afa0ec2a8aa207ec7ec2096278d851cd51d4e0a7c90541ab5a54ac
+entity_runner_sha=7c9c16ba640101acea04b8911fd179d15a13166b4a8069b129e6aa8e4d6487bb
+entity_fixture_sha=9d913127b681c0e781daae045357e24cd000a05e3702699d72caefe9f5f682e7
 dsn="postgresql://brains_app:clone_only_brains_password@127.0.0.1:${port}/memory"
 
 backup=$(mktemp /tmp/memory-v9-stance-atom.XXXXXX.dump)
@@ -177,7 +182,13 @@ equal stage_runner_sha "$(sha256sum "$stage_runner" | awk '{print $1}')" \
   "$stage_runner_sha"
 equal stage_fixture_sha "$(sha256sum "$stage_fixture" | awk '{print $1}')" \
   "$stage_fixture_sha"
+equal entity_runner_sha "$(sha256sum "$entity_runner" | awk '{print $1}')" \
+  "$entity_runner_sha"
+equal entity_fixture_sha "$(sha256sum "$entity_fixture" | awk '{print $1}')" \
+  "$entity_fixture_sha"
 [[ "$stage_test" == 0 || "$stage_test" == 1 ]] || fail invalid_stage_test
+[[ "$entity_test" == 0 || "$entity_test" == 1 ]] || fail invalid_entity_test
+[[ "$entity_test" == 0 || "$stage_test" == 1 ]] || fail entity_test_requires_stage
 equal manifest_items "$(jq -r '.items|length' "$manifest")" 1
 equal manifest_packet "$(jq -r '.items[0].packet_id' "$manifest")" "$packet"
 equal manifest_evidence "$(jq -r '.items[0].evidence_id' "$manifest")" "$evidence"
@@ -403,6 +414,104 @@ if [[ "$stage_test" == 1 ]]; then
     SELECT predicate FROM memory.observation
     WHERE owner_user_id='$owner'::uuid AND evidence_id='$evidence'::uuid
   ")" stance.reported
+
+  if [[ "$entity_test" == 1 ]]; then
+    resolution=$(scalar "
+      SELECT resolution_id::text
+      FROM memory.entity_resolution_plan
+      WHERE owner_user_id='$owner'::uuid AND evidence_id='$evidence'::uuid
+    ")
+    observation=$(scalar "
+      SELECT observation_id::text
+      FROM memory.observation
+      WHERE owner_user_id='$owner'::uuid AND evidence_id='$evidence'::uuid
+    ")
+    [[ "$resolution" =~ ^[0-9a-f-]{36}$ ]] || fail missing_resolution_id
+    [[ "$observation" =~ ^[0-9a-f-]{36}$ ]] || fail missing_observation_id
+
+    jq -n \
+      --arg owner "$owner" \
+      --arg resolution "$resolution" \
+      '{
+        contract_version:"memory_v1_v5_2_entity_resolution_batch_manifest_v1",
+        target_server:"seebx",
+        owner_user_id:$owner,
+        expected_total_bindings:1,
+        expected_new_rows:3,
+        items:[{
+          resolution_id:$resolution,
+          operation:"auto_apply",
+          expected_action:"link_existing",
+          expected_decision_state:"auto_link_eligible",
+          review_reason:null
+        }]
+      }' >"$reviews/entity-manifest.json"
+    chmod 0600 "$reviews/entity-manifest.json"
+
+    POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+      "$python_bin" "$entity_runner" plan \
+      --manifest "$reviews/entity-manifest.json" \
+      --review-root "$reviews" \
+      --output "$reviews/entity-plan.json"
+
+    jq --arg owner "$other_owner" '.owner_user_id=$owner' \
+      "$reviews/entity-manifest.json" >"$reviews/entity-cross-owner.json"
+    chmod 0600 "$reviews/entity-cross-owner.json"
+    if POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+      "$python_bin" "$entity_runner" plan \
+      --manifest "$reviews/entity-cross-owner.json" \
+      --review-root "$reviews" \
+      --output "$reviews/entity-cross-owner-plan.json" >/dev/null 2>&1; then
+      fail cross_owner_entity_plan_was_not_rejected
+    fi
+
+    "$python_bin" "$entity_fixture" \
+      --plan "$reviews/entity-plan.json" \
+      --output "$reviews/entity-authorization.json" \
+      --head "$(git rev-parse HEAD)"
+
+    MEMORY_V1_V5_2_ENTITY_RESOLUTION_BATCH_APPLY=authorized \
+    POSTGRES_DSN="$dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
+      "$python_bin" "$entity_runner" apply \
+      --plan "$reviews/entity-plan.json" \
+      --authorization "$reviews/entity-authorization.json" \
+      --review-root "$reviews" \
+      --confirm RECONCILE_REVIEW_AND_APPLY_OWNER_V5_2_ENTITY_RESOLUTIONS_ONLY \
+      --output "$reviews/entity-apply.json"
+
+    equal entity_rows_created \
+      "$(jq -r .database_rows_created "$reviews/entity-apply.json")" 3
+    equal entity_bindings_created \
+      "$(jq -r .bindings_created "$reviews/entity-apply.json")" 1
+    equal entity_apply_operation \
+      "$(jq -r '.applied[0].operation' "$reviews/entity-apply.json")" auto_apply
+    equal entity_apply_target \
+      "$(jq -r '.applied[0].applied_entity_id' "$reviews/entity-apply.json")" \
+      "$self_entity"
+    equal entity_replay_outcome \
+      "$(jq -r '.replayed[0].apply_outcome' "$reviews/entity-apply.json")" replayed
+    equal entity_replay_bindings \
+      "$(jq -r '.replayed[0].bindings_created' "$reviews/entity-apply.json")" 0
+    equal target_stage_after_entity "$(target_stage_counts)" \
+      1,2,1,1,1,1,1,0,1,1,0
+    equal exact_entity_apply "$(scalar "
+      SELECT count(*)
+      FROM memory.entity_resolution_apply
+      WHERE owner_user_id='$owner'::uuid
+        AND resolution_id='$resolution'::uuid
+        AND applied_entity_id='$self_entity'::uuid
+    ")" 1
+    equal exact_observation_binding "$(scalar "
+      SELECT count(*)
+      FROM memory.observation_entity_binding
+      WHERE owner_user_id='$owner'::uuid
+        AND observation_id='$observation'::uuid
+        AND subject_entity_id='$self_entity'::uuid
+        AND subject_resolution_id='$resolution'::uuid
+        AND object_entity_id IS NULL
+        AND object_resolution_id IS NULL
+    ")" 1
+  fi
 fi
 
 if scalar "
@@ -423,14 +532,21 @@ docker exec brains-postgres-1 pg_isready -U sage -d memory >/dev/null
 
 stage_rows=0
 [[ "$stage_test" == 0 ]] || stage_rows=7
+entity_resolution_apply_rows=0
+observation_binding_rows=0
+if [[ "$entity_test" == 1 ]]; then
+  entity_resolution_apply_rows=1
+  observation_binding_rows=1
+fi
 printf '%s\n' \
   'MEMORY_V1_V5_2_SEMANTIC_COMPILER_V9_STANCE_ATOM_CLONE=PASS' \
   "stage_test=$stage_test" \
+  "entity_test=$entity_test" \
   'clone_writes=6' \
   'replay_writes=0' \
   "stage_rows=$stage_rows" \
-  'entity_resolution_apply_rows=0' \
-  'observation_binding_rows=0' \
+  "entity_resolution_apply_rows=$entity_resolution_apply_rows" \
+  "observation_binding_rows=$observation_binding_rows" \
   'claim_rows=0' \
   'qdrant_writes=0' \
   'external_model_calls=0' \
