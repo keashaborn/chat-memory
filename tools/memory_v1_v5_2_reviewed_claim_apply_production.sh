@@ -29,9 +29,11 @@ phase=initialization
 run_tag=
 status_file=
 units_quiesced=0
+workers_quiesced=0
 brains_quiesced=0
 brains_state_before=
 unit_state=$(mktemp /tmp/memory-reviewed-claim-units.XXXXXX)
+worker_state=$(mktemp /tmp/memory-reviewed-claim-workers.XXXXXX)
 table_list=$(mktemp /tmp/memory-reviewed-claim-tables.XXXXXX)
 
 restore_timers() {
@@ -49,6 +51,17 @@ restore_timers() {
   units_quiesced=0
 }
 
+restore_workers() {
+  [[ "$workers_quiesced" -eq 1 ]] || return 0
+  while IFS=$'\t' read -r service prior_state; do
+    [[ "$service" =~ ^memory-v1-[a-z0-9-]+\.service$ ]]
+    if [[ "$prior_state" == active || "$prior_state" == activating ]]; then
+      sudo -n systemctl start --no-block "$service"
+    fi
+  done <"$worker_state"
+  workers_quiesced=0
+}
+
 restore_runtime() {
   if [[ "$brains_quiesced" -eq 1 ]]; then
     if [[ "$brains_state_before" == active ]]; then
@@ -60,14 +73,16 @@ restore_runtime() {
     brains_quiesced=0
   fi
   restore_timers
+  restore_workers
 }
 
 record_exit() {
   code=$?
-  if [[ "$brains_quiesced" -eq 1 || "$units_quiesced" -eq 1 ]]; then
+  if [[ "$brains_quiesced" -eq 1 || "$units_quiesced" -eq 1 \
+    || "$workers_quiesced" -eq 1 ]]; then
     restore_runtime || code=1
   fi
-  rm -f "$unit_state" "$table_list"
+  rm -f "$unit_state" "$worker_state" "$table_list"
   if [[ -n "$status_file" ]]; then
     printf 'run_tag=%s\nphase=%s\nexit_code=%s\ncompleted_at=%s\n' \
       "$run_tag" "$phase" "$code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -246,14 +261,24 @@ while IFS=$'\t' read -r unit _enabled active; do
   [[ "$active" != active ]] || sudo -n systemctl stop "$unit"
 done <"$unit_state"
 units_quiesced=1
+: >"$worker_state"
 while IFS=$'\t' read -r unit _enabled _active; do
   service=${unit%.timer}.service
+  state=$(systemctl show --property=ActiveState --value "$service")
+  printf '%s\t%s\n' "$service" "$state" >>"$worker_state"
+  if [[ "$state" != inactive && "$state" != failed ]]; then
+    sudo -n systemctl stop "$service"
+  fi
   for _attempt in $(seq 1 30); do
-    systemctl is-active --quiet "$service" || break
+    state=$(systemctl show --property=ActiveState --value "$service")
+    [[ "$state" == inactive || "$state" == failed ]] && break
     sleep 1
   done
-  ! systemctl is-active --quiet "$service"
+  state=$(systemctl show --property=ActiveState --value "$service")
+  [[ "$state" == inactive || "$state" == failed ]]
 done <"$unit_state"
+chmod 0600 "$worker_state"
+workers_quiesced=1
 
 phase=quiesce_brains
 brains_state_before=$(systemctl is-active brains.service)
