@@ -134,6 +134,37 @@ class AssistantResponsePreferencesV1Tests(unittest.TestCase):
         self.assertNotIn("assistant-preference-plan-v1", content)
         self.assertTrue(inspection.custom_instructions_included)
 
+    def test_contextual_playfulness_remains_bounded_by_context(self) -> None:
+        marker = compiled_preference_marker_v1(
+            [CompiledPreferenceRuleId.CONTEXTUAL_PLAYFULNESS]
+        )
+        content, inspection = render_assistant_response_preferences_v1(
+            stored(custom_instructions=marker),
+            ResponseMode.ORDINARY,
+        )
+        self.assertIn("occasional light humor or playfulness", content)
+        self.assertIn("Avoid it in technical", content)
+        self.assertTrue(inspection.custom_instructions_included)
+
+    def test_long_editable_narrative_is_never_raw_prompt_content(self) -> None:
+        raw = "Write naturally. " * 400
+        value = AssistantResponsePreferencesInputV1(
+            expected_revision=0,
+            custom_instructions=raw,
+        )
+        content, inspection = render_assistant_response_preferences_v1(
+            stored(custom_instructions=value.custom_instructions),
+            ResponseMode.ORDINARY,
+        )
+        self.assertNotIn("Write naturally", content)
+        self.assertFalse(inspection.custom_instructions_included)
+        self.assertEqual(inspection.suppressed_field_count, 1)
+        with self.assertRaises(ValidationError):
+            AssistantResponsePreferencesInputV1(
+                expected_revision=0,
+                custom_instructions="x" * 8001,
+            )
+
     def test_unknown_or_tampered_compiled_rule_is_suppressed(self) -> None:
         content, inspection = render_assistant_response_preferences_v1(
             stored(

@@ -24,9 +24,9 @@ MAX_ASSISTANT_NAME_CHARS = 40
 MAX_NICKNAME_CHARS = 64
 MAX_OCCUPATION_CHARS = 160
 MAX_MORE_ABOUT_YOU_CHARS = 2_000
-MAX_CUSTOM_INSTRUCTIONS_CHARS = 1_200
+MAX_CUSTOM_INSTRUCTIONS_CHARS = 8_000
 MAX_RENDERED_MORE_ABOUT_YOU_CHARS = 1_200
-MAX_COMPILED_PREFERENCE_RULES = 6
+MAX_COMPILED_PREFERENCE_RULES = 8
 COMPILED_PREFERENCE_MARKER_PREFIX = "assistant-preference-plan-v1:"
 
 _ALLOWED_NAME_PUNCTUATION = frozenset({" ", "'", "’", "-", "."})
@@ -66,6 +66,10 @@ class CompiledPreferenceRuleId(str, Enum):
     PRACTICAL_FOCUS = "practical_focus"
     QUESTION_RESTRAINT = "question_restraint"
     CANDID_UNCERTAINTY = "candid_uncertainty"
+    CONTEXTUAL_PLAYFULNESS = "contextual_playfulness"
+    PRECISE_PLAIN_LANGUAGE = "precise_plain_language"
+    EVIDENCE_FIRST_CONCLUSIONS = "evidence_first_conclusions"
+    INFORMATION_DENSE = "information_dense"
 
 
 COMPILED_PREFERENCE_RULE_TEXT: dict[CompiledPreferenceRuleId, str] = {
@@ -102,6 +106,23 @@ COMPILED_PREFERENCE_RULE_TEXT: dict[CompiledPreferenceRuleId, str] = {
     CompiledPreferenceRuleId.CANDID_UNCERTAINTY: (
         "State material uncertainty directly without excessive hedging."
     ),
+    CompiledPreferenceRuleId.CONTEXTUAL_PLAYFULNESS: (
+        "Use occasional light humor or playfulness in casual, low-stakes "
+        "conversation when it fits naturally. Avoid it in technical, "
+        "high-stakes, sensitive, or serious contexts."
+    ),
+    CompiledPreferenceRuleId.PRECISE_PLAIN_LANGUAGE: (
+        "Favor precise, plain language over persuasion, rhetorical flourishes, "
+        "or ornamental repetition."
+    ),
+    CompiledPreferenceRuleId.EVIDENCE_FIRST_CONCLUSIONS: (
+        "Ground conclusions in available evidence and clearly distinguish "
+        "verified facts from assumptions or inference."
+    ),
+    CompiledPreferenceRuleId.INFORMATION_DENSE: (
+        "Keep prose information-dense and avoid unnecessary repetition while "
+        "preserving context needed for accuracy."
+    ),
 }
 
 
@@ -132,6 +153,18 @@ COMPILED_PREFERENCE_RULE_SUMMARY: dict[CompiledPreferenceRuleId, str] = {
     ),
     CompiledPreferenceRuleId.CANDID_UNCERTAINTY: (
         "States meaningful uncertainty directly."
+    ),
+    CompiledPreferenceRuleId.CONTEXTUAL_PLAYFULNESS: (
+        "Uses occasional light playfulness in casual, low-stakes conversation."
+    ),
+    CompiledPreferenceRuleId.PRECISE_PLAIN_LANGUAGE: (
+        "Favors precise language over rhetorical flourish."
+    ),
+    CompiledPreferenceRuleId.EVIDENCE_FIRST_CONCLUSIONS: (
+        "Distinguishes verified evidence from assumptions and inference."
+    ),
+    CompiledPreferenceRuleId.INFORMATION_DENSE: (
+        "Keeps responses information-dense without unnecessary repetition."
     ),
 }
 

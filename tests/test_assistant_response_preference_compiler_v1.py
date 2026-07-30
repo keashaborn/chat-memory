@@ -5,7 +5,11 @@ import json
 import unittest
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from rag_engine.assistant_response_preference_compiler_v1 import (
+    MAX_PREFERENCE_NARRATIVE_CHARS,
+    AssistantPreferenceCompilationInputV1,
     AssistantPreferenceCompilationCandidateV1,
     OpenAIAssistantPreferenceCompilerV1,
     PreferenceCompilationStatus,
@@ -121,6 +125,71 @@ class AssistantResponsePreferenceCompilerV1Tests(unittest.TestCase):
         self.assertIs(candidate.status, PreferenceCompilationStatus.REJECTED)
         self.assertEqual(candidate.summary, ())
         self.assertEqual(len(candidate.not_applied), 2)
+
+    def test_benign_uncatalogued_material_does_not_create_warning(self) -> None:
+        candidate = build_compilation_candidate_v1(
+            owner_user_id=OWNER,
+            source_revision=0,
+            source_narrative=(
+                "Be concise. Use specialized agents with explicit interfaces."
+            ),
+            output=model_output(
+                response_length=ResponseLength.CONCISE,
+                rejected_reason_codes=[
+                    PreferenceRejectionReasonCode.UNSUPPORTED_STYLE_REQUEST,
+                ],
+            ),
+            provider_model="gpt-5.6-test",
+            provider_response_id="resp_test",
+            now=NOW,
+        )
+        self.assertIs(candidate.status, PreferenceCompilationStatus.ACCEPTED)
+        self.assertEqual(
+            candidate.summary,
+            ("Keeps responses concise by default.",),
+        )
+        self.assertEqual(candidate.not_applied, ())
+
+    def test_contextual_playfulness_is_bounded_and_user_visible(self) -> None:
+        candidate = build_compilation_candidate_v1(
+            owner_user_id=OWNER,
+            source_revision=0,
+            source_narrative=(
+                "Be natural and a little fun in casual conversation, but not "
+                "for serious or technical topics."
+            ),
+            output=model_output(
+                conversation_style=ConversationStyle.NATURAL,
+                rule_ids=[
+                    CompiledPreferenceRuleId.CONTEXTUAL_PLAYFULNESS,
+                    CompiledPreferenceRuleId.PRACTICAL_FOCUS,
+                ],
+            ),
+            provider_model="gpt-5.6-test",
+            provider_response_id="resp_test",
+            now=NOW,
+        )
+        self.assertIs(candidate.status, PreferenceCompilationStatus.ACCEPTED)
+        self.assertIn(
+            "Uses occasional light playfulness in casual, low-stakes conversation.",
+            candidate.summary,
+        )
+        self.assertEqual(candidate.not_applied, ())
+
+    def test_long_narrative_boundary_accepts_eight_thousand_characters(self) -> None:
+        accepted = AssistantPreferenceCompilationInputV1(
+            expected_revision=0,
+            narrative="x" * MAX_PREFERENCE_NARRATIVE_CHARS,
+        )
+        self.assertEqual(
+            len(accepted.narrative),
+            MAX_PREFERENCE_NARRATIVE_CHARS,
+        )
+        with self.assertRaises(ValidationError):
+            AssistantPreferenceCompilationInputV1(
+                expected_revision=0,
+                narrative="x" * (MAX_PREFERENCE_NARRATIVE_CHARS + 1),
+            )
 
     def test_empty_narrative_creates_clear_candidate_without_provider(self) -> None:
         class FailingClient:

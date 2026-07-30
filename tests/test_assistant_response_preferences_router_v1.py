@@ -69,6 +69,25 @@ class AssistantResponsePreferencesRouterV1Tests(unittest.TestCase):
         drop = source.index("DROP COLUMN IF EXISTS preference_narrative")
         self.assertLess(restore, drop)
 
+    def test_v2_migration_widens_narrative_without_destructive_rollback(self) -> None:
+        migration = (
+            ROOT
+            / "ops/sql/20260730_assistant_response_preference_compiler_v2.sql"
+        ).read_text(encoding="utf-8")
+        rollback = (
+            ROOT
+            / "ops/sql/20260730_assistant_response_preference_compiler_v2_rollback.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "char_length(preference_narrative) BETWEEN 1 AND 8000",
+            migration,
+        )
+        self.assertIn("Never projected directly into an answer prompt", migration)
+        self.assertIn("rollback blocked", rollback)
+        self.assertIn("char_length(preference_narrative) > 1200", rollback)
+        self.assertNotIn("left(preference_narrative", rollback.lower())
+        self.assertNotIn("substring(preference_narrative", rollback.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
