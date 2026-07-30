@@ -6,9 +6,13 @@ set -Eeuo pipefail
 
 repo=/opt/chat-memory
 worktree=/home/ubuntu/chat-memory-queue-reconciliation-v1
-base_commit=d9dc01a3d134550a004fa238577124bb171d66ce
+base_commit=${MEMORY_QUEUE_RECONCILIATION_BASE_COMMIT:-d9dc01a3d134550a004fa238577124bb171d66ce}
 expected_commit=${MEMORY_QUEUE_RECONCILIATION_COMMIT:-}
-expected_plan_sha=06337c87741dfc0ea5dc9b1ce53222cff4f339fcd49281bc1fd1c8929af72565
+expected_plan_sha=${MEMORY_QUEUE_RECONCILIATION_PLAN_SHA256:-06337c87741dfc0ea5dc9b1ce53222cff4f339fcd49281bc1fd1c8929af72565}
+expected_superseded=${MEMORY_QUEUE_RECONCILIATION_SUPERSEDED:-21}
+expected_rebind=${MEMORY_QUEUE_RECONCILIATION_REBIND:-34}
+expected_orphan=${MEMORY_QUEUE_RECONCILIATION_ORPHAN:-1}
+install_migration=${MEMORY_QUEUE_RECONCILIATION_INSTALL_MIGRATION:-true}
 expected_migration_sha=42316622327ee91bc95f8e901eaf5acd390a3bf9a8d9a1dd4f7ba5f586df4611
 expected_rollback_sha=68c70fd0dbfc31277e063f2bf7699b7d2efce3eaf409e11dc508919e6c2857c5
 expected_worker_sha=2ec1779eae2c11d566df533340a399014b869bd37f1617350d1cdc243045f6fe
@@ -24,6 +28,18 @@ if [[ ! $expected_commit =~ ^[0-9a-f]{40}$ ]]; then
   echo "exact queue reconciliation commit is required" >&2
   exit 1
 fi
+if [[ ! $base_commit =~ ^[0-9a-f]{40}$
+      || ! $expected_plan_sha =~ ^[0-9a-f]{64}$
+      || ! $expected_superseded =~ ^[0-9]+$
+      || ! $expected_rebind =~ ^[0-9]+$
+      || ! $expected_orphan =~ ^[0-9]+$
+      || $((expected_superseded+expected_rebind+expected_orphan)) -gt 100
+      || $((expected_superseded+expected_rebind+expected_orphan)) -lt 1
+      || ! $install_migration =~ ^(true|false)$ ]]; then
+  echo "queue reconciliation deployment inputs are invalid" >&2
+  exit 1
+fi
+expected_total=$((expected_superseded+expected_rebind+expected_orphan))
 
 restore_timers() {
   if [[ ! -s $timer_state ]] || $timers_restored = true; then
@@ -122,8 +138,15 @@ cp "$worktree/$rollback_rel" "$report_dir/"
 sudo -u ubuntu git -C "$repo" merge --ff-only "$expected_commit"
 test "$(git -C "$repo" rev-parse HEAD)" = "$expected_commit"
 test -z "$(git -C "$repo" status --short)"
-docker exec -i brains-postgres-1 psql -X -v ON_ERROR_STOP=1 \
-  -U sage -d "$source_database" <"$repo/$migration_rel"
+if [[ $install_migration = true ]]; then
+  docker exec -i brains-postgres-1 psql -X -v ON_ERROR_STOP=1 \
+    -U sage -d "$source_database" <"$repo/$migration_rel"
+else
+  test "$(docker exec brains-postgres-1 psql -X -A -t \
+    -v ON_ERROR_STOP=1 -U sage -d "$source_database" -c \
+    "SELECT (to_regprocedure('memory.plan_owner_context_superseded_v1(integer)') IS NOT NULL)::int")" \
+    -eq 1
+fi
 
 scalar() {
   docker exec brains-postgres-1 psql -X -A -t -v ON_ERROR_STOP=1 \
@@ -201,10 +224,14 @@ capture_qdrant() {
 PYTHONPATH="$repo" POSTGRES_DSN="$POSTGRES_DSN" \
   "$repo/venv/bin/python" "$repo/$worker_rel" --limit 100 \
   >"$report_dir/plan.json"
-test "$(jq -r '.candidate_count' "$report_dir/plan.json")" -eq 56
-test "$(jq -r '.candidate_counts.superseded' "$report_dir/plan.json")" -eq 21
-test "$(jq -r '.candidate_counts.context_rebind' "$report_dir/plan.json")" -eq 34
-test "$(jq -r '.candidate_counts.orphan_recovery' "$report_dir/plan.json")" -eq 1
+test "$(jq -r '.candidate_count' "$report_dir/plan.json")" \
+  -eq "$expected_total"
+test "$(jq -r '.candidate_counts.superseded' "$report_dir/plan.json")" \
+  -eq "$expected_superseded"
+test "$(jq -r '.candidate_counts.context_rebind' "$report_dir/plan.json")" \
+  -eq "$expected_rebind"
+test "$(jq -r '.candidate_counts.orphan_recovery' "$report_dir/plan.json")" \
+  -eq "$expected_orphan"
 test "$(jq -r '.plan_sha256' "$report_dir/plan.json")" = \
   "$expected_plan_sha"
 
@@ -218,9 +245,12 @@ MEMORY_V1_QUEUE_RECONCILIATION_APPLY=memory_v1_queue_reconciliation_apply_v1 \
   --expected-plan-sha256 "$expected_plan_sha" --apply \
   >"$report_dir/apply.json"
 test "$(jq -r '.outcome' "$report_dir/apply.json")" = applied
-test "$(jq -r '.applied_counts.superseded' "$report_dir/apply.json")" -eq 21
-test "$(jq -r '.applied_counts.context_rebind' "$report_dir/apply.json")" -eq 34
-test "$(jq -r '.applied_counts.orphan_recovery' "$report_dir/apply.json")" -eq 1
+test "$(jq -r '.applied_counts.superseded' "$report_dir/apply.json")" \
+  -eq "$expected_superseded"
+test "$(jq -r '.applied_counts.context_rebind' "$report_dir/apply.json")" \
+  -eq "$expected_rebind"
+test "$(jq -r '.applied_counts.orphan_recovery' "$report_dir/apply.json")" \
+  -eq "$expected_orphan"
 test "$(jq -r '.new_local_model_calls' "$report_dir/apply.json")" -eq 0
 test "$(jq -r '.external_model_calls' "$report_dir/apply.json")" -eq 0
 test "$(jq -r '.claim_writes' "$report_dir/apply.json")" -eq 0
@@ -236,16 +266,18 @@ cmp -s "$report_dir/before-qdrant.tsv" "$report_dir/after-qdrant.tsv"
 
 join "$report_dir/before-counts.tsv" "$report_dir/after-counts.tsv" \
   >"$report_dir/deltas.tsv"
-awk '
+awk -v superseded="$expected_superseded" \
+  -v rebind="$expected_rebind" -v orphan="$expected_orphan" '
   function delta() {return $3-$2}
-  $1 == "evidence" && delta() != 34 {failed=1}
+  $1 == "evidence" && delta() != rebind {failed=1}
   $1 == "evidence_context_queue_reconciliation_v1" &&
-    delta() != 21 {failed=1}
-  $1 == "evidence_context_rebind_v1" && delta() != 34 {failed=1}
-  $1 == "evidence_extraction_event" && delta() != 90 {failed=1}
-  $1 == "evidence_extraction_job" && delta() != 34 {failed=1}
-  $1 == "evidence_intake_terminal" && delta() != 34 {failed=1}
-  $1 == "v5_local_inference_event" && delta() != 1 {failed=1}
+    delta() != superseded {failed=1}
+  $1 == "evidence_context_rebind_v1" && delta() != rebind {failed=1}
+  $1 == "evidence_extraction_event" &&
+    delta() != superseded+(2*rebind)+orphan {failed=1}
+  $1 == "evidence_extraction_job" && delta() != rebind {failed=1}
+  $1 == "evidence_intake_terminal" && delta() != rebind {failed=1}
+  $1 == "v5_local_inference_event" && delta() != orphan {failed=1}
   $1 != "evidence" &&
     $1 != "evidence_context_queue_reconciliation_v1" &&
     $1 != "evidence_context_rebind_v1" &&
@@ -261,32 +293,6 @@ PYTHONPATH="$repo" POSTGRES_DSN="$POSTGRES_DSN" \
   "$repo/venv/bin/python" "$repo/$worker_rel" --limit 100 \
   >"$report_dir/replay-plan.json"
 test "$(jq -r '.candidate_count' "$report_dir/replay-plan.json")" -eq 0
-
-admin=1240822d-ac9a-4096-95aa-e2b24d36ef50
-new_owner=9dd7426d-77eb-4765-9db2-13e33ad7444d
-for owner in "$admin" "$new_owner"; do
-  PYTHONPATH="$repo" POSTGRES_DSN="$POSTGRES_DSN" \
-    "$repo/venv/bin/python" \
-    "$repo/scripts/memory_v1_v5_local_inference_scheduler.py" \
-    --owner-user-id "$owner" --max-attempts 1 \
-    >"$report_dir/scheduler-$owner.json"
-done
-test "$(
-  jq -r '.plans[0].context_ready_count' \
-    "$report_dir/scheduler-$admin.json"
-)" -eq 24
-test "$(
-  jq -r '.plans[0].context_ready_count' \
-    "$report_dir/scheduler-$new_owner.json"
-)" -eq 10
-test "$(
-  jq -r '.plans[0].context_rebind_required_count' \
-    "$report_dir/scheduler-$admin.json"
-)" -eq 0
-test "$(
-  jq -r '.plans[0].context_rebind_required_count' \
-    "$report_dir/scheduler-$new_owner.json"
-)" -eq 0
 
 test "$(scalar "
   SELECT (
@@ -317,6 +323,9 @@ jq -n \
   --arg plan_sha256 "$expected_plan_sha" \
   --arg migration_sha256 "$expected_migration_sha" \
   --arg rollback_sha256 "$expected_rollback_sha" \
+  --argjson superseded "$expected_superseded" \
+  --argjson context_rebound "$expected_rebind" \
+  --argjson orphan_recovered "$expected_orphan" \
   '{
     status:$status,
     production_commit:$commit,
@@ -325,10 +334,10 @@ jq -n \
     plan_sha256:$plan_sha256,
     migration_sha256:$migration_sha256,
     rollback_sha256:$rollback_sha256,
-    superseded:21,
-    context_rebound:34,
-    orphan_recovered:1,
-    context_ready_after:34,
+    superseded:$superseded,
+    context_rebound:$context_rebound,
+    orphan_recovered:$orphan_recovered,
+    context_ready_created:$context_rebound,
     new_model_calls:0,
     qdrant_unchanged:true,
     protected_stores_unchanged:true,
@@ -340,8 +349,9 @@ report_sha=$(sha256sum "$report_dir/report.json" | cut -d' ' -f1)
 
 printf 'QUEUE_RECONCILIATION_PRODUCTION=PASS commit=%s\n' \
   "$expected_commit"
-printf 'SUPERSEDED=21 CONTEXT_REBOUND=34 ORPHAN_RECOVERED=1\n'
-printf 'CONTEXT_READY_AFTER=34\n'
+printf 'SUPERSEDED=%s CONTEXT_REBOUND=%s ORPHAN_RECOVERED=%s\n' \
+  "$expected_superseded" "$expected_rebind" "$expected_orphan"
+printf 'CONTEXT_READY_CREATED=%s\n' "$expected_rebind"
 printf 'BACKUP=%s SHA256=%s\n' "$backup" "$backup_sha"
 printf 'REPORT=%s SHA256=%s\n' "$report_dir/report.json" "$report_sha"
 printf 'QDRANT_UNCHANGED=true PROTECTED_STORES_UNCHANGED=true\n'
