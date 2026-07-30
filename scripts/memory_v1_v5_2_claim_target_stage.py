@@ -507,10 +507,15 @@ async def cross_owner(
     rejected = False
     try:
         await set_actor(conn, other)
+        probe = conn.transaction()
+        await probe.start()
         try:
             await load_source(conn, manifest["stage_items"][0]["observation_id"])
         except Exception:
             rejected = True
+            await probe.rollback()
+        else:
+            await probe.commit()
         if await conn.fetchval("SELECT txid_current_if_assigned()") is not None:
             raise ClaimTargetStageError("cross-owner probe assigned a transaction ID")
     finally:
