@@ -1,0 +1,31 @@
+{
+  "apply_id": "d57a2c0c-d8c9-5211-960f-64de1190efe0",
+  "apply_manifest_sha256": "67c907b70a5f02679fa98439fb1984d3ea06f262c2c40a0a02e72662aac608e6",
+  "case_id": "self_identity_name_eric",
+  "contract_version": "memory_v1_v5_2_atom_stage_build_manifest_v2",
+  "evidence_id": "a7065682-12c2-414f-9c6f-fdcb898ee1c8",
+  "expected_counts": {
+    "comparison_hints": 0,
+    "deferrals": 0,
+    "entity_mentions": 1,
+    "observations": 1
+  },
+  "expected_resolutions": {
+    "e00": {
+      "action": "link_existing",
+      "decision_state": "auto_link_eligible",
+      "proposed_entity": null,
+      "review_reason_codes": [
+        "trusted_owner_self_binding"
+      ],
+      "selected_entity_id": "35029129-27bd-457b-8cb5-82dd37ba32ba"
+    }
+  },
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "packet_id": "1f7fe393-afc3-5982-b69c-c90877659ef6",
+  "proposal_id": "65ed67b2-9c55-55a1-a779-7d5bf827d36c",
+  "proposal_sha256": "8e18295ae0c79e51a3ea86bb1dec40231e39e02de30100d01d81b656bbaf8f21",
+  "review_id": "909cb65a-2c9d-5960-80be-4e342385a4eb",
+  "stage_projection_sha256": "e1fbdf604a8a951c8c55f3828a6def9695dbaea766d3fed89a11b57290c9569d",
+  "target_server": "seebx"
+}
