@@ -1,10 +1,10 @@
 [Unit]
-Description=Run one private Memory V1 observation entailment every two hours
+Description=Run bounded private Memory V1 observation entailment continuously
 
 [Timer]
-OnBootSec=45min
-OnUnitInactiveSec=2h
-RandomizedDelaySec=3min
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
 Persistent=true
 Unit=memory-v1-v5-local-entailment.service
 

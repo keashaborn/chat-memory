@@ -3,6 +3,7 @@ from __future__ import annotations
 """Sanitized, owner-scoped operational health for governed Memory V1."""
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -16,6 +17,7 @@ from rag_engine.qdrant_compat import make_qdrant_client
 
 
 SCHEMA = "admin_memory_health_v1"
+PIPELINE_SCHEMA = "memory_pipeline_status_v1"
 ANSWER_WINDOW_DAYS = 7
 
 
@@ -45,6 +47,7 @@ def _summarize_memory_health_v1(
     processing: Mapping[str, Any],
     evidence: Mapping[str, Any],
     answers: Mapping[str, Any],
+    pipeline: Mapping[str, Any],
     vector_points: int | None,
     vector_error: bool,
     governed_active: bool,
@@ -140,6 +143,9 @@ def _summarize_memory_health_v1(
         )
 
     status = "critical" if critical else "attention" if attention else "healthy"
+    pipeline_stages = dict(pipeline.get("stages") or {})
+    pipeline_stages["indexed_vectors"] = vector_points
+    pipeline_stages["memory_bound_answers_7d"] = memory_bound
     return {
         "ok": True,
         "schema": SCHEMA,
@@ -197,6 +203,59 @@ def _summarize_memory_health_v1(
             "attested_answers": attested,
             "memory_bound_answers": memory_bound,
             "memory_bound_percent": _memory_bound_percent(attested, memory_bound),
+        },
+        "pipeline_schema": PIPELINE_SCHEMA,
+        "pipeline": {
+            "stages": {
+                "evidence_rows": _integer(pipeline_stages, "evidence_rows"),
+                "extracted_evidence_rows": _integer(
+                    pipeline_stages,
+                    "extracted_evidence_rows",
+                ),
+                "durable_observations": _integer(
+                    pipeline_stages,
+                    "durable_observations",
+                ),
+                "bound_observations": _integer(
+                    pipeline_stages,
+                    "bound_observations",
+                ),
+                "evaluated_observations": _integer(
+                    pipeline_stages,
+                    "evaluated_observations",
+                ),
+                "claim_plan_items": _integer(
+                    pipeline_stages,
+                    "claim_plan_items",
+                ),
+                "reviewed_claim_plan_items": _integer(
+                    pipeline_stages,
+                    "reviewed_claim_plan_items",
+                ),
+                "supported_claims": supported,
+                "indexed_vectors": (
+                    int(vector_points) if vector_points is not None else None
+                ),
+                "memory_bound_answers_7d": memory_bound,
+            },
+            "backlog": {
+                "waiting_for_binding": _integer(
+                    pipeline.get("backlog") or {},
+                    "waiting_for_binding",
+                ),
+                "waiting_for_entailment": _integer(
+                    pipeline.get("backlog") or {},
+                    "waiting_for_entailment",
+                ),
+                "waiting_for_claim_review": _integer(
+                    pipeline.get("backlog") or {},
+                    "waiting_for_claim_review",
+                ),
+                "ready_for_materialization": _integer(
+                    pipeline.get("backlog") or {},
+                    "ready_for_materialization",
+                ),
+            },
         },
         "warnings": warnings,
     }
@@ -300,8 +359,17 @@ async def _load_actor_memory_health(
                 """,
                 actor,
             )
+            pipeline_value = await conn.fetchval(
+                "SELECT memory.read_owner_pipeline_status_v1()"
+            )
     finally:
         await conn.close()
+    if isinstance(pipeline_value, str):
+        pipeline_value = json.loads(pipeline_value)
+    if not isinstance(pipeline_value, Mapping):
+        raise RuntimeError("memory pipeline status returned an invalid payload")
+    if pipeline_value.get("schema") != PIPELINE_SCHEMA:
+        raise RuntimeError("memory pipeline status schema is incompatible")
     return {
         "claim": dict(claim or {}),
         "preference": dict(preference or {}),
@@ -309,6 +377,7 @@ async def _load_actor_memory_health(
         "processing": dict(processing or {}),
         "evidence": dict(evidence or {}),
         "answers": dict(answers or {}),
+        "pipeline": dict(pipeline_value),
     }
 
 
@@ -366,6 +435,7 @@ async def build_admin_memory_health_v1(
         processing=database["processing"],
         evidence=database["evidence"],
         answers=database["answers"],
+        pipeline=database["pipeline"],
         vector_points=vector_points,
         vector_error=vector_error,
         governed_active=governed_active,
@@ -375,4 +445,4 @@ async def build_admin_memory_health_v1(
     )
 
 
-__all__ = ["SCHEMA", "build_admin_memory_health_v1"]
+__all__ = ["PIPELINE_SCHEMA", "SCHEMA", "build_admin_memory_health_v1"]

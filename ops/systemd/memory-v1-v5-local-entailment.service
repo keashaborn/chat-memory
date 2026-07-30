@@ -1,8 +1,10 @@
 [Unit]
-Description=Memory V1 owner-scoped private observation entailment
+Description=Memory V1 bounded owner-scoped private observation entailment
 After=network-online.target brains.service memory-v1-v5-local-inference-tunnel.service memory-v1-v5-local-auto-resolution.service
 Wants=network-online.target
 Requires=memory-v1-v5-local-inference-tunnel.service
+StartLimitIntervalSec=30min
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -15,8 +17,8 @@ Environment=MEMORY_V1_V5_LOCAL_ENTAILMENT_APPLY=memory_v1_v5_local_entailment_ap
 LoadCredential=local_api_key:/etc/memory-v1-local-inference/api-key
 RuntimeDirectory=memory-v1-v5-local-entailment
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --max-output-tokens 128 --timeout-seconds 300 --apply
-TimeoutStartSec=7min
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-local-entailment/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_local_entailment_scheduler.py --max-records 10 --max-output-tokens 128 --timeout-seconds 120 --apply
+TimeoutStartSec=25min
 UMask=0077
 Nice=10
 CPUQuota=25%

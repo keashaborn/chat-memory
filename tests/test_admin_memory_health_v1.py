@@ -30,6 +30,23 @@ def _payload(**overrides):
             "last_answer_at": NOW,
             "last_memory_bound_at": NOW - timedelta(hours=2),
         },
+        "pipeline": {
+            "stages": {
+                "evidence_rows": 100,
+                "extracted_evidence_rows": 80,
+                "durable_observations": 40,
+                "bound_observations": 32,
+                "evaluated_observations": 24,
+                "claim_plan_items": 15,
+                "reviewed_claim_plan_items": 12,
+            },
+            "backlog": {
+                "waiting_for_binding": 8,
+                "waiting_for_entailment": 8,
+                "waiting_for_claim_review": 3,
+                "ready_for_materialization": 2,
+            },
+        },
         "vector_points": 43,
         "vector_error": False,
         "governed_active": True,
@@ -54,6 +71,16 @@ class AdminMemoryHealthTests(unittest.TestCase):
             "stored_not_response_active",
         )
         self.assertNotIn("owner_user_id", str(payload))
+        self.assertEqual(payload["pipeline_schema"], "memory_pipeline_status_v1")
+        self.assertEqual(payload["pipeline"]["stages"]["indexed_vectors"], 43)
+        self.assertEqual(
+            payload["pipeline"]["stages"]["memory_bound_answers_7d"],
+            4,
+        )
+        self.assertEqual(
+            payload["pipeline"]["backlog"]["waiting_for_entailment"],
+            8,
+        )
 
     def test_backlog_requires_attention_without_declaring_memory_broken(self):
         processing = {
