@@ -124,8 +124,9 @@ docker exec "$container" pg_dump -U sage -d "$database" -Fc >"$backup"
 [[ -s "$backup" ]]
 sha256sum "$backup" >"$backup_sha"
 chmod 0600 "$backup" "$backup_sha"
+umask 022
 
-git -C "$production_repo" merge --ff-only "$target_commit"
+sudo -u ubuntu git -C "$production_repo" merge --ff-only "$target_commit"
 [[ "$(git -C "$production_repo" rev-parse HEAD)" == "$target_commit" ]]
 [[ -z "$(git -C "$production_repo" status --porcelain)" ]]
 install -o root -g root -m 0644 \
