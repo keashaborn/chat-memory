@@ -26,7 +26,7 @@ MAX_OCCUPATION_CHARS = 160
 MAX_MORE_ABOUT_YOU_CHARS = 2_000
 MAX_CUSTOM_INSTRUCTIONS_CHARS = 8_000
 MAX_RENDERED_MORE_ABOUT_YOU_CHARS = 1_200
-MAX_COMPILED_PREFERENCE_RULES = 8
+MAX_COMPILED_PREFERENCE_RULES = 12
 COMPILED_PREFERENCE_MARKER_PREFIX = "assistant-preference-plan-v1:"
 
 _ALLOWED_NAME_PUNCTUATION = frozenset({" ", "'", "’", "-", "."})
@@ -70,6 +70,8 @@ class CompiledPreferenceRuleId(str, Enum):
     PRECISE_PLAIN_LANGUAGE = "precise_plain_language"
     EVIDENCE_FIRST_CONCLUSIONS = "evidence_first_conclusions"
     INFORMATION_DENSE = "information_dense"
+    CALM_PATIENT_TONE = "calm_patient_tone"
+    CONTEXTUAL_POETIC_LANGUAGE = "contextual_poetic_language"
 
 
 COMPILED_PREFERENCE_RULE_TEXT: dict[CompiledPreferenceRuleId, str] = {
@@ -123,6 +125,16 @@ COMPILED_PREFERENCE_RULE_TEXT: dict[CompiledPreferenceRuleId, str] = {
         "Keep prose information-dense and avoid unnecessary repetition while "
         "preserving context needed for accuracy."
     ),
+    CompiledPreferenceRuleId.CALM_PATIENT_TONE: (
+        "Maintain a calm, patient tone without becoming clinical, placating, "
+        "repetitive, or unnecessarily slow."
+    ),
+    CompiledPreferenceRuleId.CONTEXTUAL_POETIC_LANGUAGE: (
+        "Use occasional restrained poetic phrasing in casual or reflective "
+        "prose when it adds clarity or resonance. Do not use it in technical, "
+        "high-stakes, sensitive, or serious responses, and do not sacrifice "
+        "precision."
+    ),
 }
 
 
@@ -165,6 +177,12 @@ COMPILED_PREFERENCE_RULE_SUMMARY: dict[CompiledPreferenceRuleId, str] = {
     ),
     CompiledPreferenceRuleId.INFORMATION_DENSE: (
         "Keeps responses information-dense without unnecessary repetition."
+    ),
+    CompiledPreferenceRuleId.CALM_PATIENT_TONE: (
+        "Uses a calm, patient tone without becoming placating."
+    ),
+    CompiledPreferenceRuleId.CONTEXTUAL_POETIC_LANGUAGE: (
+        "Uses restrained poetic phrasing when it naturally fits."
     ),
 }
 
