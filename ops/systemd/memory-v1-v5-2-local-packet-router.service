@@ -13,7 +13,7 @@ Environment=PYTHONPATH=/opt/chat-memory
 Environment=MEMORY_V1_V5_2_LOCAL_PACKET_ROUTER_APPLY=memory_v1_v5_2_local_packet_router_apply_v1
 RuntimeDirectory=memory-v1-v5-2-local-packet-router
 RuntimeDirectoryMode=0700
-ExecStart=/usr/bin/flock -n /run/memory-v1-v5-2-local-packet-router/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_2_local_packet_router.py --owner-user-id 1240822d-ac9a-4096-95aa-e2b24d36ef50 --apply
+ExecStart=/usr/bin/flock -n /run/memory-v1-v5-2-local-packet-router/worker.lock /opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_v5_2_local_packet_router.py --apply
 TimeoutStartSec=5min
 UMask=0077
 Nice=10

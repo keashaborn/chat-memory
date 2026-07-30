@@ -12,13 +12,14 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 from typing import Any
 import uuid
 
 import asyncpg
 
+from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 from scripts.memory_v1_v5_local_packet_disposition import (
-    canonical_owners,
     loopback_dsn,
     sha256_text,
     stable_json,
@@ -48,6 +49,16 @@ TERMINAL_REASON_CODES = frozenset(
         "insufficient_evidence",
     }
 )
+
+
+def rotate_owners(
+    owners: list[uuid.UUID],
+    minute_slot: int,
+) -> list[uuid.UUID]:
+    if not owners:
+        return []
+    offset = minute_slot % len(owners)
+    return owners[offset:] + owners[:offset]
 
 
 def arguments() -> argparse.Namespace:
@@ -386,13 +397,10 @@ async def record_review(
 
 async def run() -> int:
     args = arguments()
-    owners = canonical_owners(args.owner_user_id)
     try:
         target_packet_id = uuid.UUID(args.packet_id) if args.packet_id else None
     except ValueError as exc:
         raise RuntimeError("exact packet ID is invalid") from exc
-    if target_packet_id is not None and len(owners) != 1:
-        raise RuntimeError("exact packet routing requires exactly one owner")
     if args.apply and os.getenv("MEMORY_V1_V5_2_LOCAL_PACKET_ROUTER_APPLY") != (
         APPLY_ENABLE_TOKEN
     ):
@@ -400,6 +408,11 @@ async def run() -> int:
     dsn = os.getenv("POSTGRES_DSN")
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is required")
+    owners = await resolve_authenticated_owners(dsn, args.owner_user_id)
+    if not args.owner_user_id:
+        owners = rotate_owners(owners, int(time.time() // 60))
+    if target_packet_id is not None and len(owners) != 1:
+        raise RuntimeError("exact packet routing requires exactly one owner")
     root = secure_review_root(args.review_root)
     builder = Path(args.review_builder).resolve(strict=True)
     conn = await asyncpg.connect(loopback_dsn(dsn), command_timeout=30, ssl=False)

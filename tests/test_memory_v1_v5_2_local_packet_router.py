@@ -13,13 +13,36 @@ from unittest import mock
 import uuid
 
 
-sys.modules.setdefault("asyncpg", types.ModuleType("asyncpg"))
+asyncpg_module = types.ModuleType("asyncpg")
+asyncpg_module.connect = None
+sys.modules.setdefault("asyncpg", asyncpg_module)
 scripts_package = types.ModuleType("scripts")
 scripts_package.__path__ = []
+sys.modules.setdefault("scripts", scripts_package)
+AUTHENTICATED_OWNERS_SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "memory_v1_authenticated_owners.py"
+)
+AUTHENTICATED_OWNERS_SPEC = importlib.util.spec_from_file_location(
+    "scripts.memory_v1_authenticated_owners",
+    AUTHENTICATED_OWNERS_SCRIPT,
+)
+assert (
+    AUTHENTICATED_OWNERS_SPEC is not None
+    and AUTHENTICATED_OWNERS_SPEC.loader is not None
+)
+authenticated_owners_module = importlib.util.module_from_spec(
+    AUTHENTICATED_OWNERS_SPEC
+)
+AUTHENTICATED_OWNERS_SPEC.loader.exec_module(authenticated_owners_module)
+sys.modules.setdefault(
+    "scripts.memory_v1_authenticated_owners",
+    authenticated_owners_module,
+)
 disposition_module = types.ModuleType(
     "scripts.memory_v1_v5_local_packet_disposition"
 )
-disposition_module.canonical_owners = lambda values: [uuid.UUID(value) for value in values]
 disposition_module.loopback_dsn = lambda value: value
 disposition_module.sha256_text = lambda value: hashlib.sha256(
     value.encode("utf-8")
@@ -27,7 +50,6 @@ disposition_module.sha256_text = lambda value: hashlib.sha256(
 disposition_module.stable_json = lambda value: json.dumps(
     value, sort_keys=True, separators=(",", ":")
 )
-sys.modules.setdefault("scripts", scripts_package)
 sys.modules.setdefault(
     "scripts.memory_v1_v5_local_packet_disposition",
     disposition_module,
@@ -71,6 +93,31 @@ class _Connection:
 
 
 class V52LocalPacketRouterTest(unittest.TestCase):
+    def test_authenticated_owner_rotation_prevents_fixed_uuid_priority(self) -> None:
+        owners = [
+            uuid.UUID("11111111-1111-4111-8111-111111111111"),
+            uuid.UUID("22222222-2222-4222-8222-222222222222"),
+            uuid.UUID("33333333-3333-4333-8333-333333333333"),
+        ]
+        self.assertEqual(MODULE.rotate_owners(owners, 0), owners)
+        self.assertEqual(
+            MODULE.rotate_owners(owners, 1),
+            [owners[1], owners[2], owners[0]],
+        )
+        self.assertEqual(
+            MODULE.rotate_owners(owners, 4),
+            [owners[1], owners[2], owners[0]],
+        )
+        self.assertEqual(MODULE.rotate_owners([], 5), [])
+
+    def test_router_uses_authenticated_owner_registry(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "await resolve_authenticated_owners(dsn, args.owner_user_id)",
+            source,
+        )
+        self.assertNotIn("canonical_owners(", source)
+
     def test_exact_packet_selection_never_falls_back(self) -> None:
         wanted = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
         other = uuid.UUID("3a4e8e8b-a4d2-4574-bcba-712e2fa6ac01")
