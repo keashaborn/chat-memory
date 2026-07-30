@@ -5,6 +5,7 @@ import uuid
 from scripts.memory_v1_v5_local_entailment_scheduler import (
     LocalEntailmentError,
     bounded_targets,
+    single_local_call_delta,
     validate_arguments,
 )
 from scripts.memory_v1_v5_local_inference_canary import (
@@ -67,6 +68,25 @@ class LocalEntailmentSchedulerTests(unittest.TestCase):
                 [(owner, [_row(observation_id), _row(observation_id)])],
                 10,
             )
+
+    def test_cumulative_transport_counter_is_reported_per_record(self):
+        self.assertEqual(single_local_call_delta(0, 1), 1)
+        self.assertEqual(single_local_call_delta(1, 2), 1)
+        with self.assertRaisesRegex(
+            LocalEntailmentError,
+            "exactly one local model call",
+        ):
+            single_local_call_delta(2, 2)
+        with self.assertRaisesRegex(
+            LocalEntailmentError,
+            "exactly one local model call",
+        ):
+            single_local_call_delta(2, 4)
+        with self.assertRaisesRegex(
+            LocalEntailmentError,
+            "counter regressed",
+        ):
+            single_local_call_delta(3, 2)
 
 
 if __name__ == "__main__":

@@ -165,6 +165,18 @@ def bounded_targets(
     return selected
 
 
+def single_local_call_delta(before: int, after: int) -> int:
+    """Convert the shared transport's cumulative counter into a per-record count."""
+    if before < 0 or after < before:
+        raise LocalEntailmentError("local model call counter regressed")
+    delta = after - before
+    if delta != 1:
+        raise LocalEntailmentError(
+            "entailment assessment must make exactly one local model call"
+        )
+    return delta
+
+
 def sanitized_plan(owner: uuid.UUID, row: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "owner_user_id_sha256": sha256_text(str(owner)),
@@ -329,6 +341,7 @@ async def run() -> int:
         decision_counts: dict[str, int] = {}
         for owner, target in selected:
             try:
+                calls_before = int(transport.local_model_calls)
                 assessment = assess(
                     transport,
                     model=args.model,
@@ -336,6 +349,10 @@ async def run() -> int:
                     observation_payload=json_value(target["observation_payload"]),
                     timeout_seconds=args.timeout_seconds,
                     max_output_tokens=args.max_output_tokens,
+                )
+                calls_for_record = single_local_call_delta(
+                    calls_before,
+                    int(transport.local_model_calls),
                 )
                 first, replay = await persist_assessment(
                     conn,
@@ -367,7 +384,7 @@ async def run() -> int:
                     sha256_text(str(exc)),
                 ) from exc
             processed += 1
-            local_model_calls += int(assessment.local_model_calls)
+            local_model_calls += calls_for_record
             rows_written = int(first["rows_written"])
             database_rows_created += rows_written
             decision = str(first["decision"])
