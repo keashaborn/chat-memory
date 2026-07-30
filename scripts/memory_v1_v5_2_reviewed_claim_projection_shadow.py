@@ -215,7 +215,25 @@ async def shadow_tests(
             or trace.get("database_writes") != 0
             or trace.get("qdrant_writes") != 0
         ):
-            raise ShadowProjectionError("shadow trace was not read-only")
+            diagnostic = {
+                "claim_id": item["claim_id"],
+                "predicate": item["predicate"],
+                "status": trace.get("status"),
+                "outcome_code": trace.get("outcome_code"),
+                "candidate_count": trace.get("candidate_count"),
+                "visible_candidate_count": trace.get("visible_candidate_count"),
+                "selected_count": trace.get("selected_count"),
+                "rejected_counts": trace.get("rejected_counts"),
+                "database_writes": trace.get("database_writes"),
+                "qdrant_writes": trace.get("qdrant_writes"),
+                "prompt_injection": trace.get("prompt_injection"),
+                "answer_model_exposure": trace.get("answer_model_exposure"),
+                "retrieval_activation": trace.get("retrieval_activation"),
+            }
+            raise ShadowProjectionError(
+                "shadow trace rejected: "
+                + json.dumps(diagnostic, sort_keys=True, separators=(",", ":"))
+            )
         results.append(
             {
                 "claim_id": item["claim_id"],
