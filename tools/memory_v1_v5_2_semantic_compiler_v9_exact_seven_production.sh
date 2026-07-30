@@ -17,7 +17,7 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 set -a
-source "${MEMORY_V1_ENV_FILE:-$repo_root/.env}"
+source "${MEMORY_V1_ENV_FILE:-/opt/chat-memory/.env}"
 set +a
 
 live=/opt/chat-memory
