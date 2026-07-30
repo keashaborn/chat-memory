@@ -1,0 +1,72 @@
+{
+  "contract_version": "memory_v1_v5_2_semantic_compiler_v9_reextract_manifest_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "selector_version": "20260730_v5_2_semantic_compiler_v9_reextract_v1",
+  "policy_compiler_version": "memory_v1_semantic_policy_compiler_v9",
+  "policy_compiler_sha256": "ba8739cfa7e49ddbf855be6697b372d4da938aeec5aba357bbfdc47d7a2fede1",
+  "items": [
+    {
+      "evidence_id": "541d60a4-3486-4e41-a34b-aad653d4ac89",
+      "content_sha256": "2a3e2770b0eea1a587c9dd14fafd6a4cc62906a02792849566468cc0a31d2cfd",
+      "prior_packet_id": "0f5fca46-1885-5c5d-aa9a-bb814ed56e43",
+      "prior_packet_storage_sha256": "41ad10f8b1be318b6d59e4d408ef00d811db70a0173cba8eec4654e04d4b0e68",
+      "operation_id": "1072c369-2745-5ea5-a43f-f21a8a1e0ba2",
+      "job_id": "bcab0f19-5f3c-54b3-97e1-deac045021f0",
+      "terminal_id": "1c9280ec-e637-5378-8010-bbfab2b0d42a"
+    },
+    {
+      "evidence_id": "61d4fb6f-b211-491e-8edc-d160efefe17e",
+      "content_sha256": "966b7a3d4c47e77bae6b7eaea87d8c8a88d268d3d48dcf3fa9c20dbca3dc41e8",
+      "prior_packet_id": "083917f3-d95d-5408-a7e0-358997d28444",
+      "prior_packet_storage_sha256": "e8d39e7ae945d9b0f2ae9bc0587ee536a2b9953756fc0a8e38cff13dd4dc56c6",
+      "operation_id": "dbf6e9be-138c-5048-ae29-7aef64efc6dc",
+      "job_id": "ad81be18-93b0-5907-aefa-9a03e00e79cf",
+      "terminal_id": "b7e4ddcc-0af1-5bbd-9ba7-eefa0f519c85"
+    },
+    {
+      "evidence_id": "6ce40aba-1e7c-589e-87cd-cb8b028bce8f",
+      "content_sha256": "c5ceb3f3008c9308b61e4244f9203c44ddf37a74f5bd65714907c4eef7a1fd73",
+      "prior_packet_id": "0b3b9f75-b141-5028-99c0-132e3dc27499",
+      "prior_packet_storage_sha256": "5e942fb90b770d51a76896a895570177ec6d534ae5e2f39c160d361341d7c187",
+      "operation_id": "cfd48636-04bf-5230-b738-0ce0206a529d",
+      "job_id": "fa71da24-d450-5447-8f4d-766c4d4ab446",
+      "terminal_id": "1279f066-6e56-5c86-ab73-e27023121547"
+    },
+    {
+      "evidence_id": "8f3f097c-34e7-4fdf-a492-35addb2ab8f5",
+      "content_sha256": "48df291f0de8b18aba122e0ed0db915f0c98d3de33f478ff41822899d62c2977",
+      "prior_packet_id": "ea8f9293-2c08-5713-a56e-2d5ab592f562",
+      "prior_packet_storage_sha256": "aa27d3b6bc059100f6782e1d3e7177bbb75b4c40a16b421f4c73cdcbabe7f31f",
+      "operation_id": "753cafeb-f198-5d96-9311-e422059568e9",
+      "job_id": "93c0eec3-8968-5aa7-b5de-e81f27aac982",
+      "terminal_id": "37b49e89-e6b5-569f-bea3-663f33532dd7"
+    },
+    {
+      "evidence_id": "a6b5a5ad-6756-540d-b83a-6f25ef4d073b",
+      "content_sha256": "3bdca19ebc481a49ab7c7e00510e1d178b31ebf73fc7d0e2165cfc3e7bab06bf",
+      "prior_packet_id": "296d260b-c0a8-5cf5-9861-ff587ad70b7d",
+      "prior_packet_storage_sha256": "e6dcdfd316dadb1455adf3aa5b613df5420911572b1f03d9a45860526aca14df",
+      "operation_id": "eaa8f4cc-6da0-519f-b064-a0e397215edb",
+      "job_id": "18525bf1-a1d6-579e-8252-d12296f64b6d",
+      "terminal_id": "0e5fd9da-b8b6-55fa-95a9-2019fe1e49ad"
+    },
+    {
+      "evidence_id": "ad0aeacd-f419-592b-94a6-94693399cd8c",
+      "content_sha256": "841bcbb1937b5b6f610bb81a769ee62954aff803e125b572884091c50fa07ad2",
+      "prior_packet_id": "21969e61-ab42-5058-831d-6ca3ba865d3d",
+      "prior_packet_storage_sha256": "d9f4cdd8462aec43ffaa734386a0844ce60c7d095ba843000b9ab31b4cc2888a",
+      "operation_id": "4469cc65-b7fe-581f-b2fd-7cd249fa53e7",
+      "job_id": "46b47a61-68d6-587c-8daf-f009e2de76f6",
+      "terminal_id": "670b0089-f011-5d64-8b14-a89ec6c98762"
+    },
+    {
+      "evidence_id": "f2db61f9-ec1a-5694-8e18-5ca5953aecce",
+      "content_sha256": "8fe05a934b55a77ac6f34945a1e3d9f9e75d5a996c6e8032bc9ac506ef3d1a13",
+      "prior_packet_id": "fa1231ed-b88c-5283-b234-d36b7904cea0",
+      "prior_packet_storage_sha256": "096a107b04a864b206cb1fb5d9a56c8501e92dd9d230b5026191b1d96a1e2e28",
+      "operation_id": "dd80c39c-475a-5876-adc4-e64bfd677bdb",
+      "job_id": "547a1438-e984-538c-8739-4a4dc53b283c",
+      "terminal_id": "040dd3d9-15a7-5f5d-b525-bba19c1c5de1"
+    }
+  ]
+}
