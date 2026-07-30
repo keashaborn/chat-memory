@@ -43,6 +43,8 @@ def _payload(**overrides):
             "backlog": {
                 "waiting_for_binding": 8,
                 "waiting_for_entailment": 8,
+                "eligible_for_entailment": 5,
+                "eligible_for_entailment_capped": False,
                 "waiting_for_claim_review": 3,
                 "ready_for_materialization": 2,
             },
@@ -80,6 +82,14 @@ class AdminMemoryHealthTests(unittest.TestCase):
         self.assertEqual(
             payload["pipeline"]["backlog"]["waiting_for_entailment"],
             8,
+        )
+        self.assertEqual(
+            payload["pipeline"]["backlog"]["eligible_for_entailment"],
+            5,
+        )
+        self.assertIs(
+            payload["pipeline"]["backlog"]["eligible_for_entailment_capped"],
+            False,
         )
 
     def test_backlog_requires_attention_without_declaring_memory_broken(self):

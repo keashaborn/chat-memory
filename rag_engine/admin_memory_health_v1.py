@@ -247,6 +247,16 @@ def _summarize_memory_health_v1(
                     pipeline.get("backlog") or {},
                     "waiting_for_entailment",
                 ),
+                "eligible_for_entailment": _integer(
+                    pipeline.get("backlog") or {},
+                    "eligible_for_entailment",
+                ),
+                "eligible_for_entailment_capped": bool(
+                    (pipeline.get("backlog") or {}).get(
+                        "eligible_for_entailment_capped",
+                        False,
+                    )
+                ),
                 "waiting_for_claim_review": _integer(
                     pipeline.get("backlog") or {},
                     "waiting_for_claim_review",
@@ -362,6 +372,12 @@ async def _load_actor_memory_health(
             pipeline_value = await conn.fetchval(
                 "SELECT memory.read_owner_pipeline_status_v1()"
             )
+            eligible_for_entailment = await conn.fetchval(
+                """
+                SELECT count(*)
+                FROM memory.plan_owner_v5_local_entailment_v1(20)
+                """
+            )
     finally:
         await conn.close()
     if isinstance(pipeline_value, str):
@@ -370,6 +386,12 @@ async def _load_actor_memory_health(
         raise RuntimeError("memory pipeline status returned an invalid payload")
     if pipeline_value.get("schema") != PIPELINE_SCHEMA:
         raise RuntimeError("memory pipeline status schema is incompatible")
+    pipeline_value = dict(pipeline_value)
+    pipeline_backlog = dict(pipeline_value.get("backlog") or {})
+    eligible_count = int(eligible_for_entailment or 0)
+    pipeline_backlog["eligible_for_entailment"] = eligible_count
+    pipeline_backlog["eligible_for_entailment_capped"] = eligible_count >= 20
+    pipeline_value["backlog"] = pipeline_backlog
     return {
         "claim": dict(claim or {}),
         "preference": dict(preference or {}),
