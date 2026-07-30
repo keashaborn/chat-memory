@@ -150,7 +150,7 @@ retirement review.
 Backend:
 
 - Python compilation passed.
-- 297 focused response, prompt, interaction, inspection, preference, ownership,
+- 298 focused response, prompt, interaction, inspection, preference, ownership,
   Memory boundary, FM boundary, provider, persistence, and legacy-regression
   tests passed on the rebased candidate.
 - The candidate migration passed in a disposable PostgreSQL 16 container:
@@ -175,17 +175,33 @@ No production checkout, service, database, Qdrant collection, environment
 variable, authentication rule, Memory V1 record, FM corpus, or live prompt was
 changed.
 
+## Memory V1 shared-boundary review
+
+Result: `MEMORY_SHARED_BOUNDARY_READY: YES`
+
+- `memory_v1_selection_envelope.py`, `memory_prompt_renderer_v1.py`,
+  `governed_memory_provider_v1.py`, and `response_finalization_v1.py` are
+  byte-identical between production and the candidate.
+- Generated schemas for `MemorySelectionEnvelopeV1`,
+  `MemoryPromptAssemblyContextV1`, `MemoryPromptAssemblyInputV1`, and
+  `FinalAnswerMemoryBindingV1` have identical production/candidate hashes.
+- No governed Memory schema contains response-preference fields.
+- Preferences are loaded after authenticated owner verification and remain
+  outside the governed Memory selector and renderer.
+- A dedicated combined regression proves that high-stakes mode may retain
+  independently governed Memory while suppressing profile, style, format,
+  length, depth, and custom-instruction preferences.
+- Memory content remains lower-authority reference context and never enters
+  the system prompt. Final-answer Memory binding remains unchanged.
+- Response-policy high-stakes precedence and the advanced prompt contract
+  identifiers passed focused validation.
+
 ## Required review before activation
 
 1. Reconfirm both production heads immediately before promotion.
-2. Complete joint Memory V1 review of the three shared boundaries:
-   `response_composition_root_v0_2.py`,
-   `response_orchestration_v0_2.py`, and `prompt_assembler_v1.py`.
-3. Response-policy review verifies high-stakes precedence and contract-version
-   changes.
-4. Review exact diffs and approve migration/promotion separately.
-5. Apply the database migration before backend activation.
-6. Promote backend, then frontend, run authenticated two-owner canaries, and
+2. Review exact diffs and approve migration/promotion separately.
+3. Apply the database migration before backend activation.
+4. Promote backend, then frontend, run authenticated two-owner canaries, and
    verify content-free Inspector output.
 
 Rollback does not require dropping the settings table. Reverting the application
