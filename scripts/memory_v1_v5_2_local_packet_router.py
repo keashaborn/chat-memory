@@ -307,7 +307,9 @@ async def plan_owner(
                 rows = await conn.fetch(
                     """
                     SELECT *
-                    FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)
+                    FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1(
+                      $1::uuid
+                    )
                     """,
                     packet_id,
                 )
@@ -319,7 +321,8 @@ async def plan_owner(
             if not rows:
                 rows = await conn.fetch(
                     "SELECT * FROM "
-                    "memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)",
+                    "memory.plan_owner_v5_2_zero_atom_deferral_route_v1("
+                    "$1::integer)",
                     1,
                 )
     if len(rows) > 1:
