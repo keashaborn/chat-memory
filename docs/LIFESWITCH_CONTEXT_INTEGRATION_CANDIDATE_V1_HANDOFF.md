@@ -1,19 +1,24 @@
 # LifeSwitch Context Integration Candidate V1
 
-Status: corrected isolated candidate. Ready for Memory/security re-review, not
-authorized for production activation.
+Status: current-production isolated integration candidate. Memory/security
+review is green. All candidate gates pass; production activation remains
+separately approval-gated.
 
 ## Source and scope
 
-- Production base: `90b1f8e92709074db1c62536e0004ac9106342ce`
-- Isolated worktree: `/home/ubuntu/chat-memory-lifeswitch-context-gateway-v1-current`
-- Branch: `codex/lifeswitch-context-gateway-v1-current-20260731`
-- Rebased LifeSwitch integration parent: `c94eccf`
-- Owner-gateway correction commit: `86e2cf0ddb9adfc82de905822de737ab048f9ea7`
+- Production base: `fa0bb50227fa4a35f8da973197ea2891b0476163`
+- Backend worktree: `/home/ubuntu/chat-memory-lifeswitch-context-integration-current`
+- Backend branch: `codex/lifeswitch-context-integration-current-20260731`
+- Replayed contract commits: `fcf9f13`, `eeb5da9`, `41a2042`, `ffe912c`
+- Backend integration commit: `b13471ff051b3b28897d0deb7106fcaccd50cffa`
+- Frontend base: `ed5d05a18ca31b3f224810ddb23ee7cda1d58354`
+- Frontend worktree: `/tmp/verbalsage-lifeswitch-context-integration-current`
+- Frontend branch: `codex/lifeswitch-context-integration-current-20260731`
+- Inspector compatibility commit: `676dd227d20c7200bae315ebae77ce11a6d227ae`
 
 No production checkout, service, environment variable, database object, Qdrant
 collection, authentication boundary, Memory V1 contract, FM/RAG implementation,
-or frontend file was changed.
+or live frontend file was changed. All work remains in isolated worktrees.
 
 ## Authority and data boundaries
 
@@ -40,7 +45,7 @@ Independent budgets remain enforced:
 `OFF` is evaluated before a database session is acquired and guarantees zero
 LifeSwitch database reads.
 
-## Versioned runtime candidate
+## Versioned runtime integration candidate
 
 ```text
 existing authenticated response-policy plan
@@ -59,9 +64,23 @@ existing authenticated response-policy plan
   -> content-free response_inspection_v3
 ```
 
-The inactive `response_composition_root_v0_3.py` begins only after the current
-server-owned safety, mode, Memory, FM, and web plan is complete. It does not
-replace or weaken that authority path.
+The V0.3 root begins only after the current server-owned safety, mode, Memory,
+FM, and web plan is complete. It does not replace or weaken that authority
+path. A backend-owned `off|canary|on` gate defaults to `off`; canary owners come
+only from server configuration. `OFF` follows the exact V0.2 runtime and creates
+no LifeSwitch pool or database read.
+
+Active owners use a separate lazy, bounded connection pool configured only by
+`LIFESWITCH_CHAT_POSTGRES_DSN`. The pool verifies the `brains_app` session
+identity and rejects superuser or `BYPASSRLS` connections before use. Reads then
+switch locally to the restricted no-login reader inside the reviewed gateway
+transaction. The new path builds one trusted base plan and makes one final
+answer-model call; it does not generate a discarded V0.2 answer first.
+
+The separate frontend candidate accepts `response_inspection_v3`, labels the
+runtime `resse_response_v0_3`, and displays only content-free LifeSwitch status,
+record/token counts, projection names, and final-answer binding. V1/V2 trace
+rollback compatibility remains intact.
 
 ## Corrected database boundary
 
@@ -93,15 +112,27 @@ authoritative account timezone.
 
 ## Validation evidence
 
-Using PostgreSQL 16 and `/opt/chat-memory/venv/bin/python`:
+Using PostgreSQL 16, the production Python environment, and an isolated Next.js
+build:
 
-- Candidate-focused suite: 54 tests passed.
+- LifeSwitch-focused backend suite: 60 tests passed.
 - Existing response-policy, Memory boundary, provider, finalization,
-  persistence, and inspector regression suite: 250 tests passed.
+  persistence, usage, and inspector regression suite: 261 tests passed.
+- Current Memory packet-router regression suite: 14 tests passed.
+- Total backend tests in the final matrix: 335 passed.
+- Frontend trace tests: 11 passed.
+- Isolated Next.js production build with TypeScript validation: passed, 70/70
+  static pages generated.
 - Python compilation passed.
 - `git diff --check` passed.
 - SQL apply and rollback passed in a disposable PostgreSQL 16 container.
 - Rollback left the candidate schema and both candidate roles absent.
+- The corrected SQL also applied and rolled back cleanly against a disposable
+  clone of the complete current production schema; all eight gateway readers
+  were present during the apply.
+- The real restricted runtime canary proved an unrelated query performed zero
+  pool calls and zero database reads, while a current-plan query made one
+  dedicated-pool call and returned four bounded records.
 - Production metadata showed zero `PUBLIC` table grants across the five source
   schemas used by the gateway.
 - The trusted `sage` function owner has `SELECT` on all twelve whitelisted
@@ -122,18 +153,22 @@ The disposable two-owner malicious-access test passed all ten gates:
 
 ## Review and activation gates
 
-1. Memory/security review must return `LIFESWITCH_CONTEXT_INTEGRATION_READY: YES`
-   for this corrected candidate.
-2. Recheck the then-current production head and shared-file overlap.
-3. Configure a dedicated restricted pool without changing existing Memory or
-   response-provider pools.
-4. Integrate the V0.3 seam only after joint shared-file review.
-5. Run authenticated shadow comparisons with `OFF` read counters and
-   content-free traces.
-6. Run owner-isolation and date/timezone canaries for every projection.
-7. Confirm separate Memory and LifeSwitch answer bindings under rollback and
-   replay.
-8. Obtain explicit promotion authorization and use a gradual canary rollout.
+1. Recheck both then-current production heads and changed-file overlap.
+2. Review the exact backend and frontend commit ranges above.
+3. Prepare a rollback manifest and production-schema backup.
+4. Apply the reviewed SQL through the production migration procedure and prove
+   direct-table denial, owner isolation, timezone behavior, and all eight
+   projections before enabling any owner.
+5. Configure the dedicated DSN and start with backend mode `off`; prove the
+   existing V0.2 route remains exact and performs zero LifeSwitch reads.
+6. Promote the frontend V3 Inspector compatibility before exposing a V3 canary
+   trace.
+7. Enable one explicitly authorized owner in `canary` mode; verify separate
+   Memory and LifeSwitch answer bindings and content-free inspection.
+8. Expand gradually only after OFF, owner-isolation, timezone, every-projection,
+   rollback, and final-answer canaries pass.
+9. Obtain explicit production promotion and canary authorization.
 
-Until those gates pass, do not apply the SQL, wire the live route, deploy,
-restart services, or enable production LifeSwitch prompt influence.
+Until those gates and approvals pass, do not apply the SQL, deploy either
+candidate, restart services, change environment variables, or enable production
+LifeSwitch prompt influence.
