@@ -1,0 +1,299 @@
+from __future__ import annotations
+
+import datetime as dt
+import unittest
+import uuid
+from typing import Any
+
+from rag_engine.lifeswitch_postgres_domain_reader_v1 import (
+    PostgresLifeSwitchDomainReaderV1,
+)
+
+
+OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
+TODAY = dt.date(2026, 7, 29)
+
+
+def plan_document() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "phase": "lean_gain",
+        "phase_label": "Build",
+        "primary_goal": "Add muscle",
+        "nutrition_targets": {
+            "calorie_target": {"lower": 2800, "upper": 3000},
+            "protein_g": 190,
+        },
+        "training_targets": {"workouts_per_week": 4},
+        "conditioning_targets": {"sessions_per_week": 2},
+    }
+
+
+class FakeConnection:
+    def __init__(
+        self,
+        *,
+        active_plan: dict[str, Any] | None = None,
+        legacy_plan: dict[str, Any] | None = None,
+        nutrition_rows: list[dict[str, Any]] | None = None,
+        training_rows: list[dict[str, Any]] | None = None,
+        conditioning_rows: list[dict[str, Any]] | None = None,
+        progression_rows: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.active_plan = active_plan
+        self.legacy_plan = legacy_plan
+        self.nutrition_rows = nutrition_rows or []
+        self.training_rows = training_rows or []
+        self.conditioning_rows = conditioning_rows or []
+        self.progression_rows = progression_rows or []
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchrow(self, query: str, *args: Any):
+        self.calls.append((query, args))
+        if "lifeswitch_chat_context:active_plan" in query:
+            return self.active_plan
+        if "lifeswitch_chat_context:legacy_plan" in query:
+            return self.legacy_plan
+        raise AssertionError(f"unexpected fetchrow query: {query}")
+
+    async def fetch(self, query: str, *args: Any):
+        self.calls.append((query, args))
+        if "lifeswitch_chat_context:nutrition_daily_macros" in query:
+            return self.nutrition_rows
+        if "lifeswitch_chat_context:training_day" in query:
+            return self.training_rows
+        if "lifeswitch_chat_context:conditioning_day" in query:
+            return self.conditioning_rows
+        if "lifeswitch_chat_context:exercise_progression" in query:
+            return self.progression_rows
+        raise AssertionError(f"unexpected fetch query: {query}")
+
+
+class FakeObservations:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def summarize(self, _conn, **kwargs):
+        self.calls.append(kwargs)
+        permissions = kwargs["permissions"]
+        return {
+            "as_of_local_date": TODAY.isoformat(),
+            "nutrition": (
+                {
+                    "status": "available",
+                    "logged_days": 7,
+                    "missing_log_days": 14,
+                    "data_sufficiency": "limited",
+                    "calories": {"average_on_logged_days": 2875.0},
+                    "protein": {"average_on_logged_days": 192.0},
+                }
+                if permissions.nutrition
+                else {"status": "unavailable"}
+            ),
+            "training": (
+                {
+                    "status": "available",
+                    "all_logged_resistance_sessions": 4,
+                    "strength_sessions_last_7_days": 4,
+                    "data_sufficiency": "limited",
+                }
+                if permissions.training
+                else {"status": "unavailable"}
+            ),
+            "conditioning": (
+                {"status": "available", "session_count": 2}
+                if permissions.training
+                else {"status": "unavailable"}
+            ),
+            "measurements": (
+                {
+                    "status": "available",
+                    "weight": {"observation_days": 3},
+                }
+                if permissions.measurements
+                else {"status": "unavailable"}
+            ),
+            "activity": {"status": "unavailable"},
+            "recovery": {"status": "unavailable"},
+        }
+
+
+class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_active_agentic_plan_wins_without_legacy_read(self) -> None:
+        conn = FakeConnection(active_plan={"document": plan_document()})
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_plan(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+        )
+        self.assertEqual(result.plan_source, "agentic_active")
+        self.assertEqual(result.payload["phase"], "lean_gain")
+        self.assertEqual(len(conn.calls), 1)
+        self.assertIn("active_plan", conn.calls[0][0])
+        self.assertEqual(conn.calls[0][1], (OWNER,))
+
+    async def test_legacy_plan_is_explicit_fallback_only(self) -> None:
+        legacy = {
+            "phase": "maintenance",
+            "phase_label": "Maintain",
+            "primary_goal": "Maintain performance",
+            "start_date": TODAY,
+            "review_date": None,
+            "review_cadence": "weekly",
+            "body_state": {},
+            "nutrition_targets": {"protein_g": 180},
+            "training_targets": {"workouts_per_week": 3},
+            "conditioning_targets": {},
+            "activity_targets": {},
+            "recovery_targets": {},
+            "monitoring_rules": {},
+            "coach_notes": "",
+        }
+        conn = FakeConnection(active_plan=None, legacy_plan=legacy)
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_plan(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+        )
+        self.assertEqual(result.plan_source, "legacy_fallback")
+        self.assertEqual(result.source_relations, ("lifeswitch_plan.plan_profile",))
+        self.assertEqual(len(conn.calls), 2)
+
+    async def test_nutrition_day_returns_all_four_macros_and_plan_targets(self) -> None:
+        conn = FakeConnection(
+            active_plan={"document": plan_document()},
+            nutrition_rows=[
+                {
+                    "day": TODAY,
+                    "entry_count": 4,
+                    "kcal": 2888.4,
+                    "protein_g": 194.2,
+                    "carbs_g": 335.7,
+                    "fat_g": 82.3,
+                }
+            ],
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_nutrition_day(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            day=TODAY,
+        )
+        totals = result.payload["daily"][0]
+        self.assertEqual(totals["calories"], 2888.4)
+        self.assertEqual(totals["protein_g"], 194.2)
+        self.assertEqual(totals["carbs_g"], 335.7)
+        self.assertEqual(totals["fat_g"], 82.3)
+        self.assertEqual(result.payload["plan_targets"]["protein_g"], 190)
+
+    async def test_missing_nutrition_day_is_empty_not_fabricated(self) -> None:
+        conn = FakeConnection(active_plan=None, legacy_plan=None, nutrition_rows=[])
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_nutrition_day(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            day=TODAY,
+        )
+        self.assertEqual(result.status, "EMPTY")
+        self.assertEqual(result.record_count, 0)
+        self.assertEqual(result.payload, {})
+
+    async def test_training_day_returns_resistance_and_conditioning(self) -> None:
+        conn = FakeConnection(
+            training_rows=[
+                {
+                    "day": TODAY,
+                    "name": "Upper",
+                    "set_count": 12,
+                    "exercise_count": 4,
+                    "total_volume": 8450.0,
+                }
+            ],
+            conditioning_rows=[
+                {
+                    "day": TODAY,
+                    "name": "Incline walk",
+                    "category": "cardio",
+                    "modality": "treadmill",
+                    "duration_min": 25,
+                    "intensity": "moderate",
+                    "distance_value": 1.5,
+                    "distance_unit": "mi",
+                    "heart_rate_avg": 128,
+                    "recovery_impact": "low",
+                }
+            ],
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_training_session(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            day=TODAY,
+        )
+        self.assertEqual(result.status, "AVAILABLE")
+        self.assertEqual(result.record_count, 2)
+        self.assertEqual(result.payload["resistance_sessions"][0]["sets"], 12)
+        self.assertEqual(result.payload["conditioning_sessions"][0]["duration_min"], 25.0)
+        self.assertIn(
+            "lifeswitch_training.conditioning_session_current_v",
+            result.source_relations,
+        )
+
+    async def test_overall_status_uses_plan_and_all_authorized_observation_lanes(self) -> None:
+        conn = FakeConnection(
+            active_plan={"document": plan_document()},
+            nutrition_rows=[
+                {
+                    "day": TODAY,
+                    "entry_count": 4,
+                    "kcal": 2888,
+                    "protein_g": 194,
+                    "carbs_g": 336,
+                    "fat_g": 82,
+                }
+            ],
+        )
+        observations = FakeObservations()
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            observation_repository=observations,
+        ).read_overall_status(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+        )
+        permissions = observations.calls[0]["permissions"]
+        self.assertTrue(permissions.nutrition)
+        self.assertTrue(permissions.training)
+        self.assertTrue(permissions.measurements)
+        self.assertEqual(
+            result.payload["nutrition"]["macro_averages_on_logged_days"]["carbs_g"],
+            336.0,
+        )
+        self.assertIn("public.lifeswitch_measurement_entries", result.source_relations)
+
+    async def test_progression_query_keeps_owner_window_and_subject_parameterized(self) -> None:
+        conn = FakeConnection(
+            progression_rows=[
+                {
+                    "day": TODAY,
+                    "exercise_name": "Back Squat",
+                    "set_count": 4,
+                    "total_reps": 20,
+                    "max_load": 315,
+                    "total_volume": 5400,
+                    "load_unit": "lb",
+                }
+            ]
+        )
+        start = TODAY - dt.timedelta(days=83)
+        result = await PostgresLifeSwitchDomainReaderV1(conn).read_exercise_progression(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=start,
+            end_date=TODAY,
+            subject="squat",
+        )
+        self.assertEqual(result.payload["observations"][0]["max_load"], 315.0)
+        query, arguments = conn.calls[0]
+        self.assertIn("owner_user_id = $1", query)
+        self.assertIn("lower($4)", query)
+        self.assertEqual(arguments, (OWNER, start, TODAY, "squat"))
+
+
+if __name__ == "__main__":
+    unittest.main()
