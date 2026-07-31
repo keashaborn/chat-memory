@@ -1,0 +1,21 @@
+{
+  "contract_version": "memory_v1_v5_2_manual_packet_review_spec_v1",
+  "target_server": "seebx",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "evidence_id": "681ab38d-a742-463c-ad26-c74c65eacaa9",
+  "evidence_content_sha256": "46f40455eba48cdd0c4e131cc8f01ea15d8721b761bf0e15365d008a0562ea93",
+  "packet_id": "d7cfab30-ebf8-56d6-b8c6-9db8a94d068d",
+  "packet_storage_sha256": "fa634cbe059919421e6d680bde6df7d292e0ee95c2391446a43f1ecf9a01d6de",
+  "route_event_id": "a8e7903f-2230-504d-bed3-5b9bec483a64",
+  "route_reason_code": "reviewable_relational_packet_v5_2",
+  "source_observed_at": "2026-07-30T21:39:53.840736Z",
+  "source_recorded_at": "2026-07-31T11:24:23.478195Z",
+  "thread_id": "b1b2afc9-eee1-4925-bf22-02756b3816de",
+  "prior_user_context_sha256": "16028e1ec42f77b654195924a382961aa59d3cb03d7f5675440cc4cd481cd5d5",
+  "prior_role_resolution_id": "fa0e7209-67c4-4cf3-b808-e8d8c2dc35ef",
+  "prior_role_mention_id": "723d0086-ee6b-428c-a55f-e013b7726676",
+  "prior_duration_evidence_id": "7877ebf3-1c5a-4bd2-8b43-9514a88a0e12",
+  "prior_duration_observation_id": "fbff7592-9fc8-4a2c-a629-a90ec419fde2",
+  "expected_entity_refs": ["e00", "e01"],
+  "expected_observation_refs": ["o01", "o02", "o03"]
+}
