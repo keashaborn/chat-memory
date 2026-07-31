@@ -19,8 +19,19 @@ from typing import Any
 import httpx
 
 
-CONTRACT_VERSION = "voice_synthetic_canary_v1_3"
+CONTRACT_VERSION = "voice_synthetic_canary_v1_4"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
+SLO_TRACE_CONTRACT_VERSION = "voice_slo_monitor_trace_v1"
+SLO_WINDOW_DAYS = 7
+SLO_CHECK_KEYS = frozenset(
+    {
+        "turn_success_rate",
+        "transcription_ms_p95",
+        "response_ms_p95",
+        "tts_first_audio_ms_p95",
+        "end_of_speech_to_first_audio_ms_p95",
+    }
+)
 VOICE_SESSION_HEADER = "x-vs-voice-session-id"
 SPEECH_TO_FIRST_AUDIO_BASIS = "synthetic_turn_start_v1"
 SYNTHETIC_PHRASE = "Operational voice canary."
@@ -181,7 +192,7 @@ async def _stream_tts(
             "model": "gpt-4o-mini-tts",
             "voice": "marin",
             "speed": 1.0,
-            "instructions": "Speak clearly in neutral operational English.",
+            "conversation_style": "direct",
         },
     ) as response:
         _require_success(response, stage)
@@ -199,7 +210,42 @@ async def _stream_tts(
     return b"".join(chunks), first_audio_ms, _elapsed_ms(started)
 
 
-async def _post_trace(
+async def _post_monitor_event(
+    client: httpx.AsyncClient,
+    *,
+    headers: dict[str, str],
+    event: dict[str, Any],
+    expected_observations: int,
+) -> int:
+    try:
+        response = await client.post(
+            "/telemetry/event",
+            headers=headers,
+            json={"events": [event]},
+        )
+    except httpx.HTTPError as exc:
+        raise CanaryFailure(
+            "telemetry",
+            "telemetry_request_failed",
+        ) from exc
+    _require_success(response, "telemetry")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise CanaryFailure(
+            "telemetry",
+            "invalid_telemetry_response",
+        ) from exc
+    if not isinstance(body, dict):
+        raise CanaryFailure("telemetry", "invalid_telemetry_response")
+    if body.get("accepted") != 1 or body.get("rejected") != 0:
+        raise CanaryFailure("telemetry", "telemetry_event_rejected")
+    if body.get("monitor_observations") != expected_observations:
+        raise CanaryFailure("telemetry", "monitor_observation_not_recorded")
+    return expected_observations
+
+
+async def _post_monitor_traces(
     client: httpx.AsyncClient,
     *,
     headers: dict[str, str],
@@ -208,8 +254,11 @@ async def _post_trace(
     failure_stage: str,
     failure_code: str,
     metrics: dict[str, Any],
-) -> None:
-    payload = {
+    slo_payload: dict[str, Any] | None,
+    slo_failure_code: str,
+) -> tuple[int, str]:
+    occurred_at = _now_iso()
+    canary_payload = {
         "contract_version": TRACE_CONTRACT_VERSION,
         "synthetic": True,
         "canary_contract_version": CONTRACT_VERSION,
@@ -218,7 +267,7 @@ async def _post_trace(
         "failure_code": failure_code or None,
         **metrics,
     }
-    event = {
+    canary_event = {
         "event_id": str(uuid.uuid4()),
         "event_type": "voice.turn.trace",
         "subject_type": "voice_turn",
@@ -226,18 +275,73 @@ async def _post_trace(
         "thread_id": None,
         "turn_id": voice_turn_id,
         "target_model_id": metrics.get("tts_model"),
-        "payload": payload,
-        "occurred_at": _now_iso(),
+        "payload": canary_payload,
+        "occurred_at": occurred_at,
     }
-    response = await client.post(
-        "/telemetry/event",
+
+    overall_status = "unavailable"
+    sample: dict[str, Any] = {
+        "evaluated_turns": 0,
+        "completed": 0,
+        "failed": 0,
+    }
+    failed_checks: list[str] = []
+    if isinstance(slo_payload, dict) and not slo_failure_code:
+        overall_status = str(
+            slo_payload.get("overall_status") or "unavailable"
+        )
+        raw_sample = slo_payload.get("sample")
+        if isinstance(raw_sample, dict):
+            sample = {
+                key: raw_sample.get(key, 0)
+                for key in ("evaluated_turns", "completed", "failed")
+            }
+        raw_checks = slo_payload.get("checks")
+        if isinstance(raw_checks, dict):
+            failed_checks = sorted(
+                key
+                for key, check in raw_checks.items()
+                if key in SLO_CHECK_KEYS
+                and isinstance(check, dict)
+                and check.get("status") == "fail"
+            )
+    slo_event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "voice.slo.observation",
+        "subject_type": "voice_slo",
+        "subject_id": f"voice_slo_{SLO_WINDOW_DAYS}d",
+        "thread_id": None,
+        "turn_id": voice_turn_id,
+        "payload": {
+            "contract_version": SLO_TRACE_CONTRACT_VERSION,
+            "synthetic": True,
+            "canary_contract_version": CONTRACT_VERSION,
+            "window_days": SLO_WINDOW_DAYS,
+            "overall_status": overall_status,
+            "sample": sample,
+            "failed_checks": failed_checks,
+        },
+        "occurred_at": occurred_at,
+    }
+    current_observations = await _post_monitor_event(
+        client,
         headers=headers,
-        json={"events": [event]},
+        event=canary_event,
+        expected_observations=1,
     )
-    _require_success(response, "telemetry")
-    body = response.json()
-    if body.get("accepted") != 1 or body.get("rejected") != 0:
-        raise CanaryFailure("telemetry", "telemetry_event_rejected")
+    expected_slo_observations = (
+        0 if overall_status == "insufficient_data" else 1
+    )
+    try:
+        slo_observations = await _post_monitor_event(
+            client,
+            headers=headers,
+            event=slo_event,
+            expected_observations=expected_slo_observations,
+        )
+    except CanaryFailure:
+        return current_observations, "failed"
+    return current_observations + slo_observations, "recorded"
 
 
 async def _get_slo(
@@ -248,10 +352,15 @@ async def _get_slo(
     response = await client.get(
         "/metrics/voice-slo",
         headers=headers,
-        params={"window_days": 30},
+        params={"window_days": SLO_WINDOW_DAYS},
     )
     _require_success(response, "slo")
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise CanaryFailure("slo", "invalid_slo_response") from exc
+    if not isinstance(payload, dict):
+        raise CanaryFailure("slo", "invalid_slo_response")
     if payload.get("contract_version") != "voice_slo_v1":
         raise CanaryFailure("slo", "invalid_slo_contract")
     return payload
@@ -337,7 +446,11 @@ async def run_canary(
     failure_stage = "configuration"
     failure_code = "unknown_failure"
     slo_payload: dict[str, Any] | None = None
+    slo_failure_code = ""
     telemetry_recorded = False
+    alert_store = "not_attempted"
+    slo_alert_store = "not_attempted"
+    monitor_observations = 0
     session_acquired = False
 
     async with httpx.AsyncClient(
@@ -468,7 +581,17 @@ async def run_canary(
                         failure_code = exc.code
 
         try:
-            await _post_trace(
+            slo_payload = await _get_slo(client, headers=headers)
+        except CanaryFailure as exc:
+            slo_failure_code = exc.code
+
+    async with httpx.AsyncClient(
+        base_url=config.base_url,
+        timeout=httpx.Timeout(config.timeout_seconds, connect=10.0),
+        transport=transport,
+    ) as client:
+        try:
+            monitor_observations, slo_alert_store = await _post_monitor_traces(
                 client,
                 headers=headers,
                 voice_turn_id=voice_turn_id,
@@ -476,31 +599,17 @@ async def run_canary(
                 failure_stage=failure_stage,
                 failure_code=failure_code,
                 metrics=metrics,
+                slo_payload=slo_payload,
+                slo_failure_code=slo_failure_code,
             )
             telemetry_recorded = True
+            alert_store = "recorded"
         except CanaryFailure as exc:
+            alert_store = "failed"
             if status == "completed":
                 status = "failed"
                 failure_stage = exc.stage
                 failure_code = exc.code
-
-        try:
-            slo_payload = await _get_slo(client, headers=headers)
-        except CanaryFailure as exc:
-            if status == "completed":
-                status = "failed"
-                failure_stage = exc.stage
-                failure_code = exc.code
-
-    overall_slo = (
-        slo_payload.get("overall_status")
-        if isinstance(slo_payload, dict)
-        else None
-    )
-    if status == "completed" and overall_slo == "fail":
-        status = "failed"
-        failure_stage = "slo"
-        failure_code = "voice_slo_threshold_failed"
 
     alert_delivery = "not_needed"
     if status != "completed":
@@ -517,6 +626,9 @@ async def run_canary(
         "failure_stage": failure_stage,
         "failure_code": failure_code or None,
         "telemetry_recorded": telemetry_recorded,
+        "alert_store": alert_store,
+        "slo_alert_store": slo_alert_store,
+        "monitor_observations": monitor_observations,
         "alert_delivery": alert_delivery,
         "metrics_ms": {
             key: metrics[key]
@@ -530,7 +642,20 @@ async def run_canary(
                 "total_turn_ms",
             )
         },
-        "slo": _safe_slo_summary(slo_payload) if slo_payload else None,
+        "slo": (
+            _safe_slo_summary(slo_payload)
+            if slo_payload
+            else {
+                "overall_status": "unavailable",
+                "sample": {
+                    "evaluated_turns": 0,
+                    "completed": 0,
+                    "failed": 0,
+                },
+                "checks": {},
+                "failure_code": "voice_slo_query_failed",
+            }
+        ),
         "occurred_at": _now_iso(),
     }
     return report, 0 if status == "completed" else 2
@@ -596,6 +721,9 @@ async def _main() -> int:
             "failure_stage": exc.stage,
             "failure_code": exc.code,
             "telemetry_recorded": False,
+            "alert_store": "not_attempted",
+            "slo_alert_store": "not_attempted",
+            "monitor_observations": 0,
             "alert_delivery": "not_attempted",
             "metrics_ms": {},
             "slo": None,

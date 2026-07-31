@@ -11,6 +11,7 @@ from scripts.voice_synthetic_canary import (
     CanaryConfig,
     CanaryFailure,
     _pcm_to_wav,
+    _post_monitor_traces,
     _synthetic_transcript_matches,
     _validate_config,
     run_canary,
@@ -97,6 +98,99 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+    async def test_trace_requires_private_monitor_observation(self) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers=no_store_headers(),
+                json={
+                    "accepted": 1,
+                    "rejected": 0,
+                    "monitor_observations": 0,
+                    "errors": [],
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:8088",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            with self.assertRaisesRegex(
+                CanaryFailure,
+                "monitor_observation_not_recorded",
+            ):
+                await _post_monitor_traces(
+                    client,
+                    headers={},
+                    voice_turn_id=str(uuid.uuid4()),
+                    status="failed",
+                    failure_stage="tts",
+                    failure_code="upstream_http_422",
+                    metrics={},
+                    slo_payload={
+                        "contract_version": "voice_slo_v1",
+                        "overall_status": "insufficient_data",
+                        "sample": {
+                            "evaluated_turns": 1,
+                            "completed": 0,
+                            "failed": 1,
+                        },
+                        "checks": {},
+                    },
+                    slo_failure_code="",
+                )
+
+    async def test_slo_recording_failure_is_isolated_from_current_trace(self) -> None:
+        events: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            event = json.loads(request.content)["events"][0]
+            events.append(event)
+            return httpx.Response(
+                200,
+                headers=no_store_headers(),
+                json={
+                    "accepted": 1,
+                    "rejected": 0,
+                    "monitor_observations": (
+                        1 if event["event_type"] == "voice.turn.trace" else 0
+                    ),
+                    "errors": [],
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:8088",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            observations, slo_store = await _post_monitor_traces(
+                client,
+                headers={},
+                voice_turn_id=str(uuid.uuid4()),
+                status="completed",
+                failure_stage="none",
+                failure_code="",
+                metrics={},
+                slo_payload={
+                    "contract_version": "voice_slo_v1",
+                    "overall_status": "pass",
+                    "sample": {
+                        "evaluated_turns": 40,
+                        "completed": 40,
+                        "failed": 0,
+                    },
+                    "checks": {},
+                },
+                slo_failure_code="",
+            )
+
+        self.assertEqual(observations, 1)
+        self.assertEqual(slo_store, "failed")
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            ["voice.turn.trace", "voice.slo.observation"],
+        )
+
     async def test_success_uses_no_store_and_records_synthetic_trace(self) -> None:
         calls: list[tuple[str, str, dict | None]] = []
         protected_session_ids: list[str | None] = []
@@ -154,12 +248,21 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
             if request.url.path == "/telemetry/event":
+                event_type = body["events"][0]["event_type"]
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
-                    json={"accepted": 1, "rejected": 0, "errors": []},
+                    json={
+                        "accepted": 1,
+                        "rejected": 0,
+                        "monitor_observations": (
+                            1 if event_type == "voice.turn.trace" else 0
+                        ),
+                        "errors": [],
+                    },
                 )
             if request.url.path == "/metrics/voice-slo":
+                self.assertEqual(request.url.params["window_days"], "7")
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
@@ -193,6 +296,9 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["contract_version"], CONTRACT_VERSION)
         self.assertTrue(report["telemetry_recorded"])
+        self.assertEqual(report["alert_store"], "recorded")
+        self.assertEqual(report["slo_alert_store"], "recorded")
+        self.assertEqual(report["monitor_observations"], 1)
         self.assertEqual(tts_calls, 2)
         paths = [path for _, path, _ in calls]
         self.assertEqual(paths.count("/voice/session/acquire"), 1)
@@ -220,6 +326,11 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("thread_id", response_body)
         self.assertEqual(response_body["user_id"], ACTOR)
 
+        for _, path, body in calls:
+            if path == "/voice/tts":
+                self.assertEqual(body["conversation_style"], "direct")
+                self.assertNotIn("instructions", body)
+
         telemetry_body = next(
             body
             for _, path, body in calls
@@ -235,6 +346,18 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps(event)
         self.assertNotIn("Operational voice canary", serialized)
         self.assertNotIn("Governed voice canary", serialized)
+        slo_event = next(
+            body["events"][0]
+            for _, path, body in calls
+            if path == "/telemetry/event"
+            and body["events"][0]["event_type"]
+            == "voice.slo.observation"
+        )
+        self.assertEqual(
+            slo_event["payload"]["overall_status"],
+            "insufficient_data",
+        )
+        self.assertEqual(slo_event["payload"]["window_days"], 7)
 
     async def test_response_failure_is_recorded_and_returns_nonzero(self) -> None:
         trace_payload: dict | None = None
@@ -268,13 +391,23 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     json={"detail": "response_generation_unavailable"},
                 )
             if request.url.path == "/telemetry/event":
-                trace_payload = json.loads(request.content)["events"][0]
+                event = json.loads(request.content)["events"][0]
+                if event["event_type"] == "voice.turn.trace":
+                    trace_payload = event
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
-                    json={"accepted": 1, "rejected": 0, "errors": []},
+                    json={
+                        "accepted": 1,
+                        "rejected": 0,
+                        "monitor_observations": (
+                            1 if event["event_type"] == "voice.turn.trace" else 0
+                        ),
+                        "errors": [],
+                    },
                 )
             if request.url.path == "/metrics/voice-slo":
+                self.assertEqual(request.url.params["window_days"], "7")
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
@@ -305,6 +438,9 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["failure_stage"], "response")
         self.assertEqual(report["failure_code"], "upstream_http_503")
         self.assertEqual(report["alert_delivery"], "unconfigured")
+        self.assertEqual(report["alert_store"], "recorded")
+        self.assertEqual(report["slo_alert_store"], "recorded")
+        self.assertEqual(report["monitor_observations"], 1)
         self.assertIsNotNone(trace_payload)
         self.assertEqual(trace_payload["payload"]["status"], "failed")
         self.assertEqual(
@@ -312,8 +448,11 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
             "response",
         )
 
-    async def test_slo_failure_fails_current_run_after_success(self) -> None:
+    async def test_slo_failure_does_not_fail_current_canary(self) -> None:
+        trace_events: list[dict] = []
+
         def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal trace_events
             session_response = voice_session_response(request)
             if session_response is not None:
                 return session_response
@@ -344,12 +483,18 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
             if request.url.path == "/telemetry/event":
+                trace_events.extend(json.loads(request.content)["events"])
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
-                    json={"accepted": 1, "rejected": 0},
+                    json={
+                        "accepted": 1,
+                        "rejected": 0,
+                        "monitor_observations": 1,
+                    },
                 )
             if request.url.path == "/metrics/voice-slo":
+                self.assertEqual(request.url.params["window_days"], "7")
                 return httpx.Response(
                     200,
                     headers=no_store_headers(),
@@ -376,6 +521,112 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
             ),
             transport=httpx.MockTransport(handler),
         )
-        self.assertEqual(exit_code, 2)
-        self.assertEqual(report["failure_stage"], "slo")
-        self.assertEqual(report["failure_code"], "voice_slo_threshold_failed")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["failure_stage"], "none")
+        self.assertIsNone(report["failure_code"])
+        self.assertEqual(report["alert_store"], "recorded")
+        self.assertEqual(report["slo_alert_store"], "recorded")
+        self.assertEqual(report["alert_delivery"], "not_needed")
+        self.assertEqual(report["monitor_observations"], 2)
+        self.assertEqual(len(trace_events), 2)
+        current_event, slo_event = trace_events
+        self.assertEqual(current_event["event_type"], "voice.turn.trace")
+        self.assertEqual(current_event["payload"]["status"], "completed")
+        self.assertEqual(current_event["payload"]["failure_stage"], "none")
+        self.assertEqual(slo_event["event_type"], "voice.slo.observation")
+        self.assertEqual(slo_event["subject_type"], "voice_slo")
+        self.assertEqual(slo_event["payload"]["window_days"], 7)
+        self.assertEqual(slo_event["payload"]["overall_status"], "fail")
+        self.assertEqual(
+            slo_event["payload"]["failed_checks"],
+            ["turn_success_rate"],
+        )
+
+    async def test_slo_query_failure_does_not_fail_current_canary(self) -> None:
+        trace_events: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal trace_events
+            session_response = voice_session_response(request)
+            if session_response is not None:
+                return session_response
+            if request.url.path == "/voice/tts":
+                return httpx.Response(
+                    200,
+                    headers=no_store_headers("audio/pcm"),
+                    content=pcm_bytes(),
+                )
+            if request.url.path == "/voice/openai/transcribe":
+                return httpx.Response(
+                    200,
+                    headers=no_store_headers(),
+                    json={
+                        "transcript": "Operational voice canary.",
+                        "provider": "openai",
+                        "model": "gpt-4o-transcribe",
+                        "language": "en",
+                    },
+                )
+            if request.url.path == "/response/query":
+                return httpx.Response(
+                    200,
+                    headers=no_store_headers(),
+                    json={
+                        "answer": "Operational.",
+                        "runtime": "resse_response_v0_2",
+                    },
+                )
+            if request.url.path == "/metrics/voice-slo":
+                self.assertEqual(request.url.params["window_days"], "7")
+                return httpx.Response(
+                    503,
+                    headers=no_store_headers(),
+                    json={"detail": "database detail must not be retained"},
+                )
+            if request.url.path == "/telemetry/event":
+                trace_events.extend(json.loads(request.content)["events"])
+                return httpx.Response(
+                    200,
+                    headers=no_store_headers(),
+                    json={
+                        "accepted": 1,
+                        "rejected": 0,
+                        "monitor_observations": 1,
+                    },
+                )
+            return httpx.Response(404, headers=no_store_headers())
+
+        report, exit_code = await run_canary(
+            CanaryConfig(
+                base_url="http://127.0.0.1:8088",
+                actor_user_id=ACTOR,
+                service_token="service-secret",
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["failure_stage"], "none")
+        self.assertIsNone(report["failure_code"])
+        self.assertEqual(report["alert_delivery"], "not_needed")
+        self.assertEqual(report["slo_alert_store"], "recorded")
+        self.assertEqual(report["monitor_observations"], 2)
+        self.assertEqual(report["slo"]["overall_status"], "unavailable")
+        self.assertEqual(
+            report["slo"]["failure_code"],
+            "voice_slo_query_failed",
+        )
+        serialized_report = json.dumps(report)
+        self.assertNotIn("database detail", serialized_report)
+        self.assertEqual(len(trace_events), 2)
+        self.assertEqual(trace_events[0]["payload"]["status"], "completed")
+        self.assertEqual(
+            trace_events[1]["payload"]["overall_status"],
+            "unavailable",
+        )
+        self.assertEqual(
+            trace_events[1]["payload"]["sample"],
+            {"evaluated_turns": 0, "completed": 0, "failed": 0},
+        )

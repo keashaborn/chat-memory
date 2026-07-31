@@ -8,6 +8,11 @@ import asyncpg
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import JSONResponse
 
+from rag_engine.voice_canary_monitor_bridge_v1 import (
+    parse_voice_monitor_observation_v1,
+    record_voice_monitor_observation_v1,
+)
+
 router = APIRouter()
 
 DSN = os.environ["POSTGRES_DSN"]
@@ -291,6 +296,7 @@ async def telemetry_event(req: Request):
     conn = await _connect()
     accepted = 0
     rejected = 0
+    monitor_observations = 0
     errors: List[Dict[str, Any]] = []
 
     sql = """
@@ -315,6 +321,7 @@ async def telemetry_event(req: Request):
         $14,$15
         )
         ON CONFLICT (event_id) DO NOTHING
+        RETURNING event_id
     """
 
     try:
@@ -357,7 +364,7 @@ async def telemetry_event(req: Request):
                 thread_id = (e.get("thread_id") or None)
                 turn_id = (e.get("turn_id") or None)
 
-                await conn.execute(
+                inserted_event_id = await conn.fetchval(
                     sql,
                     event_id, event_type,
                     subject_type, subject_id,
@@ -370,12 +377,30 @@ async def telemetry_event(req: Request):
                 )
 
                 accepted += 1
+                if inserted_event_id is not None:
+                    observation = parse_voice_monitor_observation_v1(
+                        event_type=event_type,
+                        subject_type=subject_type,
+                        payload=payload,
+                        occurred_at=occurred_at,
+                    )
+                    if observation is not None:
+                        await record_voice_monitor_observation_v1(
+                            conn,
+                            observation,
+                        )
+                        monitor_observations += 1
 
     finally:
         await conn.close()
 
     return JSONResponse(
-        {"accepted": accepted, "rejected": rejected, "errors": errors},
+        {
+            "accepted": accepted,
+            "rejected": rejected,
+            "monitor_observations": monitor_observations,
+            "errors": errors,
+        },
         headers=TELEMETRY_NO_STORE_HEADERS,
     )
 
