@@ -35,6 +35,8 @@ DEFAULT_BUILDER = Path(__file__).with_name(
 DEFAULT_REVIEW_ROOT = Path("/home/ubuntu/memory-v1-reviews")
 REVIEW_CONTRACT = "memory_v1_v5_2_local_packet_review_v1"
 BUNDLE_CONTRACT = "memory_v1_v5_2_stage_preflight_v1"
+STANDARD_PLANNER_LANE = "standard_packet"
+ZERO_ATOM_PLANNER_LANE = "zero_atom_deferral"
 RESOLUTION_STATES = (
     "auto_link_eligible",
     "manual_review_required",
@@ -295,6 +297,7 @@ async def plan_owner(
 ) -> dict[str, Any] | None:
     async with conn.transaction(isolation="repeatable_read", readonly=True):
         await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
+        planner_lane = STANDARD_PLANNER_LANE
         if packet_id is not None:
             rows = await conn.fetch(
                 """
@@ -304,6 +307,7 @@ async def plan_owner(
                 packet_id,
             )
             if not rows:
+                planner_lane = ZERO_ATOM_PLANNER_LANE
                 rows = await conn.fetch(
                     """
                     SELECT *
@@ -319,6 +323,7 @@ async def plan_owner(
                 1,
             )
             if not rows:
+                planner_lane = ZERO_ATOM_PLANNER_LANE
                 rows = await conn.fetch(
                     "SELECT * FROM "
                     "memory.plan_owner_v5_2_zero_atom_deferral_route_v1("
@@ -327,7 +332,9 @@ async def plan_owner(
                 )
     if len(rows) > 1:
         raise RuntimeError("V5.2 route planner exceeded its bound")
-    return dict(rows[0]) if rows else None
+    if not rows:
+        return None
+    return {**dict(rows[0]), "planner_lane": planner_lane}
 
 
 def select_plans(
@@ -353,6 +360,10 @@ async def finalize_terminal(
     reason_codes = list(target["source_deferral_reason_codes"])
     route_reason = target["reason_code"]
     reason_set = set(reason_codes)
+    planner_lane = target.get("planner_lane")
+    if planner_lane not in {STANDARD_PLANNER_LANE, ZERO_ATOM_PLANNER_LANE}:
+        raise RuntimeError("planner returned an invalid route lane")
+
     if route_reason == "deferral_only_review_unresolved_v5_2":
         if (
             not reason_set
@@ -372,7 +383,7 @@ async def finalize_terminal(
     async def invoke() -> dict[str, Any]:
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
-            if route_reason == "deferral_only_review_unresolved_v5_2":
+            if planner_lane == ZERO_ATOM_PLANNER_LANE:
                 row = await conn.fetchrow(
                     """
                     SELECT * FROM
@@ -493,6 +504,7 @@ async def run() -> int:
                     sha256_text(str(row["packet_id"])) if row else None
                 ),
                 "route": row["route"] if row else "no_work",
+                "planner_lane": row["planner_lane"] if row else None,
                 "reason_code": row["reason_code"] if row else None,
                 "source_deferral_reason_codes": (
                     list(row["source_deferral_reason_codes"]) if row else []

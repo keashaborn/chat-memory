@@ -306,7 +306,13 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
 
         result = await MODULE.plan_owner(connection, owner, packet)
 
-        self.assertEqual(result, {"packet_id": packet})
+        self.assertEqual(
+            result,
+            {
+                "packet_id": packet,
+                "planner_lane": MODULE.STANDARD_PLANNER_LANE,
+            },
+        )
         self.assertIn(
             "plan_owner_v5_2_exact_packet_route_v1",
             connection.fetch_query,
@@ -322,7 +328,13 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
 
         result = await MODULE.plan_owner(connection, owner, packet)
 
-        self.assertEqual(result, {"packet_id": packet})
+        self.assertEqual(
+            result,
+            {
+                "packet_id": packet,
+                "planner_lane": MODULE.ZERO_ATOM_PLANNER_LANE,
+            },
+        )
         self.assertEqual(len(connection.fetch_queries), 2)
         self.assertIn(
             "plan_owner_v5_2_exact_packet_route_v1",
@@ -340,6 +352,7 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
         connection = _FinalizeConnection()
         target = {
             "packet_id": packet,
+            "planner_lane": MODULE.ZERO_ATOM_PLANNER_LANE,
             "packet_storage_sha256": "1" * 64,
             "routing_basis_sha256": "2" * 64,
             "reason_code": "deferral_only_review_unresolved_v5_2",
@@ -361,6 +374,71 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
                 for query in connection.fetchrow_queries
             )
         )
+
+    async def test_terminal_zero_atom_uses_restricted_finalizer(self) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        connection = _FinalizeConnection()
+        target = {
+            "packet_id": packet,
+            "planner_lane": MODULE.ZERO_ATOM_PLANNER_LANE,
+            "packet_storage_sha256": "1" * 64,
+            "routing_basis_sha256": "2" * 64,
+            "reason_code": "deferral_only_no_stage_v5_2",
+            "source_deferral_reason_codes": [
+                "insufficient_evidence",
+                "structured_domain",
+            ],
+        }
+
+        applied, replayed = await MODULE.finalize_terminal(
+            connection, owner, target
+        )
+
+        self.assertEqual(applied["apply_outcome"], "applied")
+        self.assertEqual(replayed["apply_outcome"], "replayed")
+        self.assertTrue(
+            all(
+                "finalize_owner_v5_2_zero_atom_deferral_route_v1" in query
+                for query in connection.fetchrow_queries
+            )
+        )
+
+    async def test_standard_terminal_uses_standard_finalizer(self) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        connection = _FinalizeConnection()
+        target = {
+            "packet_id": packet,
+            "planner_lane": MODULE.STANDARD_PLANNER_LANE,
+            "packet_storage_sha256": "1" * 64,
+            "routing_basis_sha256": "2" * 64,
+            "reason_code": "deferral_only_no_stage_v5_2",
+            "source_deferral_reason_codes": ["insufficient_evidence"],
+        }
+
+        await MODULE.finalize_terminal(connection, owner, target)
+
+        self.assertTrue(
+            all(
+                "finalize_owner_v5_2_terminal_route_v1" in query
+                for query in connection.fetchrow_queries
+            )
+        )
+
+    async def test_terminal_route_rejects_missing_planner_lane(self) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        target = {
+            "packet_id": packet,
+            "packet_storage_sha256": "1" * 64,
+            "routing_basis_sha256": "2" * 64,
+            "reason_code": "deferral_only_no_stage_v5_2",
+            "source_deferral_reason_codes": ["insufficient_evidence"],
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "invalid route lane"):
+            await MODULE.finalize_terminal(_FinalizeConnection(), owner, target)
 
 
 if __name__ == "__main__":

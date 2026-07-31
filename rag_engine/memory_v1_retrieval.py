@@ -262,13 +262,23 @@ async def build_memory_packet(
                 actor,
                 candidate_ids,
             )
-            v5_rows = await conn.fetch(
+            v5_reader_available = await conn.fetchval(
                 """
-                SELECT owner_user_id, claim_id, evidence_by_stance
-                FROM memory.read_v5_shadow_claims($1::uuid[])
-                """,
-                candidate_ids,
+                SELECT to_regprocedure(
+                  'memory.read_v5_shadow_claims(uuid[])'
+                ) IS NOT NULL
+                """
             )
+            if v5_reader_available:
+                v5_rows = await conn.fetch(
+                    """
+                    SELECT owner_user_id, claim_id, evidence_by_stance
+                    FROM memory.read_v5_shadow_claims($1::uuid[])
+                    """,
+                    candidate_ids,
+                )
+            else:
+                v5_rows = []
         else:
             v5_rows = []
 
