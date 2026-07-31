@@ -30,14 +30,28 @@ from scripts.memory_v1_v5_local_packet_disposition import (
 )
 
 
-WORKER_VERSION = "memory_v1_v5_local_claim_projection_v1"
+WORKER_VERSION = "memory_v1_v5_local_claim_projection_v2"
 POLICY_VERSION = "memory_v1_v5_local_claim_projection_policy_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_local_claim_projection_apply_v1"
 IDENTITY_NAMESPACE = uuid.UUID("c545c915-b70d-5c7c-9504-1f3ad8868104")
+REGISTER_FUNCTION = "memory.register_owner_v5_local_claim_projection_v2"
 
 
 class LocalClaimProjectionError(RuntimeError):
     pass
+
+
+def outcome_spec(decision: str) -> tuple[int, str]:
+    values = {
+        "stage_manual_review_plan": (5, "manual_review_claim_plan_staged"),
+        "already_materialized": (1, "already_materialized"),
+    }
+    try:
+        return values[decision]
+    except KeyError as exc:
+        raise LocalClaimProjectionError(
+            "projection register returned an unknown decision"
+        ) from exc
 
 
 def arguments() -> argparse.Namespace:
@@ -109,8 +123,8 @@ async def apply_once(
         packet_text = stable_json(packet)
         manifest = owner_manifest_sha256(str(owner), packet["packet_sha256"])
         first = await conn.fetchrow(
-            """
-            SELECT * FROM memory.register_owner_v5_local_claim_projection_v1(
+            f"""
+            SELECT * FROM {REGISTER_FUNCTION}(
               $1,$2,$3,$4,$5,$6,$7,$8
             )
             """,
@@ -120,8 +134,8 @@ async def apply_once(
     async with conn.transaction(isolation="serializable"):
         await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
         replay = await conn.fetchrow(
-            """
-            SELECT * FROM memory.register_owner_v5_local_claim_projection_v1(
+            f"""
+            SELECT * FROM {REGISTER_FUNCTION}(
               $1,$2,$3,$4,$5,$6,$7,$8
             )
             """,
@@ -168,15 +182,21 @@ async def run() -> int:
             return 0
         owner,target=selected
         first,replay=await apply_once(conn,owner=owner,target=target)
-        if (first["outcome"]!="applied" or int(first["rows_written"])!=5
-            or replay["outcome"]!="replayed" or int(replay["rows_written"])!=0
+        expected_rows,result_outcome = outcome_spec(str(first["decision"]))
+        if (first["outcome"]!="applied"
+            or int(first["rows_written"])!=expected_rows
+            or replay["decision"]!=first["decision"]
+            or replay["outcome"]!="replayed"
+            or int(replay["rows_written"])!=0
             or first["plan_id"]!=replay["plan_id"]):
             raise LocalClaimProjectionError("projection apply/replay invariant failed")
         print(stable_output({
             "worker_version":WORKER_VERSION,"apply":True,
-            "outcome":"manual_review_claim_plan_staged","plans":safe_plans,
-            "database_rows_created":5,"zero_write_replay_proved":True,
-            "write_counts":{"admission":1,"projection_plan_rows":4,
+            "outcome":result_outcome,"plans":safe_plans,
+            "database_rows_created":expected_rows,"zero_write_replay_proved":True,
+            "write_counts":{"admission":int(expected_rows==5),
+              "already_materialized_terminal":int(expected_rows==1),
+              "projection_plan_rows":4 if expected_rows==5 else 0,
               "claims":0,"qdrant":0,"prompt_influence":0},
             "external_model_calls":0,"local_model_calls":0,"filesystem_writes":0,
         }))
