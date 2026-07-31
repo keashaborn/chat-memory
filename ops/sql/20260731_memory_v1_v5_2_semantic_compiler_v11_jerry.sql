@@ -26,6 +26,15 @@ $preflight$;
 
 GRANT SELECT ON memory.v5_local_packet_supersession
   TO memory_v5_local_reextract_maintainer;
+GRANT SELECT ON memory.v5_2_local_packet_route_event
+  TO memory_v5_local_reextract_maintainer;
+
+DROP POLICY IF EXISTS v5_2_compiler_v11_jerry_reextract_route_read
+  ON memory.v5_2_local_packet_route_event;
+CREATE POLICY v5_2_compiler_v11_jerry_reextract_route_read
+ON memory.v5_2_local_packet_route_event
+FOR SELECT TO memory_v5_local_reextract_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
 
 CREATE OR REPLACE FUNCTION
 memory.enqueue_owner_v5_2_semantic_compiler_v11_jerry_v1(

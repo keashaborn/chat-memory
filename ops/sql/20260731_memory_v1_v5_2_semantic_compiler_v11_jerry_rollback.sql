@@ -4,6 +4,10 @@ SET LOCAL statement_timeout='60s';
 
 DROP POLICY IF EXISTS v5_2_compiler_v11_jerry_supersession_route_read
   ON memory.v5_2_local_packet_route_event;
+DROP POLICY IF EXISTS v5_2_compiler_v11_jerry_reextract_route_read
+  ON memory.v5_2_local_packet_route_event;
+REVOKE SELECT ON memory.v5_2_local_packet_route_event
+  FROM memory_v5_local_reextract_maintainer;
 DROP FUNCTION IF EXISTS
 memory.finalize_owner_v5_2_semantic_compiler_v11_jerry_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text,text
