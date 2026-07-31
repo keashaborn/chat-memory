@@ -1532,10 +1532,16 @@ async def list_workout_templates(
                     where re.training_session_id=s.training_session_id
                   )
                   and not exists (
-                    select 1 from {SCHEMA}.training_set_log l
+                    select 1
+                    from {SCHEMA}.training_set_log l
+                    join {SCHEMA}.training_set_effective_role_v1 role_resolution
+                      on role_resolution.training_set_log_id=l.training_set_log_id
+                     and role_resolution.training_session_id=l.training_session_id
+                     and role_resolution.owner_user_id=l.owner_user_id
                     where l.training_session_id=s.training_session_id
+                      and l.owner_user_id=s.owner_user_id
                       and l.is_active=true
-                      and coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') in ('strength', 'rehab')
+                      and role_resolution.effective_role in ('strength', 'rehab')
                   )
               ) as unclassified_session_count
             from {SCHEMA}.workout_template wt
@@ -2221,28 +2227,55 @@ async def list_training_sessions(
                 coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
                 coalesce(count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and role_resolution.effective_role='strength'
                 ), 0)::int as strength_set_count,
                 coalesce(count(distinct l.exercise_id) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and role_resolution.effective_role='strength'
                 ), 0)::int as strength_exercise_count,
                 coalesce(sum(l.volume) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='strength'
+                    and role_resolution.effective_role='strength'
                 ), 0)::float as strength_volume,
                 coalesce(count(l.training_set_log_id) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
+                    and role_resolution.effective_role='rehab'
                 ), 0)::int as rehab_set_count,
                 coalesce(count(distinct l.exercise_id) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
+                    and role_resolution.effective_role='rehab'
                 ), 0)::int as rehab_exercise_count,
                 coalesce(sum(l.volume) filter (
                   where l.is_active=true
-                    and coalesce(nullif(l.capture_role, 'unknown'), nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, base.workout_role_snapshot, 'unknown')='rehab'
-                ), 0)::float as rehab_volume
+                    and role_resolution.effective_role='rehab'
+                ), 0)::float as rehab_volume,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.effective_role='unknown'
+                ), 0)::int as unknown_role_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true and role_resolution.role_conflict
+                ), 0)::int as role_conflict_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.resolution_source='capture_role'
+                ), 0)::int as capture_role_resolved_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.resolution_source='exercise_role_snapshot'
+                ), 0)::int as exercise_role_snapshot_resolved_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.resolution_source='training_session_role_event'
+                ), 0)::int as training_session_role_event_resolved_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.resolution_source='workout_role_snapshot'
+                ), 0)::int as workout_role_snapshot_resolved_set_count,
+                coalesce(count(l.training_set_log_id) filter (
+                  where l.is_active=true
+                    and role_resolution.resolution_source='unresolved'
+                ), 0)::int as unresolved_role_set_count
               from {SCHEMA}.{session_source} s
               join {SCHEMA}.training_session base
                 on base.training_session_id=s.training_session_id
@@ -2252,6 +2285,11 @@ async def list_training_sessions(
                and role_event.owner_user_id=s.owner_user_id
               left join {SCHEMA}.training_set_log l
                 on l.training_session_id=s.training_session_id
+               and l.owner_user_id=s.owner_user_id
+              left join {SCHEMA}.training_set_effective_role_v1 role_resolution
+                on role_resolution.training_set_log_id=l.training_set_log_id
+               and role_resolution.training_session_id=l.training_session_id
+               and role_resolution.owner_user_id=l.owner_user_id
               where {' and '.join(where)}
               group by
                 s.training_session_id, s.owner_user_id, s.day,
@@ -2262,8 +2300,6 @@ async def list_training_sessions(
             ), classified as (
               select session_rollup.*,
                 case
-                  when historical_workout_role in ('strength', 'rehab') then historical_workout_role
-                  when workout_role_snapshot in ('strength', 'rehab') then workout_role_snapshot
                   when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'
                   when strength_set_count > 0 then 'strength'
                   when rehab_set_count > 0 then 'rehab'
@@ -2360,6 +2396,9 @@ async def list_strength_progression(
               coalesce(sum(l.reps), 0)::int as total_reps,
               coalesce(max(l.weight), 0)::float as max_load,
               coalesce(sum(l.volume), 0)::float as total_volume,
+              array_agg(distinct role_resolution.resolution_source
+                order by role_resolution.resolution_source
+              ) as role_resolution_sources,
               case
                 when count(distinct nullif(trim(l.load_unit), '')) = 0 then null
                 when count(distinct nullif(trim(l.load_unit), '')) = 1
@@ -2369,27 +2408,19 @@ async def list_strength_progression(
               $4::uuid as _target_user_id,
               $5::boolean as _delegated_view
             from {SCHEMA}.training_session_current_v s
-            join {SCHEMA}.training_session base
-              on base.training_session_id=s.training_session_id
-             and base.owner_user_id=s.owner_user_id
-            left join {SCHEMA}.training_session_role_event role_event
-              on role_event.training_session_id=s.training_session_id
-             and role_event.owner_user_id=s.owner_user_id
             join {SCHEMA}.training_set_log l
               on l.training_session_id=s.training_session_id
              and l.owner_user_id=s.owner_user_id
+            join {SCHEMA}.training_set_effective_role_v1 role_resolution
+              on role_resolution.training_set_log_id=l.training_set_log_id
+             and role_resolution.training_session_id=l.training_session_id
+             and role_resolution.owner_user_id=l.owner_user_id
             where s.owner_user_id=$1::uuid
               and s.day between $2::date and $3::date
               and s.is_active=true
               and s.finished_at is not null
               and l.is_active=true
-              and coalesce(
-                nullif(l.capture_role, 'unknown'),
-                nullif(l.exercise_role_snapshot, 'unknown'),
-                role_event.assigned_role,
-                base.workout_role_snapshot,
-                'unknown'
-              )='strength'
+              and role_resolution.effective_role='strength'
             group by
               s.training_session_id,
               s.day,
@@ -2525,12 +2556,19 @@ async def list_training_session_sets(
               l.workout_template_id, l.exercise_id, l.exercise_name,
               l.set_type, l.exercise_role_snapshot, l.capture_role,
               coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') as exercise_role,
+              role_resolution.effective_role,
+              role_resolution.resolution_source,
+              role_resolution.role_conflict,
               l.exercise_sort_order, l.set_index, l.weight, l.reps, l.volume,
               l.load_unit,
               l.flags, l.notes, l.is_active, l.created_at, l.updated_at,
               $3::uuid as _target_user_id,
               $4::boolean as _delegated_view
             from {SCHEMA}.training_set_log l
+            join {SCHEMA}.training_set_effective_role_v1 role_resolution
+              on role_resolution.training_set_log_id=l.training_set_log_id
+             and role_resolution.training_session_id=l.training_session_id
+             and role_resolution.owner_user_id=l.owner_user_id
             where l.training_session_id=$1::uuid
               and l.owner_user_id=$2::uuid
               {where_active}

@@ -69,6 +69,15 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                 "rehab_exercise_count": 0,
                 "unknown_role_set_count": 0,
                 "unknown_role_exercise_count": 0,
+                "raw_capture_strength_set_count": 12,
+                "raw_capture_rehab_set_count": 0,
+                "raw_capture_unknown_set_count": 0,
+                "role_conflict_set_count": 0,
+                "capture_role_resolved_set_count": 12,
+                "exercise_role_snapshot_resolved_set_count": 0,
+                "training_session_role_event_resolved_set_count": 0,
+                "workout_role_snapshot_resolved_set_count": 0,
+                "unresolved_role_set_count": 0,
             }
             for offset in (1, 3, 8, 10, 15, 17)
         ]
@@ -226,6 +235,15 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                         "rehab_exercise_count": 1,
                         "unknown_role_set_count": 0,
                         "unknown_role_exercise_count": 0,
+                        "raw_capture_strength_set_count": 0,
+                        "raw_capture_rehab_set_count": 3,
+                        "raw_capture_unknown_set_count": 0,
+                        "role_conflict_set_count": 0,
+                        "capture_role_resolved_set_count": 3,
+                        "exercise_role_snapshot_resolved_set_count": 0,
+                        "training_session_role_event_resolved_set_count": 0,
+                        "workout_role_snapshot_resolved_set_count": 0,
+                        "unresolved_role_set_count": 0,
                     },
                     {
                         "day": today - dt.timedelta(days=1),
@@ -237,6 +255,15 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                         "rehab_exercise_count": 0,
                         "unknown_role_set_count": 0,
                         "unknown_role_exercise_count": 0,
+                        "raw_capture_strength_set_count": 12,
+                        "raw_capture_rehab_set_count": 0,
+                        "raw_capture_unknown_set_count": 0,
+                        "role_conflict_set_count": 0,
+                        "capture_role_resolved_set_count": 12,
+                        "exercise_role_snapshot_resolved_set_count": 0,
+                        "training_session_role_event_resolved_set_count": 0,
+                        "workout_role_snapshot_resolved_set_count": 0,
+                        "unresolved_role_set_count": 0,
                     },
                 ],
                 "lifeswitch_plan_context:conditioning_sessions": [],
@@ -258,7 +285,7 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
         self.assertFalse(training["strength_adherence"]["target_met"])
         self.assertTrue(training["strength_adherence"]["rehab_exclusion_supported"])
 
-    async def test_training_reads_current_observations_and_never_promotes_unknown_roles(self) -> None:
+    async def test_training_uses_reviewed_effective_role_contract(self) -> None:
         today = dt.datetime.now(ZoneInfo("UTC")).date()
         conn = FakeConnection(
             {
@@ -269,12 +296,21 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
                         "day": today,
                         "active_set_count": 4,
                         "exercise_count": 1,
-                        "strength_set_count": 0,
-                        "strength_exercise_count": 0,
+                        "strength_set_count": 4,
+                        "strength_exercise_count": 1,
                         "rehab_set_count": 0,
                         "rehab_exercise_count": 0,
-                        "unknown_role_set_count": 4,
-                        "unknown_role_exercise_count": 1,
+                        "unknown_role_set_count": 0,
+                        "unknown_role_exercise_count": 0,
+                        "raw_capture_strength_set_count": 0,
+                        "raw_capture_rehab_set_count": 0,
+                        "raw_capture_unknown_set_count": 4,
+                        "role_conflict_set_count": 0,
+                        "capture_role_resolved_set_count": 0,
+                        "exercise_role_snapshot_resolved_set_count": 0,
+                        "training_session_role_event_resolved_set_count": 4,
+                        "workout_role_snapshot_resolved_set_count": 0,
+                        "unresolved_role_set_count": 0,
                     }
                 ],
                 "lifeswitch_plan_context:conditioning_sessions": [],
@@ -289,17 +325,21 @@ class CanonicalPlanObservationContextRepositoryTest(unittest.IsolatedAsyncioTest
         )
 
         training = result["training"]
-        self.assertEqual(training["strength_sessions"], 0)
-        self.assertEqual(training["unknown_role_active_sets"], 4)
-        self.assertEqual(training["unknown_role_exercises"], 1)
+        self.assertEqual(training["strength_sessions"], 1)
+        self.assertEqual(training["strength_active_sets"], 4)
+        self.assertEqual(training["unknown_role_active_sets"], 0)
+        self.assertEqual(training["unknown_role_exercises"], 0)
+        self.assertEqual(
+            training["effective_role_contract"], "training_set_effective_role_v1"
+        )
         resistance_query = next(
             query for query, _args in conn.calls
             if "lifeswitch_plan_context:resistance_sessions" in query
         )
         self.assertIn("training_session_current_v", resistance_query)
-        self.assertIn("l.capture_role = 'strength'", resistance_query)
+        self.assertIn("training_set_effective_role_v1", resistance_query)
+        self.assertIn("role_resolution.effective_role = 'strength'", resistance_query)
         self.assertNotIn("my_exercise", resistance_query)
-        self.assertNotIn("'strength')", resistance_query)
 
         conditioning_query = next(
             query for query, _args in conn.calls

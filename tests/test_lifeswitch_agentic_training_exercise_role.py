@@ -45,16 +45,18 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
         self.assertIn("as rehab_volume", self.router)
         self.assertIn("end as session_role", self.router)
         self.assertIn("as counts_toward_strength", self.router)
-        self.assertIn(
-            "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')",
-            self.router,
-        )
+        self.assertIn("training_set_effective_role_v1", self.router)
+        self.assertIn("role_resolution.effective_role='strength'", self.router)
+        self.assertIn("role_resolution.effective_role='rehab'", self.router)
 
-    def test_session_set_list_does_not_reclassify_legacy_roles(self) -> None:
+    def test_session_set_list_preserves_raw_role_and_adds_effective_role(self) -> None:
         self.assertIn(
             "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') as exercise_role",
             self.router,
         )
+        self.assertIn("role_resolution.effective_role", self.router)
+        self.assertIn("role_resolution.resolution_source", self.router)
+        self.assertIn("role_resolution.role_conflict", self.router)
 
 
 if __name__ == "__main__":

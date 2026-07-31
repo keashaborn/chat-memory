@@ -37,7 +37,12 @@ class TrainingProgressionQueryContractTest(unittest.TestCase):
         self.assertIn("coalesce(sum(l.reps), 0)::int as total_reps", self.route)
         self.assertIn("coalesce(max(l.weight), 0)::float as max_load", self.route)
         self.assertIn("coalesce(sum(l.volume), 0)::float as total_volume", self.route)
-        self.assertIn(")='strength'", self.route)
+        self.assertIn(
+            "join {schema}.training_set_effective_role_v1 role_resolution",
+            self.route,
+        )
+        self.assertIn("role_resolution.effective_role='strength'", self.route)
+        self.assertIn("role_resolution_sources", self.route)
         self.assertIn("s.day between $2::date and $3::date", self.route)
 
     def test_query_preserves_load_unit_comparability(self) -> None:

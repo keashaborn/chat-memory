@@ -47,27 +47,36 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         self.assertIn("classify_unclassified_training_sessions", self.router)
         self.assertIn("idempotency-key", self.router)
 
-    def test_session_role_precedence_is_deterministic(self) -> None:
-        historical = self.router.index("when historical_workout_role in ('strength', 'rehab')")
-        snapshot = self.router.index("when workout_role_snapshot in ('strength', 'rehab')")
-        derived = self.router.index("when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'")
-        self.assertLess(historical, snapshot)
-        self.assertLess(snapshot, derived)
+    def test_session_role_is_derived_from_canonical_set_roles(self) -> None:
+        classification = self.router.split("), classified as (", 1)[1].split(
+            "select classified.*", 1
+        )[0]
+        self.assertNotIn("when historical_workout_role", classification)
+        self.assertNotIn("when workout_role_snapshot", classification)
+        self.assertIn(
+            "when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'",
+            classification,
+        )
+        self.assertIn("role_event.assigned_role as historical_workout_role", self.router)
+        self.assertIn("base.workout_role_snapshot", self.router)
         self.assertIn("session_role in ('strength', 'mixed') as counts_toward_strength", self.router)
 
-    def test_session_summary_uses_explicit_session_role_only_as_set_role_fallback(self) -> None:
-        strength_fallback = (
-            "coalesce(nullif(l.capture_role, 'unknown'), "
-            "nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, "
-            "base.workout_role_snapshot, 'unknown')='strength'"
+    def test_session_summary_uses_canonical_effective_role_projection(self) -> None:
+        self.assertIn("training_set_effective_role_v1", self.router)
+        self.assertGreaterEqual(
+            self.router.count("role_resolution.effective_role='strength'"),
+            4,
         )
-        rehab_fallback = (
-            "coalesce(nullif(l.capture_role, 'unknown'), "
-            "nullif(l.exercise_role_snapshot, 'unknown'), role_event.assigned_role, "
-            "base.workout_role_snapshot, 'unknown')='rehab'"
+        self.assertGreaterEqual(
+            self.router.count("role_resolution.effective_role='rehab'"),
+            3,
         )
-        self.assertEqual(self.router.count(strength_fallback), 3)
-        self.assertEqual(self.router.count(rehab_fallback), 3)
+        self.assertNotIn(
+            "coalesce(nullif(l.capture_role, 'unknown')", self.router
+        )
+        self.assertIn("role_conflict_set_count", self.router)
+        self.assertIn("unknown_role_set_count", self.router)
+        self.assertIn("training_session_role_event_resolved_set_count", self.router)
 
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
             self.router,
         )
 
-    def test_normal_reads_use_current_roots_and_frozen_roles(self) -> None:
+    def test_normal_reads_use_current_roots_and_canonical_roles(self) -> None:
         self.assertGreaterEqual(
             self.router.count("training_session_current_v"),
             5,
@@ -55,21 +55,45 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
             self.router.count("conditioning_session_current_v"),
             3,
         )
-        frozen_role = (
-            "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown')"
+        self.assertGreaterEqual(
+            self.router.count("training_set_effective_role_v1"),
+            3,
         )
-        self.assertGreaterEqual(self.router.count(frozen_role), 10)
+        self.assertNotIn(
+            "coalesce(nullif(l.capture_role, 'unknown')",
+            self.router,
+        )
+        self.assertIn(
+            "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') "
+            "as exercise_role",
+            self.router,
+        )
         self.assertNotRegex(
             self.router_lower,
             r"coalesce\([^\n]*exercise_role[^\n]*'strength'\)",
         )
 
     def test_session_summary_groups_every_projected_view_column(self) -> None:
-        expected_grouping = """group by
-              s.training_session_id, s.owner_user_id, s.day,
-              s.workout_template_id, s.name, s.notes, s.started_at,
-              s.finished_at, s.is_active, s.created_at, s.updated_at"""
-        self.assertIn(expected_grouping, self.router)
+        session_rollup = self.router.split("session_rollup as (", 1)[1].split(
+            "), classified as (", 1
+        )[0]
+        grouping = session_rollup.rsplit("group by", 1)[1]
+        for projected_column in (
+            "s.training_session_id",
+            "s.owner_user_id",
+            "s.day",
+            "s.workout_template_id",
+            "s.name",
+            "s.notes",
+            "s.started_at",
+            "s.finished_at",
+            "s.is_active",
+            "s.created_at",
+            "s.updated_at",
+            "base.workout_role_snapshot",
+            "role_event.assigned_role",
+        ):
+            self.assertIn(projected_column, grouping)
 
     def test_completed_child_mutations_are_retired(self) -> None:
         retired_message = (

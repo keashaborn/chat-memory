@@ -9,6 +9,7 @@ CREATE SCHEMA lifeswitch_plan AUTHORIZATION sage;
 CREATE SCHEMA lifeswitch_nutrition AUTHORIZATION sage;
 CREATE SCHEMA lifeswitch_training AUTHORIZATION sage;
 GRANT CREATE ON SCHEMA public TO sage;
+GRANT USAGE ON SCHEMA lifeswitch_training TO brains_app;
 
 SET ROLE sage;
 
@@ -80,25 +81,46 @@ CREATE TABLE lifeswitch_nutrition.meal_item (
   qty_servings numeric
 );
 
-CREATE TABLE lifeswitch_training.training_session_current_v (
+CREATE TABLE lifeswitch_training.training_session (
   training_session_id uuid PRIMARY KEY,
-  owner_user_id uuid,
-  day date,
-  name text,
-  finished_at timestamptz
+  owner_user_id uuid NOT NULL,
+  day date NOT NULL,
+  name text NOT NULL,
+  finished_at timestamptz,
+  is_active boolean NOT NULL DEFAULT true,
+  workout_role_snapshot text
 );
+CREATE VIEW lifeswitch_training.training_session_current_v AS
+SELECT training_session_id,owner_user_id,day,name,finished_at,is_active
+FROM lifeswitch_training.training_session
+WHERE is_active=true;
 CREATE TABLE lifeswitch_training.training_set_log (
   training_set_log_id uuid PRIMARY KEY,
   training_session_id uuid NOT NULL,
   owner_user_id uuid NOT NULL,
+  workout_template_id uuid,
   exercise_id text NOT NULL,
   exercise_name text NOT NULL,
+  set_type text,
+  exercise_sort_order integer NOT NULL DEFAULT 0,
+  set_index integer NOT NULL DEFAULT 1,
   weight numeric NOT NULL,
   reps integer NOT NULL,
   volume numeric NOT NULL,
+  flags jsonb NOT NULL DEFAULT '{}'::jsonb,
+  notes text,
   is_active boolean NOT NULL,
   capture_role text NOT NULL,
-  load_unit text NOT NULL
+  exercise_role_snapshot text,
+  load_unit text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE lifeswitch_training.training_session_role_event (
+  training_session_role_event_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  training_session_id uuid NOT NULL UNIQUE,
+  assigned_role text NOT NULL
 );
 CREATE TABLE lifeswitch_training.conditioning_session_current_v (
   conditioning_session_log_id uuid PRIMARY KEY,
@@ -168,17 +190,59 @@ INSERT INTO lifeswitch_nutrition.nutrition_entry(
 ('aaaaaaaa-3000-4000-8000-000000000001','aaaaaaaa-1000-4000-8000-000000000001','aaaaaaaa-2000-4000-8000-000000000001',100),
 ('bbbbbbbb-3000-4000-8000-000000000001','bbbbbbbb-1000-4000-8000-000000000001','bbbbbbbb-2000-4000-8000-000000000001',100);
 
-INSERT INTO lifeswitch_training.training_session_current_v(
-  training_session_id,owner_user_id,day,name,finished_at
+INSERT INTO lifeswitch_training.training_session(
+  training_session_id,owner_user_id,day,name,finished_at,is_active,
+  workout_role_snapshot
 ) VALUES
-('aaaaaaaa-4000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','2026-07-29','Owner A workout',pg_catalog.clock_timestamp()),
-('bbbbbbbb-4000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','2026-07-29','Owner B workout',pg_catalog.clock_timestamp());
+('aaaaaaaa-4000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','2026-07-29','Owner A workout',pg_catalog.clock_timestamp(),true,NULL),
+('bbbbbbbb-4000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','2026-07-29','Owner B workout',pg_catalog.clock_timestamp(),true,NULL);
 INSERT INTO lifeswitch_training.training_set_log(
   training_set_log_id,training_session_id,owner_user_id,exercise_id,
-  exercise_name,weight,reps,volume,is_active,capture_role,load_unit
+  exercise_name,weight,reps,volume,is_active,capture_role,
+  exercise_role_snapshot,load_unit
 ) VALUES
-('aaaaaaaa-5000-4000-8000-000000000001','aaaaaaaa-4000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','squat','Back Squat',200,5,1000,true,'strength','lb'),
-('bbbbbbbb-5000-4000-8000-000000000001','bbbbbbbb-4000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','squat','Back Squat',400,5,2000,true,'strength','lb');
+('aaaaaaaa-5000-4000-8000-000000000001','aaaaaaaa-4000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','squat','Back Squat',200,5,1000,true,'unknown',NULL,'lb'),
+('bbbbbbbb-5000-4000-8000-000000000001','bbbbbbbb-4000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','squat','Back Squat',400,5,2000,true,'unknown',NULL,'lb');
+INSERT INTO lifeswitch_training.training_session_role_event(
+  training_session_role_event_id,owner_user_id,training_session_id,assigned_role
+) VALUES
+('aaaaaaaa-5100-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','aaaaaaaa-4000-4000-8000-000000000001','strength'),
+('bbbbbbbb-5100-4000-8000-000000000001','22222222-2222-4222-8222-222222222222','bbbbbbbb-4000-4000-8000-000000000001','strength');
+
+INSERT INTO lifeswitch_training.training_session(
+  training_session_id,owner_user_id,day,name,finished_at,is_active,
+  workout_role_snapshot
+) VALUES
+('aaaaaaaa-4000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','2026-07-20','Workout snapshot case',pg_catalog.clock_timestamp(),true,'strength'),
+('aaaaaaaa-4000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','2026-07-21','Exercise snapshot case',pg_catalog.clock_timestamp(),true,NULL),
+('aaaaaaaa-4000-4000-8000-000000000004','11111111-1111-4111-8111-111111111111','2026-07-22','Conflict case',pg_catalog.clock_timestamp(),true,'rehab'),
+('aaaaaaaa-4000-4000-8000-000000000005','11111111-1111-4111-8111-111111111111','2026-07-23','Agreeing candidates case',pg_catalog.clock_timestamp(),true,'strength'),
+('aaaaaaaa-4000-4000-8000-000000000006','11111111-1111-4111-8111-111111111111','2026-07-24','Unresolved case',pg_catalog.clock_timestamp(),true,NULL),
+('aaaaaaaa-4000-4000-8000-000000000007','11111111-1111-4111-8111-111111111111','2026-07-25','Reviewed rehab case',pg_catalog.clock_timestamp(),true,NULL);
+
+INSERT INTO lifeswitch_training.training_set_log(
+  training_set_log_id,training_session_id,owner_user_id,exercise_id,
+  exercise_name,weight,reps,volume,is_active,capture_role,
+  exercise_role_snapshot,load_unit
+) VALUES
+('aaaaaaaa-5000-4000-8000-000000000002','aaaaaaaa-4000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','case-workout','Workout snapshot exercise',10,1,10,true,'unknown',NULL,'lb'),
+('aaaaaaaa-5000-4000-8000-000000000003','aaaaaaaa-4000-4000-8000-000000000003','11111111-1111-4111-8111-111111111111','case-exercise','Exercise snapshot exercise',10,1,10,true,'unknown','rehab','lb'),
+('aaaaaaaa-5000-4000-8000-000000000004','aaaaaaaa-4000-4000-8000-000000000004','11111111-1111-4111-8111-111111111111','case-conflict','Conflict exercise',10,1,10,true,'strength','rehab','lb'),
+('aaaaaaaa-5000-4000-8000-000000000005','aaaaaaaa-4000-4000-8000-000000000005','11111111-1111-4111-8111-111111111111','case-agree','Agreeing exercise',10,1,10,true,'strength','strength','lb'),
+('aaaaaaaa-5000-4000-8000-000000000006','aaaaaaaa-4000-4000-8000-000000000006','11111111-1111-4111-8111-111111111111','case-unresolved','Unresolved exercise',10,1,10,true,'unknown',NULL,'lb'),
+('aaaaaaaa-5000-4000-8000-000000000007','aaaaaaaa-4000-4000-8000-000000000007','11111111-1111-4111-8111-111111111111','case-event-rehab','Reviewed rehab exercise',10,1,10,true,'unknown',NULL,'lb');
+
+INSERT INTO lifeswitch_training.training_session_role_event(
+  training_session_role_event_id,owner_user_id,training_session_id,assigned_role
+) VALUES
+('aaaaaaaa-5100-4000-8000-000000000005','11111111-1111-4111-8111-111111111111','aaaaaaaa-4000-4000-8000-000000000005','strength'),
+('aaaaaaaa-5100-4000-8000-000000000007','11111111-1111-4111-8111-111111111111','aaaaaaaa-4000-4000-8000-000000000007','rehab');
+
+GRANT SELECT ON lifeswitch_training.training_session,
+  lifeswitch_training.training_session_current_v,
+  lifeswitch_training.training_set_log,
+  lifeswitch_training.training_session_role_event
+TO brains_app;
 INSERT INTO lifeswitch_training.conditioning_session_current_v(
   conditioning_session_log_id,owner_user_id,day,name,category,modality,
   duration_min,intensity,distance_value,distance_unit,heart_rate_avg,

@@ -759,27 +759,32 @@ class CanonicalPlanObservationContextRepository:
                    count(l.training_set_log_id)::int as active_set_count,
                    count(distinct l.exercise_id)::int as exercise_count,
                    count(l.training_set_log_id) filter (
-                     where l.capture_role = 'strength'
+                     where role_resolution.effective_role = 'strength'
                    )::int as strength_set_count,
                    count(distinct l.exercise_id) filter (
-                     where l.capture_role = 'strength'
+                     where role_resolution.effective_role = 'strength'
                    )::int as strength_exercise_count,
                    count(l.training_set_log_id) filter (
-                     where l.capture_role = 'rehab'
+                     where role_resolution.effective_role = 'rehab'
                    )::int as rehab_set_count,
                    count(distinct l.exercise_id) filter (
-                     where l.capture_role = 'rehab'
+                     where role_resolution.effective_role = 'rehab'
                    )::int as rehab_exercise_count,
                    count(l.training_set_log_id) filter (
-                     where l.capture_role = 'unknown'
+                     where role_resolution.effective_role = 'unknown'
                    )::int as unknown_role_set_count,
                    count(distinct l.exercise_id) filter (
-                     where l.capture_role = 'unknown'
+                     where role_resolution.effective_role = 'unknown'
                    )::int as unknown_role_exercise_count
             from lifeswitch_training.training_session_current_v s
             join lifeswitch_training.training_set_log l
               on l.training_session_id = s.training_session_id
+             and l.owner_user_id = s.owner_user_id
              and l.is_active = true
+            join lifeswitch_training.training_set_effective_role_v1 role_resolution
+              on role_resolution.training_set_log_id = l.training_set_log_id
+             and role_resolution.training_session_id = l.training_session_id
+             and role_resolution.owner_user_id = l.owner_user_id
             where s.owner_user_id = $1
               and s.finished_at is not null
               and s.day between $2 and $3
@@ -850,6 +855,14 @@ class CanonicalPlanObservationContextRepository:
             "unknown_role_exercises": sum(
                 int(row["unknown_role_exercise_count"] or 0) for row in rows
             ),
+            "effective_role_contract": "training_set_effective_role_v1",
+            "effective_role_active_sets": {
+                "strength": sum(int(row["strength_set_count"] or 0) for row in rows),
+                "rehab": sum(int(row["rehab_set_count"] or 0) for row in rows),
+                "unknown": sum(
+                    int(row["unknown_role_set_count"] or 0) for row in rows
+                ),
+            },
             "rehab_only_sessions": sum(
                 int(row["rehab_set_count"] or 0) > 0
                 and int(row["strength_set_count"] or 0) == 0

@@ -168,6 +168,14 @@ async def main() -> None:
             require(float(nutrition["kcal"]) == 100.0, "cross-owner nutrition leakage")
             require(timezone["timezone_name"] == "America/Chicago", "wrong owner timezone")
             require(resistance["active_set_count"] == 1, "cross-owner resistance leakage")
+            require(
+                resistance["strength_set_count"] == 1,
+                "reviewed strength role was not resolved",
+            )
+            require(
+                resistance["unknown_role_set_count"] == 0,
+                "reviewed role remained unknown",
+            )
             require(conditioning["name"] == "Owner A walk", "cross-owner conditioning leakage")
             require(float(measurement["weight_value"]) == 200.0, "cross-owner measurement leakage")
             require(training_day["name"] == "Owner A workout", "cross-owner training-day leakage")
@@ -191,7 +199,10 @@ async def main() -> None:
             "lifeswitch_nutrition.my_food_serving",
             "lifeswitch_nutrition.meal_item",
             "lifeswitch_training.training_session_current_v",
+            "lifeswitch_training.training_session",
             "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_session_role_event",
+            "lifeswitch_training.training_set_effective_role_v1",
             "lifeswitch_training.conditioning_session_current_v",
             "public.lifeswitch_measurement_entries",
             "lifeswitch_chat.owner_read_context_v1",
