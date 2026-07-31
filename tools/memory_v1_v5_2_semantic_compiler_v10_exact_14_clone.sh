@@ -361,64 +361,48 @@ test "$(scalar "$clone" "
           'short-term memory lasts about three seconds'
     )")" -eq 1
 
-docker exec -i "$container" psql -U sage -d "$clone" -X \
-  -v ON_ERROR_STOP=1 -v owner="$owner" >/dev/null <<'SQL'
-SET SESSION AUTHORIZATION brains_app;
-SELECT set_config('app.user_id', :'owner', false);
-DO $apply_supersessions$
-DECLARE
-  target record;
-  first_result record;
-  replay_result record;
-  operation_id uuid;
-  supersession_id uuid;
-BEGIN
-  FOR target IN
-    SELECT
-      (terminal.details->>'prior_packet_id')::uuid AS prior_packet_id,
-      terminal.details->>'prior_packet_storage_sha256'
-        AS prior_storage_sha256,
-      packet.packet_id AS replacement_packet_id,
-      packet.packet_storage_sha256 AS replacement_storage_sha256,
-      route.route
-    FROM memory.evidence_extraction_job AS job
-    JOIN memory.evidence_intake_terminal AS terminal
-      ON terminal.owner_user_id=job.owner_user_id
-     AND terminal.terminal_id=job.intake_terminal_id
-    JOIN memory.evidence_extraction_packet_v5_local AS packet
-      ON packet.owner_user_id=job.owner_user_id AND packet.job_id=job.job_id
-    JOIN memory.v5_2_local_packet_route_event AS route
-      ON route.owner_user_id=packet.owner_user_id
-     AND route.packet_id=packet.packet_id
-    WHERE job.owner_user_id=current_setting('app.user_id')::uuid
-      AND job.selector_version=
-          '20260731_v5_2_semantic_compiler_v10_exact_14_v1'
-    ORDER BY job.evidence_id
-  LOOP
-    operation_id:=gen_random_uuid();
-    supersession_id:=gen_random_uuid();
-    SELECT * INTO first_result
+while IFS='|' read -r prior_packet prior_sha replacement_packet \
+  replacement_sha replacement_route; do
+  id_pair=$(scalar "$clone" "SELECT gen_random_uuid(),gen_random_uuid()")
+  operation_id=${id_pair%%|*}
+  supersession_id=${id_pair##*|}
+  first_outcome=$(actor_scalar "$clone" "$owner" "
+    SELECT apply_outcome
     FROM memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
-      operation_id,supersession_id,target.prior_packet_id,
-      target.replacement_packet_id,target.prior_storage_sha256,
-      target.replacement_storage_sha256,target.route,
+      '$operation_id'::uuid,'$supersession_id'::uuid,
+      '$prior_packet'::uuid,'$replacement_packet'::uuid,
+      '$prior_sha','$replacement_sha','$replacement_route',
       'semantic_compiler_v10_reextracted'
-    );
-    SELECT * INTO replay_result
+    )")
+  replay_outcome=$(actor_scalar "$clone" "$owner" "
+    SELECT apply_outcome
     FROM memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
-      operation_id,supersession_id,target.prior_packet_id,
-      target.replacement_packet_id,target.prior_storage_sha256,
-      target.replacement_storage_sha256,target.route,
+      '$operation_id'::uuid,'$supersession_id'::uuid,
+      '$prior_packet'::uuid,'$replacement_packet'::uuid,
+      '$prior_sha','$replacement_sha','$replacement_route',
       'semantic_compiler_v10_reextracted'
-    );
-    IF first_result.apply_outcome<>'applied'
-       OR replay_result.apply_outcome<>'replayed' THEN
-      RAISE EXCEPTION 'compiler-v10 supersession replay failed';
-    END IF;
-  END LOOP;
-END
-$apply_supersessions$;
-SQL
+    )")
+  test "$first_outcome" = applied
+  test "$replay_outcome" = replayed
+done < <(scalar "$clone" "
+  SELECT
+    terminal.details->>'prior_packet_id',
+    terminal.details->>'prior_packet_storage_sha256',
+    packet.packet_id,
+    packet.packet_storage_sha256,
+    route.route
+  FROM memory.evidence_extraction_job AS job
+  JOIN memory.evidence_intake_terminal AS terminal
+    ON terminal.owner_user_id=job.owner_user_id
+   AND terminal.terminal_id=job.intake_terminal_id
+  JOIN memory.evidence_extraction_packet_v5_local AS packet
+    ON packet.owner_user_id=job.owner_user_id AND packet.job_id=job.job_id
+  JOIN memory.v5_2_local_packet_route_event AS route
+    ON route.owner_user_id=packet.owner_user_id
+   AND route.packet_id=packet.packet_id
+  WHERE job.owner_user_id='$owner'::uuid
+    AND job.selector_version='$selector'
+  ORDER BY job.evidence_id")
 
 test "$(( $(scalar "$clone" "
   SELECT count(*) FROM memory.v5_local_packet_supersession
