@@ -269,7 +269,7 @@ test "$(( $(scalar "$clone" "
   SELECT count(*) FROM memory.v5_2_local_packet_route_event
   WHERE owner_user_id='$owner'::uuid") - route_before ))" -eq 14
 
-test "$(actor_scalar "$clone" "$owner" "
+test "$(scalar "$clone" "
   SELECT count(*)
   FROM memory.evidence_extraction_job AS job
   JOIN memory.evidence_extraction_packet_v5_local AS packet
@@ -385,16 +385,22 @@ test "$(( $(scalar "$clone" "
   SELECT count(*) FROM memory.v5_local_packet_supersession
   WHERE owner_user_id='$owner'::uuid") - supersession_before ))" -eq 14
 
-test "$(scalar "$clone" "
-  SELECT count(*)
-  FROM memory.evidence_extraction_job AS job
-  JOIN memory.evidence_extraction_packet_v5_local AS packet
-    ON packet.owner_user_id=job.owner_user_id AND packet.job_id=job.job_id
-  WHERE job.owner_user_id='$owner'::uuid
-    AND job.selector_version='$selector'
-    AND packet.packet_id=memory.authoritative_owner_v5_2_packet_id_v1(
-      job.evidence_id
-    )")" -eq 14
+authority_count=0
+while IFS= read -r evidence_id; do
+  is_authoritative=$(actor_scalar "$clone" "$owner" "
+    SELECT (
+      memory.authoritative_owner_v5_2_packet_id_v1('$evidence_id'::uuid)
+      IS NOT NULL
+    )::integer")
+  test "$is_authoritative" -eq 1
+  authority_count=$((authority_count + 1))
+done < <(scalar "$clone" "
+  SELECT evidence_id
+  FROM memory.evidence_extraction_job
+  WHERE owner_user_id='$owner'::uuid
+    AND selector_version='$selector'
+  ORDER BY evidence_id")
+test "$authority_count" -eq 14
 
 sample_pair=$(scalar "$clone" "
   SELECT prior_packet_id::text || '|' || replacement_packet_id::text
