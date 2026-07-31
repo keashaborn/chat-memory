@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 LIFESWITCH_DATA_PLAN_CONTRACT = "lifeswitch_data_plan_v1"
-LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1_1"
+LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1_2"
 
 LifeSwitchDataIntent = Literal[
     "OFF",
@@ -168,7 +168,7 @@ _MEASUREMENTS = re.compile(
     re.IGNORECASE,
 )
 _PROGRESSION = re.compile(
-    r"\b(?:progress|progressing|progression|improv(?:e|ed|ing|ement)|"
+    r"\b(?:progress(?:ed|ing|ion)?|improv(?:e|ed|ing|ement)|"
     r"getting stronger|going up)\b",
     re.IGNORECASE,
 )
@@ -194,13 +194,68 @@ _TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
 _YESTERDAY = re.compile(r"\byesterday\b", re.IGNORECASE)
 _PROGRESSION_SUBJECT = (
     re.compile(
-        r"\b(?:how (?:is|are)|are)\s+my\s+([a-z][a-z0-9 '\-/]{1,60}?)\s+"
+        r"\b(?:show|tell)\s+(?:me\s+)?my\s+(?:recent\s+|latest\s+|current\s+)?"
+        r"progress(?:ion)?\s+(?:on|for|with)\s+(?:my\s+)?"
+        r"([a-z][a-z0-9 ()&+'’\-/]{1,60}?)(?:[?.!,]|$)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:how (?:is|are)|are)\s+my\s+"
+        r"([a-z][a-z0-9 ()&+'’\-/]{1,60}?)\s+"
         r"(?:progressing|improving|going up)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\bmy\s+([a-z][a-z0-9 '\-/]{1,60}?)\s+progress(?:ion)?\b",
+        r"\bmy\s+([a-z][a-z0-9 ()&+'’\-/]{1,60}?)\s+progress(?:ion)?\b",
         re.IGNORECASE,
+    ),
+)
+_IMPLICIT_PERSONAL_LIFTING_PROGRESS = (
+    re.compile(
+        r"^\s*(?:which|what)\s+(?:lifts?|exercises?|movements?)\s+"
+        r"(?:have|are)\s+(?:progressed|progressing|improved|improving)\b"
+        r".{0,80}\b(?:last|past|recent|this)\b",
+        re.IGNORECASE,
+    ),
+)
+_HISTORY_RANGE_DAYS = (
+    (
+        re.compile(
+            r"\b(?:last|past|previous)\s+(?:week|7\s+days?)\b",
+            re.IGNORECASE,
+        ),
+        7,
+    ),
+    (
+        re.compile(
+            r"\b(?:last|past|previous|recent)\s+"
+            r"(?:(?:couple|two|2)\s+weeks?|14\s+days?)\b",
+            re.IGNORECASE,
+        ),
+        14,
+    ),
+    (
+        re.compile(
+            r"\b(?:last|past|previous|recent)\s+"
+            r"(?:(?:three|3)\s+weeks?|21\s+days?)\b",
+            re.IGNORECASE,
+        ),
+        21,
+    ),
+    (
+        re.compile(
+            r"\b(?:last|past|previous|recent)\s+"
+            r"(?:(?:four|4)\s+weeks?|28\s+days?)\b",
+            re.IGNORECASE,
+        ),
+        28,
+    ),
+    (
+        re.compile(
+            r"\b(?:last|past|previous|recent)\s+(?:month|30\s+days?)\b",
+            re.IGNORECASE,
+        ),
+        30,
     ),
 )
 _EXERCISE_FREQUENCY = (
@@ -255,6 +310,13 @@ def _window(end: dt.date, days: int) -> LifeSwitchDataWindowV1:
     )
 
 
+def _history_window(value: str, end: dt.date) -> LifeSwitchDataWindowV1:
+    for pattern, days in _HISTORY_RANGE_DAYS:
+        if pattern.search(value):
+            return _window(end, days)
+    return _window(end, 84)
+
+
 def _day_from_query(value: str, today: dt.date) -> dt.date | None:
     if _TODAY.search(value):
         return today
@@ -280,6 +342,8 @@ def _subject(value: str) -> str | None:
         match = pattern.search(value)
         if match:
             cleaned = re.sub(r"\s+", " ", match.group(1)).strip(" .?,'\"")
+            if cleaned.lower() in {"current", "latest", "overall", "recent"}:
+                continue
             return cleaned[:80] or None
     return None
 
@@ -356,6 +420,10 @@ def create_lifeswitch_data_plan_v1(
             and (_PROGRESSION.search(value) or _RANGE.search(value))
         )
     )
+    implicit_personal_lifting_progress = _matches(
+        value,
+        _IMPLICIT_PERSONAL_LIFTING_PROGRESS,
+    )
     training = bool(_TRAINING.search(value) or lifting_progress)
     training_reason = (
         "explicit_personal_lifting_progress_request"
@@ -408,7 +476,7 @@ def create_lifeswitch_data_plan_v1(
             domains=("training",),
             reasons=("explicit_personal_exercise_progression",),
             confidence="high",
-            window=_window(local_today, 84),
+            window=_history_window(value, local_today),
             subject=progression_subject,
             max_rows=200,
             max_prompt_tokens=600,
@@ -420,19 +488,23 @@ def create_lifeswitch_data_plan_v1(
             domains=("training",),
             reasons=("explicit_personal_exercise_history_request",),
             confidence="high",
-            window=_window(local_today, 84),
+            window=_history_window(value, local_today),
             subject=None,
             max_rows=12,
             max_prompt_tokens=550,
         )
 
-    if personal and broad_lifting_progress:
+    if (personal or implicit_personal_lifting_progress) and broad_lifting_progress:
         return _make_plan(
             intent="LIFTING_PROGRESSION_SUMMARY",
             domains=("training", "plan"),
-            reasons=("explicit_personal_lifting_progress_request",),
+            reasons=(
+                "explicit_personal_lifting_progress_request"
+                if personal
+                else "implicit_personal_lifting_progress_request",
+            ),
             confidence="high",
-            window=_window(local_today, 84),
+            window=_history_window(value, local_today),
             subject=None,
             max_rows=12,
             max_prompt_tokens=750,

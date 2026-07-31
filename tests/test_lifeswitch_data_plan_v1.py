@@ -82,6 +82,30 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         self.assertEqual((plan.window.end_date - plan.window.start_date).days, 83)
         self.assertEqual(plan.budget.max_rows, 200)
 
+    def test_recent_progress_on_named_exercise_extracts_exercise(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Show my recent progress on Decline Bench Press",
+            today=TODAY,
+        )
+        self.assertEqual(plan.intent, "EXERCISE_PROGRESSION")
+        self.assertEqual(plan.subject, "Decline Bench Press")
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 83)
+
+    def test_recent_modifier_is_never_used_as_exercise_subject(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Show my recent progress",
+            today=TODAY,
+        )
+        self.assertNotEqual(plan.subject, "recent")
+
+    def test_parenthesized_exercise_name_is_preserved(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Show my recent progress on Chest Press (Plate-Loaded)",
+            today=TODAY,
+        )
+        self.assertEqual(plan.intent, "EXERCISE_PROGRESSION")
+        self.assertEqual(plan.subject, "Chest Press (Plate-Loaded)")
+
     def test_personal_progress_across_lifting_weights_selects_progression_summary(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
             "If you look at my progress with the different weights, "
@@ -118,6 +142,14 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.budget.max_rows, 12)
         self.assertEqual((plan.window.end_date - plan.window.start_date).days, 83)
 
+    def test_exercise_frequency_honors_four_week_window(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "What exercises have I done most over the last four weeks?",
+            today=TODAY,
+        )
+        self.assertEqual(plan.intent, "EXERCISE_FREQUENCY")
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 27)
+
     def test_exercise_data_access_prompt_selects_bounded_history(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
             "Do you have access to any exercise data that I've done?",
@@ -132,6 +164,7 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         )
         self.assertEqual(plan.intent, "LIFTING_PROGRESSION_SUMMARY")
         self.assertEqual(plan.domains, ("training", "plan"))
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 13)
 
     def test_broad_weight_progress_prompt_selects_progression_summary(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
@@ -139,6 +172,26 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
             today=TODAY,
         )
         self.assertEqual(plan.intent, "LIFTING_PROGRESSION_SUMMARY")
+
+    def test_implicit_personal_lift_progress_honors_month_window(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Which lifts have progressed over the last month?",
+            today=TODAY,
+        )
+        self.assertEqual(plan.intent, "LIFTING_PROGRESSION_SUMMARY")
+        self.assertEqual(
+            plan.reason_codes,
+            ("implicit_personal_lifting_progress_request",),
+        )
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 29)
+
+    def test_generic_lift_progress_question_does_not_read_personal_data(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Which lifts have progressed most in Olympic competition?",
+            today=TODAY,
+        )
+        self.assertEqual(plan.intent, "OFF")
+        self.assertFalse(plan.data_access)
 
     def test_general_exercise_advice_does_not_read_personal_history(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
