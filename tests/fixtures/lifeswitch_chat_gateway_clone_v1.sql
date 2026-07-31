@@ -238,6 +238,18 @@ INSERT INTO lifeswitch_training.training_session_role_event(
 ('aaaaaaaa-5100-4000-8000-000000000005','11111111-1111-4111-8111-111111111111','aaaaaaaa-4000-4000-8000-000000000005','strength'),
 ('aaaaaaaa-5100-4000-8000-000000000007','11111111-1111-4111-8111-111111111111','aaaaaaaa-4000-4000-8000-000000000007','rehab');
 
+INSERT INTO lifeswitch_training.training_session(
+  training_session_id,owner_user_id,day,name,finished_at,is_active,
+  workout_role_snapshot
+) VALUES
+('aaaaaaaa-4000-4000-8000-000000000008','11111111-1111-4111-8111-111111111111','2026-07-28','Owner A prior squat',pg_catalog.clock_timestamp(),true,NULL);
+INSERT INTO lifeswitch_training.training_set_log(
+  training_set_log_id,training_session_id,owner_user_id,exercise_id,
+  exercise_name,weight,reps,volume,is_active,capture_role,
+  exercise_role_snapshot,load_unit
+) VALUES
+('aaaaaaaa-5000-4000-8000-000000000008','aaaaaaaa-4000-4000-8000-000000000008','11111111-1111-4111-8111-111111111111','squat','Back Squat',180,5,900,true,'strength',NULL,'lb');
+
 GRANT SELECT ON lifeswitch_training.training_session,
   lifeswitch_training.training_session_current_v,
   lifeswitch_training.training_set_log,

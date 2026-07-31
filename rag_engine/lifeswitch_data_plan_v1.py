@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 LIFESWITCH_DATA_PLAN_CONTRACT = "lifeswitch_data_plan_v1"
-LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1"
+LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1_1"
 
 LifeSwitchDataIntent = Literal[
     "OFF",
@@ -23,6 +23,8 @@ LifeSwitchDataIntent = Literal[
     "TRAINING_SUMMARY",
     "TRAINING_SESSION",
     "EXERCISE_PROGRESSION",
+    "EXERCISE_FREQUENCY",
+    "LIFTING_PROGRESSION_SUMMARY",
     "MEASUREMENTS_SUMMARY",
 ]
 LifeSwitchDomain = Literal[
@@ -157,8 +159,8 @@ _NUTRITION = re.compile(
     re.IGNORECASE,
 )
 _TRAINING = re.compile(
-    r"\b(?:training|workout|workouts|lifting|strength|sets?|volume|"
-    r"conditioning|cardio|exercise sessions?)\b",
+    r"\b(?:training|workouts?|lifting|weightlifting|strength|sets?|volume|"
+    r"conditioning|cardio|exercises?|exercise sessions?|movements?|lifts?)\b",
     re.IGNORECASE,
 )
 _MEASUREMENTS = re.compile(
@@ -180,7 +182,8 @@ _SESSION = re.compile(
 )
 _RANGE = re.compile(
     r"\b(?:this week|last week|past week|last 7 days|last 14 days|"
-    r"last 21 days|recently|over time|lately)\b",
+    r"last 21 days|last (?:couple|two) (?:of )?weeks|past (?:couple|two) "
+    r"(?:of )?weeks|recently|over time|lately)\b",
     re.IGNORECASE,
 )
 _WEEKDAY = re.compile(
@@ -197,6 +200,37 @@ _PROGRESSION_SUBJECT = (
     ),
     re.compile(
         r"\bmy\s+([a-z][a-z0-9 '\-/]{1,60}?)\s+progress(?:ion)?\b",
+        re.IGNORECASE,
+    ),
+)
+_EXERCISE_FREQUENCY = (
+    re.compile(
+        r"\bwhat\s+(?:exercises?|movements?|lifts?)\s+(?:do|have)\s+i\s+"
+        r"(?:do|done|perform(?:ed)?|train(?:ed)?)\s+(?:the\s+)?most\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:which|what|show)\s+(?:of\s+)?my\s+(?:exercises?|movements?|lifts?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat\s+(?:exercises?|movements?|lifts?)\s+(?:have|did)\s+i\s+"
+        r"(?:do|done|perform(?:ed)?|train(?:ed)?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:my\s+)?most\s+(?:common|frequent(?:ly performed)?)\s+"
+        r"(?:exercises?|movements?|lifts?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:do you|can you)\s+have\s+access\s+to\s+(?:any\s+)?"
+        r"(?:of\s+)?my\s+exercise\s+(?:data|history)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bdo you\s+have\s+access\s+to\s+(?:any\s+)?exercise\s+data\b"
+        r".{0,80}\b(?:i(?:'ve| have)?\s+done|my)\b",
         re.IGNORECASE,
     ),
 )
@@ -315,6 +349,13 @@ def create_lifeswitch_data_plan_v1(
         _LIFTING_LOAD.search(value)
         and (_PROGRESSION.search(value) or _RANGE.search(value))
     )
+    broad_lifting_progress = bool(
+        lifting_progress
+        or (
+            re.search(r"\b(?:weightlifting|lifting|lifts?)\b", value, re.IGNORECASE)
+            and (_PROGRESSION.search(value) or _RANGE.search(value))
+        )
+    )
     training = bool(_TRAINING.search(value) or lifting_progress)
     training_reason = (
         "explicit_personal_lifting_progress_request"
@@ -371,6 +412,30 @@ def create_lifeswitch_data_plan_v1(
             subject=progression_subject,
             max_rows=200,
             max_prompt_tokens=600,
+        )
+
+    if personal and _matches(value, _EXERCISE_FREQUENCY):
+        return _make_plan(
+            intent="EXERCISE_FREQUENCY",
+            domains=("training",),
+            reasons=("explicit_personal_exercise_history_request",),
+            confidence="high",
+            window=_window(local_today, 84),
+            subject=None,
+            max_rows=12,
+            max_prompt_tokens=550,
+        )
+
+    if personal and broad_lifting_progress:
+        return _make_plan(
+            intent="LIFTING_PROGRESSION_SUMMARY",
+            domains=("training", "plan"),
+            reasons=("explicit_personal_lifting_progress_request",),
+            confidence="high",
+            window=_window(local_today, 84),
+            subject=None,
+            max_rows=12,
+            max_prompt_tokens=750,
         )
 
     requested_day = _day_from_query(value, local_today)

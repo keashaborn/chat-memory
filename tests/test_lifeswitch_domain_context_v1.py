@@ -52,6 +52,8 @@ class SpyReader:
             "read_training_summary": "lifeswitch_training.training_session_current_v",
             "read_training_session": "lifeswitch_training.training_session_current_v",
             "read_exercise_progression": "lifeswitch_training.training_set_log",
+            "read_exercise_frequency": "lifeswitch_training.training_set_effective_role_v1",
+            "read_lifting_progression_summary": "lifeswitch_training.training_set_effective_role_v1",
             "read_measurements_summary": "public.lifeswitch_measurement_entries",
         }[method]
         return LifeSwitchReadResultV1(
@@ -64,6 +66,7 @@ class SpyReader:
                     "read_nutrition_day",
                     "read_nutrition_range",
                     "read_training_summary",
+                    "read_lifting_progression_summary",
                 }
                 else "not_requested"
             ),
@@ -92,6 +95,12 @@ class SpyReader:
 
     async def read_exercise_progression(self, **kwargs):
         return self._result("read_exercise_progression", kwargs)
+
+    async def read_exercise_frequency(self, **kwargs):
+        return self._result("read_exercise_frequency", kwargs)
+
+    async def read_lifting_progression_summary(self, **kwargs):
+        return self._result("read_lifting_progression_summary", kwargs)
 
     async def read_measurements_summary(self, **kwargs):
         return self._result("read_measurements_summary", kwargs)
@@ -143,6 +152,32 @@ class LifeSwitchDomainContextV1Tests(unittest.IsolatedAsyncioTestCase):
         method, arguments = reader.calls[0]
         self.assertEqual(method, "read_exercise_progression")
         self.assertEqual(arguments["subject"], "squat")
+
+    async def test_exercise_frequency_reaches_only_frequency_reader(self) -> None:
+        reader = SpyReader()
+        envelope = await LifeSwitchDomainContextProviderV1(reader).select(
+            trusted_request("What exercises do I do the most?")
+        )
+        self.assertEqual([call[0] for call in reader.calls], ["read_exercise_frequency"])
+        self.assertEqual(envelope.sections[0].projection, "exercise_frequency")
+        self.assertLessEqual(envelope.estimated_prompt_tokens, 550)
+
+    async def test_broad_lifting_progress_reaches_summary_reader(self) -> None:
+        reader = SpyReader()
+        envelope = await LifeSwitchDomainContextProviderV1(reader).select(
+            trusted_request(
+                "Have I been progressing with my weights and if so, which ones?"
+            )
+        )
+        self.assertEqual(
+            [call[0] for call in reader.calls],
+            ["read_lifting_progression_summary"],
+        )
+        self.assertEqual(
+            envelope.sections[0].projection,
+            "lifting_progression_summary",
+        )
+        self.assertLessEqual(envelope.estimated_prompt_tokens, 750)
 
     async def test_owner_mismatch_is_rejected_before_data_access(self) -> None:
         plan = create_lifeswitch_data_plan_v1("How am I doing?", today=TODAY)

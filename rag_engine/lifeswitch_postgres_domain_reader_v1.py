@@ -32,6 +32,10 @@ TRAINING_SOURCES = (
     "lifeswitch_training.training_session_current_v",
     "lifeswitch_training.training_set_log",
 )
+TRAINING_EFFECTIVE_ROLE_SOURCES = (
+    *TRAINING_SOURCES,
+    "lifeswitch_training.training_set_effective_role_v1",
+)
 CONDITIONING_SOURCES = (
     "lifeswitch_training.conditioning_session_current_v",
 )
@@ -371,7 +375,7 @@ class PostgresLifeSwitchDomainReaderV1:
         relations = (
             *plan_relations,
             *NUTRITION_SOURCES,
-            *TRAINING_SOURCES,
+            *TRAINING_EFFECTIVE_ROLE_SOURCES,
             *CONDITIONING_SOURCES,
             *MEASUREMENT_SOURCES,
         )
@@ -467,7 +471,13 @@ class PostgresLifeSwitchDomainReaderV1:
             plan_source=source,
             record_count=count,
             source_relations=tuple(
-                dict.fromkeys((*plan_relations, *TRAINING_SOURCES, *CONDITIONING_SOURCES))
+                dict.fromkeys(
+                    (
+                        *plan_relations,
+                        *TRAINING_EFFECTIVE_ROLE_SOURCES,
+                        *CONDITIONING_SOURCES,
+                    )
+                )
             ),
             payload=(
                 {
@@ -567,7 +577,115 @@ class PostgresLifeSwitchDomainReaderV1:
             status="AVAILABLE" if rows else "EMPTY",
             plan_source="not_requested",
             record_count=len(rows),
-            source_relations=TRAINING_SOURCES,
+            source_relations=TRAINING_EFFECTIVE_ROLE_SOURCES,
+            payload=payload if rows else {},
+        )
+
+    async def read_exercise_frequency(
+        self,
+        *,
+        owner_user_id: UUID,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1:
+        rows = await self._conn.fetch(
+            "select * from lifeswitch_chat.read_exercise_frequency_v1($1,$2,$3)",
+            self._context_id,
+            start_date,
+            end_date,
+        )
+        columns = (
+            "exercise_name",
+            "effective_role",
+            "set_count",
+            "session_count",
+            "first_day",
+            "last_day",
+            "role_conflict",
+        )
+        payload = {
+            "columns": list(columns),
+            "rows": [
+                [
+                    row["exercise_name"],
+                    row["effective_role"],
+                    int(row["set_count"]),
+                    int(row["session_count"]),
+                    row["first_day"].isoformat(),
+                    row["last_day"].isoformat(),
+                    bool(row["role_conflict"]),
+                ]
+                for row in rows
+            ],
+        }
+        return LifeSwitchReadResultV1(
+            status="AVAILABLE" if rows else "EMPTY",
+            plan_source="not_requested",
+            record_count=len(rows),
+            source_relations=TRAINING_EFFECTIVE_ROLE_SOURCES,
+            payload=payload if rows else {},
+        )
+
+    async def read_lifting_progression_summary(
+        self,
+        *,
+        owner_user_id: UUID,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1:
+        source, document, plan_relations = await self._resolve_plan(owner_user_id)
+        rows = await self._conn.fetch(
+            "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+            self._context_id,
+            start_date,
+            end_date,
+        )
+        columns = (
+            "exercise_name",
+            "exposure_count",
+            "set_count",
+            "first_day",
+            "last_day",
+            "first_max_load",
+            "latest_max_load",
+            "first_total_reps",
+            "latest_total_reps",
+            "first_total_volume",
+            "latest_total_volume",
+            "first_load_unit",
+            "latest_load_unit",
+        )
+        payload = {
+            "plan_targets": document.get("training_targets", {}),
+            "columns": list(columns),
+            "rows": [
+                [
+                    row["exercise_name"],
+                    int(row["exposure_count"]),
+                    int(row["set_count"]),
+                    row["first_day"].isoformat(),
+                    row["last_day"].isoformat(),
+                    _number(row["first_max_load"]),
+                    _number(row["latest_max_load"]),
+                    int(row["first_total_reps"]),
+                    int(row["latest_total_reps"]),
+                    _number(row["first_total_volume"]),
+                    _number(row["latest_total_volume"]),
+                    row["first_load_unit"],
+                    row["latest_load_unit"],
+                ]
+                for row in rows
+            ],
+        }
+        return LifeSwitchReadResultV1(
+            status="AVAILABLE" if rows else "EMPTY",
+            plan_source=source,
+            record_count=len(rows),
+            source_relations=tuple(
+                dict.fromkeys((*plan_relations, *TRAINING_EFFECTIVE_ROLE_SOURCES))
+            ),
             payload=payload if rows else {},
         )
 

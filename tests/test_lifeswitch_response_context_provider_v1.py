@@ -163,7 +163,7 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
         )
 
         self.assertTrue(result.database_accessed)
-        self.assertEqual(result.data_plan.intent, "TRAINING_SUMMARY")
+        self.assertEqual(result.data_plan.intent, "LIFTING_PROGRESSION_SUMMARY")
         self.assertEqual(len(session.calls), 1)
         self.assertEqual(session.calls[0]["conversation_snapshot"], source)
 

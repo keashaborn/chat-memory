@@ -32,6 +32,8 @@ LifeSwitchProjection = Literal[
     "training_summary",
     "training_session",
     "exercise_progression",
+    "exercise_frequency",
+    "lifting_progression_summary",
     "measurements_summary",
 ]
 LifeSwitchContextStatus = Literal["OFF", "EMPTY", "SELECTED", "PARTIAL"]
@@ -340,6 +342,8 @@ def _projection_domains(projection: LifeSwitchProjection) -> tuple[str, ...]:
         "training_summary": ("training", "conditioning", "plan"),
         "training_session": ("training", "conditioning"),
         "exercise_progression": ("training",),
+        "exercise_frequency": ("training",),
+        "lifting_progression_summary": ("training", "plan"),
         "measurements_summary": ("measurements",),
     }[projection]
 

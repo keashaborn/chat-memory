@@ -47,6 +47,8 @@ class FakeConnection:
         training_rows: list[dict[str, Any]] | None = None,
         conditioning_rows: list[dict[str, Any]] | None = None,
         progression_rows: list[dict[str, Any]] | None = None,
+        frequency_rows: list[dict[str, Any]] | None = None,
+        lifting_summary_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self.active_plan = active_plan
         self.legacy_plan = legacy_plan
@@ -54,6 +56,8 @@ class FakeConnection:
         self.training_rows = training_rows or []
         self.conditioning_rows = conditioning_rows or []
         self.progression_rows = progression_rows or []
+        self.frequency_rows = frequency_rows or []
+        self.lifting_summary_rows = lifting_summary_rows or []
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
 
     async def fetchrow(self, query: str, *args: Any):
@@ -82,6 +86,10 @@ class FakeConnection:
             return self.conditioning_rows
         if "read_exercise_progression_v1" in query:
             return self.progression_rows
+        if "read_exercise_frequency_v1" in query:
+            return self.frequency_rows
+        if "read_lifting_progression_summary_v1" in query:
+            return self.lifting_summary_rows
         raise AssertionError(f"unexpected fetch query: {query}")
 
 
@@ -379,6 +387,166 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("read_exercise_progression_v1", query)
         self.assertNotIn("owner_user_id", query)
         self.assertEqual(arguments, (CONTEXT, start, TODAY, "squat"))
+
+    async def test_exercise_frequency_is_compact_and_owner_context_bound(self) -> None:
+        start = TODAY - dt.timedelta(days=83)
+        conn = FakeConnection(
+            frequency_rows=[
+                {
+                    "exercise_id": "squat",
+                    "exercise_name": "Back Squat",
+                    "effective_role": "strength",
+                    "set_count": 24,
+                    "session_count": 6,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "resolution_sources": ["capture_role"],
+                    "role_conflict": False,
+                }
+            ]
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_exercise_frequency(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=start,
+            end_date=TODAY,
+        )
+        self.assertEqual(result.payload["columns"][0], "exercise_name")
+        self.assertEqual(result.payload["rows"][0][2:4], [24, 6])
+        query, arguments = conn.calls[0]
+        self.assertIn("read_exercise_frequency_v1", query)
+        self.assertEqual(arguments, (CONTEXT, start, TODAY))
+        self.assertIn(
+            "lifeswitch_training.training_set_effective_role_v1",
+            result.source_relations,
+        )
+
+    async def test_lifting_summary_pairs_first_and_latest_metrics(self) -> None:
+        start = TODAY - dt.timedelta(days=83)
+        conn = FakeConnection(
+            active_plan={"document": plan_document()},
+            lifting_summary_rows=[
+                {
+                    "exercise_id": "squat",
+                    "exercise_name": "Back Squat",
+                    "exposure_count": 6,
+                    "set_count": 24,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "first_max_load": 275,
+                    "latest_max_load": 315,
+                    "first_total_reps": 20,
+                    "latest_total_reps": 18,
+                    "first_total_volume": 5000,
+                    "latest_total_volume": 5400,
+                    "first_load_unit": "lb",
+                    "latest_load_unit": "lb",
+                    "resolution_sources": ["capture_role"],
+                }
+            ],
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_lifting_progression_summary(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=start,
+            end_date=TODAY,
+        )
+        self.assertEqual(result.plan_source, "agentic_active")
+        self.assertEqual(result.payload["plan_targets"]["workouts_per_week"], 4)
+        columns = result.payload["columns"]
+        row = dict(zip(columns, result.payload["rows"][0], strict=True))
+        self.assertEqual(row["first_max_load"], 275.0)
+        self.assertEqual(row["latest_max_load"], 315.0)
+        self.assertEqual(len(conn.calls), 2)
+        self.assertIn("read_plan_v1", conn.calls[0][0])
+        self.assertIn("read_lifting_progression_summary_v1", conn.calls[1][0])
+
+    async def test_frequency_max_rows_remain_within_prompt_budget(self) -> None:
+        start = TODAY - dt.timedelta(days=83)
+        rows = [
+            {
+                "exercise_name": f"Exercise {index} " + ("x" * 64),
+                "effective_role": "strength",
+                "set_count": 99,
+                "session_count": 24,
+                "first_day": start,
+                "last_day": TODAY,
+                "role_conflict": False,
+            }
+            for index in range(12)
+        ]
+        query = "What exercises do I do the most?"
+        plan = create_lifeswitch_data_plan_v1(query, today=TODAY)
+        request = TrustedLifeSwitchContextRequestV1.create(
+            request_id="frequency-budget-regression",
+            authenticated_actor_user_id=OWNER,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            conversation_snapshot_sha256="b" * 64,
+            owner_timezone="America/Chicago",
+            query=query,
+            data_plan=plan,
+        )
+        envelope = await LifeSwitchDomainContextProviderV1(
+            PostgresLifeSwitchDomainReaderV1(
+                FakeConnection(frequency_rows=rows),
+                context_id=CONTEXT,
+            )
+        ).select(request)
+        rendered = render_lifeswitch_context_v1(envelope)
+        self.assertEqual(envelope.sections[0].record_count, 12)
+        self.assertLessEqual(rendered.estimated_tokens, 550)
+
+    async def test_lifting_summary_max_rows_remain_within_prompt_budget(self) -> None:
+        start = TODAY - dt.timedelta(days=83)
+        rows = [
+            {
+                "exercise_name": f"Exercise {index} " + ("x" * 64),
+                "exposure_count": 24,
+                "set_count": 99,
+                "first_day": start,
+                "last_day": TODAY,
+                "first_max_load": 100,
+                "latest_max_load": 125,
+                "first_total_reps": 30,
+                "latest_total_reps": 30,
+                "first_total_volume": 3000,
+                "latest_total_volume": 3750,
+                "first_load_unit": "lb",
+                "latest_load_unit": "lb",
+            }
+            for index in range(12)
+        ]
+        query = "Have I been progressing with my weights and if so, which ones?"
+        plan = create_lifeswitch_data_plan_v1(query, today=TODAY)
+        request = TrustedLifeSwitchContextRequestV1.create(
+            request_id="lifting-budget-regression",
+            authenticated_actor_user_id=OWNER,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            conversation_snapshot_sha256="c" * 64,
+            owner_timezone="America/Chicago",
+            query=query,
+            data_plan=plan,
+        )
+        envelope = await LifeSwitchDomainContextProviderV1(
+            PostgresLifeSwitchDomainReaderV1(
+                FakeConnection(
+                    active_plan={"document": plan_document()},
+                    lifting_summary_rows=rows,
+                ),
+                context_id=CONTEXT,
+            )
+        ).select(request)
+        rendered = render_lifeswitch_context_v1(envelope)
+        self.assertEqual(envelope.sections[0].record_count, 12)
+        self.assertLessEqual(rendered.estimated_tokens, 750)
 
     async def test_reader_uses_only_gateway_sql(self) -> None:
         conn = FakeConnection(active_plan={"document": plan_document()})

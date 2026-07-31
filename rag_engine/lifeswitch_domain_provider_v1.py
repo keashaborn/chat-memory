@@ -24,6 +24,8 @@ _PROJECTION_BY_INTENT = {
     "TRAINING_SUMMARY": "training_summary",
     "TRAINING_SESSION": "training_session",
     "EXERCISE_PROGRESSION": "exercise_progression",
+    "EXERCISE_FREQUENCY": "exercise_frequency",
+    "LIFTING_PROGRESSION_SUMMARY": "lifting_progression_summary",
     "MEASUREMENTS_SUMMARY": "measurements_summary",
 }
 
@@ -47,6 +49,7 @@ _ALLOWED_RELATIONS = {
             "lifeswitch_nutrition.meal_item",
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
             "lifeswitch_training.conditioning_session_current_v",
             "public.lifeswitch_measurement_entries",
         }
@@ -82,6 +85,7 @@ _ALLOWED_RELATIONS = {
             "lifeswitch_plan.plan_profile",
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
             "lifeswitch_training.conditioning_session_current_v",
         }
     ),
@@ -96,6 +100,24 @@ _ALLOWED_RELATIONS = {
         {
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
+        }
+    ),
+    "exercise_frequency": frozenset(
+        {
+            "lifeswitch_training.training_session_current_v",
+            "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
+        }
+    ),
+    "lifting_progression_summary": frozenset(
+        {
+            "lifeswitch_agentic.plan_owner_state",
+            "lifeswitch_agentic.plan_versions",
+            "lifeswitch_plan.plan_profile",
+            "lifeswitch_training.training_session_current_v",
+            "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
         }
     ),
     "measurements_summary": frozenset(
@@ -194,6 +216,24 @@ class LifeSwitchDomainReaderV1(Protocol):
         subject: str,
     ) -> LifeSwitchReadResultV1: ...
 
+    async def read_exercise_frequency(
+        self,
+        *,
+        owner_user_id: Any,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1: ...
+
+    async def read_lifting_progression_summary(
+        self,
+        *,
+        owner_user_id: Any,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1: ...
+
     async def read_measurements_summary(
         self,
         *,
@@ -272,6 +312,22 @@ class LifeSwitchDomainContextProviderV1:
                 start_date=window.start_date,
                 end_date=window.end_date,
                 subject=plan.subject,
+            )
+        elif intent == "EXERCISE_FREQUENCY":
+            assert window is not None
+            result = await self._reader.read_exercise_frequency(
+                owner_user_id=request.owner_user_id,
+                owner_timezone=request.owner_timezone,
+                start_date=window.start_date,
+                end_date=window.end_date,
+            )
+        elif intent == "LIFTING_PROGRESSION_SUMMARY":
+            assert window is not None
+            result = await self._reader.read_lifting_progression_summary(
+                owner_user_id=request.owner_user_id,
+                owner_timezone=request.owner_timezone,
+                start_date=window.start_date,
+                end_date=window.end_date,
             )
         elif intent == "MEASUREMENTS_SUMMARY":
             assert window is not None

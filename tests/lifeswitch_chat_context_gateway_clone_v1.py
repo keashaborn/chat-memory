@@ -140,6 +140,18 @@ async def main() -> None:
                 TEST_DAY,
                 "squat",
             )
+            frequency = await conn.fetch(
+                "select * from lifeswitch_chat.read_exercise_frequency_v1($1,$2,$3)",
+                context_a,
+                TEST_DAY - dt.timedelta(days=30),
+                TEST_DAY,
+            )
+            lifting_summary = await conn.fetch(
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+                context_a,
+                TEST_DAY - dt.timedelta(days=30),
+                TEST_DAY,
+            )
             require(plan["plan_source"] == "agentic_active", "wrong plan source")
             document_value = plan["document"]
             document = (
@@ -180,12 +192,28 @@ async def main() -> None:
             require(float(measurement["weight_value"]) == 200.0, "cross-owner measurement leakage")
             require(training_day["name"] == "Owner A workout", "cross-owner training-day leakage")
             require(float(progression["max_load"]) == 200.0, "cross-owner progression leakage")
+            squat_frequency = next(
+                row for row in frequency if row["exercise_id"] == "squat"
+            )
+            require(squat_frequency["set_count"] == 2, "wrong owner A squat frequency")
+            require(squat_frequency["session_count"] == 2, "wrong owner A squat exposure")
+            require(
+                not squat_frequency["role_conflict"],
+                "owner A squat was incorrectly marked conflicting",
+            )
+            squat_summary = next(
+                row for row in lifting_summary if row["exercise_id"] == "squat"
+            )
+            require(float(squat_summary["first_max_load"]) == 180.0, "wrong first load")
+            require(float(squat_summary["latest_max_load"]) == 200.0, "wrong latest load")
         checks.extend(
             [
                 "guc_forgery_blocked",
                 "plan_whitelist",
                 "owner_a_isolation",
                 "all_gateway_projections",
+                "exercise_frequency_projection",
+                "lifting_progression_projection",
             ]
         )
 
@@ -241,6 +269,12 @@ async def main() -> None:
                 TEST_DAY,
                 TEST_DAY,
             )
+            lifting_b = await conn.fetch(
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+                context_b,
+                TEST_DAY - dt.timedelta(days=30),
+                TEST_DAY,
+            )
             plan_b_value = plan_b["document"]
             plan_b_document = (
                 json.loads(plan_b_value)
@@ -249,6 +283,8 @@ async def main() -> None:
             )
             require(plan_b_document["primary_goal"] == "Owner B goal", "owner B plan missing")
             require(float(nutrition_b["kcal"]) == 900.0, "owner B nutrition missing")
+            require(len(lifting_b) == 1, "owner B lifting summary leaked another owner")
+            require(float(lifting_b[0]["latest_max_load"]) == 400.0, "owner B lift missing")
         checks.append("owner_b_isolation")
 
         ended_context_a = context_a
