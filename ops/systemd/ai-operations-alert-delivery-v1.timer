@@ -1,8 +1,8 @@
 [Unit]
-Description=Deliver queued AI Operations alerts every minute
+Description=Deliver queued AI Operations alerts hourly
 
 [Timer]
-OnCalendar=*-*-* *:*:00
+OnCalendar=hourly
 Persistent=true
 RandomizedDelaySec=15s
 AccuracySec=5s

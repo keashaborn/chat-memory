@@ -309,7 +309,7 @@ class AiOperationsAlertDeliveryV1Tests(
         self.assertIn("ProtectSystem=strict", service)
         self.assertIn("MemoryMax=128M", service)
         self.assertIn("CPUQuota=10%", service)
-        self.assertIn("OnCalendar=*-*-* *:*:00", timer)
+        self.assertIn("OnCalendar=hourly", timer)
         self.assertIn("Persistent=true", timer)
         self.assertIn("--drill", drill)
         self.assertIn(
