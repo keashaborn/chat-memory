@@ -269,6 +269,7 @@ class PostgresLifeSwitchDomainReaderV1:
         end_date: dt.date,
         targets: Mapping[str, Any],
         include_daily: bool,
+        compact_daily: bool = False,
     ) -> tuple[int, dict[str, Any]]:
         observed = [row for row in rows if int(row["entry_count"] or 0) > 0]
         daily = [
@@ -294,7 +295,20 @@ class PostgresLifeSwitchDomainReaderV1:
             }
         if targets:
             payload["plan_targets"] = dict(targets)
-        if include_daily:
+        if include_daily and compact_daily:
+            daily_columns = (
+                "date",
+                "calories",
+                "protein_g",
+                "carbs_g",
+                "fat_g",
+            )
+            payload["daily_columns"] = list(daily_columns)
+            payload["daily_rows"] = [
+                [item[column] for column in daily_columns]
+                for item in daily
+            ]
+        elif include_daily:
             payload["daily"] = daily
         return len(observed), payload
 
@@ -417,6 +431,7 @@ class PostgresLifeSwitchDomainReaderV1:
             end_date=end_date,
             targets=document.get("nutrition_targets", {}),
             include_daily=True,
+            compact_daily=True,
         )
         return LifeSwitchReadResultV1(
             status="AVAILABLE" if count else "EMPTY",

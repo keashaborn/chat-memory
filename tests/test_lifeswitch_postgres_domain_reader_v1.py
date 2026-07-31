@@ -8,10 +8,17 @@ from typing import Any
 from rag_engine.lifeswitch_postgres_domain_reader_v1 import (
     PostgresLifeSwitchDomainReaderV1,
 )
+from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from rag_engine.lifeswitch_domain_context_v1 import (
+    TrustedLifeSwitchContextRequestV1,
+    render_lifeswitch_context_v1,
+)
+from rag_engine.lifeswitch_domain_provider_v1 import LifeSwitchDomainContextProviderV1
 
 
 OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
 CONTEXT = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+THREAD = uuid.UUID("22222222-2222-4222-8222-222222222222")
 TODAY = dt.date(2026, 7, 29)
 
 
@@ -214,6 +221,57 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "EMPTY")
         self.assertEqual(result.record_count, 0)
         self.assertEqual(result.payload, {})
+
+    async def test_twenty_one_day_nutrition_range_preserves_daily_values_within_budget(self) -> None:
+        rows = [
+            {
+                "day": TODAY - dt.timedelta(days=offset),
+                "entry_count": 4,
+                "kcal": 2800 + offset,
+                "protein_g": 180 + offset,
+                "carbs_g": 320 + offset,
+                "fat_g": 80 + offset,
+            }
+            for offset in range(20, -1, -1)
+        ]
+        reader = PostgresLifeSwitchDomainReaderV1(
+            FakeConnection(
+                active_plan={"document": plan_document()},
+                nutrition_rows=rows,
+            ),
+            context_id=CONTEXT,
+        )
+        query = (
+            "Can you look at my nutrition for last couple weeks and let me know "
+            "how I'm doing with hitting my macros"
+        )
+        plan = create_lifeswitch_data_plan_v1(query, today=TODAY)
+        request = TrustedLifeSwitchContextRequestV1.create(
+            request_id="nutrition-range-regression",
+            authenticated_actor_user_id=OWNER,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            conversation_snapshot_sha256="a" * 64,
+            owner_timezone="America/Chicago",
+            query=query,
+            data_plan=plan,
+        )
+
+        envelope = await LifeSwitchDomainContextProviderV1(reader).select(request)
+        rendered = render_lifeswitch_context_v1(envelope)
+        payload = envelope.sections[0].payload
+
+        self.assertEqual(plan.intent, "NUTRITION_RANGE")
+        self.assertEqual(plan.budget.max_prompt_tokens, 450)
+        self.assertEqual(
+            payload["daily_columns"],
+            ["date", "calories", "protein_g", "carbs_g", "fat_g"],
+        )
+        self.assertEqual(len(payload["daily_rows"]), 21)
+        self.assertEqual(payload["daily_rows"][0][0], "2026-07-09")
+        self.assertEqual(payload["daily_rows"][-1][0], TODAY.isoformat())
+        self.assertNotIn("daily", payload)
+        self.assertLessEqual(rendered.estimated_tokens, 450)
 
     async def test_training_day_returns_resistance_and_conditioning(self) -> None:
         conn = FakeConnection(
