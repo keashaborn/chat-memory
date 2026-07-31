@@ -54,6 +54,7 @@ from rag_engine.trusted_web_policy_v1 import (
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
+from rag_engine.search_runtime_budget_v1 import resolve_search_budget_v1
 from rag_engine.trusted_web_provider_v1 import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,
@@ -233,6 +234,17 @@ async def trusted_web_query(
         payload.query,
         allow_bacb=settings.allow_bacb,
     )
+    try:
+        execution_budget = resolve_search_budget_v1(
+            req,
+            default_max_searches=2,
+            default_max_sources=TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=503,
+            detail="trusted_web_search_budget_invalid",
+        ) from None
 
     try:
         conn = await asyncpg.connect(dsn, command_timeout=15)
@@ -348,6 +360,7 @@ async def trusted_web_query(
                     policy=policy,
                     actor_user_id=str(owner),
                     safety_secret=safety_secret,
+                    max_searches=execution_budget.max_searches,
                     instructions=(
                         TRUSTED_WEB_INSTRUCTIONS_V1
                         + "\n"
@@ -361,7 +374,7 @@ async def trusted_web_query(
         admission = admit_trusted_web_sources_v1(
             cited_sources=result.cited_sources,
             consulted_sources=result.consulted_sources,
-            max_sources=TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
+            max_sources=execution_budget.max_sources,
             policy_pack="trusted_health",
         )
         latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)

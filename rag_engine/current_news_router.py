@@ -45,6 +45,7 @@ from rag_engine.trusted_web_policy_v1 import (
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
+from rag_engine.search_runtime_budget_v1 import resolve_search_budget_v1
 from rag_engine.trusted_web_provider_v1 import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,
@@ -109,6 +110,8 @@ def _search_current_news_with_exact_page_repair(
     actor_user_id: str,
     safety_secret: str,
     response_language: str,
+    max_searches: int = 4,
+    max_sources: int = CURRENT_NEWS_MAX_ADMITTED_SOURCES,
 ) -> tuple[
     TrustedWebProviderResultV1,
     TrustedWebEvidenceAdmissionV1,
@@ -120,8 +123,12 @@ def _search_current_news_with_exact_page_repair(
         + response_language_instruction(response_language)
     )
 
+    if max_searches < 1:
+        raise TrustedWebProviderError("current_news_search_budget_invalid")
+
     def execute(
         attempt_instructions: str,
+        attempt_searches: int,
     ) -> tuple[
         TrustedWebProviderResultV1,
         TrustedWebEvidenceAdmissionV1,
@@ -132,27 +139,35 @@ def _search_current_news_with_exact_page_repair(
             actor_user_id=actor_user_id,
             safety_secret=safety_secret,
             instructions=attempt_instructions,
+            max_searches=attempt_searches,
         )
         admission = admit_trusted_web_sources_v1(
             cited_sources=result.cited_sources,
             consulted_sources=result.consulted_sources,
-            max_sources=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+            max_sources=max_sources,
             policy_pack="current_news",
         )
         return result, admission
 
     try:
-        result, admission = execute(instructions)
+        first_attempt_searches = min(2, max_searches)
+        result, admission = execute(instructions, first_attempt_searches)
         return result, admission, False
     except TrustedWebProviderSecurityError as exc:
         if str(exc) != "citation_evidence_cited_generic_index":
             raise
 
+    remaining_searches = max_searches - first_attempt_searches
+    if remaining_searches < 1:
+        raise TrustedWebProviderSecurityError(
+            "citation_evidence_repair_budget_exhausted"
+        )
     try:
         result, admission = execute(
             instructions
             + "\n"
-            + CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1
+            + CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
+            remaining_searches,
         )
         return result, admission, True
     except TrustedWebProviderSecurityError as exc:
@@ -404,6 +419,17 @@ async def current_news_query(
     request_id = str(getattr(req.state, "request_id", "") or uuid4())[:128]
     search_id = uuid4()
     policy = route_trusted_web_query(payload.query)
+    try:
+        execution_budget = resolve_search_budget_v1(
+            req,
+            default_max_searches=4,
+            default_max_sources=CURRENT_NEWS_MAX_ADMITTED_SOURCES,
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=503,
+            detail="current_news_search_budget_invalid",
+        ) from None
 
     if (
         policy.topic != TrustedWebTopicV1.CURRENT_NEWS
@@ -518,6 +544,8 @@ async def current_news_query(
                 actor_user_id=str(owner),
                 safety_secret=safety_secret,
                 response_language=payload.response_language,
+                max_searches=execution_budget.max_searches,
+                max_sources=execution_budget.max_sources,
             ),
             timeout=settings.timeout_seconds + 5.0,
         )

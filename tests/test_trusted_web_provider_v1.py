@@ -7,6 +7,7 @@ from rag_engine.trusted_web_ncbi_v1 import NCBIResearchRecordV1
 from rag_engine.trusted_web_policy_v1 import route_trusted_web_query
 from rag_engine.trusted_web_provider_v1 import (
     OpenAITrustedWebProviderV1,
+    TrustedWebProviderError,
     TrustedWebProviderSecurityError,
     TrustedWebSettingsV1,
 )
@@ -157,6 +158,37 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         self.assertEqual(len(result.cited_sources), 1)
         self.assertEqual(len(result.consulted_sources), 1)
         self.assertIn("Sources:", result.answer_markdown())
+
+    def test_provider_tool_calls_are_bound_by_server_budget(self) -> None:
+        client = FakeClient(
+            FakeResponse("https://pubmed.ncbi.nlm.nih.gov/12345678/")
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        OpenAITrustedWebProviderV1(client, self.settings()).search(
+            query="Does creatine improve strength?",
+            policy=policy,
+            actor_user_id=ACTOR,
+            safety_secret=SECRET,
+            max_searches=1,
+        )
+        self.assertEqual(client.responses.kwargs["max_tool_calls"], 1)
+
+    def test_provider_rejects_zero_search_budget(self) -> None:
+        client = FakeClient(
+            FakeResponse("https://pubmed.ncbi.nlm.nih.gov/12345678/")
+        )
+        policy = route_trusted_web_query("Does creatine improve strength?")
+        with self.assertRaisesRegex(
+            TrustedWebProviderError,
+            "trusted_web_search_budget_invalid",
+        ):
+            OpenAITrustedWebProviderV1(client, self.settings()).search(
+                query="Does creatine improve strength?",
+                policy=policy,
+                actor_user_id=ACTOR,
+                safety_secret=SECRET,
+                max_searches=0,
+            )
 
     def test_provider_separates_cited_from_consulted_and_prefers_citation_title(
         self,

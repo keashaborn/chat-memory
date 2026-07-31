@@ -104,6 +104,8 @@ class CurrentNewsRouterTests(unittest.TestCase):
         self.assertEqual(result.provider_response_id, "resp-repaired")
         self.assertEqual(admission.exact_page_source_count, 1)
         self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[0]["max_searches"], 2)
+        self.assertEqual(provider.calls[1]["max_searches"], 2)
         self.assertNotIn(
             CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
             str(provider.calls[0]["instructions"]),
@@ -144,6 +146,36 @@ class CurrentNewsRouterTests(unittest.TestCase):
             )
 
         self.assertEqual(len(provider.calls), 2)
+
+    def test_citation_repair_cannot_exceed_total_search_budget(self) -> None:
+        provider = FakeProvider(
+            (
+                provider_result(
+                    "resp-first",
+                    "https://status.openai.com/history",
+                ),
+            )
+        )
+        policy = route_trusted_web_query(
+            "What happened with OpenAI today?"
+        )
+
+        with self.assertRaisesRegex(
+            TrustedWebProviderSecurityError,
+            "citation_evidence_repair_budget_exhausted",
+        ):
+            _search_current_news_with_exact_page_repair(
+                provider=provider,
+                query="What happened with OpenAI today?",
+                policy=policy,
+                actor_user_id=str(ACTOR),
+                safety_secret="x" * 32,
+                response_language="en",
+                max_searches=2,
+            )
+
+        self.assertEqual(len(provider.calls), 1)
+        self.assertEqual(provider.calls[0]["max_searches"], 2)
 
     def test_non_generic_policy_failure_is_not_retried(self) -> None:
         result = TrustedWebProviderResultV1(

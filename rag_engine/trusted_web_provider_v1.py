@@ -510,9 +510,12 @@ class OpenAITrustedWebProviderV1:
         actor_user_id: str,
         safety_secret: str,
         instructions: str = TRUSTED_WEB_INSTRUCTIONS_V1,
+        max_searches: int = 2,
     ) -> TrustedWebProviderResultV1:
         if not policy.allowed_domains:
             raise TrustedWebProviderError("trusted_web_allowed_domains_empty")
+        if max_searches < 1 or max_searches > 12:
+            raise TrustedWebProviderError("trusted_web_search_budget_invalid")
         response = self._client.responses.create(
             model=self._settings.model,
             instructions=instructions,
@@ -529,7 +532,7 @@ class OpenAITrustedWebProviderV1:
             ],
             tool_choice="required",
             include=["web_search_call.action.sources"],
-            max_tool_calls=2,
+            max_tool_calls=min(2, max_searches),
             max_output_tokens=self._settings.max_output_tokens,
             parallel_tool_calls=False,
             reasoning={"effort": "low"},

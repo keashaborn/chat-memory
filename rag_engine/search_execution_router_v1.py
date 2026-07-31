@@ -16,6 +16,7 @@ from rag_engine.current_news_router import (
     current_news_query,
 )
 from rag_engine.search_plan_v1 import SearchPlanV1, create_search_plan_v1
+from rag_engine.search_runtime_budget_v1 import bind_search_budget_v1
 from rag_engine.trusted_web_router import (
     TrustedWebRequestV1,
     trusted_web_query,
@@ -175,6 +176,7 @@ async def execute_search_plan_v1(
             ),
         )
 
+    bind_search_budget_v1(req, plan.budget)
     provider_response = Response()
     try:
         if plan.selected_route == "current_news":

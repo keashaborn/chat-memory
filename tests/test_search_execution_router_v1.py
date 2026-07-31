@@ -70,6 +70,12 @@ class SearchExecutionRouterV1IntegrationTests(
             }
         )
         request.state.request_id = "citation-repair-test"
+        current_news = AsyncMock(
+            side_effect=HTTPException(
+                status_code=502,
+                detail="current_news_source_policy_violation",
+            )
+        )
 
         with (
             patch(
@@ -79,12 +85,7 @@ class SearchExecutionRouterV1IntegrationTests(
             ),
             patch(
                 "rag_engine.search_execution_router_v1.current_news_query",
-                new=AsyncMock(
-                    side_effect=HTTPException(
-                        status_code=502,
-                        detail="current_news_source_policy_violation",
-                    )
-                ),
+                new=current_news,
             ),
         ):
             with self.assertRaises(HTTPException) as raised:
@@ -98,6 +99,14 @@ class SearchExecutionRouterV1IntegrationTests(
         self.assertEqual(
             raised.exception.headers["X-VS-Web-Searched"],
             "1",
+        )
+        self.assertEqual(
+            request.state.server_search_budget_v1.max_searches,
+            4,
+        )
+        self.assertEqual(
+            request.state.server_search_budget_v1.max_sources,
+            10,
         )
 
 

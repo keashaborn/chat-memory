@@ -11,6 +11,7 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.decision, "no_search")
         self.assertEqual(plan.selected_route, "normal_chat")
         self.assertFalse(plan.external_web_access)
+        self.assertEqual(plan.execution_mode, "chat_only")
         self.assertEqual(plan.budget.max_searches, 0)
 
     def test_user_prohibition_overrides_freshness(self) -> None:
@@ -33,6 +34,7 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertIn("trusted_current_news_scope", plan.reason_codes)
         self.assertEqual(plan.budget.max_searches, 4)
         self.assertEqual(plan.budget.max_sources, 10)
+        self.assertEqual(plan.execution_mode, "live_web")
 
     def test_general_current_news_uses_bounded_current_news_pack(self) -> None:
         plan = create_search_plan_v1(
@@ -99,6 +101,8 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.policy_pack, "health")
         self.assertIn("evidence_requested", plan.reason_codes)
         self.assertIn("high_stakes_verification", plan.reason_codes)
+        self.assertTrue(plan.external_web_access)
+        self.assertEqual(plan.execution_mode, "indexed_sources")
 
     def test_official_software_docs_use_trusted_evidence_route(self) -> None:
         plan = create_search_plan_v1(
@@ -141,6 +145,15 @@ class SearchPlanV1Tests(unittest.TestCase):
         self.assertEqual(plan.decision, "indexed")
         self.assertEqual(plan.selected_route, "trusted_health")
         self.assertEqual(plan.policy_pack, "behavior_change")
+
+    def test_behavior_change_research_phrase_uses_registered_pack(self) -> None:
+        plan = create_search_plan_v1(
+            "What does research say about self-monitoring and adherence?"
+        )
+        self.assertEqual(plan.decision, "indexed")
+        self.assertEqual(plan.selected_route, "trusted_health")
+        self.assertEqual(plan.policy_pack, "behavior_change")
+        self.assertEqual(plan.execution_mode, "indexed_sources")
 
     def test_current_official_docs_use_reference_route_not_news(self) -> None:
         plan = create_search_plan_v1(
@@ -195,6 +208,51 @@ class SearchPlanV1Tests(unittest.TestCase):
             plan.reason_codes,
             ("internal_context_sufficient",),
         )
+
+    def test_unsupported_current_legal_scope_is_explicit(self) -> None:
+        plan = create_search_plan_v1(
+            "What is the current US tax law for this deduction?"
+        )
+        self.assertEqual(plan.decision, "no_search")
+        self.assertEqual(plan.selected_route, "normal_chat")
+        self.assertEqual(plan.execution_mode, "unsupported")
+        self.assertEqual(plan.policy_pack, "legal_financial")
+        self.assertIn("unsupported_search_scope", plan.reason_codes)
+        self.assertFalse(plan.external_web_access)
+        self.assertEqual(plan.budget.max_sources, 0)
+
+    def test_unsupported_weather_scope_is_explicit(self) -> None:
+        plan = create_search_plan_v1("What is the weather today in Chicago?")
+        self.assertEqual(plan.decision, "no_search")
+        self.assertEqual(plan.execution_mode, "unsupported")
+        self.assertEqual(plan.policy_pack, "general")
+        self.assertIn("unsupported_search_scope", plan.reason_codes)
+
+    def test_unsupported_deep_research_scope_is_explicit(self) -> None:
+        plan = create_search_plan_v1(
+            "Do deep research on the history of semiconductor manufacturing."
+        )
+        self.assertEqual(plan.decision, "no_search")
+        self.assertEqual(plan.execution_mode, "unsupported")
+        self.assertIn("explicit_research", plan.reason_codes)
+        self.assertIn("unsupported_search_scope", plan.reason_codes)
+
+    def test_arbitrary_url_retrieval_is_explicitly_unsupported(self) -> None:
+        plan = create_search_plan_v1(
+            "Summarize https://example.com/private-report"
+        )
+        self.assertEqual(plan.decision, "no_search")
+        self.assertEqual(plan.execution_mode, "unsupported")
+        self.assertIn("specific_source_requested", plan.reason_codes)
+        self.assertIn("unsupported_search_scope", plan.reason_codes)
+
+    def test_general_fact_check_does_not_claim_indexed_execution(self) -> None:
+        plan = create_search_plan_v1(
+            "Fact-check whether the Eiffel Tower opened in 1889."
+        )
+        self.assertEqual(plan.decision, "no_search")
+        self.assertEqual(plan.execution_mode, "unsupported")
+        self.assertIn("evidence_requested", plan.reason_codes)
 
 
 if __name__ == "__main__":

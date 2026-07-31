@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 SEARCH_PLAN_CONTRACT = "search_plan_v1"
-SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_5"
+SEARCH_DECISION_POLICY_VERSION = "search_decision_v1_6"
 
 SearchDecision = Literal["no_search", "indexed", "live", "research"]
 SearchPolicyPack = Literal[
@@ -24,6 +24,12 @@ SearchPolicyPack = Literal[
     "behavior_change",
 ]
 SearchRoute = Literal["normal_chat", "trusted_health", "current_news"]
+SearchExecutionMode = Literal[
+    "chat_only",
+    "indexed_sources",
+    "live_web",
+    "unsupported",
+]
 
 
 class SearchBudgetV1(BaseModel):
@@ -45,6 +51,7 @@ class SearchPlanV1(BaseModel):
     policy_pack: SearchPolicyPack
     query_context: Literal["current_message_only"] = "current_message_only"
     external_web_access: bool
+    execution_mode: SearchExecutionMode
     confidence: Literal["high", "medium"]
     budget: SearchBudgetV1
     selected_route: SearchRoute
@@ -153,7 +160,7 @@ EVIDENCE_PATTERNS = _patterns(
     r"\bfact[- ]check\b",
     r"\bis (?:this|that) true\b",
     r"\bpeer[- ]reviewed\b",
-    r"\bwhat (?:does|do) the research\b",
+    r"\bwhat (?:does|do) (?:the )?research(?: say| show)?\b",
     r"\bfind (?:a |the )?(?:study|studies|paper|papers)\b",
     r"\bfind (?:me )?(?:evidence|research)\b",
     r"\bsearch (?:for )?(?:evidence|research)\b",
@@ -382,14 +389,34 @@ def _plan(
     effective_pack: SearchPolicyPack = (
         "none" if decision == "no_search" else policy_pack
     )
+    selected_route = _route(decision, unique_reasons, effective_pack)
+    if decision != "no_search" and selected_route == "normal_chat":
+        return SearchPlanV1(
+            decision="no_search",
+            reason_codes=tuple(
+                dict.fromkeys((*unique_reasons, "unsupported_search_scope"))
+            ),
+            policy_pack=policy_pack,
+            external_web_access=False,
+            execution_mode="unsupported",
+            confidence=confidence,
+            budget=_budget("no_search"),
+            selected_route="normal_chat",
+        )
+    execution_mode: SearchExecutionMode = "chat_only"
+    if decision == "indexed":
+        execution_mode = "indexed_sources"
+    elif decision == "live":
+        execution_mode = "live_web"
     return SearchPlanV1(
         decision=decision,
         reason_codes=unique_reasons,
         policy_pack=effective_pack,
-        external_web_access=decision in {"live", "research"},
+        external_web_access=decision in {"indexed", "live"},
+        execution_mode=execution_mode,
         confidence=confidence,
         budget=_budget(decision),
-        selected_route=_route(decision, unique_reasons, effective_pack),
+        selected_route=selected_route,
     )
 
 
