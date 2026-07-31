@@ -147,7 +147,7 @@ async def main() -> None:
                 TEST_DAY,
             )
             lifting_summary = await conn.fetch(
-                "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
                 context_a,
                 TEST_DAY - dt.timedelta(days=30),
                 TEST_DAY,
@@ -206,6 +206,8 @@ async def main() -> None:
             )
             require(float(squat_summary["first_max_load"]) == 180.0, "wrong first load")
             require(float(squat_summary["latest_max_load"]) == 200.0, "wrong latest load")
+            require(squat_summary["first_set_count"] == 1, "wrong first set count")
+            require(squat_summary["latest_set_count"] == 1, "wrong latest set count")
         checks.extend(
             [
                 "guc_forgery_blocked",
@@ -270,7 +272,7 @@ async def main() -> None:
                 TEST_DAY,
             )
             lifting_b = await conn.fetch(
-                "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
                 context_b,
                 TEST_DAY - dt.timedelta(days=30),
                 TEST_DAY,

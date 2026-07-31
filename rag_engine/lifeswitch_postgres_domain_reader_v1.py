@@ -637,7 +637,7 @@ class PostgresLifeSwitchDomainReaderV1:
     ) -> LifeSwitchReadResultV1:
         source, document, plan_relations = await self._resolve_plan(owner_user_id)
         rows = await self._conn.fetch(
-            "select * from lifeswitch_chat.read_lifting_progression_summary_v1($1,$2,$3)",
+            "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
             self._context_id,
             start_date,
             end_date,
@@ -648,17 +648,28 @@ class PostgresLifeSwitchDomainReaderV1:
             "set_count",
             "first_day",
             "last_day",
+            "first_set_count",
+            "latest_set_count",
             "first_max_load",
             "latest_max_load",
             "first_total_reps",
             "latest_total_reps",
             "first_total_volume",
             "latest_total_volume",
+            "first_average_load",
+            "latest_average_load",
             "first_load_unit",
             "latest_load_unit",
         )
         payload = {
             "plan_targets": document.get("training_targets", {}),
+            "comparison_policy": {
+                "basis": "first_latest_exposure",
+                "same_sets_same_unit": "comparable",
+                "different_sets": "work_only",
+                "different_units": "not_comparable",
+                "mixed_metrics": "use_average_load",
+            },
             "columns": list(columns),
             "rows": [
                 [
@@ -667,12 +678,16 @@ class PostgresLifeSwitchDomainReaderV1:
                     int(row["set_count"]),
                     row["first_day"].isoformat(),
                     row["last_day"].isoformat(),
+                    int(row["first_set_count"]),
+                    int(row["latest_set_count"]),
                     _number(row["first_max_load"]),
                     _number(row["latest_max_load"]),
                     int(row["first_total_reps"]),
                     int(row["latest_total_reps"]),
                     _number(row["first_total_volume"]),
                     _number(row["latest_total_volume"]),
+                    _number(row["first_average_load"]),
+                    _number(row["latest_average_load"]),
                     row["first_load_unit"],
                     row["latest_load_unit"],
                 ]

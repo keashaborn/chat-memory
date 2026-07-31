@@ -88,7 +88,7 @@ class FakeConnection:
             return self.progression_rows
         if "read_exercise_frequency_v1" in query:
             return self.frequency_rows
-        if "read_lifting_progression_summary_v1" in query:
+        if "read_lifting_progression_summary_v2" in query:
             return self.lifting_summary_rows
         raise AssertionError(f"unexpected fetch query: {query}")
 
@@ -436,12 +436,16 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                     "set_count": 24,
                     "first_day": start,
                     "last_day": TODAY,
+                    "first_set_count": 4,
+                    "latest_set_count": 3,
                     "first_max_load": 275,
                     "latest_max_load": 315,
                     "first_total_reps": 20,
                     "latest_total_reps": 18,
                     "first_total_volume": 5000,
                     "latest_total_volume": 5400,
+                    "first_average_load": 250,
+                    "latest_average_load": 300,
                     "first_load_unit": "lb",
                     "latest_load_unit": "lb",
                     "resolution_sources": ["capture_role"],
@@ -463,9 +467,16 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         row = dict(zip(columns, result.payload["rows"][0], strict=True))
         self.assertEqual(row["first_max_load"], 275.0)
         self.assertEqual(row["latest_max_load"], 315.0)
+        self.assertEqual(row["first_set_count"], 4)
+        self.assertEqual(row["latest_set_count"], 3)
+        self.assertEqual(row["first_average_load"], 250.0)
+        self.assertEqual(
+            result.payload["comparison_policy"]["different_sets"],
+            "work_only",
+        )
         self.assertEqual(len(conn.calls), 2)
         self.assertIn("read_plan_v1", conn.calls[0][0])
-        self.assertIn("read_lifting_progression_summary_v1", conn.calls[1][0])
+        self.assertIn("read_lifting_progression_summary_v2", conn.calls[1][0])
 
     async def test_frequency_max_rows_remain_within_prompt_budget(self) -> None:
         start = TODAY - dt.timedelta(days=83)
@@ -512,12 +523,16 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                 "set_count": 99,
                 "first_day": start,
                 "last_day": TODAY,
+                "first_set_count": 4,
+                "latest_set_count": 4,
                 "first_max_load": 100,
                 "latest_max_load": 125,
                 "first_total_reps": 30,
                 "latest_total_reps": 30,
                 "first_total_volume": 3000,
                 "latest_total_volume": 3750,
+                "first_average_load": 100,
+                "latest_average_load": 125,
                 "first_load_unit": "lb",
                 "latest_load_unit": "lb",
             }
