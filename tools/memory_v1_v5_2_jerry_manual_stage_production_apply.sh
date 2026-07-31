@@ -100,15 +100,21 @@ authenticated_health() {
   source "$env_file"
   set +a
   [[ -n "${VS_SERVICE_TOKEN:-}" ]]
-  [[ "$(systemctl is-active brains.service)" == active ]]
-  docker exec "$container" pg_isready -U sage -d "$database" >/dev/null
-  curl --fail --silent --show-error --max-time 10 \
-    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-    http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null
-  curl --fail --silent --show-error --max-time 10 \
-    -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
-    http://127.0.0.1:8088/readyz \
-    | jq -e '.ok==true and .postgres==true' >/dev/null
+  for _attempt in $(seq 1 30); do
+    if [[ "$(systemctl is-active brains.service)" == active ]] \
+       && docker exec "$container" pg_isready -U sage -d "$database" >/dev/null \
+       && curl --fail --silent --max-time 5 \
+         -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+         http://127.0.0.1:8088/healthz | jq -e '.status=="ok"' >/dev/null \
+       && curl --fail --silent --max-time 5 \
+         -H "x-vs-service-token: $VS_SERVICE_TOKEN" \
+         http://127.0.0.1:8088/readyz \
+         | jq -e '.ok==true and .postgres==true' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 restore_services() {
@@ -315,7 +321,10 @@ sha256sum "$backup" >"$backup.sha256"
 chmod 0600 "$backup.sha256"
 
 phase=deploy_code
-git -C "$production_root" merge --ff-only "$target_head"
+runuser -u ubuntu -- bash -c '
+  umask 022
+  exec git -C "$1" merge --ff-only "$2"
+' _ "$production_root" "$target_head"
 [[ "$(git -C "$production_root" rev-parse HEAD)" == "$target_head" ]]
 [[ -z "$(git -C "$production_root" status --porcelain)" ]]
 
