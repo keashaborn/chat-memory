@@ -196,6 +196,13 @@ test "$(scalar "$clone" "
       ::regprocedure
     AND privilege.grantee=0
     AND privilege.privilege_type='EXECUTE'")" -eq 0
+test "$(scalar "$clone" "
+  SELECT count(*)
+  FROM pg_policies
+  WHERE schemaname='memory'
+    AND tablename='v5_2_local_packet_route_event'
+    AND policyname='v5_2_compiler_v10_supersession_route_read'
+    AND cmd='SELECT'")" -eq 1
 
 set -a
 source "$production_repo/.env"

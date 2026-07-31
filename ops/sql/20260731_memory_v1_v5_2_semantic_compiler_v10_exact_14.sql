@@ -580,4 +580,9 @@ memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text,text
 ) TO brains_app;
 
+CREATE POLICY v5_2_compiler_v10_supersession_route_read
+ON memory.v5_2_local_packet_route_event
+FOR SELECT TO memory_v5_local_supersession_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
 COMMIT;

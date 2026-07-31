@@ -17,6 +17,9 @@ BEGIN
 END
 $guard$;
 
+DROP POLICY IF EXISTS v5_2_compiler_v10_supersession_route_read
+ON memory.v5_2_local_packet_route_event;
+
 DROP FUNCTION IF EXISTS
 memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text,text
