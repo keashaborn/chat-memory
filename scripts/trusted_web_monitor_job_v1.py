@@ -24,7 +24,9 @@ from rag_engine.trusted_web_monitoring_v1 import (
 
 
 JOB_CONTRACT_VERSION = "trusted_web_monitor_job_v1"
+ALERT_CONTRACT_VERSION = "trusted_web_monitor_alert_v1"
 AUTHORIZED_VALUE = "authorized"
+DRILL_ERROR_CODE = "synthetic_failure_drill"
 DEFAULT_WINDOW_HOURS = 24
 DEFAULT_MAX_RELEVANCE_FAIL_CLOSED = 0
 DEFAULT_MAX_DEPENDENCY_FAILURES = 0
@@ -48,6 +50,7 @@ class TrustedWebMonitorJobConfigV1:
     max_dependency_failures: int = DEFAULT_MAX_DEPENDENCY_FAILURES
     max_fail_closed_rate: float = DEFAULT_MAX_FAIL_CLOSED_RATE
     alert_webhook_url: str = ""
+    drill_enabled: str = ""
 
 
 def _now_iso() -> str:
@@ -97,6 +100,9 @@ def _config_from_environment() -> TrustedWebMonitorJobConfigV1:
         alert_webhook_url=(
             os.getenv("TRUSTED_WEB_MONITOR_ALERT_WEBHOOK_URL") or ""
         ).strip(),
+        drill_enabled=(
+            os.getenv("TRUSTED_WEB_MONITOR_DRILL_ENABLED") or ""
+        ).strip(),
     )
 
 
@@ -136,6 +142,7 @@ def _validate_config(
         max_dependency_failures=int(config.max_dependency_failures),
         max_fail_closed_rate=float(config.max_fail_closed_rate),
         alert_webhook_url=config.alert_webhook_url.strip(),
+        drill_enabled=config.drill_enabled.strip(),
     )
 
 
@@ -151,10 +158,26 @@ def _base_report(
     }
 
 
-def _alert_payload(report: dict[str, object]) -> dict[str, object]:
+def _alert_payload(
+    report: dict[str, object],
+    *,
+    drill: bool = False,
+) -> dict[str, object]:
     return {
-        "text": "Verbal Sage trusted-web monitor requires attention",
+        "text": (
+            "Verbal Sage trusted-web monitor delivery drill"
+            if drill
+            else "Verbal Sage trusted-web monitor requires attention"
+        ),
         "contract_version": JOB_CONTRACT_VERSION,
+        "alert_contract_version": ALERT_CONTRACT_VERSION,
+        "event_type": (
+            "trusted_web_monitor_delivery_drill"
+            if drill
+            else "trusted_web_monitor_failure"
+        ),
+        "severity": "test" if drill else "critical",
+        "drill": drill,
         "status": report["status"],
         "error_code": report.get("error_code"),
         "threshold_violations": report.get(
@@ -181,6 +204,7 @@ async def _send_alert(
     report: dict[str, object],
     *,
     transport: httpx.AsyncBaseTransport | None = None,
+    drill: bool = False,
 ) -> str:
     if not config.alert_webhook_url:
         return "unconfigured"
@@ -191,7 +215,7 @@ async def _send_alert(
         ) as client:
             response = await client.post(
                 config.alert_webhook_url,
-                json=_alert_payload(report),
+                json=_alert_payload(report, drill=drill),
             )
             if 200 <= response.status_code < 300:
                 return "delivered"
@@ -260,6 +284,46 @@ async def run_trusted_web_monitor_job_v1(
     return report, 2 if violations else 0
 
 
+async def run_trusted_web_alert_drill_v1(
+    config: TrustedWebMonitorJobConfigV1,
+    *,
+    alert_transport: httpx.AsyncBaseTransport | None = None,
+) -> tuple[dict[str, object], int]:
+    """Deliver one synthetic alert without querying or mutating search data."""
+
+    config = _validate_config(config)
+    if config.drill_enabled != AUTHORIZED_VALUE:
+        raise MonitorJobConfigurationError("drill_not_authorized")
+    if not config.alert_webhook_url:
+        raise MonitorJobConfigurationError("missing_alert_webhook_url")
+
+    report = _base_report(status="drill", occurred_at=_now_iso())
+    report.update(
+        {
+            "drill": True,
+            "error_code": DRILL_ERROR_CODE,
+            "threshold_violations": [DRILL_ERROR_CODE],
+            "window_hours": config.window_hours,
+            "request_count": 0,
+            "completed_count": 0,
+            "fail_closed_count": 0,
+            "relevance_fail_closed_count": 0,
+            "dependency_failure_count": 0,
+            "fail_closed_rate": 0.0,
+        }
+    )
+    report["alert_delivery"] = await _send_alert(
+        config,
+        report,
+        transport=alert_transport,
+        drill=True,
+    )
+    return (
+        report,
+        0 if report["alert_delivery"] == "delivered" else 3,
+    )
+
+
 def _configuration_failure_report(
     exc: MonitorJobConfigurationError,
 ) -> dict[str, object]:
@@ -279,6 +343,11 @@ async def _main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Print the metadata-only monitor contract without querying.",
     )
+    parser.add_argument(
+        "--drill",
+        action="store_true",
+        help="Send one authorized synthetic alert without querying data.",
+    )
     args = parser.parse_args(argv)
     if args.print_contract:
         print(
@@ -296,6 +365,8 @@ async def _main(argv: Sequence[str] | None = None) -> int:
                     "default_max_fail_closed_rate": (
                         DEFAULT_MAX_FAIL_CLOSED_RATE
                     ),
+                    "alert_contract_version": ALERT_CONTRACT_VERSION,
+                    "drill_requires_secondary_authorization": True,
                     "metadata_only": True,
                 },
                 sort_keys=True,
@@ -305,7 +376,14 @@ async def _main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         config = _config_from_environment()
-        report, exit_code = await run_trusted_web_monitor_job_v1(config)
+        if args.drill:
+            report, exit_code = await run_trusted_web_alert_drill_v1(
+                config
+            )
+        else:
+            report, exit_code = await run_trusted_web_monitor_job_v1(
+                config
+            )
     except MonitorJobConfigurationError as exc:
         report = _configuration_failure_report(exc)
         exit_code = 3

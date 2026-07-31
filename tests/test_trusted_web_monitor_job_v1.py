@@ -8,16 +8,19 @@ import unittest
 import httpx
 
 from scripts.trusted_web_monitor_job_v1 import (
+    ALERT_CONTRACT_VERSION,
     JOB_CONTRACT_VERSION,
     MonitorJobConfigurationError,
     TrustedWebMonitorJobConfigV1,
     _validate_config,
+    run_trusted_web_alert_drill_v1,
     run_trusted_web_monitor_job_v1,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / "ops/systemd/trusted-web-monitor-v1.service"
+DRILL_SERVICE = ROOT / "ops/systemd/trusted-web-monitor-drill-v1.service"
 TIMER = ROOT / "ops/systemd/trusted-web-monitor-v1.timer"
 ENV_EXAMPLE = (
     ROOT / "ops/systemd/trusted-web-monitor-v1.env.example"
@@ -159,6 +162,91 @@ class TrustedWebMonitorJobV1Tests(
         self.assertNotIn("topic", alert)
         self.assertNotIn("policy_version", alert)
 
+    async def test_safe_drill_delivers_without_database_access(self) -> None:
+        captured: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content))
+            return httpx.Response(204)
+
+        report, exit_code = await run_trusted_web_alert_drill_v1(
+            TrustedWebMonitorJobConfigV1(
+                enabled="authorized",
+                postgres_dsn="postgresql://unused",
+                alert_webhook_url="https://alerts.example.invalid/hook",
+                drill_enabled="authorized",
+            ),
+            alert_transport=httpx.MockTransport(handler),
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "drill")
+        self.assertTrue(report["drill"])
+        self.assertEqual(report["request_count"], 0)
+        self.assertEqual(report["alert_delivery"], "delivered")
+        self.assertEqual(len(captured), 1)
+        alert = captured[0]
+        self.assertEqual(
+            alert["alert_contract_version"],
+            ALERT_CONTRACT_VERSION,
+        )
+        self.assertEqual(
+            alert["event_type"],
+            "trusted_web_monitor_delivery_drill",
+        )
+        self.assertEqual(alert["severity"], "test")
+        self.assertTrue(alert["drill"])
+        serialized = json.dumps(alert, sort_keys=True)
+        for forbidden in (
+            "actor_user_id",
+            "query_sha256",
+            "request_id",
+            "provider_response_id",
+            "source_metadata",
+            "source_url",
+            "answer",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    async def test_drill_requires_authorization_and_webhook(self) -> None:
+        with self.assertRaises(MonitorJobConfigurationError) as ctx:
+            await run_trusted_web_alert_drill_v1(
+                TrustedWebMonitorJobConfigV1(
+                    enabled="authorized",
+                    postgres_dsn="postgresql://unused",
+                    alert_webhook_url=(
+                        "https://alerts.example.invalid/hook"
+                    ),
+                )
+            )
+        self.assertEqual(ctx.exception.code, "drill_not_authorized")
+
+        with self.assertRaises(MonitorJobConfigurationError) as ctx:
+            await run_trusted_web_alert_drill_v1(
+                TrustedWebMonitorJobConfigV1(
+                    enabled="authorized",
+                    postgres_dsn="postgresql://unused",
+                    drill_enabled="authorized",
+                )
+            )
+        self.assertEqual(ctx.exception.code, "missing_alert_webhook_url")
+
+    async def test_failed_drill_delivery_fails_closed(self) -> None:
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(503)
+        )
+        report, exit_code = await run_trusted_web_alert_drill_v1(
+            TrustedWebMonitorJobConfigV1(
+                enabled="authorized",
+                postgres_dsn="postgresql://unused",
+                alert_webhook_url="https://alerts.example.invalid/hook",
+                drill_enabled="authorized",
+            ),
+            alert_transport=transport,
+        )
+        self.assertEqual(exit_code, 3)
+        self.assertEqual(report["alert_delivery"], "http_503")
+
     async def test_query_failure_is_safe_and_fails_job(self) -> None:
         async def fail_connect(_dsn, **_kwargs):
             raise RuntimeError("secret database detail")
@@ -209,6 +297,7 @@ class TrustedWebMonitorJobV1Tests(
 
     def test_systemd_units_are_hourly_and_hardened(self) -> None:
         service = SERVICE.read_text(encoding="utf-8")
+        drill_service = DRILL_SERVICE.read_text(encoding="utf-8")
         timer = TIMER.read_text(encoding="utf-8")
         env_example = ENV_EXAMPLE.read_text(encoding="utf-8")
 
@@ -227,6 +316,14 @@ class TrustedWebMonitorJobV1Tests(
         self.assertIn("MemoryMax=128M", service)
         self.assertIn("OnCalendar=hourly", timer)
         self.assertIn("Persistent=true", timer)
+        self.assertIn("Type=oneshot", drill_service)
+        self.assertIn("--drill", drill_service)
+        self.assertIn(
+            "Environment=TRUSTED_WEB_MONITOR_DRILL_ENABLED=authorized",
+            drill_service,
+        )
+        self.assertIn("NoNewPrivileges=true", drill_service)
+        self.assertIn("ProtectSystem=strict", drill_service)
         self.assertIn("RandomizedDelaySec=5m", timer)
         self.assertIn(
             "TRUSTED_WEB_MONITOR_ENABLED=authorized",
