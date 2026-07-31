@@ -5,6 +5,8 @@ from pathlib import Path
 import unittest
 
 from rag_engine.trusted_web_monitoring_v1 import (
+    TrustedWebMonitoringSummaryV1,
+    evaluate_trusted_web_monitoring_thresholds_v1,
     load_trusted_web_monitoring_summary_v1,
 )
 
@@ -152,6 +154,72 @@ class TrustedWebMonitoringV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("security_invoker = true", bootstrap)
         self.assertIn("to brains_app", bootstrap)
+
+    def test_monitor_thresholds_cover_relevance_dependency_and_rate(
+        self,
+    ) -> None:
+        summary = TrustedWebMonitoringSummaryV1(
+            contract_version="trusted_web_monitoring_v1",
+            window_hours=24,
+            request_count=10,
+            completed_count=6,
+            failed_count=3,
+            blocked_count=1,
+            fail_closed_count=4,
+            relevance_fail_closed_count=1,
+            no_result_fail_closed_count=1,
+            dependency_failure_count=2,
+            fail_closed_rate=0.4,
+            buckets=(),
+        )
+        self.assertEqual(
+            evaluate_trusted_web_monitoring_thresholds_v1(
+                summary,
+                max_relevance_fail_closed=0,
+                max_dependency_failures=0,
+                max_fail_closed_rate=0.25,
+            ),
+            (
+                "relevance_fail_closed_count",
+                "dependency_failure_count",
+                "fail_closed_rate",
+            ),
+        )
+        self.assertEqual(
+            evaluate_trusted_web_monitoring_thresholds_v1(
+                summary,
+                max_relevance_fail_closed=1,
+                max_dependency_failures=2,
+                max_fail_closed_rate=0.4,
+            ),
+            (),
+        )
+
+    def test_monitor_thresholds_reject_unbounded_values(self) -> None:
+        summary = TrustedWebMonitoringSummaryV1(
+            contract_version="trusted_web_monitoring_v1",
+            window_hours=24,
+            request_count=0,
+            completed_count=0,
+            failed_count=0,
+            blocked_count=0,
+            fail_closed_count=0,
+            relevance_fail_closed_count=0,
+            no_result_fail_closed_count=0,
+            dependency_failure_count=0,
+            fail_closed_rate=0.0,
+            buckets=(),
+        )
+        for kwargs in (
+            {"max_relevance_fail_closed": -1},
+            {"max_dependency_failures": -1},
+            {"max_fail_closed_rate": 1.01},
+        ):
+            with self.assertRaises(ValueError):
+                evaluate_trusted_web_monitoring_thresholds_v1(
+                    summary,
+                    **kwargs,
+                )
 
 
 if __name__ == "__main__":

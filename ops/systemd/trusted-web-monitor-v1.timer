@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the trusted-web retrieval monitor hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+AccuracySec=1m
+Unit=trusted-web-monitor-v1.service
+
+[Install]
+WantedBy=timers.target

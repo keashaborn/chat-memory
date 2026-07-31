@@ -121,6 +121,49 @@ class TrustedWebMonitoringSummaryV1:
         }
 
 
+def evaluate_trusted_web_monitoring_thresholds_v1(
+    summary: TrustedWebMonitoringSummaryV1,
+    *,
+    max_relevance_fail_closed: int | None = None,
+    max_dependency_failures: int | None = None,
+    max_fail_closed_rate: float | None = None,
+) -> tuple[str, ...]:
+    if (
+        max_relevance_fail_closed is not None
+        and max_relevance_fail_closed < 0
+    ):
+        raise ValueError("max_relevance_fail_closed must be >= 0")
+    if (
+        max_dependency_failures is not None
+        and max_dependency_failures < 0
+    ):
+        raise ValueError("max_dependency_failures must be >= 0")
+    if (
+        max_fail_closed_rate is not None
+        and not 0.0 <= max_fail_closed_rate <= 1.0
+    ):
+        raise ValueError("max_fail_closed_rate must be between 0 and 1")
+
+    violations: list[str] = []
+    if (
+        max_relevance_fail_closed is not None
+        and summary.relevance_fail_closed_count
+        > max_relevance_fail_closed
+    ):
+        violations.append("relevance_fail_closed_count")
+    if (
+        max_dependency_failures is not None
+        and summary.dependency_failure_count > max_dependency_failures
+    ):
+        violations.append("dependency_failure_count")
+    if (
+        max_fail_closed_rate is not None
+        and summary.fail_closed_rate > max_fail_closed_rate
+    ):
+        violations.append("fail_closed_rate")
+    return tuple(violations)
+
+
 async def load_trusted_web_monitoring_summary_v1(
     conn,
     *,
@@ -187,5 +230,6 @@ __all__ = [
     "MIN_MONITOR_HOURS",
     "TrustedWebMonitorBucketV1",
     "TrustedWebMonitoringSummaryV1",
+    "evaluate_trusted_web_monitoring_thresholds_v1",
     "load_trusted_web_monitoring_summary_v1",
 ]
