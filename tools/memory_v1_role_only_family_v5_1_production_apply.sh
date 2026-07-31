@@ -16,8 +16,8 @@ repo_root=$(git rev-parse --show-toplevel)
 required_ancestor=977dad69617641350537567cd3fa632527368379
 runner=scripts/memory_v1_role_only_family_apply_v5_1.py
 manifest_builder=scripts/memory_v1_role_only_family_manifest_v5_1.py
-expected_runner_sha=1bdadae978c55fa9ea5310ef84d0be8ff823896765347fd005cdd1162d863752
-expected_manifest_builder_sha=9110c4ab4e4c2196daab6772b507a49c1e1d4eb2191773b78a5739862e9acf62
+expected_runner_sha=e8d3f379c9b54e412b3425f0906ff81e80550cfd480c28f3e470265c0694ca1b
+expected_manifest_builder_sha=5513ac41f58c538b295ac21643f5cafe6daa0e0f59854f6fab5d6ab4478d5a31
 manifest=$(realpath "$1")
 preflight_result=$(realpath -m "$2")
 apply_result=$(realpath -m "$3")
@@ -144,19 +144,12 @@ capture_partition() {
 }
 
 verify_target_delta() {
-  BEFORE="$1" AFTER="$2" BINDINGS="$(jq -er '.expected_bindings' "$manifest")" python3 - <<'PY'
+  BEFORE="$1" AFTER="$2" MANIFEST="$manifest" python3 - <<'PY'
+import json
 import os
 from pathlib import Path
 
-expected = {
-    "entity": 1,
-    "entity_resolution_plan": 1,
-    "entity_resolution_review": 1,
-    "entity_resolution_apply": 1,
-    "entity_role_resolution_v5_1": 1,
-    "observation_entity_binding": int(os.environ["BINDINGS"]),
-    "relational_operation_request": 2,
-}
+expected = json.loads(Path(os.environ["MANIFEST"]).read_text())["expected_table_rows"]
 
 def load(path):
     rows = {}
@@ -191,8 +184,12 @@ head=$(git -C "$repo_root" rev-parse HEAD)
 [[ "$(jq -er '.contract_version' "$manifest")" == memory_v1_role_only_family_apply_manifest_v5_1 ]]
 [[ "$(jq -er '.owner_user_id' "$manifest")" == "$target_owner" ]]
 [[ "$(jq -er '.required_head_commit' "$manifest")" == "$head" ]]
-[[ "$(jq -er '.expected_relationship_role' "$manifest")" == family:mother ]]
-[[ "$(jq -er '.expected_new_rows' "$manifest")" == 11 ]]
+role=$(jq -er '.expected_relationship_role' "$manifest")
+[[ "$role" == family:mother || "$role" == family:father ]]
+action=$(jq -er '.expected_successor_action' "$manifest")
+[[ "$action" == create_new || "$action" == link_existing ]]
+expected_new_rows=$(jq -er '.expected_new_rows' "$manifest")
+[[ "$expected_new_rows" =~ ^[0-9]+$ && "$expected_new_rows" -gt 0 && "$expected_new_rows" -le 64 ]]
 
 set -a
 source "$repo_root/.env"
@@ -304,7 +301,7 @@ phase=transactional_apply
 MEMORY_V1_REQUIRED_HEAD="$head" MEMORY_V1_ROLE_ONLY_FAMILY_APPLY=authorized \
 PYTHONPATH="$repo_root/scripts" "$repo_root/venv/bin/python" "$repo_root/$runner" \
   --mode apply --manifest "$manifest" --output "$apply_result"
-[[ "$(jq -er '.rows_written' "$apply_result")" == 11 ]]
+[[ "$(jq -er '.rows_written' "$apply_result")" == "$expected_new_rows" ]]
 capture_partition target "$target_after"
 capture_partition non_target "$non_target_after"
 verify_target_delta "$target_before" "$target_after"
@@ -356,7 +353,7 @@ report = {
         "qdrant_sha256": os.environ["QDRANT"], "qdrant_unchanged": True,
         "timers_restored_exactly": True, "brains_service_restored": True,
     },
-    "hard_stop": "before_death_entailment_or_claim_projection",
+    "hard_stop": "before_claims_projection_qdrant_retrieval_or_prompt_influence",
 }
 path = Path(os.environ["REPORT"])
 path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
