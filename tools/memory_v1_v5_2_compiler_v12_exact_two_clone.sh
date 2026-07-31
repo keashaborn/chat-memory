@@ -333,20 +333,29 @@ stance_packet_json=$(scalar "$clone" "SELECT normalized_packet
 jerry_packet_json=$(scalar "$clone" "SELECT normalized_packet
   FROM memory.evidence_extraction_packet_v5_local
   WHERE packet_id='$jerry_packet'::uuid")
+jerry_evidence_content=$(scalar "$clone" "SELECT content
+  FROM memory.evidence
+  WHERE evidence_id='$jerry'::uuid")
+stance_evidence_content=$(scalar "$clone" "SELECT content
+  FROM memory.evidence
+  WHERE evidence_id='$stance'::uuid")
 jq -e 'any(.observations[];
   .predicate=="stance.reported" and
-  any(.source_spans[]; (.quote|ascii_downcase|contains("human being in my perspective is a fractal"))))' \
+  any(.source_spans[];
+    ($content[.start:.end]|ascii_downcase|contains("human being in my perspective is a fractal"))))' \
+  --arg content "$stance_evidence_content" \
   <<<"$stance_packet_json" >/dev/null
 jq -e 'any(.observations[];
   .predicate=="identity.name" and .object.value=="Jerry" and
-  any(.source_spans[]; .quote=="Jerry")) and
+  any(.source_spans[]; $content[.start:.end]=="Jerry")) and
   any(.observations[];
   .predicate=="residence.care_setting" and
   .object.value=="assisted_living" and
-  any(.source_spans[]; .quote=="assisted-living")) and
+  any(.source_spans[]; $content[.start:.end]=="assisted-living")) and
   any(.observations[];
   .predicate=="health.user_reported_observation" and
   (.object.value|ascii_downcase|contains("three seconds")))' \
+  --arg content "$jerry_evidence_content" \
   <<<"$jerry_packet_json" >/dev/null
 
 test "$(actor_scalar "$clone" "$owner" \
