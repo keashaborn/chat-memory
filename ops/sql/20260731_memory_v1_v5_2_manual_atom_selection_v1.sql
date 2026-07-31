@@ -96,6 +96,7 @@ RETURNS text
 LANGUAGE sql
 IMMUTABLE
 STRICT
+SECURITY DEFINER
 SET search_path=''
 AS $function$
   SELECT memory.v5_digest_text(concat_ws('|',
