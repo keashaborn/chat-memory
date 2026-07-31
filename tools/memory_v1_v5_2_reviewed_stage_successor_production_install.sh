@@ -10,6 +10,11 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 [[ -z "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain)" ]]
+production_root=/opt/chat-memory
+authorized_runtime_head=af471f3e4bcf754044f77ee5929916108426b2e0
+production_head=$(git -C "$production_root" rev-parse HEAD)
+[[ "$production_head" == "$authorized_runtime_head" ]]
+[[ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$production_root" status --porcelain)" ]]
 
 set -a
 source /opt/chat-memory/.env
@@ -36,7 +41,7 @@ declare -A expected_sha256=(
   ["$rollback"]="45dd9309f9a60ab2e29bcd66f76dcd8e0942a48a9e836ca522c60f3edc776276"
   ["$worker"]="5fcc6b24643d19a709e1ac90e63ff050db81d57d4e957de68468c057c19688eb"
   ["$unit_test"]="ddcd70c46a30dad1a331296242c602993674921c8b7d5fa41e0e308b0a57a7ef"
-  ["$clone_test"]="4768e2df30d8015f2aaf6250ccb05660ac8502ab093e685840a73cc9642d7e15"
+  ["$clone_test"]="c795cf4b8f014696cd2b66fe85c1031b5eb651637f29f5313dc1fef6e849252b"
   ["$service_unit"]="2da2e41ef58c52ca0e8271395aae0e947d03a1b7eae649c91d0a9ff3d54f4069"
   ["$timer_unit"]="5514b7b71d8976ea0f8053721c701f3926638dc038ffdc4260e1b26a07ee9027"
 )
@@ -162,6 +167,7 @@ jq -e '.clone_passed==true and .selected_records==3 and
   .database_rows_created==6 and .entailment_ready_observations==3 and
   .zero_write_replay==true and .cross_owner_rejected==true and
   .owner_rejected_packets_excluded==true and
+  .acl_verified==true and
   .protected_stores_unchanged==true and .production_unchanged==true and
   .qdrant_unchanged==true and .model_calls==0 and .claims==0 and
   .prompt_influence==0' "$clone_report" >/dev/null
@@ -227,11 +233,30 @@ migration_installed=1
   SELECT proowner::regrole::text
   FROM pg_proc
   WHERE oid='memory.v5_2_resolution_successor_source_v1(uuid)'::regprocedure
-")" == memory_v5_2_reviewed_observation_stage_maintainer ]]
+")" == memory_v5_writer ]]
+[[ "$(scalar "
+  SELECT proowner::regrole::text
+  FROM pg_proc
+  WHERE oid='memory.owner_packet_stage_eligible_v1(uuid)'::regprocedure
+")" == sage ]]
 [[ "$(scalar "
   SELECT has_function_privilege('brains_app',
     'memory.v5_2_resolution_successor_source_v1(uuid)','EXECUTE')::text
 ")" == false ]]
+[[ "$(scalar "
+  SELECT has_function_privilege('brains_app',
+    'memory.owner_packet_stage_eligible_v1(uuid)','EXECUTE')::text
+")" == false ]]
+[[ "$(scalar "
+  SELECT has_function_privilege(
+    'memory_v5_2_reviewed_observation_stage_maintainer',
+    'memory.v5_2_resolution_successor_source_v1(uuid)','EXECUTE')::text
+")" == true ]]
+[[ "$(scalar "
+  SELECT has_function_privilege(
+    'memory_v5_2_reviewed_observation_stage_maintainer',
+    'memory.owner_packet_stage_eligible_v1(uuid)','EXECUTE')::text
+")" == true ]]
 [[ "$(scalar "
   SELECT has_function_privilege('brains_app',
     'memory.plan_owner_v5_2_reviewed_observation_stage_v1(integer)',
@@ -297,13 +322,15 @@ authenticated_health
 
 jq -n \
   --arg contract_version memory_v1_v5_2_reviewed_stage_install_report_v1 \
-  --arg head "$(git rev-parse HEAD)" \
+  --arg production_head "$production_head" \
+  --arg installer_head "$(git rev-parse HEAD)" \
   --arg backup "$backup" \
   --arg backup_sha256 "$backup_sha256" \
   --arg migration_sha256 "${expected_sha256[$migration]}" \
   --arg rollback_sha256 "${expected_sha256[$rollback]}" \
   --arg qdrant_sha256 "$qdrant_after" \
-  '{contract_version:$contract_version,installed:true,head:$head,
+  '{contract_version:$contract_version,installed:true,
+    production_head:$production_head,installer_head:$installer_head,
     backup:$backup,backup_sha256:$backup_sha256,
     migration_sha256:$migration_sha256,rollback_sha256:$rollback_sha256,
     live_selected_records:3,database_rows_created:0,model_calls:0,

@@ -101,6 +101,29 @@ PYTHONPATH="$repo_root" "$python_bin" "$repo_root/$unit_test"
 docker exec -i "$container" psql -X -U sage -d "$clone_db" \
   -v ON_ERROR_STOP=1 <"$repo_root/$migration"
 
+acl_report=$(scalar "$clone_db" "
+  SELECT jsonb_build_object(
+    'successor_owner',(SELECT proowner::regrole::text FROM pg_proc
+      WHERE oid='memory.v5_2_resolution_successor_source_v1(uuid)'::regprocedure),
+    'feedback_owner',(SELECT proowner::regrole::text FROM pg_proc
+      WHERE oid='memory.owner_packet_stage_eligible_v1(uuid)'::regprocedure),
+    'brains_successor',has_function_privilege('brains_app',
+      'memory.v5_2_resolution_successor_source_v1(uuid)','EXECUTE'),
+    'brains_feedback',has_function_privilege('brains_app',
+      'memory.owner_packet_stage_eligible_v1(uuid)','EXECUTE'),
+    'maintainer_successor',has_function_privilege(
+      'memory_v5_2_reviewed_observation_stage_maintainer',
+      'memory.v5_2_resolution_successor_source_v1(uuid)','EXECUTE'),
+    'maintainer_feedback',has_function_privilege(
+      'memory_v5_2_reviewed_observation_stage_maintainer',
+      'memory.owner_packet_stage_eligible_v1(uuid)','EXECUTE')
+  )")
+printf 'CLONE_ACL_REPORT=%s\n' "$acl_report"
+jq -e '.successor_owner=="memory_v5_writer" and
+  .feedback_owner=="sage" and .brains_successor==false and
+  .brains_feedback==false and .maintainer_successor==true and
+  .maintainer_feedback==true' <<<"$acl_report" >/dev/null
+
 protected_before=$(protected_signature "$clone_db")
 stage_before=$(scalar "$clone_db" "
   SELECT concat_ws(':',
@@ -361,6 +384,7 @@ jq -n \
     zero_write_replay:true,cross_owner_rejected:true,
     owner_rejected_packets_excluded:true,protected_stores_unchanged:true,
     production_unchanged:true,qdrant_unchanged:true,
+    acl_verified:true,
     model_calls:0,claims:0,prompt_influence:0,
     migration_sha256:$migration_sha256,rollback_sha256:$rollback_sha256,
     qdrant_sha256:$qdrant_sha256}' \
