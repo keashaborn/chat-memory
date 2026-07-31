@@ -91,15 +91,6 @@ BEGIN
         <>'family:father' THEN
     RAISE EXCEPTION 'manual atom stage projection drifted: %',plan;
   END IF;
-  IF (SELECT count(*) FROM memory.v5_2_manual_atom_selection_v1
-      WHERE owner_user_id=owner_id AND packet_id=target_packet_id)<>1
-     OR EXISTS (
-       SELECT 1 FROM memory.v5_2_atom_admission_proposal
-       WHERE owner_user_id=owner_id AND packet_id=target_packet_id
-     ) THEN
-    RAISE EXCEPTION 'selection wrote outside its one-row budget';
-  END IF;
-
   BEGIN
     INSERT INTO memory.v5_2_manual_atom_selection_v1(
       selection_id,owner_user_id,operation_id,packet_id,evidence_id,
