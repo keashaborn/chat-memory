@@ -473,6 +473,12 @@ class TrustedExtractionSource:
     source_sha256: str
     source_recorded_at: str
     content: str
+    source_observed_at: str | None = None
+
+    @property
+    def trusted_source_time(self) -> str:
+        """Return when the source assertion occurred, not when it was ingested."""
+        return self.source_observed_at or self.source_recorded_at
 
     @classmethod
     def create(
@@ -484,6 +490,7 @@ class TrustedExtractionSource:
         source_sha256: Any,
         source_recorded_at: Any,
         content: Any,
+        source_observed_at: Any | None = None,
     ) -> "TrustedExtractionSource":
         canonical_job_id = _uuid_text(job_id, "job_id")
         canonical_external_id = _uuid_text(
@@ -510,6 +517,12 @@ class TrustedExtractionSource:
                 "source_recorded_at",
             ),
             content=content,
+            source_observed_at=_datetime_text(
+                source_observed_at
+                if source_observed_at is not None
+                else source_recorded_at,
+                "source_observed_at",
+            ),
         )
 
 
@@ -866,7 +879,7 @@ def validate_and_normalize(
         )
         item["temporal"] = _normalize_temporal(
             item["temporal"],
-            source.source_recorded_at,
+            source.trusted_source_time,
         )
         item["predicate_registry_status"] = "governed"
         if (

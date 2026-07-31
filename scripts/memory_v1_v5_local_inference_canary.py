@@ -751,6 +751,7 @@ async def run() -> int:
             source_sha256=claim["evidence_content_sha256"],
             source_recorded_at=claim["evidence_recorded_at"],
             content=claim["evidence_content"],
+            source_observed_at=claim["evidence_observed_at"],
         )
         api_key = os.getenv("MEMORY_V1_LOCAL_INFERENCE_API_KEY")
         transport = LlamaCppSecureTransport(

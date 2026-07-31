@@ -54,7 +54,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v10"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v11"
 EVIDENCE_CONTEXT_COREFERENCE_VERSION = (
     "memory_v1_evidence_context_coreference_v1"
 )
@@ -4318,7 +4318,7 @@ def _historical_state_before_source_temporal(
     # This compiler stage is still on the untrusted provider side of the
     # temporal boundary. Preserve the proposed historical interval, but leave
     # source-time anchoring to validate_and_normalize(), which owns the trusted
-    # source_recorded_at value.
+    # evidence-observed source time.
     return _relationship_v5_1_temporal(
         source,
         temporal_profile="active_interval",
@@ -4330,6 +4330,8 @@ def _augment_assisted_living_and_memory_duration(
     source: TrustedExtractionSource,
     entities: list[dict[str, Any]],
     observations: list[dict[str, Any]],
+    comparison_hints: list[dict[str, Any]],
+    deferrals: list[dict[str, Any]],
 ) -> tuple[str, ...]:
     """Complete explicit residence and memory-duration statements."""
     content = source.content
@@ -4388,61 +4390,53 @@ def _augment_assisted_living_and_memory_duration(
             for index, item in enumerate(observations)
             if item.get("predicate") == "residence.lives_at"
         ]
-        valid_residence = place_ref is not None and any(
-            item.get("subject_entity_ref") == person_ref
-            and isinstance(item.get("object"), dict)
+        # "Assisted living" names a type of care setting, not a uniquely
+        # identifiable place. residence.lives_at requires entity.place, so a
+        # deterministic compiler must not create one shared named entity from
+        # the category. Preserve the source as deferred evidence until a
+        # governed literal residence-setting predicate exists.
+        removed_residence_refs = {
+            observations[index]["observation_ref"]
+            for index in residence_indexes
+        }
+        observations[:] = [
+            item
+            for index, item in enumerate(observations)
+            if index not in set(residence_indexes)
+        ]
+        comparison_hints[:] = [
+            item
+            for item in comparison_hints
+            if item.get("observation_ref") not in removed_residence_refs
+        ]
+        if place_ref is not None and not any(
+            isinstance(item.get("object"), dict)
             and item["object"].get("kind") == "entity"
             and item["object"].get("entity_ref") == place_ref
             for item in observations
-            if item.get("predicate") == "residence.lives_at"
+        ):
+            entities[:] = [
+                item for item in entities if item.get("entity_ref") != place_ref
+            ]
+        _append_deferral_once(
+            deferrals,
+            reason_code="unregistered_predicate",
+            memory_shape="supportive_context",
+            source_spans=[_source_span(source)],
+            sensitivity="medium",
         )
-        if not valid_residence and len(residence_indexes) <= 1:
-            if place_ref is None:
-                place_ref = _add_compiler_entity(
-                    source,
-                    entities,
-                    entity_type="place",
-                    name_text=place_name,
-                    relationship_role="residence:reported",
-                )
-            observation_ref = (
-                str(observations[residence_indexes[0]]["observation_ref"])
-                if residence_indexes
-                else _next_observation_ref(observations)
-            )
-            residence = _example_observation(
-                content,
-                observation_ref=observation_ref,
-                subject_entity_ref=person_ref,
-                predicate="residence.lives_at",
-                object_value={"kind": "entity", "entity_ref": place_ref},
-                projection_class="supportive_context",
-                surface_policy="mention_when_directly_relevant",
-                sensitivity="medium",
-                reason_code="explicit_assisted_living_residence",
-                temporal_semantic="state_validity",
-            )
-            residence["temporal"] = _relationship_v5_1_temporal(
-                source,
-                temporal_profile="active_interval",
-                historical_end=False,
-            )
-            if residence_indexes:
-                observations[residence_indexes[0]] = residence
-                repairs.append(
-                    "explicit_assisted_living_residence_canonicalized"
-                )
-            else:
-                observations.append(residence)
-                repairs.append(
-                    "explicit_assisted_living_residence_completed"
-                )
+        repairs.append(
+            "assisted_living_setting_deferred_until_literal_predicate"
+        )
 
     if duration_match is not None:
         duration = " ".join(
             duration_match.group("duration").split()
         ).casefold()
         canonical_value = f"short-term memory lasts {duration}"
+        duration_is_approximate = bool(
+            re.search(r"\b(?:about|approximately|roughly)\b", duration)
+        )
         matching_health = [
             item
             for item in observations
@@ -4458,7 +4452,11 @@ def _augment_assisted_living_and_memory_duration(
         ]
         if matching_health:
             target = matching_health[0]
-            target["object"] = _literal("text", canonical_value)
+            target["object"] = _literal(
+                "text",
+                canonical_value,
+                approximate=duration_is_approximate,
+            )
             if (
                 "explicit_short_term_memory_duration"
                 not in target["reason_codes"]
@@ -4481,7 +4479,11 @@ def _augment_assisted_living_and_memory_duration(
                 observation_ref=_next_observation_ref(observations),
                 subject_entity_ref=person_ref,
                 predicate="health.user_reported_observation",
-                object_value=_literal("text", canonical_value),
+                object_value=_literal(
+                    "text",
+                    canonical_value,
+                    approximate=duration_is_approximate,
+                ),
                 projection_class="supportive_context",
                 surface_policy="explicit_recall_only",
                 sensitivity="high",
@@ -4799,6 +4801,8 @@ def _compile_entity_links(
                 source,
                 entities,
                 observations,
+                value["comparison_hints"],
+                value["deferrals"],
             )
         )
     predicates = {item["predicate"] for item in observations}
@@ -6590,7 +6594,7 @@ class LocalLlamaCppProvider:
             )
         input_text = (
             "TRUSTED_SOURCE_TIME="
-            f"{source.source_recorded_at}\n"
+            f"{source.trusted_source_time}\n"
             f"{context_input}"
             "Offsets are Python Unicode offsets into SOURCE_CONTENT only.\n"
             "SOURCE_CONTENT_START\n"

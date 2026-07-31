@@ -142,7 +142,7 @@ class SemanticCompilerV10Test(unittest.TestCase):
         )
         self.assertEqual(provider.local_model_calls, 0)
 
-    def test_compound_father_statement_completes_residence_and_duration(
+    def test_compound_father_statement_defers_generic_setting_and_marks_approximation(
         self,
     ) -> None:
         content = (
@@ -222,18 +222,18 @@ class SemanticCompilerV10Test(unittest.TestCase):
             registry,
         )
         value = compiled.model_dump(mode="json")
-        entities = {
-            item["entity_ref"]: item for item in value["entity_mentions"]
-        }
         residence = [
             item
             for item in value["observations"]
             if item["predicate"] == "residence.lives_at"
         ]
-        self.assertEqual(len(residence), 1)
-        self.assertEqual(
-            entities[residence[0]["object"]["entity_ref"]]["name_text"],
+        self.assertEqual(residence, [])
+        self.assertNotIn(
             "assisted living",
+            {
+                item.get("name_text")
+                for item in value["entity_mentions"]
+            },
         )
         health_values = {
             item["object"]["value"]
@@ -246,11 +246,22 @@ class SemanticCompilerV10Test(unittest.TestCase):
             health_values,
         )
         self.assertNotIn("three seconds", health_values)
+        duration_observation = next(
+            item
+            for item in value["observations"]
+            if item.get("object", {}).get("value")
+            == "short-term memory lasts about three seconds"
+        )
+        self.assertIs(duration_observation["object"]["approximate"], True)
         self.assertIn(
-            "explicit_assisted_living_residence_canonicalized",
+            "assisted_living_setting_deferred_until_literal_predicate",
             repairs,
         )
         self.assertIn("short_term_memory_duration_canonicalized", repairs)
+        self.assertIn(
+            "unregistered_predicate",
+            {item["reason_code"] for item in value["deferrals"]},
+        )
 
 
 if __name__ == "__main__":

@@ -449,6 +449,7 @@ async def process_job(
             source_sha256=job["evidence_content_sha256"],
             source_recorded_at=job["evidence_recorded_at"],
             content=job["evidence_content"],
+            source_observed_at=job["evidence_observed_at"],
         )
         trusted_binding = None
         if context["binding_event_id"] is not None:
