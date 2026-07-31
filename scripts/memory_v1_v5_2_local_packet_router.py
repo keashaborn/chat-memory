@@ -29,6 +29,7 @@ from scripts.memory_v1_v5_local_packet_disposition import (
 WORKER_VERSION = "memory_v1_v5_2_local_packet_router_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_2_local_packet_router_apply_v1"
 IDENTITY_NAMESPACE = uuid.UUID("9a15e563-8ed6-5d92-9db8-a48679295463")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILDER = Path(__file__).with_name(
     "memory_v1_v5_1_review_local_packet.py"
 )
@@ -141,7 +142,15 @@ def repository_commit_valid(commit: Any) -> bool:
     if any(character not in "0123456789abcdef" for character in commit):
         return False
     completed = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+        [
+            "git",
+            "-C",
+            str(REPOSITORY_ROOT),
+            "merge-base",
+            "--is-ancestor",
+            commit,
+            "HEAD",
+        ],
         capture_output=True,
         check=False,
     )

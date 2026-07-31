@@ -120,6 +120,28 @@ class _FinalizeConnection(_Connection):
 
 
 class V52LocalPacketRouterTest(unittest.TestCase):
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_repository_validation_is_independent_of_process_cwd(
+        self,
+        run: mock.Mock,
+    ) -> None:
+        run.return_value = mock.Mock(returncode=0)
+
+        self.assertTrue(MODULE.repository_commit_valid("a" * 40))
+        run.assert_called_once_with(
+            [
+                "git",
+                "-C",
+                str(MODULE.REPOSITORY_ROOT),
+                "merge-base",
+                "--is-ancestor",
+                "a" * 40,
+                "HEAD",
+            ],
+            capture_output=True,
+            check=False,
+        )
+
     def test_authenticated_owner_rotation_prevents_fixed_uuid_priority(self) -> None:
         owners = [
             uuid.UUID("11111111-1111-4111-8111-111111111111"),
