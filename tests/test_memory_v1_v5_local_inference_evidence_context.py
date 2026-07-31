@@ -8,6 +8,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
 )
 from scripts.memory_v1_v5_local_inference_canary import (
     EvidenceContextBoundLocalProvider,
+    ZeroCallPacketReplayTransport,
 )
 
 
@@ -67,6 +68,27 @@ class EvidenceContextBoundLocalProviderTest(unittest.TestCase):
             provider.external_call_capability,
             delegate.external_call_capability,
         )
+
+    def test_prior_packet_replay_is_zero_call_and_single_use(self) -> None:
+        packet = {
+            "entity_mentions": [],
+            "observations": [],
+            "comparison_hints": [],
+            "deferrals": [],
+            "packet_findings": [],
+        }
+        request = type("Request", (), {"model": "local-test-model"})()
+        transport = ZeroCallPacketReplayTransport(packet)
+
+        result = transport.complete(request)
+
+        self.assertEqual(result.model, "local-test-model")
+        self.assertEqual(result.parsed, packet)
+        self.assertIsNot(result.parsed, packet)
+        self.assertEqual(transport.local_model_calls, 0)
+        self.assertEqual(transport.external_model_calls, 0)
+        with self.assertRaisesRegex(RuntimeError, "only once"):
+            transport.complete(request)
 
 
 if __name__ == "__main__":

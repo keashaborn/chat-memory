@@ -9,6 +9,7 @@ import os
 import re
 import socket
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -34,6 +35,7 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     LlamaCppSecureTransport,
     LocalLlamaCppProvider,
     LocalProviderAdapterError,
+    LocalStructuredResult,
 )
 from scripts.memory_v1_relational_extraction_v5_observable_provider import (
     CapturingProvider,
@@ -59,6 +61,9 @@ WORKER_VERSION = "memory_v1_v5_local_inference_canary_v1"
 APPLY_ENABLE_TOKEN = "memory_v1_v5_local_inference_canary_apply_v1"
 DIAGNOSTIC_ENABLE_TOKEN = (
     "memory_v1_v5_local_inference_diagnostic_replay_v1"
+)
+RECOMPILE_ENABLE_TOKEN = (
+    "memory_v1_v5_2_zero_call_packet_recompile_v1"
 )
 PERSIST_NAMESPACE = uuid.UUID("a1ab4c90-2b6a-4a4b-a8e9-746c03917721")
 PINNED_MODEL_FILE_SHA256 = (
@@ -102,6 +107,34 @@ class EvidenceContextBoundLocalProvider:
         return self._delegate.extract(
             source,
             evidence_context=self._evidence_context,
+        )
+
+
+class ZeroCallPacketReplayTransport:
+    """Replay one immutable prior packet through the current compiler."""
+
+    external_call_capability = False
+    external_model_calls = 0
+    local_model_calls = 0
+
+    def __init__(self, packet_value: Mapping[str, Any]) -> None:
+        self._packet_value = deepcopy(dict(packet_value))
+        self._used = False
+
+    def complete(self, request: Any) -> LocalStructuredResult:
+        if self._used:
+            raise RuntimeError("zero-call packet replay may run only once")
+        self._used = True
+        packet = deepcopy(self._packet_value)
+        return LocalStructuredResult(
+            response_id=None,
+            model=request.model,
+            finish_reason="stop",
+            parsed=packet,
+            response_sha256=canonical_sha256(packet),
+            prompt_tokens=0,
+            completion_tokens=0,
+            content_normalization="immutable_prior_packet_recompile_v1",
         )
 
 
@@ -169,6 +202,8 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--evidence-id", required=True)
     parser.add_argument("--expected-job-id")
     parser.add_argument("--expected-content-sha256", required=True)
+    parser.add_argument("--recompile-prior-packet-id")
+    parser.add_argument("--recompile-prior-packet-storage-sha256")
     parser.add_argument("--selector-version", default="20260718_local_v1")
     parser.add_argument("--run-id")
     parser.add_argument(
@@ -207,10 +242,31 @@ def validated_arguments(args: argparse.Namespace) -> dict[str, Any]:
             else None
         )
         run_id = uuid.UUID(str(args.run_id)) if args.run_id else None
+        prior_packet_id = (
+            uuid.UUID(str(args.recompile_prior_packet_id))
+            if args.recompile_prior_packet_id
+            else None
+        )
     except ValueError as exc:
         raise RuntimeError("owner, evidence, and run ids must be UUIDs") from exc
     if not SHA256_RE.fullmatch(str(args.expected_content_sha256)):
         raise RuntimeError("expected content hash must be lowercase SHA-256")
+    prior_storage_sha = args.recompile_prior_packet_storage_sha256
+    if (prior_packet_id is None) != (prior_storage_sha is None):
+        raise RuntimeError(
+            "prior packet id and storage hash must be supplied together"
+        )
+    if prior_storage_sha is not None:
+        if not SHA256_RE.fullmatch(str(prior_storage_sha)):
+            raise RuntimeError("prior packet storage hash is invalid")
+        if args.contract_profile != "v5_2" or not args.apply:
+            raise RuntimeError("zero-call recompile requires applied V5.2")
+        if args.diagnostic_replay:
+            raise RuntimeError("zero-call recompile is not diagnostic replay")
+        if os.getenv("MEMORY_V1_V5_2_ZERO_CALL_RECOMPILE") != (
+            RECOMPILE_ENABLE_TOKEN
+        ):
+            raise RuntimeError("zero-call packet recompile capability is absent")
     if not SELECTOR_RE.fullmatch(str(args.selector_version)):
         raise RuntimeError("selector version is invalid")
     if not SHA256_RE.fullmatch(str(args.model_file_sha256)):
@@ -248,6 +304,8 @@ def validated_arguments(args: argparse.Namespace) -> dict[str, Any]:
         "evidence_id": evidence_id,
         "expected_job_id": expected_job_id,
         "run_id": run_id,
+        "prior_packet_id": prior_packet_id,
+        "prior_packet_storage_sha256": prior_storage_sha,
     }
 
 
@@ -297,6 +355,40 @@ async def plan_exact(
         "route": "relational_extraction",
         "outcome": "eligible",
     }
+
+
+async def load_prior_packet_for_recompile(
+    conn: asyncpg.Connection,
+    *,
+    owner: uuid.UUID,
+    evidence_id: uuid.UUID,
+    packet_id: uuid.UUID,
+    packet_storage_sha256: str,
+) -> Mapping[str, Any]:
+    async with conn.transaction(readonly=True):
+        await set_actor(conn, owner)
+        row = await conn.fetchrow(
+            """
+            SELECT normalized_packet
+            FROM memory.evidence_extraction_packet_v5_local
+            WHERE owner_user_id=$1
+              AND evidence_id=$2
+              AND packet_id=$3
+              AND packet_storage_sha256=$4
+              AND external_model_calls=0
+              AND local_model_calls BETWEEN 0 AND 1
+            """,
+            owner,
+            evidence_id,
+            packet_id,
+            packet_storage_sha256,
+        )
+    if row is None:
+        raise RuntimeError("hash-bound prior packet is unavailable")
+    packet_value = row["normalized_packet"]
+    if not isinstance(packet_value, Mapping):
+        raise RuntimeError("prior packet value is not an object")
+    return packet_value
 
 
 async def enqueue_exact(
@@ -753,13 +845,25 @@ async def run() -> int:
             content=claim["evidence_content"],
             source_observed_at=claim["evidence_observed_at"],
         )
-        api_key = os.getenv("MEMORY_V1_LOCAL_INFERENCE_API_KEY")
-        transport = LlamaCppSecureTransport(
-            endpoint=args.endpoint,
-            enable_token=LOCAL_CALL_ENABLE_TOKEN,
-            api_key=api_key,
-            allow_loopback_http=True,
-        )
+        if ids["prior_packet_id"] is not None:
+            prior_packet_value = await load_prior_packet_for_recompile(
+                conn,
+                owner=ids["owner"],
+                evidence_id=ids["evidence_id"],
+                packet_id=ids["prior_packet_id"],
+                packet_storage_sha256=ids[
+                    "prior_packet_storage_sha256"
+                ],
+            )
+            transport = ZeroCallPacketReplayTransport(prior_packet_value)
+        else:
+            api_key = os.getenv("MEMORY_V1_LOCAL_INFERENCE_API_KEY")
+            transport = LlamaCppSecureTransport(
+                endpoint=args.endpoint,
+                enable_token=LOCAL_CALL_ENABLE_TOKEN,
+                api_key=api_key,
+                allow_loopback_http=True,
+            )
         provider = LocalLlamaCppProvider(
             model=args.model,
             model_file_sha256=args.model_file_sha256,

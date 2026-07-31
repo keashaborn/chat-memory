@@ -1,0 +1,28 @@
+{
+  "contract_version": "memory_v1_v5_2_compiler_v12_exact_two_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "selector_version": "20260731_v5_2_compiler_v12_exact_two_v1",
+  "policy_compiler_sha256": "91e3830e676b6c9abd881a52f3d6b010679809c86fffbc889134d9653deba5f3",
+  "targets": [
+    {
+      "evidence_id": "61d4fb6f-b211-491e-8edc-d160efefe17e",
+      "content_sha256": "966b7a3d4c47e77bae6b7eaea87d8c8a88d268d3d48dcf3fa9c20dbca3dc41e8",
+      "prior_packet_id": "50405677-84aa-5d72-b800-89418fc606e4",
+      "prior_packet_storage_sha256": "6276f9c4cf03ee8276b96451e0c7915691ebfeb459036123a5f0fa977c826cbc",
+      "prior_policy_compiler_sha256": "738cc80f374e3c7e441fd03f964b77d01401422d286a9bc52205c6e060767ae6",
+      "prior_selector_version": "20260730_v5_2_semantic_compiler_v9_reextract_v1",
+      "expected_route": "manual_review_artifact_ready",
+      "max_local_model_calls": 1
+    },
+    {
+      "evidence_id": "681ab38d-a742-463c-ad26-c74c65eacaa9",
+      "content_sha256": "46f40455eba48cdd0c4e131cc8f01ea15d8721b761bf0e15365d008a0562ea93",
+      "prior_packet_id": "c4db1405-ad9d-5c9a-81e3-10ad0200b0ca",
+      "prior_packet_storage_sha256": "90baad563bd05cdaf93f9d9b72ec5593e86592e4e0f334143a287e5f5e76dc5d",
+      "prior_policy_compiler_sha256": "275b5150f42e6d90e0afcebe86b32ab691be2e682c4d0c74e61947652230f6a2",
+      "prior_selector_version": "20260731_v5_2_semantic_compiler_v11_jerry_v1",
+      "expected_route": "manual_review_artifact_ready",
+      "max_local_model_calls": 0
+    }
+  ]
+}
