@@ -1,13 +1,14 @@
 # LifeSwitch Context Integration Candidate V1
 
-Status: isolated candidate only. Not authorized or ready for production activation.
+Status: corrected isolated candidate. Ready for Memory/security re-review, not
+authorized for production activation.
 
 ## Source and scope
 
-- Production base: `8c52472e6de93fa54a1811c36502ed55643f20ad`
-- Isolated worktree: `/home/ubuntu/chat-memory-lifeswitch-context-integration-v1`
-- Branch: `codex/lifeswitch-context-integration-v1-20260731`
-- Replayed design commit: `c8326f7b94309aa3565a1778104a9d4544fa967e`
+- Production base: `9abeeb8ffef7eac336bee71ac89db037f1018f17`
+- Isolated worktree: `/home/ubuntu/chat-memory-lifeswitch-context-gateway-v1`
+- Branch: `codex/lifeswitch-context-gateway-v1-20260731`
+- Rebased LifeSwitch integration parent: `cdd48e88f42b83811f0a6b6c2fde45a0b0473175`
 
 No production checkout, service, environment variable, database object, Qdrant
 collection, authentication boundary, Memory V1 contract, FM/RAG implementation,
@@ -15,10 +16,10 @@ or frontend file was changed.
 
 ## Authority and data boundaries
 
-LifeSwitch structured data is a separate answer-input lane. It never enters
+LifeSwitch structured data remains a separate answer-input lane. It never enters
 `MemorySelectionEnvelopeV1`, Memory evidence, governed claims, or Qdrant.
 Authentication supplies the owner. V1 is self-owned only; delegated People
-access is excluded.
+access remains excluded.
 
 The deterministic context order is:
 
@@ -35,16 +36,17 @@ Independent budgets remain enforced:
 - Web provenance: 16,384 bytes and 4,096 tokens
 - Combined prompt: 32,000-token hard input maximum
 
-`OFF` is evaluated before the restricted LifeSwitch session and guarantees zero
+`OFF` is evaluated before a database session is acquired and guarantees zero
 LifeSwitch database reads.
 
-## Versioned candidate path
+## Versioned runtime candidate
 
 ```text
 existing authenticated response-policy plan
   + exact conversation snapshot
   -> LifeSwitchResponseContextProviderV1
-  -> restricted repeatable-read, read-only owner transaction
+  -> trusted owner-context binder
+  -> restricted repeatable-read, read-only gateway transaction
   -> LifeSwitchPreparedContextV1
   -> TrustedLifeSwitchResponsePlanV1
   -> AssembledPromptV2
@@ -56,67 +58,81 @@ existing authenticated response-policy plan
   -> content-free response_inspection_v3
 ```
 
-The inactive `response_composition_root_v0_3.py` starts only after the current
-server-owned safety/mode/Memory/FM/web plan is complete. It does not replace or
-weaken that authority path.
+The inactive `response_composition_root_v0_3.py` begins only after the current
+server-owned safety, mode, Memory, FM, and web plan is complete. It does not
+replace or weaken that authority path.
 
-## Database candidate
+## Corrected database boundary
 
-The unapplied SQL candidate creates:
+The unapplied SQL candidate now creates a restricted gateway rather than giving
+the reader direct source-table access.
 
-- `lifeswitch_chat_reader_v1`, a no-login, no-bypass-RLS read role;
-- `lifeswitch_chat_binding_writer_v1`, a separate no-login append-only role;
-- `lifeswitch_chat.account_timezone_v1`, with forced owner RLS;
-- narrow column grants that omit raw/free-form notes;
-- `lifeswitch_chat.final_answer_lifeswitch_binding_v1`, with forced owner RLS
-  and an immutable update/delete trigger.
+- `lifeswitch_chat_reader_v1` is no-login, no-inherit, and no-bypass-RLS.
+- All source-schema and source-table privileges are explicitly revoked from it.
+- `brains_app` creates a short-lived opaque context only when authenticated
+  `app.user_id`, `app.lifeswitch_owner_id`, and the requested owner match.
+- The context is bound to the PostgreSQL backend PID, owner, thread, request
+  hash, conversation snapshot hash, and a five-minute expiry.
+- Gateway functions accept the opaque context UUID, never an owner UUID.
+- Every gateway is `SECURITY DEFINER` with an empty fixed `search_path` and
+  restricted `EXECUTE` privileges.
+- LifeSwitch reads occur in a repeatable-read, read-only transaction after
+  `SET LOCAL ROLE lifeswitch_chat_reader_v1`.
+- Plan output is recursively reduced to explicit target fields. `coach_notes`,
+  `body_state`, `monitoring_rules`, arbitrary nested notes, and the complete
+  source JSON document cannot reach the reader.
+- The owner context is removed after the read and expires closed if cleanup is
+  interrupted.
+- The answer-binding writer remains a separate no-login append-only role with
+  forced owner RLS.
 
-Reads use one repeatable-read, read-only transaction, a server-established owner
-GUC, and `SET LOCAL ROLE lifeswitch_chat_reader_v1`. Missing or invalid timezone
-fails date-dependent selection closed. An active-plan timezone is a bounded
-fallback until every account has an authoritative account timezone.
+Missing or invalid timezone still fails date-dependent selection closed. The
+active-plan timezone remains a bounded fallback until every account has an
+authoritative account timezone.
 
-The SQL and rollback SQL have not been applied to any database.
+## Validation evidence
 
-## Test evidence
+Using PostgreSQL 16 and `/opt/chat-memory/venv/bin/python`:
 
-Using `/opt/chat-memory/venv/bin/python` in the isolated worktree:
-
-- Candidate-focused suite: 50 tests passed.
+- Candidate-focused suite: 54 tests passed.
 - Existing response-policy, Memory boundary, provider, finalization,
-  persistence, and inspector regression suite: 146 tests passed.
+  persistence, and inspector regression suite: 250 tests passed.
 - Python compilation passed.
 - `git diff --check` passed.
+- SQL apply and rollback passed in a disposable PostgreSQL 16 container.
+- Rollback left the candidate schema and both candidate roles absent.
+- Production metadata showed zero `PUBLIC` table grants across the five source
+  schemas used by the gateway.
+- The trusted `sage` function owner has `SELECT` on all twelve whitelisted
+  source relations; no broader reader grants are needed.
 
-The focused suite verifies:
+The disposable two-owner malicious-access test passed all ten gates:
 
-- `OFF` performs zero LifeSwitch database reads;
-- owner/timezone access uses a restricted repeatable-read read-only transaction;
-- request, actor, thread, query, and snapshot hashes are bound;
-- context ordering and independent token limits;
-- LifeSwitch appears as lower-authority named reference data;
-- Memory and LifeSwitch create separate final-answer bindings;
-- transcript, Memory binding, and LifeSwitch binding persist in one transaction;
-- inspector V3 is content-free;
-- old V1 contracts and regression tests remain valid.
+1. Authenticated owner mismatch cannot create a context.
+2. Changing owner GUCs after binding cannot redirect the context.
+3. Private top-level and nested plan fields do not cross the whitelist.
+4. Every typed gateway projection returns only owner A records.
+5. Direct SQL reads of every underlying source relation are denied.
+6. A random context UUID is denied.
+7. A valid context is denied from another PostgreSQL backend PID.
+8. A separately bound owner B receives only owner B records.
+9. An ended context is denied.
+10. Apply/rollback leaves no gateway schema or restricted roles behind.
 
-## Required review before activation
+## Review and activation gates
 
-1. Apply the SQL only to a disposable production-schema clone and verify grants,
-   forced RLS, role switching, rollback, owner isolation, and query plans.
-2. Configure a dedicated restricted read pool without changing existing Memory
-   or response-provider pools.
-3. Integrate the V0.3 seam into the current production head after a fresh
-   shared-file review of composition, routing, finalization, persistence, and
-   inspection changes.
-4. Run authenticated shadow comparisons with `OFF` read counters and
+1. Memory/security review must return `LIFESWITCH_CONTEXT_INTEGRATION_READY: YES`
+   for this corrected candidate.
+2. Recheck the then-current production head and shared-file overlap.
+3. Configure a dedicated restricted pool without changing existing Memory or
+   response-provider pools.
+4. Integrate the V0.3 seam only after joint shared-file review.
+5. Run authenticated shadow comparisons with `OFF` read counters and
    content-free traces.
-5. Run owner-isolation and date/timezone canaries for nutrition, training,
-   measurements, current plan, and combined requests.
-6. Confirm separate final-answer Memory and LifeSwitch bindings under rollback
-   and replay.
-7. Obtain explicit promotion authorization, create a production rollback point,
-   and use a gradual canary rollout.
+6. Run owner-isolation and date/timezone canaries for every projection.
+7. Confirm separate Memory and LifeSwitch answer bindings under rollback and
+   replay.
+8. Obtain explicit promotion authorization and use a gradual canary rollout.
 
 Until those gates pass, do not apply the SQL, wire the live route, deploy,
 restart services, or enable production LifeSwitch prompt influence.

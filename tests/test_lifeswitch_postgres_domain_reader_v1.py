@@ -11,6 +11,7 @@ from rag_engine.lifeswitch_postgres_domain_reader_v1 import (
 
 
 OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
+CONTEXT = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 TODAY = dt.date(2026, 7, 29)
 
 
@@ -50,21 +51,29 @@ class FakeConnection:
 
     async def fetchrow(self, query: str, *args: Any):
         self.calls.append((query, args))
-        if "lifeswitch_chat_context:active_plan" in query:
-            return self.active_plan
-        if "lifeswitch_chat_context:legacy_plan" in query:
-            return self.legacy_plan
+        if "lifeswitch_chat.read_plan_v1" in query:
+            if self.active_plan is not None:
+                return {
+                    "plan_source": "agentic_active",
+                    "document": self.active_plan["document"],
+                }
+            if self.legacy_plan is not None:
+                return {
+                    "plan_source": "legacy_fallback",
+                    "document": self.legacy_plan,
+                }
+            return None
         raise AssertionError(f"unexpected fetchrow query: {query}")
 
     async def fetch(self, query: str, *args: Any):
         self.calls.append((query, args))
-        if "lifeswitch_chat_context:nutrition_daily_macros" in query:
+        if "read_nutrition_daily_v1" in query:
             return self.nutrition_rows
-        if "lifeswitch_chat_context:training_day" in query:
+        if "read_training_day_v1" in query:
             return self.training_rows
-        if "lifeswitch_chat_context:conditioning_day" in query:
+        if "read_conditioning_sessions_v1" in query:
             return self.conditioning_rows
-        if "lifeswitch_chat_context:exercise_progression" in query:
+        if "read_exercise_progression_v1" in query:
             return self.progression_rows
         raise AssertionError(f"unexpected fetch query: {query}")
 
@@ -121,15 +130,18 @@ class FakeObservations:
 class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_active_agentic_plan_wins_without_legacy_read(self) -> None:
         conn = FakeConnection(active_plan={"document": plan_document()})
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_plan(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_plan(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
         )
         self.assertEqual(result.plan_source, "agentic_active")
         self.assertEqual(result.payload["phase"], "lean_gain")
         self.assertEqual(len(conn.calls), 1)
-        self.assertIn("active_plan", conn.calls[0][0])
-        self.assertEqual(conn.calls[0][1], (OWNER,))
+        self.assertIn("read_plan_v1", conn.calls[0][0])
+        self.assertEqual(conn.calls[0][1], (CONTEXT,))
 
     async def test_legacy_plan_is_explicit_fallback_only(self) -> None:
         legacy = {
@@ -149,13 +161,16 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             "coach_notes": "",
         }
         conn = FakeConnection(active_plan=None, legacy_plan=legacy)
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_plan(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_plan(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
         )
         self.assertEqual(result.plan_source, "legacy_fallback")
         self.assertEqual(result.source_relations, ("lifeswitch_plan.plan_profile",))
-        self.assertEqual(len(conn.calls), 2)
+        self.assertEqual(len(conn.calls), 1)
 
     async def test_nutrition_day_returns_all_four_macros_and_plan_targets(self) -> None:
         conn = FakeConnection(
@@ -171,7 +186,10 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_nutrition_day(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_nutrition_day(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
             day=TODAY,
@@ -185,7 +203,10 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_nutrition_day_is_empty_not_fabricated(self) -> None:
         conn = FakeConnection(active_plan=None, legacy_plan=None, nutrition_rows=[])
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_nutrition_day(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_nutrition_day(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
             day=TODAY,
@@ -220,7 +241,10 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_training_session(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_training_session(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
             day=TODAY,
@@ -251,6 +275,7 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         observations = FakeObservations()
         result = await PostgresLifeSwitchDomainReaderV1(
             conn,
+            context_id=CONTEXT,
             observation_repository=observations,
         ).read_overall_status(
             owner_user_id=OWNER,
@@ -281,7 +306,10 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         start = TODAY - dt.timedelta(days=83)
-        result = await PostgresLifeSwitchDomainReaderV1(conn).read_exercise_progression(
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_exercise_progression(
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
             start_date=start,
@@ -290,9 +318,26 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.payload["observations"][0]["max_load"], 315.0)
         query, arguments = conn.calls[0]
-        self.assertIn("owner_user_id = $1", query)
-        self.assertIn("lower($4)", query)
-        self.assertEqual(arguments, (OWNER, start, TODAY, "squat"))
+        self.assertIn("read_exercise_progression_v1", query)
+        self.assertNotIn("owner_user_id", query)
+        self.assertEqual(arguments, (CONTEXT, start, TODAY, "squat"))
+
+    async def test_reader_uses_only_gateway_sql(self) -> None:
+        conn = FakeConnection(active_plan={"document": plan_document()})
+        await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_nutrition_range(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=TODAY - dt.timedelta(days=6),
+            end_date=TODAY,
+        )
+        sql = "\n".join(query.lower() for query, _ in conn.calls)
+        self.assertIn("lifeswitch_chat.read_plan_v1", sql)
+        self.assertIn("lifeswitch_chat.read_nutrition_daily_v1", sql)
+        self.assertNotIn("from lifeswitch_nutrition", sql)
+        self.assertNotIn("from lifeswitch_agentic", sql)
 
 
 if __name__ == "__main__":

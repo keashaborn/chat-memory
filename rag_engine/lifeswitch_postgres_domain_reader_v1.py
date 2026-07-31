@@ -9,7 +9,6 @@ from uuid import UUID
 
 import asyncpg
 
-from lifeswitch_agentic.plan_domain import PlanDocumentV1
 from lifeswitch_agentic.plan_observation_context import (
     CanonicalPlanObservationContextRepository,
     ObservationPermissions,
@@ -37,17 +36,6 @@ CONDITIONING_SOURCES = (
     "lifeswitch_training.conditioning_session_current_v",
 )
 MEASUREMENT_SOURCES = ("public.lifeswitch_measurement_entries",)
-
-_PLAN_JSON_FIELDS = (
-    "body_state",
-    "nutrition_targets",
-    "training_targets",
-    "conditioning_targets",
-    "activity_targets",
-    "recovery_targets",
-    "monitoring_rules",
-)
-
 
 def _json_object(value: Any) -> dict[str, Any]:
     if value is None:
@@ -87,16 +75,15 @@ def _compact_plan(document: Mapping[str, Any]) -> dict[str, Any]:
             "target_kcal",
             "kcal",
             "calorie_target",
+            "calorie_range",
             "protein_g",
             "target_protein_g",
             "protein",
             "protein_target",
+            "protein_grams_minimum",
+            "protein_minimum_g",
             "carbs_g",
             "fat_g",
-            "macros",
-            "macro_notes",
-            "carbs_fat",
-            "adherence_rule",
         ),
         "training_targets": (
             "workouts_per_week",
@@ -197,14 +184,49 @@ def _compact_overall_observations(
     }
 
 
+class _LifeSwitchGatewayObservationConnectionV1:
+    """Expose only typed gateway reads to the canonical observation projector."""
+
+    def __init__(self, conn: asyncpg.Connection, *, context_id: UUID) -> None:
+        self._conn = conn
+        self._context_id = context_id
+
+    async def fetch(self, query: str, *args: Any):
+        if len(args) != 3:
+            raise ValueError("LifeSwitch observation query arguments are invalid")
+        start_date, end_date = args[1], args[2]
+        if "lifeswitch_plan_context:nutrition_daily_totals" in query:
+            function = "read_nutrition_daily_v1"
+        elif "lifeswitch_plan_context:measurements" in query:
+            function = "read_measurement_observations_v1"
+        elif "lifeswitch_plan_context:resistance_sessions" in query:
+            function = "read_resistance_sessions_v1"
+        elif "lifeswitch_plan_context:conditioning_sessions" in query:
+            function = "read_conditioning_sessions_v1"
+        else:
+            raise ValueError("unapproved LifeSwitch observation query")
+        return await self._conn.fetch(
+            f"select * from lifeswitch_chat.{function}($1,$2,$3)",
+            self._context_id,
+            start_date,
+            end_date,
+        )
+
+
 class PostgresLifeSwitchDomainReaderV1:
     def __init__(
         self,
         conn: asyncpg.Connection,
         *,
+        context_id: UUID,
         observation_repository: CanonicalPlanObservationContextRepository | None = None,
     ) -> None:
         self._conn = conn
+        self._context_id = context_id
+        self._observation_conn = _LifeSwitchGatewayObservationConnectionV1(
+            conn,
+            context_id=context_id,
+        )
         self._observations = (
             observation_repository or CanonicalPlanObservationContextRepository()
         )
@@ -213,43 +235,17 @@ class PostgresLifeSwitchDomainReaderV1:
         self,
         owner_user_id: UUID,
     ) -> tuple[str, dict[str, Any], tuple[str, ...]]:
-        active = await self._conn.fetchrow(
-            """
-            /* lifeswitch_chat_context:active_plan */
-            select version.document
-            from lifeswitch_agentic.plan_owner_state state
-            join lifeswitch_agentic.plan_versions version
-              on version.owner_user_id = state.owner_user_id
-             and version.id = state.active_plan_version_id
-            where state.owner_user_id = $1
-            """,
-            owner_user_id,
+        row = await self._conn.fetchrow(
+            "select * from lifeswitch_chat.read_plan_v1($1)",
+            self._context_id,
         )
-        if active is not None:
-            document = PlanDocumentV1.from_mapping(
-                _json_object(active["document"])
-            ).to_dict()
-            return "agentic_active", document, PLAN_AGENTIC_SOURCES
-
-        legacy = await self._conn.fetchrow(
-            """
-            /* lifeswitch_chat_context:legacy_plan */
-            select phase, phase_label, primary_goal, start_date, review_date,
-                   review_cadence, body_state, nutrition_targets,
-                   training_targets, conditioning_targets, activity_targets,
-                   recovery_targets, monitoring_rules
-            from lifeswitch_plan.plan_profile
-            where owner_user_id = $1 and is_active = true
-            """,
-            owner_user_id,
-        )
-        if legacy is None:
+        if row is None:
             return "unavailable", {}, ()
-        material = dict(legacy)
-        for field in _PLAN_JSON_FIELDS:
-            material[field] = _json_object(material.get(field))
-        document = PlanDocumentV1.from_legacy_profile(material).to_dict()
-        return "legacy_fallback", document, PLAN_LEGACY_SOURCES
+        source = str(row["plan_source"])
+        if source not in {"agentic_active", "legacy_fallback"}:
+            raise ValueError("LifeSwitch plan gateway returned an invalid source")
+        relations = PLAN_AGENTIC_SOURCES if source == "agentic_active" else PLAN_LEGACY_SOURCES
+        return source, _json_object(row["document"]), relations
 
     async def _nutrition_rows(
         self,
@@ -259,59 +255,8 @@ class PostgresLifeSwitchDomainReaderV1:
         end_date: dt.date,
     ) -> list[asyncpg.Record]:
         return await self._conn.fetch(
-            """
-            /* lifeswitch_chat_context:nutrition_daily_macros */
-            select
-              nd.day,
-              count(entry.nutrition_entry_id)::int as entry_count,
-              coalesce(sum(
-                case when entry.my_food_id is not null
-                  then food.kcal * coalesce(entry.qty_g, serving.grams * entry.qty_servings) / 100.0
-                  else meal_total.kcal end
-              ), 0)::float as kcal,
-              coalesce(sum(
-                case when entry.my_food_id is not null
-                  then food.protein_g * coalesce(entry.qty_g, serving.grams * entry.qty_servings) / 100.0
-                  else meal_total.protein_g end
-              ), 0)::float as protein_g,
-              coalesce(sum(
-                case when entry.my_food_id is not null
-                  then food.carbs_g * coalesce(entry.qty_g, serving.grams * entry.qty_servings) / 100.0
-                  else meal_total.carbs_g end
-              ), 0)::float as carbs_g,
-              coalesce(sum(
-                case when entry.my_food_id is not null
-                  then food.fat_g * coalesce(entry.qty_g, serving.grams * entry.qty_servings) / 100.0
-                  else meal_total.fat_g end
-              ), 0)::float as fat_g
-            from lifeswitch_nutrition.nutrition_day nd
-            left join lifeswitch_nutrition.nutrition_entry entry
-              on entry.nutrition_day_id = nd.nutrition_day_id
-            left join lifeswitch_nutrition.my_food food
-              on food.my_food_id = entry.my_food_id
-            left join lifeswitch_nutrition.my_food_serving serving
-              on serving.my_food_serving_id = entry.my_food_serving_id
-             and serving.my_food_id = entry.my_food_id
-            left join lateral (
-              select
-                sum(item_food.kcal * coalesce(item.qty_g, item_serving.grams * item.qty_servings) / 100.0) as kcal,
-                sum(item_food.protein_g * coalesce(item.qty_g, item_serving.grams * item.qty_servings) / 100.0) as protein_g,
-                sum(item_food.carbs_g * coalesce(item.qty_g, item_serving.grams * item.qty_servings) / 100.0) as carbs_g,
-                sum(item_food.fat_g * coalesce(item.qty_g, item_serving.grams * item.qty_servings) / 100.0) as fat_g
-              from lifeswitch_nutrition.meal_item item
-              join lifeswitch_nutrition.my_food item_food
-                on item_food.my_food_id = item.my_food_id
-              left join lifeswitch_nutrition.my_food_serving item_serving
-                on item_serving.my_food_serving_id = item.my_food_serving_id
-               and item_serving.my_food_id = item.my_food_id
-              where item.meal_id = entry.meal_id
-            ) meal_total on true
-            where nd.owner_user_id = $1
-              and nd.day between $2 and $3
-            group by nd.day
-            order by nd.day
-            """,
-            owner_user_id,
+            "select * from lifeswitch_chat.read_nutrition_daily_v1($1,$2,$3)",
+            self._context_id,
             start_date,
             end_date,
         )
@@ -377,7 +322,7 @@ class PostgresLifeSwitchDomainReaderV1:
     ) -> LifeSwitchReadResultV1:
         source, document, plan_relations = await self._resolve_plan(owner_user_id)
         observations = await self._observations.summarize(
-            self._conn,
+            self._observation_conn,
             owner_user_id=owner_user_id,
             owner_timezone=owner_timezone,
             document=document,
@@ -491,7 +436,7 @@ class PostgresLifeSwitchDomainReaderV1:
     ) -> LifeSwitchReadResultV1:
         source, document, plan_relations = await self._resolve_plan(owner_user_id)
         observations = await self._observations.summarize(
-            self._conn,
+            self._observation_conn,
             owner_user_id=owner_user_id,
             owner_timezone=owner_timezone,
             document=document,
@@ -528,40 +473,13 @@ class PostgresLifeSwitchDomainReaderV1:
         day: dt.date,
     ) -> LifeSwitchReadResultV1:
         rows = await self._conn.fetch(
-            """
-            /* lifeswitch_chat_context:training_day */
-            select session.day, session.name,
-                   count(log.training_set_log_id)::int as set_count,
-                   count(distinct log.exercise_id)::int as exercise_count,
-                   coalesce(sum(log.volume), 0)::float as total_volume
-            from lifeswitch_training.training_session_current_v session
-            join lifeswitch_training.training_set_log log
-              on log.training_session_id = session.training_session_id
-             and log.is_active = true
-            where session.owner_user_id = $1
-              and session.finished_at is not null
-              and session.day = $2
-            group by session.training_session_id, session.day, session.name
-            order by session.name
-            limit 50
-            """,
-            owner_user_id,
+            "select * from lifeswitch_chat.read_training_day_v1($1,$2)",
+            self._context_id,
             day,
         )
         conditioning_rows = await self._conn.fetch(
-            """
-            /* lifeswitch_chat_context:conditioning_day */
-            select day, name, category, modality, duration_min, intensity,
-                   distance_value, distance_unit, heart_rate_avg,
-                   recovery_impact
-            from lifeswitch_training.conditioning_session_current_v
-            where owner_user_id = $1
-              and is_active = true
-              and day = $2
-            order by created_at, conditioning_session_log_id
-            limit 50
-            """,
-            owner_user_id,
+            "select * from lifeswitch_chat.read_conditioning_sessions_v1($1,$2,$2)",
+            self._context_id,
             day,
         )
         payload = {
@@ -609,35 +527,8 @@ class PostgresLifeSwitchDomainReaderV1:
         subject: str,
     ) -> LifeSwitchReadResultV1:
         rows = await self._conn.fetch(
-            """
-            /* lifeswitch_chat_context:exercise_progression */
-            select session.day,
-                   max(log.exercise_name) as exercise_name,
-                   count(log.training_set_log_id)::int as set_count,
-                   coalesce(sum(log.reps), 0)::int as total_reps,
-                   coalesce(max(log.weight), 0)::float as max_load,
-                   coalesce(sum(log.volume), 0)::float as total_volume,
-                   case
-                     when count(distinct nullif(trim(log.load_unit), '')) = 1
-                       then max(nullif(trim(log.load_unit), ''))
-                     when count(distinct nullif(trim(log.load_unit), '')) > 1
-                       then 'mixed'
-                     else null
-                   end as load_unit
-            from lifeswitch_training.training_session_current_v session
-            join lifeswitch_training.training_set_log log
-              on log.training_session_id = session.training_session_id
-             and log.is_active = true
-            where session.owner_user_id = $1
-              and session.finished_at is not null
-              and session.day between $2 and $3
-              and log.capture_role = 'strength'
-              and lower(log.exercise_name) like ('%' || lower($4) || '%')
-            group by session.training_session_id, session.day, log.exercise_id
-            order by session.day
-            limit 200
-            """,
-            owner_user_id,
+            "select * from lifeswitch_chat.read_exercise_progression_v1($1,$2,$3,$4)",
+            self._context_id,
             start_date,
             end_date,
             subject,
@@ -674,7 +565,7 @@ class PostgresLifeSwitchDomainReaderV1:
         end_date: dt.date,
     ) -> LifeSwitchReadResultV1:
         observations = await self._observations.summarize(
-            self._conn,
+            self._observation_conn,
             owner_user_id=owner_user_id,
             owner_timezone=owner_timezone,
             document={},

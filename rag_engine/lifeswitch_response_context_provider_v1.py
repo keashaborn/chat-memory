@@ -86,6 +86,10 @@ def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
+def _text_sha256(value: Any) -> str:
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+
+
 class LifeSwitchPreparedContextV1(_StrictFrozenModel):
     contract_version: Literal[LIFESWITCH_PREPARED_CONTEXT_VERSION] = (
         LIFESWITCH_PREPARED_CONTEXT_VERSION
@@ -197,7 +201,7 @@ class LifeSwitchResponseContextProviderV1:
 
 
 class PostgresRestrictedLifeSwitchReadSessionV1:
-    """Use only the no-login LifeSwitch reader role in one repeatable snapshot."""
+    """Bind trusted ownership, then read only through restricted gateways."""
 
     def __init__(
         self,
@@ -211,29 +215,11 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
     @staticmethod
     async def _owner_timezone(
         conn: asyncpg.Connection,
-        owner_user_id: UUID,
+        context_id: UUID,
     ) -> tuple[str | None, LifeSwitchTimezoneSource]:
         row = await conn.fetchrow(
-            """
-            /* lifeswitch_chat_context:trusted_owner_timezone */
-            with candidate as (
-              select timezone_name, 1 as precedence
-              from lifeswitch_chat.account_timezone_v1
-              where owner_user_id = $1
-              union all
-              select version.owner_timezone as timezone_name, 2 as precedence
-              from lifeswitch_agentic.plan_owner_state state
-              join lifeswitch_agentic.plan_versions version
-                on version.owner_user_id = state.owner_user_id
-               and version.id = state.active_plan_version_id
-              where state.owner_user_id = $1
-            )
-            select timezone_name, precedence
-            from candidate
-            order by precedence
-            limit 1
-            """,
-            owner_user_id,
+            "select * from lifeswitch_chat.read_owner_timezone_v1($1)",
+            context_id,
         )
         if row is None:
             return None, "unavailable"
@@ -242,7 +228,10 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
             ZoneInfo(value)
         except ZoneInfoNotFoundError:
             return None, "unavailable"
-        return value, "account_timezone" if int(row["precedence"]) == 1 else "active_plan"
+        source = str(row["timezone_source"] or "")
+        if source not in {"account_setting", "reviewed_migration", "active_plan"}:
+            return None, "unavailable"
+        return value, "active_plan" if source == "active_plan" else "account_timezone"
 
     async def select(
         self,
@@ -254,57 +243,86 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
         if conversation_snapshot.authenticated_actor_user_id != authenticated_actor_user_id:
             raise ValueError("LifeSwitch session actor differs from snapshot")
         async with self._pool.acquire() as conn:
-            async with conn.transaction(isolation="repeatable_read", readonly=True):
+            context_id: UUID | None = None
+            async with conn.transaction():
+                await conn.execute(
+                    "select set_config('app.user_id', $1, true)",
+                    str(authenticated_actor_user_id),
+                )
                 await conn.execute(
                     "select set_config('app.lifeswitch_owner_id', $1, true)",
                     str(authenticated_actor_user_id),
                 )
-                await conn.execute(f"set local role {LIFESWITCH_READER_ROLE}")
-                owner_timezone, source = await self._owner_timezone(
-                    conn,
+                context_id = await conn.fetchval(
+                    """
+                    select lifeswitch_chat.begin_owner_read_context_v1(
+                      $1,$2,$3,$4
+                    )
+                    """,
                     authenticated_actor_user_id,
+                    conversation_snapshot.thread_id,
+                    _text_sha256(conversation_snapshot.current_request_id),
+                    conversation_snapshot.snapshot_sha256,
                 )
-                if owner_timezone is None:
+                if not isinstance(context_id, UUID):
+                    raise ValueError("LifeSwitch owner gateway did not return a UUID")
+            try:
+                async with conn.transaction(isolation="repeatable_read", readonly=True):
+                    await conn.execute(f"set local role {LIFESWITCH_READER_ROLE}")
+                    owner_timezone, source = await self._owner_timezone(
+                        conn,
+                        context_id,
+                    )
                     now = self._utc_clock()
                     if now.tzinfo is None or now.utcoffset() is None:
                         raise ValueError("LifeSwitch read clock must be timezone-aware")
-                    plan = create_lifeswitch_data_plan_v1(
-                        query,
-                        today=now.astimezone(dt.timezone.utc).date(),
-                    )
-                    return LifeSwitchPreparedContextV1.create(
-                        status="TIMEZONE_UNAVAILABLE",
-                        timezone_source="unavailable",
-                        database_accessed=True,
+                    if owner_timezone is None:
+                        plan = create_lifeswitch_data_plan_v1(
+                            query,
+                            today=now.astimezone(dt.timezone.utc).date(),
+                        )
+                        return LifeSwitchPreparedContextV1.create(
+                            status="TIMEZONE_UNAVAILABLE",
+                            timezone_source="unavailable",
+                            database_accessed=True,
+                            data_plan=plan,
+                        )
+                    local_today = now.astimezone(ZoneInfo(owner_timezone)).date()
+                    plan = create_lifeswitch_data_plan_v1(query, today=local_today)
+                    trusted = TrustedLifeSwitchContextRequestV1.create(
+                        request_id=conversation_snapshot.current_request_id,
+                        authenticated_actor_user_id=authenticated_actor_user_id,
+                        owner_user_id=authenticated_actor_user_id,
+                        thread_id=conversation_snapshot.thread_id,
+                        conversation_snapshot_sha256=conversation_snapshot.snapshot_sha256,
+                        owner_timezone=owner_timezone,
+                        query=query,
                         data_plan=plan,
                     )
-                now = self._utc_clock()
-                if now.tzinfo is None or now.utcoffset() is None:
-                    raise ValueError("LifeSwitch read clock must be timezone-aware")
-                local_today = now.astimezone(ZoneInfo(owner_timezone)).date()
-                plan = create_lifeswitch_data_plan_v1(query, today=local_today)
-                trusted = TrustedLifeSwitchContextRequestV1.create(
-                    request_id=conversation_snapshot.current_request_id,
-                    authenticated_actor_user_id=authenticated_actor_user_id,
-                    owner_user_id=authenticated_actor_user_id,
-                    thread_id=conversation_snapshot.thread_id,
-                    conversation_snapshot_sha256=conversation_snapshot.snapshot_sha256,
-                    owner_timezone=owner_timezone,
-                    query=query,
-                    data_plan=plan,
-                )
-                envelope = await LifeSwitchDomainContextProviderV1(
-                    PostgresLifeSwitchDomainReaderV1(conn)
-                ).select(trusted)
-                rendered = render_lifeswitch_context_v1(envelope)
-                return LifeSwitchPreparedContextV1.create(
-                    status=envelope.status,
-                    timezone_source=source,
-                    database_accessed=True,
-                    data_plan=plan,
-                    envelope=envelope,
-                    rendered=rendered,
-                )
+                    envelope = await LifeSwitchDomainContextProviderV1(
+                        PostgresLifeSwitchDomainReaderV1(
+                            conn,
+                            context_id=context_id,
+                        )
+                    ).select(trusted)
+                    rendered = render_lifeswitch_context_v1(envelope)
+                    return LifeSwitchPreparedContextV1.create(
+                        status=envelope.status,
+                        timezone_source=source,
+                        database_accessed=True,
+                        data_plan=plan,
+                        envelope=envelope,
+                        rendered=rendered,
+                    )
+            finally:
+                if context_id is not None:
+                    async with conn.transaction():
+                        removed = await conn.fetchval(
+                            "select lifeswitch_chat.end_owner_read_context_v1($1)",
+                            context_id,
+                        )
+                        if removed is not True:
+                            raise RuntimeError("LifeSwitch owner gateway cleanup failed")
 
 
 __all__ = [

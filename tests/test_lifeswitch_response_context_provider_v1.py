@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import unittest
 import uuid
 
@@ -18,6 +19,7 @@ from rag_engine.response_conversation_snapshot_v1 import (
 ACTOR = uuid.UUID("11111111-1111-4111-8111-111111111111")
 THREAD = uuid.UUID("22222222-2222-4222-8222-222222222222")
 NOW = dt.datetime(2026, 7, 29, 12, tzinfo=dt.timezone.utc)
+CONTEXT = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 
 
 def snapshot(message: str):
@@ -63,6 +65,7 @@ class FakeReadConnection:
         self.transaction_calls = []
         self.execute_calls = []
         self.fetchrow_calls = []
+        self.fetchval_calls = []
 
     def transaction(self, **kwargs):
         return FakeReadTransaction(self, kwargs)
@@ -73,6 +76,14 @@ class FakeReadConnection:
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
         return None
+
+    async def fetchval(self, query, *args):
+        self.fetchval_calls.append((query, args))
+        if "begin_owner_read_context_v1" in query:
+            return CONTEXT
+        if "end_owner_read_context_v1" in query:
+            return True
+        raise AssertionError(f"unexpected fetchval query: {query}")
 
 
 class FakeAcquire:
@@ -167,12 +178,31 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(result.status, "TIMEZONE_UNAVAILABLE")
         self.assertEqual(
             conn.transaction_calls,
-            [{"isolation": "repeatable_read", "readonly": True}],
+            [
+                {},
+                {"isolation": "repeatable_read", "readonly": True},
+                {},
+            ],
         )
         sql = "\n".join(query for query, _ in conn.execute_calls)
+        self.assertIn("app.user_id", sql)
         self.assertIn("app.lifeswitch_owner_id", sql)
         self.assertIn("set local role lifeswitch_chat_reader_v1", sql)
         self.assertEqual(len(conn.fetchrow_calls), 1)
+        self.assertIn("read_owner_timezone_v1", conn.fetchrow_calls[0][0])
+        self.assertEqual(conn.fetchrow_calls[0][1], (CONTEXT,))
+        self.assertEqual(len(conn.fetchval_calls), 2)
+        begin_query, begin_args = conn.fetchval_calls[0]
+        self.assertIn("begin_owner_read_context_v1", begin_query)
+        self.assertEqual(begin_args[0], ACTOR)
+        self.assertEqual(begin_args[1], THREAD)
+        self.assertEqual(
+            begin_args[2],
+            hashlib.sha256(b"request-123").hexdigest(),
+        )
+        self.assertEqual(begin_args[3], source.snapshot_sha256)
+        self.assertIn("end_owner_read_context_v1", conn.fetchval_calls[1][0])
+        self.assertEqual(conn.fetchval_calls[1][1], (CONTEXT,))
         self.assertEqual(result.data_plan.window.start_date, dt.date(2026, 7, 27))
 
 
