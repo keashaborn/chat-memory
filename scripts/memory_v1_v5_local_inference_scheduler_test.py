@@ -19,7 +19,9 @@ from scripts.memory_v1_v5_local_inference_scheduler import (
     canonical_owners,
     execute_batch_v2,
     loopback_dsn,
+    no_target_outcome,
     ordered_owner_targets,
+    sanitized_queue_summary,
     sanitized_canary_result,
     sanitized_batch_summary,
     select_owner_target,
@@ -124,6 +126,42 @@ def main() -> int:
     )
     assert selected == (owner_b, target_b)
     assert select_owner_target([(OWNER, {}, None, None)]) is None
+
+    empty_queue = [{"eligible_count": 0, "context_ready_count": 0}]
+    assert no_target_outcome(empty_queue) == "idle_no_eligible_work"
+    context_blocked = [{
+        "eligible_count": 14,
+        "raw_context_ready_count": 0,
+        "context_ready_count": 0,
+        "context_duplicate_count": 0,
+        "context_superseded_count": 0,
+        "context_rebind_required_count": 14,
+    }]
+    assert no_target_outcome(context_blocked) == "blocked_context_rebind"
+    assert sanitized_queue_summary(context_blocked) == {
+        "eligible_count": 14,
+        "raw_context_ready_count": 0,
+        "context_ready_count": 0,
+        "context_duplicate_count": 0,
+        "context_superseded_count": 0,
+        "context_rebind_required_count": 14,
+    }
+    assert no_target_outcome([{
+        "eligible_count": 2,
+        "raw_context_ready_count": 2,
+        "context_ready_count": 0,
+        "context_duplicate_count": 2,
+        "context_superseded_count": 0,
+        "context_rebind_required_count": 0,
+    }]) == "blocked_context_duplicate"
+    assert no_target_outcome([{
+        "eligible_count": 1,
+        "raw_context_ready_count": 1,
+        "context_ready_count": 0,
+        "context_duplicate_count": 0,
+        "context_superseded_count": 1,
+        "context_rebind_required_count": 0,
+    }]) == "blocked_context_superseded"
 
     validate_arguments(args())
     validate_arguments(

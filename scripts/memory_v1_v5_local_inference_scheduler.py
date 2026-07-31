@@ -410,6 +410,34 @@ def select_owner_target(
     return ordered[0] if ordered else None
 
 
+def sanitized_queue_summary(plans: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    count_fields = (
+        "eligible_count",
+        "raw_context_ready_count",
+        "context_ready_count",
+        "context_duplicate_count",
+        "context_superseded_count",
+        "context_rebind_required_count",
+    )
+    return {
+        field: sum(int(plan.get(field, 0)) for plan in plans)
+        for field in count_fields
+    }
+
+
+def no_target_outcome(plans: Sequence[Mapping[str, Any]]) -> str:
+    queue = sanitized_queue_summary(plans)
+    if queue["eligible_count"] <= 0:
+        return "idle_no_eligible_work"
+    if queue["context_rebind_required_count"] > 0:
+        return "blocked_context_rebind"
+    if queue["context_superseded_count"] > 0:
+        return "blocked_context_superseded"
+    if queue["context_duplicate_count"] > 0:
+        return "blocked_context_duplicate"
+    return "blocked_no_context_ready"
+
+
 def batch_child_run_id(
     batch_run_id: uuid.UUID,
     *,
@@ -699,9 +727,12 @@ async def execute_batch_v2(
             if item[0] not in blocked_owners
         ]
         if not ordered_targets:
-            stop_reason = (
-                "all_owners_blocked" if blocked_owners else "no_work"
-            )
+            if blocked_owners:
+                stop_reason = "all_owners_blocked"
+            else:
+                stop_reason = no_target_outcome(
+                    [item[1] for item in planned]
+                )
             break
         made_progress = False
         for owner, target in ordered_targets:
@@ -790,6 +821,7 @@ async def run() -> int:
             )
         )
         return 0
+    queue_summary = sanitized_queue_summary(plans)
     if selected is None:
         print(
             stable_json(
@@ -799,8 +831,9 @@ async def run() -> int:
                     "extraction_contract_version": profile.contract_version,
                     "predicate_registry_version": profile.registry_version,
                     "apply": True,
-                    "outcome": "no_work",
+                    "outcome": no_target_outcome(plans),
                     "owner_count": len(owners),
+                    "queue": queue_summary,
                     "external_model_calls": 0,
                     "local_model_calls": 0,
                 }

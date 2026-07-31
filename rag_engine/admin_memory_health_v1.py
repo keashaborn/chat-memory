@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import UUID
@@ -14,11 +15,60 @@ from qdrant_client.http import models as qmodels
 
 from rag_engine.memory_v1_shadow import governed_activation_allowlisted
 from rag_engine.qdrant_compat import make_qdrant_client
+from scripts.memory_v1_v5_local_inference_scheduler import plan_owner
 
 
 SCHEMA = "admin_memory_health_v1"
 PIPELINE_SCHEMA = "memory_pipeline_status_v1"
 ANSWER_WINDOW_DAYS = 7
+OPERATIONS_SCHEMA = "memory_operational_status_v1"
+PIPELINE_UNITS = (
+    (
+        "intake_dispatcher",
+        "memory-v1-evidence-intake-dispatcher.service",
+        "memory-v1-evidence-intake-dispatcher.timer",
+    ),
+    (
+        "extraction_scheduler",
+        "memory-v1-v5-local-inference-scheduler.service",
+        "memory-v1-v5-local-inference-scheduler.timer",
+    ),
+    (
+        "packet_router",
+        "memory-v1-v5-2-local-packet-router.service",
+        "memory-v1-v5-2-local-packet-router.timer",
+    ),
+    (
+        "entity_validation",
+        "memory-v1-v5-local-entity-validation.service",
+        "memory-v1-v5-local-entity-validation.timer",
+    ),
+    (
+        "auto_resolution",
+        "memory-v1-v5-local-auto-resolution.service",
+        "memory-v1-v5-local-auto-resolution.timer",
+    ),
+    (
+        "entailment",
+        "memory-v1-v5-local-entailment.service",
+        "memory-v1-v5-local-entailment.timer",
+    ),
+    (
+        "auto_stage",
+        "memory-v1-v5-local-auto-stage.service",
+        "memory-v1-v5-local-auto-stage.timer",
+    ),
+    (
+        "claim_projection",
+        "memory-v1-v5-local-claim-projection.service",
+        "memory-v1-v5-local-claim-projection.timer",
+    ),
+    (
+        "qdrant_projection",
+        "memory-v1-projection.service",
+        "memory-v1-projection.timer",
+    ),
+)
 
 
 def _iso(value: Any) -> str | None:
@@ -31,6 +81,117 @@ def _iso(value: Any) -> str | None:
 
 def _integer(row: Mapping[str, Any], key: str) -> int:
     return int(row.get(key) or 0)
+
+
+def _systemd_timestamp(value: str | None) -> str | None:
+    if not value or value == "n/a":
+        return None
+    try:
+        parsed = datetime.strptime(value, "%a %Y-%m-%d %H:%M:%S %Z")
+    except ValueError:
+        return None
+    return _iso(parsed.replace(tzinfo=timezone.utc))
+
+
+def _systemd_properties(unit: str, properties: tuple[str, ...]) -> dict[str, str]:
+    completed = subprocess.run(
+        [
+            "systemctl",
+            "show",
+            unit,
+            "--no-pager",
+            f"--property={','.join(properties)}",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=2,
+    )
+    if completed.returncode != 0:
+        return {}
+    return {
+        key: value
+        for line in completed.stdout.splitlines()
+        if "=" in line
+        for key, value in [line.split("=", 1)]
+    }
+
+
+def _load_worker_operations_status() -> dict[str, Any]:
+    workers: list[dict[str, Any]] = []
+    for key, service_unit, timer_unit in PIPELINE_UNITS:
+        service = _systemd_properties(
+            service_unit,
+            (
+                "ActiveState",
+                "SubState",
+                "Result",
+                "ExecMainStatus",
+                "ExecMainStartTimestamp",
+                "ExecMainExitTimestamp",
+            ),
+        )
+        timer = _systemd_properties(
+            timer_unit,
+            (
+                "ActiveState",
+                "SubState",
+                "Result",
+                "LastTriggerUSec",
+                "NextElapseUSecRealtime",
+            ),
+        )
+        service_failed = (
+            not service
+            or service.get("ActiveState") == "failed"
+            or service.get("Result") not in {"", "success"}
+            or service.get("ExecMainStatus") not in {"", "0"}
+        )
+        timer_failed = (
+            not timer
+            or timer.get("ActiveState") != "active"
+            or timer.get("SubState") != "waiting"
+        )
+        workers.append(
+            {
+                "key": key,
+                "status": (
+                    "unhealthy"
+                    if service_failed or timer_failed
+                    else "running"
+                    if service.get("ActiveState") == "active"
+                    else "idle"
+                ),
+                "service_result": service.get("Result") or "unavailable",
+                "service_exit_status": (
+                    int(service["ExecMainStatus"])
+                    if service.get("ExecMainStatus", "").isdigit()
+                    else None
+                ),
+                "last_run_started_at": _systemd_timestamp(
+                    service.get("ExecMainStartTimestamp")
+                ),
+                "last_run_finished_at": _systemd_timestamp(
+                    service.get("ExecMainExitTimestamp")
+                ),
+                "timer_status": (
+                    "active" if not timer_failed else "unhealthy"
+                ),
+                "last_trigger_at": _systemd_timestamp(
+                    timer.get("LastTriggerUSec")
+                ),
+                "next_trigger_at": _systemd_timestamp(
+                    timer.get("NextElapseUSecRealtime")
+                ),
+            }
+        )
+    unhealthy = sum(worker["status"] == "unhealthy" for worker in workers)
+    return {
+        "schema": OPERATIONS_SCHEMA,
+        "status": "unhealthy" if unhealthy else "healthy",
+        "unhealthy_worker_count": unhealthy,
+        "workers": workers,
+    }
 
 
 def _memory_bound_percent(attested: int, memory_bound: int) -> float:
@@ -48,6 +209,7 @@ def _summarize_memory_health_v1(
     evidence: Mapping[str, Any],
     answers: Mapping[str, Any],
     pipeline: Mapping[str, Any],
+    operations: Mapping[str, Any],
     vector_points: int | None,
     vector_error: bool,
     governed_active: bool,
@@ -99,6 +261,53 @@ def _summarize_memory_health_v1(
                 "code": "extraction_errors",
                 "severity": "critical",
                 "message": "One or more memory extraction jobs are in an error state.",
+            }
+        )
+
+    eligible = _integer(processing, "eligible")
+    context_ready = _integer(processing, "context_ready")
+    context_rebind_required = _integer(
+        processing,
+        "context_rebind_required",
+    )
+    retry_blocked = _integer(processing, "retry_blocked")
+    head_of_line_blocked = eligible > 0 and context_ready == 0
+    if head_of_line_blocked:
+        critical = True
+        warnings.append(
+            {
+                "code": "extraction_head_of_line_blocked",
+                "severity": "critical",
+                "message": "Pending extraction work exists, but no job is context-ready.",
+            }
+        )
+    if context_rebind_required > 0:
+        attention = True
+        warnings.append(
+            {
+                "code": "context_rebind_required",
+                "severity": "attention",
+                "message": "Some extraction jobs require same-owner context rebinding.",
+            }
+        )
+    if retry_blocked > 0:
+        critical = True
+        warnings.append(
+            {
+                "code": "retry_blocked_queue_items",
+                "severity": "critical",
+                "message": "Some extraction jobs are blocked by the retry ceiling.",
+            }
+        )
+
+    unhealthy_workers = _integer(operations, "unhealthy_worker_count")
+    if unhealthy_workers > 0:
+        critical = True
+        warnings.append(
+            {
+                "code": "memory_pipeline_workers_unhealthy",
+                "severity": "critical",
+                "message": "One or more governed-memory workers or timers are unhealthy.",
             }
         )
 
@@ -191,7 +400,16 @@ def _summarize_memory_health_v1(
             "newest_job_at": _iso(processing.get("newest_job_at")),
             "completed_1d": _integer(processing, "completed_1d"),
             "completed_7d": _integer(processing, "completed_7d"),
+            "eligible": eligible,
+            "context_ready": context_ready,
+            "context_rebind_required": context_rebind_required,
+            "context_duplicate": _integer(processing, "context_duplicate"),
+            "context_superseded": _integer(processing, "context_superseded"),
+            "retry_blocked": retry_blocked,
+            "head_of_line_blocked": head_of_line_blocked,
         },
+        "operations_schema": OPERATIONS_SCHEMA,
+        "operations": dict(operations),
         "freshness": {
             "last_evidence_at": _iso(evidence.get("last_evidence_at")),
             "last_claim_at": _iso(claim.get("last_claim_at")),
@@ -315,6 +533,9 @@ async def _load_actor_memory_health(
                   count(*) FILTER (WHERE status='processing') AS processing,
                   count(*) FILTER (WHERE status='error') AS error,
                   count(*) FILTER (
+                    WHERE status IN ('pending','error') AND attempts >= 2
+                  ) AS retry_blocked,
+                  count(*) FILTER (
                     WHERE status='pending' AND created_at < now()-interval '1 day'
                   ) AS pending_older_1d,
                   count(*) FILTER (
@@ -378,6 +599,12 @@ async def _load_actor_memory_health(
                 FROM memory.plan_owner_v5_local_entailment_v1(20)
                 """
             )
+        queue_plan, _target, _last_service_at = await plan_owner(
+            conn,
+            actor,
+            max_attempts=2,
+            selector_version=None,
+        )
     finally:
         await conn.close()
     if isinstance(pipeline_value, str):
@@ -392,11 +619,27 @@ async def _load_actor_memory_health(
     pipeline_backlog["eligible_for_entailment"] = eligible_count
     pipeline_backlog["eligible_for_entailment_capped"] = eligible_count >= 20
     pipeline_value["backlog"] = pipeline_backlog
+    processing_value = dict(processing or {})
+    processing_value.update(
+        {
+            "eligible": int(queue_plan.get("eligible_count", 0)),
+            "context_ready": int(queue_plan.get("context_ready_count", 0)),
+            "context_rebind_required": int(
+                queue_plan.get("context_rebind_required_count", 0)
+            ),
+            "context_duplicate": int(
+                queue_plan.get("context_duplicate_count", 0)
+            ),
+            "context_superseded": int(
+                queue_plan.get("context_superseded_count", 0)
+            ),
+        }
+    )
     return {
         "claim": dict(claim or {}),
         "preference": dict(preference or {}),
         "project": dict(project or {}),
-        "processing": dict(processing or {}),
+        "processing": processing_value,
         "evidence": dict(evidence or {}),
         "answers": dict(answers or {}),
         "pipeline": dict(pipeline_value),
@@ -436,6 +679,7 @@ async def build_admin_memory_health_v1(
 ) -> dict[str, Any]:
     actor = UUID(actor_user_id)
     database = await _load_actor_memory_health(dsn, actor)
+    operations = await asyncio.to_thread(_load_worker_operations_status)
 
     vector_points: int | None = None
     vector_error = False
@@ -458,6 +702,7 @@ async def build_admin_memory_health_v1(
         evidence=database["evidence"],
         answers=database["answers"],
         pipeline=database["pipeline"],
+        operations=operations,
         vector_points=vector_points,
         vector_error=vector_error,
         governed_active=governed_active,

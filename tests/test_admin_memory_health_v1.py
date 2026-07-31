@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import patch
 
-from rag_engine.admin_memory_health_v1 import _summarize_memory_health_v1
+from rag_engine.admin_memory_health_v1 import (
+    _load_worker_operations_status,
+    _summarize_memory_health_v1,
+)
 
 
 NOW = datetime(2026, 7, 26, 18, 0, tzinfo=timezone.utc)
@@ -22,6 +26,12 @@ def _payload(**overrides):
             "pending_older_7d": 0,
             "completed_1d": 5,
             "completed_7d": 12,
+            "eligible": 0,
+            "context_ready": 0,
+            "context_rebind_required": 0,
+            "context_duplicate": 0,
+            "context_superseded": 0,
+            "retry_blocked": 0,
         },
         "evidence": {"last_evidence_at": NOW},
         "answers": {
@@ -48,6 +58,12 @@ def _payload(**overrides):
                 "waiting_for_claim_review": 3,
                 "ready_for_materialization": 2,
             },
+        },
+        "operations": {
+            "schema": "memory_operational_status_v1",
+            "status": "healthy",
+            "unhealthy_worker_count": 0,
+            "workers": [],
         },
         "vector_points": 43,
         "vector_error": False,
@@ -130,6 +146,90 @@ class AdminMemoryHealthTests(unittest.TestCase):
         self.assertEqual(
             warnings["memory_use_canary_recommended"]["severity"],
             "information",
+        )
+
+    def test_blocked_context_and_failed_worker_are_critical(self):
+        processing = {
+            "pending": 14,
+            "review_required": 0,
+            "skipped": 0,
+            "processing": 0,
+            "error": 0,
+            "pending_older_1d": 0,
+            "pending_older_7d": 0,
+            "completed_1d": 0,
+            "completed_7d": 0,
+            "eligible": 14,
+            "context_ready": 0,
+            "context_rebind_required": 14,
+            "context_duplicate": 0,
+            "context_superseded": 0,
+            "retry_blocked": 0,
+        }
+        operations = {
+            "schema": "memory_operational_status_v1",
+            "status": "unhealthy",
+            "unhealthy_worker_count": 2,
+            "workers": [],
+        }
+        payload = _payload(processing=processing, operations=operations)
+
+        self.assertEqual(payload["status"], "critical")
+        self.assertIs(payload["processing"]["head_of_line_blocked"], True)
+        self.assertEqual(payload["processing"]["context_rebind_required"], 14)
+        self.assertEqual(payload["operations_schema"], "memory_operational_status_v1")
+        self.assertEqual(
+            {warning["code"] for warning in payload["warnings"]},
+            {
+                "extraction_head_of_line_blocked",
+                "context_rebind_required",
+                "memory_pipeline_workers_unhealthy",
+            },
+        )
+
+    @patch("rag_engine.admin_memory_health_v1._systemd_properties")
+    def test_worker_snapshot_uses_static_units_and_reports_failure(self, load):
+        def properties(unit, _fields):
+            if unit.endswith(".timer"):
+                return {
+                    "ActiveState": "active",
+                    "SubState": "waiting",
+                    "Result": "success",
+                    "LastTriggerUSec": "Fri 2026-07-31 09:37:13 UTC",
+                    "NextElapseUSecRealtime": "",
+                }
+            if unit == "memory-v1-v5-2-local-packet-router.service":
+                return {
+                    "ActiveState": "failed",
+                    "SubState": "failed",
+                    "Result": "exit-code",
+                    "ExecMainStatus": "1",
+                    "ExecMainStartTimestamp": "Fri 2026-07-31 09:37:13 UTC",
+                    "ExecMainExitTimestamp": "Fri 2026-07-31 09:37:14 UTC",
+                }
+            return {
+                "ActiveState": "inactive",
+                "SubState": "dead",
+                "Result": "success",
+                "ExecMainStatus": "0",
+                "ExecMainStartTimestamp": "Fri 2026-07-31 09:37:13 UTC",
+                "ExecMainExitTimestamp": "Fri 2026-07-31 09:37:14 UTC",
+            }
+
+        load.side_effect = properties
+        value = _load_worker_operations_status()
+
+        self.assertEqual(value["status"], "unhealthy")
+        self.assertEqual(value["unhealthy_worker_count"], 1)
+        packet_router = next(
+            worker for worker in value["workers"]
+            if worker["key"] == "packet_router"
+        )
+        self.assertEqual(packet_router["service_exit_status"], 1)
+        self.assertEqual(packet_router["status"], "unhealthy")
+        self.assertEqual(
+            packet_router["last_run_finished_at"],
+            "2026-07-31T09:37:14+00:00",
         )
 
 
