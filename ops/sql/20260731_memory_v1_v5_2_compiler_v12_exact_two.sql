@@ -9,6 +9,7 @@ BEGIN
      OR to_regrole('brains_app') IS NULL
      OR to_regrole('memory_v5_local_reextract_maintainer') IS NULL
      OR to_regrole('memory_v5_local_supersession_maintainer') IS NULL
+     OR to_regrole('memory_v5_2_local_router_maintainer') IS NULL
      OR to_regclass('memory.evidence') IS NULL
      OR to_regclass('memory.evidence_extraction_job') IS NULL
      OR to_regclass('memory.evidence_extraction_packet_v5_local') IS NULL
@@ -16,6 +17,9 @@ BEGIN
      OR to_regclass('memory.evidence_extraction_event') IS NULL
      OR to_regclass('memory.v5_2_local_packet_route_event') IS NULL
      OR to_regclass('memory.v5_local_packet_supersession') IS NULL
+     OR to_regclass('memory.relational_stage_batch') IS NULL
+     OR to_regclass('memory.observation') IS NULL
+     OR to_regclass('memory.claim_observation') IS NULL
      OR to_regprocedure('memory.current_actor_user_id()') IS NULL THEN
     RAISE EXCEPTION 'compiler-v12 exact-two prerequisites are absent';
   END IF;
@@ -322,12 +326,63 @@ GRANT SELECT ON memory.v5_2_local_packet_route_event
   TO memory_v5_local_supersession_maintainer;
 GRANT SELECT ON memory.evidence_intake_terminal
   TO memory_v5_local_supersession_maintainer;
+GRANT SELECT ON memory.relational_stage_batch
+  TO memory_v5_local_supersession_maintainer;
+GRANT SELECT ON memory.observation
+  TO memory_v5_local_supersession_maintainer;
+GRANT SELECT ON memory.claim_observation
+  TO memory_v5_local_supersession_maintainer;
+GRANT SELECT ON memory.observation,memory.claim_observation,
+  memory.v5_local_packet_supersession
+  TO memory_v5_2_local_router_maintainer;
 
 DROP POLICY IF EXISTS v5_2_compiler_v12_supersession_route_read
   ON memory.v5_2_local_packet_route_event;
 CREATE POLICY v5_2_compiler_v12_supersession_route_read
 ON memory.v5_2_local_packet_route_event
 FOR SELECT TO memory_v5_local_supersession_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_supersession_stage_read
+  ON memory.relational_stage_batch;
+CREATE POLICY v5_2_compiler_v12_supersession_stage_read
+ON memory.relational_stage_batch
+FOR SELECT TO memory_v5_local_supersession_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_supersession_observation_read
+  ON memory.observation;
+CREATE POLICY v5_2_compiler_v12_supersession_observation_read
+ON memory.observation
+FOR SELECT TO memory_v5_local_supersession_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_supersession_claim_link_read
+  ON memory.claim_observation;
+CREATE POLICY v5_2_compiler_v12_supersession_claim_link_read
+ON memory.claim_observation
+FOR SELECT TO memory_v5_local_supersession_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_route_observation_read
+  ON memory.observation;
+CREATE POLICY v5_2_compiler_v12_route_observation_read
+ON memory.observation
+FOR SELECT TO memory_v5_2_local_router_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_route_claim_link_read
+  ON memory.claim_observation;
+CREATE POLICY v5_2_compiler_v12_route_claim_link_read
+ON memory.claim_observation
+FOR SELECT TO memory_v5_2_local_router_maintainer
+USING (owner_user_id=memory.current_actor_user_id());
+
+DROP POLICY IF EXISTS v5_2_compiler_v12_route_supersession_read
+  ON memory.v5_local_packet_supersession;
+CREATE POLICY v5_2_compiler_v12_route_supersession_read
+ON memory.v5_local_packet_supersession
+FOR SELECT TO memory_v5_2_local_router_maintainer
 USING (owner_user_id=memory.current_actor_user_id());
 
 CREATE OR REPLACE FUNCTION
@@ -408,7 +463,7 @@ BEGIN
   WHERE prior.owner_user_id=actor
     AND prior.packet_id=p_prior_packet_id
     AND replacement.packet_id=p_replacement_packet_id
-    AND prior.packet_id=
+    AND replacement.packet_id=
         memory.authoritative_owner_v5_2_packet_id_v1(prior.evidence_id)
     AND prior.created_at<replacement.created_at
     AND replacement.policy_compiler_sha256=compiler_sha
@@ -478,10 +533,57 @@ BEGIN
       WHERE value.owner_user_id=actor
         AND value.packet_id=replacement.packet_id
     )
+    AND (
+      (
+        prior.evidence_id=
+          '61d4fb6f-b211-491e-8edc-d160efefe17e'::uuid
+        AND EXISTS (
+          SELECT 1 FROM memory.relational_stage_batch AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=prior.evidence_id
+            AND value.batch_id=
+              '7488403c-5fd9-47b3-a05a-ee4cad3b2561'::uuid
+            AND value.extraction_packet_sha256=
+              'c34bed1ba50cc612a343ea150c669e56a83f4bd47f4c04d3150a4c468743c82a'
+            AND value.observation_count=1
+        )
+        AND 1=(
+          SELECT count(*) FROM memory.observation AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=prior.evidence_id
+            AND value.packet_sha256=
+              'c34bed1ba50cc612a343ea150c669e56a83f4bd47f4c04d3150a4c468743c82a'
+        )
+      ) OR (
+        prior.evidence_id=
+          '681ab38d-a742-463c-ad26-c74c65eacaa9'::uuid
+        AND EXISTS (
+          SELECT 1 FROM memory.relational_stage_batch AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=prior.evidence_id
+            AND value.batch_id=
+              '34f9af36-c895-443b-b84c-5c0656e22fa2'::uuid
+            AND value.extraction_packet_sha256=
+              '32f03737973cd7f2f4a95948e289eb5dbf5500bde388be20d4e9fe4b57184443'
+            AND value.observation_count=2
+        )
+        AND 2=(
+          SELECT count(*) FROM memory.observation AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=prior.evidence_id
+            AND value.packet_sha256=
+              '32f03737973cd7f2f4a95948e289eb5dbf5500bde388be20d4e9fe4b57184443'
+        )
+      )
+    )
     AND NOT EXISTS (
-      SELECT 1 FROM memory.relational_stage_batch AS value
-      WHERE value.owner_user_id=actor
-        AND value.evidence_id=prior.evidence_id
+      SELECT 1
+      FROM memory.observation AS observation
+      JOIN memory.claim_observation AS claim_link
+        ON claim_link.owner_user_id=observation.owner_user_id
+       AND claim_link.observation_id=observation.observation_id
+      WHERE observation.owner_user_id=actor
+        AND observation.evidence_id=prior.evidence_id
     );
 END
 $function$;
@@ -592,6 +694,322 @@ BEGIN
 END
 $function$;
 
+CREATE OR REPLACE FUNCTION
+memory.plan_owner_v5_2_v12_correction_route_v1(p_packet_id uuid)
+RETURNS TABLE(
+  packet_id uuid,
+  job_id uuid,
+  evidence_id uuid,
+  packet_storage_sha256 text,
+  route text,
+  reason_code text,
+  routing_basis_sha256 text,
+  source_deferral_reason_codes text[],
+  entity_mention_count integer,
+  observation_count integer,
+  comparison_hint_count integer,
+  deferral_count integer
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path='pg_catalog'
+AS $function$
+DECLARE
+  actor uuid;
+  selector constant text :=
+    '20260731_v5_2_compiler_v12_exact_two_v1';
+  compiler_sha constant text :=
+    '91e3830e676b6c9abd881a52f3d6b010679809c86fffbc889134d9653deba5f3';
+BEGIN
+  IF session_user<>'brains_app' THEN
+    RAISE EXCEPTION 'compiler-v12 correction route requires brains_app'
+      USING ERRCODE='42501';
+  END IF;
+  actor:=memory.current_actor_user_id();
+  IF actor IS NULL
+     OR actor<>'1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid THEN
+    RAISE EXCEPTION 'compiler-v12 correction route actor is invalid'
+      USING ERRCODE='42501';
+  END IF;
+  IF p_packet_id IS NULL THEN
+    RAISE EXCEPTION 'compiler-v12 correction packet is required'
+      USING ERRCODE='22023';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    packet.packet_id,
+    packet.job_id,
+    packet.evidence_id,
+    packet.packet_storage_sha256,
+    'manual_review_artifact_ready'::text,
+    'reviewable_relational_packet_v5_2'::text,
+    encode(public.digest(convert_to(jsonb_build_object(
+      'packet_storage_sha256',packet.packet_storage_sha256,
+      'route','manual_review_artifact_ready',
+      'reason_codes','[]'::jsonb,
+      'entity_mention_count',packet.entity_mention_count,
+      'observation_count',packet.observation_count,
+      'comparison_hint_count',packet.comparison_hint_count,
+      'deferral_count',packet.deferral_count
+    )::text,'UTF8'),'sha256'),'hex'),
+    ARRAY[]::text[],
+    packet.entity_mention_count,
+    packet.observation_count,
+    packet.comparison_hint_count,
+    packet.deferral_count
+  FROM memory.evidence_extraction_packet_v5_local AS packet
+  JOIN memory.evidence_extraction_job AS job
+    ON job.owner_user_id=packet.owner_user_id
+   AND job.job_id=packet.job_id
+   AND job.evidence_id=packet.evidence_id
+  JOIN memory.evidence AS evidence
+    ON evidence.owner_user_id=packet.owner_user_id
+   AND evidence.evidence_id=packet.evidence_id
+  JOIN memory.v5_local_packet_supersession AS supersession
+    ON supersession.owner_user_id=packet.owner_user_id
+   AND supersession.replacement_packet_id=packet.packet_id
+   AND supersession.evidence_id=packet.evidence_id
+   AND supersession.reason_code='semantic_compiler_v12_reextracted'
+  WHERE packet.owner_user_id=actor
+    AND packet.packet_id=p_packet_id
+    AND packet.packet_id=
+        memory.authoritative_owner_v5_2_packet_id_v1(packet.evidence_id)
+    AND packet.policy_compiler_sha256=compiler_sha
+    AND job.selector_version=selector
+    AND job.status='review_required'
+    AND job.route='relational_extraction'
+    AND job.lease_token IS NULL
+    AND job.lease_expires_at IS NULL
+    AND job.last_error IS NULL
+    AND evidence.status='active'
+    AND evidence.content_sha256=packet.evidence_content_sha256
+    AND packet.provider_id='local_llama_cpp'
+    AND packet.local_model_calls BETWEEN 0 AND 1
+    AND packet.external_model_calls=0
+    AND packet.manual_review_required
+    AND packet.entity_mention_count+packet.observation_count
+          +packet.comparison_hint_count>=1
+    AND packet.packet_storage_sha256=encode(public.digest(convert_to(
+      packet.normalized_packet::text,'UTF8'
+    ),'sha256'),'hex')
+    AND (
+      (
+        packet.evidence_id=
+          '61d4fb6f-b211-491e-8edc-d160efefe17e'::uuid
+        AND supersession.prior_packet_id=
+          '50405677-84aa-5d72-b800-89418fc606e4'::uuid
+        AND supersession.prior_packet_storage_sha256=
+          '6276f9c4cf03ee8276b96451e0c7915691ebfeb459036123a5f0fa977c826cbc'
+        AND EXISTS (
+          SELECT 1 FROM memory.relational_stage_batch AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=packet.evidence_id
+            AND value.batch_id=
+              '7488403c-5fd9-47b3-a05a-ee4cad3b2561'::uuid
+            AND value.extraction_packet_sha256=
+              'c34bed1ba50cc612a343ea150c669e56a83f4bd47f4c04d3150a4c468743c82a'
+            AND value.observation_count=1
+        )
+        AND 1=(
+          SELECT count(*) FROM memory.observation AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=packet.evidence_id
+            AND value.packet_sha256=
+              'c34bed1ba50cc612a343ea150c669e56a83f4bd47f4c04d3150a4c468743c82a'
+        )
+      ) OR (
+        packet.evidence_id=
+          '681ab38d-a742-463c-ad26-c74c65eacaa9'::uuid
+        AND supersession.prior_packet_id=
+          'c4db1405-ad9d-5c9a-81e3-10ad0200b0ca'::uuid
+        AND supersession.prior_packet_storage_sha256=
+          '90baad563bd05cdaf93f9d9b72ec5593e86592e4e0f334143a287e5f5e76dc5d'
+        AND EXISTS (
+          SELECT 1 FROM memory.relational_stage_batch AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=packet.evidence_id
+            AND value.batch_id=
+              '34f9af36-c895-443b-b84c-5c0656e22fa2'::uuid
+            AND value.extraction_packet_sha256=
+              '32f03737973cd7f2f4a95948e289eb5dbf5500bde388be20d4e9fe4b57184443'
+            AND value.observation_count=2
+        )
+        AND 2=(
+          SELECT count(*) FROM memory.observation AS value
+          WHERE value.owner_user_id=actor
+            AND value.evidence_id=packet.evidence_id
+            AND value.packet_sha256=
+              '32f03737973cd7f2f4a95948e289eb5dbf5500bde388be20d4e9fe4b57184443'
+        )
+      )
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM memory.observation AS observation
+      JOIN memory.claim_observation AS claim_link
+        ON claim_link.owner_user_id=observation.owner_user_id
+       AND claim_link.observation_id=observation.observation_id
+      WHERE observation.owner_user_id=actor
+        AND observation.evidence_id=packet.evidence_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.v5_2_local_packet_route_event AS value
+      WHERE value.owner_user_id=actor
+        AND value.packet_id=packet.packet_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.v5_local_packet_disposition AS value
+      WHERE value.owner_user_id=actor
+        AND value.packet_id=packet.packet_id
+    );
+END
+$function$;
+
+CREATE OR REPLACE FUNCTION
+memory.record_owner_v5_2_v12_correction_review_v1(
+  p_operation_id uuid,
+  p_route_event_id uuid,
+  p_packet_id uuid,
+  p_expected_packet_storage_sha256 text,
+  p_expected_routing_basis_sha256 text,
+  p_review_id uuid,
+  p_request_id uuid,
+  p_review_report_sha256 text,
+  p_stage_bundle_sha256 text,
+  p_repository_commit text,
+  p_auto_link_count integer,
+  p_manual_review_count integer,
+  p_deferred_resolution_count integer,
+  p_rejected_count integer,
+  p_blocking_code_count integer
+)
+RETURNS TABLE(
+  route_event_id uuid,
+  packet_id uuid,
+  route text,
+  apply_outcome text
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path='pg_catalog'
+AS $function$
+DECLARE
+  actor uuid;
+  target record;
+  packet memory.evidence_extraction_packet_v5_local%ROWTYPE;
+  replayed memory.v5_2_local_packet_route_event%ROWTYPE;
+BEGIN
+  IF session_user<>'brains_app' THEN
+    RAISE EXCEPTION 'compiler-v12 correction review requires brains_app'
+      USING ERRCODE='42501';
+  END IF;
+  actor:=memory.current_actor_user_id();
+  IF actor IS NULL
+     OR actor<>'1240822d-ac9a-4096-95aa-e2b24d36ef50'::uuid THEN
+    RAISE EXCEPTION 'compiler-v12 correction review actor is invalid'
+      USING ERRCODE='42501';
+  END IF;
+  IF p_operation_id IS NULL OR p_route_event_id IS NULL OR p_packet_id IS NULL
+     OR p_review_id IS NULL OR p_request_id IS NULL
+     OR p_expected_packet_storage_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_expected_routing_basis_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_review_report_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_stage_bundle_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_repository_commit !~ '^[0-9a-f]{40}$'
+     OR p_auto_link_count NOT BETWEEN 0 AND 32
+     OR p_manual_review_count NOT BETWEEN 0 AND 32
+     OR p_deferred_resolution_count NOT BETWEEN 0 AND 32
+     OR p_rejected_count NOT BETWEEN 0 AND 32
+     OR p_blocking_code_count NOT BETWEEN 0 AND 32 THEN
+    RAISE EXCEPTION 'compiler-v12 correction review inputs are invalid'
+      USING ERRCODE='22023';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(concat_ws('|',
+    'memory_v1_v5_2_v12_correction_route',actor::text,p_packet_id::text
+  ),0));
+
+  SELECT value.* INTO replayed
+  FROM memory.v5_2_local_packet_route_event AS value
+  WHERE value.owner_user_id=actor
+    AND (value.operation_id=p_operation_id OR value.packet_id=p_packet_id);
+  IF FOUND THEN
+    IF replayed.operation_id<>p_operation_id
+       OR replayed.route_event_id<>p_route_event_id
+       OR replayed.packet_id<>p_packet_id
+       OR replayed.route<>'manual_review_artifact_ready'
+       OR replayed.reason_code<>'reviewable_relational_packet_v5_2'
+       OR replayed.packet_storage_sha256<>p_expected_packet_storage_sha256
+       OR replayed.routing_basis_sha256<>p_expected_routing_basis_sha256
+       OR replayed.review_id<>p_review_id
+       OR replayed.request_id<>p_request_id
+       OR replayed.review_report_sha256<>p_review_report_sha256
+       OR replayed.stage_bundle_sha256<>p_stage_bundle_sha256
+       OR replayed.repository_commit<>p_repository_commit
+       OR replayed.auto_link_count<>p_auto_link_count
+       OR replayed.manual_review_count<>p_manual_review_count
+       OR replayed.deferred_resolution_count<>p_deferred_resolution_count
+       OR replayed.rejected_count<>p_rejected_count
+       OR replayed.blocking_code_count<>p_blocking_code_count THEN
+      RAISE EXCEPTION 'compiler-v12 correction review replay conflicts'
+        USING ERRCODE='23514';
+    END IF;
+    RETURN QUERY SELECT replayed.route_event_id,replayed.packet_id,
+      replayed.route,'replayed'::text;
+    RETURN;
+  END IF;
+
+  SELECT * INTO target
+  FROM memory.plan_owner_v5_2_v12_correction_route_v1(p_packet_id);
+  IF NOT FOUND
+     OR target.packet_storage_sha256<>p_expected_packet_storage_sha256
+     OR target.routing_basis_sha256<>p_expected_routing_basis_sha256 THEN
+    RAISE EXCEPTION 'compiler-v12 correction review plan changed'
+      USING ERRCODE='23514';
+  END IF;
+
+  SELECT value.* INTO STRICT packet
+  FROM memory.evidence_extraction_packet_v5_local AS value
+  WHERE value.owner_user_id=actor
+    AND value.packet_id=p_packet_id;
+  IF p_auto_link_count+p_manual_review_count+p_deferred_resolution_count
+       +p_rejected_count<>packet.entity_mention_count THEN
+    RAISE EXCEPTION 'compiler-v12 review counts do not match packet'
+      USING ERRCODE='23514';
+  END IF;
+
+  INSERT INTO memory.v5_2_local_packet_route_event(
+    route_event_id,owner_user_id,operation_id,packet_id,job_id,evidence_id,
+    route,reason_code,routing_basis_sha256,evidence_content_sha256,
+    validator_packet_sha256,packet_storage_sha256,entity_mention_count,
+    observation_count,comparison_hint_count,deferral_count,
+    source_deferral_reason_codes,review_id,request_id,review_contract,
+    bundle_contract,review_report_sha256,stage_bundle_sha256,
+    repository_commit,auto_link_count,manual_review_count,
+    deferred_resolution_count,rejected_count,blocking_code_count
+  ) VALUES (
+    p_route_event_id,actor,p_operation_id,packet.packet_id,packet.job_id,
+    packet.evidence_id,'manual_review_artifact_ready',
+    'reviewable_relational_packet_v5_2',p_expected_routing_basis_sha256,
+    packet.evidence_content_sha256,packet.validator_packet_sha256,
+    packet.packet_storage_sha256,packet.entity_mention_count,
+    packet.observation_count,packet.comparison_hint_count,
+    packet.deferral_count,ARRAY[]::text[],p_review_id,p_request_id,
+    'memory_v1_v5_2_local_packet_review_v1',
+    'memory_v1_v5_2_stage_preflight_v1',p_review_report_sha256,
+    p_stage_bundle_sha256,p_repository_commit,p_auto_link_count,
+    p_manual_review_count,p_deferred_resolution_count,p_rejected_count,
+    p_blocking_code_count
+  );
+
+  RETURN QUERY SELECT p_route_event_id,p_packet_id,
+    'manual_review_artifact_ready'::text,'applied'::text;
+END
+$function$;
+
 ALTER FUNCTION
 memory.plan_owner_v5_2_compiler_v12_exact_two_supersession_v1(uuid,uuid)
   OWNER TO memory_v5_local_supersession_maintainer;
@@ -612,6 +1030,27 @@ memory.plan_owner_v5_2_compiler_v12_exact_two_supersession_v1(uuid,uuid)
 GRANT EXECUTE ON FUNCTION
 memory.finalize_owner_v5_2_compiler_v12_exact_two_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text
+) TO brains_app;
+
+ALTER FUNCTION memory.plan_owner_v5_2_v12_correction_route_v1(uuid)
+  OWNER TO memory_v5_2_local_router_maintainer;
+ALTER FUNCTION memory.record_owner_v5_2_v12_correction_review_v1(
+  uuid,uuid,uuid,text,text,uuid,uuid,text,text,text,
+  integer,integer,integer,integer,integer
+) OWNER TO memory_v5_2_local_router_maintainer;
+REVOKE ALL ON FUNCTION
+memory.plan_owner_v5_2_v12_correction_route_v1(uuid)
+  FROM PUBLIC,brains_app,memory_v5_2_local_router_maintainer;
+REVOKE ALL ON FUNCTION memory.record_owner_v5_2_v12_correction_review_v1(
+  uuid,uuid,uuid,text,text,uuid,uuid,text,text,text,
+  integer,integer,integer,integer,integer
+) FROM PUBLIC,brains_app,memory_v5_2_local_router_maintainer;
+GRANT EXECUTE ON FUNCTION
+memory.plan_owner_v5_2_v12_correction_route_v1(uuid)
+  TO brains_app,memory_v5_2_local_router_maintainer;
+GRANT EXECUTE ON FUNCTION memory.record_owner_v5_2_v12_correction_review_v1(
+  uuid,uuid,uuid,text,text,uuid,uuid,text,text,text,
+  integer,integer,integer,integer,integer
 ) TO brains_app;
 
 COMMIT;

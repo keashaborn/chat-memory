@@ -38,6 +38,7 @@ REVIEW_CONTRACT = "memory_v1_v5_2_local_packet_review_v1"
 BUNDLE_CONTRACT = "memory_v1_v5_2_stage_preflight_v1"
 STANDARD_PLANNER_LANE = "standard_packet"
 ZERO_ATOM_PLANNER_LANE = "zero_atom_deferral"
+V12_CORRECTION_PLANNER_LANE = "compiler_v12_preclaim_correction"
 RESOLUTION_STATES = (
     "auto_link_eligible",
     "manual_review_required",
@@ -316,6 +317,15 @@ async def plan_owner(
                 packet_id,
             )
             if not rows:
+                planner_lane = V12_CORRECTION_PLANNER_LANE
+                rows = await conn.fetch(
+                    """
+                    SELECT *
+                    FROM memory.plan_owner_v5_2_v12_correction_route_v1($1)
+                    """,
+                    packet_id,
+                )
+            if not rows:
                 planner_lane = ZERO_ATOM_PLANNER_LANE
                 rows = await conn.fetch(
                     """
@@ -444,13 +454,24 @@ async def record_review(
         report_sha256=artifact["report_sha256"],
         bundle_sha256=artifact["bundle_sha256"],
     )
+    planner_lane = target.get("planner_lane")
+    if planner_lane not in {
+        STANDARD_PLANNER_LANE,
+        V12_CORRECTION_PLANNER_LANE,
+    }:
+        raise RuntimeError("review route planner lane is invalid")
 
     async def invoke() -> dict[str, Any]:
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
+            function_name = (
+                "memory.record_owner_v5_2_v12_correction_review_v1"
+                if planner_lane == V12_CORRECTION_PLANNER_LANE
+                else "memory.record_owner_v5_2_review_route_v1"
+            )
             row = await conn.fetchrow(
-                """
-                SELECT * FROM memory.record_owner_v5_2_review_route_v1(
+                f"""
+                SELECT * FROM {function_name}(
                   $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
                 )
                 """,

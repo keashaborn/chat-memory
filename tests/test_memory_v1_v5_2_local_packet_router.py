@@ -93,14 +93,17 @@ class _Connection:
 
 
 class _FallbackConnection(_Connection):
-    def __init__(self, row: dict[str, object]) -> None:
+    def __init__(
+        self, row: dict[str, object], *, empty_count: int = 1
+    ) -> None:
         super().__init__(row)
         self.fetch_queries: list[str] = []
+        self.empty_count = empty_count
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
         self.fetch_queries.append(query)
         self.fetch_args = args
-        if len(self.fetch_queries) == 1:
+        if len(self.fetch_queries) <= self.empty_count:
             return []
         return [self.row]
 
@@ -346,7 +349,9 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
         owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
-        connection = _FallbackConnection({"packet_id": packet})
+        connection = _FallbackConnection(
+            {"packet_id": packet}, empty_count=2
+        )
 
         result = await MODULE.plan_owner(connection, owner, packet)
 
@@ -357,16 +362,82 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
                 "planner_lane": MODULE.ZERO_ATOM_PLANNER_LANE,
             },
         )
-        self.assertEqual(len(connection.fetch_queries), 2)
+        self.assertEqual(len(connection.fetch_queries), 3)
         self.assertIn(
             "plan_owner_v5_2_exact_packet_route_v1",
             connection.fetch_queries[0],
         )
         self.assertIn(
-            "plan_owner_v5_2_zero_atom_deferral_route_v1",
+            "plan_owner_v5_2_v12_correction_route_v1",
             connection.fetch_queries[1],
         )
+        self.assertIn(
+            "plan_owner_v5_2_zero_atom_deferral_route_v1",
+            connection.fetch_queries[2],
+        )
         self.assertEqual(connection.fetch_args, (packet,))
+
+    async def test_exact_packet_uses_v12_correction_lane_before_zero_atom(
+        self,
+    ) -> None:
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        connection = _FallbackConnection({"packet_id": packet})
+
+        result = await MODULE.plan_owner(connection, owner, packet)
+
+        self.assertEqual(
+            result,
+            {
+                "packet_id": packet,
+                "planner_lane": MODULE.V12_CORRECTION_PLANNER_LANE,
+            },
+        )
+        self.assertEqual(len(connection.fetch_queries), 2)
+        self.assertIn(
+            "plan_owner_v5_2_v12_correction_route_v1",
+            connection.fetch_queries[1],
+        )
+
+    async def test_v12_correction_review_uses_restricted_finalizer(
+        self,
+    ) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        connection = _FinalizeConnection()
+        target = {
+            "packet_id": packet,
+            "planner_lane": MODULE.V12_CORRECTION_PLANNER_LANE,
+            "packet_storage_sha256": "1" * 64,
+            "routing_basis_sha256": "2" * 64,
+        }
+        artifact = {
+            "review_id": uuid.uuid4(),
+            "request_id": uuid.uuid4(),
+            "report_sha256": "3" * 64,
+            "bundle_sha256": "4" * 64,
+            "repository_commit": "5" * 40,
+            "counts": {
+                "auto_link_eligible": 0,
+                "manual_review_required": 1,
+                "deferred": 0,
+                "rejected": 0,
+            },
+            "blocking_code_count": 0,
+        }
+
+        applied, replayed = await MODULE.record_review(
+            connection, owner=owner, target=target, artifact=artifact
+        )
+
+        self.assertEqual(applied["apply_outcome"], "applied")
+        self.assertEqual(replayed["apply_outcome"], "replayed")
+        self.assertTrue(
+            all(
+                "record_owner_v5_2_v12_correction_review_v1" in query
+                for query in connection.fetchrow_queries
+            )
+        )
 
     async def test_unresolved_zero_atom_uses_restricted_finalizer(self) -> None:
         owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
