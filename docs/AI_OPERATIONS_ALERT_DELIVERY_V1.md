@@ -24,8 +24,9 @@ answer text was read into this document or stored in the candidate.
 
 1. The existing database monitor writer inserts an append-only incident event.
 2. A database trigger enqueues one email delivery only for the first normal
-   warning or critical incident event. Repeated observations cannot enqueue a
-   duplicate delivery.
+   critical incident event. Warning incidents remain visible in the private AI
+   Operations inbox but do not send immediate email. Repeated observations
+   cannot enqueue a duplicate delivery.
 3. `brains_app` has no direct table access. A resource-limited worker can claim
    and complete deliveries only through security-definer functions and two
    transaction-local authorization settings.

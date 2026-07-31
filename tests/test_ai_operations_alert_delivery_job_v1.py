@@ -287,6 +287,8 @@ class AiOperationsAlertDeliveryV1Tests(
         self.assertIn("FOR UPDATE SKIP LOCKED", sql)
         self.assertIn("attempt_count BETWEEN 0 AND max_attempts", sql)
         self.assertIn("worker_lease_expired", sql)
+        self.assertIn("OR NEW.severity <> 'critical'", sql)
+        self.assertNotIn("NEW.severity NOT IN ('warning','critical')", sql)
         self.assertIn("interval '1 minute'", sql)
         self.assertIn("interval '12 hours'", sql)
         self.assertIn("REVOKE ALL ON ai_operations.monitor_alert_delivery_v1 FROM brains_app", sql)

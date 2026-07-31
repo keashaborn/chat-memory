@@ -178,6 +178,14 @@ async def main():
         )
         assert repeated["action"] == "updated", repeated
         assert repeated["observation_count"] == 2, repeated
+        warning = await record(
+            connection,
+            "trusted_web_warning",
+            "violated",
+            "warning",
+            ["fail_closed_rate"],
+        )
+        assert warning["action"] == "opened", warning
         drill = await record(
             connection,
             "trusted_web_retrieval",
@@ -228,7 +236,7 @@ async def main():
         print(
             "AI_OPERATIONS_ALERT_APP_PHASE1 "
             "direct_table=denied unauthorized=denied enqueue=pass "
-            "dedupe=pass drill_excluded=pass retry=pass"
+            "dedupe=pass warning_excluded=pass drill_excluded=pass retry=pass"
         )
     finally:
         await connection.close()
@@ -257,6 +265,13 @@ docker exec "$clone_name" psql \
         join ai_operations.monitor_incident_v1 incident
           on incident.incident_id=delivery.incident_id
         where incident.is_drill
+      ) then 1 else 0 end;
+      select 1 / case when not exists (
+        select 1
+        from ai_operations.monitor_alert_delivery_v1 delivery
+        join ai_operations.monitor_incident_v1 incident
+          on incident.incident_id=delivery.incident_id
+        where incident.severity='warning'
       ) then 1 else 0 end;
       update ai_operations.monitor_alert_delivery_v1
       set next_attempt_at=clock_timestamp()-interval '1 second',
@@ -529,5 +544,6 @@ fi
 
 printf '%s\n' \
   'AI_OPERATIONS_ALERT_CLONE_GATE apply=pass acl=pass rls=pass' \
-  'dedupe=pass drill_excluded=pass worker_binding=pass retry=pass' \
+  'dedupe=pass warning_excluded=pass drill_excluded=pass' \
+  'worker_binding=pass retry=pass' \
   'append_only=pass rollback=pass reapply=pass production_unchanged=pass'

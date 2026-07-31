@@ -192,7 +192,7 @@ DECLARE
 BEGIN
   IF NEW.event_type <> 'observed'
      OR NEW.status NOT IN ('violated','unavailable')
-     OR NEW.severity NOT IN ('warning','critical') THEN
+     OR NEW.severity <> 'critical' THEN
     RETURN NEW;
   END IF;
   INSERT INTO ai_operations.monitor_alert_delivery_v1 (
