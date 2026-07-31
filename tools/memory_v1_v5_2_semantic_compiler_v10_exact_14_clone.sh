@@ -129,6 +129,8 @@ test -r /etc/memory-v1-local-inference/api-key
 PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python -m unittest \
   tests.test_memory_v1_semantic_compiler_v10 \
   tests.test_memory_v1_local_provider_v5_2 >/dev/null
+PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python -m unittest \
+  tests.test_memory_v1_v5_2_local_packet_router >/dev/null
 
 production_head=$(git -C "$production_repo" rev-parse HEAD)
 production_qdrant_before=$(qdrant_signature)
