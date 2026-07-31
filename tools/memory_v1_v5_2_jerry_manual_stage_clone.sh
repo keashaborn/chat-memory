@@ -120,7 +120,7 @@ original_planner_sha=$(scalar "$clone" "
   ),'UTF8'),'sha256'),'hex')")
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$migration"
-POSTGRES_DSN="$clone_dsn" psql -X -v ON_ERROR_STOP=1 \
+psql "$clone_dsn" -X -v ON_ERROR_STOP=1 \
   -f "$security_test" >/dev/null
 docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 \
   -U sage -d "$clone" <"$rollback"
