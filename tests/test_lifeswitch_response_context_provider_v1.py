@@ -146,27 +146,6 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
         )
         self.assertEqual(session.calls[0]["conversation_snapshot"], source)
 
-    async def test_lifting_weight_progress_uses_restricted_session(self) -> None:
-        session = SpyRestrictedSession()
-        provider = LifeSwitchResponseContextProviderV1(
-            session,
-            utc_clock=lambda: NOW,
-        )
-        source = snapshot(
-            "If you look at my progress with the different weights, "
-            "I've been doing do you have any suggestions?"
-        )
-
-        result = await provider.prepare(
-            authenticated_actor_user_id=ACTOR,
-            conversation_snapshot=source,
-        )
-
-        self.assertTrue(result.database_accessed)
-        self.assertEqual(result.data_plan.intent, "TRAINING_SUMMARY")
-        self.assertEqual(len(session.calls), 1)
-        self.assertEqual(session.calls[0]["conversation_snapshot"], source)
-
     async def test_actor_mismatch_fails_before_database_access(self) -> None:
         session = SpyRestrictedSession()
         provider = LifeSwitchResponseContextProviderV1(

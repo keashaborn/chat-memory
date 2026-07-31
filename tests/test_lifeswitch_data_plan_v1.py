@@ -82,48 +82,6 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         self.assertEqual((plan.window.end_date - plan.window.start_date).days, 83)
         self.assertEqual(plan.budget.max_rows, 200)
 
-    def test_personal_progress_across_lifting_weights_selects_training_summary(self) -> None:
-        plan = create_lifeswitch_data_plan_v1(
-            "If you look at my progress with the different weights, "
-            "I've been doing do you have any suggestions?",
-            today=TODAY,
-        )
-        self.assertEqual(plan.intent, "TRAINING_SUMMARY")
-        self.assertTrue(plan.data_access)
-        self.assertEqual(plan.domains, ("training", "conditioning", "plan"))
-        self.assertIn(
-            "explicit_personal_lifting_progress_request",
-            plan.reason_codes,
-        )
-        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 27)
-
-    def test_personal_lifting_loads_over_time_select_training_summary(self) -> None:
-        plan = create_lifeswitch_data_plan_v1(
-            "How have my lifting loads changed over time?",
-            today=TODAY,
-        )
-        self.assertEqual(plan.intent, "TRAINING_SUMMARY")
-        self.assertIn(
-            "explicit_personal_lifting_progress_request",
-            plan.reason_codes,
-        )
-
-    def test_personal_weight_without_lifting_context_remains_measurement(self) -> None:
-        plan = create_lifeswitch_data_plan_v1(
-            "How has my body weight changed over time?",
-            today=TODAY,
-        )
-        self.assertEqual(plan.intent, "MEASUREMENTS_SUMMARY")
-        self.assertEqual(plan.domains, ("measurements",))
-
-    def test_general_weight_selection_does_not_read_personal_data(self) -> None:
-        plan = create_lifeswitch_data_plan_v1(
-            "What weights should I use?",
-            today=TODAY,
-        )
-        self.assertEqual(plan.intent, "OFF")
-        self.assertFalse(plan.data_access)
-
     def test_personal_measurements_use_measurements_only(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
             "How is my waist measurement changing?",

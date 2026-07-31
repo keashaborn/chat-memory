@@ -170,10 +170,6 @@ _PROGRESSION = re.compile(
     r"getting stronger|going up)\b",
     re.IGNORECASE,
 )
-_LIFTING_LOAD = re.compile(
-    r"\bweights\b|\b(?:lifting|training)\s+(?:loads?|poundages?)\b",
-    re.IGNORECASE,
-)
 _SESSION = re.compile(
     r"\b(?:session|workout|trained|lifted|training)\b",
     re.IGNORECASE,
@@ -311,16 +307,7 @@ def create_lifeswitch_data_plan_v1(
 
     personal = bool(_SELF.search(value))
     nutrition = bool(_NUTRITION.search(value))
-    lifting_progress = bool(
-        _LIFTING_LOAD.search(value)
-        and (_PROGRESSION.search(value) or _RANGE.search(value))
-    )
-    training = bool(_TRAINING.search(value) or lifting_progress)
-    training_reason = (
-        "explicit_personal_lifting_progress_request"
-        if lifting_progress
-        else "explicit_personal_training_request"
-    )
+    training = bool(_TRAINING.search(value))
     measurements = bool(_MEASUREMENTS.search(value))
     plan = bool(_PLAN.search(value))
 
@@ -416,7 +403,7 @@ def create_lifeswitch_data_plan_v1(
         return _make_plan(
             intent="TRAINING_SUMMARY",
             domains=("training", "conditioning", "plan"),
-            reasons=(training_reason,),
+            reasons=("explicit_personal_training_request",),
             confidence="high",
             window=_window(local_today, 28),
             subject=None,
