@@ -1,5 +1,5 @@
 [Unit]
-Description=Memory V1 authenticated-owner no-model evidence intake dispatcher
+Description=Memory V1 authenticated-owner contextual chat intake bridge
 After=network-online.target brains.service
 Wants=network-online.target
 
@@ -10,7 +10,8 @@ Group=ubuntu
 WorkingDirectory=/opt/chat-memory
 EnvironmentFile=/opt/chat-memory/.env
 Environment=PYTHONPATH=/opt/chat-memory
-ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_evidence_intake_dispatcher.py --selector-version 20260717_v2 --limit 100 --apply --report-path /tmp/memory-v1-evidence-intake-dispatcher.json
+Environment=MEMORY_V1_CONTEXTUAL_INTAKE_APPLY=memory_v1_contextual_evidence_intake_apply_v3
+ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/memory_v1_contextual_evidence_intake_dispatcher_v3.py --selector-version 20260729_v4_contextual_resplit --limit 100 --apply --report-path /tmp/memory-v1-contextual-evidence-intake-dispatcher-v3.json
 TimeoutStartSec=2min
 UMask=0077
 Nice=10

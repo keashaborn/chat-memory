@@ -17,7 +17,7 @@ import asyncpg
 
 from scripts.memory_v1_authenticated_owners import resolve_authenticated_owners
 
-CAPTURE_VERSION = "memory_v1_v5_chat_capture_20260717_v1"
+CAPTURE_VERSION = "memory_v1_v5_chat_capture_20260730_v2_contextual"
 SOURCE_SYSTEM = "public.chat_log"
 SOURCE_TYPE = "frontend/chat:user"
 
@@ -221,9 +221,17 @@ async def record_source(
             {
                 "capture_version": CAPTURE_VERSION,
                 "source_type": SOURCE_TYPE,
+                "source_id": source_id,
                 "source_external_id": source_id,
+                "source_content_sha256": source["source_sha256"],
+                "source_char_start": 0,
+                "source_char_end": len(source["content"]),
                 "thread_id": source["thread_id"],
                 "request_id": source["request_id"],
+                "primary_lane": "unclassified_user_statement",
+                "epistemic_role": "user_report_unclassified",
+                "span_origin": "raw_chat_turn_v1",
+                "context_needed": False,
                 "semantic_processing": "pending",
             }
         ),
