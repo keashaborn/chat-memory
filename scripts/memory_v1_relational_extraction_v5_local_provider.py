@@ -2536,7 +2536,11 @@ _SHORT_TERM_MEMORY_DURATION_RE = re.compile(
     r"(?:only\s+)?remembers?\s+for\s+"
     r"(?P<duration>(?:about|approximately|roughly)?\s*"
     r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)"
-    r"\s+(?:seconds?|minutes?|hours?))\b",
+    r"\s+(?:seconds?|minutes?|hours?)(?:\s+or\s+so)?)\b",
+    re.IGNORECASE,
+)
+_APPROXIMATE_DURATION_CUE_RE = re.compile(
+    r"\b(?:about|approximately|roughly)\b|\bor\s+so\b",
     re.IGNORECASE,
 )
 _HISTORICAL_RESIDENCE_RE = re.compile(
@@ -4435,7 +4439,7 @@ def _augment_assisted_living_and_memory_duration(
         ).casefold()
         canonical_value = f"short-term memory lasts {duration}"
         duration_is_approximate = bool(
-            re.search(r"\b(?:about|approximately|roughly)\b", duration)
+            _APPROXIMATE_DURATION_CUE_RE.search(duration)
         )
         matching_health = [
             item

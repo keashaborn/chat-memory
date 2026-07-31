@@ -8,6 +8,8 @@ from scripts.memory_v1_predicate_runtime_profile_v2 import (
     load_runtime_profile_v2,
 )
 from scripts.memory_v1_relational_extraction_v5_local_provider import (
+    _APPROXIMATE_DURATION_CUE_RE,
+    _SHORT_TERM_MEMORY_DURATION_RE,
     LocalLlamaCppProvider,
     _compile_entity_links,
     _context_safe_deterministic_policy_packet,
@@ -262,6 +264,14 @@ class SemanticCompilerV10Test(unittest.TestCase):
             "approximate_reported_duration",
             duration_observation["reason_codes"],
         )
+        self.assertEqual(
+            duration_observation["temporal"]["certainty"], "bounded"
+        )
+        # Precision describes the trusted source-time anchor. The approximate
+        # reported duration remains in the literal text and reason taxonomy.
+        self.assertEqual(
+            duration_observation["temporal"]["precision"], "exact"
+        )
         self.assertIn(
             "assisted_living_setting_deferred_until_literal_predicate",
             repairs,
@@ -289,6 +299,15 @@ class SemanticCompilerV10Test(unittest.TestCase):
             max_external_model_calls=0,
         )
         self.assertEqual(len(validated.normalized_packet["observations"]), 2)
+
+    def test_or_so_is_preserved_as_an_approximate_duration_cue(self) -> None:
+        match = _SHORT_TERM_MEMORY_DURATION_RE.search(
+            "He only remembers for three seconds or so."
+        )
+        self.assertIsNotNone(match)
+        duration = match.group("duration")
+        self.assertEqual(duration.casefold(), "three seconds or so")
+        self.assertIsNotNone(_APPROXIMATE_DURATION_CUE_RE.search(duration))
 
 
 if __name__ == "__main__":
