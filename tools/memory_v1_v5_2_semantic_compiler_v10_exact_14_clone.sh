@@ -301,9 +301,8 @@ test "$(scalar "$clone" "
     AND packet.manual_review_required
     AND route.route='terminal_no_stage'
     AND route.reason_code='deferral_only_review_unresolved_v5_2'
-    AND packet.normalized_packet @? '$.deferrals[*] ? (
-      @.reason_code == "entity_resolution_unresolved"
-    )'")" -eq 1
+    AND packet.normalized_packet @?
+      '$.deferrals[*] ? (@.reason_code == "entity_resolution_unresolved")'")" -eq 1
 
 test "$(scalar "$clone" "
   SELECT count(*)
