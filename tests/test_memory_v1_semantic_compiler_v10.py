@@ -16,7 +16,10 @@ from scripts.memory_v1_relational_extraction_v5_local_provider import (
     _literal,
     _packet,
 )
-from scripts.memory_v1_relational_extraction_v5_provider import ProviderPacket
+from scripts.memory_v1_relational_extraction_v5_provider import (
+    ProviderPacket,
+    validate_and_normalize,
+)
 from tests.test_memory_v1_local_provider_v5_2 import (
     LocalProviderV52Test,
     MODEL_SHA256,
@@ -252,7 +255,13 @@ class SemanticCompilerV10Test(unittest.TestCase):
             if item.get("object", {}).get("value")
             == "short-term memory lasts about three seconds"
         )
-        self.assertIs(duration_observation["object"]["approximate"], True)
+        # literal.health_text stores the exact reported wording; approximation
+        # remains explicit in both the text and the reason taxonomy.
+        self.assertIs(duration_observation["object"]["approximate"], False)
+        self.assertIn(
+            "approximate_reported_duration",
+            duration_observation["reason_codes"],
+        )
         self.assertIn(
             "assisted_living_setting_deferred_until_literal_predicate",
             repairs,
@@ -262,6 +271,24 @@ class SemanticCompilerV10Test(unittest.TestCase):
             "unregistered_predicate",
             {item["reason_code"] for item in value["deferrals"]},
         )
+        provider = SimpleNamespace(
+            provider_id="local_llama_cpp",
+            provider_version="v1",
+            external_call_capability=False,
+            external_model_calls=0,
+            extract=lambda _source: compiled,
+        )
+        validated = validate_and_normalize(
+            provider,
+            source=source,
+            registry=registry,
+            schema=json.loads(
+                profile.schema_path.read_text(encoding="utf-8")
+            ),
+            allowed_provider_versions={"local_llama_cpp": "v1"},
+            max_external_model_calls=0,
+        )
+        self.assertEqual(len(validated.normalized_packet["observations"]), 2)
 
 
 if __name__ == "__main__":

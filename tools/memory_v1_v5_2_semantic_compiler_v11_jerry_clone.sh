@@ -300,7 +300,8 @@ test "$(scalar "$clone" "
         AND item->>'surface_policy'='explicit_recall_only'
         AND item->>'sensitivity'='high'
         AND item->'object'->>'value'='short-term memory lasts about three seconds'
-        AND (item->'object'->>'approximate')::boolean
+        AND NOT (item->'object'->>'approximate')::boolean
+        AND item->'reason_codes' ? 'approximate_reported_duration'
     )
     AND EXISTS (
       SELECT 1 FROM jsonb_array_elements(

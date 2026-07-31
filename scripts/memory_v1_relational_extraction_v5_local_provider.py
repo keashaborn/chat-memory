@@ -4455,7 +4455,10 @@ def _augment_assisted_living_and_memory_duration(
             target["object"] = _literal(
                 "text",
                 canonical_value,
-                approximate=duration_is_approximate,
+                # literal.health_text stores an exact text assertion. The
+                # approximation is preserved in the text and reason code;
+                # its object contract intentionally disallows approximate.
+                approximate=False,
             )
             if (
                 "explicit_short_term_memory_duration"
@@ -4463,6 +4466,14 @@ def _augment_assisted_living_and_memory_duration(
             ):
                 target["reason_codes"].append(
                     "explicit_short_term_memory_duration"
+                )
+            if (
+                duration_is_approximate
+                and "approximate_reported_duration"
+                not in target["reason_codes"]
+            ):
+                target["reason_codes"].append(
+                    "approximate_reported_duration"
                 )
             target["modality"] = "reported_observation"
             target["surface_policy"] = "explicit_recall_only"
@@ -4482,7 +4493,7 @@ def _augment_assisted_living_and_memory_duration(
                 object_value=_literal(
                     "text",
                     canonical_value,
-                    approximate=duration_is_approximate,
+                    approximate=False,
                 ),
                 projection_class="supportive_context",
                 surface_policy="explicit_recall_only",
@@ -4496,6 +4507,10 @@ def _augment_assisted_living_and_memory_duration(
                 temporal_profile="active_interval",
                 historical_end=False,
             )
+            if duration_is_approximate:
+                health["reason_codes"].append(
+                    "approximate_reported_duration"
+                )
             observations.append(health)
             repairs.append("short_term_memory_duration_completed")
     return tuple(repairs)
