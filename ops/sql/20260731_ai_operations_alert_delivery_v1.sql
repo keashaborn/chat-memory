@@ -72,11 +72,17 @@ CREATE TABLE ai_operations.monitor_alert_delivery_v1 (
   ),
   CONSTRAINT monitor_alert_delivery_provider_id_check CHECK (
     provider_message_id IS NULL
-    OR provider_message_id ~ '^[A-Za-z0-9_-]{1,256}$'
+    OR (
+      char_length(provider_message_id) BETWEEN 1 AND 256
+      AND provider_message_id ~ '^[A-Za-z0-9_-]+$'
+    )
   ),
   CONSTRAINT monitor_alert_delivery_error_check CHECK (
     last_error_code IS NULL
-    OR last_error_code ~ '^[a-z][a-z0-9_]{1,63}$'
+    OR (
+      char_length(last_error_code) BETWEEN 2 AND 64
+      AND last_error_code ~ '^[a-z][a-z0-9_]*$'
+    )
   ),
   CONSTRAINT monitor_alert_delivery_time_check CHECK (
     created_at <= updated_at
@@ -114,11 +120,17 @@ CREATE TABLE ai_operations.monitor_alert_delivery_event_v1 (
   ),
   CONSTRAINT monitor_alert_delivery_event_error_check CHECK (
     error_code IS NULL
-    OR error_code ~ '^[a-z][a-z0-9_]{1,63}$'
+    OR (
+      char_length(error_code) BETWEEN 2 AND 64
+      AND error_code ~ '^[a-z][a-z0-9_]*$'
+    )
   ),
   CONSTRAINT monitor_alert_delivery_event_provider_check CHECK (
     provider_message_id IS NULL
-    OR provider_message_id ~ '^[A-Za-z0-9_-]{1,256}$'
+    OR (
+      char_length(provider_message_id) BETWEEN 1 AND 256
+      AND provider_message_id ~ '^[A-Za-z0-9_-]+$'
+    )
   )
 );
 
@@ -367,12 +379,18 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
   IF p_provider_message_id IS NOT NULL
-     AND p_provider_message_id !~ '^[A-Za-z0-9_-]{1,256}$' THEN
+     AND (
+       char_length(p_provider_message_id) NOT BETWEEN 1 AND 256
+       OR p_provider_message_id !~ '^[A-Za-z0-9_-]+$'
+     ) THEN
     RAISE EXCEPTION 'invalid provider message id'
       USING ERRCODE = '22023';
   END IF;
   IF p_error_code IS NOT NULL
-     AND p_error_code !~ '^[a-z][a-z0-9_]{1,63}$' THEN
+     AND (
+       char_length(p_error_code) NOT BETWEEN 2 AND 64
+       OR p_error_code !~ '^[a-z][a-z0-9_]*$'
+     ) THEN
     RAISE EXCEPTION 'invalid alert delivery error code'
       USING ERRCODE = '22023';
   END IF;
