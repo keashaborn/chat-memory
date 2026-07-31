@@ -1,0 +1,35 @@
+{
+  "contract_version": "memory_v1_v5_2_atom_admission_spec_v1",
+  "items": [
+    {
+      "case_id": "compiler_v11_jerry_restricted_health_observations",
+      "evidence_id": "681ab38d-a742-463c-ad26-c74c65eacaa9",
+      "expected_counts": {
+        "admitted_comparison_hint_count": 0,
+        "admitted_entity_mention_count": 1,
+        "admitted_observation_count": 2,
+        "deferred_atom_count": 3,
+        "rejected_atom_count": 0,
+        "retained_source_only_count": 0,
+        "source_atom_count": 6
+      },
+      "expected_entity_refs": [
+        "e00"
+      ],
+      "expected_predicates": [
+        "health.user_reported_observation",
+        "health.user_reported_observation"
+      ],
+      "packet_id": "c4db1405-ad9d-5c9a-81e3-10ad0200b0ca",
+      "review_decision": "authorized",
+      "review_reason_codes": [
+        "manual_packet_review_v2_approved",
+        "third_party_health_user_report",
+        "high_sensitivity_explicit_recall_only",
+        "assisted_living_remains_deferred"
+      ]
+    }
+  ],
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "target_server": "seebx"
+}
