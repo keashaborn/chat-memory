@@ -484,6 +484,8 @@ def _validate_row(
     row: dict[str, Any],
     packet: dict[str, Any],
     profile: ReviewProfile,
+    *,
+    allow_preexisting_stage: bool = False,
 ) -> None:
     if any(not _sha256_valid(row[field]) for field in HASH_FIELDS):
         raise LocalPacketReviewError("local packet provenance contains an invalid hash")
@@ -514,7 +516,9 @@ def _validate_row(
         raise LocalPacketReviewError("local packet evidence is not active")
     if row["evidence_content_sha256"] != row["evidence_authority_sha256"]:
         raise LocalPacketReviewError("packet and evidence authority hashes differ")
-    if row["exact_stage_batch_count"] or row["evidence_stage_batch_count"]:
+    if (
+        row["exact_stage_batch_count"] or row["evidence_stage_batch_count"]
+    ) and not allow_preexisting_stage:
         raise LocalPacketReviewError("evidence already has relational staging state")
     expected_counts = (
         len(packet["entity_mentions"]),
@@ -560,7 +564,31 @@ async def _build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
                 raise LocalPacketReviewError("owner-scoped immutable packet not found")
             row = dict(packet_rows[0])
             packet = _json_value(row["normalized_packet"], "normalized packet")
-            _validate_row(row, packet, profile)
+            allow_preexisting_stage = False
+            if (
+                profile.name == "v5_2"
+                and (
+                    row["exact_stage_batch_count"]
+                    or row["evidence_stage_batch_count"]
+                )
+            ):
+                correction_rows = await conn.fetch(
+                    "SELECT * FROM "
+                    "memory.plan_owner_v5_2_v12_correction_route_v1($1)",
+                    packet_id,
+                )
+                allow_preexisting_stage = (
+                    len(correction_rows) == 1
+                    and correction_rows[0]["packet_id"] == packet_id
+                    and correction_rows[0]["route"]
+                    == "manual_review_artifact_ready"
+                )
+            _validate_row(
+                row,
+                packet,
+                profile,
+                allow_preexisting_stage=allow_preexisting_stage,
+            )
             immutable = NormalizedPacket.model_validate(packet).model_dump(mode="json")
             if canonical_sha256(immutable) != row["validator_packet_sha256"]:
                 raise LocalPacketReviewError("validated packet differs from immutable packet")
