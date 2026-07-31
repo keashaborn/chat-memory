@@ -4361,11 +4361,7 @@ def _augment_assisted_living_and_memory_duration(
         return ()
     repairs: list[str] = []
 
-    if residence_match is not None and not any(
-        item.get("predicate") == "residence.lives_at"
-        and item.get("subject_entity_ref") == person_ref
-        for item in observations
-    ):
+    if residence_match is not None:
         place_name = " ".join(
             residence_match.group("place").replace("-", " ").split()
         ).casefold()
@@ -4382,35 +4378,65 @@ def _augment_assisted_living_and_memory_duration(
             ),
             None,
         )
-        if place_entity is None:
-            place_ref = _add_compiler_entity(
-                source,
-                entities,
-                entity_type="place",
-                name_text=place_name,
-                relationship_role="residence:reported",
+        place_ref = (
+            str(place_entity["entity_ref"])
+            if place_entity is not None
+            else None
+        )
+        residence_indexes = [
+            index
+            for index, item in enumerate(observations)
+            if item.get("predicate") == "residence.lives_at"
+        ]
+        valid_residence = place_ref is not None and any(
+            item.get("subject_entity_ref") == person_ref
+            and isinstance(item.get("object"), dict)
+            and item["object"].get("kind") == "entity"
+            and item["object"].get("entity_ref") == place_ref
+            for item in observations
+            if item.get("predicate") == "residence.lives_at"
+        )
+        if not valid_residence and len(residence_indexes) <= 1:
+            if place_ref is None:
+                place_ref = _add_compiler_entity(
+                    source,
+                    entities,
+                    entity_type="place",
+                    name_text=place_name,
+                    relationship_role="residence:reported",
+                )
+            observation_ref = (
+                str(observations[residence_indexes[0]]["observation_ref"])
+                if residence_indexes
+                else _next_observation_ref(observations)
             )
-        else:
-            place_ref = str(place_entity["entity_ref"])
-        residence = _example_observation(
-            content,
-            observation_ref=_next_observation_ref(observations),
-            subject_entity_ref=person_ref,
-            predicate="residence.lives_at",
-            object_value={"kind": "entity", "entity_ref": place_ref},
-            projection_class="supportive_context",
-            surface_policy="mention_when_directly_relevant",
-            sensitivity="medium",
-            reason_code="explicit_assisted_living_residence",
-            temporal_semantic="state_validity",
-        )
-        residence["temporal"] = _relationship_v5_1_temporal(
-            source,
-            temporal_profile="active_interval",
-            historical_end=False,
-        )
-        observations.append(residence)
-        repairs.append("explicit_assisted_living_residence_completed")
+            residence = _example_observation(
+                content,
+                observation_ref=observation_ref,
+                subject_entity_ref=person_ref,
+                predicate="residence.lives_at",
+                object_value={"kind": "entity", "entity_ref": place_ref},
+                projection_class="supportive_context",
+                surface_policy="mention_when_directly_relevant",
+                sensitivity="medium",
+                reason_code="explicit_assisted_living_residence",
+                temporal_semantic="state_validity",
+            )
+            residence["temporal"] = _relationship_v5_1_temporal(
+                source,
+                temporal_profile="active_interval",
+                historical_end=False,
+            )
+            if residence_indexes:
+                observations[residence_indexes[0]] = residence
+                repairs.append(
+                    "explicit_assisted_living_residence_canonicalized"
+                )
+            else:
+                observations.append(residence)
+                repairs.append(
+                    "explicit_assisted_living_residence_completed"
+                )
 
     if duration_match is not None:
         duration = " ".join(

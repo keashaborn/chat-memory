@@ -186,6 +186,18 @@ class SemanticCompilerV10Test(unittest.TestCase):
             modality="reported_observation",
             temporal_semantic="state_validity",
         )
+        malformed_residence = _example_observation(
+            content,
+            observation_ref="o01",
+            subject_entity_ref="e00",
+            predicate="residence.lives_at",
+            object_value=_literal("text", "assisted living"),
+            projection_class="supportive_context",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="medium",
+            reason_code="provider_literal_residence",
+            temporal_semantic="state_validity",
+        )
         duration = _example_observation(
             content,
             observation_ref="o03",
@@ -204,7 +216,7 @@ class SemanticCompilerV10Test(unittest.TestCase):
             ProviderPacket.model_validate(
                 _packet(
                     entities=[person, redundant_person],
-                    observations=[dementia, duration],
+                    observations=[malformed_residence, dementia, duration],
                 )
             ),
             registry,
@@ -235,7 +247,7 @@ class SemanticCompilerV10Test(unittest.TestCase):
         )
         self.assertNotIn("three seconds", health_values)
         self.assertIn(
-            "explicit_assisted_living_residence_completed",
+            "explicit_assisted_living_residence_canonicalized",
             repairs,
         )
         self.assertIn("short_term_memory_duration_canonicalized", repairs)
