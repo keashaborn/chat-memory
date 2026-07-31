@@ -35,14 +35,14 @@ clone_created=0
 cleanup() {
   rc=$?
   trap - EXIT
-  if [[ $clone_created -eq 1 ]]; then
-    docker exec "$container" dropdb -U sage --if-exists --force "$clone" \
-      >/dev/null 2>&1 || rc=1
-  fi
   if [[ $rc -ne 0 && ${KEEP_FAILED_CLONE:-0} == 1 ]]; then
     printf 'FAILED_CLONE_RETAINED=%s\nFAILED_WORK_RETAINED=%s\n' \
       "$clone" "$work" >&2
     exit "$rc"
+  fi
+  if [[ $clone_created -eq 1 ]]; then
+    docker exec "$container" dropdb -U sage --if-exists --force "$clone" \
+      >/dev/null 2>&1 || rc=1
   fi
   rm -rf "$work"
   if [[ $rc -ne 0 ]]; then
@@ -108,6 +108,9 @@ other_owner_signature() {
       UNION ALL SELECT to_jsonb(value)::text
       FROM memory.v5_2_local_packet_route_event AS value
       WHERE owner_user_id<>'$owner'::uuid
+      UNION ALL SELECT to_jsonb(value)::text
+      FROM memory.v5_local_packet_supersession AS value
+      WHERE owner_user_id<>'$owner'::uuid
     ) AS rows"
 }
 
@@ -128,6 +131,10 @@ target_signature() {
       FROM memory.v5_2_local_packet_route_event AS value
       WHERE owner_user_id='$owner'::uuid
         AND evidence_id IN ('$stance'::uuid,'$jerry'::uuid)
+      UNION ALL SELECT to_jsonb(value)::text
+      FROM memory.v5_local_packet_supersession AS value
+      WHERE owner_user_id='$owner'::uuid
+        AND evidence_id IN ('$stance'::uuid,'$jerry'::uuid)
     ) AS rows"
 }
 
@@ -143,7 +150,8 @@ production_target_before=$(target_signature "$production")
 phase=clone
 docker exec "$container" pg_dump -U sage -d "$production" -Fc >"$dump"
 pg_restore -l "$dump" \
-  | grep -E ' ACL memory | ACL - SCHEMA memory ' >"$memory_acl_list"
+  | grep -E ' ACL memory | ACL - SCHEMA memory | ACL public TABLE chat_log ' \
+  >"$memory_acl_list"
 test -s "$memory_acl_list"
 ! grep -q 'lifeswitch_chat' "$memory_acl_list"
 docker exec "$container" createdb -U sage -T template0 "$clone"
@@ -208,6 +216,9 @@ PY
 
 clone_protected_before=$(protected_signature "$clone")
 other_before=$(other_owner_signature "$clone")
+supersession_before=$(scalar "$clone" "
+  SELECT count(*) FROM memory.v5_local_packet_supersession
+  WHERE owner_user_id='$owner'::uuid")
 
 run_recompile() {
   local evidence=$1 content=$2 job=$3 prior=$4 prior_storage=$5 run_id=$6 output=$7
@@ -259,6 +270,58 @@ stance_packet=$(scalar "$clone" "SELECT packet_id
 jerry_packet=$(scalar "$clone" "SELECT packet_id
   FROM memory.evidence_extraction_packet_v5_local
   WHERE owner_user_id='$owner'::uuid AND job_id='$jerry_job'::uuid")
+
+supersede_packet() {
+  local prior=$1 prior_storage=$2 replacement=$3 operation=$4 supersession=$5
+  local replacement_storage first replay
+  replacement_storage=$(scalar "$clone" "SELECT packet_storage_sha256
+    FROM memory.evidence_extraction_packet_v5_local
+    WHERE owner_user_id='$owner'::uuid AND packet_id='$replacement'::uuid")
+  first=$(actor_scalar "$clone" "$owner" "
+    SELECT apply_outcome
+    FROM memory.finalize_owner_v5_2_compiler_v12_exact_two_supersession_v1(
+      '$operation'::uuid,'$supersession'::uuid,
+      '$prior'::uuid,'$replacement'::uuid,
+      '$prior_storage','$replacement_storage',
+      'semantic_compiler_v12_reextracted'
+    )")
+  replay=$(actor_scalar "$clone" "$owner" "
+    SELECT apply_outcome
+    FROM memory.finalize_owner_v5_2_compiler_v12_exact_two_supersession_v1(
+      '$operation'::uuid,'$supersession'::uuid,
+      '$prior'::uuid,'$replacement'::uuid,
+      '$prior_storage','$replacement_storage',
+      'semantic_compiler_v12_reextracted'
+    )")
+  test "$first" = applied
+  test "$replay" = replayed
+}
+
+phase=supersession
+supersede_packet "$stance_prior" "$stance_prior_storage" "$stance_packet" \
+  e024a1f8-d863-5fc8-9336-088b9d7950d7 \
+  36be951a-e061-5323-8451-592fe560f7ac
+supersede_packet "$jerry_prior" "$jerry_prior_storage" "$jerry_packet" \
+  cf3d3d05-a3a9-5e78-93e6-ce8775ba4784 \
+  a640b5e8-15e1-50ce-bf48-3a45c673778c
+test "$(( $(scalar "$clone" "
+  SELECT count(*) FROM memory.v5_local_packet_supersession
+  WHERE owner_user_id='$owner'::uuid") - supersession_before ))" -eq 2
+test "$(actor_scalar "$clone" "$owner" "
+  SELECT (memory.authoritative_owner_v5_2_packet_id_v1('$stance'::uuid)
+    ='$stance_packet'::uuid)::integer")" -eq 1
+test "$(actor_scalar "$clone" "$owner" "
+  SELECT (memory.authoritative_owner_v5_2_packet_id_v1('$jerry'::uuid)
+    ='$jerry_packet'::uuid)::integer")" -eq 1
+phase=cross_owner_supersession
+if actor_scalar "$clone" "$other" "
+  SELECT count(*)
+  FROM memory.plan_owner_v5_2_compiler_v12_exact_two_supersession_v1(
+    '$stance_prior'::uuid,'$stance_packet'::uuid
+  )" >/dev/null 2>&1; then
+  echo 'cross-owner compiler-v12 supersession plan was not rejected' >&2
+  exit 1
+fi
 phase=route
 route_packet "$stance_packet" "$work/stance-route.json"
 route_packet "$jerry_packet" "$work/jerry-route.json"
@@ -299,6 +362,6 @@ test "$(git -C /opt/chat-memory rev-parse HEAD)" = "$production_head"
 test "$(systemctl is-active brains.service)" = active
 
 phase=complete
-printf 'V12_FULL_CLONE=PASS jobs=2 packets=2 routes=2 local_model_calls=0 external_model_calls=0\n'
+printf 'V12_FULL_CLONE=PASS jobs=2 packets=2 supersessions=2 routes=2 local_model_calls=0 external_model_calls=0\n'
 printf 'stance_span_repaired=true jerry_name=true assisted_living=true temporal_conflict=1\n'
 printf 'claims=0 entities=0 observations=0 qdrant=0 prompt_influence=0 cross_owner_isolated=true replay=true\n'

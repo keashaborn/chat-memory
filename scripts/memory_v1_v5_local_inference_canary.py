@@ -364,31 +364,124 @@ async def load_prior_packet_for_recompile(
     evidence_id: uuid.UUID,
     packet_id: uuid.UUID,
     packet_storage_sha256: str,
+    source_content: str,
 ) -> Mapping[str, Any]:
     async with conn.transaction(readonly=True):
         await set_actor(conn, owner)
         row = await conn.fetchrow(
             """
             SELECT normalized_packet
-            FROM memory.evidence_extraction_packet_v5_local
-            WHERE owner_user_id=$1
-              AND evidence_id=$2
-              AND packet_id=$3
-              AND packet_storage_sha256=$4
+            FROM memory.read_owner_v5_local_packet_review_v1($1)
+            WHERE evidence_id=$2
+              AND packet_storage_sha256=$3
               AND external_model_calls=0
               AND local_model_calls BETWEEN 0 AND 1
+              AND storage_integrity_verified
             """,
-            owner,
-            evidence_id,
             packet_id,
+            evidence_id,
             packet_storage_sha256,
         )
     if row is None:
         raise RuntimeError("hash-bound prior packet is unavailable")
     packet_value = row["normalized_packet"]
+    if isinstance(packet_value, str):
+        try:
+            packet_value = json.loads(packet_value)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("prior packet value is invalid JSON") from exc
     if not isinstance(packet_value, Mapping):
         raise RuntimeError("prior packet value is not an object")
-    return packet_value
+    provider_fields = deepcopy({
+        key: packet_value.get(key, [])
+        for key in (
+            "entity_mentions",
+            "observations",
+            "comparison_hints",
+            "deferrals",
+            "packet_findings",
+        )
+    })
+    for observation in provider_fields["observations"]:
+        if not isinstance(observation, dict):
+            raise RuntimeError("prior normalized observation is invalid")
+        observation.pop("predicate_registry_status", None)
+        observation.pop("project_scope", None)
+        temporal = observation.get("temporal")
+        if isinstance(temporal, dict):
+            temporal.pop("normalization_policy_version", None)
+            if temporal.get("anchored_to_source_time") is True:
+                reason_codes = temporal.get("reason_codes", [])
+                if (
+                    temporal.get("source_form") != "implicit_source_time"
+                    or not isinstance(reason_codes, list)
+                    or "trusted_source_time_upper_bound" in reason_codes
+                    or "historical_relationship_ended_before_source"
+                    in reason_codes
+                ):
+                    raise RuntimeError(
+                        "prior packet has non-replayable trusted temporal anchoring"
+                    )
+                temporal.update(
+                    {
+                        "shape": "none",
+                        "basis": "none",
+                        "certainty": "unknown",
+                        "precision": "unknown",
+                        "instant": None,
+                        "calendar_range": None,
+                        "instant_range": None,
+                        "relative_offset": None,
+                        "recurrence": None,
+                        "anchored_to_source_time": False,
+                    }
+                )
+    for deferral in provider_fields["deferrals"]:
+        if not isinstance(deferral, dict):
+            raise RuntimeError("prior normalized deferral is invalid")
+        deferral.pop("review_required", None)
+
+    def restore_spans(value: Any) -> None:
+        if isinstance(value, dict):
+            spans = value.get("source_spans")
+            if isinstance(spans, list):
+                restored: list[dict[str, Any]] = []
+                for span in spans:
+                    if not isinstance(span, dict):
+                        raise RuntimeError("prior normalized span is invalid")
+                    start = span.get("start")
+                    end = span.get("end")
+                    span_sha = span.get("span_sha256")
+                    if (
+                        not isinstance(start, int)
+                        or not isinstance(end, int)
+                        or start < 0
+                        or end <= start
+                        or end > len(source_content)
+                        or not isinstance(span_sha, str)
+                    ):
+                        raise RuntimeError("prior normalized span bounds changed")
+                    quote = source_content[start:end]
+                    if sha256_text(quote) != span_sha:
+                        raise RuntimeError("prior normalized span hash changed")
+                    restored.append(
+                        {"start": start, "end": end, "quote": quote}
+                    )
+                value["source_spans"] = restored
+            for child in value.values():
+                restore_spans(child)
+        elif isinstance(value, list):
+            for child in value:
+                restore_spans(child)
+
+    restore_spans(provider_fields)
+    try:
+        packet = ProviderPacket.model_validate(provider_fields)
+    except Exception as exc:
+        raise RuntimeError(
+            "prior normalized packet cannot be replayed as provider output"
+        ) from exc
+    return packet.model_dump(mode="json")
 
 
 async def enqueue_exact(
@@ -854,6 +947,7 @@ async def run() -> int:
                 packet_storage_sha256=ids[
                     "prior_packet_storage_sha256"
                 ],
+                source_content=source.content,
             )
             transport = ZeroCallPacketReplayTransport(prior_packet_value)
         else:
@@ -1158,6 +1252,7 @@ async def run() -> int:
                         "apply": True,
                         "outcome": "rejected",
                         "rejection_code": code,
+                        "failure_phase": phase,
                         "outcome_class": policy.outcome_class,
                         "terminal_disposition": policy.disposition,
                         "job_status": terminal["status"],
