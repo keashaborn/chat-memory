@@ -44,6 +44,7 @@ LifeSwitchPlanSource = Literal[
 ]
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
 
 class _StrictFrozenModel(BaseModel):
@@ -108,9 +109,11 @@ class TrustedLifeSwitchContextRequestV1(_StrictFrozenModel):
     contract_version: Literal[LIFESWITCH_CONTEXT_REQUEST_CONTRACT] = (
         LIFESWITCH_CONTEXT_REQUEST_CONTRACT
     )
-    request_id: UUID
+    request_id: str = Field(min_length=1, max_length=160, repr=False)
     authenticated_actor_user_id: UUID = Field(repr=False)
     owner_user_id: UUID = Field(repr=False)
+    thread_id: UUID = Field(repr=False)
+    conversation_snapshot_sha256: str
     authorization_basis: Literal["fresh_authenticated_owner"] = (
         "fresh_authenticated_owner"
     )
@@ -119,11 +122,22 @@ class TrustedLifeSwitchContextRequestV1(_StrictFrozenModel):
     data_plan: LifeSwitchDataPlanV1
     request_sha256: str
 
-    @field_validator("query_sha256", "request_sha256")
+    @field_validator(
+        "conversation_snapshot_sha256",
+        "query_sha256",
+        "request_sha256",
+    )
     @classmethod
     def valid_hash(cls, value: str) -> str:
         if not _SHA256.fullmatch(value):
             raise ValueError("invalid SHA-256")
+        return value
+
+    @field_validator("request_id")
+    @classmethod
+    def valid_request_id(cls, value: str) -> str:
+        if not _REQUEST_ID.fullmatch(value):
+            raise ValueError("request id is invalid")
         return value
 
     @field_validator("owner_timezone")
@@ -148,9 +162,11 @@ class TrustedLifeSwitchContextRequestV1(_StrictFrozenModel):
     def create(
         cls,
         *,
-        request_id: UUID,
+        request_id: str,
         authenticated_actor_user_id: UUID,
         owner_user_id: UUID,
+        thread_id: UUID,
+        conversation_snapshot_sha256: str,
         owner_timezone: str,
         query: str,
         data_plan: LifeSwitchDataPlanV1,
@@ -160,6 +176,8 @@ class TrustedLifeSwitchContextRequestV1(_StrictFrozenModel):
             "request_id": request_id,
             "authenticated_actor_user_id": authenticated_actor_user_id,
             "owner_user_id": owner_user_id,
+            "thread_id": thread_id,
+            "conversation_snapshot_sha256": conversation_snapshot_sha256,
             "authorization_basis": "fresh_authenticated_owner",
             "owner_timezone": owner_timezone,
             "query_sha256": _text_sha256(query),
@@ -226,8 +244,10 @@ class LifeSwitchDomainContextEnvelopeV1(_StrictFrozenModel):
     contract_version: Literal[LIFESWITCH_CONTEXT_ENVELOPE_CONTRACT] = (
         LIFESWITCH_CONTEXT_ENVELOPE_CONTRACT
     )
-    request_id: UUID
+    request_id: str = Field(min_length=1, max_length=160, repr=False)
     owner_user_id: UUID = Field(repr=False)
+    thread_id: UUID = Field(repr=False)
+    conversation_snapshot_sha256: str
     query_sha256: str
     data_plan_sha256: str
     status: LifeSwitchContextStatus
@@ -242,6 +262,7 @@ class LifeSwitchDomainContextEnvelopeV1(_StrictFrozenModel):
     @field_validator(
         "query_sha256",
         "data_plan_sha256",
+        "conversation_snapshot_sha256",
         "envelope_sha256",
     )
     @classmethod
@@ -353,6 +374,8 @@ def create_lifeswitch_context_envelope_v1(
         "contract_version": LIFESWITCH_CONTEXT_ENVELOPE_CONTRACT,
         "request_id": request.request_id,
         "owner_user_id": request.owner_user_id,
+        "thread_id": request.thread_id,
+        "conversation_snapshot_sha256": request.conversation_snapshot_sha256,
         "query_sha256": request.query_sha256,
         "data_plan_sha256": request.data_plan.plan_sha256,
         "status": status,

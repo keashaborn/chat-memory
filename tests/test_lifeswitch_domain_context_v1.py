@@ -19,7 +19,9 @@ from rag_engine.lifeswitch_domain_provider_v1 import (
 
 TODAY = dt.date(2026, 7, 29)
 ACTOR = uuid.UUID("11111111-1111-4111-8111-111111111111")
-REQUEST = uuid.UUID("22222222-2222-4222-8222-222222222222")
+REQUEST = "req_lifeswitch_20260731"
+THREAD = uuid.UUID("22222222-2222-4222-8222-222222222222")
+SNAPSHOT_SHA256 = "a" * 64
 
 
 def trusted_request(query: str) -> TrustedLifeSwitchContextRequestV1:
@@ -27,6 +29,8 @@ def trusted_request(query: str) -> TrustedLifeSwitchContextRequestV1:
         request_id=REQUEST,
         authenticated_actor_user_id=ACTOR,
         owner_user_id=ACTOR,
+        thread_id=THREAD,
+        conversation_snapshot_sha256=SNAPSHOT_SHA256,
         owner_timezone="America/Chicago",
         query=query,
         data_plan=create_lifeswitch_data_plan_v1(query, today=TODAY),
@@ -147,6 +151,8 @@ class LifeSwitchDomainContextV1Tests(unittest.IsolatedAsyncioTestCase):
                 request_id=REQUEST,
                 authenticated_actor_user_id=ACTOR,
                 owner_user_id=uuid.UUID("33333333-3333-4333-8333-333333333333"),
+                thread_id=THREAD,
+                conversation_snapshot_sha256=SNAPSHOT_SHA256,
                 owner_timezone="America/Chicago",
                 query="How am I doing?",
                 data_plan=plan,

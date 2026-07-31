@@ -237,7 +237,7 @@ class PostgresLifeSwitchDomainReaderV1:
             select phase, phase_label, primary_goal, start_date, review_date,
                    review_cadence, body_state, nutrition_targets,
                    training_targets, conditioning_targets, activity_targets,
-                   recovery_targets, monitoring_rules, coach_notes
+                   recovery_targets, monitoring_rules
             from lifeswitch_plan.plan_profile
             where owner_user_id = $1 and is_active = true
             """,
