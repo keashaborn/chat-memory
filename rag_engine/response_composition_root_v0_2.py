@@ -169,6 +169,49 @@ class ResponseStageTimingsV1(_StrictFrozenModel):
     pipeline_total_ms: int = Field(ge=0)
 
 
+class ResponsePreparationTimingsV1(_StrictFrozenModel):
+    """Content-free timings through trusted-plan construction only."""
+
+    command_validation_ms: int = Field(ge=0)
+    conversation_snapshot_ms: int = Field(ge=0)
+    policy_input_ms: int = Field(ge=0)
+    signal_classification_ms: int = Field(ge=0)
+    signal_binding_ms: int = Field(ge=0)
+    memory_selection_ms: int = Field(ge=0)
+    trusted_request_ms: int = Field(ge=0)
+    orchestration_ms: int = Field(ge=0)
+    preparation_total_ms: int = Field(ge=0)
+
+
+class TrustedResponsePreparationV0_2(_StrictFrozenModel):
+    """Private seam for adding independent context before provider execution."""
+
+    trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
+    conversation_snapshot: ConversationSnapshotV1 = Field(repr=False)
+    stage_timings: ResponsePreparationTimingsV1
+
+    @model_validator(mode="after")
+    def bound(self) -> "TrustedResponsePreparationV0_2":
+        if (
+            self.conversation_snapshot.authenticated_actor_user_id
+            != self.trusted_plan.authenticated_actor_user_id
+        ):
+            raise ValueError("prepared snapshot actor differs from trusted plan")
+        if self.conversation_snapshot.thread_id != self.trusted_plan.thread_id:
+            raise ValueError("prepared snapshot thread differs from trusted plan")
+        if (
+            self.conversation_snapshot.current_request_id
+            != self.trusted_plan.policy_input.request_id
+        ):
+            raise ValueError("prepared snapshot request differs from trusted plan")
+        if (
+            self.conversation_snapshot.snapshot_sha256
+            != self.trusted_plan.conversation_snapshot_sha256
+        ):
+            raise ValueError("prepared snapshot hash differs from trusted plan")
+        return self
+
+
 class TrustedResponseExecutionV0_2(_StrictFrozenModel):
     """Private execution result used by trusted post-generation adapters."""
 
@@ -273,9 +316,64 @@ class InactiveResponseCompositionRootV0_2:
     ) -> TrustedResponseExecutionV0_2:
         """Execute and retain private typed artifacts for trusted adapters."""
 
-        stage = "command_validation"
         pipeline_started_ns = time.monotonic_ns()
-        stage_started_ns = pipeline_started_ns
+        stage = "trusted_plan_preparation"
+        try:
+            prepared = await self.prepare_detailed(conn, command)
+            plan = prepared.trusted_plan
+            stage_timings = prepared.stage_timings.model_dump(
+                mode="python",
+                exclude={"preparation_total_ms"},
+            )
+            stage = "answer_generation"
+            stage_started_ns = time.monotonic_ns()
+            response = await OpenAIChatCompletionsAdapterV1(
+                self._openai_client
+            ).complete_async(
+                plan,
+                generation_config=self._generation_config,
+            )
+            stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
+            stage = "finalization"
+            stage_started_ns = time.monotonic_ns()
+            finalized = finalize_trusted_response_v1(
+                trusted_plan=plan,
+                provider_response=response,
+                generation_config=self._generation_config,
+                answer_id=self._answer_id_factory(),
+                created_at=self._clock(),
+            )
+            stage_timings["finalization_ms"] = _elapsed_ms(stage_started_ns)
+            stage = "execution_binding"
+            return TrustedResponseExecutionV0_2(
+                trusted_plan=plan,
+                provider_response=response,
+                finalized=finalized,
+                stage_timings=ResponseStageTimingsV1(
+                    **stage_timings,
+                    pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
+                ),
+            )
+        except ResponseCompositionError as exc:
+            if exc.stage == "not_applicable":
+                raise ResponseCompositionError(str(exc), stage=stage) from None
+            raise
+        except Exception:
+            raise ResponseCompositionError(
+                "inactive response composition failed",
+                stage=stage,
+            ) from None
+
+    async def prepare_detailed(
+        self,
+        conn: Any,
+        command: AuthenticatedResponseCommandV0_2,
+    ) -> TrustedResponsePreparationV0_2:
+        """Construct the exact trusted plan without calling the answer model."""
+
+        stage = "command_validation"
+        preparation_started_ns = time.monotonic_ns()
+        stage_started_ns = preparation_started_ns
         stage_timings: dict[str, int] = {}
         try:
             if not isinstance(command, AuthenticatedResponseCommandV0_2):
@@ -380,33 +478,12 @@ class InactiveResponseCompositionRootV0_2:
             )
             plan = await orchestrator.build_plan(trusted_request)
             stage_timings["orchestration_ms"] = _elapsed_ms(stage_started_ns)
-            stage = "answer_generation"
-            stage_started_ns = time.monotonic_ns()
-            response = await OpenAIChatCompletionsAdapterV1(
-                self._openai_client
-            ).complete_async(
-                plan,
-                generation_config=self._generation_config,
-            )
-            stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
-            stage = "finalization"
-            stage_started_ns = time.monotonic_ns()
-            finalized = finalize_trusted_response_v1(
+            return TrustedResponsePreparationV0_2(
                 trusted_plan=plan,
-                provider_response=response,
-                generation_config=self._generation_config,
-                answer_id=self._answer_id_factory(),
-                created_at=self._clock(),
-            )
-            stage_timings["finalization_ms"] = _elapsed_ms(stage_started_ns)
-            stage = "execution_binding"
-            return TrustedResponseExecutionV0_2(
-                trusted_plan=plan,
-                provider_response=response,
-                finalized=finalized,
-                stage_timings=ResponseStageTimingsV1(
+                conversation_snapshot=snapshot,
+                stage_timings=ResponsePreparationTimingsV1(
                     **stage_timings,
-                    pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
+                    preparation_total_ms=_elapsed_ms(preparation_started_ns),
                 ),
             )
         except ResponseCompositionError as exc:
@@ -427,6 +504,8 @@ __all__ = [
     "InactiveResponseCompositionRootV0_2",
     "NoGovernedMemoryAssemblyProviderV1",
     "ResponseCompositionError",
+    "ResponsePreparationTimingsV1",
     "ResponseStageTimingsV1",
     "TrustedResponseExecutionV0_2",
+    "TrustedResponsePreparationV0_2",
 ]

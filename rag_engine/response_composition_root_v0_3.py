@@ -24,6 +24,10 @@ from rag_engine.openai_chat_request_v3 import (
     OpenAIChatResponseV3,
 )
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from rag_engine.response_composition_root_v0_2 import (
+    AuthenticatedResponseCommandV0_2,
+    InactiveResponseCompositionRootV0_2,
+)
 from rag_engine.response_finalization_v2 import (
     FinalizedTrustedResponseV2,
     finalize_trusted_response_v2,
@@ -58,6 +62,22 @@ class LifeSwitchResponseStageTimingsV1(_StrictFrozenModel):
     pipeline_total_ms: int = Field(ge=0)
 
 
+class IntegratedLifeSwitchResponseStageTimingsV1(_StrictFrozenModel):
+    command_validation_ms: int = Field(ge=0)
+    conversation_snapshot_ms: int = Field(ge=0)
+    policy_input_ms: int = Field(ge=0)
+    signal_classification_ms: int = Field(ge=0)
+    signal_binding_ms: int = Field(ge=0)
+    memory_selection_ms: int = Field(ge=0)
+    trusted_request_ms: int = Field(ge=0)
+    orchestration_ms: int = Field(ge=0)
+    lifeswitch_context_selection_ms: int = Field(ge=0)
+    lifeswitch_prompt_augmentation_ms: int = Field(ge=0)
+    answer_generation_ms: int = Field(ge=0)
+    finalization_ms: int = Field(ge=0)
+    pipeline_total_ms: int = Field(ge=0)
+
+
 class TrustedLifeSwitchResponseExecutionV1(_StrictFrozenModel):
     trusted_plan: TrustedLifeSwitchResponsePlanV1 = Field(repr=False)
     provider_response: OpenAIChatResponseV3 = Field(repr=False)
@@ -66,6 +86,24 @@ class TrustedLifeSwitchResponseExecutionV1(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def exact_execution(self) -> "TrustedLifeSwitchResponseExecutionV1":
+        if self.finalized.attestation.trusted_plan_sha256 != self.trusted_plan.plan_sha256:
+            raise ValueError("finalization differs from LifeSwitch response plan")
+        if (
+            self.finalized.attestation.provider_response_sha256
+            != self.provider_response.response_sha256
+        ):
+            raise ValueError("finalization differs from provider response")
+        return self
+
+
+class IntegratedTrustedLifeSwitchResponseExecutionV1(_StrictFrozenModel):
+    trusted_plan: TrustedLifeSwitchResponsePlanV1 = Field(repr=False)
+    provider_response: OpenAIChatResponseV3 = Field(repr=False)
+    finalized: FinalizedTrustedResponseV2 = Field(repr=False)
+    stage_timings: IntegratedLifeSwitchResponseStageTimingsV1
+
+    @model_validator(mode="after")
+    def exact_execution(self) -> "IntegratedTrustedLifeSwitchResponseExecutionV1":
         if self.finalized.attestation.trusted_plan_sha256 != self.trusted_plan.plan_sha256:
             raise ValueError("finalization differs from LifeSwitch response plan")
         if (
@@ -197,7 +235,67 @@ class InactiveLifeSwitchResponseCompositionRootV0_3:
             raise LifeSwitchCompositionError(stage) from None
 
 
+class IntegratedLifeSwitchResponseCompositionRootV0_3:
+    """Current-route candidate: one base plan, one LifeSwitch pass, one answer."""
+
+    def __init__(
+        self,
+        *,
+        base_root: InactiveResponseCompositionRootV0_2,
+        openai_client: Any,
+        context_provider: LifeSwitchContextPreparationProviderV1,
+        generation_config: OpenAIChatGenerationConfigV1 | None = None,
+        clock: Callable[[], datetime] | None = None,
+        answer_id_factory: Callable[[], UUID] | None = None,
+    ) -> None:
+        self._base_root = base_root
+        self._downstream = InactiveLifeSwitchResponseCompositionRootV0_3(
+            openai_client=openai_client,
+            context_provider=context_provider,
+            generation_config=generation_config,
+            clock=clock,
+            answer_id_factory=answer_id_factory,
+        )
+
+    async def execute_detailed(
+        self,
+        conn: Any,
+        command: AuthenticatedResponseCommandV0_2,
+    ) -> IntegratedTrustedLifeSwitchResponseExecutionV1:
+        pipeline_started_ns = time.monotonic_ns()
+        prepared = await self._base_root.prepare_detailed(conn, command)
+        downstream = await self._downstream.execute(
+            base_response_plan=prepared.trusted_plan,
+            conversation_snapshot=prepared.conversation_snapshot,
+        )
+        base = prepared.stage_timings
+        life = downstream.stage_timings
+        return IntegratedTrustedLifeSwitchResponseExecutionV1(
+            trusted_plan=downstream.trusted_plan,
+            provider_response=downstream.provider_response,
+            finalized=downstream.finalized,
+            stage_timings=IntegratedLifeSwitchResponseStageTimingsV1(
+                command_validation_ms=base.command_validation_ms,
+                conversation_snapshot_ms=base.conversation_snapshot_ms,
+                policy_input_ms=base.policy_input_ms,
+                signal_classification_ms=base.signal_classification_ms,
+                signal_binding_ms=base.signal_binding_ms,
+                memory_selection_ms=base.memory_selection_ms,
+                trusted_request_ms=base.trusted_request_ms,
+                orchestration_ms=base.orchestration_ms,
+                lifeswitch_context_selection_ms=life.context_selection_ms,
+                lifeswitch_prompt_augmentation_ms=life.prompt_augmentation_ms,
+                answer_generation_ms=life.answer_generation_ms,
+                finalization_ms=life.finalization_ms,
+                pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
+            ),
+        )
+
+
 __all__ = [
+    "IntegratedLifeSwitchResponseCompositionRootV0_3",
+    "IntegratedLifeSwitchResponseStageTimingsV1",
+    "IntegratedTrustedLifeSwitchResponseExecutionV1",
     "InactiveLifeSwitchResponseCompositionRootV0_3",
     "LifeSwitchCompositionError",
     "LifeSwitchContextPreparationProviderV1",

@@ -5,12 +5,17 @@ from typing import Any
 from uuid import UUID
 
 from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
+from rag_engine.openai_chat_request_v3 import OpenAIChatCompletionsAdapterV2
+from rag_engine.response_lifeswitch_integration_v1 import (
+    TrustedLifeSwitchResponsePlanV1,
+)
 from rag_engine import usage_ledger_v1
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
     AdminUsageUsersRequestV1,
     UsageLedgerError,
     persist_openai_chat_usage_v1,
+    persist_openai_chat_usage_v2,
 )
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_response_orchestration_v0_2 import (
@@ -20,6 +25,7 @@ from tests.test_response_orchestration_v0_2 import (
     orchestrator,
     trusted_request,
 )
+from tests.test_response_lifeswitch_integration_v1 import selected_context
 
 
 ANSWER = UUID("90000000-0000-4000-8000-000000000088")
@@ -73,7 +79,42 @@ async def chat_response():
     return OpenAIChatCompletionsAdapterV1(FakeClient(raw)).complete(plan)
 
 
+async def chat_response_v3():
+    message = "Was I low on protein Monday?"
+    base = await orchestrator(FixedSafetyProvider()).build_plan(
+        trusted_request(
+            authenticated_actor_user_id=ACTOR,
+            request_id="usage-ledger-request-v3",
+            conversation=messages(message),
+        )
+    )
+    plan = TrustedLifeSwitchResponsePlanV1.create(
+        base_response_plan=base,
+        lifeswitch_context=selected_context(base, message),
+    )
+    raw = provider_response(prompt_tokens=120, completion_tokens=20)
+    raw["usage"]["prompt_tokens_details"] = {"cached_tokens": 40}
+    raw["usage"]["completion_tokens_details"] = {"reasoning_tokens": 12}
+    return OpenAIChatCompletionsAdapterV2(FakeClient(raw)).complete(plan)
+
+
 class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_v3_response_persists_through_versioned_usage_adapter(self) -> None:
+        response = await chat_response_v3()
+        conn = FakeConnection(insert_row={"ai_usage_event_id": ANSWER})
+
+        await persist_openai_chat_usage_v2(
+            conn,
+            owner_user_id=ACTOR,
+            answer_id=ANSWER,
+            source_channel="chat",
+            provider_response=response,
+        )
+
+        insert = conn.fetchrow_calls[0]
+        self.assertEqual(insert[1][4], response.response_id)
+        self.assertEqual(insert[1][7:12], (120, 40, 20, 12, 140))
+
     async def test_persists_content_free_exact_provider_usage(self) -> None:
         response = await chat_response()
         conn = FakeConnection(insert_row={"ai_usage_event_id": ANSWER})

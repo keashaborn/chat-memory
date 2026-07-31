@@ -13,7 +13,11 @@ from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchResponseContextProviderV1,
 )
 from rag_engine.response_composition_root_v0_3 import (
+    IntegratedLifeSwitchResponseCompositionRootV0_3,
     InactiveLifeSwitchResponseCompositionRootV0_3,
+)
+from rag_engine.response_composition_root_v0_2 import (
+    InactiveResponseCompositionRootV0_2,
 )
 from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
@@ -40,6 +44,11 @@ from tests.test_response_orchestration_v0_2 import (
     messages,
     orchestrator,
     trusted_request,
+)
+from tests.test_response_composition_root_v0_2 import (
+    CombinedOpenAIClient,
+    SnapshotConn,
+    command,
 )
 
 
@@ -151,6 +160,42 @@ class FakeConnection:
 
 
 class LifeSwitchResponseRuntimeV1Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_integrated_root_builds_one_base_plan_and_one_answer(self) -> None:
+        message = "Was I low on protein Monday?"
+        context_base = await orchestrator(FixedSafetyProvider()).build_plan(
+            trusted_request(
+                authenticated_actor_user_id=ACTOR,
+                request_id="composition-request",
+                conversation=messages(message),
+            )
+        )
+        context = selected_context(context_base, message)
+        client = CombinedOpenAIClient()
+        base_root = InactiveResponseCompositionRootV0_2(
+            openai_client=client,
+            classifier_model="gpt-5.1",
+        )
+        root = IntegratedLifeSwitchResponseCompositionRootV0_3(
+            base_root=base_root,
+            openai_client=client,
+            context_provider=FixedContextProvider(context),
+            clock=lambda: NOW,
+            answer_id_factory=lambda: ANSWER,
+        )
+
+        execution = await root.execute_detailed(
+            SnapshotConn(),
+            command(message),
+        )
+
+        self.assertEqual(
+            [name for name, _ in client.calls],
+            ["classifier", "moderation", "chat"],
+        )
+        self.assertEqual(execution.finalized.answer_id, ANSWER)
+        self.assertIsNotNone(execution.finalized.lifeswitch_binding)
+        self.assertGreaterEqual(execution.stage_timings.pipeline_total_ms, 0)
+
     async def test_provider_adapter_binds_exact_v3_request_and_usage(self) -> None:
         plan = await response_plan()
         expected = OpenAIChatRequestV3.create(source_plan=plan)

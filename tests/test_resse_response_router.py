@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class ResseResponseRouterTests(unittest.TestCase):
     def test_normal_chat_generation_is_backend_owned(self) -> None:
         source = (ROOT / "rag_engine/resse_response_router.py").read_text()
-        self.assertIn("generation_config=OpenAIChatGenerationConfigV1()", source)
+        self.assertIn("generation_config = OpenAIChatGenerationConfigV1()", source)
+        self.assertIn("generation_config=generation_config", source)
         self.assertNotIn("OPENAI_CHAT_MODEL", source)
         self.assertNotIn("normalize_chat_model", source)
 
@@ -59,7 +60,7 @@ class ResseResponseRouterTests(unittest.TestCase):
         source = (ROOT / "rag_engine/resse_response_router.py").read_text()
         self.assertIn("load_assistant_response_preferences_v1(conn, owner)", source)
         self.assertIn(
-            "assistant_response_preferences=(",
+            "assistant_response_preferences=assistant_response_preferences",
             source,
         )
         self.assertNotIn("payload.assistant_name", source)

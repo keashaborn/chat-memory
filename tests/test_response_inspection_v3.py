@@ -5,14 +5,14 @@ import json
 import unittest
 import uuid
 
-from rag_engine.lifeswitch_answer_binding_v1 import (
-    FinalAnswerLifeSwitchBindingV1,
-)
+from rag_engine.openai_chat_request_v3 import OpenAIChatCompletionsAdapterV2
+from rag_engine.response_finalization_v2 import finalize_trusted_response_v2
 from rag_engine.response_lifeswitch_integration_v1 import (
     TrustedLifeSwitchResponsePlanV1,
 )
 from rag_engine.response_inspection_v3 import build_response_inspection_v3
 from tests.test_response_lifeswitch_integration_v1 import selected_context
+from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     FixedSafetyProvider,
@@ -33,28 +33,35 @@ class ResponseInspectionV3Tests(unittest.IsolatedAsyncioTestCase):
             )
         )
         prepared = selected_context(base_plan, message)
-        assembly = TrustedLifeSwitchResponsePlanV1.create(
+        plan = TrustedLifeSwitchResponsePlanV1.create(
             base_response_plan=base_plan,
             lifeswitch_context=prepared,
-        ).assembled_prompt
-        binding = FinalAnswerLifeSwitchBindingV1.create(
-            assembly=assembly,
-            authenticated_actor_user_id=ACTOR,
+        )
+        response = OpenAIChatCompletionsAdapterV2(
+            FakeClient(provider_response(content="Use Monday's recorded totals."))
+        ).complete(plan)
+        finalized = finalize_trusted_response_v2(
+            trusted_plan=plan,
+            provider_response=response,
             answer_id=uuid.uuid4(),
             created_at=dt.datetime.now(dt.timezone.utc),
         )
 
         trace = build_response_inspection_v3(
-            prepared=prepared,
-            assembled=assembly,
-            binding=binding,
+            trusted_plan=plan,
+            provider_response=response,
+            finalized=finalized,
+            transcript_persistence="persisted",
         )
 
         exported = json.dumps(trace.model_dump(mode="json"), sort_keys=True)
         self.assertEqual(trace.contract_version, "response_inspection_v3")
-        self.assertTrue(trace.before_openai.included)
-        self.assertEqual(trace.before_openai.projections, ("nutrition_day",))
-        self.assertEqual(trace.after_openai.answer_binding, "bound")
+        self.assertTrue(trace.before_openai.lifeswitch_included)
+        self.assertEqual(
+            trace.before_openai.lifeswitch_projections,
+            ("nutrition_day",),
+        )
+        self.assertEqual(trace.after_openai.lifeswitch_binding, "bound")
         self.assertNotIn(message, exported)
         self.assertNotIn(str(ACTOR), exported)
         self.assertNotIn("protein_g", exported)

@@ -15,6 +15,7 @@ import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_engine.openai_chat_provider_v1 import OpenAIChatResponseV1
+from rag_engine.openai_chat_request_v3 import OpenAIChatResponseV3
 
 
 LEGACY_USAGE_SCHEMA = "admin_usage_summary_v1"
@@ -232,12 +233,55 @@ async def persist_openai_chat_usage_v1(
     source_channel: str,
     provider_response: OpenAIChatResponseV1,
 ) -> None:
-    if source_channel not in {"chat", "voice"}:
-        raise UsageLedgerError("invalid source channel")
     try:
         response = OpenAIChatResponseV1.model_validate_json(
             provider_response.model_dump_json()
         )
+    except Exception:
+        raise UsageLedgerError("OpenAI usage response is invalid") from None
+    await _persist_openai_chat_usage_record_v1(
+        conn,
+        owner_user_id=owner_user_id,
+        answer_id=answer_id,
+        source_channel=source_channel,
+        response=response,
+    )
+
+
+async def persist_openai_chat_usage_v2(
+    conn: Any,
+    *,
+    owner_user_id: UUID,
+    answer_id: UUID,
+    source_channel: str,
+    provider_response: OpenAIChatResponseV3,
+) -> None:
+    try:
+        response = OpenAIChatResponseV3.model_validate_json(
+            provider_response.model_dump_json()
+        )
+    except Exception:
+        raise UsageLedgerError("OpenAI usage response is invalid") from None
+    await _persist_openai_chat_usage_record_v1(
+        conn,
+        owner_user_id=owner_user_id,
+        answer_id=answer_id,
+        source_channel=source_channel,
+        response=response,
+    )
+
+
+async def _persist_openai_chat_usage_record_v1(
+    conn: Any,
+    *,
+    owner_user_id: UUID,
+    answer_id: UUID,
+    source_channel: str,
+    response: OpenAIChatResponseV1 | OpenAIChatResponseV3,
+) -> None:
+    if source_channel not in {"chat", "voice"}:
+        raise UsageLedgerError("invalid source channel")
+    try:
         async with conn.transaction():
             await _set_writer_role(conn)
             await conn.execute(
@@ -1151,4 +1195,5 @@ __all__ = [
     "build_admin_usage_user_detail_v1",
     "build_admin_usage_users_v1",
     "persist_openai_chat_usage_v1",
+    "persist_openai_chat_usage_v2",
 ]
