@@ -173,6 +173,30 @@ docker exec -i "$container" psql -U sage -d "$clone" -X \
 docker exec -i "$container" psql -U sage -d "$clone" -X \
   -v ON_ERROR_STOP=1 <"$repo/$exact_migration" >/dev/null
 
+test "$(scalar "$clone" "
+  SELECT has_function_privilege(
+    'memory_v5_local_supersession_maintainer',
+    'memory.plan_owner_v5_2_semantic_compiler_v10_supersession_v1(uuid,uuid)',
+    'EXECUTE'
+  )::integer")" -eq 1
+test "$(scalar "$clone" "
+  SELECT has_function_privilege(
+    'brains_app',
+    'memory.plan_owner_v5_2_semantic_compiler_v10_supersession_v1(uuid,uuid)',
+    'EXECUTE'
+  )::integer")" -eq 1
+test "$(scalar "$clone" "
+  SELECT count(*)
+  FROM pg_proc AS procedure
+  CROSS JOIN LATERAL aclexplode(COALESCE(
+    procedure.proacl,acldefault('f',procedure.proowner)
+  )) AS privilege
+  WHERE procedure.oid=
+    'memory.plan_owner_v5_2_semantic_compiler_v10_supersession_v1(uuid,uuid)'
+      ::regprocedure
+    AND privilege.grantee=0
+    AND privilege.privilege_type='EXECUTE'")" -eq 0
+
 set -a
 source "$production_repo/.env"
 set +a

@@ -574,7 +574,7 @@ memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
 ) FROM PUBLIC,brains_app,memory_v5_local_supersession_maintainer;
 GRANT EXECUTE ON FUNCTION
 memory.plan_owner_v5_2_semantic_compiler_v10_supersession_v1(uuid,uuid)
-  TO brains_app;
+  TO brains_app,memory_v5_local_supersession_maintainer;
 GRANT EXECUTE ON FUNCTION
 memory.finalize_owner_v5_2_semantic_compiler_v10_supersession_v1(
   uuid,uuid,uuid,uuid,text,text,text,text
