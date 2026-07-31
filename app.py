@@ -87,6 +87,12 @@ from rag_engine.admin_memory_workbench_v1 import (
     list_admin_memory_workbench_v1,
     record_admin_memory_workbench_feedback_v2,
 )
+from rag_engine.admin_ai_operations_v1 import (
+    AiOperationsError,
+    acknowledge_admin_ai_operations_incident_v1,
+    list_admin_ai_operations_incidents_v1,
+    resolve_admin_ai_operations_incident_v1,
+)
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
     AdminUsageUsersRequestV1,
@@ -520,6 +526,134 @@ def infer_extra_tags(text: str, source: str = "frontend") -> List[str]:
     return extra
 
 
+
+
+# ---------- AI Operations ----------
+AI_OPERATIONS_INSPECTION_CAPABILITY = "inspector.view"
+AI_OPERATIONS_MANAGEMENT_CAPABILITY = "incident.manage"
+
+
+def _require_ai_operations_actor(
+    req: Request,
+    required_capability: str,
+):
+    actor = _actor_user_id(req)
+    if not actor:
+        return _actor_missing_response(), None
+    actor_uuid = parse_uuid(actor)
+    if actor_uuid is None:
+        return JSONResponse(
+            {"ok": False, "error": "invalid_actor_user_id"},
+            status_code=400,
+        ), None
+    capability = (
+        req.headers.get("x-vs-authorized-capability") or ""
+    ).strip()
+    if not hmac.compare_digest(capability, required_capability):
+        return JSONResponse(
+            {"ok": False, "error": "capability_required"},
+            status_code=403,
+        ), None
+    return None, str(actor_uuid)
+
+
+def _ai_operations_error_response(
+    req: Request,
+    exc: AiOperationsError,
+) -> JSONResponse:
+    rid = getattr(req.state, "request_id", None) or _get_request_id(req)
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": exc.code,
+            "request_id": rid,
+        },
+        status_code=exc.status_code,
+        headers={"x-request-id": rid},
+    )
+
+
+@app.get("/admin/ai-operations/incidents")
+async def admin_ai_operations_incidents(req: Request):
+    denied, actor = _require_ai_operations_actor(
+        req,
+        AI_OPERATIONS_INSPECTION_CAPABILITY,
+    )
+    if denied is not None:
+        return denied
+    params = req.query_params
+    state = (params.get("state") or "").strip() or None
+    try:
+        limit = int(params.get("limit") or 50)
+        return await list_admin_ai_operations_incidents_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            state=state,
+            limit=limit,
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_ai_operations_query"},
+            status_code=400,
+        )
+    except AiOperationsError as exc:
+        return _ai_operations_error_response(req, exc)
+
+
+@app.post(
+    "/admin/ai-operations/incidents/{incident_id}/acknowledge"
+)
+async def admin_ai_operations_acknowledge(
+    incident_id: str,
+    req: Request,
+):
+    denied, actor = _require_ai_operations_actor(
+        req,
+        AI_OPERATIONS_MANAGEMENT_CAPABILITY,
+    )
+    if denied is not None:
+        return denied
+    try:
+        return await acknowledge_admin_ai_operations_incident_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            incident_id=incident_id,
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_incident_id"},
+            status_code=400,
+        )
+    except AiOperationsError as exc:
+        return _ai_operations_error_response(req, exc)
+
+
+@app.post(
+    "/admin/ai-operations/incidents/{incident_id}/resolve"
+)
+async def admin_ai_operations_resolve(
+    incident_id: str,
+    req: Request,
+):
+    denied, actor = _require_ai_operations_actor(
+        req,
+        AI_OPERATIONS_MANAGEMENT_CAPABILITY,
+    )
+    if denied is not None:
+        return denied
+    try:
+        return await resolve_admin_ai_operations_incident_v1(
+            dsn=DSN,
+            actor_user_id=actor,
+            incident_id=incident_id,
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_incident_id"},
+            status_code=400,
+        )
+    except AiOperationsError as exc:
+        return _ai_operations_error_response(req, exc)
 
 
 # ---------- admin usage ----------
