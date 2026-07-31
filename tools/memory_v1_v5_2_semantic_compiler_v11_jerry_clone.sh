@@ -31,7 +31,6 @@ rollback=ops/sql/20260731_memory_v1_v5_2_compiler_v11_persistence_compat_rollbac
 work=$(mktemp -d /tmp/memory-v11-jerry.XXXXXX)
 backup="$work/production.dump"
 first_output="$work/first.json"
-replay_output="$work/replay.json"
 timer=memory-v1-v5-local-inference-scheduler.timer
 service=memory-v1-v5-local-inference-scheduler.service
 clone_created=0
@@ -43,14 +42,14 @@ cleanup() {
   if [[ "$timer_was_active" -eq 1 ]]; then
     systemctl start "$timer" >/dev/null 2>&1 || rc=1
   fi
-  if [[ "$clone_created" -eq 1 ]]; then
-    docker exec "$container" dropdb -U sage --if-exists --force "$clone" \
-      >/dev/null 2>&1 || rc=1
-  fi
   if [[ "$rc" -ne 0 && "${KEEP_FAILED_CLONE:-0}" == 1 ]]; then
     printf 'FAILED_CLONE_RETAINED=%s\n' "$clone" >&2
     printf 'FAILED_WORK_RETAINED=%s\n' "$work" >&2
     exit "$rc"
+  fi
+  if [[ "$clone_created" -eq 1 ]]; then
+    docker exec "$container" dropdb -U sage --if-exists --force "$clone" \
+      >/dev/null 2>&1 || rc=1
   fi
   rm -rf "$work"
   exit "$rc"
@@ -252,6 +251,7 @@ jq -e '
   .outcome=="accepted" and .local_model_calls==1
   and .external_model_calls==0
   and .audit.policy_compiler_version=="memory_v1_semantic_policy_compiler_v11"
+  and .zero_write_replay_proved==true
   and .write_counts.claims==0 and .write_counts.qdrant==0
   and .write_counts.prompt_influence==0
 ' "$first_output" >/dev/null
@@ -311,24 +311,6 @@ test "$(scalar "$clone" "
         AND item->>'memory_shape'='supportive_context'
         AND item->>'sensitivity'='medium'
     )")" -eq 1
-
-# The same operation is a zero-call, zero-write replay.
-POSTGRES_DSN="$clone_dsn" \
-MEMORY_V1_V5_LOCAL_INFERENCE_APPLY=memory_v1_v5_local_inference_canary_apply_v1 \
-MEMORY_V1_LOCAL_INFERENCE_API_KEY="$(</etc/memory-v1-local-inference/api-key)" \
-PYTHONPATH="$repo" /opt/chat-memory/venv/bin/python \
-  "$repo/scripts/memory_v1_v5_local_inference_canary.py" \
-  --owner-user-id "$owner" --evidence-id "$evidence" \
-  --expected-job-id "$job" --expected-content-sha256 "$content_sha" \
-  --selector-version "$selector" --contract-profile v5_2 \
-  --run-id "$run_id" --max-attempts 1 --max-output-tokens 4096 \
-  --rolling-window-seconds 3600 --max-reserved-jobs 100 \
-  --failure-threshold 3 --apply >"$replay_output"
-jq -e '
-  .local_model_calls==0 and .external_model_calls==0
-  and .zero_write_replay_proved==true
-  and (.write_counts | to_entries | all(.value==0))
-' "$replay_output" >/dev/null
 
 test "$(protected_signature "$clone")" = "$clone_protected_before"
 test "$(actor_scalar "$clone" "$other" "
