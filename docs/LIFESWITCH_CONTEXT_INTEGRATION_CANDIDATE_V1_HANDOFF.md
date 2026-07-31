@@ -5,10 +5,11 @@ authorized for production activation.
 
 ## Source and scope
 
-- Production base: `9abeeb8ffef7eac336bee71ac89db037f1018f17`
-- Isolated worktree: `/home/ubuntu/chat-memory-lifeswitch-context-gateway-v1`
-- Branch: `codex/lifeswitch-context-gateway-v1-20260731`
-- Rebased LifeSwitch integration parent: `cdd48e88f42b83811f0a6b6c2fde45a0b0473175`
+- Production base: `90b1f8e92709074db1c62536e0004ac9106342ce`
+- Isolated worktree: `/home/ubuntu/chat-memory-lifeswitch-context-gateway-v1-current`
+- Branch: `codex/lifeswitch-context-gateway-v1-current-20260731`
+- Rebased LifeSwitch integration parent: `c94eccf`
+- Owner-gateway correction commit: `86e2cf0ddb9adfc82de905822de737ab048f9ea7`
 
 No production checkout, service, environment variable, database object, Qdrant
 collection, authentication boundary, Memory V1 contract, FM/RAG implementation,
