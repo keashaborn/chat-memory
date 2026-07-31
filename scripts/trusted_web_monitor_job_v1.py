@@ -25,8 +25,10 @@ from rag_engine.trusted_web_monitoring_v1 import (
 
 JOB_CONTRACT_VERSION = "trusted_web_monitor_job_v1"
 ALERT_CONTRACT_VERSION = "trusted_web_monitor_alert_v1"
+INBOX_CONTRACT_VERSION = "ai_operations_monitor_record_v1"
 AUTHORIZED_VALUE = "authorized"
 DRILL_ERROR_CODE = "synthetic_failure_drill"
+MONITOR_NAME = "trusted_web_retrieval"
 DEFAULT_WINDOW_HOURS = 24
 DEFAULT_MAX_RELEVANCE_FAIL_CLOSED = 0
 DEFAULT_MAX_DEPENDENCY_FAILURES = 0
@@ -227,6 +229,60 @@ async def _send_alert(
 ConnectCallable = Callable[..., Awaitable[Any]]
 
 
+async def _record_alert_inbox(
+    connection: Any,
+    report: dict[str, object],
+    *,
+    drill: bool = False,
+) -> str:
+    status = "drill" if drill else str(report["status"])
+    if drill:
+        reason_codes = [DRILL_ERROR_CODE]
+        severity = "test"
+    elif status == "pass":
+        reason_codes = []
+        severity = "info"
+    else:
+        reason_codes = list(
+            report.get("threshold_violations") or []
+        )
+        if not reason_codes and report.get("error_code"):
+            reason_codes = [str(report["error_code"])]
+        severity = "critical"
+    try:
+        result = await connection.fetchval(
+            """
+            SELECT ai_operations.record_monitor_observation_v1(
+                $1,$2,$3,$4,$5::text[],$6,$7,$8,$9,$10,$11,$12,$13
+            )
+            """,
+            MONITOR_NAME,
+            status,
+            severity,
+            drill,
+            reason_codes,
+            int(report.get("window_hours") or DEFAULT_WINDOW_HOURS),
+            int(report.get("request_count") or 0),
+            int(report.get("completed_count") or 0),
+            int(report.get("fail_closed_count") or 0),
+            int(report.get("relevance_fail_closed_count") or 0),
+            int(report.get("dependency_failure_count") or 0),
+            float(report.get("fail_closed_rate") or 0.0),
+            datetime.fromisoformat(
+                str(report["occurred_at"]).replace("Z", "+00:00")
+            ),
+        )
+        if isinstance(result, str):
+            result = json.loads(result)
+        if not isinstance(result, dict):
+            return "failed"
+        if result.get("contract_version") != INBOX_CONTRACT_VERSION:
+            return "failed"
+        return "recorded"
+    except Exception:
+        return "failed"
+
+
 async def run_trusted_web_monitor_job_v1(
     config: TrustedWebMonitorJobConfigV1,
     *,
@@ -235,21 +291,27 @@ async def run_trusted_web_monitor_job_v1(
 ) -> tuple[dict[str, object], int]:
     config = _validate_config(config)
     occurred_at = _now_iso()
+    conn: Any | None = None
     try:
         conn = await connect(config.postgres_dsn, command_timeout=15)
-        try:
-            summary = await load_trusted_web_monitoring_summary_v1(
-                conn,
-                hours=config.window_hours,
-            )
-        finally:
-            await conn.close()
+        summary = await load_trusted_web_monitoring_summary_v1(
+            conn,
+            hours=config.window_hours,
+        )
     except Exception:
         report = _base_report(
             status="unavailable",
             occurred_at=occurred_at,
         )
         report["error_code"] = "monitor_query_failed"
+        report["window_hours"] = config.window_hours
+        report["alert_store"] = "failed"
+        if conn is not None:
+            report["alert_store"] = await _record_alert_inbox(
+                conn,
+                report,
+            )
+            await conn.close()
         report["alert_delivery"] = await _send_alert(
             config,
             report,
@@ -257,23 +319,30 @@ async def run_trusted_web_monitor_job_v1(
         )
         return report, 3
 
-    violations = evaluate_trusted_web_monitoring_thresholds_v1(
-        summary,
-        max_relevance_fail_closed=(
-            config.max_relevance_fail_closed
-        ),
-        max_dependency_failures=config.max_dependency_failures,
-        max_fail_closed_rate=config.max_fail_closed_rate,
-    )
-    report = _base_report(
-        status="violated" if violations else "pass",
-        occurred_at=occurred_at,
-    )
-    report["monitor_contract_version"] = summary.contract_version
-    for key, value in summary.as_dict().items():
-        if key not in {"buckets", "contract_version"}:
-            report[key] = value
-    report["threshold_violations"] = list(violations)
+    try:
+        violations = evaluate_trusted_web_monitoring_thresholds_v1(
+            summary,
+            max_relevance_fail_closed=(
+                config.max_relevance_fail_closed
+            ),
+            max_dependency_failures=config.max_dependency_failures,
+            max_fail_closed_rate=config.max_fail_closed_rate,
+        )
+        report = _base_report(
+            status="violated" if violations else "pass",
+            occurred_at=occurred_at,
+        )
+        report["monitor_contract_version"] = summary.contract_version
+        for key, value in summary.as_dict().items():
+            if key not in {"buckets", "contract_version"}:
+                report[key] = value
+        report["threshold_violations"] = list(violations)
+        report["alert_store"] = await _record_alert_inbox(
+            conn,
+            report,
+        )
+    finally:
+        await conn.close()
     report["alert_delivery"] = "not_needed"
     if violations:
         report["alert_delivery"] = await _send_alert(
@@ -281,21 +350,22 @@ async def run_trusted_web_monitor_job_v1(
             report,
             transport=alert_transport,
         )
+    if report["alert_store"] != "recorded":
+        return report, 3
     return report, 2 if violations else 0
 
 
 async def run_trusted_web_alert_drill_v1(
     config: TrustedWebMonitorJobConfigV1,
     *,
+    connect: ConnectCallable = asyncpg.connect,
     alert_transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[dict[str, object], int]:
-    """Deliver one synthetic alert without querying or mutating search data."""
+    """Record one synthetic alert without querying or mutating search data."""
 
     config = _validate_config(config)
     if config.drill_enabled != AUTHORIZED_VALUE:
         raise MonitorJobConfigurationError("drill_not_authorized")
-    if not config.alert_webhook_url:
-        raise MonitorJobConfigurationError("missing_alert_webhook_url")
 
     report = _base_report(status="drill", occurred_at=_now_iso())
     report.update(
@@ -312,15 +382,33 @@ async def run_trusted_web_alert_drill_v1(
             "fail_closed_rate": 0.0,
         }
     )
+    try:
+        conn = await connect(config.postgres_dsn, command_timeout=15)
+        try:
+            report["alert_store"] = await _record_alert_inbox(
+                conn,
+                report,
+                drill=True,
+            )
+        finally:
+            await conn.close()
+    except Exception:
+        report["alert_store"] = "failed"
     report["alert_delivery"] = await _send_alert(
         config,
         report,
         transport=alert_transport,
         drill=True,
     )
+    delivery_ok = report["alert_delivery"] in {
+        "unconfigured",
+        "delivered",
+    }
     return (
         report,
-        0 if report["alert_delivery"] == "delivered" else 3,
+        0
+        if report["alert_store"] == "recorded" and delivery_ok
+        else 3,
     )
 
 
@@ -332,6 +420,7 @@ def _configuration_failure_report(
         "status": "unavailable",
         "error_code": exc.code,
         "alert_delivery": "not_attempted",
+        "alert_store": "not_attempted",
         "occurred_at": _now_iso(),
     }
 
@@ -366,6 +455,8 @@ async def _main(argv: Sequence[str] | None = None) -> int:
                         DEFAULT_MAX_FAIL_CLOSED_RATE
                     ),
                     "alert_contract_version": ALERT_CONTRACT_VERSION,
+                    "inbox_contract_version": INBOX_CONTRACT_VERSION,
+                    "internal_inbox_required": True,
                     "drill_requires_secondary_authorization": True,
                     "metadata_only": True,
                 },
