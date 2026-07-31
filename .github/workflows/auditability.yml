@@ -32,6 +32,15 @@ jobs:
           docker compose -f docker-compose.ci.yml exec -T brains \
             bash -lc 'VS_SERVICE_TOKEN=ci_only_service_token HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
 
+      - name: Run focused Memory V1 Python tests
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app:/app/scripts \
+            brains python -m pytest -p no:cacheprovider -q \
+              tests/test_memory_v1_v5_local_claim_projection_v2.py \
+              tests/test_admin_memory_health_v1.py \
+              tests/test_memory_v1_contextual_chat_capture_bridge_v1.py
+
       - name: Validate memory V1 schema firewall
         run: ./tools/memory_v1_schema_ci.sh
 
