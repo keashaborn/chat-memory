@@ -27,9 +27,20 @@ work=$(mktemp -d /tmp/memory-v10-exact14.XXXXXX)
 backup="$work/production.dump"
 credential_dir="$work/credential"
 review_root="$work/reviews"
+canary_trace="$work/canary-results.jsonl"
+canary_wrapper="$work/canary-wrapper.sh"
 mkdir -p "$credential_dir" "$review_root"
 chmod 0700 "$work" "$credential_dir" "$review_root"
 clone_created=0
+
+cat >"$canary_wrapper" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+/opt/chat-memory/venv/bin/python \
+  "$repo/scripts/memory_v1_v5_local_inference_canary.py" \
+  "\$@" | tee -a "$canary_trace"
+EOF
+chmod 0700 "$canary_wrapper"
 
 cleanup() {
   rc=$?
@@ -212,6 +223,7 @@ MEMORY_V1_V5_LOCAL_SCHEDULER_APPLY=memory_v1_v5_local_inference_scheduler_apply_
   "$repo/scripts/memory_v1_v5_local_inference_scheduler.py" \
   --owner-user-id "$owner" --selector-version "$selector" \
   --contract-profile v5_2 --max-jobs 14 \
+  --canary "$canary_wrapper" \
   --max-runtime-seconds 3600 --max-attempts 1 --lease-seconds 900 \
   --timeout-seconds 600 --max-output-tokens 4096 \
   --rolling-window-seconds 3600 --max-reserved-jobs 100 \
