@@ -1,0 +1,12 @@
+[Unit]
+Description=Deliver queued AI Operations alerts every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+RandomizedDelaySec=15s
+AccuracySec=5s
+Unit=ai-operations-alert-delivery-v1.service
+
+[Install]
+WantedBy=timers.target

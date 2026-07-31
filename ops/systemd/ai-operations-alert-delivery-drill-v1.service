@@ -1,0 +1,44 @@
+[Unit]
+Description=Run one authorized AI Operations alert email delivery drill
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/chat-memory
+EnvironmentFile=/opt/chat-memory/.env
+EnvironmentFile=-/etc/verbalsage/ai-operations-alert-delivery.env
+Environment=PYTHONPATH=/opt/chat-memory
+Environment=AI_OPERATIONS_ALERT_DRILL_ENABLED=authorized
+ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/ai_operations_alert_delivery_job_v1.py --drill
+TimeoutStartSec=30s
+UMask=0077
+Nice=10
+CPUQuota=10%
+MemoryMax=128M
+TasksMax=16
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+RemoveIPC=true
+SystemCallArchitectures=native
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-operations-alert-delivery-drill-v1
