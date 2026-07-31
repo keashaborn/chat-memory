@@ -1,0 +1,17 @@
+{
+  "contract_version": "memory_v1_v5_2_semantic_compiler_v11_jerry_v1",
+  "owner_user_id": "1240822d-ac9a-4096-95aa-e2b24d36ef50",
+  "selector_version": "20260731_v5_2_semantic_compiler_v11_jerry_v1",
+  "policy_compiler_sha256": "275b5150f42e6d90e0afcebe86b32ab691be2e682c4d0c74e61947652230f6a2",
+  "prior_policy_compiler_sha256": "c50b7e663fa0275051b5ce3522f1124f7f5cf7b0f02aab71bf9535c37e7258ea",
+  "targets": [
+    {
+      "evidence_id": "681ab38d-a742-463c-ad26-c74c65eacaa9",
+      "content_sha256": "46f40455eba48cdd0c4e131cc8f01ea15d8721b761bf0e15365d008a0562ea93",
+      "prior_packet_id": "d7cfab30-ebf8-56d6-b8c6-9db8a94d068d",
+      "prior_packet_storage_sha256": "fa634cbe059919421e6d680bde6df7d292e0ee95c2391446a43f1ecf9a01d6de",
+      "expected_route": "manual_review_artifact_ready",
+      "max_local_model_calls": 1
+    }
+  ]
+}
