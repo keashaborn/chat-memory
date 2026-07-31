@@ -44,7 +44,9 @@ class PredicateRuntimeProfileV2Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             copy_root = Path(temporary)
             shutil.copytree(ROOT / "specs", copy_root / "specs")
-            target = copy_root / "specs/memory_v1_predicate_registry_v5_2.json"
+            target = copy_root / (
+                "specs/memory_v1_predicate_registry_v5_2_compiler_v12.json"
+            )
             target.write_bytes(target.read_bytes() + b"\n")
             with self.assertRaisesRegex(ValueError, "registry SHA-256 mismatch"):
                 load_runtime_profile_v2(copy_root, "v5_2")

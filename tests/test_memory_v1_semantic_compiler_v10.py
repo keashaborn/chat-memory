@@ -233,6 +233,15 @@ class SemanticCompilerV10Test(unittest.TestCase):
             if item["predicate"] == "residence.lives_at"
         ]
         self.assertEqual(residence, [])
+        care_setting = [
+            item
+            for item in value["observations"]
+            if item["predicate"] == "residence.care_setting"
+        ]
+        self.assertEqual(len(care_setting), 1)
+        self.assertEqual(
+            care_setting[0]["object"]["value"], "assisted_living"
+        )
         self.assertNotIn(
             "assisted living",
             {
@@ -273,11 +282,11 @@ class SemanticCompilerV10Test(unittest.TestCase):
             duration_observation["temporal"]["precision"], "exact"
         )
         self.assertIn(
-            "assisted_living_setting_deferred_until_literal_predicate",
+            "assisted_living_setting_completed",
             repairs,
         )
         self.assertIn("short_term_memory_duration_canonicalized", repairs)
-        self.assertIn(
+        self.assertNotIn(
             "unregistered_predicate",
             {item["reason_code"] for item in value["deferrals"]},
         )
@@ -298,7 +307,7 @@ class SemanticCompilerV10Test(unittest.TestCase):
             allowed_provider_versions={"local_llama_cpp": "v1"},
             max_external_model_calls=0,
         )
-        self.assertEqual(len(validated.normalized_packet["observations"]), 2)
+        self.assertEqual(len(validated.normalized_packet["observations"]), 4)
 
     def test_or_so_is_preserved_as_an_approximate_duration_cue(self) -> None:
         match = _SHORT_TERM_MEMORY_DURATION_RE.search(

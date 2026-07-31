@@ -24,9 +24,9 @@
     "v5_2": {
       "contract_version": "memory_v1_relational_extraction_v5_2",
       "lifecycle": "shadow_review_staging",
-      "registry_artifact_sha256": "e6ac5dfe7d7939aac23223ae76272b2e4f67777decde814d9bf0b8eee82b277e",
-      "registry_canonical_sha256": "446c0f9df2e3f12bab90cea5b056c5dc3da09a81c6d7ffd9c62252cdcf6c4876",
-      "registry_path": "specs/memory_v1_predicate_registry_v5_2.json",
+      "registry_artifact_sha256": "c244bc7c9727f5218c649dabd57e513053f73957316ad534a20b2f45ec719690",
+      "registry_canonical_sha256": "d40e79057070aa6760af474dc8ca2695ad0024320afde562753e840356cf9f06",
+      "registry_path": "specs/memory_v1_predicate_registry_v5_2_compiler_v12.json",
       "registry_version": "memory_predicate_registry_v5_2",
       "schema_artifact_sha256": "ad35ec61a5816c93c284b32a8e392e7088c26233a7471251915233e97178531c",
       "schema_path": "specs/memory_v1_relational_extraction_v5_2.schema.json"

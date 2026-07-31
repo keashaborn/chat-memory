@@ -54,7 +54,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v11"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v12"
 EVIDENCE_CONTEXT_COREFERENCE_VERSION = (
     "memory_v1_evidence_context_coreference_v1"
 )
@@ -2152,6 +2152,15 @@ _EXPLICIT_NAMED_ASSERTION_RE = re.compile(
     r"[^\s.!?,][^.!?,]{0,119}",
     re.IGNORECASE,
 )
+_EXPLICIT_ENTITY_NAME_RE = re.compile(
+    r"\b(?P<possessive>my|his|her|their|its)\s+"
+    r"(?:(?P<role>father|mother|dad|mom|sister|brother|spouse|wife|"
+    r"husband|dog|cat|pet)['’]s\s+)?name\s+is\s+"
+    r"(?P<name>[^\s.!?,][^.!?,]{0,119}?)"
+    r"(?=\s+(?:and|but|who|which|that|has|had|is|was|lives?|died)\b|"
+    r"[.!?,]|$)",
+    re.IGNORECASE,
+)
 _EXPLICIT_LIFE_PREFERENCE_RE = re.compile(
     r"^\s*i\s+(?P<cue>"
     r"really\s+love|love|really\s+like|like|enjoy|prefer|"
@@ -2599,6 +2608,20 @@ _PARTNER_ROLE_RE = re.compile(
 
 def _source_span(source: TrustedExtractionSource) -> dict[str, Any]:
     return {"start": 0, "end": len(source.content), "quote": source.content}
+
+
+def _matched_span(source: TrustedExtractionSource, match: re.Match[str]) -> dict[str, Any]:
+    start, end = match.span()
+    return {"start": start, "end": end, "quote": source.content[start:end]}
+
+
+def _group_span(
+    source: TrustedExtractionSource,
+    match: re.Match[str],
+    group: str,
+) -> dict[str, Any]:
+    start, end = match.span(group)
+    return {"start": start, "end": end, "quote": source.content[start:end]}
 
 
 def _named_relationship_span(
@@ -3736,6 +3759,159 @@ def _observation_source_text(
     return "\n".join(pieces)
 
 
+_ALIGNMENT_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "for",
+        "has",
+        "in",
+        "is",
+        "it",
+        "of",
+        "or",
+        "the",
+        "to",
+    }
+)
+
+
+def _alignment_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if token not in _ALIGNMENT_STOPWORDS
+    }
+
+
+def _observation_alignment_terms(observation: dict[str, Any]) -> set[str]:
+    object_value = observation.get("object")
+    if not isinstance(object_value, dict) or object_value.get("kind") != "literal":
+        return set()
+    value = object_value.get("value")
+    predicate = observation.get("predicate")
+    if predicate == "identity.name" and isinstance(value, str):
+        return _alignment_tokens(value)
+    if predicate == "residence.care_setting" and value == "assisted_living":
+        return {"assisted", "living"}
+    if (
+        predicate == "health.user_reported_observation"
+        and isinstance(value, str)
+        and "explicit_short_term_memory_duration"
+        in observation.get("reason_codes", [])
+    ):
+        duration = re.search(
+            r"(?P<value>\d+(?:\.\d+)?|one|two|three|four|five|six|"
+            r"seven|eight|nine|ten)\s+(?P<unit>seconds?|minutes?|hours?)",
+            value,
+            re.IGNORECASE,
+        )
+        if duration is not None:
+            return _alignment_tokens(duration.group(0))
+    if isinstance(value, str):
+        return _alignment_tokens(value)
+    if isinstance(value, dict):
+        strings = [
+            value.get("position"),
+            value.get("topic_text"),
+        ]
+        return set().union(
+            *(
+                _alignment_tokens(item)
+                for item in strings
+                if isinstance(item, str)
+            )
+        )
+    return set()
+
+
+def _source_clause_spans(source: TrustedExtractionSource) -> tuple[dict[str, Any], ...]:
+    spans: list[dict[str, Any]] = []
+    for match in re.finditer(r"[^.!?\n]+(?:[.!?]+|$)", source.content):
+        start, end = match.span()
+        while start < end and source.content[start].isspace():
+            start += 1
+        while end > start and source.content[end - 1].isspace():
+            end -= 1
+        if start < end:
+            spans.append(
+                {
+                    "start": start,
+                    "end": end,
+                    "quote": source.content[start:end],
+                }
+            )
+    return tuple(spans)
+
+
+def _repair_observation_source_alignment(
+    source: TrustedExtractionSource,
+    observations: list[dict[str, Any]],
+    comparison_hints: list[dict[str, Any]],
+    deferrals: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Repair semantically misaligned spans or fail closed."""
+    repairs: list[str] = []
+    rejected_refs: set[str] = set()
+    candidate_spans = _source_clause_spans(source)
+    for observation in observations:
+        if any(
+            span.get("start") == 0
+            and span.get("end") == len(source.content)
+            for span in observation.get("source_spans", [])
+            if isinstance(span, dict)
+        ):
+            continue
+        terms = _observation_alignment_terms(observation)
+        if not terms:
+            continue
+        current_terms = _alignment_tokens(
+            _observation_source_text(source.content, observation)
+        )
+        current_score = len(terms & current_terms) / len(terms)
+        if current_score >= 0.6:
+            continue
+        scored = [
+            (
+                len(terms & _alignment_tokens(str(span["quote"])))
+                / len(terms),
+                -(int(span["end"]) - int(span["start"])),
+                span,
+            )
+            for span in candidate_spans
+        ]
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        if scored and scored[0][0] >= 0.6:
+            observation["source_spans"] = [scored[0][2]]
+            repairs.append("observation_source_span_realigned")
+            continue
+        rejected_refs.add(str(observation["observation_ref"]))
+        repairs.append("observation_source_alignment_failed_closed")
+    if not rejected_refs:
+        return tuple(repairs)
+    observations[:] = [
+        item
+        for item in observations
+        if str(item.get("observation_ref")) not in rejected_refs
+    ]
+    comparison_hints[:] = [
+        item
+        for item in comparison_hints
+        if str(item.get("observation_ref")) not in rejected_refs
+    ]
+    _append_deferral_once(
+        deferrals,
+        reason_code="insufficient_evidence",
+        memory_shape="none",
+        source_spans=[_source_span(source)],
+        sensitivity="medium",
+    )
+    return tuple(repairs)
+
+
 def _relationship_source_class(content: str) -> str:
     if _MIXED_AUTHOR_RE.search(content):
         return "assistant_statement"
@@ -4330,6 +4506,88 @@ def _historical_state_before_source_temporal(
     )
 
 
+def _augment_explicit_entity_name(
+    source: TrustedExtractionSource,
+    entities: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Complete an explicit name statement for one unambiguous entity."""
+    match = _EXPLICIT_ENTITY_NAME_RE.search(source.content)
+    if match is None:
+        return ()
+    named_value = match.group("name").strip(" \t\r\n\"'‘’“”.,;:")
+    if not named_value:
+        return ()
+    non_self_entities = [
+        item
+        for item in entities
+        if item.get("entity_type") in {"animal", "person"}
+    ]
+    referenced_refs = {
+        str(item["subject_entity_ref"])
+        for item in observations
+        if item.get("subject_entity_ref")
+        in {entity.get("entity_ref") for entity in non_self_entities}
+    }
+    if len(non_self_entities) == 1:
+        target = non_self_entities[0]
+    elif len(referenced_refs) == 1:
+        target = next(
+            item
+            for item in non_self_entities
+            if item.get("entity_ref") in referenced_refs
+        )
+    else:
+        return ()
+
+    repairs: list[str] = []
+    target_ref = str(target["entity_ref"])
+    name_span = _group_span(source, match, "name")
+    statement_span = _matched_span(source, match)
+    if target.get("name_text") != named_value:
+        target["name_text"] = named_value
+        target["mention_kind"] = "named"
+        target["source_spans"] = [statement_span]
+        if "explicit_entity_name_statement" not in target["reason_codes"]:
+            target["reason_codes"].append("explicit_entity_name_statement")
+        repairs.append("explicit_entity_name_mention_canonicalized")
+
+    existing = [
+        item
+        for item in observations
+        if item.get("predicate") == "identity.name"
+        and item.get("subject_entity_ref") == target_ref
+    ]
+    if existing:
+        observation = existing[0]
+        observation["object"] = _literal("text", named_value)
+        observation["source_spans"] = [name_span]
+        if (
+            "explicit_entity_name_statement"
+            not in observation["reason_codes"]
+        ):
+            observation["reason_codes"].append(
+                "explicit_entity_name_statement"
+            )
+        repairs.append("explicit_entity_name_observation_canonicalized")
+    else:
+        observation = _example_observation(
+            source.content,
+            observation_ref=_next_observation_ref(observations),
+            subject_entity_ref=target_ref,
+            predicate="identity.name",
+            object_value=_literal("text", named_value),
+            projection_class="direct_claim",
+            surface_policy="direct_or_relevant",
+            sensitivity="medium",
+            reason_code="explicit_entity_name_statement",
+        )
+        observation["source_spans"] = [name_span]
+        observations.append(observation)
+        repairs.append("explicit_entity_name_observation_completed")
+    return tuple(repairs)
+
+
 def _augment_assisted_living_and_memory_duration(
     source: TrustedExtractionSource,
     entities: list[dict[str, Any]],
@@ -4368,27 +4626,16 @@ def _augment_assisted_living_and_memory_duration(
     repairs: list[str] = []
 
     if residence_match is not None:
-        place_name = " ".join(
-            residence_match.group("place").replace("-", " ").split()
-        ).casefold()
-        place_entity = next(
-            (
-                item
-                for item in entities
-                if item.get("entity_type") == "place"
-                and isinstance(item.get("name_text"), str)
-                and " ".join(
-                    item["name_text"].replace("-", " ").split()
-                ).casefold()
-                == place_name
-            ),
-            None,
-        )
-        place_ref = (
-            str(place_entity["entity_ref"])
-            if place_entity is not None
-            else None
-        )
+        place_entity_refs = {
+            str(item["entity_ref"])
+            for item in entities
+            if item.get("entity_type") == "place"
+            and isinstance(item.get("name_text"), str)
+            and "assisted living"
+            in " ".join(
+                item["name_text"].replace("-", " ").split()
+            ).casefold()
+        }
         residence_indexes = [
             index
             for index, item in enumerate(observations)
@@ -4413,25 +4660,43 @@ def _augment_assisted_living_and_memory_duration(
             for item in comparison_hints
             if item.get("observation_ref") not in removed_residence_refs
         ]
-        if place_ref is not None and not any(
-            isinstance(item.get("object"), dict)
-            and item["object"].get("kind") == "entity"
-            and item["object"].get("entity_ref") == place_ref
-            for item in observations
-        ):
+        if place_entity_refs:
             entities[:] = [
-                item for item in entities if item.get("entity_ref") != place_ref
+                item
+                for item in entities
+                if item.get("entity_ref") not in place_entity_refs
             ]
-        _append_deferral_once(
-            deferrals,
-            reason_code="unregistered_predicate",
-            memory_shape="supportive_context",
-            source_spans=[_source_span(source)],
-            sensitivity="medium",
+        deferrals[:] = [
+            item
+            for item in deferrals
+            if not (
+                item.get("reason_code") == "unregistered_predicate"
+                and item.get("memory_shape") == "supportive_context"
+            )
+        ]
+        care_setting = _example_observation(
+            content,
+            observation_ref=_next_observation_ref(observations),
+            subject_entity_ref=person_ref,
+            predicate="residence.care_setting",
+            object_value=_literal("enum", "assisted_living"),
+            projection_class="supportive_context",
+            surface_policy="explicit_recall_only",
+            sensitivity="high",
+            reason_code="explicit_assisted_living_setting",
+            modality="reported_observation",
+            temporal_semantic="state_validity",
         )
-        repairs.append(
-            "assisted_living_setting_deferred_until_literal_predicate"
+        care_setting["source_spans"] = [
+            _group_span(source, residence_match, "place")
+        ]
+        care_setting["temporal"] = _relationship_v5_1_temporal(
+            source,
+            temporal_profile="active_interval",
+            historical_end=False,
         )
+        observations.append(care_setting)
+        repairs.append("assisted_living_setting_completed")
 
     if duration_match is not None:
         duration = " ".join(
@@ -4482,6 +4747,7 @@ def _augment_assisted_living_and_memory_duration(
             target["modality"] = "reported_observation"
             target["surface_policy"] = "explicit_recall_only"
             target["sensitivity"] = "high"
+            target["source_spans"] = [_matched_span(source, duration_match)]
             target["temporal"] = _relationship_v5_1_temporal(
                 source,
                 temporal_profile="active_interval",
@@ -4515,6 +4781,7 @@ def _augment_assisted_living_and_memory_duration(
                 health["reason_codes"].append(
                     "approximate_reported_duration"
                 )
+            health["source_spans"] = [_matched_span(source, duration_match)]
             observations.append(health)
             repairs.append("short_term_memory_duration_completed")
     return tuple(repairs)
@@ -4815,6 +5082,13 @@ def _compile_entity_links(
                 value["entity_mentions"] = []
                 entities = value["entity_mentions"]
     if registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION:
+        repairs.extend(
+            _augment_explicit_entity_name(
+                source,
+                entities,
+                observations,
+            )
+        )
         repairs.extend(
             _augment_assisted_living_and_memory_duration(
                 source,
@@ -6029,6 +6303,15 @@ def _compile_entity_links(
         if not observations:
             value["entity_mentions"] = []
             value["comparison_hints"] = []
+
+    repairs.extend(
+        _repair_observation_source_alignment(
+            source,
+            observations,
+            value["comparison_hints"],
+            value["deferrals"],
+        )
+    )
 
     if observations and original_global_insufficient_ids:
         retained_deferrals = [
