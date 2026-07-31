@@ -55,8 +55,92 @@ def _number(value: Any) -> float:
     return round(float(value or 0), 1)
 
 
+def _optional_number(value: Any) -> float | None:
+    return None if value is None else round(float(value), 1)
+
+
 def _average(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 1) if values else None
+
+
+def _percent_change(early: Any, recent: Any) -> float | None:
+    if early is None or recent is None:
+        return None
+    baseline = float(early)
+    if abs(baseline) < 1e-9:
+        return None
+    return round((float(recent) - baseline) / abs(baseline) * 100.0, 1)
+
+
+def _trend_signal(change: float | None, threshold: float) -> str:
+    if change is None:
+        return "unavailable"
+    if change >= threshold:
+        return "improving"
+    if change <= -threshold:
+        return "declining"
+    return "stable"
+
+
+def _lifting_microanalysis(row: Mapping[str, Any]) -> dict[str, Any]:
+    exposures = int(row["exposure_count"])
+    early_count = int(row["early_exposure_count"])
+    recent_count = int(row["recent_exposure_count"])
+    enough_evidence = exposures >= 3 and early_count > 0 and recent_count > 0
+
+    load_change = (
+        _percent_change(row["early_max_load"], row["recent_max_load"])
+        if bool(row["load_comparable"])
+        else None
+    )
+    reps_change = _percent_change(
+        row["early_reps_per_set"], row["recent_reps_per_set"]
+    )
+    volume_change = (
+        _percent_change(row["early_volume_per_set"], row["recent_volume_per_set"])
+        if bool(row["load_comparable"])
+        else None
+    )
+    load_signal = _trend_signal(load_change, 2.5)
+    reps_signal = _trend_signal(reps_change, 5.0)
+    volume_signal = _trend_signal(volume_change, 5.0)
+    primary = [signal for signal in (load_signal, reps_signal) if signal != "unavailable"]
+    if not primary:
+        primary = [volume_signal] if volume_signal != "unavailable" else []
+
+    if not enough_evidence or not primary:
+        trend = "insufficient_data"
+        confidence = "insufficient"
+    else:
+        improving = "improving" in primary
+        declining = "declining" in primary
+        if improving and declining:
+            trend = "mixed"
+        elif improving:
+            trend = "improving"
+        elif declining:
+            trend = "declining"
+        elif volume_signal == "improving":
+            trend = "improving"
+        elif volume_signal == "declining":
+            trend = "declining"
+        else:
+            trend = "stable"
+
+        if exposures >= 10 and early_count >= 5 and recent_count >= 5:
+            confidence = "high"
+        elif exposures >= 6 and early_count >= 3 and recent_count >= 3:
+            confidence = "moderate"
+        else:
+            confidence = "low"
+
+    return {
+        "trend": trend,
+        "confidence": confidence,
+        "load_change_pct": load_change,
+        "reps_per_set_change_pct": reps_change,
+        "volume_per_set_change_pct": volume_change,
+    }
 
 
 def _compact_plan(document: Mapping[str, Any]) -> dict[str, Any]:
@@ -637,62 +721,62 @@ class PostgresLifeSwitchDomainReaderV1:
     ) -> LifeSwitchReadResultV1:
         source, document, plan_relations = await self._resolve_plan(owner_user_id)
         rows = await self._conn.fetch(
-            "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
+            "select * from lifeswitch_chat.read_lifting_progression_summary_v3($1,$2,$3)",
             self._context_id,
             start_date,
             end_date,
         )
         columns = (
             "exercise_name",
+            "trend",
+            "confidence",
             "exposure_count",
-            "set_count",
-            "first_day",
-            "last_day",
-            "first_set_count",
-            "latest_set_count",
-            "first_max_load",
-            "latest_max_load",
-            "first_total_reps",
-            "latest_total_reps",
-            "first_total_volume",
-            "latest_total_volume",
-            "first_average_load",
-            "latest_average_load",
-            "first_load_unit",
-            "latest_load_unit",
+            "load_unit",
+            "early_max_load",
+            "recent_max_load",
+            "load_change_pct",
+            "early_reps_per_set",
+            "recent_reps_per_set",
+            "reps_per_set_change_pct",
+            "volume_per_set_change_pct",
+            "early_sets_per_exposure",
+            "recent_sets_per_exposure",
         )
         payload = {
             "plan_targets": document.get("training_targets", {}),
             "comparison_policy": {
-                "basis": "first_latest_exposure",
-                "same_sets_same_unit": "comparable",
-                "different_sets": "normalize_per_set",
-                "raw_totals_when_sets_differ": "work_only",
-                "different_units": "not_comparable",
-                "mixed_metrics": "use_average_load",
+                "version": "lifting_microanalysis_v1",
+                "basis": "early_recent_halves_excluding_middle",
+                "minimum_exposures": 3,
+                "meaningful_change_pct": {
+                    "load": 2.5,
+                    "reps_per_set": 5.0,
+                    "volume_per_set": 5.0,
+                },
+                "set_count_change": "context_only",
+                "interpretation": "descriptive_not_causal",
+                "advice": "only_when_requested",
             },
             "columns": list(columns),
             "rows": [
                 [
                     row["exercise_name"],
+                    analysis["trend"],
+                    analysis["confidence"],
                     int(row["exposure_count"]),
-                    int(row["set_count"]),
-                    row["first_day"].isoformat(),
-                    row["last_day"].isoformat(),
-                    int(row["first_set_count"]),
-                    int(row["latest_set_count"]),
-                    _number(row["first_max_load"]),
-                    _number(row["latest_max_load"]),
-                    int(row["first_total_reps"]),
-                    int(row["latest_total_reps"]),
-                    _number(row["first_total_volume"]),
-                    _number(row["latest_total_volume"]),
-                    _number(row["first_average_load"]),
-                    _number(row["latest_average_load"]),
-                    row["first_load_unit"],
-                    row["latest_load_unit"],
+                    row["load_unit"] if bool(row["load_comparable"]) else "not_comparable",
+                    _optional_number(row["early_max_load"]),
+                    _optional_number(row["recent_max_load"]),
+                    analysis["load_change_pct"],
+                    _optional_number(row["early_reps_per_set"]),
+                    _optional_number(row["recent_reps_per_set"]),
+                    analysis["reps_per_set_change_pct"],
+                    analysis["volume_per_set_change_pct"],
+                    _optional_number(row["early_sets_per_exposure"]),
+                    _optional_number(row["recent_sets_per_exposure"]),
                 ]
                 for row in rows
+                for analysis in (_lifting_microanalysis(row),)
             ],
         }
         return LifeSwitchReadResultV1(

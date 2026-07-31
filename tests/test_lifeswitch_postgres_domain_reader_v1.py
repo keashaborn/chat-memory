@@ -88,7 +88,7 @@ class FakeConnection:
             return self.progression_rows
         if "read_exercise_frequency_v1" in query:
             return self.frequency_rows
-        if "read_lifting_progression_summary_v2" in query:
+        if "read_lifting_progression_summary_v3" in query:
             return self.lifting_summary_rows
         raise AssertionError(f"unexpected fetch query: {query}")
 
@@ -424,7 +424,7 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             result.source_relations,
         )
 
-    async def test_lifting_summary_pairs_first_and_latest_metrics(self) -> None:
+    async def test_lifting_summary_returns_deterministic_microanalysis(self) -> None:
         start = TODAY - dt.timedelta(days=83)
         conn = FakeConnection(
             active_plan={"document": plan_document()},
@@ -436,18 +436,102 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                     "set_count": 24,
                     "first_day": start,
                     "last_day": TODAY,
-                    "first_set_count": 4,
-                    "latest_set_count": 3,
-                    "first_max_load": 275,
-                    "latest_max_load": 315,
-                    "first_total_reps": 20,
-                    "latest_total_reps": 18,
-                    "first_total_volume": 5000,
-                    "latest_total_volume": 5400,
-                    "first_average_load": 250,
-                    "latest_average_load": 300,
-                    "first_load_unit": "lb",
-                    "latest_load_unit": "lb",
+                    "early_exposure_count": 3,
+                    "recent_exposure_count": 3,
+                    "early_max_load": 275,
+                    "recent_max_load": 302.5,
+                    "early_reps_per_set": 8,
+                    "recent_reps_per_set": 8.8,
+                    "early_volume_per_set": 2000,
+                    "recent_volume_per_set": 2420,
+                    "early_sets_per_exposure": 4,
+                    "recent_sets_per_exposure": 4,
+                    "load_unit": "lb",
+                    "load_comparable": True,
+                    "resolution_sources": ["capture_role"],
+                },
+                {
+                    "exercise_id": "row",
+                    "exercise_name": "Seated Row",
+                    "exposure_count": 6,
+                    "set_count": 18,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "early_exposure_count": 3,
+                    "recent_exposure_count": 3,
+                    "early_max_load": 100,
+                    "recent_max_load": 110,
+                    "early_reps_per_set": 10,
+                    "recent_reps_per_set": 9,
+                    "early_volume_per_set": 1000,
+                    "recent_volume_per_set": 990,
+                    "early_sets_per_exposure": 3,
+                    "recent_sets_per_exposure": 3,
+                    "load_unit": "lb",
+                    "load_comparable": True,
+                    "resolution_sources": ["capture_role"],
+                },
+                {
+                    "exercise_id": "fly",
+                    "exercise_name": "Machine Fly",
+                    "exposure_count": 2,
+                    "set_count": 7,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "early_exposure_count": 1,
+                    "recent_exposure_count": 1,
+                    "early_max_load": 60,
+                    "recent_max_load": 70,
+                    "early_reps_per_set": 10,
+                    "recent_reps_per_set": 12,
+                    "early_volume_per_set": 600,
+                    "recent_volume_per_set": 840,
+                    "early_sets_per_exposure": 3,
+                    "recent_sets_per_exposure": 4,
+                    "load_unit": "lb",
+                    "load_comparable": True,
+                    "resolution_sources": ["capture_role"],
+                },
+                {
+                    "exercise_id": "dip",
+                    "exercise_name": "Dip",
+                    "exposure_count": 6,
+                    "set_count": 21,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "early_exposure_count": 3,
+                    "recent_exposure_count": 3,
+                    "early_max_load": 180,
+                    "recent_max_load": 180,
+                    "early_reps_per_set": 12,
+                    "recent_reps_per_set": 12,
+                    "early_volume_per_set": 2160,
+                    "recent_volume_per_set": 2160,
+                    "early_sets_per_exposure": 3,
+                    "recent_sets_per_exposure": 4,
+                    "load_unit": "lb",
+                    "load_comparable": True,
+                    "resolution_sources": ["capture_role"],
+                },
+                {
+                    "exercise_id": "mixed-unit",
+                    "exercise_name": "Mixed Unit Lift",
+                    "exposure_count": 6,
+                    "set_count": 18,
+                    "first_day": start,
+                    "last_day": TODAY,
+                    "early_exposure_count": 3,
+                    "recent_exposure_count": 3,
+                    "early_max_load": 100,
+                    "recent_max_load": 200,
+                    "early_reps_per_set": 10,
+                    "recent_reps_per_set": 10,
+                    "early_volume_per_set": 1000,
+                    "recent_volume_per_set": 2000,
+                    "early_sets_per_exposure": 3,
+                    "recent_sets_per_exposure": 3,
+                    "load_unit": "mixed",
+                    "load_comparable": False,
                     "resolution_sources": ["capture_role"],
                 }
             ],
@@ -464,23 +548,33 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.plan_source, "agentic_active")
         self.assertEqual(result.payload["plan_targets"]["workouts_per_week"], 4)
         columns = result.payload["columns"]
-        row = dict(zip(columns, result.payload["rows"][0], strict=True))
-        self.assertEqual(row["first_max_load"], 275.0)
-        self.assertEqual(row["latest_max_load"], 315.0)
-        self.assertEqual(row["first_set_count"], 4)
-        self.assertEqual(row["latest_set_count"], 3)
-        self.assertEqual(row["first_average_load"], 250.0)
+        rows = {
+            row[0]: dict(zip(columns, row, strict=True))
+            for row in result.payload["rows"]
+        }
+        self.assertEqual(rows["Back Squat"]["trend"], "improving")
+        self.assertEqual(rows["Back Squat"]["confidence"], "moderate")
+        self.assertEqual(rows["Back Squat"]["load_change_pct"], 10.0)
+        self.assertEqual(rows["Back Squat"]["reps_per_set_change_pct"], 10.0)
+        self.assertEqual(rows["Seated Row"]["trend"], "mixed")
+        self.assertEqual(rows["Machine Fly"]["trend"], "insufficient_data")
+        self.assertEqual(rows["Dip"]["trend"], "stable")
+        self.assertEqual(rows["Dip"]["early_sets_per_exposure"], 3.0)
+        self.assertEqual(rows["Dip"]["recent_sets_per_exposure"], 4.0)
+        self.assertEqual(rows["Mixed Unit Lift"]["trend"], "stable")
+        self.assertIsNone(rows["Mixed Unit Lift"]["load_change_pct"])
+        self.assertIsNone(rows["Mixed Unit Lift"]["volume_per_set_change_pct"])
         self.assertEqual(
-            result.payload["comparison_policy"]["different_sets"],
-            "normalize_per_set",
+            result.payload["comparison_policy"]["basis"],
+            "early_recent_halves_excluding_middle",
         )
         self.assertEqual(
-            result.payload["comparison_policy"]["raw_totals_when_sets_differ"],
-            "work_only",
+            result.payload["comparison_policy"]["set_count_change"],
+            "context_only",
         )
         self.assertEqual(len(conn.calls), 2)
         self.assertIn("read_plan_v1", conn.calls[0][0])
-        self.assertIn("read_lifting_progression_summary_v2", conn.calls[1][0])
+        self.assertIn("read_lifting_progression_summary_v3", conn.calls[1][0])
 
     async def test_frequency_max_rows_remain_within_prompt_budget(self) -> None:
         start = TODAY - dt.timedelta(days=83)
@@ -527,18 +621,18 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
                 "set_count": 99,
                 "first_day": start,
                 "last_day": TODAY,
-                "first_set_count": 4,
-                "latest_set_count": 4,
-                "first_max_load": 100,
-                "latest_max_load": 125,
-                "first_total_reps": 30,
-                "latest_total_reps": 30,
-                "first_total_volume": 3000,
-                "latest_total_volume": 3750,
-                "first_average_load": 100,
-                "latest_average_load": 125,
-                "first_load_unit": "lb",
-                "latest_load_unit": "lb",
+                "early_exposure_count": 12,
+                "recent_exposure_count": 12,
+                "early_max_load": 100,
+                "recent_max_load": 125,
+                "early_reps_per_set": 10,
+                "recent_reps_per_set": 11,
+                "early_volume_per_set": 1000,
+                "recent_volume_per_set": 1375,
+                "early_sets_per_exposure": 4,
+                "recent_sets_per_exposure": 4,
+                "load_unit": "lb",
+                "load_comparable": True,
             }
             for index in range(12)
         ]

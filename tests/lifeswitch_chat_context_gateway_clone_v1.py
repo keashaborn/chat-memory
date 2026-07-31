@@ -147,7 +147,7 @@ async def main() -> None:
                 TEST_DAY,
             )
             lifting_summary = await conn.fetch(
-                "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v3($1,$2,$3)",
                 context_a,
                 TEST_DAY - dt.timedelta(days=30),
                 TEST_DAY,
@@ -204,10 +204,10 @@ async def main() -> None:
             squat_summary = next(
                 row for row in lifting_summary if row["exercise_id"] == "squat"
             )
-            require(float(squat_summary["first_max_load"]) == 180.0, "wrong first load")
-            require(float(squat_summary["latest_max_load"]) == 200.0, "wrong latest load")
-            require(squat_summary["first_set_count"] == 1, "wrong first set count")
-            require(squat_summary["latest_set_count"] == 1, "wrong latest set count")
+            require(float(squat_summary["early_max_load"]) == 180.0, "wrong early load")
+            require(float(squat_summary["recent_max_load"]) == 200.0, "wrong recent load")
+            require(squat_summary["early_exposure_count"] == 1, "wrong early exposure count")
+            require(squat_summary["recent_exposure_count"] == 1, "wrong recent exposure count")
         checks.extend(
             [
                 "guc_forgery_blocked",
@@ -272,7 +272,7 @@ async def main() -> None:
                 TEST_DAY,
             )
             lifting_b = await conn.fetch(
-                "select * from lifeswitch_chat.read_lifting_progression_summary_v2($1,$2,$3)",
+                "select * from lifeswitch_chat.read_lifting_progression_summary_v3($1,$2,$3)",
                 context_b,
                 TEST_DAY - dt.timedelta(days=30),
                 TEST_DAY,
@@ -286,7 +286,13 @@ async def main() -> None:
             require(plan_b_document["primary_goal"] == "Owner B goal", "owner B plan missing")
             require(float(nutrition_b["kcal"]) == 900.0, "owner B nutrition missing")
             require(len(lifting_b) == 1, "owner B lifting summary leaked another owner")
-            require(float(lifting_b[0]["latest_max_load"]) == 400.0, "owner B lift missing")
+            require(lifting_b[0]["exercise_id"] == "squat", "owner B lift missing")
+            require(lifting_b[0]["exposure_count"] == 1, "owner B exposure count wrong")
+            require(
+                lifting_b[0]["early_max_load"] is None
+                and lifting_b[0]["recent_max_load"] is None,
+                "single exposure incorrectly produced a comparison",
+            )
         checks.append("owner_b_isolation")
 
         ended_context_a = context_a
