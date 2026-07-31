@@ -49,6 +49,19 @@ TERMINAL_REASON_CODES = frozenset(
         "insufficient_evidence",
     }
 )
+REVIEW_UNRESOLVED_REASON_CODES = frozenset(
+    {
+        "structured_domain",
+        "question_only",
+        "transient_state",
+        "insufficient_evidence",
+        "entity_resolution_unresolved",
+        "unregistered_predicate",
+    }
+)
+REVIEW_UNRESOLVED_REQUIRED_CODES = frozenset(
+    {"entity_resolution_unresolved", "unregistered_predicate"}
+)
 
 
 def rotate_owners(
@@ -290,11 +303,25 @@ async def plan_owner(
                 """,
                 packet_id,
             )
+            if not rows:
+                rows = await conn.fetch(
+                    """
+                    SELECT *
+                    FROM memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)
+                    """,
+                    packet_id,
+                )
         else:
             rows = await conn.fetch(
                 "SELECT * FROM memory.plan_owner_v5_2_local_packet_route_v1($1)",
                 1,
             )
+            if not rows:
+                rows = await conn.fetch(
+                    "SELECT * FROM "
+                    "memory.plan_owner_v5_2_zero_atom_deferral_route_v1($1)",
+                    1,
+                )
     if len(rows) > 1:
         raise RuntimeError("V5.2 route planner exceeded its bound")
     return dict(rows[0]) if rows else None
@@ -321,25 +348,57 @@ async def finalize_terminal(
         routing_basis_sha256=target["routing_basis_sha256"],
     )
     reason_codes = list(target["source_deferral_reason_codes"])
-    if not reason_codes or not set(reason_codes).issubset(TERMINAL_REASON_CODES):
+    route_reason = target["reason_code"]
+    reason_set = set(reason_codes)
+    if route_reason == "deferral_only_review_unresolved_v5_2":
+        if (
+            not reason_set
+            or not reason_set.issubset(REVIEW_UNRESOLVED_REASON_CODES)
+            or not reason_set.intersection(REVIEW_UNRESOLVED_REQUIRED_CODES)
+        ):
+            raise RuntimeError(
+                "planner returned an invalid unresolved-review terminal reason"
+            )
+    elif (
+        route_reason != "deferral_only_no_stage_v5_2"
+        or not reason_set
+        or not reason_set.issubset(TERMINAL_REASON_CODES)
+    ):
         raise RuntimeError("planner returned a non-allowlisted terminal reason")
 
     async def invoke() -> dict[str, Any]:
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM memory.finalize_owner_v5_2_terminal_route_v1(
-                  $1,$2,$3,$4,$5,$6
+            if route_reason == "deferral_only_review_unresolved_v5_2":
+                row = await conn.fetchrow(
+                    """
+                    SELECT * FROM
+                      memory.finalize_owner_v5_2_zero_atom_deferral_route_v1(
+                        $1,$2,$3,$4,$5,$6,$7
+                      )
+                    """,
+                    operation_id,
+                    event_id,
+                    packet_id,
+                    target["packet_storage_sha256"],
+                    route_reason,
+                    target["routing_basis_sha256"],
+                    reason_codes,
                 )
-                """,
-                operation_id,
-                event_id,
-                packet_id,
-                target["packet_storage_sha256"],
-                target["routing_basis_sha256"],
-                reason_codes,
-            )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT * FROM memory.finalize_owner_v5_2_terminal_route_v1(
+                      $1,$2,$3,$4,$5,$6
+                    )
+                    """,
+                    operation_id,
+                    event_id,
+                    packet_id,
+                    target["packet_storage_sha256"],
+                    target["routing_basis_sha256"],
+                    reason_codes,
+                )
         if row is None:
             raise RuntimeError("V5.2 terminal route returned no row")
         return dict(row)

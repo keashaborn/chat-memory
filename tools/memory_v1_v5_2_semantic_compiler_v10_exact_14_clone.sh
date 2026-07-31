@@ -19,7 +19,7 @@ owner=1240822d-ac9a-4096-95aa-e2b24d36ef50
 other=557ea042-cb82-48f8-9429-472e96c957ef
 selector=20260731_v5_2_semantic_compiler_v10_exact_14_v1
 manifest="$repo/manifests/memory_v1_v5_2_compiler_v10_exact_14.json"
-manifest_sha=6709d9709a4c256d401fa7fc54b09cdadb2481a9f34ed41f47376ba7cb90ebfa
+manifest_sha=0df8f548cecab15d5011c2915fda6e854ebbd4b1bf005ff04a22d906d6ffb928
 compiler_sha=c50b7e663fa0275051b5ce3522f1124f7f5cf7b0f02aab71bf9535c37e7258ea
 persistence_migration=ops/sql/20260731_memory_v1_v5_2_compiler_v10_persistence_compat.sql
 exact_migration=ops/sql/20260731_memory_v1_v5_2_semantic_compiler_v10_exact_14.sql
@@ -260,9 +260,9 @@ done < <(scalar "$clone" "
   ORDER BY job.evidence_id")
 
 test "$(jq -s '[.[]|select(.outcome=="terminal_no_stage")]|length' \
-  "$route_outputs")" -eq 12
+  "$route_outputs")" -eq 13
 test "$(jq -s '[.[]|select(.outcome=="manual_review_artifact_ready")]|length' \
-  "$route_outputs")" -eq 2
+  "$route_outputs")" -eq 1
 test "$(( $(scalar "$clone" "
   SELECT count(*) FROM memory.v5_2_local_packet_route_event
   WHERE owner_user_id='$owner'::uuid") - route_before ))" -eq 14
@@ -297,7 +297,8 @@ test "$(scalar "$clone" "
     AND packet.entity_mention_count=0
     AND packet.observation_count=0
     AND packet.manual_review_required
-    AND route.route='manual_review_artifact_ready'
+    AND route.route='terminal_no_stage'
+    AND route.reason_code='deferral_only_review_unresolved_v5_2'
     AND packet.normalized_packet @? '$.deferrals[*] ? (
       @.reason_code == "entity_resolution_unresolved"
     )'")" -eq 1
@@ -439,8 +440,8 @@ printf '%s\n' \
   'REEXTRACTED=14' \
   'LOCAL_MODEL_CALLS=1' \
   'EXTERNAL_MODEL_CALLS=0' \
-  'TERMINAL_ROUTES=12' \
-  'MANUAL_REVIEW_ROUTES=2' \
+  'TERMINAL_ROUTES=13' \
+  'MANUAL_REVIEW_ROUTES=1' \
   'SUPERSESSIONS=14' \
   'CLAIMS_WRITTEN=0' \
   'QDRANT_WRITES=0' \

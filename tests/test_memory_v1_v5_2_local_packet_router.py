@@ -92,6 +92,33 @@ class _Connection:
         return [self.row]
 
 
+class _FallbackConnection(_Connection):
+    def __init__(self, row: dict[str, object]) -> None:
+        super().__init__(row)
+        self.fetch_queries: list[str] = []
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.fetch_queries.append(query)
+        self.fetch_args = args
+        if len(self.fetch_queries) == 1:
+            return []
+        return [self.row]
+
+
+class _FinalizeConnection(_Connection):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.fetchrow_queries: list[str] = []
+
+    async def fetchrow(self, query: str, *_args: object) -> dict[str, object]:
+        self.fetchrow_queries.append(query)
+        return {
+            "apply_outcome": (
+                "applied" if len(self.fetchrow_queries) == 1 else "replayed"
+            )
+        }
+
+
 class V52LocalPacketRouterTest(unittest.TestCase):
     def test_authenticated_owner_rotation_prevents_fixed_uuid_priority(self) -> None:
         owners = [
@@ -137,6 +164,10 @@ class V52LocalPacketRouterTest(unittest.TestCase):
             },
         )
         self.assertNotIn("ambiguous_transcription", MODULE.TERMINAL_REASON_CODES)
+        self.assertEqual(
+            MODULE.REVIEW_UNRESOLVED_REQUIRED_CODES,
+            {"entity_resolution_unresolved", "unregistered_predicate"},
+        )
 
     def test_stable_ids_are_deterministic_and_route_bound(self) -> None:
         owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -281,6 +312,55 @@ class V52LocalPacketPlannerTest(unittest.IsolatedAsyncioTestCase):
             connection.fetch_query,
         )
         self.assertEqual(connection.fetch_args, (packet,))
+
+    async def test_exact_packet_falls_back_only_to_exact_zero_atom_planner(
+        self,
+    ) -> None:
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        connection = _FallbackConnection({"packet_id": packet})
+
+        result = await MODULE.plan_owner(connection, owner, packet)
+
+        self.assertEqual(result, {"packet_id": packet})
+        self.assertEqual(len(connection.fetch_queries), 2)
+        self.assertIn(
+            "plan_owner_v5_2_exact_packet_route_v1",
+            connection.fetch_queries[0],
+        )
+        self.assertIn(
+            "plan_owner_v5_2_zero_atom_deferral_route_v1",
+            connection.fetch_queries[1],
+        )
+        self.assertEqual(connection.fetch_args, (packet,))
+
+    async def test_unresolved_zero_atom_uses_restricted_finalizer(self) -> None:
+        owner = uuid.UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+        packet = uuid.UUID("8bf28952-67a5-4a11-8cab-718d451fca4c")
+        connection = _FinalizeConnection()
+        target = {
+            "packet_id": packet,
+            "packet_storage_sha256": "1" * 64,
+            "routing_basis_sha256": "2" * 64,
+            "reason_code": "deferral_only_review_unresolved_v5_2",
+            "source_deferral_reason_codes": [
+                "entity_resolution_unresolved"
+            ],
+        }
+
+        applied, replayed = await MODULE.finalize_terminal(
+            connection, owner, target
+        )
+
+        self.assertEqual(applied["apply_outcome"], "applied")
+        self.assertEqual(replayed["apply_outcome"], "replayed")
+        self.assertEqual(len(connection.fetchrow_queries), 2)
+        self.assertTrue(
+            all(
+                "finalize_owner_v5_2_zero_atom_deferral_route_v1" in query
+                for query in connection.fetchrow_queries
+            )
+        )
 
 
 if __name__ == "__main__":
