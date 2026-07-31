@@ -49,18 +49,31 @@ def load_manifest(value: str) -> dict[str, Any]:
         "reconcile_request_id", "review_request_id", "apply_request_id",
     ):
         uuid.UUID(manifest[field])
-    expected_tables = {
-        "entity": 1,
-        "entity_resolution_plan": 1,
-        "entity_resolution_review": 1,
-        "entity_resolution_apply": 1,
-        "entity_role_resolution_v5_1": 1,
-        "observation_entity_binding": manifest["expected_bindings"],
-        "relational_operation_request": 2,
-    }
+    if manifest["expected_successor_action"] == "create_new":
+        expected_tables = {
+            "entity": 1,
+            "entity_resolution_plan": 1,
+            "entity_resolution_review": 1,
+            "entity_resolution_apply": 1,
+            "entity_role_resolution_v5_1": 1,
+            "observation_entity_binding": manifest["expected_bindings"],
+            "relational_operation_request": 2,
+        }
+    elif manifest["expected_successor_action"] == "link_existing":
+        expected_tables = {
+            "entity": 0,
+            "entity_resolution_candidate": 1,
+            "entity_resolution_plan": 1,
+            "entity_resolution_review": 1,
+            "entity_resolution_apply": 1,
+            "entity_role_resolution_v5_1": 1,
+            "observation_entity_binding": manifest["expected_bindings"],
+            "relational_operation_request": 2,
+        }
+    else:
+        raise RuntimeError("family-role successor action is invalid")
     if (
         manifest["expected_relationship_role"] not in {"family:mother", "family:father"}
-        or manifest["expected_successor_action"] != "create_new"
         or manifest["expected_table_rows"] != expected_tables
         or manifest["expected_new_rows"] != sum(expected_tables.values())
         or any(manifest[field] != 0 for field in (
@@ -124,6 +137,7 @@ async def run() -> int:
     apply_manifest = None
     applied_entity = None
     bindings = 0
+    checked_target_entity = None
     try:
         if await conn.fetchval("SELECT session_user") != "brains_app":
             raise RuntimeError("POSTGRES_DSN must authenticate as brains_app")
@@ -150,6 +164,15 @@ async def run() -> int:
                 checked["reconciliation_manifest_sha256"] != manifest["reconciliation_manifest_sha256"],
             )):
                 raise RuntimeError("family-role source drifted after manifest creation")
+            checked_target_entity = (
+                str(checked["target_entity_id"])
+                if checked["target_entity_id"] is not None else None
+            )
+            if (
+                manifest["expected_successor_action"] == "link_existing"
+                and checked_target_entity is None
+            ):
+                raise RuntimeError("family-role link target disappeared")
         reconciled = await conn.fetchrow(
             "SELECT * FROM memory.reconcile_role_only_family_resolution_v5_1($1,$2,$3,$4,$5)",
             uuid.UUID(manifest["reconcile_request_id"]),
@@ -197,6 +220,16 @@ async def run() -> int:
         if bindings != (0 if args.mode == "replay" else manifest["expected_bindings"]):
             raise RuntimeError("family-role binding budget drifted")
         applied_entity = str(applied["applied_entity_id"])
+        expected_applied_entity = (
+            prior["applied_entity_id"]
+            if args.mode == "replay"
+            else checked_target_entity
+        )
+        if (
+            manifest["expected_successor_action"] == "link_existing"
+            and applied_entity != expected_applied_entity
+        ):
+            raise RuntimeError("family-role apply selected a different entity")
         if args.mode == "preflight":
             await tx.rollback()
         else:

@@ -31,6 +31,11 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--expected-role", choices=("family:mother", "family:father"), required=True
     )
+    parser.add_argument(
+        "--expected-successor-action",
+        choices=("create_new", "link_existing"),
+        default="create_new",
+    )
     parser.add_argument("--required-head", required=True)
     parser.add_argument("--expected-bindings", type=int, required=True)
     parser.add_argument("--output", required=True)
@@ -92,23 +97,41 @@ async def run() -> int:
         proposed = json.loads(proposed)
     if (
         checked["relationship_role"] != args.expected_role
-        or str(checked["successor_action"]) != "create_new"
-        or checked["target_entity_id"] is not None
-        or proposed.get("identity_state") != "role_only"
-        or proposed.get("entity_type") != "person"
-        or proposed.get("canonical_name") is not None
+        or str(checked["successor_action"]) != args.expected_successor_action
         or txid is not None
     ):
         raise RuntimeError("parent-role preflight is outside the approved boundary")
-    expected_tables = {
-        "entity": 1,
-        "entity_resolution_plan": 1,
-        "entity_resolution_review": 1,
-        "entity_resolution_apply": 1,
-        "entity_role_resolution_v5_1": 1,
-        "observation_entity_binding": args.expected_bindings,
-        "relational_operation_request": 2,
-    }
+    if args.expected_successor_action == "create_new":
+        if (
+            checked["target_entity_id"] is not None
+            or not isinstance(proposed, dict)
+            or proposed.get("identity_state") != "role_only"
+            or proposed.get("entity_type") != "person"
+            or proposed.get("canonical_name") is not None
+        ):
+            raise RuntimeError("parent-role create-new target is invalid")
+        expected_tables = {
+            "entity": 1,
+            "entity_resolution_plan": 1,
+            "entity_resolution_review": 1,
+            "entity_resolution_apply": 1,
+            "entity_role_resolution_v5_1": 1,
+            "observation_entity_binding": args.expected_bindings,
+            "relational_operation_request": 2,
+        }
+    else:
+        if checked["target_entity_id"] is None or proposed is not None:
+            raise RuntimeError("parent-role link-existing target is invalid")
+        expected_tables = {
+            "entity": 0,
+            "entity_resolution_candidate": 1,
+            "entity_resolution_plan": 1,
+            "entity_resolution_review": 1,
+            "entity_resolution_apply": 1,
+            "entity_role_resolution_v5_1": 1,
+            "observation_entity_binding": args.expected_bindings,
+            "relational_operation_request": 2,
+        }
     manifest = {
         "contract_version": CONTRACT,
         "owner_user_id": owner,
@@ -117,7 +140,7 @@ async def run() -> int:
         "reconcile_reason": reconcile_reason,
         "review_reason": review_reason,
         "expected_relationship_role": args.expected_role,
-        "expected_successor_action": "create_new",
+        "expected_successor_action": args.expected_successor_action,
         "expected_bindings": args.expected_bindings,
         "expected_new_rows": sum(expected_tables.values()),
         "expected_table_rows": expected_tables,
