@@ -34,11 +34,25 @@ chmod 0700 "$work" "$credential_dir" "$review_root"
 clone_created=0
 
 cat >"$canary_wrapper" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-/opt/chat-memory/venv/bin/python \
-  "$repo/scripts/memory_v1_v5_local_inference_canary.py" \
-  "\$@" | tee -a "$canary_trace"
+#!/usr/bin/env python3
+import subprocess
+import sys
+
+completed = subprocess.run(
+    [
+        sys.executable,
+        "$repo/scripts/memory_v1_v5_local_inference_canary.py",
+        *sys.argv[1:],
+    ],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+with open("$canary_trace", "a", encoding="utf-8") as trace:
+    trace.write(completed.stdout)
+sys.stdout.write(completed.stdout)
+sys.stderr.write(completed.stderr)
+raise SystemExit(completed.returncode)
 EOF
 chmod 0700 "$canary_wrapper"
 
