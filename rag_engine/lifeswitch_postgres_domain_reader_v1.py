@@ -666,7 +666,8 @@ class PostgresLifeSwitchDomainReaderV1:
             "comparison_policy": {
                 "basis": "first_latest_exposure",
                 "same_sets_same_unit": "comparable",
-                "different_sets": "work_only",
+                "different_sets": "normalize_per_set",
+                "raw_totals_when_sets_differ": "work_only",
                 "different_units": "not_comparable",
                 "mixed_metrics": "use_average_load",
             },

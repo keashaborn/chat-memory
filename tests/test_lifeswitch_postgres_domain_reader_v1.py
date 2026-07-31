@@ -472,6 +472,10 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["first_average_load"], 250.0)
         self.assertEqual(
             result.payload["comparison_policy"]["different_sets"],
+            "normalize_per_set",
+        )
+        self.assertEqual(
+            result.payload["comparison_policy"]["raw_totals_when_sets_differ"],
             "work_only",
         )
         self.assertEqual(len(conn.calls), 2)
