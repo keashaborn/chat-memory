@@ -10,7 +10,8 @@ if [[ "$EUID" -ne 0 ]]; then
   exit 1
 fi
 
-repo_root=$(git rev-parse --show-toplevel)
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(git -C "$script_dir/.." rev-parse --show-toplevel)
 cd "$repo_root"
 container=brains-postgres-1
 production=memory
