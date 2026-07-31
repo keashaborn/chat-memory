@@ -301,8 +301,13 @@ test "$(scalar "$clone" "
     AND packet.manual_review_required
     AND route.route='terminal_no_stage'
     AND route.reason_code='deferral_only_review_unresolved_v5_2'
-    AND packet.normalized_packet @?
-      '$.deferrals[*] ? (@.reason_code == "entity_resolution_unresolved")'")" -eq 1
+    AND EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(
+        COALESCE(packet.normalized_packet->'deferrals','[]'::jsonb)
+      ) AS deferral(value)
+      WHERE deferral.value->>'reason_code'='entity_resolution_unresolved'
+    )")" -eq 1
 
 test "$(scalar "$clone" "
   SELECT count(*)
@@ -313,13 +318,22 @@ test "$(scalar "$clone" "
     AND job.selector_version='$selector'
     AND job.evidence_id='681ab38d-a742-463c-ad26-c74c65eacaa9'::uuid
     AND packet.local_model_calls=1
-    AND packet.normalized_packet @? '$.observations[*] ? (
-      @.predicate == "residence.lives_at"
-    )'
-    AND packet.normalized_packet @? '$.observations[*] ? (
-      @.predicate == "health.user_reported_observation"
-      && @.object.value == "short-term memory lasts about three seconds"
-    )'")" -eq 1
+    AND EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(
+        COALESCE(packet.normalized_packet->'observations','[]'::jsonb)
+      ) AS observation(value)
+      WHERE observation.value->>'predicate'='residence.lives_at'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(
+        COALESCE(packet.normalized_packet->'observations','[]'::jsonb)
+      ) AS observation(value)
+      WHERE observation.value->>'predicate'='health.user_reported_observation'
+        AND observation.value->'object'->>'value'=
+          'short-term memory lasts about three seconds'
+    )")" -eq 1
 
 docker exec -i "$container" psql -U sage -d "$clone" -X \
   -v ON_ERROR_STOP=1 -v owner="$owner" >/dev/null <<'SQL'
