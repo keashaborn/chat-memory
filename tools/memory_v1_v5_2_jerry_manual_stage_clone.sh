@@ -178,7 +178,7 @@ review_id=$(jq -r '.items[0].review_id' "$work/atom-manifest.json")
 stage_plan=$(PGCONNECT_TIMEOUT=10 psql "$clone_dsn" -X -q -A -t \
   -v ON_ERROR_STOP=1 -c "BEGIN; SET LOCAL app.user_id='$owner';
     SELECT memory.plan_owner_v5_2_atom_stage_v2('$apply_id'::uuid); COMMIT;")
-mkdir -m 0700 "$work/stage"
+install -d -o ubuntu -g ubuntu -m 0700 "$work/stage"
 jq -n --arg owner "$owner" --arg packet "$packet" --arg evidence "$evidence" \
   --arg apply "$apply_id" --arg proposal "$proposal_id" --arg review "$review_id" \
   --argjson plan "$stage_plan" '
@@ -204,6 +204,7 @@ jq -n --arg owner "$owner" --arg packet "$packet" --arg evidence "$evidence" \
     }
   }' >"$work/stage-build-manifest.json"
 chmod 0600 "$work/stage-build-manifest.json"
+chown ubuntu:ubuntu "$work/stage-build-manifest.json"
 
 runuser -u ubuntu -- env POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" \
   GIT_OPTIONAL_LOCKS=0 /opt/chat-memory/venv/bin/python "$repo_root/$bundle_builder" \
@@ -250,6 +251,7 @@ jq -n --arg authorization_id "a550e170-92bd-4a51-962e-9054c0d0eaff" \
    expected_new_rows:2,confirmation:"REVIEW_OWNER_V5_2_ENTITY_RESOLUTIONS_WITHOUT_APPLY"}' \
   >"$work/entity-authorization.json"
 chmod 0600 "$work/entity-authorization.json"
+chown ubuntu:ubuntu "$work/entity-authorization.json"
 runuser -u ubuntu -- env MEMORY_V1_V5_2_ENTITY_REVIEW_ONLY_APPLY=authorized \
   POSTGRES_DSN="$clone_dsn" PYTHONPATH="$repo_root" GIT_OPTIONAL_LOCKS=0 \
   /opt/chat-memory/venv/bin/python "$repo_root/$entity_review_runner" apply \
