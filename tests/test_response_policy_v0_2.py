@@ -175,6 +175,22 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
                     result.mode_reasons,
                 )
 
+    def test_first_person_self_harm_variants_remain_hard_vetoes(self) -> None:
+        messages = (
+            "I want to harm myself.",
+            "I might hurt myself.",
+            "I am thinking about harming myself.",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                result = decide_response_policy_v0_2(request(message))
+                self.assertEqual(result.response_mode, ResponseMode.HIGH_STAKES)
+                self.assertEqual(result.fm_effective_level, FMLevel.OFF)
+                self.assertIn(
+                    "local_high_stakes:acute_self_harm",
+                    result.mode_reasons,
+                )
+
     def test_local_reality_testing_risk_overrides_explicit_fm(self) -> None:
         result = decide_response_policy_v0_2(
             request(
@@ -538,6 +554,35 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
             parse_response_policy_input_v0_2(
                 '{"request_id":"one","request_id":"two"}'
             )
+
+    def test_direct_request_cannot_become_material_clarification(self) -> None:
+        result = decide_response_policy_v0_2(
+            request(
+                "Give me your recommendation directly, then help me think "
+                "through it."
+            ),
+            signals=ResponsePolicySignalsV0_2(
+                coaching=True,
+                direct_response_requested=True,
+                guided_reflection_requested=True,
+                material_clarification_required=True,
+            ),
+        )
+
+        self.assertEqual(result.closure, Closure.COMPLETE)
+
+    def test_technical_explanation_cannot_become_procedure(self) -> None:
+        result = decide_response_policy_v0_2(
+            request("Explain why this Python unit test is failing."),
+            signals=ResponsePolicySignalsV0_2(
+                technical=True,
+                direct_response_requested=True,
+                technical_procedure_requested=True,
+            ),
+        )
+
+        self.assertEqual(result.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(result.closure, Closure.COMPLETE)
 
     def test_policy_contains_no_runtime_or_external_dependencies(self) -> None:
         source = MODULE.read_text(encoding="utf-8")

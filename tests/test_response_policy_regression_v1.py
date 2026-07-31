@@ -39,36 +39,20 @@ class ResponsePolicyRegressionV1Tests(unittest.TestCase):
             )
         )
 
-    def test_current_runtime_has_only_the_reviewed_context_gaps(self) -> None:
+    def test_hardened_runtime_resolves_all_catalog_requirements(self) -> None:
         self.assertEqual(self.result["unexpected_failure_ids"], [])
-        self.assertEqual(
-            self.result["known_failure_ids"],
-            [
-                "DEG-002",
-                "EDU-001",
-                "EDU-002",
-                "EDU-003",
-                "EDU-004",
-                "EDU-005",
-                "EDU-006",
-                "EDU-007",
-                "EDU-008",
-                "EDU-009",
-                "EDU-010",
-                "EDU-011",
-                "EDU-012",
-            ],
-        )
+        self.assertEqual(self.result["known_failure_ids"], [])
         self.assertEqual(self.result["resolved_gap_ids"], [])
+        self.assertEqual(self.result["passed"], 52)
 
-    def test_live_provider_findings_are_explicit_and_bounded(self) -> None:
+    def test_live_provider_expectations_have_no_accepted_gap(self) -> None:
         self.assertEqual(
             sorted(
                 case["id"]
                 for case in self.cases
                 if case.get("known_live_gap")
             ),
-            ["DIR-001", "INT-001", "TECH-001"],
+            [],
         )
         for case in self.cases:
             for field, allowed in (case.get("live_allowed") or {}).items():

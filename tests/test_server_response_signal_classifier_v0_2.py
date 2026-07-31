@@ -568,6 +568,291 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
         self.assertEqual(result.assessment.provider_call_count, 1)
         self.assertEqual(len(client.responses.calls), 1)
 
+    def test_provider_timeout_preserves_explicit_guided_reflection(self) -> None:
+        timeout = APITimeoutError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+        )
+        client = FakeClient(error=timeout)
+        policy_input = request("Help me think through why Monday bothered me.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
+        self.assertEqual(decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(decision.interaction, Interaction.GUIDED_REFLECTION)
+        self.assertEqual(decision.closure, Closure.GUIDED_REFLECTION)
+        self.assertEqual(
+            decision.question_policy,
+            QuestionPolicy.OPTIONAL_ONE_NON_LEADING,
+        )
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+        self.assertFalse(decision.intervention_authorized)
+
+    def test_educational_risk_terms_require_provider_context(self) -> None:
+        cases = (
+            (
+                "What does the term self-harm mean in a clinical research paper?",
+                "self_harm",
+            ),
+            (
+                "I am writing an article about suicide prevention programs.",
+                "mental_health_crisis",
+            ),
+            (
+                "Summarize national overdose statistics for a public-health report.",
+                "substance_intoxication_or_withdrawal",
+            ),
+            (
+                "Explain how alcohol withdrawal works physiologically in a "
+                "medical textbook.",
+                "substance_intoxication_or_withdrawal",
+            ),
+            (
+                "How is shortness of breath defined in medical writing?",
+                "acute_medical",
+            ),
+            ("What is a custody hearing in general?", "legal_decision"),
+            (
+                "What is an eating disorder in general medical education?",
+                "eating_disorder_or_dangerous_restriction",
+            ),
+            (
+                "Define medication interaction for a pharmacology class.",
+                "medication",
+            ),
+            (
+                "Explain coercion as a concept in legal ethics.",
+                "coercion_or_consent",
+            ),
+            (
+                "What does tax advice mean as a regulated professional service?",
+                "financial_decision",
+            ),
+            ("What is a bankruptcy advice clinic?", "financial_decision"),
+            (
+                "What does detox at home mean in a public-health article?",
+                "substance_intoxication_or_withdrawal",
+            ),
+        )
+        for message, category in cases:
+            with self.subTest(message=message):
+                client = FakeClient(
+                    output(
+                        domain_risk_gate="triggered",
+                        categories=[category],
+                        fm_application_gate="triggered",
+                    )
+                )
+                policy_input = request(message)
+
+                result = classifier(client).classify(policy_input)
+                decision = decide_response_policy_v0_2(
+                    policy_input,
+                    safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+                    signals=result.signals,
+                )
+
+                self.assertEqual(
+                    result.assessment.outcome,
+                    ClassificationOutcome.PROVIDER_CLASSIFIED,
+                )
+                self.assertEqual(result.assessment.gate, GateState.PASS)
+                self.assertEqual(result.assessment.provider_call_count, 1)
+                self.assertEqual(len(client.responses.calls), 1)
+                self.assertNotEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+
+    def test_educational_context_never_masks_personal_risk(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="triggered",
+                categories=["self_harm"],
+                safety_action_required=True,
+                fm_application_gate="triggered",
+            )
+        )
+        policy_input = request(
+            "I am writing an article about suicide prevention, and I want to "
+            "kill myself now."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.TRIGGERED)
+        self.assertTrue(result.assessment.safety_action_required)
+        self.assertEqual(decision.response_mode, ResponseMode.HIGH_STAKES)
+        self.assertEqual(decision.closure, Closure.SAFETY_ACTION)
+
+    def test_simple_arithmetic_clears_provider_technical_drift(self) -> None:
+        client = FakeClient(
+            output(
+                technical=True,
+                ordinary_fm_relevant=True,
+                technical_procedure_requested=True,
+                direct_response_requested=True,
+            )
+        )
+        policy_input = request("What is 2 + 2?")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.technical, None)
+        self.assertFalse(result.signals.ordinary_fm_relevant)
+        self.assertIs(result.signals.technical_procedure_requested, None)
+        self.assertEqual(decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+
+    def test_simple_arithmetic_clears_provider_risk_uncertainty(self) -> None:
+        client = FakeClient(
+            output(
+                domain_risk_gate="uncertain",
+                categories=["other_material_risk"],
+                fm_application_gate="uncertain",
+                technical=True,
+                ordinary_fm_relevant=True,
+                direct_response_requested=True,
+            )
+        )
+        policy_input = request("What is 2 + 2?")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertEqual(result.assessment.gate, GateState.PASS)
+        self.assertEqual(result.assessment.categories, ())
+        self.assertEqual(decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+
+    def test_clear_non_fm_education_clears_provider_fm_drift(self) -> None:
+        client = FakeClient(
+            output(
+                ordinary_fm_relevant=True,
+                direct_response_requested=True,
+            )
+        )
+        policy_input = request("Explain coercion as a concept in legal ethics.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertFalse(result.signals.ordinary_fm_relevant)
+        self.assertEqual(decision.response_mode, ResponseMode.ORDINARY)
+        self.assertEqual(decision.fm_effective_level, FMLevel.OFF)
+
+    def test_explicit_direct_request_clears_provider_clarification_drift(self) -> None:
+        client = FakeClient(
+            output(
+                coaching=True,
+                direct_response_requested=True,
+                guided_reflection_requested=True,
+                material_clarification_required=True,
+            )
+        )
+        policy_input = request(
+            "Give me your recommendation directly, then help me think through it."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.direct_response_requested, True)
+        self.assertIsNot(result.signals.material_clarification_required, True)
+        self.assertEqual(decision.interaction, Interaction.DIRECT)
+        self.assertEqual(decision.closure, Closure.COMPLETE)
+
+    def test_technical_explanation_clears_provider_procedure_drift(self) -> None:
+        client = FakeClient(
+            output(
+                technical=True,
+                technical_procedure_requested=True,
+                direct_response_requested=True,
+            )
+        )
+        policy_input = request("Explain why this Python unit test is failing.")
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.technical_procedure_requested, None)
+        self.assertEqual(decision.response_mode, ResponseMode.TECHNICAL)
+        self.assertEqual(decision.interaction, Interaction.DIRECT)
+        self.assertEqual(decision.closure, Closure.COMPLETE)
+
+    def test_specific_experiment_consent_negation_closes_every_gate(self) -> None:
+        client = FakeClient(
+            output(
+                coaching=True,
+                coaching_consent=True,
+                specific_experiment_consent=True,
+                experiment_reversible_and_proportionate=True,
+                experiment_measurement_defined=True,
+                experiment_adverse_indicators_defined=True,
+                experiment_stop_rule_defined=True,
+                direct_response_requested=True,
+                behavioral_intervention_requested=True,
+            )
+        )
+        policy_input = request(
+            "Help me design a plan to hit my protein target, but I have not "
+            "chosen or consented to a specific experiment."
+        )
+
+        result = classifier(client).classify(policy_input)
+        decision = decide_response_policy_v0_2(
+            policy_input,
+            safety_assessment=SafetyAssessmentV0_2.create(policy_input),
+            signals=result.signals,
+        )
+
+        self.assertIs(result.signals.specific_experiment_consent, False)
+        self.assertIs(
+            result.signals.experiment_reversible_and_proportionate,
+            False,
+        )
+        self.assertIs(result.signals.experiment_measurement_defined, False)
+        self.assertIs(
+            result.signals.experiment_adverse_indicators_defined,
+            False,
+        )
+        self.assertIs(result.signals.experiment_stop_rule_defined, False)
+        self.assertEqual(
+            decision.interaction,
+            Interaction.BEHAVIORAL_INTERVENTION,
+        )
+        self.assertFalse(decision.intervention_authorized)
+        self.assertFalse(decision.fm_ir_020_eligible)
+        self.assertEqual(decision.closure, Closure.COMPLETE)
+
     def test_provider_cannot_trigger_domain_risk_while_leaving_fm_enabled(self) -> None:
         client = FakeClient(
             output(

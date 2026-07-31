@@ -167,28 +167,21 @@ _LOCAL_RISK_RULES: tuple[
         DomainRiskCategory.ACUTE_MEDICAL,
         True,
         re.compile(
-            r"\b(?:crushing chest pain|cannot breathe|can't breathe|"
-            r"overdos(?:e|ed)|unconscious|severe bleeding|stroke symptoms|"
+            r"\b(?:i (?:have|am having) crushing chest pain|"
+            r"i (?:cannot|can't) breathe|i (?:have )?overdosed|"
+            r"(?:i am|someone is) unconscious|i (?:have )?severe bleeding|"
+            r"i (?:have|am having) stroke symptoms|"
             r"should i (?:go to|call) (?:the )?(?:er|emergency))\b"
-        ),
-    ),
-    (
-        DomainRiskCategory.MEDICATION,
-        False,
-        re.compile(
-            r"\b(?:what dose|double (?:my )?dose|skip (?:my )?dose|"
-            r"stop (?:my )?medication|taper (?:my )?medication|"
-            r"increase (?:my )?medication|medication interaction|"
-            r"can i take .{0,80} with .{0,80})\b"
         ),
     ),
     (
         DomainRiskCategory.EATING_DISORDER_OR_DANGEROUS_RESTRICTION,
         False,
         re.compile(
-            r"\b(?:anorexi\w*|bulimi\w*|eating disorder|purging|"
-            r"starving myself|binge and purge|under [1-8]\d{2} calories|"
-            r"faint(?:ed|ing).{0,50}(?:workout|exercise|not eat))\b"
+            r"\bi\b[^.?!]{0,160}\b(?:starving myself|"
+            r"purging (?:every day|daily)|binge and purge|"
+            r"(?:under|only (?:eat|eating)) [1-8]\d{2} calories|"
+            r"faint(?:ed|ing)[^.?!]{0,50}(?:workout|exercise|not eat))\b"
         ),
     ),
     (
@@ -201,47 +194,40 @@ _LOCAL_RISK_RULES: tuple[
         ),
     ),
     (
-        DomainRiskCategory.COERCION_OR_CONSENT,
-        False,
-        re.compile(
-            r"\b(?:without (?:their|her|his|my) consent|coerc(?:e|ed|ion)|"
-            r"forced me to|pressuring me to have sex)\b"
-        ),
-    ),
-    (
         DomainRiskCategory.CHILD_SAFETY,
         True,
         re.compile(
-            r"\b(?:my child is missing|child is in (?:immediate )?danger|"
-            r"child is being abused|abducted my child)\b"
+            r"\b(?:my child is (?:missing|in (?:immediate )?danger|being abused)|"
+            r"a child is in immediate danger|abducted my child)\b"
         ),
     ),
     (
         DomainRiskCategory.SUBSTANCE_INTOXICATION_OR_WITHDRAWAL,
         True,
         re.compile(
-            r"\b(?:alcohol withdrawal|detox at home|shaking and seeing things|"
-            r"hallucinating after (?:stopping|quitting) alcohol|"
-            r"mixed .{0,50}(?:alcohol|opioid|benzodiazepine)|overdosed?)\b"
+            r"\b(?:i (?:am|have been) shaking and seeing things|"
+            r"i stopped drinking[^.?!]{0,100}(?:shaking|hallucinating|seeing things)|"
+            r"i am hallucinating after (?:stopping|quitting) alcohol|"
+            r"i mixed [^.?!]{0,50}(?:alcohol|opioid|benzodiazepine)|"
+            r"i (?:have )?overdosed)\b"
         ),
     ),
     (
         DomainRiskCategory.LEGAL_DECISION,
         False,
         re.compile(
-            r"\b(?:legal advice|should i sue|custody hearing|divorce settlement|"
-            r"criminal charge|what plea should i|should i sign (?:this|the) contract|"
-            r"court deadline)\b"
+            r"\b(?:(?:my|i have a) custody hearing (?:is )?(?:today|tomorrow)|"
+            r"what plea should i|should i sign (?:this|the) contract|"
+            r"my court deadline is (?:today|tomorrow))\b"
         ),
     ),
     (
         DomainRiskCategory.FINANCIAL_DECISION,
         False,
         re.compile(
-            r"\b(?:invest (?:all of )?my (?:life savings|retirement)|"
-            r"bet (?:all of )?my (?:life savings|retirement)|"
-            r"bankruptcy advice|tax advice|guarantee (?:a )?(?:profit|return)|"
-            r"put all .{0,40} into crypto)\b"
+            r"\b(?:invest|bet|transfer) (?:all of )?my "
+            r"(?:life savings|retirement(?: money)?)\b|"
+            r"\bput all (?:of )?my [^.?!]{0,40} into crypto\b"
         ),
     ),
 )
@@ -267,6 +253,34 @@ _FITNESS_NUTRITION_RISK_EVIDENCE_RE = re.compile(
     r"body dysmorph\w*|underweight|obsess\w*|compuls\w*|"
     r"vomit\w*|laxative\w*|compensat\w* for eating|"
     r"extreme(?:ly)? (?:low|restrictive)|rapid weight loss)\b"
+)
+
+_CLEAR_EDUCATIONAL_CONTEXT_RE = re.compile(
+    r"\b(?:clinical research paper|writing an? article about|"
+    r"statistics for (?:a )?(?:public[- ]health|academic) report|"
+    r"(?:medical|academic) textbook|defined in medical writing|"
+    r"in general(?: medical education)?|for (?:a )?(?:pharmacology|"
+    r"medical|legal|academic) class|as a concept in legal ethics|"
+    r"as a regulated professional service|advice clinic|"
+    r"(?:public[- ]health|academic) article)\b"
+)
+
+_PERSONAL_RISK_OR_DECISION_RE = re.compile(
+    r"\b(?:i (?:want|plan|intend) to (?:die|kill|harm|stop|taper|"
+    r"double|invest|bet|sign|sue)|"
+    r"i (?:have|am experiencing|am feeling) (?:chest pain|"
+    r"shortness of breath|withdrawal|hallucinations?|suicidal thoughts?|"
+    r"an eating disorder|a court deadline)|"
+    r"my (?:doctor|medication|symptoms?|child|partner|custody hearing|"
+    r"court deadline|life savings|retirement)|"
+    r"what (?:dose|plea) should i|should i (?:take|stop|taper|sign|"
+    r"sue|invest|bet)|tell me what i should do)\b"
+)
+
+_SIMPLE_ARITHMETIC_RE = re.compile(
+    r"^(?:(?:what(?:'s| is)|calculate|compute)\s+)?"
+    r"[-+]?\d+(?:\.\d+)?\s*(?:\+|-|\*|×|/|÷)\s*"
+    r"[-+]?\d+(?:\.\d+)?\s*\??$"
 )
 
 
@@ -300,6 +314,25 @@ _FROZEN_BEHAVIORAL_INTERVENTION_RULES: tuple[re.Pattern[str], ...] = (
         r"(?:a |an )?(?:experiment|change|intervention)\b"
     ),
     re.compile(r"\btrack whether (?:it|this|the change) helps\b"),
+)
+
+_FROZEN_TECHNICAL_EXPLANATION_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bexplain (?:why|how)\b"),
+    re.compile(r"\b(?:analyze|diagnose|review) (?:why|how|the)\b"),
+)
+
+_FROZEN_TECHNICAL_PROCEDURE_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:implement|apply|patch|deploy|restart|install|configure|"
+        r"migrate|run) (?:this|the|an?|my)\b"
+    ),
+    re.compile(r"\b(?:walk me through|one command at a time|exact patch)\b"),
+)
+
+_SPECIFIC_EXPERIMENT_CONSENT_NEGATION_RE = re.compile(
+    r"\b(?:not|never|do not|don't|have not|haven't|did not|didn't)\b"
+    r"[^.?!]{0,120}\b(?:consent(?:ed)?|agree(?:d)?|accept(?:ed)?|"
+    r"choos(?:e|en))\b[^.?!]{0,120}\b(?:specific )?experiment\b"
 )
 
 _FROZEN_EXPERIMENT_ACCEPTANCE_RULES: tuple[re.Pattern[str], ...] = (
@@ -495,6 +528,44 @@ def _apply_ordinary_fitness_nutrition_calibration(
         }
     )
 
+def _apply_educational_context_calibration(
+    output: _DomainRiskModelOutput,
+    *,
+    current_message: str,
+) -> _DomainRiskModelOutput:
+    """Keep clear general education separate from personal domain decisions."""
+
+    text = _normalized(current_message)
+    if (
+        _SIMPLE_ARITHMETIC_RE.fullmatch(text)
+        and not output.safety_action_required
+    ):
+        return _DomainRiskModelOutput.model_validate(
+            {
+                **output.model_dump(mode="json"),
+                "domain_risk_gate": "pass",
+                "categories": [],
+                "safety_action_required": False,
+                "fm_application_gate": "pass",
+            }
+        )
+    if output.domain_risk_gate == "pass" or output.safety_action_required:
+        return output
+    if (
+        not _CLEAR_EDUCATIONAL_CONTEXT_RE.search(text)
+        or _PERSONAL_RISK_OR_DECISION_RE.search(text)
+    ):
+        return output
+    return _DomainRiskModelOutput.model_validate(
+        {
+            **output.model_dump(mode="json"),
+            "domain_risk_gate": "pass",
+            "categories": [],
+            "safety_action_required": False,
+            "fm_application_gate": "pass",
+        }
+    )
+
 
 def _apply_frozen_interaction_authority(
     output: _DomainRiskModelOutput,
@@ -514,8 +585,10 @@ def _apply_frozen_interaction_authority(
     text = _normalized(current_message)
     updates: dict[str, bool] = {}
     frozen_activation_ready = _frozen_experiment_activation_ready(text)
+    consent_declined = bool(_SPECIFIC_EXPERIMENT_CONSENT_NEGATION_RE.search(text))
     activation_ready = (
-        _experiment_activation_ready(output) or frozen_activation_ready
+        not consent_declined
+        and (_experiment_activation_ready(output) or frozen_activation_ready)
     )
     if activation_ready:
         updates.update(
@@ -535,6 +608,52 @@ def _apply_frozen_interaction_authority(
     frozen_reflection = _matches_any(text, _FROZEN_GUIDED_REFLECTION_RULES)
     direct = _matches_any(text, _FROZEN_DIRECT_RESPONSE_RULES)
     intervention = _has_nonnegated_frozen_intervention(text)
+    technical_explanation = _matches_any(
+        text, _FROZEN_TECHNICAL_EXPLANATION_RULES
+    )
+    technical_procedure = _matches_any(
+        text, _FROZEN_TECHNICAL_PROCEDURE_RULES
+    )
+    if _SIMPLE_ARITHMETIC_RE.fullmatch(text):
+        updates.update(
+            technical=False,
+            fm_explicit=False,
+            ordinary_fm_relevant=False,
+            technical_procedure_requested=False,
+        )
+    if (
+        _CLEAR_EDUCATIONAL_CONTEXT_RE.search(text)
+        and not _PERSONAL_RISK_OR_DECISION_RE.search(text)
+        and not output.fm_explicit
+    ):
+        updates["ordinary_fm_relevant"] = False
+    if direct:
+        updates.update(
+            coaching=False if not intervention else output.coaching,
+            direct_response_requested=True,
+            material_clarification_required=False,
+        )
+    if intervention and not direct:
+        updates.update(
+            direct_response_requested=False,
+            guided_reflection_requested=False,
+            behavioral_intervention_requested=True,
+            coaching=True,
+        )
+    if consent_declined:
+        updates.update(
+            specific_experiment_consent=False,
+            experiment_reversible_and_proportionate=False,
+            experiment_measurement_defined=False,
+            experiment_adverse_indicators_defined=False,
+            experiment_stop_rule_defined=False,
+        )
+    if output.technical and technical_explanation and not technical_procedure:
+        updates.update(
+            technical_procedure_requested=False,
+            direct_response_requested=True,
+            material_clarification_required=False,
+        )
     if frozen_reflection and not direct and not intervention and not activation_ready:
         updates.update(
             direct_response_requested=False,
@@ -1031,6 +1150,10 @@ class OpenAIServerResponseSignalClassifierV0_2:
             output = _apply_ordinary_fitness_nutrition_calibration(
                 output,
                 conversation_text=normalized,
+            )
+            output = _apply_educational_context_calibration(
+                output,
+                current_message=verified.current_message.content,
             )
             output = _apply_frozen_interaction_authority(
                 output,

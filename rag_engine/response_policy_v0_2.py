@@ -603,8 +603,12 @@ _LOCAL_HIGH_STAKES_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:i (?:have )?a plan to (?:kill myself|end my life)|"
             r"i (?:want|plan|intend) to (?:kill myself|die)|"
+            r"i (?:want|plan|intend|am going) to (?:hurt|harm) myself|"
+            r"i (?:might|may) (?:hurt|harm) myself|"
+            r"i am thinking (?:about|of) (?:hurting|harming) myself|"
             r"i (?:do not|don't) want to live|"
-            r"kill myself|end my life|suicid(?:e|al)|self[- ]harm)\b"
+            r"i (?:am|feel) suicidal|i (?:am going to|may) kill myself|"
+            r"i (?:am|have been) self[- ]harming)\b"
         ),
     ),
     (
@@ -619,26 +623,29 @@ _LOCAL_HIGH_STAKES_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "acute_medical",
         re.compile(
-            r"\bcrushing chest pain\b|\bshortness of breath\b|"
-            r"\b(?:cannot|can't) breathe\b|\boverdosed?\b|"
-            r"\bunconscious\b|\bfainted twice\b|"
-            r"\b(?:cannot|can't) bear weight\b.*\bdeform(?:ed|ity)\b"
+            r"\bi (?:have|am having) crushing chest pain\b|"
+            r"\bi (?:have|am having) shortness of breath\b|"
+            r"\bi (?:cannot|can't) breathe\b|\bi (?:have )?overdosed\b|"
+            r"\b(?:i am|someone is) unconscious\b|\bi fainted twice\b|"
+            r"\bi (?:cannot|can't) bear weight\b.*\bdeform(?:ed|ity)\b"
         ),
     ),
     (
         "dangerous_restriction_or_eating_disorder",
         re.compile(
-            r"\b500 calories\b|\bstarving myself\b|\bpurging (?:every day|daily)\b|"
-            r"\bfaint(?:ed|ing) (?:during|after) (?:a )?workout\b|"
-            r"\b(?:have not|haven't) eaten (?:in|for) \d+ days\b"
+            r"\bi\b[^.?!]{0,160}\b(?:500 calories|starving myself|"
+            r"purging (?:every day|daily)|"
+            r"faint(?:ed|ing) (?:during|after) (?:a )?workout)\b|"
+            r"\bi (?:have not|haven't) eaten (?:in|for) \d+ days\b"
         ),
     ),
     (
         "dangerous_intoxication_or_withdrawal",
         re.compile(
-            r"\bshaking and seeing things\b|\balcohol withdrawal\b|"
-            r"\bstopped drinking\b.*\b(?:shaking|hallucinating|seeing things)\b|"
-            r"\bdangerously intoxicated\b"
+            r"\bi (?:am|have been) shaking and seeing things\b|"
+            r"\bi stopped drinking\b.*\b(?:shaking|hallucinating|seeing things)\b|"
+            r"\bi am hallucinating after (?:stopping|quitting) alcohol\b|"
+            r"\bi am dangerously intoxicated\b"
         ),
     ),
     (
@@ -716,7 +723,11 @@ _LOCAL_TECHNICAL_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"\b(?:python|sql|api|software|backend|frontend|qdrant|postgres|docker|"
         r"kubernetes|systemctl|journalctl|nginx|git|worktree|unit test|"
-        r"function|class|database|server|service)\b"
+        r"function|database|server)\b"
+    ),
+    re.compile(
+        r"\b(?:python|typescript|javascript|java|ruby|c\+\+) class\b|"
+        r"\b(?:systemd|backend|frontend|web|api) service\b"
     ),
     re.compile(r"\b(?:debug|implement|deploy|restart|patch|trace|compile)\b"),
 )
@@ -751,7 +762,7 @@ _LOCAL_RESPONSE_REQUEST_SHAPE_RULES: tuple[re.Pattern[str], ...] = (
     ),
     re.compile(
         r"^(?:please )?(?:answer|tell|explain|describe|summarize|compare|"
-        r"review|analyze|show|give|write|create|make|set|use|find|check|"
+        r"define|review|analyze|show|give|write|create|make|set|use|find|check|"
         r"fix|implement|deploy|restart|run|list|identify|recommend|advise|"
         r"calculate|continue|help)\b"
     ),
@@ -793,6 +804,23 @@ _LOCAL_BEHAVIORAL_INTERVENTION_RULES: tuple[re.Pattern[str], ...] = (
 _LOCAL_DECLINES_QUESTIONS_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:do not|don't) ask (?:me )?(?:any |further )?questions\b"),
     re.compile(r"\bwithout asking (?:me )?(?:a |any )?questions?\b"),
+)
+
+_LOCAL_TECHNICAL_PROCEDURE_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:implement|apply|patch|deploy|restart|install|configure|"
+        r"migrate|run|repair|fix|edit|change|build|create) "
+        r"(?:this|the|an?|my)\b"
+    ),
+    re.compile(
+        r"\b(?:walk me through|one command at a time|exact patch|"
+        r"verification command)\b"
+    ),
+)
+
+_LOCAL_TECHNICAL_EXPLANATION_RULES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bexplain (?:why|how)\b"),
+    re.compile(r"\b(?:analyze|diagnose|review) (?:why|how|the)\b"),
 )
 
 
@@ -954,6 +982,12 @@ def _select_closure(
     safety_assessment: SafetyAssessmentV0_2,
     local_high_stakes: tuple[str, ...],
 ) -> Closure:
+    local_next_step = bool(
+        re.search(
+            r"\b(?:give me next steps|make (?:me )?a plan|what should i do next)\b",
+            text,
+        )
+    )
     if mode is ResponseMode.HIGH_STAKES:
         local_action_categories = {
             "acute_medical",
@@ -980,13 +1014,23 @@ def _select_closure(
             return Closure.CONSENTED_COACHING
         return Closure.COMPLETE
 
+    if (
+        interaction is Interaction.DIRECT
+        and _matches_any(text, _LOCAL_DIRECT_RESPONSE_RULES)
+        and not local_next_step
+    ):
+        return Closure.COMPLETE
+
     if mode is ResponseMode.TECHNICAL:
-        if signals.technical_procedure_requested is True:
-            return Closure.TECHNICAL_PROCEDURE
-        if signals.technical_procedure_requested is None and re.search(
-            r"\b(?:implement|exact patch|one command at a time|walk me through|restart)\b",
-            text,
-        ):
+        local_procedure = _matches_any(
+            text, _LOCAL_TECHNICAL_PROCEDURE_RULES
+        )
+        local_explanation = _matches_any(
+            text, _LOCAL_TECHNICAL_EXPLANATION_RULES
+        )
+        if local_explanation and not local_procedure:
+            return Closure.COMPLETE
+        if local_procedure:
             return Closure.TECHNICAL_PROCEDURE
 
     if mode is ResponseMode.COACHING:
@@ -1009,9 +1053,6 @@ def _select_closure(
         ):
             return Closure.MATERIAL_CLARIFICATION
 
-    local_next_step = bool(
-        re.search(r"\b(?:give me next steps|make (?:me )?a plan|what should i do next)\b", text)
-    )
     if signals.explicit_next_step_requested is True or (
         signals.explicit_next_step_requested is None and local_next_step
     ):
@@ -1049,6 +1090,11 @@ def _select_interaction(
     signals: ResponsePolicySignalsV0_2,
     application_gate: GateState,
 ) -> tuple[Interaction, QuestionPolicy, tuple[str, ...], bool]:
+    classifier_unavailable = (
+        signals.domain_risk_gate is GateState.UNCERTAIN
+        and signals.domain_risk_reason_codes
+        == (DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,)
+    )
     declines_questions = _trusted_or_local(
         signals.user_declines_questions,
         _matches_any(text, _LOCAL_DECLINES_QUESTIONS_RULES),
@@ -1060,7 +1106,7 @@ def _select_interaction(
             ("high_stakes_forces_direct",),
             False,
         )
-    if application_gate is not GateState.PASS:
+    if application_gate is not GateState.PASS and not classifier_unavailable:
         reasons = ["fm_application_boundary_forces_direct"]
         if declines_questions:
             reasons.append("user_declined_questions")
@@ -1086,6 +1132,8 @@ def _select_interaction(
         signals.behavioral_intervention_requested,
         local_intervention,
     )
+    if classifier_unavailable:
+        intervention = False
     reflection = _trusted_or_local(
         signals.guided_reflection_requested,
         _matches_any(text, _LOCAL_GUIDED_REFLECTION_RULES),
