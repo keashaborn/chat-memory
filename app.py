@@ -32,6 +32,9 @@ from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router
 from lifeswitch_agentic.app_adapter import create_lifeswitch_plan_app_router
 from rag_engine.lifeswitch_measurements_router import router as lifeswitch_measurements_router
 from rag_engine.lifeswitch_people_router import router as lifeswitch_people_router
+from rag_engine.lifeswitch_account_timezone_router_v1 import (
+    router as lifeswitch_account_timezone_router_v1,
+)
 from rag_engine.catalog_router import router as catalog_router
 from rag_engine.vb_tagging import infer_vb_tags
 class NewThreadReq(BaseModel):
@@ -141,6 +144,10 @@ app.include_router(
 )
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
 app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
+app.include_router(
+    lifeswitch_account_timezone_router_v1,
+    prefix="/lifeswitch/account",
+)
 app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
 app.include_router(voice_realtime_preview_router)
