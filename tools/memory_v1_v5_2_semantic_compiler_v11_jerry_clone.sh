@@ -313,15 +313,18 @@ test "$(scalar "$clone" "
     )")" -eq 1
 
 test "$(protected_signature "$clone")" = "$clone_protected_before"
+replacement_packet=$(scalar "$clone" "
+  SELECT packet_id FROM memory.evidence_extraction_packet_v5_local
+  WHERE owner_user_id='$owner'::uuid AND job_id='$job'::uuid")
+[[ "$replacement_packet" =~ ^[0-9a-f-]{36}$ ]]
 test "$(actor_scalar "$clone" "$other" "
-  SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
-  WHERE packet_id IN (
-    SELECT packet_id FROM memory.evidence_extraction_packet_v5_local
-    WHERE owner_user_id='$owner'::uuid AND job_id='$job'::uuid
+  SELECT count(*) FROM memory.read_owner_v5_local_packet_review_v1(
+    '$replacement_packet'::uuid
   )")" -eq 0
 test "$(actor_scalar "$clone" "$owner" "
-  SELECT count(*) FROM memory.evidence_extraction_packet_v5_local
-  WHERE owner_user_id='$owner'::uuid AND job_id='$job'::uuid")" -eq 1
+  SELECT count(*) FROM memory.read_owner_v5_local_packet_review_v1(
+    '$replacement_packet'::uuid
+  )")" -eq 1
 
 test "$(function_sha "$production")" = "$old_function_sha"
 test "$(protected_signature "$production")" = "$production_protected_before"
