@@ -54,7 +54,7 @@ RELATIONSHIP_V5_1_POLICY_COMPILER_VERSION = (
     "memory_v1_relationship_policy_compiler_v14"
 )
 SEMANTIC_V5_2_REGISTRY_VERSION = "memory_predicate_registry_v5_2"
-SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v9"
+SEMANTIC_V5_2_POLICY_COMPILER_VERSION = "memory_v1_semantic_policy_compiler_v10"
 EVIDENCE_CONTEXT_COREFERENCE_VERSION = (
     "memory_v1_evidence_context_coreference_v1"
 )
@@ -2126,6 +2126,32 @@ _DURABLE_ASSERTION_RE = re.compile(
     r"\w+\s+is\s+my\s+(?:father|mother|parent|brother|sister|sibling))\b",
     re.IGNORECASE,
 )
+_CONTEXT_SAFE_INFORMATION_REQUEST_RE = re.compile(
+    r"(?:^|[.!?]\s+)(?:in\s+(?:one|a)\s+sentence\s*,?\s*)?"
+    r"(?:please\s+)?(?:what|when|where|who|why|how|did|do|does|can|"
+    r"could|would|will|is|are|was|were|tell|explain|describe|summarize)\b",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_CONFIRMATION_RE = re.compile(
+    r"\b(?:that|this|it)(?:['’]s|\s+is)\s+"
+    r"(?:correct|right|true|accurate)\b|"
+    r"\b(?:you(?:['’]re|\s+are)\s+(?:correct|right)|"
+    r"yes\s*,?\s+that(?:['’]s|\s+is)\s+(?:correct|right|true))\b",
+    re.IGNORECASE,
+)
+_NON_DURABLE_OPERATIONAL_CHAT_RE = re.compile(
+    r"\b(?:just\s+testing\s+(?:the\s+)?memory(?:\s+system)?|"
+    r"testing\s+(?:the\s+)?memory(?:\s+system)?\s+to\s+see|"
+    r"thank\s+you\s+for\s+your\s+help)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_NAMED_ASSERTION_RE = re.compile(
+    r"\b(?:my|his|her|their|its)\s+"
+    r"(?:(?:father|mother|dad|mom|sister|brother|spouse|wife|husband|"
+    r"dog|cat|pet)['’]s\s+)?name\s+is\s+"
+    r"[^\s.!?,][^.!?,]{0,119}",
+    re.IGNORECASE,
+)
 _EXPLICIT_LIFE_PREFERENCE_RE = re.compile(
     r"^\s*i\s+(?P<cue>"
     r"really\s+love|love|really\s+like|like|enjoy|prefer|"
@@ -2499,6 +2525,20 @@ _RESIDENCE_RE = re.compile(
     r"\blive\s+in\s+(.+?)(?:[.!?]|$)",
     re.IGNORECASE,
 )
+_ASSISTED_LIVING_RE = re.compile(
+    r"\b(?:currently\s+)?(?:lives?\s+)?(?:in|at)\s+"
+    r"(?:an?\s+)?(?P<place>assisted[-\s]+living"
+    r"(?:\s+(?:facility|community))?)\b",
+    re.IGNORECASE,
+)
+_SHORT_TERM_MEMORY_DURATION_RE = re.compile(
+    r"\b(?:he|she|they|[A-Z][\w'’-]{0,79})\s+"
+    r"(?:only\s+)?remembers?\s+for\s+"
+    r"(?P<duration>(?:about|approximately|roughly)?\s*"
+    r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)"
+    r"\s+(?:seconds?|minutes?|hours?))\b",
+    re.IGNORECASE,
+)
 _HISTORICAL_RESIDENCE_RE = re.compile(
     r"\b(?:used\s+to\s+live|previously\s+lived|formerly\s+lived)\b",
     re.IGNORECASE,
@@ -2616,6 +2656,43 @@ def _guard_deferral_packet(
     return ProviderPacket.model_validate(
         _packet(deferrals=deferrals)
     )
+
+
+def _context_safe_deterministic_policy_packet(
+    source: TrustedExtractionSource,
+    *,
+    registry_version: str | None,
+) -> tuple[ProviderPacket, str] | None:
+    """Classify target-only non-assertions without consulting context."""
+    if registry_version != SEMANTIC_V5_2_REGISTRY_VERSION:
+        return None
+    content = source.content.strip()
+    durable = bool(
+        _DURABLE_ASSERTION_RE.search(content)
+        or _EXPLICIT_NAMED_ASSERTION_RE.search(content)
+    )
+    if durable:
+        return None
+    if _NON_DURABLE_OPERATIONAL_CHAT_RE.search(content):
+        return (
+            _guard_deferral_packet(source, ("insufficient_evidence",)),
+            "non_durable_operational_chat",
+        )
+    request_match = _CONTEXT_SAFE_INFORMATION_REQUEST_RE.search(content)
+    if request_match is None:
+        return None
+    confirmation = _CONTEXTUAL_CONFIRMATION_RE.search(content)
+    if confirmation is not None:
+        return (
+            _guard_deferral_packet(
+                source,
+                ("entity_resolution_unresolved",),
+            ),
+            "contextual_confirmation_requires_typed_binding",
+        )
+    if request_match.start() != 0:
+        return None
+    return _guard_deferral_packet(source, ("question_only",)), "question_only"
 
 
 def _response_dimension(content: str) -> str:
@@ -4249,6 +4326,137 @@ def _historical_state_before_source_temporal(
     )
 
 
+def _augment_assisted_living_and_memory_duration(
+    source: TrustedExtractionSource,
+    entities: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Complete explicit residence and memory-duration statements."""
+    content = source.content
+    residence_match = _ASSISTED_LIVING_RE.search(content)
+    duration_match = _SHORT_TERM_MEMORY_DURATION_RE.search(content)
+    if residence_match is None and duration_match is None:
+        return ()
+    person_entities = [
+        item for item in entities if item.get("entity_type") == "person"
+    ]
+    if len(person_entities) != 1:
+        return ()
+    person_ref = str(person_entities[0]["entity_ref"])
+    repairs: list[str] = []
+
+    if residence_match is not None and not any(
+        item.get("predicate") == "residence.lives_at"
+        and item.get("subject_entity_ref") == person_ref
+        for item in observations
+    ):
+        place_name = " ".join(
+            residence_match.group("place").replace("-", " ").split()
+        ).casefold()
+        place_entity = next(
+            (
+                item
+                for item in entities
+                if item.get("entity_type") == "place"
+                and isinstance(item.get("name_text"), str)
+                and " ".join(
+                    item["name_text"].replace("-", " ").split()
+                ).casefold()
+                == place_name
+            ),
+            None,
+        )
+        if place_entity is None:
+            place_ref = _add_compiler_entity(
+                source,
+                entities,
+                entity_type="place",
+                name_text=place_name,
+                relationship_role="residence:reported",
+            )
+        else:
+            place_ref = str(place_entity["entity_ref"])
+        residence = _example_observation(
+            content,
+            observation_ref=_next_observation_ref(observations),
+            subject_entity_ref=person_ref,
+            predicate="residence.lives_at",
+            object_value={"kind": "entity", "entity_ref": place_ref},
+            projection_class="supportive_context",
+            surface_policy="mention_when_directly_relevant",
+            sensitivity="medium",
+            reason_code="explicit_assisted_living_residence",
+            temporal_semantic="state_validity",
+        )
+        residence["temporal"] = _relationship_v5_1_temporal(
+            source,
+            temporal_profile="active_interval",
+            historical_end=False,
+        )
+        observations.append(residence)
+        repairs.append("explicit_assisted_living_residence_completed")
+
+    if duration_match is not None:
+        duration = " ".join(
+            duration_match.group("duration").split()
+        ).casefold()
+        canonical_value = f"short-term memory lasts {duration}"
+        matching_health = [
+            item
+            for item in observations
+            if item.get("predicate") == "health.user_reported_observation"
+            and item.get("subject_entity_ref") == person_ref
+            and isinstance(item.get("object"), dict)
+            and item["object"].get("kind") == "literal"
+            and isinstance(item["object"].get("value"), str)
+            and (
+                duration in item["object"]["value"].casefold()
+                or item["object"]["value"].casefold() in duration
+            )
+        ]
+        if matching_health:
+            target = matching_health[0]
+            target["object"] = _literal("text", canonical_value)
+            if (
+                "explicit_short_term_memory_duration"
+                not in target["reason_codes"]
+            ):
+                target["reason_codes"].append(
+                    "explicit_short_term_memory_duration"
+                )
+            target["modality"] = "reported_observation"
+            target["surface_policy"] = "explicit_recall_only"
+            target["sensitivity"] = "high"
+            target["temporal"] = _relationship_v5_1_temporal(
+                source,
+                temporal_profile="active_interval",
+                historical_end=False,
+            )
+            repairs.append("short_term_memory_duration_canonicalized")
+        else:
+            health = _example_observation(
+                content,
+                observation_ref=_next_observation_ref(observations),
+                subject_entity_ref=person_ref,
+                predicate="health.user_reported_observation",
+                object_value=_literal("text", canonical_value),
+                projection_class="supportive_context",
+                surface_policy="explicit_recall_only",
+                sensitivity="high",
+                reason_code="explicit_short_term_memory_duration",
+                modality="reported_observation",
+                temporal_semantic="state_validity",
+            )
+            health["temporal"] = _relationship_v5_1_temporal(
+                source,
+                temporal_profile="active_interval",
+                historical_end=False,
+            )
+            observations.append(health)
+            repairs.append("short_term_memory_duration_completed")
+    return tuple(repairs)
+
+
 def _relationship_v5_1_complete_explicit_assertions(
     source: TrustedExtractionSource,
     entities: list[dict[str, Any]],
@@ -4543,6 +4751,14 @@ def _compile_entity_links(
             if not observations:
                 value["entity_mentions"] = []
                 entities = value["entity_mentions"]
+    if registry.get("registry_version") == SEMANTIC_V5_2_REGISTRY_VERSION:
+        repairs.extend(
+            _augment_assisted_living_and_memory_duration(
+                source,
+                entities,
+                observations,
+            )
+        )
     predicates = {item["predicate"] for item in observations}
     original_global_insufficient_ids = {
         id(item)
@@ -6449,7 +6665,12 @@ class LocalLlamaCppProvider:
             self._registry.get("registry_version")
             == SEMANTIC_V5_2_REGISTRY_VERSION
         ):
-            deterministic = _reported_stance_durability_guard(source)
+            deterministic = _context_safe_deterministic_policy_packet(
+                source,
+                registry_version=self._registry.get("registry_version"),
+            )
+            if deterministic is None:
+                deterministic = _reported_stance_durability_guard(source)
         else:
             deterministic = None
         if deterministic is not None:
