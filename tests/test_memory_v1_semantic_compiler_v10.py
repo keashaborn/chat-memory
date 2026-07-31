@@ -164,6 +164,15 @@ class SemanticCompilerV10Test(unittest.TestCase):
             relationship_role="family:father",
             reason_code="explicit_named_person",
         )
+        redundant_person = _example_entity(
+            content,
+            entity_ref="e01",
+            entity_type="person",
+            mention_kind="named",
+            name_text="Jerry",
+            relationship_role="family:father",
+            reason_code="redundant_named_person",
+        )
         dementia = _example_observation(
             content,
             observation_ref="o02",
@@ -194,7 +203,7 @@ class SemanticCompilerV10Test(unittest.TestCase):
             source,
             ProviderPacket.model_validate(
                 _packet(
-                    entities=[person],
+                    entities=[person, redundant_person],
                     observations=[dementia, duration],
                 )
             ),

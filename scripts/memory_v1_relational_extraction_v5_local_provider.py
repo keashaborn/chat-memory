@@ -4340,9 +4340,25 @@ def _augment_assisted_living_and_memory_duration(
     person_entities = [
         item for item in entities if item.get("entity_type") == "person"
     ]
-    if len(person_entities) != 1:
+    person_refs = {
+        str(item["entity_ref"])
+        for item in person_entities
+        if isinstance(item.get("entity_ref"), str)
+    }
+    referenced_person_refs = {
+        str(item["subject_entity_ref"])
+        for item in observations
+        if item.get("subject_entity_ref") in person_refs
+    }
+    if len(person_refs) == 1:
+        person_ref = next(iter(person_refs))
+    elif len(referenced_person_refs) == 1:
+        # A model may emit a redundant person mention which is pruned later.
+        # Bind deterministic clause completion only when all existing atomic
+        # observations identify one unambiguous person subject.
+        person_ref = next(iter(referenced_person_refs))
+    else:
         return ()
-    person_ref = str(person_entities[0]["entity_ref"])
     repairs: list[str] = []
 
     if residence_match is not None and not any(
