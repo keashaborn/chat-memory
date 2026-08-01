@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.local/contracts/projection_selection_v1.schema.json",
+  "title": "ProjectionSelectionResultV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "requested_count",
+    "selected_count",
+    "max_selected_count",
+    "decisions",
+    "truncated"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "lifeswitch.projection_selection"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "requested_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "selected_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6
+    },
+    "max_selected_count": {
+      "const": 6
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "truncation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/countTruncation"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "truncated": {
+            "const": true
+          }
+        },
+        "required": [
+          "truncated"
+        ]
+      },
+      "then": {
+        "required": [
+          "truncation"
+        ],
+        "properties": {
+          "truncation": {
+            "$ref": "#/$defs/countTruncation"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "truncation": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "projectionId": {
+      "type": "string",
+      "enum": [
+        "plan.current.v1",
+        "plan.targets.current.v1",
+        "plan.history.v1",
+        "plan.recovery_adjustments.v1",
+        "nutrition.daily.v1",
+        "nutrition.range.v1",
+        "nutrition.adherence.v1",
+        "nutrition.meal_patterns.v1",
+        "training.sessions_by_day.v1",
+        "training.exercise_frequency.v1",
+        "training.exercise_history.v1",
+        "training.exercise_progression.v1",
+        "training.plan_adherence.v1",
+        "conditioning.sessions_by_day.v1",
+        "conditioning.plan_adherence.v1",
+        "measurements.core_summary.v1",
+        "measurements.timeline.v1",
+        "people.subject_authorization.v1",
+        "messages.recent_direct.v1",
+        "checkins.relevant.v1"
+      ]
+    },
+    "selectedDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id",
+        "status",
+        "executed",
+        "execution_ordinal"
+      ],
+      "properties": {
+        "projection_id": {
+          "$ref": "#/$defs/projectionId"
+        },
+        "status": {
+          "const": "selected"
+        },
+        "executed": {
+          "const": true
+        },
+        "execution_ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        }
+      }
+    },
+    "rejectedDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id",
+        "status",
+        "executed",
+        "reason"
+      ],
+      "properties": {
+        "projection_id": {
+          "$ref": "#/$defs/projectionId"
+        },
+        "status": {
+          "const": "rejected"
+        },
+        "executed": {
+          "const": false
+        },
+        "reason": {
+          "const": "projection_count_limit"
+        }
+      }
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/selectedDecision"
+        },
+        {
+          "$ref": "#/$defs/rejectedDecision"
+        }
+      ]
+    },
+    "countTruncation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "limit",
+        "requested",
+        "selected"
+      ],
+      "properties": {
+        "reason": {
+          "const": "projection_count_limit"
+        },
+        "limit": {
+          "const": 6
+        },
+        "requested": {
+          "type": "integer",
+          "minimum": 7
+        },
+        "selected": {
+          "const": 6
+        }
+      }
+    }
+  }
+}

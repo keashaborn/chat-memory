@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.local/contracts/projection_result_v1.schema.json",
+  "title": "ProjectionExecutionResultV1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/projectionEnvelope"
+    },
+    {
+      "$ref": "#/$defs/projectionError"
+    }
+  ],
+  "$defs": {
+    "projectionId": {
+      "type": "string",
+      "enum": [
+        "plan.current.v1",
+        "plan.targets.current.v1",
+        "plan.history.v1",
+        "plan.recovery_adjustments.v1",
+        "nutrition.daily.v1",
+        "nutrition.range.v1",
+        "nutrition.adherence.v1",
+        "nutrition.meal_patterns.v1",
+        "training.sessions_by_day.v1",
+        "training.exercise_frequency.v1",
+        "training.exercise_history.v1",
+        "training.exercise_progression.v1",
+        "training.plan_adherence.v1",
+        "conditioning.sessions_by_day.v1",
+        "conditioning.plan_adherence.v1",
+        "measurements.core_summary.v1",
+        "measurements.timeline.v1",
+        "people.subject_authorization.v1",
+        "messages.recent_direct.v1",
+        "checkins.relevant.v1"
+      ]
+    },
+    "lifecycleState": {
+      "type": "string",
+      "enum": [
+        "present",
+        "explicit_zero",
+        "missing",
+        "absent",
+        "in_progress",
+        "incomplete",
+        "corrected",
+        "deleted"
+      ]
+    },
+    "decisionBlockId": {
+      "type": "string",
+      "enum": [
+        "D01_HISTORICAL_PLAN_AUTHORITY",
+        "D02_RELATIVE_DATE_SEMANTICS",
+        "D03_MEASUREMENT_COLLISIONS",
+        "D04_RECOVERY_ADJUSTMENT_PRECEDENCE",
+        "D05_HEALTH_ESCALATION_THRESHOLDS",
+        "D06_FORECAST_METHOD"
+      ]
+    },
+    "fieldState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "state"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.]*$"
+        },
+        "state": {
+          "$ref": "#/$defs/lifecycleState"
+        },
+        "decision_block": {
+          "$ref": "#/$defs/decisionBlockId"
+        }
+      }
+    },
+    "absoluteWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_local_date",
+        "end_local_date",
+        "timezone",
+        "boundary"
+      ],
+      "properties": {
+        "start_local_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "end_local_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "boundary": {
+          "const": "inclusive_local_dates"
+        },
+        "relative_expression": {
+          "type": "null"
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "gateway_id",
+        "gateway_version",
+        "field_policy_version"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "gateway_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "gateway_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "field_policy_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_refs",
+        "snapshot_id",
+        "retrieved_at_utc"
+      ],
+      "properties": {
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          },
+          "maxItems": 8
+        },
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "retrieved_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "calculation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calculation_id",
+        "calculation_version",
+        "input_projection_ids"
+      ],
+      "properties": {
+        "calculation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "calculation_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_projection_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectionId"
+          },
+          "uniqueItems": true,
+          "maxItems": 6
+        }
+      }
+    },
+    "truncation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truncated",
+        "reason"
+      ],
+      "properties": {
+        "truncated": {
+          "const": true
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "projection_row_limit",
+            "projection_byte_limit",
+            "context_byte_limit"
+          ]
+        },
+        "returned_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "available_rows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "serialized_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "projectionEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id",
+        "projection_schema_version",
+        "status",
+        "executed",
+        "sensitivity",
+        "data",
+        "field_states",
+        "provenance",
+        "serialized_bytes",
+        "fallback_used"
+      ],
+      "properties": {
+        "projection_id": {
+          "$ref": "#/$defs/projectionId"
+        },
+        "projection_schema_version": {
+          "const": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable",
+            "not_captured",
+            "decision_blocked"
+          ]
+        },
+        "executed": {
+          "const": true
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": [
+            "S0",
+            "S1",
+            "S2",
+            "S3",
+            "S4"
+          ]
+        },
+        "data": {
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "field_states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldState"
+          },
+          "maxItems": 128
+        },
+        "window": {
+          "$ref": "#/$defs/absoluteWindow"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "calculation": {
+          "$ref": "#/$defs/calculation"
+        },
+        "decision_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decisionBlockId"
+          },
+          "uniqueItems": true,
+          "maxItems": 6
+        },
+        "serialized_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32768
+        },
+        "truncation": {
+          "$ref": "#/$defs/truncation"
+        },
+        "fallback_used": {
+          "const": false
+        }
+      }
+    },
+    "projectionError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id",
+        "projection_schema_version",
+        "status",
+        "executed",
+        "error_code",
+        "data",
+        "fail_closed",
+        "fallback_used"
+      ],
+      "properties": {
+        "projection_id": {
+          "$ref": "#/$defs/projectionId"
+        },
+        "projection_schema_version": {
+          "const": 1
+        },
+        "status": {
+          "const": "error"
+        },
+        "executed": {
+          "const": true
+        },
+        "error_code": {
+          "type": "string",
+          "enum": [
+            "incompatible_projection_version",
+            "malformed_projection_payload"
+          ]
+        },
+        "data": {
+          "type": "null"
+        },
+        "fail_closed": {
+          "const": true
+        },
+        "fallback_used": {
+          "const": false
+        }
+      }
+    }
+  }
+}

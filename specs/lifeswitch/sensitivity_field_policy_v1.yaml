@@ -1,0 +1,275 @@
+schema_id: lifeswitch.sensitivity_field_policy
+schema_version: 1
+status: candidate
+enforcement_stage: restricted_subject_bound_gateway
+default_action: deny
+unknown_field_action: reject_projection
+malformed_payload_action: fail_closed
+legacy_or_raw_fallback_allowed: false
+delegated_sensitivity_ceiling: S1
+
+tiers:
+  S0:
+    description: Content-free authorization and operational metadata.
+    initial_access: internal_only
+  S1:
+    description: Routine structured Plan, Nutrition, Training, Conditioning, and core numeric Measurements facts.
+    initial_access: self_or_exact_delegated_domain_scope
+  S2:
+    description: Private free text, ordinary coaching notes, and check-ins.
+    initial_access: self_only_when_typed_projection_exists
+  S3:
+    description: Pain, injury, medication, digestion, reproductive, and eating-risk material.
+    initial_access: explicit_self_request_plus_controlling_policy
+  S4:
+    description: Private communications.
+    initial_access: unavailable_until_message_read_contract_exists
+
+global_rules:
+  - Apply the projection allowlist before values leave PostgreSQL.
+  - Reject unknown or unclassified fields; never pass them through for downstream redaction.
+  - Derived calculations inherit the highest sensitivity tier of every input.
+  - Generic projections exclude notes, scans, photographs, opaque JSON, messages, check-ins, and health fields.
+  - Delegated projections may contain S1 fields only.
+  - Denied projection row counts and existence facts are never surfaced.
+  - Structured LifeSwitch content never becomes Memory, FM/RAG, Qdrant, or web evidence.
+
+always_forbidden_fields:
+  - credentials
+  - service_tokens
+  - authentication_headers
+  - token_bearing_urls
+  - raw_database_rows
+  - untyped_json
+  - raw_actor_user_id_in_trace
+  - raw_subject_user_id_in_trace
+  - raw_relationship_id_in_trace
+  - raw_permission_id_in_trace
+  - raw_record_id_in_trace
+
+content_free_trace_policy:
+  maximum_tier: S0
+  allowed:
+    - projection_id
+    - scope_name_used
+    - perspective
+    - authorized_date_window
+    - authorized_row_count
+    - schema_version
+    - gateway_version
+    - field_policy_version
+    - calculation_version
+    - byte_and_projection_budget
+    - truncation_code
+    - authorization_recheck_state
+    - answer_binding_digest
+  forbidden:
+    - raw_identifiers
+    - names
+    - emails
+    - physique_values
+    - food_names
+    - exercise_notes
+    - private_text
+    - messages
+    - checkins
+    - health_content
+    - full_prompt
+    - model_response_text
+    - denied_projection_row_count
+    - denied_record_existence
+    - cross_lane_content
+
+projection_policies:
+  plan.current.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["plan:view"]
+    allowed_fields:
+      - plan_version_ref
+      - version_number
+      - activation_and_effective_metadata
+      - requested_target_sections
+      - routine_goal_direction
+    forbidden_fields: [notes, private_rationale, health_material, opaque_json]
+
+  plan.targets.current.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["plan:view"]
+    allowed_fields:
+      - calories
+      - protein_g
+      - carbohydrate_g
+      - fat_g
+      - strength_frequency
+      - conditioning_frequency
+      - conditioning_minutes
+      - typed_target_units
+    forbidden_fields: [notes, private_rationale, health_material, opaque_json]
+
+  plan.history.v1:
+    maximum_tier: S1
+    delegated_policy: decision_blocked
+    required_scopes: ["plan:view"]
+    allowed_fields: [version_ref, typed_field_delta, effective_metadata]
+    forbidden_fields: [full_plan_document, notes, health_material, opaque_json]
+
+  plan.recovery_adjustments.v1:
+    maximum_tier: S1
+    delegated_policy: decision_blocked
+    required_scopes: ["plan:view"]
+    allowed_fields: [adjustment_type, effective_window, stopped_state, routine_adjustment_value]
+    forbidden_fields: [private_reason, free_text_note, pain_detail, diagnosis, medication, health_material]
+
+  nutrition.daily.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["nutrition:view"]
+    allowed_fields:
+      - local_date
+      - day_state
+      - calories
+      - protein_g
+      - carbohydrate_g
+      - fat_g
+      - fiber_g
+      - bounded_food_or_meal_label
+      - typed_quantity
+    forbidden_fields: [entry_notes, eating_risk_text, digestion_text, health_material, opaque_json]
+
+  nutrition.range.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["nutrition:view"]
+    allowed_fields:
+      - requested_window
+      - daily_totals
+      - day_state
+      - coverage_counts
+      - explicit_zero_fact
+    forbidden_fields: [entry_notes, eating_risk_text, digestion_text, health_material, opaque_json]
+
+  nutrition.adherence.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["nutrition:view", "plan:view"]
+    allowed_fields:
+      - requested_window
+      - scoreable_day_count
+      - absent_day_count
+      - in_progress_day_count
+      - incomplete_day_count
+      - target_hit_count
+      - versioned_calculation
+    forbidden_fields: [imputed_zero, private_notes, health_material]
+
+  nutrition.meal_patterns.v1:
+    maximum_tier: S1
+    delegated_policy: gateway_missing
+    required_scopes: ["nutrition:view"]
+    allowed_fields: [bounded_food_or_meal_occurrence_aggregate]
+    forbidden_fields: [inferred_meal_time, inferred_breakfast, notes, health_material]
+
+  training.sessions_by_day.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["training:view"]
+    allowed_fields:
+      - local_date
+      - completion_state
+      - routine_session_type
+      - duration
+      - bounded_exercise_ref
+      - bounded_exercise_name
+      - routine_set_and_rep_metrics
+    forbidden_fields: [session_notes, exercise_notes, pain_text, injury_text, health_material]
+
+  training.exercise_frequency.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["training:view"]
+    allowed_fields: [requested_window, exercise_ref, exercise_name, completed_exposure_count]
+    forbidden_fields: [notes, pain_text, injury_text, health_material]
+
+  training.exercise_history.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["training:view"]
+    allowed_fields: [exercise_ref, exercise_name, local_date, load, reps, set_count, comparable_unit]
+    forbidden_fields: [notes, pain_text, injury_text, health_material]
+
+  training.exercise_progression.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["training:view"]
+    allowed_fields: [exercise_ref, requested_window, declared_metric, metric_values, calculation_version]
+    forbidden_fields: [unsupported_estimate, causal_claim, notes, health_material]
+
+  training.plan_adherence.v1:
+    maximum_tier: S1
+    delegated_policy: decision_blocked
+    required_scopes: ["training:view", "plan:view"]
+    allowed_fields: [requested_window, completed_strength_count, applicable_target, scoreable_period_count]
+    forbidden_fields: [unknown_role_as_strength, recovery_inference, notes, health_material]
+
+  conditioning.sessions_by_day.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["training:view"]
+    allowed_fields: [local_date, completion_state, modality, duration, bounded_routine_intensity]
+    forbidden_fields: [notes, pain_text, injury_text, health_material]
+
+  conditioning.plan_adherence.v1:
+    maximum_tier: S1
+    delegated_policy: decision_blocked
+    required_scopes: ["training:view", "plan:view"]
+    allowed_fields: [requested_window, applicable_target, completed_sessions, completed_minutes, target_unit]
+    forbidden_fields: [dimensionally_ambiguous_score, notes, health_material]
+
+  measurements.core_summary.v1:
+    maximum_tier: S1
+    delegated_policy: eligible_s1
+    required_scopes: ["measurements:view"]
+    allowed_fields:
+      - requested_window
+      - weight
+      - waist
+      - body_fat_percent
+      - normalized_unit
+      - observation_count
+      - versioned_trend
+    forbidden_fields: [measurement_notes, skinfolds_json, scan_json, photographs, health_interpretation]
+
+  measurements.timeline.v1:
+    maximum_tier: S1
+    delegated_policy: decision_blocked
+    required_scopes: ["measurements:view"]
+    allowed_fields: [local_date, whitelisted_numeric_measurement, normalized_unit, correction_state]
+    forbidden_fields: [measurement_notes, skinfolds_json, scan_json, photographs, health_interpretation]
+
+  people.subject_authorization.v1:
+    maximum_tier: S0
+    delegated_policy: internal_only
+    required_scopes: []
+    allowed_fields:
+      - perspective
+      - authorization_outcome
+      - scope_names_used
+      - authorization_epoch_digest
+      - relationship_binding_digest
+    forbidden_fields: [people_directory, profile, name, email, raw_relationship, raw_permission, private_text]
+
+  messages.recent_direct.v1:
+    maximum_tier: S4
+    delegated_policy: unavailable
+    required_scopes: ["messages:view"]
+    allowed_fields: []
+    forbidden_fields: [all_message_content_until_contract_exists]
+
+  checkins.relevant.v1:
+    maximum_tier: S3
+    delegated_policy: unavailable
+    required_scopes: []
+    allowed_fields: []
+    forbidden_fields: [all_delegated_checkins, all_uncaptured_checkins]

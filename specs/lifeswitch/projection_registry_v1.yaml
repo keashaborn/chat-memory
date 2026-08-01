@@ -1,0 +1,632 @@
+registry_id: lifeswitch.projection_registry
+registry_version: 1
+manager_contract: lifeswitch.coaching_context@0.2.0-candidate
+projection_schema_version: 1
+
+global_limits:
+  default_projection_count: 6
+  max_projection_count: 6
+  default_context_bytes: 32768
+  max_context_bytes: 32768
+  overflow_behavior: typed_truncation
+  unexecuted_overflow_behavior: selection_result_only
+
+projection_error_codes:
+  - incompatible_projection_version
+  - malformed_projection_payload
+
+payload_failure_policy:
+  fail_closed: true
+  fallback_allowed: false
+  forbidden_fallbacks:
+    - legacy_data
+    - raw_database_rows
+    - raw_json
+    - partially_parsed_payload
+
+truncation_reasons:
+  - projection_count_limit
+  - projection_row_limit
+  - projection_byte_limit
+  - context_byte_limit
+
+lifecycle_states:
+  - present
+  - explicit_zero
+  - missing
+  - absent
+  - in_progress
+  - incomplete
+  - corrected
+  - deleted
+
+decision_blocks:
+  - D01_HISTORICAL_PLAN_AUTHORITY
+  - D02_RELATIVE_DATE_SEMANTICS
+  - D03_MEASUREMENT_COLLISIONS
+  - D04_RECOVERY_ADJUSTMENT_PRECEDENCE
+  - D05_HEALTH_ESCALATION_THRESHOLDS
+  - D06_FORECAST_METHOD
+
+hard_failures:
+  HF14: client-controlled identity or binding affects authority
+  HF15: denial reveals existence, relationship, permission, or record information
+  HF16: sensitive or delegated data crosses trace, cache, queue, Memory, FM, Qdrant, or web lanes
+  HF17: output is used after authorization-epoch or context-snapshot invalidation
+  HF18: budget, schema, malformed-payload, or field-policy violation fails open
+
+authorization:
+  permission_order:
+    - none
+    - view
+    - comment
+    - edit
+    - admin
+  exact_read_scopes:
+    plan: plan:view
+    nutrition: nutrition:view
+    training: training:view
+    conditioning: training:view
+    measurements: measurements:view
+    messages: messages:view
+  rules:
+    - higher levels satisfy view only on the same exact scope
+    - plan:comment and plan:edit do not replace plan:view
+    - messages:send does not replace messages:view
+    - measurement write scopes do not authorize reads
+    - workout-template scopes do not authorize coaching-context reads
+    - no broad people:view scope exists
+    - initial delegated access is capped at S1
+    - check-ins are self-only initially
+  sensitivity_tiers:
+    S0: content-free authorization and operational metadata
+    S1: routine plan, nutrition, training, conditioning, and core numeric measurement data
+    S2: private free text, ordinary coaching notes, and check-ins
+    S3: pain, injury, medication, digestion, reproductive, or eating-risk content
+    S4: private communications
+
+budget_semantics:
+  window_boundary: inclusive_local_dates
+  relative_dates: decision_blocked
+  row_limit: typed_projection_truncation
+  byte_limit: typed_projection_or_context_truncation
+  budgets_are_candidate_bounds: true
+
+projections:
+  - projection_id: plan.current.v1
+    domain: plan
+    readiness: READY
+    initial_self_s1: true
+    authorization_scopes: ["plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_agentic.plan_owner_state_to_plan_versions
+      gateway_requirement: restricted subject-bound current-plan gateway with typed target field mask
+    calculation:
+      owner: none
+      inputs:
+        - plan.current.v1
+    window:
+      kind: as_of_snapshot
+      default_days: 1
+      max_days: 1
+      decision_blocks: []
+    budget:
+      default_rows: 1
+      max_rows: 1
+      default_bytes: 3072
+      max_bytes: 4096
+
+  - projection_id: plan.targets.current.v1
+    domain: plan
+    readiness: READY
+    initial_self_s1: false
+    authorization_scopes: ["plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_agentic.plan_versions.current_typed_targets
+      gateway_requirement: restricted subject-bound current-target gateway and field whitelist
+    calculation:
+      owner: none
+      inputs:
+        - plan.targets.current.v1
+    window:
+      kind: as_of_snapshot
+      default_days: 1
+      max_days: 1
+      decision_blocks: []
+    budget:
+      default_rows: 1
+      max_rows: 1
+      default_bytes: 2048
+      max_bytes: 4096
+
+  - projection_id: plan.history.v1
+    domain: plan
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: ["plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: agentic_and_legacy_plan_stores
+      gateway_requirement: historical-plan gateway after authority and effective-interval decision
+    calculation:
+      owner: none
+      inputs:
+        - plan.history.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 365
+      max_days: 1095
+      decision_blocks:
+        - D01_HISTORICAL_PLAN_AUTHORITY
+        - D02_RELATIVE_DATE_SEMANTICS
+    budget:
+      default_rows: 24
+      max_rows: 100
+      default_bytes: 8192
+      max_bytes: 16384
+
+  - projection_id: plan.recovery_adjustments.v1
+    domain: plan
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: ["plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_agentic.recovery_adjustments
+      gateway_requirement: restricted subject-bound adjustment gateway with effective-period typing
+    calculation:
+      owner: none
+      inputs:
+        - plan.recovery_adjustments.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 90
+      max_days: 365
+      decision_blocks:
+        - D04_RECOVERY_ADJUSTMENT_PRECEDENCE
+    budget:
+      default_rows: 32
+      max_rows: 128
+      default_bytes: 6144
+      max_bytes: 12288
+
+  - projection_id: nutrition.daily.v1
+    domain: nutrition
+    readiness: READY
+    initial_self_s1: false
+    authorization_scopes: ["nutrition:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_nutrition_log_router.daily_records
+      gateway_requirement: restricted subject-bound daily gateway with lifecycle and explicit-zero facts
+    calculation:
+      owner: source_gateway
+      inputs:
+        - nutrition.daily.v1
+    window:
+      kind: explicit_local_date
+      default_days: 1
+      max_days: 1
+      decision_blocks: []
+    budget:
+      default_rows: 1
+      max_rows: 1
+      default_bytes: 3072
+      max_bytes: 4096
+
+  - projection_id: nutrition.range.v1
+    domain: nutrition
+    readiness: READY
+    initial_self_s1: true
+    authorization_scopes: ["nutrition:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_nutrition_log_router.range_records
+      gateway_requirement: restricted subject-bound range gateway with per-day completeness state
+    calculation:
+      owner: source_gateway
+      inputs:
+        - nutrition.range.v1
+    window:
+      kind: explicit_local_date_range
+      initial_slice_days: 1
+      default_days: 7
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 7
+      max_rows: 90
+      default_bytes: 6144
+      max_bytes: 12288
+
+  - projection_id: nutrition.adherence.v1
+    domain: nutrition
+    readiness: DERIVABLE
+    initial_self_s1: false
+    authorization_scopes: ["nutrition:view", "plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: typed_plan_targets_and_nutrition_days
+      gateway_requirement: no separate raw gateway after canonical input projections exist
+    calculation:
+      owner: projection_calculator
+      calculation_id: nutrition_adherence
+      calculation_version: 1
+      inputs:
+        - plan.history.v1
+        - nutrition.range.v1
+      excludes_states:
+        - absent
+        - in_progress
+        - incomplete
+        - missing
+        - deleted
+    window:
+      kind: explicit_local_date_range
+      default_days: 14
+      max_days: 90
+      decision_blocks:
+        - D01_HISTORICAL_PLAN_AUTHORITY
+    budget:
+      default_rows: 14
+      max_rows: 90
+      default_bytes: 4096
+      max_bytes: 8192
+
+  - projection_id: nutrition.meal_patterns.v1
+    domain: nutrition
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: ["nutrition:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: meal_level_typed_records_not_yet_exposed
+      gateway_requirement: typed meal-event gateway with completion and deleted/corrected lifecycle
+    calculation:
+      owner: projection_calculator
+      calculation_id: nutrition_meal_patterns
+      calculation_version: 1
+      inputs:
+        - nutrition.range.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 28
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 112
+      max_rows: 360
+      default_bytes: 8192
+      max_bytes: 16384
+
+  - projection_id: training.sessions_by_day.v1
+    domain: training
+    readiness: READY
+    initial_self_s1: false
+    authorization_scopes: ["training:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_training_router.completed_sessions
+      gateway_requirement: restricted subject-bound session gateway excluding notes and health fields
+    calculation:
+      owner: source_gateway
+      inputs:
+        - training.sessions_by_day.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 14
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 32
+      max_rows: 180
+      default_bytes: 8192
+      max_bytes: 16384
+
+  - projection_id: training.exercise_frequency.v1
+    domain: training
+    readiness: READY
+    initial_self_s1: true
+    authorization_scopes: ["training:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: completed_strength_sessions
+      gateway_requirement: bounded canonical-exercise frequency gateway or calculator input gateway
+    calculation:
+      owner: projection_calculator
+      calculation_id: exercise_frequency
+      calculation_version: 1
+      inputs:
+        - training.sessions_by_day.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 28
+      max_days: 180
+      decision_blocks: []
+    budget:
+      default_rows: 64
+      max_rows: 256
+      default_bytes: 6144
+      max_bytes: 12288
+
+  - projection_id: training.exercise_history.v1
+    domain: training
+    readiness: READY
+    initial_self_s1: false
+    authorization_scopes: ["training:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: completed_strength_exposures_for_one_resolved_exercise
+      gateway_requirement: named-exercise resolver plus bounded like-unit exposure gateway
+    calculation:
+      owner: source_gateway
+      inputs:
+        - training.exercise_history.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 90
+      max_days: 365
+      decision_blocks: []
+    budget:
+      default_rows: 48
+      max_rows: 200
+      default_bytes: 8192
+      max_bytes: 16384
+
+  - projection_id: training.exercise_progression.v1
+    domain: training
+    readiness: READY
+    initial_self_s1: true
+    authorization_scopes: ["training:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: like_unit_named_exercise_exposures
+      gateway_requirement: one resolved strength exercise; exclude notes and health fields
+    calculation:
+      owner: projection_calculator
+      calculation_id: named_exercise_progression
+      calculation_version: 1
+      inputs:
+        - training.exercise_history.v1
+      comparison: latest_two_comparable_like_unit_exposures
+    window:
+      kind: explicit_local_date_range
+      default_days: 180
+      max_days: 365
+      decision_blocks: []
+    budget:
+      default_rows: 24
+      max_rows: 100
+      default_bytes: 6144
+      max_bytes: 12288
+
+  - projection_id: training.plan_adherence.v1
+    domain: training
+    readiness: DERIVABLE
+    initial_self_s1: false
+    authorization_scopes: ["training:view", "plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: typed_plan_targets_and_training_sessions
+      gateway_requirement: no separate raw gateway after canonical input projections exist
+    calculation:
+      owner: projection_calculator
+      calculation_id: training_plan_adherence
+      calculation_version: 1
+      inputs:
+        - plan.history.v1
+        - training.sessions_by_day.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 28
+      max_days: 90
+      decision_blocks:
+        - D01_HISTORICAL_PLAN_AUTHORITY
+        - D04_RECOVERY_ADJUSTMENT_PRECEDENCE
+    budget:
+      default_rows: 28
+      max_rows: 90
+      default_bytes: 4096
+      max_bytes: 8192
+
+  - projection_id: conditioning.sessions_by_day.v1
+    domain: conditioning
+    readiness: READY
+    initial_self_s1: true
+    authorization_scopes: ["training:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_training_router.completed_conditioning_sessions
+      gateway_requirement: restricted subject-bound routine conditioning gateway excluding notes and health fields
+    calculation:
+      owner: source_gateway
+      inputs:
+        - conditioning.sessions_by_day.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 21
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 48
+      max_rows: 180
+      default_bytes: 6144
+      max_bytes: 12288
+
+  - projection_id: conditioning.plan_adherence.v1
+    domain: conditioning
+    readiness: DERIVABLE
+    initial_self_s1: false
+    authorization_scopes: ["training:view", "plan:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: typed_plan_targets_and_conditioning_sessions
+      gateway_requirement: no separate raw gateway after canonical input projections exist
+    calculation:
+      owner: projection_calculator
+      calculation_id: conditioning_plan_adherence
+      calculation_version: 1
+      inputs:
+        - plan.history.v1
+        - conditioning.sessions_by_day.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 28
+      max_days: 90
+      decision_blocks:
+        - D01_HISTORICAL_PLAN_AUTHORITY
+        - D04_RECOVERY_ADJUSTMENT_PRECEDENCE
+    budget:
+      default_rows: 28
+      max_rows: 90
+      default_bytes: 4096
+      max_bytes: 8192
+
+  - projection_id: measurements.core_summary.v1
+    domain: measurements
+    readiness: DERIVABLE
+    initial_self_s1: true
+    authorization_scopes: ["measurements:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: projection_calculator
+      current_source: lifeswitch_measurement_entries.active_core_numeric_records
+      gateway_requirement: restricted subject-bound whitelisted metric gateway returning only unambiguous values
+    calculation:
+      owner: projection_calculator
+      calculation_id: core_measurement_summary
+      calculation_version: 1
+      inputs:
+        - measurements.timeline.v1
+      collision_behavior: field_null_with_D03_MEASUREMENT_COLLISIONS
+    window:
+      kind: latest_unambiguous_with_explicit_lookback
+      default_days: 365
+      max_days: 1825
+      decision_blocks:
+        - D03_MEASUREMENT_COLLISIONS
+    budget:
+      default_rows: 3
+      max_rows: 3
+      default_bytes: 3072
+      max_bytes: 4096
+
+  - projection_id: measurements.timeline.v1
+    domain: measurements
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: ["measurements:view"]
+    sensitivity_ceiling: S1
+    source_contract:
+      owner: source_gateway
+      current_source: lifeswitch_measurement_entries
+      gateway_requirement: full typed whitelist, source/kind provenance, correction lineage, and collision-preserving gateway
+    calculation:
+      owner: source_gateway
+      inputs:
+        - measurements.timeline.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 90
+      max_days: 1095
+      decision_blocks:
+        - D03_MEASUREMENT_COLLISIONS
+    budget:
+      default_rows: 180
+      max_rows: 1000
+      default_bytes: 12288
+      max_bytes: 24576
+
+  - projection_id: people.subject_authorization.v1
+    domain: people
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: []
+    access_mode: internal_only
+    sensitivity_ceiling: S0
+    source_contract:
+      owner: authorization_gateway
+      current_source: relationship_and_permission_records
+      gateway_requirement: content-free exact-edge exact-scope resolver with epoch; never a People directory
+    calculation:
+      owner: authorization_gateway
+      inputs:
+        - people.subject_authorization.v1
+    window:
+      kind: current_authorization_epoch
+      default_days: 1
+      max_days: 1
+      decision_blocks: []
+    budget:
+      default_rows: 1
+      max_rows: 1
+      default_bytes: 1024
+      max_bytes: 2048
+
+  - projection_id: messages.recent_direct.v1
+    domain: messages
+    readiness: NEEDS_GATEWAY
+    initial_self_s1: false
+    authorization_scopes: ["messages:view"]
+    sensitivity_ceiling: S4
+    source_contract:
+      owner: source_gateway
+      current_source: unavailable
+      gateway_requirement: distinct messages:view scope plus side-effect-free direct-conversation gateway; GET paths that mutate last_read_at are forbidden
+    calculation:
+      owner: none
+      inputs:
+        - messages.recent_direct.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 30
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 20
+      max_rows: 50
+      default_bytes: 8192
+      max_bytes: 16384
+
+  - projection_id: checkins.relevant.v1
+    domain: checkins
+    readiness: NOT_CAPTURED
+    initial_self_s1: false
+    authorization_scopes: []
+    access_mode: self_only
+    sensitivity_ceiling: S3
+    source_contract:
+      owner: source_gateway
+      current_source: not_captured
+      gateway_requirement: define check-in schema, lifecycle, capture path, and typed self-only gateway before retrieval
+    calculation:
+      owner: none
+      inputs:
+        - checkins.relevant.v1
+    window:
+      kind: explicit_local_date_range
+      default_days: 30
+      max_days: 90
+      decision_blocks: []
+    budget:
+      default_rows: 12
+      max_rows: 50
+      default_bytes: 6144
+      max_bytes: 12288

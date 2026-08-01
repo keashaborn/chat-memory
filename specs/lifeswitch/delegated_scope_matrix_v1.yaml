@@ -1,0 +1,284 @@
+schema_id: lifeswitch.delegated_scope_matrix
+schema_version: 1
+status: candidate
+initial_v2_mode: read_only
+initial_subject_limit: 1
+delegated_sensitivity_ceiling: S1
+projection_count_limit: 6
+context_byte_limit: 32768
+
+directional_predicate:
+  - server_verified_actor_equals_bound_actor
+  - exactly_one_explicit_subject
+  - relationship_joins_exact_actor_and_subject
+  - relationship_status_is_accepted
+  - grantor_user_id_equals_subject_user_id
+  - grantee_user_id_equals_actor_user_id
+  - exact_required_permission_scope
+  - permission_is_enabled
+  - permission_level_meets_minimum_and_is_not_none
+  - grant_and_relationship_share_authorization_edge
+  - requested_fields_do_not_exceed_sensitivity_ceiling
+  - authorization_epoch_is_current
+
+permission_levels:
+  order: [none, view, comment, edit, admin]
+  read_minimum: view
+  rules:
+    - A higher level satisfies only the same exact scope.
+    - plan:comment and plan:edit never replace plan:view.
+    - messages:send never replaces messages:view.
+    - Unknown levels, unknown scopes, conflicting grants, and malformed permission rows deny.
+
+scope_catalog:
+  "plan:view":
+    establishment: existing
+    minimum_level: view
+    authorizes_context_read: true
+    domains: [plan]
+  "nutrition:view":
+    establishment: existing
+    minimum_level: view
+    authorizes_context_read: true
+    domains: [nutrition]
+  "training:view":
+    establishment: existing
+    minimum_level: view
+    authorizes_context_read: true
+    domains: [training, conditioning]
+  "measurements:view":
+    establishment: existing
+    minimum_level: view
+    authorizes_context_read: true
+    domains: [measurements]
+  "messages:view":
+    establishment: future
+    minimum_level: view
+    authorizes_context_read: false
+    domains: [messages]
+    missing_requirements:
+      - explicit_scope_creation_and_review
+      - side_effect_free_direct_conversation_gateway
+      - active_direct_conversation_membership_check
+  "messages:send":
+    establishment: existing
+    minimum_level: comment
+    authorizes_context_read: false
+    domains: []
+  "measurements:enter":
+    establishment: existing
+    minimum_level: edit
+    authorizes_context_read: false
+    domains: []
+  "measurements:edit_recent":
+    establishment: existing
+    minimum_level: edit
+    authorizes_context_read: false
+    domains: []
+  "plan:comment":
+    establishment: existing
+    minimum_level: comment
+    authorizes_context_read: false
+    domains: []
+  "plan:edit":
+    establishment: existing
+    minimum_level: edit
+    authorizes_context_read: false
+    domains: []
+  "workout_template:share":
+    establishment: existing
+    minimum_level: edit
+    authorizes_context_read: false
+    domains: []
+  "workout_template:copy":
+    establishment: existing
+    minimum_level: edit
+    authorizes_context_read: false
+    domains: []
+
+generic_denial:
+  all_denied_text: "I can’t access the requested information."
+  partial_text: "Some requested information is unavailable under the current access."
+  externally_equivalent_causes:
+    - unknown_subject
+    - nonexistent_subject
+    - missing_relationship
+    - pending_relationship
+    - blocked_relationship
+    - revoked_relationship
+    - wrong_grant_direction
+    - missing_scope
+    - disabled_grant
+    - permission_level_none
+    - malformed_authorization_edge
+  forbidden_disclosures:
+    - failed_scope_name
+    - relationship_state
+    - permission_state
+    - denied_record_count
+    - denied_record_existence
+    - denied_source_provenance
+    - timing_distinction
+
+epoch_policy:
+  recheck_points: [pre_retrieval, pre_prompt, delivery]
+  increments_on:
+    - relationship_status_change
+    - grant_enable_or_disable
+    - permission_level_change
+    - permission_scope_change
+    - relationship_revoke_or_block
+    - relationship_reaccept
+    - explicit_regrant
+  invalidation_effects:
+    - discard_delegated_context
+    - discard_undelivered_answer
+    - block_cache_reuse
+    - cancel_queued_work
+    - block_background_transcript_search
+  reacceptance_rule: explicit_regrant_required
+
+projection_scope_matrix:
+  plan.current.v1:
+    required_scopes: ["plan:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09]
+  plan.targets.current.v1:
+    required_scopes: ["plan:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09]
+  plan.history.v1:
+    required_scopes: ["plan:view"]
+    maximum_tier: S1
+    delegated_contract: decision_blocked
+    gateway_state: new_restricted_gateway_required
+    decision_blocks: [D01_HISTORICAL_PLAN_AUTHORITY]
+    benchmark_refs: [A02, A03, A05, B08]
+  plan.recovery_adjustments.v1:
+    required_scopes: ["plan:view"]
+    maximum_tier: S1
+    delegated_contract: decision_blocked
+    gateway_state: new_restricted_gateway_required
+    decision_blocks: [D04_RECOVERY_ADJUSTMENT_PRECEDENCE]
+    benchmark_refs: [A02, A03, A05, B07, B08]
+  nutrition.daily.v1:
+    required_scopes: ["nutrition:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A05, A06, A08, A09]
+  nutrition.range.v1:
+    required_scopes: ["nutrition:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A05, A06, A08, A09, B01, B02, B03, B04, B08]
+  nutrition.adherence.v1:
+    required_scopes: ["nutrition:view", "plan:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scopes_and_semantics_blocked
+    gateway_state: deterministic_derivation_required
+    decision_blocks: [D01_HISTORICAL_PLAN_AUTHORITY]
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B03, B08]
+  nutrition.meal_patterns.v1:
+    required_scopes: ["nutrition:view"]
+    maximum_tier: S1
+    delegated_contract: gateway_missing
+    gateway_state: new_restricted_gateway_and_capture_semantics_required
+    benchmark_refs: [A02, A03, A05, A12, B08]
+  training.sessions_by_day.v1:
+    required_scopes: ["training:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B03, B08]
+  training.exercise_frequency.v1:
+    required_scopes: ["training:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B02, B03, B08]
+  training.exercise_history.v1:
+    required_scopes: ["training:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A05, A06, A08, A09, B02, B03, B08]
+  training.exercise_progression.v1:
+    required_scopes: ["training:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: deterministic_derivation_required
+    benchmark_refs: [A02, A03, A05, A06, A08, A09, B02, B03, B08]
+  training.plan_adherence.v1:
+    required_scopes: ["training:view", "plan:view"]
+    maximum_tier: S1
+    delegated_contract: decision_blocked
+    gateway_state: deterministic_derivation_required
+    decision_blocks: [D01_HISTORICAL_PLAN_AUTHORITY, D04_RECOVERY_ADJUSTMENT_PRECEDENCE]
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B03, B07, B08]
+  conditioning.sessions_by_day.v1:
+    required_scopes: ["training:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: v2_subject_bound_gateway_required
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B03, B08]
+  conditioning.plan_adherence.v1:
+    required_scopes: ["training:view", "plan:view"]
+    maximum_tier: S1
+    delegated_contract: decision_blocked
+    gateway_state: deterministic_derivation_required
+    decision_blocks: [D01_HISTORICAL_PLAN_AUTHORITY, D04_RECOVERY_ADJUSTMENT_PRECEDENCE]
+    benchmark_refs: [A02, A03, A04, A05, A06, A08, A09, B03, B07, B08]
+  measurements.core_summary.v1:
+    required_scopes: ["measurements:view"]
+    maximum_tier: S1
+    delegated_contract: existing_scope
+    gateway_state: new_restricted_gateway_required
+    benchmark_refs: [A02, A03, A05, A06, A07, A08, A09, B02, B03, B06, B08]
+  measurements.timeline.v1:
+    required_scopes: ["measurements:view"]
+    maximum_tier: S1
+    delegated_contract: decision_blocked
+    gateway_state: new_restricted_gateway_required
+    decision_blocks: [D03_MEASUREMENT_COLLISIONS]
+    benchmark_refs: [A02, A03, A05, A06, A07, A08, A09, B02, B03, B04, B06, B08]
+  people.subject_authorization.v1:
+    required_scopes: []
+    maximum_tier: S0
+    delegated_contract: internal_only
+    gateway_state: canonical_authorization_gateway_required
+    benchmark_refs: [A01, A02, A03, A04, A05, A06, A08, A09, A10]
+  messages.recent_direct.v1:
+    required_scopes: ["messages:view"]
+    maximum_tier: S4
+    delegated_contract: unavailable
+    gateway_state: future_scope_and_side_effect_free_gateway_required
+    benchmark_refs: [A04, A05, A06, A08, A09, A11, A12, A13, A14, B08]
+  checkins.relevant.v1:
+    required_scopes: []
+    maximum_tier: S3
+    delegated_contract: unavailable
+    gateway_state: not_captured
+    benchmark_refs: [A10, A12, A13, A14, B08]
+
+canonical_hard_failures:
+  HF14: client_controlled_identity_or_binding_affects_authority
+  HF15: denial_reveals_existence_relationship_permission_or_record_information
+  HF16: sensitive_or_delegated_data_crosses_context_lane
+  HF17: output_released_after_epoch_or_snapshot_invalidation
+  HF18: budget_schema_malformed_payload_or_field_policy_violation_fails_open
+
+canonical_selection_and_error_codes:
+  truncation_reasons:
+    - projection_count_limit
+    - projection_row_limit
+    - projection_byte_limit
+    - context_byte_limit
+  projection_errors:
+    - incompatible_projection_version
+    - malformed_projection_payload

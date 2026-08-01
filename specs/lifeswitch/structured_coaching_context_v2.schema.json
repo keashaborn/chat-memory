@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.local/contracts/structured_coaching_context_v2.schema.json",
+  "title": "StructuredCoachingContextV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "binding",
+    "authorization",
+    "selection",
+    "projections",
+    "unavailable_domains",
+    "serialized_projection_bytes",
+    "max_projection_bytes",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "lifeswitch.structured_coaching_context"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "binding": {
+      "$ref": "#/$defs/binding"
+    },
+    "authorization": {
+      "$ref": "authorization_snapshot_v2.schema.json"
+    },
+    "selection": {
+      "$ref": "projection_selection_v1.schema.json"
+    },
+    "projections": {
+      "type": "array",
+      "items": {
+        "$ref": "projection_result_v1.schema.json"
+      },
+      "maxItems": 6
+    },
+    "unavailable_domains": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unavailableDomain"
+      },
+      "uniqueItems": true,
+      "maxItems": 5
+    },
+    "serialized_projection_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32768
+    },
+    "max_projection_bytes": {
+      "const": 32768
+    },
+    "context_truncation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/contextTruncation"
+        }
+      ]
+    },
+    "capabilities": {
+      "$ref": "#/$defs/capabilities"
+    }
+  },
+  "$defs": {
+    "projectionId": {
+      "$ref": "projection_selection_v1.schema.json#/$defs/projectionId"
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "thread_id",
+        "context_snapshot_id",
+        "actor_user_id",
+        "subject_user_id",
+        "account_timezone",
+        "as_of_utc",
+        "as_of_local_date",
+        "authorization_epoch",
+        "transaction_isolation",
+        "transaction_access"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "thread_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "context_snapshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "actor_user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "subject_user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "account_timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "as_of_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "as_of_local_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "authorization_epoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "transaction_isolation": {
+          "const": "repeatable_read"
+        },
+        "transaction_access": {
+          "const": "read_only"
+        }
+      }
+    },
+    "unavailableDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "status"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "nutrition",
+            "training",
+            "conditioning",
+            "measurements"
+          ]
+        },
+        "status": {
+          "const": "unavailable"
+        }
+      }
+    },
+    "contextTruncation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "limit_bytes",
+        "serialized_bytes"
+      ],
+      "properties": {
+        "reason": {
+          "const": "context_byte_limit"
+        },
+        "limit_bytes": {
+          "const": 32768
+        },
+        "serialized_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32768
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read",
+        "change_design",
+        "experiment_consent",
+        "write_consent",
+        "proactive_follow_up"
+      ],
+      "properties": {
+        "read": {
+          "const": true
+        },
+        "change_design": {
+          "const": false
+        },
+        "experiment_consent": {
+          "const": false
+        },
+        "write_consent": {
+          "const": false
+        },
+        "proactive_follow_up": {
+          "const": false
+        }
+      }
+    }
+  }
+}

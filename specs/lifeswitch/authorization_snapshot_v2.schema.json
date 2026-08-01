@@ -1,0 +1,359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.local/contracts/authorization_snapshot_v2.schema.json",
+  "title": "LifeSwitch Authorization Snapshot V2",
+  "description": "Server-internal, request-bound authorization snapshot for StructuredCoachingContextV2. It is not a client authority token and must not be copied into content-free traces verbatim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "binding",
+    "decision",
+    "authorization_epoch",
+    "sensitivity_ceiling",
+    "relationship_basis",
+    "effective_grants",
+    "projection_decisions",
+    "rechecks",
+    "budget"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "lifeswitch.authorization_snapshot"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "binding": {
+      "$ref": "#/$defs/binding"
+    },
+    "decision": {
+      "enum": ["allow", "partial", "deny"]
+    },
+    "authorization_epoch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Opaque server-controlled epoch. It is never accepted from client input."
+    },
+    "sensitivity_ceiling": {
+      "enum": ["S1", "S2", "S3"]
+    },
+    "relationship_basis": {
+      "enum": ["self", "accepted_relationship"]
+    },
+    "relationship_binding_digest": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "effective_grants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/effectiveGrant"
+      },
+      "uniqueItems": true
+    },
+    "projection_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/projectionDecision"
+      }
+    },
+    "rechecks": {
+      "$ref": "#/$defs/rechecks"
+    },
+    "budget": {
+      "$ref": "#/$defs/budget"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "binding": {
+            "properties": {
+              "perspective": {
+                "const": "delegated"
+              }
+            },
+            "required": ["perspective"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sensitivity_ceiling": {
+            "const": "S1"
+          },
+          "relationship_basis": {
+            "const": "accepted_relationship"
+          },
+          "relationship_binding_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effective_grants": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "relationship_basis": {
+            "const": "self"
+          },
+          "relationship_binding_digest": {
+            "type": "null"
+          },
+          "effective_grants": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "thread_id",
+        "context_snapshot_id",
+        "actor_user_id",
+        "subject_user_id",
+        "subject_selection",
+        "perspective",
+        "account_timezone",
+        "evaluated_at",
+        "transaction_isolation",
+        "transaction_access",
+        "transaction_snapshot_digest"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "thread_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "context_snapshot_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actor_user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "subject_user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "subject_selection": {
+          "const": "explicit"
+        },
+        "perspective": {
+          "enum": ["self", "delegated"]
+        },
+        "account_timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9_+./-]+$"
+        },
+        "evaluated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "transaction_isolation": {
+          "const": "repeatable_read"
+        },
+        "transaction_access": {
+          "const": "read_only"
+        },
+        "transaction_snapshot_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "currentReadScope": {
+      "enum": [
+        "plan:view",
+        "nutrition:view",
+        "training:view",
+        "measurements:view"
+      ]
+    },
+    "projectionScope": {
+      "enum": [
+        "plan:view",
+        "nutrition:view",
+        "training:view",
+        "measurements:view",
+        "messages:view"
+      ]
+    },
+    "permissionLevel": {
+      "enum": ["view", "comment", "edit", "admin"]
+    },
+    "effectiveGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "permission_level", "grant_digest"],
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/currentReadScope"
+        },
+        "permission_level": {
+          "$ref": "#/$defs/permissionLevel"
+        },
+        "grant_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "projectionId": {
+      "enum": [
+        "plan.current.v1",
+        "plan.targets.current.v1",
+        "plan.history.v1",
+        "plan.recovery_adjustments.v1",
+        "nutrition.daily.v1",
+        "nutrition.range.v1",
+        "nutrition.adherence.v1",
+        "nutrition.meal_patterns.v1",
+        "training.sessions_by_day.v1",
+        "training.exercise_frequency.v1",
+        "training.exercise_history.v1",
+        "training.exercise_progression.v1",
+        "training.plan_adherence.v1",
+        "conditioning.sessions_by_day.v1",
+        "conditioning.plan_adherence.v1",
+        "measurements.core_summary.v1",
+        "measurements.timeline.v1",
+        "people.subject_authorization.v1",
+        "messages.recent_direct.v1",
+        "checkins.relevant.v1"
+      ]
+    },
+    "projectionDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id",
+        "outcome",
+        "executed",
+        "required_scopes",
+        "sensitivity_ceiling",
+        "field_policy_version",
+        "internal_reason_code"
+      ],
+      "properties": {
+        "projection_id": {
+          "$ref": "#/$defs/projectionId"
+        },
+        "outcome": {
+          "enum": ["authorized", "unavailable", "rejected", "error"]
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "required_scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectionScope"
+          },
+          "uniqueItems": true
+        },
+        "sensitivity_ceiling": {
+          "enum": ["S0", "S1", "S2", "S3", "S4"]
+        },
+        "field_policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "internal_reason_code": {
+          "enum": [
+            null,
+            "AUTH_UNAVAILABLE",
+            "projection_count_limit",
+            "projection_row_limit",
+            "projection_byte_limit",
+            "context_byte_limit",
+            "incompatible_projection_version",
+            "malformed_projection_payload",
+            "field_policy_violation"
+          ]
+        }
+      }
+    },
+    "recheckState": {
+      "enum": ["pass", "fail", "not_run"]
+    },
+    "rechecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre_retrieval", "pre_prompt", "delivery"],
+      "properties": {
+        "pre_retrieval": {
+          "enum": ["pass", "fail"]
+        },
+        "pre_prompt": {
+          "$ref": "#/$defs/recheckState"
+        },
+        "delivery": {
+          "$ref": "#/$defs/recheckState"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_count_limit",
+        "context_byte_limit",
+        "selected_projection_count",
+        "serialized_projection_bytes",
+        "truncation_reasons"
+      ],
+      "properties": {
+        "projection_count_limit": {
+          "const": 6
+        },
+        "context_byte_limit": {
+          "const": 32768
+        },
+        "selected_projection_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "serialized_projection_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32768
+        },
+        "truncation_reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "projection_count_limit",
+              "projection_row_limit",
+              "projection_byte_limit",
+              "context_byte_limit"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

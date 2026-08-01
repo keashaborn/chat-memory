@@ -1,0 +1,45 @@
+{
+  "manifest_id": "lifeswitch.coaching_contracts.v2",
+  "manifest_version": 2,
+  "status": "candidate",
+  "starting_commit": "7ef10be1d662bc6ce2330c7db2349c285a68fc50",
+  "canonical_source_root": "/Users/seebx/Documents/LifeSwitch AI Response Orchestration/contracts",
+  "runtime_activation": false,
+  "artifacts": [
+    {
+      "path": "specs/lifeswitch/structured_coaching_context_v2.schema.json",
+      "sha256": "3e71f80961bb9b26844762916270e2e2ad150d0118cc1fa5b6eed05e4031f63a"
+    },
+    {
+      "path": "specs/lifeswitch/authorization_snapshot_v2.schema.json",
+      "sha256": "73b8b2c6358145361c202476dbca93e8b6181fe077b838fc78053ecf46637358"
+    },
+    {
+      "path": "specs/lifeswitch/projection_selection_v1.schema.json",
+      "sha256": "824c94f4f60d9d0bcb340a506dda8024b7989cc2d498c07f9ece86b53b5ea22f"
+    },
+    {
+      "path": "specs/lifeswitch/projection_result_v1.schema.json",
+      "sha256": "0f34c8a2e187760bc40d5019f2006486fd9c91e89f1ea41ea85506a5716636ec"
+    },
+    {
+      "path": "specs/lifeswitch/projection_registry_v1.yaml",
+      "sha256": "dd2393b8fbbbd45321541ab512810e46c5583335613d6dc4e411310ab2f57e6a"
+    },
+    {
+      "path": "specs/lifeswitch/delegated_scope_matrix_v1.yaml",
+      "sha256": "7ee7c81a2e88db4283d2a2d0636606d3638f80d8c914fc8dc5e3f1c41dbd7246"
+    },
+    {
+      "path": "specs/lifeswitch/sensitivity_field_policy_v1.yaml",
+      "sha256": "987dc6200ec89e49ffe617ca838832ed5084f52dfbd1c6b9f79ef9687ad6a3d0"
+    }
+  ],
+  "boundaries": {
+    "new_files_only": true,
+    "production_runtime_import": false,
+    "database_change": false,
+    "qdrant_change": false,
+    "provider_call": false
+  }
+}
