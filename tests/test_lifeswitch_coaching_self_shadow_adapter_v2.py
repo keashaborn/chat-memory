@@ -403,6 +403,66 @@ class SelfShadowAdapterTests(unittest.TestCase):
         self.assertNotIn("recovery", serialized)
         self.assertEqual(result.result.data["sessions"][0]["duration"], 30.0)
 
+    def test_training_range_preserves_exact_days_and_bounded_session_counts(self):
+        request = _request(
+            "For each day from July 30 through August 1, show whether I "
+            "completed strength training or conditioning."
+        )
+        section = _section(
+            projection="training_range",
+            payload={
+                "columns": [
+                    "date",
+                    "strength_session_count",
+                    "strength_set_count",
+                    "strength_exercise_count",
+                    "rehab_session_count",
+                    "rehab_set_count",
+                    "rehab_exercise_count",
+                    "conditioning_session_count",
+                    "conditioning_minutes",
+                    "unknown_role_session_count",
+                    "unknown_role_set_count",
+                    "unknown_role_exercise_count",
+                ],
+                "rows": [
+                    ["2026-07-30", 1, 12, 4, 0, 0, 0, 0, 0.0, 0, 0, 0],
+                    ["2026-07-31", 0, 0, 0, 0, 0, 0, 1, 25.0, 0, 0, 0],
+                    ["2026-08-01", 0, 0, 0, 0, 0, 0, 0, 0.0, 0, 0, 0],
+                ],
+            },
+            sources=(
+                "lifeswitch_training.training_session_current_v",
+                "lifeswitch_training.training_set_log",
+                "lifeswitch_training.training_set_effective_role_v1",
+                "lifeswitch_training.conditioning_session_current_v",
+            ),
+            start=dt.date(2026, 7, 30),
+            end=TODAY,
+        )
+        result = _adapt(
+            request,
+            _envelope(request, section),
+            "training.sessions_by_day.v1",
+            ("training:view",),
+        )
+        self.assertEqual(result.result.status, "available")
+        self.assertEqual(len(result.result.data["sessions"]), 2)
+        self.assertEqual(
+            result.result.data["requested_window"],
+            {
+                "start_local_date": "2026-07-30",
+                "end_local_date": "2026-08-01",
+            },
+        )
+        self.assertEqual(
+            [item["routine_session_type"] for item in result.result.data["sessions"]],
+            ["strength", "conditioning"],
+        )
+        serialized = json.dumps(result.result.data, default=str, sort_keys=True)
+        self.assertNotIn("heart", serialized)
+        self.assertNotIn("notes", serialized)
+
     def test_measurements_are_data_free_and_decision_blocked(self):
         request = _request("What is my recent weight?")
         section = _section(

@@ -23,6 +23,8 @@ _PROJECTION_BY_INTENT = {
     "NUTRITION_RANGE": "nutrition_range",
     "TRAINING_SUMMARY": "training_summary",
     "TRAINING_SESSION": "training_session",
+    "TRAINING_RANGE": "training_range",
+    "DAILY_STATUS_RANGE": "daily_status_range",
     "EXERCISE_PROGRESSION": "exercise_progression",
     "EXERCISE_FREQUENCY": "exercise_frequency",
     "LIFTING_PROGRESSION_SUMMARY": "lifting_progression_summary",
@@ -93,6 +95,30 @@ _ALLOWED_RELATIONS = {
         {
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
+            "lifeswitch_training.conditioning_session_current_v",
+        }
+    ),
+    "training_range": frozenset(
+        {
+            "lifeswitch_training.training_session_current_v",
+            "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
+            "lifeswitch_training.conditioning_session_current_v",
+        }
+    ),
+    "daily_status_range": frozenset(
+        {
+            "lifeswitch_agentic.plan_owner_state",
+            "lifeswitch_agentic.plan_versions",
+            "lifeswitch_plan.plan_profile",
+            "lifeswitch_nutrition.nutrition_day",
+            "lifeswitch_nutrition.nutrition_entry",
+            "lifeswitch_nutrition.my_food",
+            "lifeswitch_nutrition.my_food_serving",
+            "lifeswitch_nutrition.meal_item",
+            "lifeswitch_training.training_session_current_v",
+            "lifeswitch_training.training_set_log",
+            "lifeswitch_training.training_set_effective_role_v1",
             "lifeswitch_training.conditioning_session_current_v",
         }
     ),
@@ -206,6 +232,24 @@ class LifeSwitchDomainReaderV1(Protocol):
         day: dt.date,
     ) -> LifeSwitchReadResultV1: ...
 
+    async def read_training_range(
+        self,
+        *,
+        owner_user_id: Any,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1: ...
+
+    async def read_daily_status_range(
+        self,
+        *,
+        owner_user_id: Any,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1: ...
+
     async def read_exercise_progression(
         self,
         *,
@@ -303,6 +347,22 @@ class LifeSwitchDomainContextProviderV1:
                 owner_user_id=request.owner_user_id,
                 owner_timezone=request.owner_timezone,
                 day=window.end_date,
+            )
+        elif intent == "TRAINING_RANGE":
+            assert window is not None
+            result = await self._reader.read_training_range(
+                owner_user_id=request.owner_user_id,
+                owner_timezone=request.owner_timezone,
+                start_date=window.start_date,
+                end_date=window.end_date,
+            )
+        elif intent == "DAILY_STATUS_RANGE":
+            assert window is not None
+            result = await self._reader.read_daily_status_range(
+                owner_user_id=request.owner_user_id,
+                owner_timezone=request.owner_timezone,
+                start_date=window.start_date,
+                end_date=window.end_date,
             )
         elif intent == "EXERCISE_PROGRESSION":
             assert window is not None and plan.subject is not None

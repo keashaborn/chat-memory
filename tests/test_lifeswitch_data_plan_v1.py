@@ -62,7 +62,50 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         )
         self.assertEqual(plan.intent, "NUTRITION_RANGE")
         self.assertEqual(plan.window.end_date, TODAY)
-        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 20)
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 6)
+
+    def test_absolute_nutrition_range_is_preserved(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "For each day from July 18 through July 31, show my calories and "
+            "protein and compare both with my plan.",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "NUTRITION_RANGE")
+        self.assertEqual(plan.window.start_date, dt.date(2026, 7, 18))
+        self.assertEqual(plan.window.end_date, dt.date(2026, 7, 31))
+        self.assertEqual(plan.confidence, "high")
+
+    def test_combined_daily_range_selects_cross_domain_projection(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "For each day from July 18 through July 31, show my protein "
+            "and whether I completed strength training.",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "DAILY_STATUS_RANGE")
+        self.assertEqual(
+            plan.domains,
+            ("nutrition", "training", "conditioning", "plan"),
+        )
+        self.assertEqual(plan.window.start_date, dt.date(2026, 7, 18))
+        self.assertEqual(plan.window.end_date, dt.date(2026, 7, 31))
+
+    def test_relative_cross_domain_range_uses_requested_fourteen_days(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "Which days during the last 14 days missed my protein minimum, "
+            "and on which days did I strength train?",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "DAILY_STATUS_RANGE")
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 13)
+
+    def test_relative_daily_training_range_uses_requested_fourteen_days(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "For each day in the last 14 days, show whether I strength trained "
+            "or did conditioning.",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "TRAINING_RANGE")
+        self.assertEqual((plan.window.end_date - plan.window.start_date).days, 13)
 
     def test_training_day_selects_one_session_projection(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
@@ -71,6 +114,17 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         )
         self.assertEqual(plan.intent, "TRAINING_SESSION")
         self.assertEqual(plan.window.end_date, dt.date(2026, 7, 28))
+
+    def test_absolute_daily_training_range_selects_exact_window(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "For each day from July 18 through July 31, show whether I "
+            "completed strength training or conditioning.",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "TRAINING_RANGE")
+        self.assertEqual(plan.domains, ("training", "conditioning"))
+        self.assertEqual(plan.window.start_date, dt.date(2026, 7, 18))
+        self.assertEqual(plan.window.end_date, dt.date(2026, 7, 31))
 
     def test_named_exercise_progression_is_bounded(self) -> None:
         plan = create_lifeswitch_data_plan_v1(
@@ -149,6 +203,15 @@ class LifeSwitchDataPlanV1Tests(unittest.TestCase):
         )
         self.assertEqual(plan.intent, "EXERCISE_FREQUENCY")
         self.assertEqual((plan.window.end_date - plan.window.start_date).days, 27)
+
+    def test_exercise_frequency_honors_absolute_window(self) -> None:
+        plan = create_lifeswitch_data_plan_v1(
+            "What exercises did I do most from July 4 through July 31?",
+            today=dt.date(2026, 8, 1),
+        )
+        self.assertEqual(plan.intent, "EXERCISE_FREQUENCY")
+        self.assertEqual(plan.window.start_date, dt.date(2026, 7, 4))
+        self.assertEqual(plan.window.end_date, dt.date(2026, 7, 31))
 
     def test_exercise_data_access_prompt_selects_bounded_history(self) -> None:
         plan = create_lifeswitch_data_plan_v1(

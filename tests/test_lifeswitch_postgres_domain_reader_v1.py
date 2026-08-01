@@ -45,6 +45,7 @@ class FakeConnection:
         legacy_plan: dict[str, Any] | None = None,
         nutrition_rows: list[dict[str, Any]] | None = None,
         training_rows: list[dict[str, Any]] | None = None,
+        resistance_rows: list[dict[str, Any]] | None = None,
         conditioning_rows: list[dict[str, Any]] | None = None,
         progression_rows: list[dict[str, Any]] | None = None,
         frequency_rows: list[dict[str, Any]] | None = None,
@@ -54,6 +55,7 @@ class FakeConnection:
         self.legacy_plan = legacy_plan
         self.nutrition_rows = nutrition_rows or []
         self.training_rows = training_rows or []
+        self.resistance_rows = resistance_rows or []
         self.conditioning_rows = conditioning_rows or []
         self.progression_rows = progression_rows or []
         self.frequency_rows = frequency_rows or []
@@ -82,6 +84,8 @@ class FakeConnection:
             return self.nutrition_rows
         if "read_training_day_v1" in query:
             return self.training_rows
+        if "read_resistance_sessions_v1" in query:
+            return self.resistance_rows
         if "read_conditioning_sessions_v1" in query:
             return self.conditioning_rows
         if "read_exercise_progression_v1" in query:
@@ -322,6 +326,117 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "lifeswitch_training.conditioning_session_current_v",
             result.source_relations,
+        )
+
+    async def test_training_range_returns_exact_daily_rows_including_zero_days(self) -> None:
+        start = dt.date(2026, 7, 18)
+        end = dt.date(2026, 7, 20)
+        conn = FakeConnection(
+            resistance_rows=[
+                {
+                    "day": dt.date(2026, 7, 20),
+                    "active_set_count": 12,
+                    "exercise_count": 4,
+                    "strength_set_count": 9,
+                    "strength_exercise_count": 3,
+                    "rehab_set_count": 3,
+                    "rehab_exercise_count": 1,
+                    "unknown_role_set_count": 0,
+                    "unknown_role_exercise_count": 0,
+                }
+            ],
+            conditioning_rows=[
+                {
+                    "day": dt.date(2026, 7, 19),
+                    "name": "Bike",
+                    "category": "conditioning",
+                    "modality": "bike",
+                    "duration_min": 25,
+                    "intensity": "moderate",
+                    "distance_value": 5,
+                    "distance_unit": "mi",
+                    "heart_rate_avg": None,
+                    "recovery_impact": None,
+                }
+            ],
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_training_range(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=start,
+            end_date=end,
+        )
+        self.assertEqual(result.status, "AVAILABLE")
+        self.assertEqual(result.record_count, 3)
+        self.assertEqual([row[0] for row in result.payload["rows"]], [
+            "2026-07-18",
+            "2026-07-19",
+            "2026-07-20",
+        ])
+        columns = result.payload["columns"]
+        july_18 = dict(zip(columns, result.payload["rows"][0]))
+        july_19 = dict(zip(columns, result.payload["rows"][1]))
+        july_20 = dict(zip(columns, result.payload["rows"][2]))
+        self.assertEqual(july_18["strength_session_count"], 0)
+        self.assertEqual(july_19["conditioning_session_count"], 1)
+        self.assertEqual(july_19["conditioning_minutes"], 25.0)
+        self.assertEqual(july_20["strength_session_count"], 1)
+        self.assertEqual(july_20["strength_set_count"], 9)
+        self.assertEqual(july_20["rehab_session_count"], 1)
+
+    async def test_daily_status_range_joins_nutrition_and_training_by_date(self) -> None:
+        start = dt.date(2026, 7, 18)
+        end = dt.date(2026, 7, 20)
+        conn = FakeConnection(
+            active_plan={"document": plan_document()},
+            nutrition_rows=[
+                {
+                    "day": dt.date(2026, 7, 20),
+                    "entry_count": 4,
+                    "kcal": 1950,
+                    "protein_g": 190,
+                    "carbs_g": 160,
+                    "fat_g": 60,
+                }
+            ],
+            resistance_rows=[
+                {
+                    "day": dt.date(2026, 7, 20),
+                    "active_set_count": 9,
+                    "exercise_count": 3,
+                    "strength_set_count": 9,
+                    "strength_exercise_count": 3,
+                    "rehab_set_count": 0,
+                    "rehab_exercise_count": 0,
+                    "unknown_role_set_count": 0,
+                    "unknown_role_exercise_count": 0,
+                }
+            ],
+        )
+        result = await PostgresLifeSwitchDomainReaderV1(
+            conn,
+            context_id=CONTEXT,
+        ).read_daily_status_range(
+            owner_user_id=OWNER,
+            owner_timezone="America/Chicago",
+            start_date=start,
+            end_date=end,
+        )
+        self.assertEqual(result.record_count, 3)
+        columns = result.payload["columns"]
+        july_20 = dict(zip(columns, result.payload["rows"][2]))
+        self.assertEqual(july_20["calories"], 1950.0)
+        self.assertEqual(july_20["protein_g"], 190.0)
+        self.assertEqual(july_20["strength_session_count"], 1)
+        self.assertEqual(july_20["strength_set_count"], 9)
+        self.assertIn("calories", columns)
+        self.assertIn("conditioning_session_count", columns)
+        self.assertEqual(
+            result.payload["training_plan_targets"],
+            {"workouts_per_week": 4},
         )
 
     async def test_overall_status_uses_plan_and_all_authorized_observation_lanes(self) -> None:
@@ -611,6 +726,64 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
         rendered = render_lifeswitch_context_v1(envelope)
         self.assertEqual(envelope.sections[0].record_count, 12)
         self.assertLessEqual(rendered.estimated_tokens, 550)
+
+    async def test_combined_fourteen_day_timeline_remains_within_prompt_budget(self) -> None:
+        start = dt.date(2026, 7, 18)
+        end = dt.date(2026, 7, 31)
+        nutrition_rows = [
+            {
+                "day": start + dt.timedelta(days=index),
+                "entry_count": 4,
+                "kcal": 1900 + index,
+                "protein_g": 180 + index,
+                "carbs_g": 160 + index,
+                "fat_g": 55 + index,
+            }
+            for index in range(14)
+        ]
+        resistance_rows = [
+            {
+                "day": dt.date(2026, 7, day),
+                "active_set_count": 12,
+                "exercise_count": 4,
+                "strength_set_count": 12,
+                "strength_exercise_count": 4,
+                "rehab_set_count": 0,
+                "rehab_exercise_count": 0,
+                "unknown_role_set_count": 0,
+                "unknown_role_exercise_count": 0,
+            }
+            for day in (20, 22, 24)
+        ]
+        query = (
+            "For each day from July 18 through July 31, show my protein "
+            "and whether I completed strength training."
+        )
+        plan = create_lifeswitch_data_plan_v1(query, today=dt.date(2026, 8, 1))
+        request = TrustedLifeSwitchContextRequestV1.create(
+            request_id="daily-status-budget-regression",
+            authenticated_actor_user_id=OWNER,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            conversation_snapshot_sha256="d" * 64,
+            owner_timezone="America/Chicago",
+            query=query,
+            data_plan=plan,
+        )
+        envelope = await LifeSwitchDomainContextProviderV1(
+            PostgresLifeSwitchDomainReaderV1(
+                FakeConnection(
+                    active_plan={"document": plan_document()},
+                    nutrition_rows=nutrition_rows,
+                    resistance_rows=resistance_rows,
+                ),
+                context_id=CONTEXT,
+            )
+        ).select(request)
+        rendered = render_lifeswitch_context_v1(envelope)
+        self.assertEqual(envelope.sections[0].projection, "daily_status_range")
+        self.assertEqual(envelope.sections[0].record_count, 14)
+        self.assertLessEqual(rendered.estimated_tokens, 800)
 
     async def test_lifting_summary_max_rows_remain_within_prompt_budget(self) -> None:
         start = TODAY - dt.timedelta(days=83)

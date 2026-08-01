@@ -80,6 +80,12 @@
         "conditioning_sessions"
       ]
     },
+    "training_range": {
+      "target_projection_id": "training.sessions_by_day.v1",
+      "required_scopes": ["training:view"],
+      "mode": "transform",
+      "allowed_payload_fields": ["columns", "rows"]
+    },
     "measurements_summary": {
       "target_projection_id": "measurements.core_summary.v1",
       "required_scopes": ["measurements:view"],
@@ -91,6 +97,7 @@
   "excluded_v1_projections": [
     "plan_adherence",
     "training_summary",
-    "lifting_progression_summary"
+    "lifting_progression_summary",
+    "daily_status_range"
   ]
 }

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 LIFESWITCH_DATA_PLAN_CONTRACT = "lifeswitch_data_plan_v1"
-LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1_2"
+LIFESWITCH_DATA_POLICY_VERSION = "lifeswitch_data_policy_v1_3"
 
 LifeSwitchDataIntent = Literal[
     "OFF",
@@ -22,6 +22,8 @@ LifeSwitchDataIntent = Literal[
     "NUTRITION_RANGE",
     "TRAINING_SUMMARY",
     "TRAINING_SESSION",
+    "TRAINING_RANGE",
+    "DAILY_STATUS_RANGE",
     "EXERCISE_PROGRESSION",
     "EXERCISE_FREQUENCY",
     "LIFTING_PROGRESSION_SUMMARY",
@@ -192,6 +194,49 @@ _WEEKDAY = re.compile(
 )
 _TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
 _YESTERDAY = re.compile(r"\byesterday\b", re.IGNORECASE)
+_DAILY_SERIES = re.compile(
+    r"\b(?:for\s+each\s+day|each\s+day|day[- ]by[- ]day|daily|"
+    r"which\s+days?|list\s+(?:the\s+)?dates?)\b",
+    re.IGNORECASE,
+)
+_MONTH_NUMBER = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+_MONTH_PATTERN = "|".join(sorted(_MONTH_NUMBER, key=len, reverse=True))
+_ABSOLUTE_DATE_RANGE = re.compile(
+    rf"\b(?:from\s+)?"
+    rf"(?P<start_month>{_MONTH_PATTERN})\.?\s+"
+    rf"(?P<start_day>\d{{1,2}})(?:st|nd|rd|th)?"
+    rf"(?:,?\s+(?P<start_year>\d{{4}}))?\s*"
+    rf"(?:through|thru|to|until|[-–—])\s*"
+    rf"(?:(?P<end_month>{_MONTH_PATTERN})\.?\s+)?"
+    rf"(?P<end_day>\d{{1,2}})(?:st|nd|rd|th)?"
+    rf"(?:,?\s+(?P<end_year>\d{{4}}))?\b",
+    re.IGNORECASE,
+)
 _PROGRESSION_SUBJECT = (
     re.compile(
         r"\b(?:show|tell)\s+(?:me\s+)?my\s+(?:recent\s+|latest\s+|current\s+)?"
@@ -221,7 +266,8 @@ _IMPLICIT_PERSONAL_LIFTING_PROGRESS = (
 _HISTORY_RANGE_DAYS = (
     (
         re.compile(
-            r"\b(?:last|past|previous)\s+(?:week|7\s+days?)\b",
+            r"\b(?:(?:this|last|past|previous)\s+week|"
+            r"(?:last|past|previous)\s+7\s+days?)\b",
             re.IGNORECASE,
         ),
         7,
@@ -310,10 +356,65 @@ def _window(end: dt.date, days: int) -> LifeSwitchDataWindowV1:
     )
 
 
-def _history_window(value: str, end: dt.date) -> LifeSwitchDataWindowV1:
+def _absolute_date_window(
+    value: str,
+    today: dt.date,
+) -> LifeSwitchDataWindowV1 | None:
+    match = _ABSOLUTE_DATE_RANGE.search(value)
+    if match is None:
+        return None
+    try:
+        start_month = _MONTH_NUMBER[match.group("start_month").lower()]
+        end_month_name = match.group("end_month")
+        end_month = (
+            _MONTH_NUMBER[end_month_name.lower()]
+            if end_month_name
+            else start_month
+        )
+        start_day = int(match.group("start_day"))
+        end_day = int(match.group("end_day"))
+        start_year_text = match.group("start_year")
+        end_year_text = match.group("end_year")
+
+        if end_year_text:
+            end_year = int(end_year_text)
+        elif start_year_text:
+            end_year = int(start_year_text)
+        else:
+            end_year = today.year
+            if dt.date(end_year, end_month, end_day) > today:
+                end_year -= 1
+
+        start_year = int(start_year_text) if start_year_text else end_year
+        start_date = dt.date(start_year, start_month, start_day)
+        end_date = dt.date(end_year, end_month, end_day)
+        if not start_year_text and start_date > end_date:
+            start_date = dt.date(end_year - 1, start_month, start_day)
+        return LifeSwitchDataWindowV1(
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _relative_history_window(
+    value: str,
+    end: dt.date,
+) -> LifeSwitchDataWindowV1 | None:
     for pattern, days in _HISTORY_RANGE_DAYS:
         if pattern.search(value):
             return _window(end, days)
+    return None
+
+
+def _history_window(value: str, end: dt.date) -> LifeSwitchDataWindowV1:
+    absolute = _absolute_date_window(value, end)
+    if absolute is not None:
+        return absolute
+    relative = _relative_history_window(value, end)
+    if relative is not None:
+        return relative
     return _window(end, 84)
 
 
@@ -432,8 +533,17 @@ def create_lifeswitch_data_plan_v1(
     )
     measurements = bool(_MEASUREMENTS.search(value))
     plan = bool(_PLAN.search(value))
+    absolute_window = _absolute_date_window(value, local_today)
+    relative_window = _relative_history_window(value, local_today)
+    requested_range = absolute_window or relative_window
+    daily_series = bool(_DAILY_SERIES.search(value))
 
-    if personal and plan and (nutrition or training):
+    if (
+        personal
+        and plan
+        and (nutrition or training)
+        and requested_range is None
+    ):
         return _make_plan(
             intent="OVERALL_STATUS",
             domains=_DOMAIN_ORDER,
@@ -467,6 +577,18 @@ def create_lifeswitch_data_plan_v1(
             subject=None,
             max_rows=100,
             max_prompt_tokens=450,
+        )
+
+    if personal and nutrition and training and requested_range:
+        return _make_plan(
+            intent="DAILY_STATUS_RANGE",
+            domains=("nutrition", "training", "conditioning", "plan"),
+            reasons=("explicit_personal_daily_status_range",),
+            confidence="high",
+            window=requested_range,
+            subject=None,
+            max_rows=500,
+            max_prompt_tokens=800,
         )
 
     progression_subject = _subject(value)
@@ -523,16 +645,21 @@ def create_lifeswitch_data_plan_v1(
                 max_rows=50,
                 max_prompt_tokens=250,
             )
+        selected_window = requested_range or _window(local_today, 21)
         return _make_plan(
             intent="NUTRITION_RANGE",
             domains=("nutrition", "plan"),
             reasons=(
                 "explicit_personal_nutrition_range"
-                if _RANGE.search(value)
+                if (_RANGE.search(value) or requested_range is not None)
                 else "explicit_personal_nutrition_request"
             ,),
-            confidence="high" if _RANGE.search(value) else "medium",
-            window=_window(local_today, 21),
+            confidence=(
+                "high"
+                if (_RANGE.search(value) or requested_range is not None)
+                else "medium"
+            ),
+            window=selected_window,
             subject=None,
             max_rows=100,
             max_prompt_tokens=450,
@@ -549,6 +676,17 @@ def create_lifeswitch_data_plan_v1(
                 subject=None,
                 max_rows=100,
                 max_prompt_tokens=450,
+            )
+        if absolute_window is not None or (relative_window is not None and daily_series):
+            return _make_plan(
+                intent="TRAINING_RANGE",
+                domains=("training", "conditioning"),
+                reasons=("explicit_personal_training_range",),
+                confidence="high",
+                window=absolute_window or relative_window,
+                subject=None,
+                max_rows=500,
+                max_prompt_tokens=650,
             )
         return _make_plan(
             intent="TRAINING_SUMMARY",

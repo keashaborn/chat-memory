@@ -626,6 +626,161 @@ class PostgresLifeSwitchDomainReaderV1:
             payload=payload if count else {},
         )
 
+    async def read_training_range(
+        self,
+        *,
+        owner_user_id: UUID,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1:
+        del owner_user_id, owner_timezone
+        resistance_rows = await self._conn.fetch(
+            "select * from lifeswitch_chat.read_resistance_sessions_v1($1,$2,$3)",
+            self._context_id,
+            start_date,
+            end_date,
+        )
+        conditioning_rows = await self._conn.fetch(
+            "select * from lifeswitch_chat.read_conditioning_sessions_v1($1,$2,$3)",
+            self._context_id,
+            start_date,
+            end_date,
+        )
+        days: dict[dt.date, dict[str, Any]] = {}
+        cursor = start_date
+        while cursor <= end_date:
+            days[cursor] = {
+                "strength_session_count": 0,
+                "strength_set_count": 0,
+                "strength_exercise_count": 0,
+                "rehab_session_count": 0,
+                "rehab_set_count": 0,
+                "rehab_exercise_count": 0,
+                "conditioning_session_count": 0,
+                "conditioning_minutes": 0.0,
+                "unknown_role_session_count": 0,
+                "unknown_role_set_count": 0,
+                "unknown_role_exercise_count": 0,
+            }
+            cursor += dt.timedelta(days=1)
+
+        for row in resistance_rows:
+            day = row["day"]
+            if day not in days:
+                raise ValueError("resistance gateway returned a day outside the window")
+            target = days[day]
+            for role in ("strength", "rehab", "unknown_role"):
+                set_count = int(row[f"{role}_set_count"])
+                exercise_count = int(row[f"{role}_exercise_count"])
+                target[f"{role}_set_count"] += set_count
+                target[f"{role}_exercise_count"] += exercise_count
+                if set_count:
+                    target[f"{role}_session_count"] += 1
+
+        for row in conditioning_rows:
+            day = row["day"]
+            if day not in days:
+                raise ValueError("conditioning gateway returned a day outside the window")
+            days[day]["conditioning_session_count"] += 1
+            days[day]["conditioning_minutes"] = round(
+                days[day]["conditioning_minutes"] + _number(row["duration_min"]),
+                1,
+            )
+
+        columns = [
+            "date",
+            "strength_session_count",
+            "strength_set_count",
+            "strength_exercise_count",
+            "rehab_session_count",
+            "rehab_set_count",
+            "rehab_exercise_count",
+            "conditioning_session_count",
+            "conditioning_minutes",
+            "unknown_role_session_count",
+            "unknown_role_set_count",
+            "unknown_role_exercise_count",
+        ]
+        daily_rows = [
+            [day.isoformat(), *(values[column] for column in columns[1:])]
+            for day, values in sorted(days.items())
+        ]
+        return LifeSwitchReadResultV1(
+            status="AVAILABLE",
+            plan_source="not_requested",
+            record_count=len(daily_rows),
+            source_relations=tuple(
+                dict.fromkeys((*TRAINING_EFFECTIVE_ROLE_SOURCES, *CONDITIONING_SOURCES))
+            ),
+            payload={"columns": columns, "rows": daily_rows},
+        )
+
+    async def read_daily_status_range(
+        self,
+        *,
+        owner_user_id: UUID,
+        owner_timezone: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> LifeSwitchReadResultV1:
+        nutrition = await self.read_nutrition_range(
+            owner_user_id=owner_user_id,
+            owner_timezone=owner_timezone,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        _, plan_document, _ = await self._resolve_plan(owner_user_id)
+        training = await self.read_training_range(
+            owner_user_id=owner_user_id,
+            owner_timezone=owner_timezone,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        nutrition_columns = nutrition.payload.get("daily_columns", [])
+        nutrition_rows = nutrition.payload.get("daily_rows", [])
+        nutrition_by_day = {
+            row[0]: dict(zip(nutrition_columns[1:], row[1:]))
+            for row in nutrition_rows
+        }
+        training_columns = training.payload["columns"]
+        rows = []
+        for training_row in training.payload["rows"]:
+            day = training_row[0]
+            nutrition_day = nutrition_by_day.get(day, {})
+            rows.append(
+                [
+                    day,
+                    nutrition_day.get("calories"),
+                    nutrition_day.get("protein_g"),
+                    nutrition_day.get("carbs_g"),
+                    nutrition_day.get("fat_g"),
+                    *training_row[1:],
+                ]
+            )
+        columns = [
+            "date",
+            "calories",
+            "protein_g",
+            "carbs_g",
+            "fat_g",
+            *training_columns[1:],
+        ]
+        return LifeSwitchReadResultV1(
+            status="AVAILABLE",
+            plan_source=nutrition.plan_source,
+            record_count=len(rows),
+            source_relations=tuple(
+                dict.fromkeys((*nutrition.source_relations, *training.source_relations))
+            ),
+            payload={
+                "columns": columns,
+                "rows": rows,
+                "nutrition_plan_targets": nutrition.payload.get("plan_targets", {}),
+                "training_plan_targets": plan_document.get("training_targets", {}),
+            },
+        )
+
     async def read_exercise_progression(
         self,
         *,

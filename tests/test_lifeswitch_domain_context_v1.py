@@ -17,7 +17,7 @@ from rag_engine.lifeswitch_domain_provider_v1 import (
 )
 
 
-TODAY = dt.date(2026, 7, 29)
+TODAY = dt.date(2026, 8, 1)
 ACTOR = uuid.UUID("11111111-1111-4111-8111-111111111111")
 REQUEST = "req_lifeswitch_20260731"
 THREAD = uuid.UUID("22222222-2222-4222-8222-222222222222")
@@ -51,6 +51,8 @@ class SpyReader:
             "read_nutrition_range": "lifeswitch_nutrition.nutrition_day",
             "read_training_summary": "lifeswitch_training.training_session_current_v",
             "read_training_session": "lifeswitch_training.training_session_current_v",
+            "read_training_range": "lifeswitch_training.training_set_effective_role_v1",
+            "read_daily_status_range": "lifeswitch_nutrition.nutrition_day",
             "read_exercise_progression": "lifeswitch_training.training_set_log",
             "read_exercise_frequency": "lifeswitch_training.training_set_effective_role_v1",
             "read_lifting_progression_summary": "lifeswitch_training.training_set_effective_role_v1",
@@ -66,6 +68,7 @@ class SpyReader:
                     "read_nutrition_day",
                     "read_nutrition_range",
                     "read_training_summary",
+                    "read_daily_status_range",
                     "read_lifting_progression_summary",
                 }
                 else "not_requested"
@@ -92,6 +95,12 @@ class SpyReader:
 
     async def read_training_session(self, **kwargs):
         return self._result("read_training_session", kwargs)
+
+    async def read_training_range(self, **kwargs):
+        return self._result("read_training_range", kwargs)
+
+    async def read_daily_status_range(self, **kwargs):
+        return self._result("read_daily_status_range", kwargs)
 
     async def read_exercise_progression(self, **kwargs):
         return self._result("read_exercise_progression", kwargs)
@@ -161,6 +170,35 @@ class LifeSwitchDomainContextV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call[0] for call in reader.calls], ["read_exercise_frequency"])
         self.assertEqual(envelope.sections[0].projection, "exercise_frequency")
         self.assertLessEqual(envelope.estimated_prompt_tokens, 550)
+
+    async def test_training_range_reaches_exact_bounded_reader(self) -> None:
+        reader = SpyReader()
+        envelope = await LifeSwitchDomainContextProviderV1(reader).select(
+            trusted_request(
+                "For each day from July 18 through July 31, show whether I "
+                "completed strength training or conditioning."
+            )
+        )
+        self.assertEqual([call[0] for call in reader.calls], ["read_training_range"])
+        _, arguments = reader.calls[0]
+        self.assertEqual(arguments["start_date"], dt.date(2026, 7, 18))
+        self.assertEqual(arguments["end_date"], dt.date(2026, 7, 31))
+        self.assertEqual(envelope.sections[0].projection, "training_range")
+
+    async def test_daily_status_range_dispatches_one_cross_domain_read(self) -> None:
+        reader = SpyReader()
+        envelope = await LifeSwitchDomainContextProviderV1(reader).select(
+            trusted_request(
+                "For each day from July 18 through July 31, show my protein "
+                "and whether I completed strength training."
+            )
+        )
+        self.assertEqual(
+            [call[0] for call in reader.calls],
+            ["read_daily_status_range"],
+        )
+        self.assertEqual(envelope.sections[0].projection, "daily_status_range")
+        self.assertLessEqual(envelope.estimated_prompt_tokens, 800)
 
     async def test_broad_lifting_progress_reaches_summary_reader(self) -> None:
         reader = SpyReader()

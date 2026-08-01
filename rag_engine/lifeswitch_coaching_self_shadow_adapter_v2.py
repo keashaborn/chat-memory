@@ -117,6 +117,12 @@ SELF_S1_SHADOW_ADAPTER_MAP_V1: dict[str, dict[str, Any]] = {
             "conditioning_sessions",
         ),
     },
+    "training_range": {
+        "target_projection_id": "training.sessions_by_day.v1",
+        "required_scopes": ("training:view",),
+        "mode": "transform",
+        "allowed_payload_fields": ("columns", "rows"),
+    },
     "measurements_summary": {
         "target_projection_id": "measurements.core_summary.v1",
         "required_scopes": ("measurements:view",),
@@ -131,6 +137,7 @@ _EXCLUDED_V1_PROJECTIONS = frozenset(
         "plan_adherence",
         "training_summary",
         "lifting_progression_summary",
+        "daily_status_range",
     }
 )
 
@@ -195,6 +202,10 @@ _ALLOWED_RELATIONS = {
     "exercise_frequency": _TRAINING_RELATIONS,
     "exercise_progression": _TRAINING_RELATIONS,
     "training_session": _TRAINING_DAY_RELATIONS,
+    "training_range": {
+        *_TRAINING_RELATIONS,
+        "lifeswitch_training.conditioning_session_current_v",
+    },
     "measurements_summary": _MEASUREMENT_RELATIONS,
 }
 
@@ -670,6 +681,104 @@ def _conditioning(
     return data, states, "available"
 
 
+def _training_range(
+    payload: Mapping[str, Any], projection_window: ProjectionAbsoluteWindowV1
+) -> tuple[dict[str, Any], tuple[Any, ...], str]:
+    allowed = set(SELF_S1_SHADOW_ADAPTER_MAP_V1["training_range"]["allowed_payload_fields"])
+    _exact_keys(payload, allowed, "training range")
+    columns = _list(payload.get("columns"), "training range columns")
+    expected_columns = [
+        "date",
+        "strength_session_count",
+        "strength_set_count",
+        "strength_exercise_count",
+        "rehab_session_count",
+        "rehab_set_count",
+        "rehab_exercise_count",
+        "conditioning_session_count",
+        "conditioning_minutes",
+        "unknown_role_session_count",
+        "unknown_role_set_count",
+        "unknown_role_exercise_count",
+    ]
+    if columns != expected_columns:
+        _fail("training range columns differ from the approved projection")
+    sessions: list[dict[str, Any]] = []
+    for index, raw in enumerate(_list(payload.get("rows"), "training range rows")):
+        row = _list(raw, f"training range row {index}")
+        if len(row) != len(expected_columns):
+            _fail("training range row width differs from the approved projection")
+        values = dict(zip(expected_columns, row))
+        day = _date(values["date"], "training range day")
+        if not (
+            projection_window.start_local_date
+            <= day
+            <= projection_window.end_local_date
+        ):
+            _fail("training range row falls outside the authorized window")
+        for role in ("strength", "rehab", "unknown_role"):
+            session_count = _integer(
+                values[f"{role}_session_count"],
+                f"{role} session count",
+            )
+            set_count = _integer(values[f"{role}_set_count"], f"{role} set count")
+            exercise_count = _integer(
+                values[f"{role}_exercise_count"],
+                f"{role} exercise count",
+            )
+            if session_count:
+                sessions.append(
+                    {
+                        "local_date": day,
+                        "completion_state": "completed",
+                        "routine_session_type": (
+                            "unknown" if role == "unknown_role" else role
+                        ),
+                        "duration": None,
+                        "routine_set_and_rep_metrics": {
+                            "session_count": session_count,
+                            "active_set_count": set_count,
+                            "exercise_count": exercise_count,
+                        },
+                    }
+                )
+        conditioning_count = _integer(
+            values["conditioning_session_count"],
+            "conditioning session count",
+        )
+        conditioning_minutes = _number(
+            values["conditioning_minutes"],
+            "conditioning minutes",
+        )
+        if conditioning_count:
+            sessions.append(
+                {
+                    "local_date": day,
+                    "completion_state": "completed",
+                    "routine_session_type": "conditioning",
+                    "duration": conditioning_minutes,
+                    "routine_set_and_rep_metrics": {
+                        "session_count": conditioning_count,
+                    },
+                }
+            )
+    data = {
+        "requested_window": {
+            "start_local_date": projection_window.start_local_date,
+            "end_local_date": projection_window.end_local_date,
+        },
+        "sessions": sorted(
+            sessions,
+            key=lambda item: (item["local_date"], item["routine_session_type"]),
+        ),
+    }
+    states = (
+        _state("requested_window", "present"),
+        _state("sessions", "present" if sessions else "explicit_zero"),
+    )
+    return data, states, "available"
+
+
 def _decision_blocked_measurements(
     envelope: LifeSwitchDomainContextEnvelopeV1,
     authorization: AuthorizationSnapshotV2,
@@ -841,6 +950,11 @@ def adapt_lifeswitch_v1_envelope_to_self_shadow_projection_v2(
             data, states, status, calculation = _progression(payload, projection_window)
         elif section.projection == "training_session":
             data, states, status = _conditioning(payload, projection_window)
+        elif section.projection == "training_range":
+            data, states, status = _training_range(
+                payload,
+                projection_window,
+            )
         else:  # defensive: mapping and implementation must remain closed together
             _fail("V1 projection has no approved transformer")
         serialized_bytes = len(canonical_json_bytes(data))
