@@ -69,6 +69,9 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertIn("For moderate confidence", rendered.content)
         self.assertIn("High confidence may be stated directly", rendered.content)
         self.assertIn("Never convert insufficient data into a trend", rendered.content)
+        self.assertIn("name the metric for every percentage", rendered.content)
+        self.assertIn("does not govern later items", rendered.content)
+        self.assertIn("explicit metric column header", rendered.content)
 
     def test_ordinary_standalone_closing_forbids_crisis_reinterpretation(self) -> None:
         rendered = render_response_policy_prompt_v0_2(decision("I'm done."))

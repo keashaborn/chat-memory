@@ -571,12 +571,12 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             RESPONSE_POLICY_PROMPT_VERSION,
-            "response_policy_prompt_v0_5",
+            "response_policy_prompt_v0_6",
         )
         self.assertEqual(RESPONSE_INTERACTION_VERSION, "response_interaction_v3")
         self.assertEqual(
             prompt.contract_version,
-            "response_policy_prompt_v0_5",
+            "response_policy_prompt_v0_6",
         )
         self.assertEqual(prompt.interaction_version, "response_interaction_v3")
         self.assertEqual(

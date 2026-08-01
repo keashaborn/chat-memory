@@ -24,7 +24,7 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_5"
+RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_6"
 RESPONSE_INTERACTION_VERSION = "response_interaction_v3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -127,7 +127,10 @@ _CORE = (
     "describe an improving pattern as 'showed an improving trend' or 'may be "
     "improving'; do not state definitively that it 'progressed'. For moderate "
     "confidence, use qualified language such as 'likely.' High confidence may be "
-    "stated directly. Never convert insufficient data into a trend."
+    "stated directly. Never convert insufficient data into a trend. In prose or "
+    "bullets, name the metric for every percentage; a metric label on one item "
+    "does not govern later items. A table may use one explicit metric column header "
+    "for every value in that column."
 )
 
 
