@@ -1,0 +1,83 @@
+{
+  "contract_version": "lifeswitch_self_s1_shadow_runner_v1",
+  "status": "candidate_only",
+  "perspective": "self",
+  "sensitivity_ceiling": "S1",
+  "projection_count": 1,
+  "inputs": {
+    "trusted_v1_request": "lifeswitch_context_request_v1",
+    "selected_v1_envelope": "lifeswitch_domain_context_v1",
+    "server_authority": {
+      "context_snapshot_id": "canonical_uuid",
+      "transaction_snapshot_digest": "sha256",
+      "authorization_epoch": "server_created",
+      "evaluated_at": "rfc3339_with_offset",
+      "transaction_isolation": "repeatable_read",
+      "transaction_access": "read_only",
+      "pre_retrieval_recheck": "pass",
+      "pre_prompt_recheck": "pass",
+      "delivery_recheck": "not_run"
+    }
+  },
+  "outputs": {
+    "authorization": "lifeswitch.authorization_snapshot@2",
+    "context": "lifeswitch.structured_coaching_context@2",
+    "adapter": "lifeswitch_self_s1_shadow_adapter_v1",
+    "inspection": "lifeswitch_self_s1_shadow_inspection_v1"
+  },
+  "authorization": {
+    "actor_source": "trusted_v1_authenticated_actor",
+    "subject_source": "trusted_v1_owner",
+    "actor_must_equal_subject": true,
+    "relationship_basis": "self",
+    "delegated_grants_allowed": false,
+    "serialized_bytes_must_equal_projection": true,
+    "two_pass_byte_binding": true
+  },
+  "inspection": {
+    "content_free": true,
+    "allowed": [
+      "source_status",
+      "source_projection",
+      "target_projection_id",
+      "target_status",
+      "serialized_projection_bytes",
+      "source_record_count",
+      "lifecycle_state_counts",
+      "decision_block_ids",
+      "fixed_effect_flags"
+    ],
+    "forbidden": [
+      "user_ids",
+      "thread_ids",
+      "request_ids",
+      "context_snapshot_ids",
+      "names",
+      "account_timezone",
+      "source_values",
+      "prompt_text",
+      "model_output"
+    ]
+  },
+  "effects": {
+    "additional_database_reads": 0,
+    "database_writes": false,
+    "prompt_influence": false,
+    "model_exposure": false,
+    "persistence": false,
+    "runtime_registration": false,
+    "network_calls": false,
+    "service_actions": false
+  },
+  "fail_closed": [
+    "actor_owner_mismatch",
+    "non_selected_source_context",
+    "source_section_count_not_one",
+    "unsupported_source_projection",
+    "invalid_context_snapshot_id",
+    "invalid_transaction_snapshot_digest",
+    "non_exact_authorization_bytes",
+    "projection_changed_during_byte_binding",
+    "context_or_run_hash_mismatch"
+  ]
+}
