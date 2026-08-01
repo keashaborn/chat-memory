@@ -1,0 +1,96 @@
+{
+  "schema_id": "lifeswitch.self_s1_shadow_adapter_map",
+  "schema_version": 1,
+  "status": "candidate_shadow_only",
+  "source_contract": "lifeswitch_domain_context_v1",
+  "target_contract": "lifeswitch.projection_result@1",
+  "perspective": "self",
+  "maximum_source_sections": 1,
+  "maximum_target_projections": 1,
+  "sensitivity_ceiling": "S1",
+  "database_reads": false,
+  "prompt_influence": false,
+  "runtime_registration": false,
+  "legacy_fallback_allowed": false,
+  "raw_fallback_allowed": false,
+  "capabilities": {
+    "read": true,
+    "change_design": false,
+    "experiment_consent": false,
+    "write_consent": false,
+    "proactive_follow_up": false
+  },
+  "mappings": {
+    "current_plan": {
+      "target_projection_id": "plan.current.v1",
+      "required_scopes": ["plan:view"],
+      "mode": "transform",
+      "allowed_payload_fields": [
+        "phase",
+        "phase_label",
+        "primary_goal",
+        "start_date",
+        "review_date",
+        "review_cadence",
+        "nutrition_targets",
+        "training_targets",
+        "conditioning_targets",
+        "activity_targets",
+        "recovery_targets"
+      ]
+    },
+    "nutrition_day": {
+      "target_projection_id": "nutrition.range.v1",
+      "required_scopes": ["nutrition:view"],
+      "mode": "transform",
+      "allowed_payload_fields": ["plan_targets", "daily"]
+    },
+    "nutrition_range": {
+      "target_projection_id": "nutrition.range.v1",
+      "required_scopes": ["nutrition:view"],
+      "mode": "transform",
+      "allowed_payload_fields": [
+        "logged_days",
+        "calendar_days",
+        "averages_on_logged_days",
+        "plan_targets",
+        "daily_columns",
+        "daily_rows"
+      ]
+    },
+    "exercise_frequency": {
+      "target_projection_id": "training.exercise_frequency.v1",
+      "required_scopes": ["training:view"],
+      "mode": "transform",
+      "allowed_payload_fields": ["columns", "rows"]
+    },
+    "exercise_progression": {
+      "target_projection_id": "training.exercise_progression.v1",
+      "required_scopes": ["training:view"],
+      "mode": "transform",
+      "allowed_payload_fields": ["exercise_query", "observations"]
+    },
+    "training_session": {
+      "target_projection_id": "conditioning.sessions_by_day.v1",
+      "required_scopes": ["training:view"],
+      "mode": "conditioning_only",
+      "allowed_payload_fields": [
+        "date",
+        "resistance_sessions",
+        "conditioning_sessions"
+      ]
+    },
+    "measurements_summary": {
+      "target_projection_id": "measurements.core_summary.v1",
+      "required_scopes": ["measurements:view"],
+      "mode": "decision_blocked",
+      "decision_block": "D03_MEASUREMENT_COLLISIONS",
+      "allowed_payload_fields": []
+    }
+  },
+  "excluded_v1_projections": [
+    "plan_adherence",
+    "training_summary",
+    "lifting_progression_summary"
+  ]
+}
