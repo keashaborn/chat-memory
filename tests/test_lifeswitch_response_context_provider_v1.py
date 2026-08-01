@@ -4,8 +4,14 @@ import datetime as dt
 import hashlib
 import unittest
 import uuid
+from unittest.mock import AsyncMock, patch
 
 from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from rag_engine.lifeswitch_domain_context_v1 import (
+    LifeSwitchContextSectionV1,
+    TrustedLifeSwitchContextRequestV1,
+    create_lifeswitch_context_envelope_v1,
+)
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
     LifeSwitchResponseContextProviderV1,
@@ -22,13 +28,48 @@ NOW = dt.datetime(2026, 7, 29, 12, tzinfo=dt.timezone.utc)
 CONTEXT = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 
 
-def snapshot(message: str):
+def snapshot(message: str, *, request_id: str = "request-123"):
     return create_current_only_conversation_snapshot_v1(
         authenticated_actor_user_id=ACTOR,
         thread_id=THREAD,
-        current_request_id="request-123",
+        current_request_id=request_id,
         current_message=message,
     )
+
+
+def selected_current_plan_source():
+    query = "What is my current plan?"
+    source = snapshot(
+        query,
+        request_id="33333333-3333-4333-8333-333333333333",
+    )
+    plan = create_lifeswitch_data_plan_v1(query, today=NOW.date())
+    trusted = TrustedLifeSwitchContextRequestV1.create(
+        request_id=source.current_request_id,
+        authenticated_actor_user_id=ACTOR,
+        owner_user_id=ACTOR,
+        thread_id=THREAD,
+        conversation_snapshot_sha256=source.snapshot_sha256,
+        owner_timezone="America/Chicago",
+        query=query,
+        data_plan=plan,
+    )
+    section = LifeSwitchContextSectionV1.create(
+        projection="current_plan",
+        status="AVAILABLE",
+        window=None,
+        record_count=1,
+        source_relations=("lifeswitch_agentic.plan_versions",),
+        payload={"primary_goal": "Maintain"},
+    )
+    envelope = create_lifeswitch_context_envelope_v1(
+        request=trusted,
+        plan_source="agentic_active",
+        as_of_local_date=NOW.date(),
+        sections=(section,),
+        generated_at=NOW,
+    )
+    return source, trusted, envelope
 
 
 class SpyRestrictedSession:
@@ -83,6 +124,8 @@ class FakeReadConnection:
             return CONTEXT
         if "end_owner_read_context_v1" in query:
             return True
+        if "pg_current_snapshot" in query:
+            return "123:456:"
         raise AssertionError(f"unexpected fetchval query: {query}")
 
 
@@ -103,6 +146,17 @@ class FakePool:
 
     def acquire(self):
         return FakeAcquire(self.conn)
+
+
+class RecordingSelfShadowObserver:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = []
+
+    async def observe(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("shadow failed")
 
 
 class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase):
@@ -225,6 +279,89 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("end_owner_read_context_v1", conn.fetchval_calls[1][0])
         self.assertEqual(conn.fetchval_calls[1][1], (CONTEXT,))
         self.assertEqual(result.data_plan.window.start_date, dt.date(2026, 7, 27))
+
+    async def test_selected_result_runs_optional_shadow_in_same_transaction(self) -> None:
+        conn = FakeReadConnection()
+        observer = RecordingSelfShadowObserver()
+        session = PostgresRestrictedLifeSwitchReadSessionV1(
+            FakePool(conn),
+            utc_clock=lambda: NOW,
+            self_shadow_observer=observer,
+        )
+        source, trusted, envelope = selected_current_plan_source()
+
+        with patch.object(
+            session,
+            "_owner_timezone",
+            new=AsyncMock(return_value=("America/Chicago", "account_timezone")),
+        ), patch(
+            "rag_engine.lifeswitch_response_context_provider_v1."
+            "LifeSwitchDomainContextProviderV1.select",
+            new=AsyncMock(return_value=envelope),
+        ):
+            result = await session.select(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=source,
+                query=source.messages[-1].content,
+            )
+
+        self.assertEqual(result.status, "SELECTED")
+        self.assertEqual(result.envelope, envelope)
+        self.assertEqual(len(observer.calls), 1)
+        observed = observer.calls[0]
+        self.assertEqual(observed["request"], trusted)
+        self.assertEqual(observed["envelope"], envelope)
+        self.assertEqual(observed["context_snapshot_id"], CONTEXT)
+        self.assertEqual(observed["evaluated_at"], NOW)
+        self.assertEqual(
+            observed["transaction_snapshot_digest"],
+            hashlib.sha256(b"123:456:").hexdigest(),
+        )
+        snapshot_reads = [
+            query
+            for query, _ in conn.fetchval_calls
+            if "pg_current_snapshot" in query
+        ]
+        self.assertEqual(snapshot_reads, ["select pg_current_snapshot()::text"])
+
+    async def test_shadow_failure_does_not_change_selected_result(self) -> None:
+        conn = FakeReadConnection()
+        observer = RecordingSelfShadowObserver(fail=True)
+        session = PostgresRestrictedLifeSwitchReadSessionV1(
+            FakePool(conn),
+            utc_clock=lambda: NOW,
+            self_shadow_observer=observer,
+        )
+        source, _, envelope = selected_current_plan_source()
+
+        with patch.object(
+            session,
+            "_owner_timezone",
+            new=AsyncMock(return_value=("America/Chicago", "account_timezone")),
+        ), patch(
+            "rag_engine.lifeswitch_response_context_provider_v1."
+            "LifeSwitchDomainContextProviderV1.select",
+            new=AsyncMock(return_value=envelope),
+        ), self.assertLogs(
+            "rag_engine.lifeswitch_response_context_provider_v1",
+            level="WARNING",
+        ) as captured:
+            result = await session.select(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=source,
+                query=source.messages[-1].content,
+            )
+
+        self.assertEqual(result.status, "SELECTED")
+        self.assertEqual(result.envelope, envelope)
+        self.assertEqual(len(observer.calls), 1)
+        self.assertEqual(
+            captured.output,
+            [
+                "WARNING:rag_engine.lifeswitch_response_context_provider_v1:"
+                "LifeSwitch V2 self shadow observation unavailable"
+            ],
+        )
 
 
 if __name__ == "__main__":

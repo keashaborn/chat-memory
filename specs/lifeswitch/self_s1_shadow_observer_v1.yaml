@@ -1,0 +1,39 @@
+{
+  "contract_version": "lifeswitch_self_s1_shadow_observer_v1",
+  "purpose": "Run the accepted self-owned S1 coaching projection as a content-free shadow observation without affecting the answer path.",
+  "activation": {
+    "enabled_by_default": false,
+    "requires_server_injection": true,
+    "client_controllable": false
+  },
+  "source_boundary": {
+    "eligible_envelope_statuses": [
+      "SELECTED",
+      "PARTIAL"
+    ],
+    "same_repeatable_read_transaction": true,
+    "additional_source_reads": 0,
+    "transaction_metadata_reads_when_enabled": 1,
+    "transaction_snapshot_query": "select pg_current_snapshot()::text",
+    "transaction_snapshot_value_retained": false,
+    "transaction_snapshot_digest": "sha256"
+  },
+  "output": {
+    "contract_version": "lifeswitch_self_s1_shadow_inspection_v1",
+    "content_free": true,
+    "owner_identifiers": false,
+    "thread_identifiers": false,
+    "source_values": false
+  },
+  "failure_behavior": "discard_shadow_only",
+  "effects": {
+    "prompt_influence": false,
+    "model_exposure": false,
+    "response_influence": false,
+    "persistence": false,
+    "database_writes": false,
+    "qdrant_access": false,
+    "network_calls": false,
+    "service_actions": false
+  }
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import logging
 from typing import Any, Callable, Literal, Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -12,6 +13,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rag_engine.lifeswitch_coaching_self_shadow_observer_v2 import (
+    LifeSwitchSelfShadowObserverV2,
+)
 from rag_engine.lifeswitch_data_plan_v1 import (
     LifeSwitchDataPlanV1,
     create_lifeswitch_data_plan_v1,
@@ -31,6 +35,7 @@ from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 
 LIFESWITCH_PREPARED_CONTEXT_VERSION = "lifeswitch_prepared_context_v1"
 LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader_v1"
+logger = logging.getLogger(__name__)
 
 LifeSwitchPreparationStatus = Literal[
     "OFF",
@@ -208,9 +213,39 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
         pool: asyncpg.Pool,
         *,
         utc_clock: Callable[[], dt.datetime] | None = None,
+        self_shadow_observer: LifeSwitchSelfShadowObserverV2 | None = None,
     ) -> None:
         self._pool = pool
         self._utc_clock = utc_clock or (lambda: dt.datetime.now(dt.timezone.utc))
+        self._self_shadow_observer = self_shadow_observer
+
+    async def _observe_self_shadow(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        trusted: TrustedLifeSwitchContextRequestV1,
+        envelope: LifeSwitchDomainContextEnvelopeV1,
+        context_id: UUID,
+        evaluated_at: dt.datetime,
+    ) -> None:
+        if self._self_shadow_observer is None:
+            return
+        if envelope.status not in {"SELECTED", "PARTIAL"}:
+            return
+        try:
+            snapshot = await conn.fetchval("select pg_current_snapshot()::text")
+            snapshot_text = str(snapshot or "").strip()
+            if not snapshot_text:
+                raise ValueError("transaction snapshot is unavailable")
+            await self._self_shadow_observer.observe(
+                request=trusted,
+                envelope=envelope,
+                context_snapshot_id=context_id,
+                transaction_snapshot_digest=_text_sha256(snapshot_text),
+                evaluated_at=evaluated_at,
+            )
+        except Exception:
+            logger.warning("LifeSwitch V2 self shadow observation unavailable")
 
     @staticmethod
     async def _owner_timezone(
@@ -305,6 +340,13 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
                             context_id=context_id,
                         )
                     ).select(trusted)
+                    await self._observe_self_shadow(
+                        conn=conn,
+                        trusted=trusted,
+                        envelope=envelope,
+                        context_id=context_id,
+                        evaluated_at=now,
+                    )
                     rendered = render_lifeswitch_context_v1(envelope)
                     return LifeSwitchPreparedContextV1.create(
                         status=envelope.status,
