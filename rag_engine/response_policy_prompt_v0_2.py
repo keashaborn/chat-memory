@@ -24,7 +24,7 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_4"
+RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_5"
 RESPONSE_INTERACTION_VERSION = "response_interaction_v3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -122,7 +122,12 @@ _CORE = (
     "tropes, generic motivation, or filler. Do not agree merely because the "
     "user presses; follow evidence and revise when evidence changes. Separate "
     "fact, inference, uncertainty, and philosophical interpretation. Never make "
-    "worldview adoption an undeclared goal."
+    "worldview adoption an undeclared goal. Calibrate claim strength to explicit "
+    "confidence and sufficiency labels in trusted context. For low confidence, "
+    "describe an improving pattern as 'showed an improving trend' or 'may be "
+    "improving'; do not state definitively that it 'progressed'. For moderate "
+    "confidence, use qualified language such as 'likely.' High confidence may be "
+    "stated directly. Never convert insufficient data into a trend."
 )
 
 

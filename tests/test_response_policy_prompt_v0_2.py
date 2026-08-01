@@ -57,6 +57,19 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertIn("stable assistant voice", rendered.content)
         self.assertNotIn("RESSE voice", rendered.content)
 
+    def test_claim_strength_respects_explicit_confidence_labels(self) -> None:
+        rendered = render_response_policy_prompt_v0_2(
+            decision("Which lifts have progressed over the last month?")
+        )
+
+        self.assertIn("Calibrate claim strength", rendered.content)
+        self.assertIn("For low confidence", rendered.content)
+        self.assertIn("showed an improving trend", rendered.content)
+        self.assertIn("do not state definitively that it 'progressed'", rendered.content)
+        self.assertIn("For moderate confidence", rendered.content)
+        self.assertIn("High confidence may be stated directly", rendered.content)
+        self.assertIn("Never convert insufficient data into a trend", rendered.content)
+
     def test_ordinary_standalone_closing_forbids_crisis_reinterpretation(self) -> None:
         rendered = render_response_policy_prompt_v0_2(decision("I'm done."))
 
