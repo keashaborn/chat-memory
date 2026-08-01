@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate governed-memory schema ledger
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=schema-ledger/tools python3 -B -W error::ResourceWarning -m unittest discover -s schema-ledger/tests -p test_*.py
+          python3 -B schema-ledger/tools/verify_manifest.py --root schema-ledger
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=schema-ledger/tools python3 -B schema-ledger/tools/validate_schema_ledger.py --root schema-ledger --repository . --repository-commit HEAD
+
       - name: Build and start CI stack
         run: |
           docker compose -f docker-compose.ci.yml build
