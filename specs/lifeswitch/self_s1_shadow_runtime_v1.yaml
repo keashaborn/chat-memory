@@ -1,0 +1,36 @@
+{
+  "contract_version": "lifeswitch_self_s1_shadow_runtime_v1",
+  "default_mode": "off",
+  "modes": [
+    "off",
+    "canary",
+    "on"
+  ],
+  "environment": {
+    "mode": "LIFESWITCH_COACHING_CONTEXT_V2_SHADOW_MODE",
+    "canary_owner_ids": "LIFESWITCH_COACHING_CONTEXT_V2_SHADOW_CANARY_OWNER_IDS"
+  },
+  "authorization": {
+    "authority": "server_environment",
+    "client_controllable": false,
+    "base_lifeswitch_context_must_be_enabled": true,
+    "canary_is_authenticated_owner_scoped": true
+  },
+  "execution": {
+    "uses_existing_restricted_read_transaction": true,
+    "source_reads_added": 0,
+    "metadata_reads_when_enabled": 1,
+    "prompt_influence": false,
+    "model_exposure": false,
+    "response_influence": false
+  },
+  "observation": {
+    "sink": "server_log",
+    "payload_contract": "lifeswitch_self_s1_shadow_inspection_v1",
+    "content_free": true,
+    "owner_identifiers": false,
+    "thread_identifiers": false,
+    "source_values": false
+  },
+  "failure_behavior": "discard_shadow_only"
+}
