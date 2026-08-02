@@ -168,10 +168,28 @@ class SqlPolicyTest(unittest.TestCase):
             b"ALTER TABLE protected DISABLE ROW LEVEL SECURITY;\n",
             b"GRANT SELECT ON protected TO PUBLIC;\n",
             b"GRANT ALL ON protected TO reader;\n",
+            b"GRANT SELECT, INSERT ON TABLE protected TO reader WITH GRANT OPTION;\n",
+            b"GRANT SELECT, INSERT ON TABLE protected TO PUBLIC;\n",
+            b"GRANT SELECT, INSERT ON TABLE protected TO reader INSERT;\n",
+            b"GRANT SELECT ON TABLE protected TO reader; INSERT INTO t VALUES (1);\n",
+            b"WITH changed AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM changed;\n",
+            b"UPDATE t SET value = 1;\n",
+            b"DELETE FROM t;\n",
+            b"MERGE INTO t USING s ON false WHEN NOT MATCHED THEN INSERT VALUES (1);\n",
         ]
         for payload in cases:
             with self.subTest(payload=payload), self.assertRaises(MigrationError):
                 classify_sql(payload, "forward")
+
+    def test_narrow_insert_table_privilege_is_allowlisted(self) -> None:
+        statements = classify_sql(
+            b"GRANT SELECT, INSERT ON TABLE protected TO reader;\n",
+            "forward",
+        )
+        self.assertEqual(
+            statements,
+            ("GRANT SELECT, INSERT ON TABLE protected TO reader",),
+        )
 
     def test_sql_requires_final_newline(self) -> None:
         with self.assertRaisesRegex(MigrationError, "final newline"):
@@ -225,10 +243,18 @@ class DependencyAndRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(MigrationError, "cannot cross"):
             validate_dependency_graph([first, second])
 
-    def test_registry_empty_is_valid(self) -> None:
+    def test_registry_contains_current_production_package(self) -> None:
         registry = load_registry(ROOT / "registry/governed-migrations-v1.json")
-        self.assertEqual(registry, {})
-        validate_registry([load_package(FIXTURE, IDENTITY)], registry)
+        package = load_package(
+            ROOT.parent
+            / "governed-migrations/lifeswitch_prior_answer_provenance_v1",
+            IDENTITY,
+        )
+        self.assertEqual(
+            tuple(registry),
+            ("lifeswitch_prior_answer_provenance_v1",),
+        )
+        validate_registry([load_package(FIXTURE, IDENTITY), package], registry)
 
     def test_registry_hash_mismatch_rejected(self) -> None:
         package = self.copy_package("production_one", [], ci_only=False)

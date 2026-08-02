@@ -1,0 +1,20 @@
+from __future__ import annotations
+
+import pathlib
+import unittest
+
+
+class ResseResponsePriorLifeSwitchProvenanceV1Tests(unittest.TestCase):
+    def test_router_uses_single_v4_text_and_voice_response_path(self) -> None:
+        source = (
+            pathlib.Path(__file__).parents[1] / "rag_engine" / "resse_response_router.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("IntegratedLifeSwitchResponseCompositionRootV0_4", source)
+        self.assertIn("PriorLifeSwitchProvenanceProviderV1", source)
+        self.assertIn("persist_finalized_response_v3", source)
+        self.assertIn("build_response_inspection_v4", source)
+        self.assertNotIn("client_prior_lifeswitch", source)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -179,7 +179,8 @@ FORBIDDEN_SQL = tuple(
         r"\b(?:dblink|postgres_fdw|file_fdw|lo_import|lo_export)\b",
         r"\b(?:pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program)\b",
         r"\b(?:LOAD|VACUUM|ANALYZE|LISTEN|NOTIFY|DO|CALL)\b",
-        r"\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b",
+        r"\b(?:UPDATE|DELETE|MERGE|TRUNCATE)\b",
+        r"\bINSERT\s+INTO\b",
         r"\bDISABLE\s+ROW\s+LEVEL\s+SECURITY\b",
         r"\bNO\s+FORCE\s+ROW\s+LEVEL\s+SECURITY\b",
         r"\bGRANT\b[^;]*\bALL\b",
@@ -190,6 +191,12 @@ FORBIDDEN_SQL = tuple(
         r"--[^\n]*[\\]",
         r"/\*",
     )
+)
+NARROW_INSERT_GRANT_RE = re.compile(
+    r"^GRANT (?:SELECT\s*,\s*INSERT|INSERT\s*,\s*SELECT|INSERT) "
+    r"ON (?:TABLE )?[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?"
+    r"(?:\s*,\s*[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?)* "
+    r"TO [A-Z_][A-Z0-9_]*(?:\s*,\s*[A-Z_][A-Z0-9_]*)*$"
 )
 FORWARD_PREFIXES = (
     "CREATE SCHEMA ",
@@ -234,6 +241,12 @@ def classify_sql(payload: bytes, action: str) -> tuple[str, ...]:
     allowed = FORWARD_PREFIXES if action == "forward" else ROLLBACK_PREFIXES
     for statement in statements:
         normalized = re.sub(r"\s+", " ", statement).strip().upper()
+        if re.search(r"\bINSERT\b", normalized) and not NARROW_INSERT_GRANT_RE.fullmatch(
+            normalized
+        ):
+            raise MigrationError(
+                action + " SQL uses INSERT outside a narrow table privilege grant"
+            )
         if not normalized.startswith(allowed):
             raise MigrationError(action + " SQL statement is not allowlisted")
         if action == "forward" and normalized.startswith(("DROP ", "REVOKE ")):

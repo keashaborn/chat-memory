@@ -28,6 +28,10 @@ from rag_engine.lifeswitch_chat_runtime_v1 import (
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchResponseContextProviderV1,
 )
+from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+    LazyPostgresPriorLifeSwitchRestrictedReadSessionV1,
+    PriorLifeSwitchProvenanceProviderV1,
+)
 from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
@@ -38,10 +42,15 @@ from rag_engine.response_composition_root_v0_2 import (
 from rag_engine.response_composition_root_v0_3 import (
     IntegratedLifeSwitchResponseCompositionRootV0_3,
 )
+from rag_engine.response_composition_root_v0_4 import (
+    IntegratedLifeSwitchResponseCompositionRootV0_4,
+)
+from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from rag_engine.response_inspection_v3 import build_response_inspection_v3
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 from rag_engine.response_persistence_v2 import persist_finalized_response_v2
+from rag_engine.response_persistence_v3 import persist_finalized_response_v3
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v2
 from rag_engine.voice_observability_v1 import (
@@ -199,14 +208,20 @@ async def resse_response_query(
                     LIFESWITCH_CHAT_POOL
                 )
             )
-            root_v3 = IntegratedLifeSwitchResponseCompositionRootV0_3(
+            prior_provenance_provider = PriorLifeSwitchProvenanceProviderV1(
+                LazyPostgresPriorLifeSwitchRestrictedReadSessionV1(
+                    LIFESWITCH_CHAT_POOL
+                )
+            )
+            root_v4 = IntegratedLifeSwitchResponseCompositionRootV0_4(
                 base_root=base_root,
                 openai_client=openai_client,
                 context_provider=context_provider,
+                prior_provenance_provider=prior_provenance_provider,
                 generation_config=generation_config,
             )
             execution = await asyncio.wait_for(
-                root_v3.execute_detailed(conn, command),
+                root_v4.execute_detailed(conn, command),
                 timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
             )
         else:
@@ -228,7 +243,7 @@ async def resse_response_query(
                 provider_response=execution.provider_response,
             )
             if not payload.no_store:
-                await persist_finalized_response_v2(
+                await persist_finalized_response_v3(
                     conn,
                     owner_user_id=owner,
                     thread_id=thread_id,
@@ -260,7 +275,7 @@ async def resse_response_query(
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
             "runtime": (
-                "resse_response_v0_3" if lifeswitch_enabled else "resse_response_v0_2"
+                "resse_response_v0_4" if lifeswitch_enabled else "resse_response_v0_2"
             ),
             "timings": {
                 **execution.stage_timings.model_dump(mode="json"),
@@ -274,7 +289,7 @@ async def resse_response_query(
         if payload.include_inspection:
             try:
                 if lifeswitch_enabled:
-                    inspection = build_response_inspection_v3(
+                    inspection = build_response_inspection_v4(
                         trusted_plan=execution.trusted_plan,
                         provider_response=execution.provider_response,
                         finalized=finalized,
