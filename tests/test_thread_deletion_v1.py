@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import unittest
+import contextlib
+import os
+import pathlib
+import tempfile
 import uuid
 from typing import Any
+from unittest import mock
 
 from rag_engine.thread_deletion_v1 import (
     ThreadDeletionV1Error,
     delete_thread_v1,
     memory_source_lock_key_v1,
+)
+from rag_engine import thread_deletion_v1 as thread_deletion
+from rag_engine.memory_v1_qdrant_rebuild_contract_v1 import (
+    RebuildContractError,
+    qdrant_mutation_lock,
 )
 
 
@@ -110,6 +120,43 @@ class FakeQdrant:
 
 
 class ThreadDeletionV1Tests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.lock_patch = mock.patch.object(
+            thread_deletion,
+            "qdrant_mutation_lock",
+            side_effect=lambda **kwargs: contextlib.nullcontext(),
+        )
+        self.lock_patch.start()
+        self.addCleanup(self.lock_patch.stop)
+        self.collection_patch = mock.patch.dict(
+            os.environ, {"MEMORY_V1_COLLECTION": "memory_claim_v1"}, clear=False
+        )
+        self.collection_patch.start()
+        self.addCleanup(self.collection_patch.stop)
+
+    def test_exclusive_alias_lock_blocks_thread_deletion_qdrant_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "qdrant.lock"
+            exclusive = qdrant_mutation_lock(
+                exclusive=True, timeout_seconds=0.0, path=path
+            )
+            exclusive.acquire()
+            qdrant = FakeQdrant()
+            try:
+                with mock.patch.object(
+                    thread_deletion,
+                    "qdrant_mutation_lock",
+                    side_effect=lambda **kwargs: qdrant_mutation_lock(
+                        exclusive=False, timeout_seconds=0.0, path=path
+                    ),
+                ), self.assertRaises(RebuildContractError):
+                    thread_deletion._delete_and_verify_qdrant(
+                        qdrant, OWNER, THREAD, [CLAIM]
+                    )
+            finally:
+                exclusive.release()
+            self.assertEqual(qdrant.delete_calls, [])
+
     def test_source_lock_identity_is_owner_and_source_scoped(self) -> None:
         self.assertEqual(
             memory_source_lock_key_v1(
@@ -181,6 +228,44 @@ class ThreadDeletionV1Tests(unittest.IsolatedAsyncioTestCase):
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertNotIn("DELETE FROM", sql)
         self.assertIs(conn.transaction_error, raised.exception)
+
+    async def test_claim_cleanup_uses_the_authoritative_collection_setting(self) -> None:
+        conn = FakeConnection()
+        qdrant = FakeQdrant()
+        with mock.patch.dict(
+            os.environ,
+            {"MEMORY_V1_COLLECTION": "memory_claim_v1_active"},
+            clear=False,
+        ):
+            await delete_thread_v1(
+                conn,
+                qdrant,
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+            )
+        self.assertEqual(
+            [call["collection_name"] for call in qdrant.delete_calls],
+            ["memory_raw", "memory_claim_v1_active"],
+        )
+        self.assertEqual(
+            [call["collection_name"] for call in qdrant.scroll_calls],
+            ["memory_raw", "memory_claim_v1_active"],
+        )
+
+    async def test_missing_authoritative_collection_fails_before_cleanup(self) -> None:
+        conn = FakeConnection()
+        qdrant = FakeQdrant()
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(
+            ThreadDeletionV1Error
+        ) as raised:
+            await delete_thread_v1(
+                conn,
+                qdrant,
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+            )
+        self.assertEqual(raised.exception.code, "invalid_memory_claim_collection")
+        self.assertEqual(qdrant.delete_calls, [])
 
     async def test_absent_owner_thread_fails_before_any_cleanup(self) -> None:
         conn = FakeConnection(has_thread=False)

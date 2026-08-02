@@ -1,0 +1,82 @@
+# Memory V1 Qdrant Shadow Rebuild V1
+
+## Authority and source
+
+PostgreSQL is the governed memory authority. Qdrant is a replaceable retrieval projection: a point cannot establish claim truth, current status, ownership, correction state, deletion state, or answer eligibility. Every retrieved candidate remains subject to owner-bound PostgreSQL revalidation before prompt assembly.
+
+The rebuild source is one `REPEATABLE READ READ ONLY` snapshot of all then-current `supported` governed claims across every owner in `memory.claim` and `memory.claim_revision`. The source deliberately excludes raw memories, chat transcripts, evidence or observation text, retracted claims, and unsupported records. Owner and claim counts are discovered from the snapshot and bound into the run; they are not a hard-coded three-owner pilot. `--source-plan` is the read-only planning path: it reports only aggregate counts, hashes, byte totals, and the exact number of embedding requests, without invoking OpenAI or writing Qdrant.
+
+The exact embedding renderer is the imported implementation in `rag_engine/memory_v1_projection.py`; both its resolved path and byte hash are frozen into the run specification. A closing PostgreSQL snapshot must reproduce the exact opening source hash.
+
+## Components and supported consumers
+
+- `rag_engine/memory_v1_qdrant_rebuild_contract_v1.py` owns canonical source and point contracts, provenance hashes, payload-index requirements, deterministic query generation, quality metrics, the central lease evidence checks, collection naming, and the process-wide Qdrant mutation lock.
+- `scripts/memory_v1_qdrant_shadow_rebuild_v1.py` is the operator-only build tool. It creates one new no-clobber shadow, embeds the frozen PostgreSQL source, validates it, exercises and restores its lifecycle, and produces the acceptance report. It is not a scheduled projection writer.
+- `scripts/memory_v1_qdrant_alias_cutover_v1.py` is the operator-only bootstrap, cutover, and recovery tool. It changes aliases atomically and never deletes a collection.
+- `rag_engine/memory_v1_projection.py` and `scripts/memory_v1_projection_worker.py` are the current incremental projection path. The writer reads the collection metric while holding the same shared lock as its upsert. The legacy cosine collection continues to receive raw v1 points; a dot-product active target receives normalized v3 points binding the model, dimensions, process-loaded renderer, source record, stored vector, and projection manifest.
+- `rag_engine/thread_deletion_v1.py` is the current claim-removal consumer.
+- `scripts/memory_v1_v5_activation_readiness.py` verifies the selected collection and exact derived loopback scroll endpoint before activation.
+
+The active runtime/scheduled consumers above must resolve the authoritative `MEMORY_V1_COLLECTION` target. The rebuild and alias programs are explicit operator tools, not runtime consumers. Any older manual script that hard-codes `memory_claim_v1`, does not participate in the stable mutation lock, or emits legacy payloads is dormant and unsupported for production rebuild, cutover, projection, or deletion. Its presence is not evidence that it is an active consumer.
+
+## Point and collection contracts
+
+A newly built shadow is strict `memory_claim_projection_v2`. Every embedding is deterministically converted to float32, L2-normalized, and only then hashed and uploaded. Every point contains exactly the approved v2 payload fields, including owner, claim, revision, supported status, retrieval policy metadata, rebuild run, renderer, embedding model, 3,072 dimensions, source-record hash, source-snapshot hash, and stored-vector hash. The collection has exact 3,072-dimension dot-product configuration and the exact keyword payload-index schema frozen by the contract. Dot storage preserves the normalized float32 bytes, while producing the same ranking and effectively the same scores as cosine over the original vectors. The report and collection fingerprint bind the vector configuration, payload-index schema, every point ID, every allowlisted payload, and every stored vector byte.
+
+A fresh cutover validates the target shadow strictly as v2. Its current source may be either:
+
+- a dot-product shadow collection containing only exact v2 rebuild points or truthful normalized v3 incremental replacements; or
+- the exact legacy `memory_claim_v1` cosine collection containing only exact raw v1 legacy points.
+
+No other metric/schema pairing or partial field set is accepted: a cosine shadow, a dot v1 point, or a cosine v3 point fails closed. V3 points must pass their source, vector, process-loaded renderer, model, dimension, and projection-manifest hashes. Legacy v1 is tolerated only on the exact existing live-source side of the first migration; it is not valid output for a new shadow. A later report-backed rollback to a retained dot shadow may accept an exact PostgreSQL-current v2/v3 mix only when at least one v2 point preserves the original report lineage, the current fingerprint and structure match the rollback specification, and the complete point inventory matches current PostgreSQL immediately before transition.
+
+For both source and target, cutover scans with payloads and vectors enabled. It compares owner, claim, status, and revision against the then-current PostgreSQL projection inventory and compares the source-record hash whenever the point format carries one. The alias specification binds the exact expected PostgreSQL supported-snapshot and projection-inventory hashes. If PostgreSQL changes before or during the transition, automatic restoration is not guessed: the result is indeterminate and requires operator review.
+
+## Shadow build and acceptance
+
+The build is rejected unless all of the following hold:
+
+1. Git HEAD/tree, canonical specification, current production-write lease and acquisition event, renderer bytes, model, dimensions, discovered claim/owner inventory, source hash, input limits, and request ceiling match the reviewed plan.
+2. PostgreSQL proves repeatable-read/read-only and returns only the current supported governed claims across all owners.
+3. The target name is a new `memory_claim_v1_shadow_rebuild_*` collection. The live collection, active alias, an existing name, or an ambiguous foreign collection is never reused.
+4. Collection creation returns exact success. A timeout, false result, or uncertain response never establishes run ownership. If the target name appears afterward, even as the expected empty, unaliased collection, it is retained and hard-stopped for operator review; the builder neither reclassifies nor deletes it.
+5. Each payload index is acknowledged and the completed schema equals the frozen keyword-index map exactly.
+6. Each point is strict v2 and its stored vector hash equals its payload provenance. The exact point ID set equals the PostgreSQL supported-claim ID set.
+7. Every positive and negative query vector is deterministically float32/L2-normalized before dot search. Three deterministic conversational query forms are evaluated per claim under owner-and-status filters. Cross-owner searches must not expose the target claim. Top-1, top-5, mean reciprocal rank, negative-query separation, and positive-score thresholds must all pass.
+8. A reversible lifecycle gate runs on one point in the new shadow: write and verify a temporary correction, restore the original, perform an owner-bound deletion and verify absence, restore again, then reproduce the exact opening inventory, collection fingerprint, and payload-index hash. If restoration cannot be proved, the shadow is retained for investigation and is not accepted or deleted.
+9. The closing PostgreSQL snapshot and exact projection inventory still match the opening proof.
+10. The canonical content-free report is created no-clobber, mode `0600`, fsynced, and placed in an already existing private snapshot directory opened component-by-component without following symlinks.
+
+## Embedding boundary
+
+The builder may use the existing backend `OPENAI_API_KEY` only in process memory and only after the separately approved production-write guard passes. The key is never printed, copied into the run specification, written to the report, or transferred to a candidate worktree. Embeddings use `text-embedding-3-large`, 3,072 dimensions, batches of at most 64 inputs, zero automatic retries, a bounded timeout, and the exact request and input-byte/token ceilings frozen in the specification. Every provider response must report a positive integer `prompt_tokens` usage value. A missing, non-integer, zero, or over-budget usage record fails the build.
+
+## Stable alias and runtime readiness
+
+Safe production routing uses `memory_claim_v1_active` as a stable alias:
+
+1. Before any Git fast-forward, obtain the sequential production-write authority for the pre-integration bridge. Atomically bootstrap the previously absent alias `memory_claim_v1_active -> memory_claim_v1`, then add the sole primary assignment `MEMORY_V1_COLLECTION=memory_claim_v1_active`. Never preseed `MEMORY_V1_COLLECTION=memory_claim_v1`.
+2. Do not restart Brains yet. Its already-loaded process remains on the legacy physical collection. Do not stop or mask `memory-v1-projection.timer`; observe its next scheduled two-minute invocation and require the old projection service to succeed through the new alias. Recheck the alias still targets `memory_claim_v1`, the timer is active, and Brains remains healthy on its unchanged loaded state. This closes the interval in which newly launched timer processes could otherwise see configuration for an alias that does not exist.
+3. Only after that bridge proof, fast-forward the accepted code and build the new shadow. The alias continues to target the legacy collection throughout construction and validation.
+4. Restart Brains exactly once under the separate deploy authority. Require the process-effective five-setting mapping to be exact and require its collection to be the stable alias, while the alias still targets the legacy collection. Prove unchanged retrieval before cutover.
+5. Under the later sequential production-write lease, atomically replace the exact observed alias source with the accepted shadow.
+6. Verify the stable alias, PostgreSQL parity, owner isolation, typed-envelope behavior, service health, timer health, and aggregate retrieval evidence.
+7. On a failed cutover gate, atomically restore the exact prior alias map only when the prior collection and current PostgreSQL source still match their bound fingerprints. Otherwise stop as indeterminate. No collection is deleted during cutover or rollback.
+
+If activation is abandoned after the pre-integration bridge but before Git moves, reverse only that bridge under fresh sequential production-write authority: first restore the primary environment to its exact prior state with the collection key absent, then remove only the newly created `memory_claim_v1_active` alias after proving it still points to `memory_claim_v1`. Do not write a direct-legacy collection setting, and do not stop or mask the projection timer. No Brains restart is required because the old process never loaded the bridge setting.
+
+Readiness has no silent legacy default. Final activation accepts only the exact collection name `memory_claim_v1_active`; direct `memory_claim_v1` and physical `memory_claim_v1_shadow_rebuild_*` names fail closed. It binds all five effective settings: `MEMORY_V1_COLLECTION`, `MEMORY_V1_V5_SHADOW`, `MEMORY_V1_V5_SHADOW_TRACE_PERSISTENCE`, `MEMORY_V1_V5_SHADOW_ALL_AUTHENTICATED`, and `MEMORY_V1_V5_SHADOW_USER_IDS`. Each must occur exactly once and nonblank in `/opt/chat-memory/.env` and exactly once and nonblank in `/proc/<brains MainPID>/environ`. Each may occur zero or one time in the later `/etc/verbalsage/brains.env`; when present, it must equal both primary and process values. A disagreement, duplicate, missing, or blank setting fails closed, and evaluation uses the process-effective mapping. Any explicit command-line collection must equal the stable alias. The Qdrant scroll URL is derived exactly as `http://127.0.0.1:6333/collections/memory_claim_v1_active/points/scroll`; a supplied URL must match it byte-for-byte. Readiness binds dimensions, metric, schema version, owner, claim, status, and revision; it follows every bounded scroll page and rejects count mismatch or repeated offsets. The projection worker and thread deletion both require the authoritative collection explicitly. The projection worker gives an explicit CLI owner list exact precedence. Scheduled operation combines configured owners with authenticated-owner discovery, fails closed if discovery fails, and enforces `MAX_AUTHENTICATED_OWNERS` on the resulting all-owner set.
+
+## Mutation serialization and lease proof
+
+All compliant Qdrant writers use the same identity-checked lock at `/run/lock/chat-memory-qdrant-alias-v1.lock`. Normal projection upserts/removals and thread deletion take a shared lock. Shadow creation, payload-index creation, lifecycle testing, guarded cleanup, alias bootstrap/cutover/recovery, and other collection-wide transitions take the exclusive lock. This prevents an ordinary projection or deletion from racing a collection fingerprint or alias transition.
+
+Operator build, alias, cleanup, and destructive collection mutations require a fresh pass through the installed central production-write guard. Those tools also independently read the canonical append-only lease acquisition event, recompute its SHA-256, and verify its revision, lease, task, thread, worktree, actor, and production-write scope. Normal projection and thread deletion instead run under their existing runtime/data authority while taking the shared mutation lock. A unit-test stub or local look-alike guard cannot authorize an operator production transition.
+
+## Audit, failure, cleanup, and rollback
+
+Alias operations write an append-only canonical JSON-lines audit chain in an existing identity-checked private snapshot directory. Creation is no-clobber, mode `0600`, and fsynced. A durable `prepared` event precedes the one alias-update call; a terminal event records `completed`, `failed_no_change`, `rolled_back_verified`, or `indeterminate` according to the exact observed alias map.
+
+Cleanup of a newly created failed shadow is intentionally narrower than ordinary rollback. Before upload it binds every run-built point to its exact ID, owner, source hash, canonical complete-payload hash, and normalized vector hash. Before deletion it verifies that manifest, the exact dot configuration, exact payload-index map, reported and scanned counts, and the absence of aliases. It obtains a fresh central guard, rereads the complete identity, requires the two reads to be identical, then obtains a second central guard immediately before deletion. A name reuse, internally consistent payload/vector substitution, configuration change, added index, count drift, alias reference, source drift, unreadable state, or ambiguous creation retains the collection and hard-stops.
+
+Old accepted collections remain available through the observation and rollback period. Collection retirement is a later destructive action requiring separate identity checks and explicit authorization. PostgreSQL is never written by this workflow, historical Qdrant data is never promoted into PostgreSQL, automatic memory promotion remains disabled, and no existing collection is deleted as part of bootstrap, cutover, or rollback.

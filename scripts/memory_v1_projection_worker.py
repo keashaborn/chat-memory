@@ -16,14 +16,17 @@ import asyncpg
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rag_engine.memory_v1_projection import (
-    DEFAULT_COLLECTION,
     DEFAULT_VECTOR_SIZE,
     ClaimVectorIndex,
     process_owner_projection_outbox,
 )
 from rag_engine.openai_client import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
-from rag_engine.memory_v1_store import actor_uuid
+from scripts.memory_v1_authenticated_owners import (
+    MAX_AUTHENTICATED_OWNERS,
+    explicit_owners,
+    resolve_authenticated_owners,
+)
 
 
 WORKER_VERSION = "memory_claim_projection_worker_v2"
@@ -33,12 +36,12 @@ COUNTER_KEYS = ("claimed", "upserted", "deleted", "errors", "stale")
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Project explicitly allowlisted Memory V1 claim owners to Qdrant."
+        description="Project authenticated Memory V1 claim owners to Qdrant."
     )
     parser.add_argument("--owner-user-id", action="append", default=[])
     parser.add_argument(
         "--collection",
-        default=os.environ.get("MEMORY_V1_COLLECTION", DEFAULT_COLLECTION),
+        default=os.environ.get("MEMORY_V1_COLLECTION"),
     )
     parser.add_argument("--vector-size", type=int, default=DEFAULT_VECTOR_SIZE)
     parser.add_argument("--limit", type=int, default=25)
@@ -49,20 +52,31 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _owners(args: argparse.Namespace) -> list[uuid.UUID]:
-    raw = list(args.owner_user_id)
-    raw.extend(
+async def _owners(args: argparse.Namespace, dsn: str) -> list[uuid.UUID]:
+    cli_owners = explicit_owners(list(args.owner_user_id))
+    if cli_owners:
+        return cli_owners
+    configured = explicit_owners(
+        [
         value.strip()
         for value in os.getenv("MEMORY_V1_PROJECTION_OWNER_IDS", "").split(",")
         if value.strip()
+        ]
     )
-    owners = sorted({actor_uuid(value) for value in raw}, key=str)
+    discovered = await resolve_authenticated_owners(dsn, [])
+    owners = sorted({*configured, *discovered}, key=str)
     if not owners:
-        raise RuntimeError("no projection owner allowlist is configured")
+        raise RuntimeError("no authenticated projection owner is available")
+    if len(owners) > MAX_AUTHENTICATED_OWNERS:
+        raise RuntimeError(
+            f"authenticated projection owner count exceeds {MAX_AUTHENTICATED_OWNERS}"
+        )
     return owners
 
 
 def _validate_limits(args: argparse.Namespace) -> None:
+    if not getattr(args, "collection", None):
+        raise RuntimeError("MEMORY_V1_COLLECTION or --collection is required")
     if not 1 <= int(args.limit) <= 100:
         raise RuntimeError("limit must be between 1 and 100")
     if not 1 <= int(args.max_attempts) <= 50:
@@ -113,7 +127,6 @@ async def _process_owner(
 
 async def main() -> int:
     args = arguments()
-    owners = _owners(args)
     _validate_limits(args)
     dsn = os.environ.get("POSTGRES_DSN")
     qdrant_url = os.environ.get("QDRANT_URL")
@@ -122,12 +135,16 @@ async def main() -> int:
         raise RuntimeError("POSTGRES_DSN is required")
     if not qdrant_url:
         raise RuntimeError("QDRANT_URL is required")
+    if embed_model != "text-embedding-3-large" or args.vector_size != 3072:
+        raise RuntimeError("projection provenance requires text-embedding-3-large/3072")
+    owners = await _owners(args, dsn)
 
     qdrant = make_qdrant_client(url=qdrant_url, timeout=15.0)
     index = ClaimVectorIndex(
         qdrant,
         collection_name=args.collection,
         vector_size=args.vector_size,
+        embedding_model=embed_model,
     )
     created = index.ensure_collection() if args.ensure_collection else False
 

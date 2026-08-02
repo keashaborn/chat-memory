@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import urllib.request
@@ -13,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "memory_v1_v5_activation_readiness_v4"
+VERSION = "memory_v1_v5_activation_readiness_v5"
 REGISTRY_VERSION = "memory_predicate_registry_v5"
 REGISTRY_SHA256 = "4d626433109c89c18d5ea374e173ca6785de6f9c20ecc05fef9f6447bfc671f4"
 COMPILER_SHA256 = "5cb83e837e38174af4cfda016c20009168ff62974e7d9137b30228d9973256a2"
@@ -65,6 +66,7 @@ RESTRICTED_ROLES = {
     "memory_v5_local_review_reader",
 }
 TRACE_TABLES = {"v5_shadow_trace_event", "v5_project_shadow_trace_event"}
+RETRIEVABLE_STATUSES = frozenset({"supported", "uncertain", "disputed"})
 FORBIDDEN_TRACE_COLUMNS = {
     "query_text",
     "message_text",
@@ -95,6 +97,15 @@ EXPECTED_TIMER_STATES = {
     "memory-v1-v5-local-inference-scheduler.timer": ("enabled", "active"),
     "memory-v1-v5-local-packet-router.timer": ("enabled", "active"),
 }
+MAX_QDRANT_READINESS_POINTS = 100_000
+ACTIVE_COLLECTION_ALIAS = "memory_claim_v1_active"
+EFFECTIVE_MEMORY_SETTINGS = (
+    "MEMORY_V1_COLLECTION",
+    "MEMORY_V1_V5_SHADOW",
+    "MEMORY_V1_V5_SHADOW_TRACE_PERSISTENCE",
+    "MEMORY_V1_V5_SHADOW_ALL_AUTHENTICATED",
+    "MEMORY_V1_V5_SHADOW_USER_IDS",
+)
 
 
 def arguments() -> argparse.Namespace:
@@ -107,8 +118,16 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--database", default="memory")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument(
+        "--service-env-file", default="/etc/verbalsage/brains.env"
+    )
+    parser.add_argument("--service-name", default="brains.service")
+    parser.add_argument(
+        "--qdrant-collection",
+        default=None,
+    )
+    parser.add_argument(
         "--qdrant-scroll-url",
-        default="http://127.0.0.1:6333/collections/memory_claim_v1/points/scroll",
+        default=None,
     )
     return parser.parse_args()
 
@@ -227,11 +246,23 @@ WITH owner_tables AS (
          ) ORDER BY p.proname),'{{}}'::jsonb) value
     FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid=p.pronamespace
    WHERE n.nspname='memory' AND p.proname=ANY({compiler_functions})
-), supported_claims AS (
+), retrievable_claims AS (
   SELECT coalesce(jsonb_agg(jsonb_build_object(
-           'claim_id',claim_id,'owner_user_id',owner_user_id
-         ) ORDER BY claim_id),'[]'::jsonb) value
-    FROM memory.claim WHERE status='supported'
+           'claim_id',claim_id,
+           'owner_user_id',owner_user_id,
+           'revision_number',revision_number,
+           'status',status
+         ) ORDER BY owner_user_id,claim_id),'[]'::jsonb) value
+    FROM (
+      SELECT claim.claim_id,claim.owner_user_id,claim.status::text AS status,
+             COALESCE(max(revision.revision_number),0) AS revision_number
+        FROM memory.claim AS claim
+        LEFT JOIN memory.claim_revision AS revision
+          ON revision.owner_user_id=claim.owner_user_id
+         AND revision.claim_id=claim.claim_id
+       WHERE claim.status::text IN ('supported','uncertain','disputed')
+       GROUP BY claim.owner_user_id,claim.claim_id
+    ) AS current_claim
 )
 SELECT jsonb_build_object(
   'registry',(SELECT to_jsonb(r) FROM (
@@ -275,7 +306,7 @@ SELECT jsonb_build_object(
      'assessments',(SELECT count(*) FROM memory.claim_assessment),
      'evidence_links',(SELECT count(*) FROM memory.claim_evidence)
   ),
-  'supported_claims',(SELECT value FROM supported_claims)
+  'retrievable_claims',(SELECT value FROM retrievable_claims)
 );
 ROLLBACK;
 """
@@ -301,31 +332,97 @@ ROLLBACK;
 
 
 def _qdrant_snapshot(url: str) -> dict[str, Any]:
-    body = json.dumps(
-        {"limit": 10000, "with_payload": True, "with_vector": False}
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url, data=body, headers={"content-type": "application/json"}, method="POST"
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.load(response)
-    points = payload.get("result", {}).get("points")
-    if not isinstance(points, list):
-        raise RuntimeError("Qdrant scroll returned an invalid payload")
-    values: list[dict[str, str | None]] = []
+    suffix = "/points/scroll"
+    if not url.endswith(suffix):
+        raise RuntimeError("Qdrant scroll URL is invalid")
+    collection_url = url[: -len(suffix)]
+    with urllib.request.urlopen(collection_url, timeout=30) as response:
+        collection_payload = json.load(response)
+    result = collection_payload.get("result", {})
+    vectors = result.get("config", {}).get("params", {}).get("vectors")
+    if not isinstance(vectors, dict):
+        raise RuntimeError("Qdrant vector configuration is invalid")
+    dimensions = vectors.get("size")
+    distance = str(vectors.get("distance") or "").strip().lower()
+    reported_count = result.get("points_count")
+    if (
+        type(dimensions) is not int
+        or dimensions < 1
+        or distance not in {"cosine", "dot"}
+        or type(reported_count) is not int
+        or reported_count < 0
+        or reported_count > MAX_QDRANT_READINESS_POINTS
+    ):
+        raise RuntimeError("Qdrant collection configuration is invalid")
+
+    points: list[Any] = []
+    offset: Any = None
+    seen_offsets: set[str] = set()
+    while True:
+        body_value: dict[str, Any] = {
+            "limit": 10000,
+            "with_payload": True,
+            "with_vector": False,
+        }
+        if offset is not None:
+            body_value["offset"] = offset
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(body_value).encode("utf-8"),
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+        page = payload.get("result", {})
+        page_points = page.get("points")
+        if not isinstance(page_points, list):
+            raise RuntimeError("Qdrant scroll returned an invalid payload")
+        points.extend(page_points)
+        if len(points) > MAX_QDRANT_READINESS_POINTS:
+            raise RuntimeError("Qdrant readiness point bound exceeded")
+        next_offset = page.get("next_page_offset")
+        if next_offset is None:
+            break
+        marker = _stable_json(next_offset)
+        if marker in seen_offsets:
+            raise RuntimeError("Qdrant scroll offset repeated")
+        seen_offsets.add(marker)
+        offset = next_offset
+    if len(points) != reported_count:
+        raise RuntimeError("Qdrant readiness inventory was truncated")
+    values: list[dict[str, Any]] = []
     for point in points:
         point_payload = point.get("payload") if isinstance(point, dict) else None
         if not isinstance(point_payload, dict):
-            values.append({"claim_id": None, "owner_user_id": None})
+            values.append(
+                {
+                    "claim_id": None,
+                    "owner_user_id": None,
+                    "point_id": None,
+                    "revision_number": None,
+                    "schema_version": None,
+                    "status": None,
+                }
+            )
             continue
         values.append(
             {
                 "claim_id": point_payload.get("claim_id"),
                 "owner_user_id": point_payload.get("owner_user_id")
                 or point_payload.get("user_id"),
+                "point_id": point.get("id"),
+                "revision_number": point_payload.get("revision_number"),
+                "schema_version": point_payload.get("schema_version"),
+                "status": point_payload.get("status"),
             }
         )
-    return {"points": values}
+    return {
+        "dimensions": dimensions,
+        "distance": distance,
+        "points": values,
+        "reported_count": reported_count,
+    }
 
 
 def _parse_env(path: Path) -> dict[str, str]:
@@ -335,9 +432,131 @@ def _parse_env(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        if key.startswith("MEMORY_V1_V5_SHADOW"):
+        if key in EFFECTIVE_MEMORY_SETTINGS:
             values[key] = value.strip().strip("'\"")
     return values
+
+
+def _env_key_occurrences(path: Path, key: str) -> int:
+    if not path.is_file():
+        return 0
+    count = 0
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.split("=", 1)[0].strip() == key:
+            count += 1
+    return count
+
+
+def _validate_env_setting_occurrences(
+    primary_path: Path, service_path: Path
+) -> None:
+    for key in EFFECTIVE_MEMORY_SETTINGS:
+        if _env_key_occurrences(primary_path, key) != 1:
+            raise RuntimeError(
+                f"primary env must contain exactly one nonblank {key} setting"
+            )
+        service_occurrences = _env_key_occurrences(service_path, key)
+        if service_occurrences not in {0, 1}:
+            raise RuntimeError(
+                f"later service env may contain at most one {key} setting"
+            )
+
+
+def _running_service_memory_settings(service_name: str) -> dict[str, str]:
+    completed = subprocess.run(
+        ["systemctl", "show", service_name, "--property=MainPID", "--value"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    value = completed.stdout.strip()
+    if completed.returncode != 0 or not value.isdigit() or int(value) <= 0:
+        raise RuntimeError("Brains service MainPID is unavailable")
+    environment = Path(f"/proc/{value}/environ").read_bytes().split(b"\0")
+    matches: dict[str, list[str]] = {key: [] for key in EFFECTIVE_MEMORY_SETTINGS}
+    for item in environment:
+        if b"=" not in item:
+            continue
+        raw_key, raw_value = item.split(b"=", 1)
+        try:
+            key = raw_key.decode("utf-8", "strict")
+        except UnicodeDecodeError:
+            continue
+        if key not in matches:
+            continue
+        try:
+            decoded = raw_value.decode("utf-8", "strict").strip()
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(f"running service {key} setting is invalid") from exc
+        matches[key].append(decoded)
+    resolved: dict[str, str] = {}
+    for key, values in matches.items():
+        if len(values) != 1 or not values[0]:
+            raise RuntimeError(
+                f"running service must expose exactly one nonblank {key} setting"
+            )
+        resolved[key] = values[0]
+    return resolved
+
+
+def _running_service_collection(service_name: str) -> str:
+    """Compatibility wrapper; final readiness validates the complete mapping."""
+    return _running_service_memory_settings(service_name)["MEMORY_V1_COLLECTION"]
+
+
+def _resolve_effective_memory_settings(
+    primary_env: dict[str, str],
+    service_env: dict[str, str],
+    process_env: dict[str, str] | os._Environ[str],
+) -> dict[str, str]:
+    effective: dict[str, str] = {}
+    for key in EFFECTIVE_MEMORY_SETTINGS:
+        primary = str(primary_env.get(key) or "").strip()
+        running = str(process_env.get(key) or "").strip()
+        if not primary:
+            raise RuntimeError(f"primary {key} setting is missing or blank")
+        if not running:
+            raise RuntimeError(f"running service {key} setting is missing or blank")
+        if primary != running:
+            raise RuntimeError("memory settings disagree across runtime sources")
+        if key in service_env:
+            later = str(service_env.get(key) or "").strip()
+            if not later or later != running:
+                raise RuntimeError("memory settings disagree across runtime sources")
+        effective[key] = running
+    return effective
+
+
+def _resolve_qdrant_target(
+    args: argparse.Namespace,
+    env: dict[str, str],
+    *,
+    service_env: dict[str, str] | None = None,
+    process_env: dict[str, str] | os._Environ[str] | None = None,
+) -> tuple[str, str]:
+    runtime_env = os.environ if process_env is None else process_env
+    effective = _resolve_effective_memory_settings(
+        env, service_env or {}, runtime_env
+    )
+    collection = effective["MEMORY_V1_COLLECTION"]
+    explicit = str(args.qdrant_collection or "").strip()
+    if explicit:
+        if explicit != collection:
+            raise RuntimeError("memory settings disagree across runtime sources")
+    if collection != ACTIVE_COLLECTION_ALIAS:
+        raise RuntimeError(
+            "final readiness requires exact alias memory_claim_v1_active"
+        )
+    expected_scroll_url = (
+        f"http://127.0.0.1:6333/collections/{collection}/points/scroll"
+    )
+    supplied_scroll_url = str(args.qdrant_scroll_url or "").strip()
+    if supplied_scroll_url and supplied_scroll_url != expected_scroll_url:
+        raise RuntimeError("Qdrant scroll URL differs from the selected collection")
+    return collection, expected_scroll_url
 
 
 def _timer_inventory() -> dict[str, dict[str, str]]:
@@ -391,6 +610,97 @@ def _hashed_owner_counts(values: dict[str, int]) -> dict[str, int]:
     }
 
 
+def _require_stable_database_snapshot(
+    opening: dict[str, Any], closing: dict[str, Any]
+) -> None:
+    if closing != opening:
+        raise RuntimeError("PostgreSQL readiness snapshot changed during Qdrant scan")
+
+
+def _projection_inventories(
+    database: dict[str, Any], qdrant: dict[str, Any]
+) -> dict[str, Any]:
+    postgres_values = database.get("retrievable_claims", [])
+    qdrant_values = qdrant.get("points", [])
+    postgres_inventory: list[tuple[str, str, str, int]] = []
+    qdrant_inventory: list[tuple[str, str, str, int]] = []
+    postgres_complete = isinstance(postgres_values, list)
+    distance = str(qdrant.get("distance") or "").strip().lower()
+    dimensions = qdrant.get("dimensions")
+    metric_schema_versions = {
+        "cosine": frozenset({"memory_claim_projection_v1"}),
+        "dot": frozenset(
+            {"memory_claim_projection_v2", "memory_claim_projection_v3"}
+        ),
+    }
+    allowed_schema_versions = metric_schema_versions.get(distance, frozenset())
+    qdrant_complete = (
+        isinstance(qdrant_values, list)
+        and dimensions == 3072
+        and bool(allowed_schema_versions)
+    )
+
+    for item in postgres_values if isinstance(postgres_values, list) else []:
+        try:
+            claim_id = str(item["claim_id"])
+            owner_user_id = str(item["owner_user_id"])
+            status = str(item["status"]).strip().lower()
+            revision_number = item["revision_number"]
+            uuid.UUID(claim_id)
+            uuid.UUID(owner_user_id)
+            if (
+                status not in RETRIEVABLE_STATUSES
+                or type(revision_number) is not int
+                or revision_number < 0
+            ):
+                raise ValueError("PostgreSQL projection metadata rejected")
+        except (KeyError, TypeError, ValueError, AttributeError):
+            postgres_complete = False
+            continue
+        postgres_inventory.append(
+            (claim_id, owner_user_id, status, revision_number)
+        )
+
+    for item in qdrant_values if isinstance(qdrant_values, list) else []:
+        try:
+            point_id = str(item["point_id"])
+            claim_id = str(item["claim_id"])
+            owner_user_id = str(item["owner_user_id"])
+            status = str(item["status"]).strip().lower()
+            revision_number = item["revision_number"]
+            schema_version = str(item["schema_version"])
+            uuid.UUID(point_id)
+            uuid.UUID(claim_id)
+            uuid.UUID(owner_user_id)
+            if (
+                point_id != claim_id
+                or status not in RETRIEVABLE_STATUSES
+                or schema_version not in allowed_schema_versions
+                or type(revision_number) is not int
+                or revision_number < 0
+            ):
+                raise ValueError("Qdrant projection metadata rejected")
+        except (KeyError, TypeError, ValueError, AttributeError):
+            qdrant_complete = False
+            continue
+        qdrant_inventory.append(
+            (claim_id, owner_user_id, status, revision_number)
+        )
+
+    postgres_projection = set(postgres_inventory)
+    qdrant_projection = set(qdrant_inventory)
+    postgres_unique = len(postgres_projection) == len(postgres_inventory)
+    qdrant_unique = len(qdrant_projection) == len(qdrant_inventory)
+    return {
+        "postgres_complete": postgres_complete,
+        "postgres_projection": postgres_projection,
+        "postgres_unique": postgres_unique,
+        "qdrant_complete": qdrant_complete,
+        "qdrant_projection": qdrant_projection,
+        "qdrant_unique": qdrant_unique,
+    }
+
+
 def evaluate(
     database: dict[str, Any],
     qdrant: dict[str, Any],
@@ -406,18 +716,12 @@ def evaluate(
     compiler = database.get("compiler_gate") or {}
     trace_counts = database.get("trace_counts") or {}
 
-    postgres_projection = {
-        (str(item["claim_id"]), str(item["owner_user_id"]))
-        for item in database.get("supported_claims", [])
-    }
+    projection = _projection_inventories(database, qdrant)
+    postgres_projection = projection["postgres_projection"]
     qdrant_values = qdrant.get("points", [])
-    qdrant_projection = {
-        (str(item.get("claim_id")), str(item.get("owner_user_id")))
-        for item in qdrant_values
-        if item.get("claim_id") and item.get("owner_user_id")
-    }
-    qdrant_complete = len(qdrant_projection) == len(qdrant_values)
-    qdrant_unique = len(qdrant_projection) == len(qdrant_values)
+    qdrant_projection = projection["qdrant_projection"]
+    qdrant_complete = projection["qdrant_complete"]
+    qdrant_unique = projection["qdrant_unique"]
 
     allowlist_raw = env.get("MEMORY_V1_V5_SHADOW_USER_IDS", "")
     allowlist = {item.strip() for item in allowlist_raw.split(",") if item.strip()}
@@ -487,7 +791,11 @@ def evaluate(
         "trace_schema_contains_no_prose": trace_schema_sanitized,
         "trace_storage_forced_rls_append_only": trace_storage_restricted,
         "qdrant_payloads_are_owner_scoped_and_unique": qdrant_complete and qdrant_unique,
-        "qdrant_exactly_projects_supported_postgres_claims": qdrant_projection == postgres_projection,
+        "qdrant_exactly_projects_retrievable_postgres_claims": projection[
+            "postgres_complete"
+        ]
+        and projection["postgres_unique"]
+        and qdrant_projection == postgres_projection,
         "shadow_feature_is_allowlisted_only": env.get("MEMORY_V1_V5_SHADOW") == "1"
         and env.get("MEMORY_V1_V5_SHADOW_TRACE_PERSISTENCE") == "1"
         and env.get("MEMORY_V1_V5_SHADOW_ALL_AUTHENTICATED") == "0"
@@ -526,7 +834,7 @@ def evaluate(
         checks[key]
         for key in (
             "qdrant_payloads_are_owner_scoped_and_unique",
-            "qdrant_exactly_projects_supported_postgres_claims",
+            "qdrant_exactly_projects_retrievable_postgres_claims",
         )
     )
     allowlisted_shadow_observed = all(
@@ -585,7 +893,7 @@ def evaluate(
             "shadow_allowlist_owner_sha256": sorted(
                 _sha256_bytes(item.encode("utf-8")) for item in allowlist
             ),
-            "postgres_supported_projection_count": len(postgres_projection),
+            "postgres_retrievable_projection_count": len(postgres_projection),
             "qdrant_projection_count": len(qdrant_values),
             "projection_missing_from_qdrant": len(postgres_projection - qdrant_projection),
             "projection_unknown_to_postgres": len(qdrant_projection - postgres_projection),
@@ -597,23 +905,48 @@ def main() -> int:
     args = arguments()
     output_path = Path(args.output).resolve()
     env_path = Path(args.env_file).resolve()
+    service_env_path = Path(args.service_env_file).resolve()
+    _validate_env_setting_occurrences(env_path, service_env_path)
+    env = _parse_env(env_path)
+    service_env = _parse_env(service_env_path) if service_env_path.is_file() else {}
+    process_env = _running_service_memory_settings(args.service_name)
+    effective_env = _resolve_effective_memory_settings(
+        env, service_env, process_env
+    )
+    collection, qdrant_scroll_url = _resolve_qdrant_target(
+        args,
+        env,
+        service_env=service_env,
+        process_env=process_env,
+    )
     database = _database_snapshot(
         container=args.postgres_container,
         maintenance_role=args.maintenance_role,
         database=args.database,
     )
-    qdrant = _qdrant_snapshot(args.qdrant_scroll_url)
-    env = _parse_env(env_path)
+    qdrant = _qdrant_snapshot(qdrant_scroll_url)
+    closing_database = _database_snapshot(
+        container=args.postgres_container,
+        maintenance_role=args.maintenance_role,
+        database=args.database,
+    )
+    _require_stable_database_snapshot(database, closing_database)
     timers = _timer_inventory()
     tunnel_state = _service_state("memory-v1-v5-local-inference-tunnel.service")
     failed_units = _failed_units()
     git_state = _git_state()
     evaluation = evaluate(
-        database, qdrant, env, timers, tunnel_state, failed_units, git_state
+        database,
+        qdrant,
+        effective_env,
+        timers,
+        tunnel_state,
+        failed_units,
+        git_state,
     )
 
     sanitized_database = dict(database)
-    sanitized_database.pop("supported_claims", None)
+    sanitized_database.pop("retrievable_claims", None)
     trace_counts = dict(sanitized_database.get("trace_counts", {}))
     trace_counts["claim_owner_counts"] = _hashed_owner_counts(
         trace_counts.get("claim_owner_counts", {})
@@ -630,7 +963,9 @@ def main() -> int:
         "git": git_state,
         "database": sanitized_database,
         "qdrant": {
-            "collection": "memory_claim_v1",
+            "collection": collection,
+            "dimensions": qdrant.get("dimensions"),
+            "distance": qdrant.get("distance"),
             "point_count": len(qdrant.get("points", [])),
         },
         "runtime": {
@@ -638,13 +973,19 @@ def main() -> int:
             "private_inference_tunnel": tunnel_state,
             "failed_units": failed_units,
             "shadow_flags": {
-                "enabled": env.get("MEMORY_V1_V5_SHADOW"),
-                "trace_persistence": env.get("MEMORY_V1_V5_SHADOW_TRACE_PERSISTENCE"),
-                "all_authenticated": env.get("MEMORY_V1_V5_SHADOW_ALL_AUTHENTICATED"),
+                "enabled": effective_env.get("MEMORY_V1_V5_SHADOW"),
+                "trace_persistence": effective_env.get(
+                    "MEMORY_V1_V5_SHADOW_TRACE_PERSISTENCE"
+                ),
+                "all_authenticated": effective_env.get(
+                    "MEMORY_V1_V5_SHADOW_ALL_AUTHENTICATED"
+                ),
                 "allowlist_count": len(
                     {
                         item.strip()
-                        for item in env.get("MEMORY_V1_V5_SHADOW_USER_IDS", "").split(",")
+                        for item in effective_env.get(
+                            "MEMORY_V1_V5_SHADOW_USER_IDS", ""
+                        ).split(",")
                         if item.strip()
                     }
                 ),

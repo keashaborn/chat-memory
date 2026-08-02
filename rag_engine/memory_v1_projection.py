@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import math
+import pathlib
+import re
+import struct
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,9 +17,23 @@ import asyncpg
 from qdrant_client.http import models as qmodels
 
 from .memory_v1_store import InvalidActor, actor_uuid
+from .memory_v1_qdrant_rebuild_contract_v1 import (
+    canonical_bytes,
+    normalize_cosine_vector,
+    projection_source_sha256,
+    qdrant_mutation_lock,
+    sha256_bytes,
+)
 
 
 DEFAULT_COLLECTION = "memory_claim_v1"
+RETRIEVABLE_SCHEMA_VERSIONS = frozenset(
+    {
+        "memory_claim_projection_v1",
+        "memory_claim_projection_v2",
+        "memory_claim_projection_v3",
+    }
+)
 DEFAULT_VECTOR_SIZE = 3072
 RETRIEVABLE_STATUSES = {"supported", "uncertain", "disputed"}
 SEARCH_PAYLOAD_FIELDS = [
@@ -24,6 +42,13 @@ SEARCH_PAYLOAD_FIELDS = [
     "status",
     "schema_version",
 ]
+
+# Bind v3 projection provenance to the code loaded by this process. Reading the
+# module file during each upsert could attest bytes that were deployed after an
+# older worker process started.
+PROJECTION_RENDERER_SHA256 = hashlib.sha256(
+    pathlib.Path(__file__).resolve().read_bytes()
+).hexdigest()
 
 
 class ProjectionError(RuntimeError):
@@ -96,13 +121,24 @@ def render_claim_for_embedding(snapshot: Mapping[str, Any]) -> str:
 
 
 def projection_payload(
-    actor: uuid.UUID, snapshot: Mapping[str, Any]
+    actor: uuid.UUID,
+    snapshot: Mapping[str, Any],
+    *,
+    embedding: Sequence[float] | None = None,
+    renderer_sha256: str | None = None,
+    dimensions: int = DEFAULT_VECTOR_SIZE,
+    embedding_model: str = "text-embedding-3-large",
 ) -> Dict[str, Any]:
     policy = _json_object(snapshot.get("retrieval_policy"), "retrieval_policy")
     surface = str(
         policy.get("surface_policy") or policy.get("surface") or "support"
     ).strip().lower()
-    return {
+    updated_at = (
+        snapshot["updated_at"].isoformat()
+        if isinstance(snapshot.get("updated_at"), datetime)
+        else str(snapshot.get("updated_at") or "")
+    )
+    payload: Dict[str, Any] = {
         "schema_version": "memory_claim_projection_v1",
         "owner_user_id": str(actor),
         "claim_id": str(snapshot["claim_id"]),
@@ -119,10 +155,45 @@ def projection_payload(
             "explicit_recall_only",
             "restricted_explicit_recall_only",
         },
-        "updated_at": snapshot["updated_at"].isoformat()
-        if isinstance(snapshot.get("updated_at"), datetime)
-        else str(snapshot.get("updated_at") or ""),
+        "updated_at": updated_at,
     }
+    if embedding is None or renderer_sha256 is None:
+        return payload
+    vector = _vector(embedding, dimensions)
+    if not re.fullmatch(r"[0-9a-f]{64}", renderer_sha256):
+        raise ProjectionError("renderer digest is malformed")
+    source_record = {
+        "claim_id": str(snapshot["claim_id"]),
+        "canonical_text": " ".join(
+            str(snapshot.get("canonical_text") or "").split()
+        ).strip(),
+        "owner_user_id": str(actor),
+        "predicate": str(snapshot.get("predicate") or "").strip().lower(),
+        "qualifiers": _json_object(snapshot.get("qualifiers"), "qualifiers"),
+        "retrieval_policy": policy,
+        "revision_number": int(snapshot["revision_number"]),
+        "sensitivity": str(snapshot.get("sensitivity") or "").strip().lower(),
+        "status": str(snapshot.get("status") or "").strip().lower(),
+        "updated_at": updated_at,
+    }
+    payload.update(
+        {
+            "dimensions": dimensions,
+            "embedding_model": embedding_model,
+            "renderer_sha256": renderer_sha256,
+            "schema_version": "memory_claim_projection_v3",
+            "source_sha256": projection_source_sha256(source_record),
+            "vector_sha256": hashlib.sha256(
+                struct.pack("<" + "f" * dimensions, *vector)
+            ).hexdigest(),
+        }
+    )
+    payload["projection_manifest_sha256"] = sha256_bytes(canonical_bytes(payload))
+    return payload
+
+
+def projection_renderer_sha256() -> str:
+    return PROJECTION_RENDERER_SHA256
 
 
 class ClaimVectorIndex:
@@ -132,35 +203,51 @@ class ClaimVectorIndex:
         *,
         collection_name: str = DEFAULT_COLLECTION,
         vector_size: int = DEFAULT_VECTOR_SIZE,
+        embedding_model: str = "text-embedding-3-large",
     ) -> None:
         self.client = client
         self.collection_name = str(collection_name).strip()
         self.vector_size = int(vector_size)
+        self.embedding_model = str(embedding_model).strip()
         if not self.collection_name:
             raise ProjectionError("collection_name is required")
         if self.vector_size <= 0:
             raise ProjectionError("vector_size must be positive")
+        if not self.embedding_model:
+            raise ProjectionError("embedding_model is required")
 
     def ensure_collection(self) -> bool:
+        # Collection and payload-index provisioning are operator mutations.  The
+        # runtime may validate an already provisioned collection, but it must
+        # never create a collection implicitly or race an alias transition.
+        with qdrant_mutation_lock(exclusive=True):
+            return self._ensure_collection_locked()
+
+    def _ensure_collection_locked(self) -> bool:
         collections = self.client.get_collections().collections
         names = {item.name for item in collections}
-        created = self.collection_name not in names
-        if created:
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=qmodels.VectorParams(
-                    size=self.vector_size,
-                    distance=qmodels.Distance.COSINE,
-                    on_disk=False,
-                ),
-                on_disk_payload=True,
-            )
+        aliases = {
+            str(item.alias_name): str(item.collection_name)
+            for item in self.client.get_aliases().aliases
+        }
+        if self.collection_name not in names and self.collection_name not in aliases:
+            raise ProjectionError("collection must be provisioned explicitly")
         info = self.client.get_collection(self.collection_name)
         params = info.config.params.vectors
+        if isinstance(params, Mapping):
+            raise ProjectionError("named-vector collection is unsupported")
         if getattr(params, "size", None) != self.vector_size:
             raise ProjectionError("existing collection has the wrong vector dimension")
-        if getattr(params, "distance", None) != qmodels.Distance.COSINE:
-            raise ProjectionError("existing collection does not use cosine distance")
+        distance = str(
+            getattr(
+                getattr(params, "distance", None),
+                "value",
+                getattr(params, "distance", None),
+            )
+            or ""
+        ).strip().lower()
+        if distance not in {"cosine", "dot"}:
+            raise ProjectionError("existing collection has an unsupported distance")
 
         existing_payload = set((getattr(info, "payload_schema", None) or {}).keys())
         for field_name in ("owner_user_id", "status", "sensitivity", "domains", "intents"):
@@ -171,7 +258,7 @@ class ClaimVectorIndex:
                     field_schema=qmodels.PayloadSchemaType.KEYWORD,
                     wait=True,
                 )
-        return created
+        return False
 
     def upsert_claim(
         self,
@@ -181,17 +268,53 @@ class ClaimVectorIndex:
     ) -> None:
         actor = actor_uuid(actor_user_id)
         claim_id = uuid.UUID(str(snapshot["claim_id"]))
-        self.client.upsert(
-            collection_name=self.collection_name,
-            wait=True,
-            points=[
-                qmodels.PointStruct(
-                    id=str(claim_id),
-                    vector=_vector(embedding, self.vector_size),
-                    payload=projection_payload(actor, snapshot),
+        with qdrant_mutation_lock(exclusive=False):
+            info = self.client.get_collection(self.collection_name)
+            params = info.config.params.vectors
+            if isinstance(params, Mapping):
+                raise ProjectionError("named-vector collection is unsupported")
+            if getattr(params, "size", None) != self.vector_size:
+                raise ProjectionError("collection vector dimension changed")
+            distance = str(
+                getattr(
+                    getattr(params, "distance", None),
+                    "value",
+                    getattr(params, "distance", None),
                 )
-            ],
-        )
+                or ""
+            ).strip().lower()
+            raw_vector = _vector(embedding, self.vector_size)
+            if distance == "cosine":
+                vector = raw_vector
+                payload = projection_payload(actor, snapshot)
+            elif distance == "dot":
+                try:
+                    vector = normalize_cosine_vector(
+                        raw_vector, dimensions=self.vector_size
+                    )
+                except Exception as exc:
+                    raise ProjectionError("embedding normalization failed") from exc
+                payload = projection_payload(
+                    actor,
+                    snapshot,
+                    embedding=vector,
+                    renderer_sha256=projection_renderer_sha256(),
+                    dimensions=self.vector_size,
+                    embedding_model=self.embedding_model,
+                )
+            else:
+                raise ProjectionError("collection distance changed")
+            self.client.upsert(
+                collection_name=self.collection_name,
+                wait=True,
+                points=[
+                    qmodels.PointStruct(
+                        id=str(claim_id),
+                        vector=vector,
+                        payload=payload,
+                    )
+                ],
+            )
 
     def delete_claim(
         self, actor_user_id: str | uuid.UUID, claim_id: str | uuid.UUID
@@ -200,20 +323,21 @@ class ClaimVectorIndex:
         claim_uuid = uuid.UUID(str(claim_id))
         # The owner filter prevents an incorrect worker actor from deleting another
         # owner's point, even if a claim UUID is supplied incorrectly.
-        self.client.delete(
-            collection_name=self.collection_name,
-            wait=True,
-            points_selector=qmodels.FilterSelector(
-                filter=qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(
-                            key="owner_user_id", match=qmodels.MatchValue(value=str(actor))
-                        ),
-                        qmodels.HasIdCondition(has_id=[str(claim_uuid)]),
-                    ]
-                )
-            ),
-        )
+        with qdrant_mutation_lock(exclusive=False):
+            self.client.delete(
+                collection_name=self.collection_name,
+                wait=True,
+                points_selector=qmodels.FilterSelector(
+                    filter=qmodels.Filter(
+                        must=[
+                            qmodels.FieldCondition(
+                                key="owner_user_id", match=qmodels.MatchValue(value=str(actor))
+                            ),
+                            qmodels.HasIdCondition(has_id=[str(claim_uuid)]),
+                        ]
+                    )
+                ),
+            )
 
     def search_claims(
         self,
@@ -225,9 +349,15 @@ class ClaimVectorIndex:
         actor = actor_uuid(actor_user_id)
         if not 1 <= int(limit) <= 100:
             raise ProjectionError("limit must be between 1 and 100")
+        try:
+            normalized_query = normalize_cosine_vector(
+                _vector(query_vector, self.vector_size), dimensions=self.vector_size
+            )
+        except Exception as exc:
+            raise ProjectionError("query embedding normalization failed") from exc
         hits = self.client.search(
             collection_name=self.collection_name,
-            query_vector=_vector(query_vector, self.vector_size),
+            query_vector=normalized_query,
             query_filter=qmodels.Filter(
                 must=[
                     qmodels.FieldCondition(
@@ -260,7 +390,7 @@ class ClaimVectorIndex:
                 raise ProjectionError("Qdrant point ID and payload claim_id differ")
             if str(payload.get("status") or "") not in RETRIEVABLE_STATUSES:
                 raise ProjectionError("Qdrant returned a non-retrievable claim hit")
-            if payload.get("schema_version") != "memory_claim_projection_v1":
+            if payload.get("schema_version") not in RETRIEVABLE_SCHEMA_VERSIONS:
                 raise ProjectionError("Qdrant claim hit has an invalid schema version")
             if claim_id in seen:
                 raise ProjectionError("Qdrant returned a duplicate claim hit")

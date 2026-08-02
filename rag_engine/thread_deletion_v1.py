@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 from qdrant_client.http import models as qmodels
+
+from .memory_v1_qdrant_rebuild_contract_v1 import qdrant_mutation_lock
 
 
 THREAD_DELETION_CONTRACT_VERSION = "thread_deletion_v1"
@@ -102,6 +106,16 @@ def _batches(values: Sequence[uuid.UUID]) -> Iterable[Sequence[uuid.UUID]]:
         yield values[offset : offset + _QDRANT_BATCH_SIZE]
 
 
+def _claim_collection() -> str:
+    value = os.environ.get("MEMORY_V1_COLLECTION", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,255}", value):
+        raise ThreadDeletionV1Error(
+            "invalid_memory_claim_collection",
+            retryable=False,
+        )
+    return value
+
+
 def _raw_thread_filter(
     owner_user_id: uuid.UUID,
     thread_id: uuid.UUID,
@@ -141,6 +155,19 @@ def _delete_and_verify_qdrant(
     thread_id: uuid.UUID,
     unsupported_claim_ids: Sequence[uuid.UUID],
 ) -> None:
+    with qdrant_mutation_lock(exclusive=False):
+        _delete_and_verify_qdrant_locked(
+            qdrant, owner_user_id, thread_id, unsupported_claim_ids
+        )
+
+
+def _delete_and_verify_qdrant_locked(
+    qdrant: Any,
+    owner_user_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    unsupported_claim_ids: Sequence[uuid.UUID],
+) -> None:
+    claim_collection = _claim_collection()
     raw_filter = _raw_thread_filter(owner_user_id, thread_id)
     qdrant.delete(
         collection_name="memory_raw",
@@ -163,12 +190,12 @@ def _delete_and_verify_qdrant(
     for batch in _batches(unsupported_claim_ids):
         claim_filter = _claim_filter(owner_user_id, batch)
         qdrant.delete(
-            collection_name="memory_claim_v1",
+            collection_name=claim_collection,
             points_selector=qmodels.FilterSelector(filter=claim_filter),
             wait=True,
         )
         remaining_claims, _ = qdrant.scroll(
-            collection_name="memory_claim_v1",
+            collection_name=claim_collection,
             scroll_filter=claim_filter,
             limit=1,
             with_payload=False,
