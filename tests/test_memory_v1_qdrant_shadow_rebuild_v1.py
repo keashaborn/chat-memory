@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
@@ -78,11 +79,14 @@ def alias_spec(
     *,
     operation: str,
     source: str | None,
-    target: str,
+    target: str | None,
     report_path: str | None,
     target_fingerprint: str = HASH,
     source_fingerprint: str | None = HASH,
 ) -> dict:
+    expected_aliases = (
+        {} if operation == "bootstrap" else {"memory_claim_v1_active": source}
+    )
     return {
         "schema_version": cutover.SPEC_VERSION,
         "run_id": "memory-qdrant-alias-20260802T050000Z-abcdef123456",
@@ -97,6 +101,7 @@ def alias_spec(
         },
         "qdrant_url": "http://127.0.0.1:6333",
         "alias_name": "memory_claim_v1_active",
+        "expected_alias_state_sha256": cutover.alias_state_sha256(expected_aliases),
         "expected_alias_source": source,
         "expected_alias_source_fingerprint_sha256": (
             None if operation == "bootstrap" else source_fingerprint
@@ -104,7 +109,9 @@ def alias_spec(
         "expected_postgres_projection_inventory_sha256": HASH,
         "expected_postgres_supported_snapshot_sha256": "1" * 64,
         "target_collection": target,
-        "target_collection_fingerprint_sha256": target_fingerprint,
+        "target_collection_fingerprint_sha256": (
+            None if operation == "unbootstrap" else target_fingerprint
+        ),
         "rebuild_report_path": report_path,
         "rebuild_report_sha256": HASH if report_path else None,
         "output_path": "/home/ubuntu/brains/snapshots/test-run/alias-event.jsonl",
@@ -197,12 +204,21 @@ class FakeQdrant:
         self.behavior = behavior
         self.target_revision = target_revision
         self.update_calls = 0
+        self.operation_batches: list[list[object]] = []
+        self.alias_read_calls = 0
         self.closed = False
         self.audit_path: pathlib.Path | None = None
         self.point_id = "00000000-0000-4000-8000-000000000001"
         self.owner = "00000000-0000-4000-8000-000000000002"
 
     def get_aliases(self):
+        self.alias_read_calls += 1
+        if (
+            self.behavior == "late_alias_drift"
+            and self.update_calls
+            and self.alias_read_calls >= 4
+        ):
+            self.aliases["late_alias"] = "late_collection"
         return types.SimpleNamespace(
             aliases=[
                 types.SimpleNamespace(alias_name=name, collection_name=collection)
@@ -212,6 +228,8 @@ class FakeQdrant:
 
     def get_collections(self):
         names = {"memory_claim_v1", SHADOW, SHADOW_2, self.target}
+        if self.behavior == "collection_drift" and self.update_calls:
+            names.add("foreign_collection")
         return types.SimpleNamespace(
             collections=[types.SimpleNamespace(name=name) for name in sorted(names)]
         )
@@ -257,6 +275,7 @@ class FakeQdrant:
 
     def update_collection_aliases(self, *, change_aliases_operations, timeout: int):
         self.update_calls += 1
+        self.operation_batches.append(list(change_aliases_operations))
         if self.audit_path is not None:
             durable = [json.loads(line) for line in self.audit_path.read_text().splitlines()]
             if not durable or durable[-1].get("state") != "prepared":
@@ -1701,6 +1720,68 @@ class AliasTransitionScriptTests(unittest.TestCase):
             self.addCleanup(temp.cleanup)
             self.assertEqual(spec.value["operation"], operation)
 
+    def test_unbootstrap_spec_is_canonical_and_strict(self) -> None:
+        value = alias_spec(
+            operation="unbootstrap",
+            source="memory_claim_v1",
+            target=None,
+            report_path=None,
+        )
+        temporary, loaded = load_spec(cutover.Spec, value)
+        self.addCleanup(temporary.cleanup)
+        self.assertEqual(loaded.value["operation"], "unbootstrap")
+        self.assertIsNone(loaded.value["target_collection"])
+        self.assertIsNone(loaded.value["target_collection_fingerprint_sha256"])
+        for field, changed in (
+            ("expected_alias_source", None),
+            ("expected_alias_source", SHADOW),
+            ("expected_alias_source_fingerprint_sha256", None),
+            ("expected_alias_source_fingerprint_sha256", "bad"),
+            ("target_collection", "memory_claim_v1"),
+            ("target_collection_fingerprint_sha256", HASH),
+            ("rebuild_report_path", "/home/ubuntu/brains/snapshots/test-run/rebuild.json"),
+            ("rebuild_report_sha256", HASH),
+        ):
+            rejected = {**value, field: changed}
+            with self.assertRaises(cutover.AliasCutoverError, msg=field):
+                with tempfile.TemporaryDirectory() as temporary:
+                    path = pathlib.Path(temporary) / "spec.json"
+                    raw = rebuild.canonical_bytes(rejected)
+                    path.write_bytes(raw)
+                    cutover.Spec.load(path, hashlib.sha256(raw).hexdigest())
+
+    def test_unbootstrap_operation_is_one_alias_delete_and_binds_full_map(self) -> None:
+        aliases = {
+            "memory_claim_v1_active": "memory_claim_v1",
+            "unrelated": "other_collection",
+        }
+        value = alias_spec(
+            operation="unbootstrap",
+            source="memory_claim_v1",
+            target=None,
+            report_path=None,
+        )
+        value["expected_alias_state_sha256"] = cutover.alias_state_sha256(aliases)
+        temporary, spec = load_spec(cutover.Spec, value)
+        self.addCleanup(temporary.cleanup)
+        planned = cutover.operations(spec, aliases)
+        self.assertEqual(len(planned), 1)
+        self.assertIsNotNone(planned[0].delete_alias)
+        self.assertIsNone(getattr(planned[0], "create_alias", None))
+        with self.assertRaisesRegex(cutover.AliasCutoverError, "complete alias map"):
+            cutover.operations(
+                spec,
+                {"memory_claim_v1_active": "memory_claim_v1"},
+            )
+        for rejected in (
+            {},
+            {"memory_claim_v1_active": SHADOW, "unrelated": "other_collection"},
+        ):
+            changed = {**value, "expected_alias_state_sha256": cutover.alias_state_sha256(rejected)}
+            candidate = cutover.Spec(value=changed, raw=rebuild.canonical_bytes(changed))
+            with self.assertRaises(cutover.AliasCutoverError):
+                cutover.operations(candidate, rejected)
+
     def test_alias_operations_never_delete_a_collection(self) -> None:
         value = alias_spec(
             operation="cutover",
@@ -1851,6 +1932,58 @@ class AliasTransitionScriptTests(unittest.TestCase):
             with self.assertRaises(cutover.AliasCutoverError):
                 cutover.AliasAudit.create(path, trusted_root=root)
 
+    def test_terminal_audit_low_level_write_fsync_and_truncate_fail_closed(self) -> None:
+        for failure in ("write", "fsync", "truncate"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                root.chmod(0o755)
+                run = root / "run"
+                run.mkdir(mode=0o700)
+                path = run / "audit.jsonl"
+                audit = cutover.AliasAudit.create(path, trusted_root=root)
+                audit.append("prepared", {"contract_version": cutover.REPORT_VERSION})
+                opening = path.read_bytes()
+                if failure == "write":
+                    context = mock.patch.object(
+                        cutover.os, "write", side_effect=OSError("synthetic write")
+                    )
+                    expected = "failed without durable change"
+                elif failure == "fsync":
+                    original_fsync = cutover.os.fsync
+                    calls = 0
+
+                    def fail_first_fsync(descriptor):
+                        nonlocal calls
+                        calls += 1
+                        if calls == 1:
+                            raise OSError("synthetic fsync")
+                        return original_fsync(descriptor)
+
+                    context = mock.patch.object(
+                        cutover.os, "fsync", side_effect=fail_first_fsync
+                    )
+                    expected = "failed without durable change"
+                else:
+                    context = mock.patch.object(
+                        cutover.os, "ftruncate", side_effect=OSError("synthetic truncate")
+                    )
+                    expected = "durability is indeterminate"
+                if failure == "truncate":
+                    write_context = mock.patch.object(
+                        cutover.os, "write", side_effect=OSError("synthetic write")
+                    )
+                else:
+                    write_context = contextlib.nullcontext()
+                with context, write_context, self.assertRaisesRegex(
+                    cutover.AliasCutoverError, expected
+                ):
+                    audit.append(
+                        "completed", {"contract_version": cutover.REPORT_VERSION}
+                    )
+                audit.close()
+                if failure != "truncate":
+                    self.assertEqual(path.read_bytes(), opening)
+
     def test_intermediate_symlink_cannot_escape_audit_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as external:
             root = pathlib.Path(temporary)
@@ -1906,6 +2039,9 @@ class AliasTransitionScriptTests(unittest.TestCase):
                 "collection_fingerprint_sha256"
             ],
         )
+        value["expected_alias_state_sha256"] = cutover.alias_state_sha256(
+            fake.aliases
+        )
         value["rebuild_report_sha256"] = hashlib.sha256(report_raw).hexdigest()
         value["output_path"] = str(output_path)
         pg_inventory = [
@@ -1959,6 +2095,216 @@ class AliasTransitionScriptTests(unittest.TestCase):
             except Exception as exc:  # asserted by callers
                 error = exc
         return fake, (parse_audit(output_path) if output_path.exists() else []), error
+
+    def _execute_unbootstrap_case(
+        self,
+        behavior: str,
+        *,
+        source_states: list[dict] | None = None,
+        unrelated: dict[str, str] | None = None,
+    ) -> tuple[FakeQdrant, list[dict], Exception | None, set[str]]:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        root.chmod(0o755)
+        run = root / "run"
+        run.mkdir(mode=0o700)
+        fake = FakeQdrant(
+            aliases={"memory_claim_v1_active": "memory_claim_v1"},
+            target=SHADOW,
+            behavior=behavior,
+            unrelated=unrelated or {"other_alias": "other_collection"},
+        )
+        collections_before = {
+            item.name for item in fake.get_collections().collections
+        }
+        source_evidence = cutover.collection_evidence(
+            fake, "memory_claim_v1", require_rebuild_provenance=False
+        )
+        pg_inventory = [
+            (*item[:4], "f" * 64)
+            for item in source_evidence["_projection_inventory"]
+        ]
+        source_state = {
+            "claim_count": 1,
+            "owner_count": 1,
+            "projection_identity_inventory_sha256": hashlib.sha256(
+                rebuild.canonical_bytes(sorted(item[:4] for item in pg_inventory))
+            ).hexdigest(),
+            "projection_inventory_sha256": hashlib.sha256(
+                rebuild.canonical_bytes(sorted(pg_inventory))
+            ).hexdigest(),
+            "_projection_inventory": sorted(pg_inventory),
+            "supported_projection_inventory_sha256": source_evidence[
+                "supported_projection_inventory_sha256"
+            ],
+            "source_snapshot_sha256": "1" * 64,
+        }
+        output_path = run / "audit.jsonl"
+        fake.audit_path = output_path
+        value = alias_spec(
+            operation="unbootstrap",
+            source="memory_claim_v1",
+            target=None,
+            report_path=None,
+            source_fingerprint=source_evidence[
+                "collection_fingerprint_sha256"
+            ],
+        )
+        value["expected_alias_state_sha256"] = cutover.alias_state_sha256(
+            fake.aliases
+        )
+        value["expected_postgres_projection_inventory_sha256"] = source_state[
+            "projection_inventory_sha256"
+        ]
+        value["expected_postgres_supported_snapshot_sha256"] = source_state[
+            "source_snapshot_sha256"
+        ]
+        value["output_path"] = str(output_path)
+        spec = cutover.Spec(value=value, raw=rebuild.canonical_bytes(value))
+        source_effect: object = (
+            [{**source_state, **item} for item in source_states]
+            if source_states is not None
+            else source_state
+        )
+        error: Exception | None = None
+        with mock.patch.object(
+            cutover, "git_identity", return_value=value["expected_git"]
+        ), mock.patch.object(
+            cutover, "make_qdrant_client", return_value=fake
+        ), mock.patch.object(
+            cutover, "SNAPSHOT_ROOT_PATH", root
+        ), mock.patch.object(
+            cutover,
+            "current_source_state",
+            side_effect=(source_effect if isinstance(source_effect, list) else None),
+            return_value=(source_effect if isinstance(source_effect, dict) else None),
+        ), mock.patch.object(cutover, "require_guard"), mock.patch.object(
+            cutover, "qdrant_mutation_lock", return_value=mock.Mock()
+        ):
+            try:
+                cutover.execute(spec)
+            except Exception as exc:
+                error = exc
+        return (
+            fake,
+            parse_audit(output_path) if output_path.exists() else [],
+            error,
+            collections_before,
+        )
+
+    def test_unbootstrap_success_is_deletion_only_and_preserves_everything_else(self) -> None:
+        fake, events, error, collections_before = self._execute_unbootstrap_case(
+            "success"
+        )
+        self.assertIsNone(error)
+        self.assertEqual(fake.update_calls, 1)
+        self.assertNotIn("memory_claim_v1_active", fake.aliases)
+        self.assertEqual(fake.aliases, {"other_alias": "other_collection"})
+        self.assertEqual(
+            {item.name for item in fake.get_collections().collections},
+            collections_before,
+        )
+        self.assertEqual([event["state"] for event in events], ["prepared", "completed"])
+        self.assertTrue(events[-1]["postcondition_verified"])
+
+    def test_unbootstrap_rejection_and_prepared_drift_fail_without_change(self) -> None:
+        fake, events, error, _ = self._execute_unbootstrap_case("reject")
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.aliases["memory_claim_v1_active"], "memory_claim_v1")
+        self.assertEqual([event["state"] for event in events], ["prepared", "failed_no_change"])
+        current = {"source_snapshot_sha256": "1" * 64}
+        changed = {"source_snapshot_sha256": "2" * 64}
+        fake, events, error, _ = self._execute_unbootstrap_case(
+            "success", source_states=[current, changed]
+        )
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 0)
+        self.assertEqual([event["state"] for event in events], ["prepared", "failed_no_change"])
+
+    def test_unbootstrap_committed_timeout_recovers_with_create_only(self) -> None:
+        fake, events, error, _ = self._execute_unbootstrap_case(
+            "commit_then_timeout"
+        )
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 2)
+        recovery = fake.operation_batches[-1]
+        self.assertEqual(len(recovery), 1)
+        self.assertIsNone(getattr(recovery[0], "delete_alias", None))
+        self.assertEqual(
+            str(recovery[0].create_alias.alias_name), "memory_claim_v1_active"
+        )
+        self.assertEqual(
+            str(recovery[0].create_alias.collection_name), "memory_claim_v1"
+        )
+        self.assertEqual(fake.aliases["memory_claim_v1_active"], "memory_claim_v1")
+        self.assertEqual(
+            [event["state"] for event in events],
+            ["prepared", "rolled_back_verified"],
+        )
+
+    def test_unbootstrap_completed_audit_failure_recovers_exact_alias(self) -> None:
+        original_append = cutover.AliasAudit.append
+
+        def fail_completed(audit, state, fields):
+            if state == "completed":
+                raise cutover.AliasCutoverError("synthetic completed fsync failure")
+            return original_append(audit, state, fields)
+
+        with mock.patch.object(cutover.AliasAudit, "append", new=fail_completed):
+            fake, events, error, _ = self._execute_unbootstrap_case("success")
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 2)
+        recovery = fake.operation_batches[-1]
+        self.assertEqual(len(recovery), 1)
+        self.assertIsNone(getattr(recovery[0], "delete_alias", None))
+        self.assertEqual(
+            str(recovery[0].create_alias.collection_name), "memory_claim_v1"
+        )
+        self.assertEqual(fake.aliases["memory_claim_v1_active"], "memory_claim_v1")
+        self.assertEqual(
+            [event["state"] for event in events],
+            ["prepared", "rolled_back_verified"],
+        )
+
+    def test_unbootstrap_post_delete_source_or_alias_drift_is_indeterminate(self) -> None:
+        current = {"source_snapshot_sha256": "1" * 64}
+        changed = {"source_snapshot_sha256": "2" * 64}
+        fake, events, error, _ = self._execute_unbootstrap_case(
+            "success", source_states=[current, current, changed, changed]
+        )
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 1)
+        self.assertNotIn("memory_claim_v1_active", fake.aliases)
+        self.assertEqual([event["state"] for event in events], ["prepared", "indeterminate"])
+
+    def test_final_alias_observation_rejects_late_drift(self) -> None:
+        fake, events, error, _ = self._execute_unbootstrap_case("late_alias_drift")
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 1)
+        self.assertEqual(
+            [event["state"] for event in events], ["prepared", "indeterminate"]
+        )
+        fake, events, error = self._execute_case("late_alias_drift")
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertEqual(fake.update_calls, 1)
+        self.assertEqual(
+            [event["state"] for event in events], ["prepared", "indeterminate"]
+        )
+        fake, events, error, _ = self._execute_unbootstrap_case(
+            "collection_drift"
+        )
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertNotIn("memory_claim_v1_active", fake.aliases)
+        self.assertEqual(
+            [event["state"] for event in events], ["prepared", "indeterminate"]
+        )
+        fake, events, error, _ = self._execute_unbootstrap_case(
+            "unrelated_drift"
+        )
+        self.assertIsInstance(error, cutover.AliasCutoverError)
+        self.assertNotIn("memory_claim_v1_active", fake.aliases)
+        self.assertEqual([event["state"] for event in events], ["prepared", "indeterminate"])
 
     def test_prepared_event_precedes_one_atomic_alias_update(self) -> None:
         fake, events, error = self._execute_case("success")

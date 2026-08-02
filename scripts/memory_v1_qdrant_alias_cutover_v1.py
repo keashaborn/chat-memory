@@ -49,8 +49,8 @@ from rag_engine.memory_v1_qdrant_rebuild_contract_v1 import (
 from rag_engine.qdrant_compat import make_qdrant_client
 
 
-SPEC_VERSION = "memory_v1_qdrant_alias_transition_spec_v1"
-REPORT_VERSION = "memory_v1_qdrant_alias_transition_report_v1"
+SPEC_VERSION = "memory_v1_qdrant_alias_transition_spec_v2"
+REPORT_VERSION = "memory_v1_qdrant_alias_transition_report_v2"
 REBUILD_REPORT_VERSION = "memory_v1_qdrant_shadow_rebuild_report_v1"
 LIVE_COLLECTION = "memory_claim_v1"
 SNAPSHOT_ROOT = pathlib.PurePosixPath("/home/ubuntu/brains/snapshots")
@@ -170,6 +170,7 @@ class Spec:
             "lease",
             "qdrant_url",
             "alias_name",
+            "expected_alias_state_sha256",
             "expected_alias_source",
             "expected_alias_source_fingerprint_sha256",
             "expected_postgres_projection_inventory_sha256",
@@ -187,6 +188,7 @@ class Spec:
             "bootstrap",
             "cutover",
             "rollback",
+            "unbootstrap",
         }:
             raise AliasCutoverError("spec operation rejected")
         if not re.fullmatch(
@@ -202,7 +204,7 @@ class Spec:
             or any(not re.fullmatch(r"[0-9a-f]{40}", str(item)) for item in git.values())
             or value.get("qdrant_url") != "http://127.0.0.1:6333"
             or value.get("alias_name") != ACTIVE_ALIAS
-            or not _is_sha256(value.get("target_collection_fingerprint_sha256"))
+            or not _is_sha256(value.get("expected_alias_state_sha256"))
             or not _is_sha256(
                 value.get("expected_postgres_projection_inventory_sha256")
             )
@@ -221,6 +223,7 @@ class Spec:
         report_path = value.get("rebuild_report_path")
         report_sha = value.get("rebuild_report_sha256")
         source_fingerprint = value.get("expected_alias_source_fingerprint_sha256")
+        target_fingerprint = value.get("target_collection_fingerprint_sha256")
         if operation == "bootstrap":
             if source is not None or target != LIVE_COLLECTION:
                 raise AliasCutoverError("bootstrap boundary rejected")
@@ -228,6 +231,15 @@ class Spec:
                 raise AliasCutoverError("bootstrap does not accept a rebuild report")
             if source_fingerprint is not None:
                 raise AliasCutoverError("bootstrap does not accept a source fingerprint")
+            if not _is_sha256(target_fingerprint):
+                raise AliasCutoverError("bootstrap target fingerprint rejected")
+        elif operation == "unbootstrap":
+            if source != LIVE_COLLECTION or value.get("target_collection") is not None:
+                raise AliasCutoverError("unbootstrap boundary rejected")
+            if not _is_sha256(source_fingerprint) or target_fingerprint is not None:
+                raise AliasCutoverError("unbootstrap fingerprint boundary rejected")
+            if report_path is not None or report_sha is not None:
+                raise AliasCutoverError("unbootstrap does not accept a rebuild report")
         elif operation == "cutover":
             if not _is_collection(source, live_allowed=True):
                 raise AliasCutoverError("cutover source rejected")
@@ -235,6 +247,8 @@ class Spec:
                 raise AliasCutoverError("cutover target rejected")
             if not _is_sha256(source_fingerprint):
                 raise AliasCutoverError("cutover source fingerprint rejected")
+            if not _is_sha256(target_fingerprint):
+                raise AliasCutoverError("cutover target fingerprint rejected")
         else:
             if not _is_collection(source, live_allowed=False):
                 raise AliasCutoverError("rollback source rejected")
@@ -242,9 +256,13 @@ class Spec:
                 raise AliasCutoverError("rollback target rejected")
             if not _is_sha256(source_fingerprint):
                 raise AliasCutoverError("rollback source fingerprint rejected")
+            if not _is_sha256(target_fingerprint):
+                raise AliasCutoverError("rollback target fingerprint rejected")
 
         output = _snapshot_path(value.get("output_path"), "output")
-        if target == LIVE_COLLECTION:
+        if operation == "unbootstrap":
+            pass
+        elif target == LIVE_COLLECTION:
             if report_path is not None or report_sha is not None:
                 raise AliasCutoverError("live target does not accept a rebuild report")
         else:
@@ -434,6 +452,8 @@ def _read_private_snapshot_file(path: pathlib.Path) -> bytes:
 
 
 def load_rebuild_report(spec: Spec) -> dict[str, Any] | None:
+    if spec.value["operation"] == "unbootstrap":
+        return None
     target = spec.value["target_collection"]
     if target == LIVE_COLLECTION:
         return None
@@ -518,6 +538,8 @@ def alias_state_sha256(aliases: Mapping[str, str]) -> str:
 
 
 def operations(spec: Spec, aliases: Mapping[str, str]) -> list[Any]:
+    if alias_state_sha256(aliases) != spec.value["expected_alias_state_sha256"]:
+        raise AliasCutoverError("complete alias map differs from approved state")
     if spec.value["operation"] == "bootstrap":
         if ACTIVE_ALIAS in aliases:
             raise AliasCutoverError("active alias already exists")
@@ -526,6 +548,14 @@ def operations(spec: Spec, aliases: Mapping[str, str]) -> list[Any]:
                 create_alias=qmodels.CreateAlias(
                     collection_name=LIVE_COLLECTION, alias_name=ACTIVE_ALIAS
                 )
+            )
+        ]
+    if spec.value["operation"] == "unbootstrap":
+        if aliases.get(ACTIVE_ALIAS) != LIVE_COLLECTION:
+            raise AliasCutoverError("unbootstrap active alias differs")
+        return [
+            qmodels.DeleteAliasOperation(
+                delete_alias=qmodels.DeleteAlias(alias_name=ACTIVE_ALIAS)
             )
         ]
     relevant = {ACTIVE_ALIAS: aliases[ACTIVE_ALIAS]} if ACTIVE_ALIAS in aliases else {}
@@ -1044,12 +1074,16 @@ def _unrelated_aliases(aliases: Mapping[str, str]) -> dict[str, str]:
     return {key: value for key, value in aliases.items() if key != ACTIVE_ALIAS}
 
 
-def _prior_alias_operations(before: Mapping[str, str]) -> list[Any]:
-    operations: list[Any] = [
-        qmodels.DeleteAliasOperation(
-            delete_alias=qmodels.DeleteAlias(alias_name=ACTIVE_ALIAS)
+def _prior_alias_operations(
+    before: Mapping[str, str], current: Mapping[str, str]
+) -> list[Any]:
+    operations: list[Any] = []
+    if ACTIVE_ALIAS in current:
+        operations.append(
+            qmodels.DeleteAliasOperation(
+                delete_alias=qmodels.DeleteAlias(alias_name=ACTIVE_ALIAS)
+            )
         )
-    ]
     if ACTIVE_ALIAS in before:
         operations.append(
             qmodels.CreateAliasOperation(
@@ -1112,7 +1146,8 @@ def _bounded_failure_recovery(
             raise AliasCutoverError("alias state changed before counter-transition")
         try:
             qdrant.update_collection_aliases(
-                change_aliases_operations=_prior_alias_operations(before), timeout=30
+                change_aliases_operations=_prior_alias_operations(before, aliases),
+                timeout=30,
             )
         except Exception:
             pass
@@ -1132,11 +1167,15 @@ def _bounded_failure_recovery(
                 != spec.value["expected_alias_source_fingerprint_sha256"]
             ):
                 raise AliasCutoverError("restored alias source fingerprint changed")
+        final_aliases = observed_aliases(qdrant)
+        if final_aliases != dict(before):
+            raise AliasCutoverError("alias state changed after counter-transition proof")
+        final_alias_sha256 = alias_state_sha256(final_aliases)
         fields.update(
             {
-                "observed_alias_state_sha256": alias_state_sha256(restored),
+                "observed_alias_state_sha256": final_alias_sha256,
                 "postcondition_verified": True,
-                "restored_alias_state_sha256": alias_state_sha256(restored),
+                "restored_alias_state_sha256": final_alias_sha256,
             }
         )
         return "rolled_back_verified", fields
@@ -1144,9 +1183,239 @@ def _bounded_failure_recovery(
         return "indeterminate", fields
 
 
+def _bounded_unbootstrap_failure_recovery(
+    qdrant: Any,
+    *,
+    spec: Spec,
+    before: Mapping[str, str],
+    before_collections: set[str],
+    source_state: Mapping[str, Any],
+    attempted: bool,
+) -> tuple[str, dict[str, Any]]:
+    fields: dict[str, Any] = {"postcondition_verified": False}
+    try:
+        aliases = observed_aliases(qdrant)
+        fields["observed_alias_state_sha256"] = alias_state_sha256(aliases)
+    except Exception:
+        fields["observed_alias_state_sha256"] = None
+        return "indeterminate", fields
+    if aliases == dict(before):
+        return "failed_no_change", fields
+    applied = (
+        ACTIVE_ALIAS not in aliases
+        and _unrelated_aliases(aliases) == _unrelated_aliases(before)
+    )
+    if not attempted or not applied:
+        return "indeterminate", fields
+    try:
+        current_collections = {
+            item.name for item in qdrant.get_collections().collections
+        }
+        if current_collections != before_collections:
+            raise AliasCutoverError("collection inventory changed during unbootstrap")
+        current = current_source_state()
+        if current != source_state:
+            raise AliasCutoverError("PostgreSQL source changed during unbootstrap")
+        source_evidence = collection_evidence(
+            qdrant, LIVE_COLLECTION, require_rebuild_provenance=False
+        )
+        if (
+            source_evidence["collection_fingerprint_sha256"]
+            != spec.value["expected_alias_source_fingerprint_sha256"]
+        ):
+            raise AliasCutoverError("legacy collection fingerprint changed")
+        require_current_source_parity(source_evidence, current)
+        require_guard(spec)
+        if observed_aliases(qdrant) != aliases:
+            raise AliasCutoverError("alias state changed before unbootstrap recovery")
+        try:
+            qdrant.update_collection_aliases(
+                change_aliases_operations=_prior_alias_operations(before, aliases),
+                timeout=30,
+            )
+        except Exception:
+            pass
+        restored = observed_aliases(qdrant)
+        if restored != dict(before):
+            raise AliasCutoverError("unbootstrap alias state was not restored")
+        if {
+            item.name for item in qdrant.get_collections().collections
+        } != before_collections:
+            raise AliasCutoverError("collection inventory changed during recovery")
+        restored_state = current_source_state()
+        if restored_state != source_state:
+            raise AliasCutoverError("PostgreSQL source changed during unbootstrap recovery")
+        restored_evidence = collection_evidence(
+            qdrant, LIVE_COLLECTION, require_rebuild_provenance=False
+        )
+        if restored_evidence != source_evidence:
+            raise AliasCutoverError("legacy collection changed during unbootstrap recovery")
+        require_current_source_parity(restored_evidence, restored_state)
+        final_aliases = observed_aliases(qdrant)
+        if final_aliases != dict(before):
+            raise AliasCutoverError("alias state changed after unbootstrap recovery proof")
+        final_alias_sha256 = alias_state_sha256(final_aliases)
+        fields.update(
+            {
+                "observed_alias_state_sha256": final_alias_sha256,
+                "postcondition_verified": True,
+                "restored_alias_state_sha256": final_alias_sha256,
+            }
+        )
+        return "rolled_back_verified", fields
+    except Exception:
+        return "indeterminate", fields
+
+
+def _execute_unbootstrap(spec: Spec) -> dict[str, Any]:
+    qdrant = make_qdrant_client(url=spec.value["qdrant_url"], timeout=30.0)
+    lock = qdrant_mutation_lock(exclusive=True, timeout_seconds=10.0)
+    try:
+        lock.acquire()
+    except Exception:
+        qdrant.close()
+        raise
+    try:
+        collections = {item.name for item in qdrant.get_collections().collections}
+        if LIVE_COLLECTION not in collections:
+            raise AliasCutoverError("legacy collection is absent")
+        before = observed_aliases(qdrant)
+        planned = operations(spec, before)
+        source_evidence = collection_evidence(
+            qdrant, LIVE_COLLECTION, require_rebuild_provenance=False
+        )
+        if (
+            source_evidence["collection_fingerprint_sha256"]
+            != spec.value["expected_alias_source_fingerprint_sha256"]
+        ):
+            raise AliasCutoverError("legacy collection fingerprint changed")
+        source_state = current_source_state()
+        if (
+            source_state["projection_inventory_sha256"]
+            != spec.value["expected_postgres_projection_inventory_sha256"]
+            or source_state["source_snapshot_sha256"]
+            != spec.value["expected_postgres_supported_snapshot_sha256"]
+        ):
+            raise AliasCutoverError("PostgreSQL source differs from the approved baseline")
+        require_current_source_parity(source_evidence, source_state)
+        common_fields = {
+            "active_alias": ACTIVE_ALIAS,
+            "before_alias_state_sha256": alias_state_sha256(before),
+            "expected_alias_state_sha256": spec.value[
+                "expected_alias_state_sha256"
+            ],
+            "contract_version": REPORT_VERSION,
+            "expected_alias_source": LIVE_COLLECTION,
+            "expected_alias_source_fingerprint_sha256": spec.value[
+                "expected_alias_source_fingerprint_sha256"
+            ],
+            "expected_git": spec.value["expected_git"],
+            "lease": spec.value["lease"],
+            "operation": "unbootstrap",
+            "rebuild_report_sha256": None,
+            "run_id": spec.value["run_id"],
+            "spec_sha256": spec.sha256,
+            "target_collection": None,
+            "target_collection_fingerprint_sha256": None,
+            "target_rebuild_expected_git": None,
+            "target_rebuild_run_id": None,
+            "target_rebuild_spec_sha256": None,
+            "source_state": {
+                key: value
+                for key, value in source_state.items()
+                if not key.startswith("_")
+            },
+        }
+        require_guard(spec)
+        audit = AliasAudit.create(
+            pathlib.Path(spec.value["output_path"]), trusted_root=SNAPSHOT_ROOT_PATH
+        )
+        try:
+            audit.append("prepared", common_fields)
+            attempted = False
+            try:
+                if observed_aliases(qdrant) != before:
+                    raise AliasCutoverError("alias state changed before unbootstrap")
+                confirmed_evidence = collection_evidence(
+                    qdrant, LIVE_COLLECTION, require_rebuild_provenance=False
+                )
+                if confirmed_evidence != source_evidence:
+                    raise AliasCutoverError("legacy collection changed before unbootstrap")
+                require_current_source_parity(confirmed_evidence, source_state)
+                if current_source_state() != source_state:
+                    raise AliasCutoverError("PostgreSQL source changed before unbootstrap")
+                require_guard(spec)
+                attempted = True
+                qdrant.update_collection_aliases(
+                    change_aliases_operations=planned, timeout=30
+                )
+                after = observed_aliases(qdrant)
+                if (
+                    ACTIVE_ALIAS in after
+                    or _unrelated_aliases(after) != _unrelated_aliases(before)
+                ):
+                    raise AliasCutoverError(
+                        "unbootstrap did not remove only the approved active alias"
+                    )
+                closing_collections = {
+                    item.name for item in qdrant.get_collections().collections
+                }
+                if closing_collections != collections:
+                    raise AliasCutoverError("collection inventory changed during unbootstrap")
+                closing_evidence = collection_evidence(
+                    qdrant, LIVE_COLLECTION, require_rebuild_provenance=False
+                )
+                if closing_evidence != source_evidence:
+                    raise AliasCutoverError("legacy collection changed after unbootstrap")
+                closing_source_state = current_source_state()
+                if closing_source_state != source_state:
+                    raise AliasCutoverError("PostgreSQL source changed after unbootstrap")
+                require_current_source_parity(closing_evidence, closing_source_state)
+                final_aliases = observed_aliases(qdrant)
+                if final_aliases != after:
+                    raise AliasCutoverError(
+                        "alias state changed after unbootstrap closing proof"
+                    )
+                final_alias_sha256 = alias_state_sha256(final_aliases)
+                completed = audit.append(
+                    "completed",
+                    {
+                        **common_fields,
+                        "after_alias_state_sha256": final_alias_sha256,
+                        "postcondition_verified": True,
+                    },
+                )
+                return completed
+            except Exception as exc:
+                state, outcome_fields = _bounded_unbootstrap_failure_recovery(
+                    qdrant,
+                    spec=spec,
+                    before=before,
+                    before_collections=collections,
+                    source_state=source_state,
+                    attempted=attempted,
+                )
+                try:
+                    audit.append(state, {**common_fields, **outcome_fields})
+                except Exception as audit_exc:
+                    raise AliasCutoverError(
+                        f"unbootstrap outcome:{state}; audit outcome:indeterminate"
+                    ) from audit_exc
+                raise AliasCutoverError(f"unbootstrap outcome:{state}") from exc
+        finally:
+            audit.close()
+    finally:
+        try:
+            qdrant.close()
+        finally:
+            lock.release()
+
+
 def execute(spec: Spec) -> dict[str, Any]:
     if git_identity() != spec.value["expected_git"]:
         raise AliasCutoverError("Git identity changed")
+    if spec.value["operation"] == "unbootstrap":
+        return _execute_unbootstrap(spec)
     rebuild_report = load_rebuild_report(spec)
     qdrant = make_qdrant_client(url=spec.value["qdrant_url"], timeout=30.0)
     lock = qdrant_mutation_lock(exclusive=True, timeout_seconds=10.0)
@@ -1210,6 +1479,9 @@ def execute(spec: Spec) -> dict[str, Any]:
             "active_alias": ACTIVE_ALIAS,
             "before_alias_state_sha256": alias_state_sha256(before),
             "contract_version": REPORT_VERSION,
+            "expected_alias_state_sha256": spec.value[
+                "expected_alias_state_sha256"
+            ],
             "expected_alias_source": spec.value["expected_alias_source"],
             "expected_alias_source_fingerprint_sha256": spec.value[
                 "expected_alias_source_fingerprint_sha256"
@@ -1290,11 +1562,17 @@ def execute(spec: Spec) -> dict[str, Any]:
                 if closing_source_state != source_state:
                     raise AliasCutoverError("PostgreSQL source changed after transition")
                 require_current_source_parity(closing_evidence, closing_source_state)
+                final_aliases = observed_aliases(qdrant)
+                if final_aliases != after:
+                    raise AliasCutoverError(
+                        "alias state changed after transition closing proof"
+                    )
+                final_alias_sha256 = alias_state_sha256(final_aliases)
                 completed = audit.append(
                     "completed",
                     {
                         **common_fields,
-                        "after_alias_state_sha256": alias_state_sha256(after),
+                        "after_alias_state_sha256": final_alias_sha256,
                         "postcondition_verified": True,
                     },
                 )
