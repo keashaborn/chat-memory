@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import os
+import re
 from pathlib import Path
 from unittest import mock
 import unittest
@@ -643,7 +644,7 @@ class WorkerTests(unittest.TestCase):
         source = TrustedExtractionSource.create(
             job_id="00000000-0000-4000-8000-000000000010",
             source_system="public.chat_log",
-            source_external_id="00000000-0000-4000-8000-000000000011",
+            source_external_id=job()["evidence_external_id"],
             source_sha256=SOURCE_SHA,
             source_recorded_at="2026-08-06T12:00:00Z",
             content=SOURCE,
@@ -673,6 +674,78 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(
             result.normalized_packet["predicate_registry_version"],
             "memory_predicate_registry_v5_2",
+        )
+        self.assertEqual(
+            result.normalized_packet["source_envelope"]["source_external_id"],
+            job()["evidence_external_id"],
+        )
+
+    def test_v5_schema_accepts_exact_maximum_governed_external_id(self) -> None:
+        packet = OpenAIExtractionResultV1.model_validate(
+            {
+                "entity_mentions": [],
+                "observations": [],
+                "comparison_hints": [],
+                "deferrals": [],
+                "packet_findings": [],
+            },
+            strict=True,
+        )
+        provider = _BoundPacketProvider(
+            packet=packet,
+            source_sha256=SOURCE_SHA,
+            external_model_calls=1,
+        )
+        source = TrustedExtractionSource.create(
+            job_id="00000000-0000-4000-8000-000000000010",
+            source_system="public.chat_log",
+            source_external_id="x" * 500,
+            source_sha256=SOURCE_SHA,
+            source_recorded_at="2026-08-06T12:00:00Z",
+            content=SOURCE,
+            source_observed_at="2026-08-06T12:00:00Z",
+        )
+        result = validate_and_normalize(
+            provider,
+            source=source,
+            registry=load_registry(
+                DEFAULT_REGISTRY,
+                EXPECTED_REGISTRY_SHA256,
+            ),
+            schema=load_schema(
+                DEFAULT_SCHEMA,
+                EXPECTED_SCHEMA_SHA256,
+                expected_contract_version=CONTRACT_VERSION_V5_2,
+            ),
+            trusted_project_binding=None,
+            allowed_provider_versions={OPENAI_PROVIDER_ID: PROVIDER_VERSION},
+            max_external_model_calls=1,
+        )
+        self.assertEqual(
+            result.normalized_packet["source_envelope"]["source_external_id"],
+            "x" * 500,
+        )
+
+    def test_v5_schema_external_id_definition_is_fail_closed(self) -> None:
+        schema = load_schema(
+            DEFAULT_SCHEMA,
+            EXPECTED_SCHEMA_SHA256,
+            expected_contract_version=CONTRACT_VERSION_V5_2,
+        )
+        contract = schema["$defs"]["governed_external_id"]
+        self.assertEqual(contract["type"], "string")
+        self.assertEqual(contract["minLength"], 1)
+        self.assertEqual(contract["maxLength"], 500)
+        pattern = re.compile(contract["pattern"])
+        self.assertIsNotNone(pattern.fullmatch("legacy:record:01"))
+        for invalid in ("", " \t\n", "unsafe\x00id"):
+            with self.subTest(invalid=repr(invalid)):
+                self.assertIsNone(pattern.fullmatch(invalid))
+        self.assertEqual(
+            schema["$defs"]["source_envelope"]["properties"][
+                "source_external_id"
+            ]["$ref"],
+            "#/$defs/governed_external_id",
         )
 
     def test_worker_defaults_are_exact_v5_2_contract_inputs(self) -> None:

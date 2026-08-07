@@ -28,7 +28,7 @@
       "registry_canonical_sha256": "d40e79057070aa6760af474dc8ca2695ad0024320afde562753e840356cf9f06",
       "registry_path": "specs/memory_v1_predicate_registry_v5_2_compiler_v12.json",
       "registry_version": "memory_predicate_registry_v5_2",
-      "schema_artifact_sha256": "ad35ec61a5816c93c284b32a8e392e7088c26233a7471251915233e97178531c",
+      "schema_artifact_sha256": "21d0438d381715d7e2397564eb093364aee2149312b870caed6e0753a6cd31f5",
       "schema_path": "specs/memory_v1_relational_extraction_v5_2.schema.json"
     }
   },

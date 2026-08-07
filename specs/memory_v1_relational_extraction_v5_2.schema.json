@@ -71,6 +71,12 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "governed_external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000]+$"
+    },
     "nullable_uuid": {
       "oneOf": [
         {
@@ -111,7 +117,7 @@
           "const": "public.chat_log"
         },
         "source_external_id": {
-          "$ref": "#/$defs/uuid"
+          "$ref": "#/$defs/governed_external_id"
         },
         "source_sha256": {
           "$ref": "#/$defs/sha256"
