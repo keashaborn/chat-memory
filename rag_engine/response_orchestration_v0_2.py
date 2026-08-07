@@ -31,7 +31,9 @@ from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.prompt_assembler_v1 import (
     AssembledPromptV1,
+    ContextKind,
     PromptAssemblyRequestV1,
+    PromptReferenceContextBlockV1,
     assemble_prompt,
 )
 from rag_engine.response_policy_prompt_v0_2 import (
@@ -196,6 +198,10 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    attachment_context_block: PromptReferenceContextBlockV1 | None = Field(
+        default=None,
+        repr=False,
+    )
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
     search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
         default=None,
@@ -268,6 +274,17 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
                 raise ValueError(
                     "Prior web provenance differs from the trusted response request"
                 )
+        if self.attachment_context_block is not None:
+            attachment = self.attachment_context_block
+            if (
+                attachment.kind is not ContextKind.ATTACHMENT
+                or attachment.request_id_sha256 != _text_sha256(self.request_id)
+                or attachment.query_sha256
+                != _text_sha256(self.conversation[-1].content)
+            ):
+                raise ValueError(
+                    "Attachment context differs from the trusted response request"
+                )
         if (
             self.assistant_response_preferences is not None
             and self.assistant_response_preferences.owner_user_id
@@ -313,6 +330,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         memory_input: MemoryPromptAssemblyInputV1 | None = None,
         memory_application: MemoryPromptApplicationResultV1 | None = None,
         prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
+        attachment_context_block: PromptReferenceContextBlockV1 | None = None,
         fm_token_budget: int | None = None,
         search_capability_manifest: SearchCapabilityManifestV1 | None = None,
         assistant_response_preferences: AssistantResponsePreferencesV1 | None = None,
@@ -362,6 +380,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             memory_input=memory_input,
             memory_application=memory_application,
             prior_web_provenance=prior_web_provenance,
+            attachment_context_block=attachment_context_block,
             fm_token_budget=fm_token_budget,
             search_capability_manifest=search_capability_manifest,
             assistant_response_preferences=assistant_response_preferences,
@@ -398,7 +417,7 @@ class SanitizedResponseShadowTraceV0_2(_StrictFrozenModel):
     fm_selection_status: str
     fm_selected_record_count: int = Field(ge=0, le=8)
     memory_present: bool
-    context_block_count: int = Field(ge=0, le=3)
+    context_block_count: int = Field(ge=0, le=4)
     total_input_bytes: int = Field(ge=1)
     total_input_tokens: int = Field(ge=1)
     ignored_legacy_request_fields: tuple[str, ...]
@@ -798,6 +817,7 @@ class TrustedResponseOrchestratorV0_2:
                     memory_application=request.memory_application,
                     fm_selection=fm,
                     prior_web_provenance=request.prior_web_provenance,
+                    attachment_context_block=request.attachment_context_block,
                     search_capability_manifest=(
                         request.search_capability_manifest
                     ),

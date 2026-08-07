@@ -56,6 +56,7 @@ class LifeSwitchPromptIntegrationError(RuntimeError):
 
 class ContextKindV2(str, Enum):
     MEMORY = "memory"
+    ATTACHMENT = "attachment"
     LIFESWITCH = "lifeswitch"
     FRACTAL_MONISM = "fractal_monism"
     WEB_PROVENANCE = "web_provenance"
@@ -118,6 +119,7 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
     )
     block_id: Literal[
         "governed_memory_v1",
+        "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
         "fractal_monism_v0_2",
         "prior_web_provenance_v1",
@@ -150,6 +152,7 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
     def exact_block(self) -> "PromptReferenceContextBlockV2":
         expected_id = {
             ContextKindV2.MEMORY: "governed_memory_v1",
+            ContextKindV2.ATTACHMENT: "chat_attachments_v1",
             ContextKindV2.LIFESWITCH: "lifeswitch_domain_context_v1",
             ContextKindV2.FRACTAL_MONISM: "fractal_monism_v0_2",
             ContextKindV2.WEB_PROVENANCE: "prior_web_provenance_v1",
@@ -258,14 +261,14 @@ class PromptAssemblyManifestV2(_StrictFrozenModel):
     source_v1_assembly_sha256: str
     augmentation_request_sha256: str
     context_order: tuple[str, ...]
-    context_block_count: int = Field(ge=0, le=4)
+    context_block_count: int = Field(ge=0, le=5)
     lifeswitch_envelope_sha256: str | None = None
     lifeswitch_render_sha256: str | None = None
     lifeswitch_record_count: int = Field(ge=0, le=500)
     lifeswitch_estimated_tokens: int = Field(ge=0, le=LIFESWITCH_MAX_TOKENS)
     total_input_bytes: int = Field(ge=1, le=HARD_MAX_TOTAL_INPUT_BYTES)
     total_input_tokens: int = Field(ge=1, le=HARD_MAX_TOTAL_INPUT_TOKENS)
-    total_message_count: int = Field(ge=2, le=260)
+    total_message_count: int = Field(ge=2, le=262)
     context_window_committed_tokens: int = Field(
         ge=1,
         le=MODEL_CONTEXT_WINDOW_TOKENS,
@@ -408,6 +411,7 @@ def assemble_prompt_with_lifeswitch_v1(
 
     ordered_ids = (
         "governed_memory_v1",
+        "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
         "fractal_monism_v0_2",
         "prior_web_provenance_v1",

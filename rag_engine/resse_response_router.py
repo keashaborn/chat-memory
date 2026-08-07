@@ -16,6 +16,10 @@ from rag_engine.assistant_response_preferences_store_v1 import (
     load_assistant_response_preferences_v1,
     set_preference_actor_v1,
 )
+from rag_engine.chat_attachment_context_v1 import (
+    MAX_ATTACHMENT_COUNT,
+    build_attachment_context_block_v1,
+)
 from rag_engine.assistant_response_preferences_v1 import (
     default_assistant_response_preferences_v1,
 )
@@ -105,8 +109,13 @@ class ResseResponseRequestV1(BaseModel):
     thread_id: UUID | None = None
     no_store: bool = False
     include_inspection: bool = False
+    attachment_ids: tuple[UUID, ...] = Field(
+        default=(),
+        max_length=MAX_ATTACHMENT_COUNT,
+    )
+    attachment_message_id: UUID | None = None
 
-    @field_validator("user_id", "thread_id", mode="before")
+    @field_validator("user_id", "thread_id", "attachment_message_id", mode="before")
     @classmethod
     def parse_wire_uuid(cls, value: object) -> object:
         if value is None or isinstance(value, UUID):
@@ -117,6 +126,35 @@ class ResseResponseRequestV1(BaseModel):
             return UUID(value)
         except ValueError:
             raise ValueError("UUID field is invalid") from None
+
+    @field_validator("attachment_ids", mode="before")
+    @classmethod
+    def parse_attachment_ids(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("attachment_ids must be an array")
+        parsed = []
+        for item in value:
+            if isinstance(item, UUID):
+                parsed.append(item)
+            elif isinstance(item, str):
+                try:
+                    parsed.append(UUID(item))
+                except ValueError:
+                    raise ValueError("attachment id is invalid") from None
+            else:
+                raise ValueError("attachment id is invalid")
+        if len(set(parsed)) != len(parsed):
+            raise ValueError("attachment ids must be unique")
+        return tuple(parsed)
+
+    @field_validator("attachment_ids")
+    @classmethod
+    def attachment_pairing(
+        cls, value: tuple[UUID, ...], info: object
+    ) -> tuple[UUID, ...]:
+        return value
 
 
 @router.post("/query")
@@ -163,9 +201,51 @@ async def resse_response_query(
     thread_id = payload.thread_id or uuid4()
     if not payload.no_store and stateless:
         raise HTTPException(status_code=400, detail="thread_id_required")
+    if payload.attachment_ids and (
+        payload.no_store
+        or payload.thread_id is None
+        or payload.attachment_message_id is None
+        or search_capability_manifest is not None
+    ):
+        raise HTTPException(status_code=400, detail="invalid_attachment_context")
+    if payload.attachment_message_id is not None and not payload.attachment_ids:
+        raise HTTPException(status_code=400, detail="invalid_attachment_context")
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
+        attachment_context_block = None
+        if payload.attachment_ids:
+            await conn.execute("SELECT set_config('app.user_id', $1, false)", str(owner))
+            attachment_rows = await conn.fetch(
+                """
+                SELECT attachment.id,attachment.filename,attachment.media_type,
+                       attachment.content,attachment.content_sha256,attachment.byte_size
+                FROM public.chat_attachments AS attachment
+                JOIN public.chat_log AS message
+                  ON message.id=attachment.message_id
+                 AND message.owner_user_id=attachment.owner_user_id
+                 AND message.thread_id=attachment.thread_id
+                WHERE attachment.owner_user_id=$1
+                  AND attachment.thread_id=$2
+                  AND attachment.message_id=$3
+                  AND attachment.id=ANY($4::uuid[])
+                  AND attachment.status='ready'
+                  AND attachment.deleted_at IS NULL
+                  AND attachment.content IS NOT NULL
+                ORDER BY array_position($4::uuid[], attachment.id)
+                """,
+                owner,
+                payload.thread_id,
+                payload.attachment_message_id,
+                list(payload.attachment_ids),
+            )
+            if len(attachment_rows) != len(payload.attachment_ids):
+                raise HTTPException(status_code=404, detail="attachment_not_found")
+            attachment_context_block = build_attachment_context_block_v1(
+                rows=attachment_rows,
+                request_id=request_id,
+                current_message=payload.message,
+            )
         try:
             async with conn.transaction():
                 await set_preference_actor_v1(conn, owner)
@@ -194,12 +274,20 @@ async def resse_response_query(
             request_id=request_id,
             current_message=payload.message,
             request_field_names=tuple(
-                sorted(set(payload.model_fields_set) - {"include_inspection"})
+                sorted(
+                    set(payload.model_fields_set)
+                    - {
+                        "include_inspection",
+                        "attachment_ids",
+                        "attachment_message_id",
+                    }
+                )
             ),
             stateless=stateless,
             search_capability_manifest=search_capability_manifest,
             assistant_response_preferences=assistant_response_preferences,
             response_language=response_language,
+            attachment_context_block=attachment_context_block,
         )
         lifeswitch_enabled = LIFESWITCH_CHAT_SETTINGS.enabled_for(owner)
         if lifeswitch_enabled:

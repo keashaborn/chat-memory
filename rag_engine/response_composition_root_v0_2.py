@@ -8,6 +8,7 @@ scoped database snapshot, backend safety and mode classifiers, independently
 governed Memory, typed prompt assembly, provider execution, and final binding.
 """
 
+import hashlib
 import re
 import time
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ from rag_engine.prior_web_provenance_v1 import (
     PriorWebProvenanceError,
     load_prior_web_provenance_v1,
 )
+from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
 from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotV1,
     create_current_only_conversation_snapshot_v1,
@@ -100,6 +102,10 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         repr=False,
     )
     response_language: str = DEFAULT_VOICE_LANGUAGE
+    attachment_context_block: PromptReferenceContextBlockV1 | None = Field(
+        default=None,
+        repr=False,
+    )
 
     @field_validator("request_id")
     @classmethod
@@ -136,6 +142,14 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
             raise ValueError(
                 "assistant response preference owner differs from authenticated actor"
             )
+        if self.attachment_context_block is not None:
+            if (
+                self.attachment_context_block.request_id_sha256
+                != hashlib.sha256(self.request_id.encode("utf-8")).hexdigest()
+                or self.attachment_context_block.query_sha256
+                != hashlib.sha256(self.current_message.encode("utf-8")).hexdigest()
+            ):
+                raise ValueError("attachment context differs from authenticated command")
         return self
 
 
@@ -461,6 +475,7 @@ class InactiveResponseCompositionRootV0_2:
                 memory_input=memory.memory_input,
                 memory_application=memory.memory_application,
                 prior_web_provenance=prior_web_provenance,
+                attachment_context_block=command.attachment_context_block,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
                 assistant_response_preferences=(

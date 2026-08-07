@@ -88,8 +88,35 @@ class ResseResponseRouterTests(unittest.TestCase):
                 "thread_id": None,
                 "no_store": True,
                 "include_inspection": False,
+                "attachment_ids": [],
+                "attachment_message_id": None,
             },
         )
+
+    def test_attachment_transport_fields_are_uuid_bound_and_unique(self) -> None:
+        attachment_id = "1a8beae3-58e5-4fb7-8f64-4fbb2bddcb73"
+        message_id = "05e79a7d-1e58-4cf4-95d6-b06b46f8898d"
+        value = ResseResponseRequestV1.model_validate(
+            {
+                "user_id": str(ACTOR),
+                "message": "Review the attachment.",
+                "thread_id": "735e1cf0-5a02-456c-a035-5597b010c7aa",
+                "attachment_ids": [attachment_id],
+                "attachment_message_id": message_id,
+            }
+        )
+        self.assertEqual([str(item) for item in value.attachment_ids], [attachment_id])
+        self.assertEqual(str(value.attachment_message_id), message_id)
+        with self.assertRaises(ValidationError):
+            ResseResponseRequestV1.model_validate(
+                {
+                    "user_id": str(ACTOR),
+                    "message": "Review it.",
+                    "thread_id": "735e1cf0-5a02-456c-a035-5597b010c7aa",
+                    "attachment_ids": [attachment_id, attachment_id],
+                    "attachment_message_id": message_id,
+                }
+            )
 
     def test_public_request_keeps_non_uuid_transport_fields_strict(self) -> None:
         with self.assertRaises(ValidationError):
