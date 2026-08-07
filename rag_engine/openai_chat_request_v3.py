@@ -93,6 +93,7 @@ class OpenAIChatMessageV2(_StrictFrozenModel):
             self.role != "user"
             or self.name
             not in {
+                "chat_attachments_v1",
                 "governed_memory_v1",
                 "lifeswitch_domain_context_v1",
                 "fractal_monism_v0_2",

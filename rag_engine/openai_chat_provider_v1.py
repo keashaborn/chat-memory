@@ -221,6 +221,7 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
             if self.role != "user" or self.name not in {
                 "governed_memory_v1",
                 "fractal_monism_v0_2",
+                "chat_attachments_v1",
                 "prior_web_provenance_v1",
             }:
                 raise ValueError("named provider messages must be reference data")
