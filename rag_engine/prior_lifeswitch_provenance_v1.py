@@ -53,6 +53,41 @@ _DIRECT_ACCESS_RE = re.compile(
     r"pull|use|look at|see)\b",
     re.IGNORECASE,
 )
+_ANAPHORIC_SOURCE_RES = (
+    re.compile(
+        r"^(?:and\s+)?where(?:\s+did|['’]d)\s+you\s+"
+        r"(?:get|find|pull|retrieve|obtain)\s+(?:all\s+)?(?:of\s+)?"
+        r"(?:(?:that|those|these|the)\s+)?"
+        r"(?:numbers?|figures?|values?|data|information|records?)\s*"
+        r"(?:from)?[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:and\s+)?where\s+did\s+(?:that|those|these|the)\s+"
+        r"(?:numbers?|figures?|values?|data|information|records?)\s+"
+        r"come\s+from[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:and\s+)?how\s+(?:do|did|can|could)\s+you\s+know"
+        r"(?:\s+(?:that|this|those|these))?[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:and\s+)?what\s+(?:was|is|were|are)\s+"
+        r"(?:(?:that|this|those|these)(?:\s+(?:answer|response|numbers?|"
+        r"figures?|values?|data|information))?|the\s+(?:answer|response|"
+        r"numbers?|figures?|values?|data|information))\s+based\s+on[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:and\s+)?(?:what|which)\s+(?:records?|sources?|data)\s+"
+        r"(?:supported?|backed)\s+(?:(?:that|this|those|these)(?:\s+"
+        r"(?:answer|response|numbers?|figures?|values?))?|the\s+"
+        r"(?:answer|response|numbers?|figures?|values?))[?.!]*$",
+        re.IGNORECASE,
+    ),
+)
 
 
 class PriorLifeSwitchProvenanceError(RuntimeError):
@@ -115,11 +150,14 @@ def _utc(value: Any) -> datetime:
 def prior_lifeswitch_provenance_requested_v1(message: str) -> bool:
     if not isinstance(message, str) or not message.strip():
         return False
+    normalized = " ".join(message.split())
+    if any(pattern.fullmatch(normalized) for pattern in _ANAPHORIC_SOURCE_RES):
+        return True
     return bool(
-        _PERSONAL_DOMAIN_RE.search(message)
+        _PERSONAL_DOMAIN_RE.search(normalized)
         and (
-            (_SOURCE_RE.search(message) and _PRIOR_RE.search(message))
-            or _DIRECT_ACCESS_RE.search(message)
+            (_SOURCE_RE.search(normalized) and _PRIOR_RE.search(normalized))
+            or _DIRECT_ACCESS_RE.search(normalized)
         )
     )
 

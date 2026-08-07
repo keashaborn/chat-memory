@@ -179,7 +179,18 @@ def remove_receipt(row: dict[str, Any]) -> None:
 
 
 class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
-    def test_trigger_requires_personal_domain_and_source_followup(self) -> None:
+    def test_trigger_accepts_narrow_anaphoric_prior_source_followups(self) -> None:
+        for message in (
+            "Where did those numbers come from?",
+            "And where'd you get all the information from?",
+            "How do you know that?",
+            "What was that based on?",
+            "Which records supported that answer?",
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(prior_lifeswitch_provenance_requested_v1(message))
+
+    def test_trigger_preserves_personal_domain_and_rejects_unrelated_turns(self) -> None:
         self.assertTrue(prior_lifeswitch_provenance_requested_v1(QUESTION))
         self.assertTrue(
             prior_lifeswitch_provenance_requested_v1(
@@ -192,6 +203,15 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
                 "Where did that news come from?"
             )
         )
+        for message in (
+            "Where are you going?",
+            "How are you?",
+            "What is that based in?",
+            "Which records should I keep?",
+            "Tell me about those numbers.",
+        ):
+            with self.subTest(message=message):
+                self.assertFalse(prior_lifeswitch_provenance_requested_v1(message))
 
     async def test_unbound_snapshot_reads_nothing(self) -> None:
         result = await select_prior_lifeswitch_provenance_v1(
