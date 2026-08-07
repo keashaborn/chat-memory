@@ -243,6 +243,52 @@ def main() -> int:
         source_recorded_at="2026-07-16T12:01:00Z",
         content=SOURCE,
     )
+    governed_external_id = (
+        "chat_log:legacy-capture:"
+        "aaaaaaaa-0002-4000-8000-000000000002"
+    )
+    governed_source = TrustedExtractionSource.create(
+        job_id="aaaaaaaa-0006-4000-8000-000000000006",
+        source_system="public.chat_log",
+        source_external_id=governed_external_id,
+        source_sha256=SOURCE_SHA256,
+        source_recorded_at="2026-07-16T12:01:00Z",
+        content=SOURCE,
+    )
+    if governed_source.source_external_id != governed_external_id:
+        raise AssertionError(
+            "governed source external ID was not preserved exactly"
+        )
+    maximum_external_id = "x" * 500
+    maximum_source = TrustedExtractionSource.create(
+        job_id="aaaaaaaa-0007-4000-8000-000000000007",
+        source_system="public.chat_log",
+        source_external_id=maximum_external_id,
+        source_sha256=SOURCE_SHA256,
+        source_recorded_at="2026-07-16T12:01:00Z",
+        content=SOURCE,
+    )
+    if maximum_source.source_external_id != maximum_external_id:
+        raise AssertionError("maximum governed external ID changed")
+    for invalid_external_id in (
+        None,
+        1,
+        "",
+        " \t\n",
+        "x" * 501,
+        "unsafe\x00id",
+    ):
+        expect_error(
+            lambda value=invalid_external_id: TrustedExtractionSource.create(
+                job_id="aaaaaaaa-0008-4000-8000-000000000008",
+                source_system="public.chat_log",
+                source_external_id=value,
+                source_sha256=SOURCE_SHA256,
+                source_recorded_at="2026-07-16T12:01:00Z",
+                content=SOURCE,
+            ),
+            "invalid governed source external ID",
+        )
     shifted_source_text = (
         "XXMy name is Avery in this exact synthetic record. Avery."
     )

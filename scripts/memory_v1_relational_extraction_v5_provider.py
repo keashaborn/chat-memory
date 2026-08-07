@@ -493,9 +493,8 @@ class TrustedExtractionSource:
         source_observed_at: Any | None = None,
     ) -> "TrustedExtractionSource":
         canonical_job_id = _uuid_text(job_id, "job_id")
-        canonical_external_id = _uuid_text(
+        canonical_external_id = _source_external_id_text(
             source_external_id,
-            "source_external_id",
         )
         if source_system != SOURCE_SYSTEM:
             raise ValueError("V5 source system must be public.chat_log")
@@ -1036,6 +1035,16 @@ def _uuid_text(value: Any, label: str) -> str:
         return str(uuid.UUID(str(value)))
     except (ValueError, TypeError, AttributeError) as exc:
         raise ValueError(f"{label} must be a UUID") from exc
+
+
+def _source_external_id_text(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("source_external_id must be text")
+    if not value.strip() or len(value) > 500 or "\x00" in value:
+        raise ValueError(
+            "source_external_id is outside the governed evidence domain"
+        )
+    return value
 
 
 def _project_name_key(value: str) -> str:

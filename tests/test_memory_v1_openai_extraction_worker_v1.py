@@ -66,7 +66,10 @@ def job() -> dict:
     return {
         "job_id": uuid.UUID("00000000-0000-4000-8000-000000000010"),
         "evidence_source_system": "public.chat_log",
-        "evidence_external_id": "00000000-0000-4000-8000-000000000011",
+        "evidence_external_id": (
+            "chat_log:legacy-capture:"
+            "00000000-0000-4000-8000-000000000011"
+        ),
         "evidence_content_sha256": SOURCE_SHA,
         "evidence_recorded_at": "2026-08-06T12:00:00Z",
         "evidence_observed_at": "2026-08-06T12:00:00Z",
