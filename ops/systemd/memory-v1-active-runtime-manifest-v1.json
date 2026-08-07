@@ -38,12 +38,29 @@
     },
     {
       "component": "memory-v1-v5-local-inference-tunnel.service",
+      "required_enabled_state": "disabled",
+      "required_activation_state": "inactive"
+    },
+    {
+      "component": "memory-v1-v5-local-inference-health.timer",
+      "required_enabled_state": "disabled",
       "required_activation_state": "inactive"
     }
   ],
   "release_binding": {
-    "commit": "release_time_exact_required",
-    "tree": "release_time_exact_required"
+    "contract_version": "memory_v1_active_runtime_release_binding_v1",
+    "exact_path": "/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json",
+    "required_fields": [
+      "repository_commit",
+      "repository_tree",
+      "manifest_sha256",
+      "unit_sha256",
+      "runtime_config_sha256",
+      "python_executable_sha256",
+      "openai_sdk_version",
+      "phase"
+    ],
+    "self_digest_forbidden": true
   },
   "rollback": {
     "automatic_backlog_resume": false,
@@ -54,18 +71,52 @@
     {
       "entrypoint": "scripts/memory_v1_openai_extraction_worker_v1.py",
       "installed": false,
+      "source_sha256": "c76a06a6908de74fb4b81ca683b4750b86a2a144e91c1fa49814d3a24fa63dee",
       "timer": "memory-v1-openai-extraction.timer",
+      "timer_source_sha256": "5cc9db1f1e484a90bc26bb46a0d1e0183e8d0c4ab1a9b4a9da4e1fd4be07096e",
       "timer_enable_sentinel": "/etc/chat-memory/enable-openai-extraction-timer-v1",
       "unit": "memory-v1-openai-extraction.service"
     },
     {
       "entrypoint": "scripts/memory_v1_openai_v5_2_packet_router_v1.py",
       "installed": false,
+      "source_sha256": "9e63530b8479e2b88e4a1c91c95449f3c68cefeaed65b7a289cd2f79c26ff7da",
       "timer": "memory-v1-openai-v5-2-packet-router.timer",
+      "timer_source_sha256": "6b9bab0c047d251577fbec434219b6bd1f013b3e809a4aad681d268f05e3e62e",
       "timer_enable_sentinel": "/etc/chat-memory/enable-openai-v5-2-packet-router-timer-v1",
       "unit": "memory-v1-openai-v5-2-packet-router.service"
     }
   ],
+  "verification": {
+    "contract_version": "memory_v1_active_runtime_verifier_v1",
+    "openai_sdk_version": "2.6.1",
+    "python_executable": "/opt/chat-memory/venv/bin/python",
+    "runtime_config": "/etc/chat-memory/memory-openai-extraction.env",
+    "supported_phases": {
+      "installed_inactive": {
+        "binding_required": true,
+        "runtime_config_state": "root_owned_0600_regular_single_link",
+        "service_active_state": "inactive",
+        "service_enabled_state": "disabled",
+        "service_load_state": "loaded",
+        "sentinel_state": "absent",
+        "timer_active_state": "inactive",
+        "timer_enabled_state": "disabled",
+        "timer_load_state": "loaded"
+      },
+      "preactivation": {
+        "binding_required": false,
+        "runtime_config_state": "absent",
+        "service_active_state": "inactive",
+        "service_enabled_state": "not-found",
+        "service_load_state": "not-found",
+        "sentinel_state": "absent",
+        "timer_active_state": "inactive",
+        "timer_enabled_state": "not-found",
+        "timer_load_state": "not-found"
+      }
+    }
+  },
   "state_transitions": [
     "exact_job_probe",
     "terminal_skip_without_reservation",

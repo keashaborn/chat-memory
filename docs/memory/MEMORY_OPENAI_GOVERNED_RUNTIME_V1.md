@@ -61,6 +61,43 @@ this candidate. An activation release must bind the final commit/tree, install
 the reviewed units and configuration, prove legacy extraction exclusivity, and
 start only the exact one-job pilot.
 
+The manifest is policy, not a self-referential release receipt. The exact
+commit, tree, manifest hash, installed unit hashes, root-owned configuration
+hash, Python executable hash, and OpenAI SDK version are bound by the external
+root-owned
+`/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json`. The
+binding contains no provider key, prompt text, owner content, or other private
+value. `scripts/memory_v1_active_runtime_verifier_v1.py` verifies the policy
+and binding against live source, systemd, filesystem, and toolchain state.
+
+Before any installation, run the content-free preactivation check:
+
+```text
+/opt/chat-memory/venv/bin/python \
+  /opt/chat-memory/scripts/memory_v1_active_runtime_verifier_v1.py \
+  --phase preactivation
+```
+
+It requires both new service/timer pairs, both enable sentinels, and the
+root-owned runtime configuration to be absent. It also requires the legacy GPU
+scheduler, tunnel, and health timer to remain disabled and inactive.
+
+After a separately authorized installation, but before a provider call, run:
+
+```text
+sudo /opt/chat-memory/venv/bin/python \
+  /opt/chat-memory/scripts/memory_v1_active_runtime_verifier_v1.py \
+  --phase installed_inactive \
+  --binding /etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json
+```
+
+This requires exact source/installed unit-byte equality, disabled and inactive
+new units, absent timer sentinels, a regular single-link root-owned mode-0600
+configuration, the pinned SDK, a clean exact Git identity, and the exact release
+binding. A mismatch fails closed before provider or database work. The first
+pilot invokes one exact service manually; recurring timers remain disabled
+until a later continuous-processing release.
+
 The local GPU scheduler and tunnel must remain inactive. Existing local packet
 and claim-processing components are not silently retired by this candidate;
 their eventual retirement requires an inventory showing that no accepted
@@ -89,6 +126,8 @@ resolved as follows:
    schema forward/rollback/reapply clone is the release gate.
 7. **Accept now — active runtime manifest.** The JSON manifest names the new
    units, entrypoints, packages, state transitions, and exclusivity boundary.
+   The verifier additionally proves preinstallation and installed-inactive
+   host state against an external exact release binding.
 8. **Defer — full legacy retirement.** The candidate proves the old extraction
    worker is not imported and the GPU lane must remain inactive. Deleting old
    code or disabling other proven production consumers is a separate release.

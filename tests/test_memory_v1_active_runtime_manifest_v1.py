@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import unittest
 
@@ -36,6 +37,14 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             timer = ROOT / "ops/systemd" / service["timer"]
             self.assertTrue(unit.is_file())
             self.assertTrue(timer.is_file())
+            self.assertEqual(
+                hashlib.sha256(unit.read_bytes()).hexdigest(),
+                service["source_sha256"],
+            )
+            self.assertEqual(
+                hashlib.sha256(timer.read_bytes()).hexdigest(),
+                service["timer_source_sha256"],
+            )
             timer_source = timer.read_text(encoding="utf-8")
             self.assertIn(
                 f"ConditionPathExists={service['timer_enable_sentinel']}",
@@ -55,6 +64,37 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         self.assertNotIn("memory_v1_v5_bounded_extraction_worker", extraction)
         self.assertNotIn("memory-v1-reviews", router)
         self.assertNotIn("ReadWritePaths=", router_unit)
+
+    def test_release_binding_and_live_verification_are_external_and_fail_closed(self) -> None:
+        value = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        binding = value["release_binding"]
+        self.assertEqual(
+            binding["contract_version"],
+            "memory_v1_active_runtime_release_binding_v1",
+        )
+        self.assertEqual(
+            binding["exact_path"],
+            "/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json",
+        )
+        self.assertTrue(binding["self_digest_forbidden"])
+        self.assertNotIn("commit", binding)
+        self.assertNotIn("tree", binding)
+        verification = value["verification"]
+        self.assertEqual(
+            verification["contract_version"],
+            "memory_v1_active_runtime_verifier_v1",
+        )
+        self.assertEqual(
+            verification["runtime_config"],
+            "/etc/chat-memory/memory-openai-extraction.env",
+        )
+        self.assertEqual(
+            set(verification["supported_phases"]),
+            {"preactivation", "installed_inactive"},
+        )
+        self.assertTrue(
+            (ROOT / "scripts/memory_v1_active_runtime_verifier_v1.py").is_file()
+        )
 
 
 if __name__ == "__main__":
