@@ -872,6 +872,7 @@ def validate_repository_inventory(
     current_legacy_sources: Iterable[Mapping[str, object]] | None = None,
     external_deployed_sources: Mapping[str, Mapping[str, object]] | None = None,
     legacy_path_aliases: Mapping[str, Mapping[str, object]] | None = None,
+    function_governed_sources: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     packages = list(packages)
     baseline_sources = list(baseline_sources)
@@ -943,7 +944,7 @@ def validate_repository_inventory(
             or observed_legacy != observed_expected_legacy
         ):
             raise MigrationError("legacy SQL baseline changed or an ungoverned .sql source was added")
-    governed: dict[str, str] = {}
+    schema_governed: dict[str, str] = {}
     for package in packages:
         package_root = package.directory
         for action in ("forward", "recovery"):
@@ -957,9 +958,17 @@ def validate_repository_inventory(
             except ValueError as error:
                 raise MigrationError("package is outside the repository") from error
             expected_hash = str(record["sha256"])
-            if repository_relative in governed:
+            if repository_relative in schema_governed:
                 raise MigrationError("governed SQL source is referenced twice")
-            governed[repository_relative] = expected_hash
+            schema_governed[repository_relative] = expected_hash
+    function_governed: dict[str, str] = {}
+    for raw_path, raw_hash in dict(function_governed_sources or {}).items():
+        relative = require_relative_path(raw_path, "governed function SQL path", ".pgsql")
+        expected_hash = require_hash(raw_hash, "governed function SQL hash")
+        if relative in schema_governed or relative in function_governed:
+            raise MigrationError("governed SQL source is referenced twice")
+        function_governed[relative] = expected_hash
+    governed = {**schema_governed, **function_governed}
     observed_governed = {path: value[1] for path, value in inventory.items() if path.endswith(".pgsql")}
     if observed_governed != governed:
         raise MigrationError("governed SQL coverage or bytes differ")
@@ -974,6 +983,8 @@ def validate_repository_inventory(
         "external_deployed_sql_execution_authorized": False,
         "external_deployed_sql_status": "closed_hash_bound_read_only",
         "governed_sql_count": len(observed_governed),
+        "schema_governed_sql_count": len(schema_governed),
+        "function_governed_sql_count": len(function_governed),
         "governed_package_count": len(packages),
         "status": "reconciled",
     }

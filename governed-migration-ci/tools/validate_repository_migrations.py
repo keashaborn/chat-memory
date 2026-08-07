@@ -9,9 +9,17 @@ import json
 import pathlib
 import subprocess
 import sys
+from collections.abc import Iterable
 
 sys.dont_write_bytecode = True
 
+from governed_function_migration import (
+    LoadedFunctionPackage,
+    load_function_package,
+    parse_function_registry,
+    validate_function_registry,
+    validate_function_registry_append_only,
+)
 from governed_migration import (
     MigrationError,
     canonical_bytes,
@@ -77,6 +85,61 @@ def package_directories(root: pathlib.Path) -> list[pathlib.Path]:
             if child.is_symlink() or not child.is_dir() or not (child / "package.json").is_file():
                 raise MigrationError("migration package entry is unsafe")
             output.append(child)
+    return output
+
+
+def function_package_directories(repository: pathlib.Path) -> list[pathlib.Path]:
+    location = repository / "governed-function-migrations"
+    if not location.exists():
+        return []
+    if location.is_symlink() or not location.is_dir():
+        raise MigrationError("governed function package root is unsafe")
+    output: list[pathlib.Path] = []
+    for child in sorted(location.iterdir(), key=lambda item: item.name):
+        if child.is_symlink() or not child.is_dir() or not (child / "package.json").is_file():
+            raise MigrationError("governed function package entry is unsafe")
+        output.append(child)
+    return output
+
+
+def function_governed_sources(
+    repository: pathlib.Path,
+    packages: Iterable[LoadedFunctionPackage],
+) -> dict[str, str]:
+    root = repository.resolve(strict=True)
+    output: dict[str, str] = {}
+    for package in packages:
+        artifacts = [
+            (
+                str(package.manifest["relations"]["forward_path"]),
+                str(package.manifest["relations"]["forward_sha256"]),
+            ),
+            (
+                str(package.manifest["relations"]["rollback_path"]),
+                str(package.manifest["relations"]["rollback_sha256"]),
+            ),
+            *(
+                (spec.forward_path, spec.forward_sha256)
+                for spec in package.functions
+            ),
+            *(
+                (spec.rollback_path, spec.rollback_sha256)
+                for spec in package.functions
+            ),
+        ]
+        for relative, expected_hash in artifacts:
+            try:
+                repository_relative = (
+                    (package.directory / relative)
+                    .resolve(strict=True)
+                    .relative_to(root)
+                    .as_posix()
+                )
+            except ValueError as error:
+                raise MigrationError("governed function package is outside the repository") from error
+            if repository_relative in output:
+                raise MigrationError("governed function SQL source is referenced twice")
+            output[repository_relative] = expected_hash
     return output
 
 
@@ -249,6 +312,24 @@ def main() -> int:
     registry = load_registry(root / "registry/governed-migrations-v1.json")
     validate_registry_append_only(previous_registry(repository, args.repository_commit), registry)
     validate_registry(packages, registry)
+    function_packages = [
+        load_function_package(directory, identity)
+        for directory in function_package_directories(repository)
+    ]
+    function_registry_path = root / "registry/governed-function-migrations-v1.json"
+    function_registry = parse_function_registry(function_registry_path.read_bytes())
+    validate_function_registry_append_only(
+        previous_optional_registry(
+            repository,
+            args.repository_commit,
+            "governed-migration-ci/registry/governed-function-migrations-v1.json",
+            parse_function_registry,
+            "function migration",
+        ),
+        function_registry,
+    )
+    validate_function_registry(function_packages, function_registry)
+    function_sources = function_governed_sources(repository, function_packages)
     external_registry = load_external_deployed_sql_registry(
         root / "registry/external-deployed-sql-v1.json"
     )
@@ -282,6 +363,7 @@ def main() -> int:
         current_legacy_sources=projected,
         external_deployed_sources=external_registry,
         legacy_path_aliases=legacy_alias_registry,
+        function_governed_sources=function_sources,
     )
     if classifications != {"duplicated": 3, "source-only": 173, "unverifiable": 491}:
         raise MigrationError("legacy classifications changed")
@@ -304,6 +386,12 @@ def main() -> int:
         "inventory": inventory,
         "package_ids": sorted(package.migration_id for package in packages),
         "package_sha256": {package.migration_id: package.package_sha256 for package in sorted(packages, key=lambda item: item.migration_id)},
+        "function_package_ids": sorted(package.migration_id for package in function_packages),
+        "function_package_sha256": {
+            package.migration_id: package.package_sha256
+            for package in sorted(function_packages, key=lambda item: item.migration_id)
+        },
+        "function_registry_sha256": sha256(function_registry_path.read_bytes()),
         "status": "valid",
     }
     sys.stdout.buffer.write(canonical_bytes(report))

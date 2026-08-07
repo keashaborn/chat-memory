@@ -253,16 +253,20 @@ class DependencyAndRegistryTest(unittest.TestCase):
 
     def test_registry_contains_current_production_package(self) -> None:
         registry = load_registry(ROOT / "registry/governed-migrations-v1.json")
-        package = load_package(
-            ROOT.parent
-            / "governed-migrations/lifeswitch_prior_answer_provenance_v1",
-            IDENTITY,
+        location = ROOT.parent / "governed-migrations"
+        directories = sorted(location.iterdir(), key=lambda item: item.name)
+        self.assertTrue(directories)
+        self.assertTrue(
+            all(
+                not child.is_symlink()
+                and child.is_dir()
+                and (child / "package.json").is_file()
+                for child in directories
+            )
         )
-        self.assertEqual(
-            tuple(registry),
-            ("lifeswitch_prior_answer_provenance_v1",),
-        )
-        validate_registry([load_package(FIXTURE, IDENTITY), package], registry)
+        packages = [load_package(directory, IDENTITY) for directory in directories]
+        self.assertEqual(tuple(registry), tuple(package.migration_id for package in packages))
+        validate_registry([load_package(FIXTURE, IDENTITY), *packages], registry)
 
     def test_registry_hash_mismatch_rejected(self) -> None:
         package = self.copy_package("production_one", [], ci_only=False)
@@ -487,6 +491,57 @@ class RepositoryInventoryTest(unittest.TestCase):
         report = validate_repository_inventory(self.repository, "HEAD", self.baseline, [self.package])
         self.assertEqual(report["legacy_sql_count"], 1)
         self.assertEqual(report["governed_sql_count"], 2)
+        self.assertEqual(report["schema_governed_sql_count"], 2)
+        self.assertEqual(report["function_governed_sql_count"], 0)
+
+    def add_function_governed_source(self) -> dict[str, str]:
+        path = "governed-function-migrations/function_one/function-forward.pgsql"
+        source = self.repository / path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("CREATE OR REPLACE FUNCTION memory.f() RETURNS integer LANGUAGE sql AS 'SELECT 1';\n")
+        self.commit("function governed source")
+        return {path: sha256(source.read_bytes())}
+
+    def test_exact_function_governed_inventory_passes(self) -> None:
+        function_sources = self.add_function_governed_source()
+        report = validate_repository_inventory(
+            self.repository,
+            "HEAD",
+            self.baseline,
+            [self.package],
+            function_governed_sources=function_sources,
+        )
+        self.assertEqual(report["governed_sql_count"], 3)
+        self.assertEqual(report["schema_governed_sql_count"], 2)
+        self.assertEqual(report["function_governed_sql_count"], 1)
+
+    def test_modified_function_governed_source_is_rejected(self) -> None:
+        function_sources = self.add_function_governed_source()
+        path = next(iter(function_sources))
+        (self.repository / path).write_text(
+            "CREATE OR REPLACE FUNCTION memory.f() RETURNS integer LANGUAGE sql AS 'SELECT 2';\n"
+        )
+        self.commit("modified function governed source")
+        with self.assertRaisesRegex(MigrationError, "governed SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                function_governed_sources=function_sources,
+            )
+
+    def test_function_governed_source_cannot_overlap_schema_package(self) -> None:
+        forward = self.package.directory / str(self.package.manifest["forward"]["path"])
+        relative = forward.relative_to(self.repository).as_posix()
+        with self.assertRaisesRegex(MigrationError, "referenced twice"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                function_governed_sources={relative: sha256(forward.read_bytes())},
+            )
 
     def test_new_legacy_sql_rejected(self) -> None:
         (self.repository / "unregistered.sql").write_text("CREATE TABLE nope(id integer);\n")
