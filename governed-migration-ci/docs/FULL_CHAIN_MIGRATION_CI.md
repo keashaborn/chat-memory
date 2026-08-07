@@ -10,9 +10,31 @@ derived-index contract.
 The 667 historical repository SQL records remain inventory evidence: 491 are
 unverifiable, 173 are source-only, and 3 are duplicated. Their path/blob/hash
 set is frozen. CI never orders, applies, rolls back, or marks them executed.
-Changing one, deleting one, or adding another legacy `.sql` source fails.
+Changing or deleting one fails.
 
-Future governed sources use the distinct `.pgsql` namespace. Every `.pgsql`
+Two Chat Attachments `.sql` sources entered the repository and were deployed
+under separately audited production leases after that baseline was frozen but
+before this Memory candidate reached repository reconciliation. The closed
+`registry/external-deployed-sql-v1.json` records only those exact paths, Git
+blobs, SHA-256 values, source-projection hashes, production commit, and lease
+events. The validator duplicates the authorized binding in code, requires the
+adopted commit to be an ancestor, and verifies the same blobs at both that
+commit and the current commit. The registry is append-only after creation,
+closed at exactly two records, read-only, and grants no execution authority.
+Changing either source, changing its evidence, or adding any other `.sql`
+source fails.
+
+The frozen ledger also pseudonymized two preexisting semantic-compiler source
+paths while the repository retained their subject-named paths. Their Git blobs
+and SHA-256 values are byte-identical. The closed
+`registry/legacy-sql-path-aliases-v1.json` binds only those two ledger-path to
+repository-path identities, their unchanged blob/hash and ledger-projection
+hash, and the exact adopted repository commit. The ledger records remain
+unchanged; the alias is used only while comparing Git inventory. It grants no
+execution authority. A changed path, changed byte, third alias, surviving old
+path, or additional `.sql` source fails.
+
+Future governed sources still use the distinct `.pgsql` namespace. Every `.pgsql`
 file must be referenced exactly once by a canonical package. Production
 packages live under `governed-migrations/<migration-id>/`; the only package in
 this candidate is synthetic and `ci_only=true` under `fixtures/`.
@@ -40,8 +62,10 @@ database. It creates no production relation and marks no migration applied.
 
 ## Full-chain sequence
 
-1. Verify the Step 3 manifest and schema ledger, then freeze the 667-record
-   legacy inventory and reconcile every governed package and `.pgsql` source.
+1. Verify the Step 3 manifest and schema ledger, freeze the 667-record legacy
+   inventory, verify the two closed identity-only path aliases and two closed
+   external-deployment records without granting execution authority, and
+   reconcile every governed package and `.pgsql` source.
 2. Verify the digest-pinned image and require the exact container name absent.
 3. Start PostgreSQL with `--network none`, no port/volume, tmpfs data, private
    synthetic credentials, memory/CPU/PID bounds, reduced capabilities, and a

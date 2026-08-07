@@ -1,0 +1,79 @@
+{
+  "activation_state": "candidate_only_inactive",
+  "canonical_authority": {
+    "postgresql": "authoritative",
+    "qdrant": "derived_rebuildable"
+  },
+  "contract_version": "memory_v1_active_runtime_manifest_v1",
+  "database_packages": [
+    {
+      "activation_state": "candidate_only",
+      "name": "memory_openai_extraction_authority_v1",
+      "purpose": "eligibility_reservation_receipt_and_completion"
+    },
+    {
+      "activation_state": "candidate_only",
+      "name": "memory_openai_v5_2_stage_authority_v1",
+      "purpose": "postgresql_review_artifact_and_governed_route"
+    }
+  ],
+  "first_vertical_slice": {
+    "automatic_claim_promotion": false,
+    "backlog_drain": false,
+    "external_provider_calls_maximum": 1,
+    "job_selection": "exact_owner_job_content_hash",
+    "jobs_maximum": 1,
+    "packet_routing": "exact_owner_packet",
+    "provider": "openai_responses",
+    "provider_model": "release_configuration_exact"
+  },
+  "legacy_exclusivity": [
+    {
+      "component": "scripts/memory_v1_v5_bounded_extraction_worker.py",
+      "status": "superseded_runtime_not_imported"
+    },
+    {
+      "component": "memory-v1-v5-local-inference-scheduler.timer",
+      "required_activation_state": "inactive"
+    },
+    {
+      "component": "memory-v1-v5-local-inference-tunnel.service",
+      "required_activation_state": "inactive"
+    }
+  ],
+  "release_binding": {
+    "commit": "release_time_exact_required",
+    "tree": "release_time_exact_required"
+  },
+  "rollback": {
+    "automatic_backlog_resume": false,
+    "database": "governed_package_rollback_with_receipt_preservation_review",
+    "runtime": "disable_new_units_restore_prior_unit_state"
+  },
+  "services": [
+    {
+      "entrypoint": "scripts/memory_v1_openai_extraction_worker_v1.py",
+      "installed": false,
+      "timer": "memory-v1-openai-extraction.timer",
+      "timer_enable_sentinel": "/etc/chat-memory/enable-openai-extraction-timer-v1",
+      "unit": "memory-v1-openai-extraction.service"
+    },
+    {
+      "entrypoint": "scripts/memory_v1_openai_v5_2_packet_router_v1.py",
+      "installed": false,
+      "timer": "memory-v1-openai-v5-2-packet-router.timer",
+      "timer_enable_sentinel": "/etc/chat-memory/enable-openai-v5-2-packet-router-timer-v1",
+      "unit": "memory-v1-openai-v5-2-packet-router.service"
+    }
+  ],
+  "state_transitions": [
+    "exact_job_probe",
+    "terminal_skip_without_reservation",
+    "provider_request_reservation",
+    "single_provider_call",
+    "validated_packet_persistence",
+    "provider_receipt_finalization",
+    "postgresql_review_artifact",
+    "governed_manual_review_route"
+  ]
+}

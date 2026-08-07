@@ -1,0 +1,2 @@
+REVOKE SELECT ON memory.evidence_extraction_packet_v5 FROM memory_v5_2_local_router_maintainer;
+DROP TABLE memory.v5_2_openai_packet_route_event;

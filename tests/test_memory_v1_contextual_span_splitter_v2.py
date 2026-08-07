@@ -59,6 +59,34 @@ class ContextualSpanSplitterV2Test(unittest.TestCase):
             )
         )
 
+    def test_splits_long_unpunctuated_text_at_whitespace_boundaries(
+        self,
+    ) -> None:
+        source = " ".join(
+            f"memoryword{index:03d}"
+            for index in range(120)
+        )
+        spans = contextual_spans_v2(source, max_span_chars=180)
+        self.assertGreater(len(spans), 1)
+        self.assertTrue(all(len(span.content) <= 180 for span in spans))
+        self.assertTrue(
+            any(
+                span.boundary_reason == "length_boundary"
+                for span in spans[:-1]
+            )
+        )
+        previous_end = 0
+        reconstructed: list[str] = []
+        for span in spans:
+            gap = source[previous_end:span.char_start]
+            self.assertFalse(gap.strip())
+            self.assertEqual(source[span.char_start:span.char_end], span.content)
+            reconstructed.append(gap)
+            reconstructed.append(span.content)
+            previous_end = span.char_end
+        reconstructed.append(source[previous_end:])
+        self.assertEqual("".join(reconstructed), source)
+
     def test_keeps_compact_family_list_together(self) -> None:
         source = (
             "I have three sisters: Cindy is older, Lori is younger, and Heidi is "

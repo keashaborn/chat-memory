@@ -15,12 +15,20 @@ sys.dont_write_bytecode = True
 from governed_migration import (
     MigrationError,
     canonical_bytes,
+    load_external_deployed_sql_registry,
+    load_legacy_sql_path_alias_registry,
     load_package,
     load_registry,
     parse_canonical,
+    parse_external_deployed_sql_registry,
+    parse_legacy_sql_path_alias_registry,
     parse_registry,
     sha256,
     validate_dependency_graph,
+    validate_external_deployed_sql_commit_bindings,
+    validate_external_deployed_sql_registry_append_only,
+    validate_legacy_sql_path_alias_commit_bindings,
+    validate_legacy_sql_path_alias_registry_append_only,
     validate_registry,
     validate_registry_append_only,
     validate_repository_inventory,
@@ -148,6 +156,84 @@ def previous_registry(repository: pathlib.Path, commit: str) -> dict[str, dict[s
     return parse_registry(result.stdout)
 
 
+def previous_optional_registry(
+    repository: pathlib.Path,
+    commit: str,
+    relative: str,
+    parser,
+    label: str,
+) -> dict[str, dict[str, object]]:
+    parent = subprocess.run(
+        ["/usr/bin/git", "--no-optional-locks", "--no-pager", "-C", repository.as_posix(), "rev-parse", "--verify", commit + "^{commit}^"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+        check=False,
+        timeout=30,
+        env={"LANG": "C", "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat"},
+    )
+    parent_oid = parent.stdout.rstrip(b"\n")
+    if parent.returncode != 0 or len(parent_oid) != 40:
+        raise MigrationError("previous " + label + " registry commit resolution failed")
+    tree = subprocess.run(
+        ["/usr/bin/git", "--no-optional-locks", "--no-pager", "-C", repository.as_posix(), "ls-tree", "-z", parent_oid.decode("ascii", "strict"), "--", relative],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+        check=False,
+        timeout=30,
+        env={"LANG": "C", "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat"},
+    )
+    if tree.returncode != 0 or len(tree.stdout) > 1024 * 1024:
+        raise MigrationError("previous " + label + " registry presence check failed")
+    if not tree.stdout:
+        return {}
+    records = [record for record in tree.stdout.split(b"\0") if record]
+    if len(records) != 1 or not records[0].endswith(b"\t" + relative.encode("ascii")):
+        raise MigrationError("previous " + label + " registry tree identity is malformed")
+    result = subprocess.run(
+        ["/usr/bin/git", "--no-optional-locks", "--no-pager", "-C", repository.as_posix(), "show", parent_oid.decode("ascii", "strict") + ":" + relative],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+        check=False,
+        timeout=30,
+        env={"LANG": "C", "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat"},
+    )
+    if result.returncode != 0 or not result.stdout or len(result.stdout) > 1024 * 1024:
+        raise MigrationError("previous " + label + " registry read failed")
+    return parser(result.stdout)
+
+
+def previous_external_registry(
+    repository: pathlib.Path,
+    commit: str,
+) -> dict[str, dict[str, object]]:
+    return previous_optional_registry(
+        repository,
+        commit,
+        "governed-migration-ci/registry/external-deployed-sql-v1.json",
+        parse_external_deployed_sql_registry,
+        "external deployed SQL",
+    )
+
+
+def previous_legacy_alias_registry(
+    repository: pathlib.Path,
+    commit: str,
+) -> dict[str, dict[str, object]]:
+    return previous_optional_registry(
+        repository,
+        commit,
+        "governed-migration-ci/registry/legacy-sql-path-aliases-v1.json",
+        parse_legacy_sql_path_alias_registry,
+        "legacy SQL path alias",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=pathlib.Path, required=True)
@@ -163,6 +249,30 @@ def main() -> int:
     registry = load_registry(root / "registry/governed-migrations-v1.json")
     validate_registry_append_only(previous_registry(repository, args.repository_commit), registry)
     validate_registry(packages, registry)
+    external_registry = load_external_deployed_sql_registry(
+        root / "registry/external-deployed-sql-v1.json"
+    )
+    validate_external_deployed_sql_registry_append_only(
+        previous_external_registry(repository, args.repository_commit),
+        external_registry,
+    )
+    external_commit_binding = validate_external_deployed_sql_commit_bindings(
+        repository,
+        args.repository_commit,
+        external_registry,
+    )
+    legacy_alias_registry = load_legacy_sql_path_alias_registry(
+        root / "registry/legacy-sql-path-aliases-v1.json"
+    )
+    validate_legacy_sql_path_alias_registry_append_only(
+        previous_legacy_alias_registry(repository, args.repository_commit),
+        legacy_alias_registry,
+    )
+    legacy_alias_commit_binding = validate_legacy_sql_path_alias_commit_bindings(
+        repository,
+        args.repository_commit,
+        legacy_alias_registry,
+    )
     projected = current_legacy_projection(args.schema_ledger_root, repository, args.repository_commit)
     inventory = validate_repository_inventory(
         repository,
@@ -170,6 +280,8 @@ def main() -> int:
         baseline_sources,
         packages,
         current_legacy_sources=projected,
+        external_deployed_sources=external_registry,
+        legacy_path_aliases=legacy_alias_registry,
     )
     if classifications != {"duplicated": 3, "source-only": 173, "unverifiable": 491}:
         raise MigrationError("legacy classifications changed")
@@ -179,6 +291,16 @@ def main() -> int:
         "catalog_evidence_sha256": identity["catalog_evidence_sha256"],
         "legacy_classifications": classifications,
         "legacy_execution_authorized": False,
+        "external_deployed_sql_execution_authorized": False,
+        "external_deployed_sql_commit_binding": external_commit_binding,
+        "external_deployed_sql_record_ids": sorted(
+            str(record["record_id"]) for record in external_registry.values()
+        ),
+        "legacy_sql_path_alias_execution_authorized": False,
+        "legacy_sql_path_alias_commit_binding": legacy_alias_commit_binding,
+        "legacy_sql_path_alias_record_ids": sorted(
+            str(record["record_id"]) for record in legacy_alias_registry.values()
+        ),
         "inventory": inventory,
         "package_ids": sorted(package.migration_id for package in packages),
         "package_sha256": {package.migration_id: package.package_sha256 for package in sorted(packages, key=lambda item: item.migration_id)},

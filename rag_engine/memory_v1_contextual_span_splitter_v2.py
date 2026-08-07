@@ -30,6 +30,7 @@ _SENTENCE_BOUNDARY_RE = re.compile(
     r"|(?P<newline>\r?\n+)"
     r"|(?P<tight>[.!?])(?=[A-Z])"
 )
+_WHITESPACE_RE = re.compile(r"\s+")
 _CLAUSE_BOUNDARY_RE = re.compile(
     r"(?P<punct>[;:](?:[\"'’”)]?))(?P<space>[ \t]+)"
     r"|(?P<comma>,)(?=[ \t]+(?:and|but|then|so|yet)\s+"
@@ -166,7 +167,7 @@ def _split_long_range(
         else:
             whitespace = [
                 match.start()
-                for match in re.finditer(r"\s+", text, cursor, ceiling + 1)
+                for match in _WHITESPACE_RE.finditer(text, cursor, ceiling + 1)
                 if match.start() - cursor >= minimum_clause_chars
             ]
             if not whitespace:

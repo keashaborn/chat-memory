@@ -22,8 +22,11 @@ from typing import Iterable, Mapping
 CANONICALIZATION = "json-sort-keys-utf8-ensure-ascii-no-floats-lf-v1"
 PACKAGE_SCHEMA = "governed-migration-package-v1"
 REGISTRY_SCHEMA = "governed-migration-registry-v1"
+EXTERNAL_DEPLOYED_SQL_REGISTRY_SCHEMA = "governed-external-deployed-sql-registry-v1"
+LEGACY_SQL_PATH_ALIAS_REGISTRY_SCHEMA = "governed-legacy-sql-path-alias-registry-v1"
 EXECUTION_EVENT_SCHEMA = "governed-migration-execution-event-v1"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+GIT_OID_RE = re.compile(r"[0-9a-f]{40}")
 ID_RE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 ROLE_RE = re.compile(r"[a-z][a-z0-9_]{0,62}")
@@ -81,6 +84,114 @@ POLICY_FIELDS = {
 AUDIT_FIELDS = {"schema_version", "append_only"}
 REGISTRY_FIELDS = {"schema_version", "canonicalization", "packages"}
 REGISTRY_RECORD_FIELDS = {"migration_id", "package_sha256", "lane", "status"}
+EXTERNAL_REGISTRY_FIELDS = {
+    "schema_version",
+    "canonicalization",
+    "closed",
+    "records",
+}
+EXTERNAL_RECORD_FIELDS = {
+    "record_id",
+    "path",
+    "git_blob",
+    "sha256",
+    "source_projection_sha256",
+    "repository_commit",
+    "source_role",
+    "deployment_evidence",
+    "execution_authorized",
+    "future_source_policy",
+    "status",
+}
+EXTERNAL_DEPLOYMENT_FIELDS = {
+    "event_sequence",
+    "event_sha256",
+    "outcome",
+}
+LEGACY_ALIAS_REGISTRY_FIELDS = {
+    "schema_version",
+    "canonicalization",
+    "closed",
+    "records",
+}
+LEGACY_ALIAS_RECORD_FIELDS = {
+    "record_id",
+    "ledger_path",
+    "repository_path",
+    "git_blob",
+    "sha256",
+    "ledger_source_projection_sha256",
+    "repository_commit",
+    "execution_authorized",
+    "status",
+}
+
+# This is a closed, one-time reconciliation for two SQL sources that were
+# independently reviewed, deployed, and committed before the governed Memory
+# candidate reached its repository-inventory gate.  Duplicating the authorized
+# binding in code and canonical registry data prevents that registry from
+# becoming a general exception lane for future unmanaged .sql files.
+EXPECTED_EXTERNAL_DEPLOYED_SQL_V1 = (
+    {
+        "record_id": "chat_attachments_v1_forward_20260806",
+        "path": "ops/sql/20260806_chat_attachments_v1.sql",
+        "git_blob": "5f0d4c701bbb5b86856cbf3f262a7c7ffca3827b",
+        "sha256": "f862fbb467d534979a8af029f3da73e45b5a421c1714ac83cde132dcc93e4ea8",
+        "source_projection_sha256": "51e37c474b53c43e6244e956b4be2aecae28f89241ed758cbd3533716202155d",
+        "repository_commit": "1f06e32942d01152d3f3fb5ffc5c7781d04b9c57",
+        "source_role": "forward",
+        "deployment_evidence": {
+            "event_sequence": 655,
+            "event_sha256": "77efc95b35f7b78094bc7228be574a03540a8957899bbe851f4d510d346f1685",
+            "outcome": "verified_current_forward_apply",
+        },
+        "execution_authorized": False,
+        "future_source_policy": "governed_pgsql_required",
+        "status": "adopted_read_only",
+    },
+    {
+        "record_id": "chat_attachments_v1_rollback_20260806",
+        "path": "ops/sql/20260806_chat_attachments_v1.rollback.sql",
+        "git_blob": "2bc550e870cb3dd036e256c9cd79a631c8ccf6a9",
+        "sha256": "f5a6f9340b38c24d0424b758bff284afb393c061bd2c7d774f95b9f1c1fdb040",
+        "source_projection_sha256": "fad5baeb16fb0c658e22cb25ca9b5ae7f3ad8ed4f37ff7974ef373890e0b5a02",
+        "repository_commit": "1f06e32942d01152d3f3fb5ffc5c7781d04b9c57",
+        "source_role": "rollback",
+        "deployment_evidence": {
+            "event_sequence": 647,
+            "event_sha256": "64f84a616ee4b4de52471e2fd6113598e2145661ff901015c74fc14f22ba9515",
+            "outcome": "verified_rollback_then_superseded_by_forward",
+        },
+        "execution_authorized": False,
+        "future_source_policy": "governed_pgsql_required",
+        "status": "adopted_read_only",
+    },
+)
+
+EXPECTED_LEGACY_SQL_PATH_ALIASES_V1 = (
+    {
+        "record_id": "semantic_compiler_v11_subject_forward_path_alias",
+        "ledger_path": "ops/sql/20260731_memory_v1_v5_2_semantic_compiler_v11_subject_3a5a251294939911_62d4610fd348.sql",
+        "repository_path": "ops/sql/20260731_memory_v1_v5_2_semantic_compiler_v11_jerry.sql",
+        "git_blob": "078467ee85e38b9dc015d95e746fdfd02e3c1271",
+        "sha256": "338dc1bf8c70945eed4e1a5dd4cb015cf0d304dbc279b59a85a36d7bd2ca16e5",
+        "ledger_source_projection_sha256": "cf1cde7ab97b41f954a59c005c0a02628985ab4a4e6b9ce005e71015bb0c2903",
+        "repository_commit": "1f06e32942d01152d3f3fb5ffc5c7781d04b9c57",
+        "execution_authorized": False,
+        "status": "identity_only",
+    },
+    {
+        "record_id": "semantic_compiler_v11_subject_rollback_path_alias",
+        "ledger_path": "ops/sql/20260731_memory_v1_v5_2_semantic_compiler_v11_subject_3a5a251294939911_c2e0db9b89ac_rollback.sql",
+        "repository_path": "ops/sql/20260731_memory_v1_v5_2_semantic_compiler_v11_jerry_rollback.sql",
+        "git_blob": "9a2485e8827db80ab15e7edb85336e860a56cbc1",
+        "sha256": "47044d45b7db38349d93cb0663ef219290ae07495f606ddd7002c984aa2a7dea",
+        "ledger_source_projection_sha256": "874e876154aabc22f55f887be1b18d0fb7ec848d10d23944cbd45198b7b66856",
+        "repository_commit": "1f06e32942d01152d3f3fb5ffc5c7781d04b9c57",
+        "execution_authorized": False,
+        "status": "identity_only",
+    },
+)
 
 
 class MigrationError(RuntimeError):
@@ -458,6 +569,142 @@ def load_registry(path: pathlib.Path) -> dict[str, dict[str, object]]:
     return parse_registry(path.read_bytes())
 
 
+def parse_external_deployed_sql_registry(
+    payload: bytes,
+) -> dict[str, dict[str, object]]:
+    value = parse_canonical(payload, maximum=1024 * 1024)
+    registry = require_exact(value, EXTERNAL_REGISTRY_FIELDS, "external registry")
+    if (
+        registry["schema_version"] != EXTERNAL_DEPLOYED_SQL_REGISTRY_SCHEMA
+        or registry["canonicalization"] != CANONICALIZATION
+        or registry["closed"] is not True
+    ):
+        raise MigrationError("external deployed SQL registry contract is invalid")
+    records = registry["records"]
+    if not isinstance(records, list) or len(records) != len(EXPECTED_EXTERNAL_DEPLOYED_SQL_V1):
+        raise MigrationError("external deployed SQL registry is not closed")
+    output: dict[str, dict[str, object]] = {}
+    record_ids: list[str] = []
+    for index, raw in enumerate(records):
+        record = require_exact(raw, EXTERNAL_RECORD_FIELDS, f"external registry[{index}]")
+        record_id = require_id(record["record_id"], "external record ID")
+        path = require_relative_path(record["path"], "external SQL path", ".sql")
+        if not isinstance(record["git_blob"], str) or not GIT_OID_RE.fullmatch(record["git_blob"]):
+            raise MigrationError("external SQL Git blob is malformed")
+        require_hash(record["sha256"], "external SQL hash")
+        require_hash(record["source_projection_sha256"], "external source projection hash")
+        if not isinstance(record["repository_commit"], str) or not GIT_OID_RE.fullmatch(record["repository_commit"]):
+            raise MigrationError("external SQL repository commit is malformed")
+        if record["source_role"] not in {"forward", "rollback"}:
+            raise MigrationError("external SQL source role is invalid")
+        evidence = require_exact(
+            record["deployment_evidence"],
+            EXTERNAL_DEPLOYMENT_FIELDS,
+            "external deployment evidence",
+        )
+        if not isinstance(evidence["event_sequence"], int) or isinstance(evidence["event_sequence"], bool) or evidence["event_sequence"] <= 0:
+            raise MigrationError("external deployment event sequence is invalid")
+        require_hash(evidence["event_sha256"], "external deployment event hash")
+        if evidence["outcome"] not in {
+            "verified_current_forward_apply",
+            "verified_rollback_then_superseded_by_forward",
+        }:
+            raise MigrationError("external deployment outcome is invalid")
+        if (
+            record["execution_authorized"] is not False
+            or record["future_source_policy"] != "governed_pgsql_required"
+            or record["status"] != "adopted_read_only"
+        ):
+            raise MigrationError("external SQL record grants authority or changes policy")
+        if record_id in record_ids or path in output:
+            raise MigrationError("external deployed SQL record collides")
+        record_ids.append(record_id)
+        output[path] = dict(record)
+    if record_ids != sorted(record_ids):
+        raise MigrationError("external deployed SQL records are not sorted")
+    expected = {str(item["path"]): dict(item) for item in EXPECTED_EXTERNAL_DEPLOYED_SQL_V1}
+    if output != expected:
+        raise MigrationError("external deployed SQL registry differs from the authorized closed binding")
+    return output
+
+
+def load_external_deployed_sql_registry(
+    path: pathlib.Path,
+) -> dict[str, dict[str, object]]:
+    return parse_external_deployed_sql_registry(path.read_bytes())
+
+
+def validate_external_deployed_sql_registry_append_only(
+    previous: Mapping[str, Mapping[str, object]],
+    current: Mapping[str, Mapping[str, object]],
+) -> None:
+    if previous and {
+        key: dict(value) for key, value in previous.items()
+    } != {key: dict(value) for key, value in current.items()}:
+        raise MigrationError("closed external deployed SQL registry changed")
+
+
+def parse_legacy_sql_path_alias_registry(
+    payload: bytes,
+) -> dict[str, dict[str, object]]:
+    value = parse_canonical(payload, maximum=1024 * 1024)
+    registry = require_exact(value, LEGACY_ALIAS_REGISTRY_FIELDS, "legacy alias registry")
+    if (
+        registry["schema_version"] != LEGACY_SQL_PATH_ALIAS_REGISTRY_SCHEMA
+        or registry["canonicalization"] != CANONICALIZATION
+        or registry["closed"] is not True
+    ):
+        raise MigrationError("legacy SQL path alias registry contract is invalid")
+    records = registry["records"]
+    if not isinstance(records, list) or len(records) != len(EXPECTED_LEGACY_SQL_PATH_ALIASES_V1):
+        raise MigrationError("legacy SQL path alias registry is not closed")
+    output: dict[str, dict[str, object]] = {}
+    repository_paths: set[str] = set()
+    record_ids: list[str] = []
+    for index, raw in enumerate(records):
+        record = require_exact(raw, LEGACY_ALIAS_RECORD_FIELDS, f"legacy alias registry[{index}]")
+        record_id = require_id(record["record_id"], "legacy path alias record ID")
+        ledger_path = require_relative_path(record["ledger_path"], "legacy ledger path", ".sql")
+        repository_path = require_relative_path(record["repository_path"], "legacy repository path", ".sql")
+        if ledger_path == repository_path:
+            raise MigrationError("legacy SQL path alias does not change path")
+        if not isinstance(record["git_blob"], str) or not GIT_OID_RE.fullmatch(record["git_blob"]):
+            raise MigrationError("legacy path alias Git blob is malformed")
+        require_hash(record["sha256"], "legacy path alias SQL hash")
+        require_hash(record["ledger_source_projection_sha256"], "legacy path alias projection hash")
+        if not isinstance(record["repository_commit"], str) or not GIT_OID_RE.fullmatch(record["repository_commit"]):
+            raise MigrationError("legacy path alias repository commit is malformed")
+        if record["execution_authorized"] is not False or record["status"] != "identity_only":
+            raise MigrationError("legacy SQL path alias grants authority")
+        if record_id in record_ids or ledger_path in output or repository_path in repository_paths:
+            raise MigrationError("legacy SQL path alias collides")
+        record_ids.append(record_id)
+        repository_paths.add(repository_path)
+        output[ledger_path] = dict(record)
+    if record_ids != sorted(record_ids):
+        raise MigrationError("legacy SQL path alias records are not sorted")
+    expected = {str(item["ledger_path"]): dict(item) for item in EXPECTED_LEGACY_SQL_PATH_ALIASES_V1}
+    if output != expected:
+        raise MigrationError("legacy SQL path alias registry differs from the authorized closed binding")
+    return output
+
+
+def load_legacy_sql_path_alias_registry(
+    path: pathlib.Path,
+) -> dict[str, dict[str, object]]:
+    return parse_legacy_sql_path_alias_registry(path.read_bytes())
+
+
+def validate_legacy_sql_path_alias_registry_append_only(
+    previous: Mapping[str, Mapping[str, object]],
+    current: Mapping[str, Mapping[str, object]],
+) -> None:
+    if previous and {
+        key: dict(value) for key, value in previous.items()
+    } != {key: dict(value) for key, value in current.items()}:
+        raise MigrationError("closed legacy SQL path alias registry changed")
+
+
 def validate_registry_append_only(previous: Mapping[str, Mapping[str, object]], current: Mapping[str, Mapping[str, object]]) -> None:
     if not set(previous).issubset(current):
         raise MigrationError("governed migration registry is not append-only")
@@ -538,6 +785,84 @@ def git_sql_inventory(repository: pathlib.Path, commit: str) -> dict[str, tuple[
     return output
 
 
+def validate_external_deployed_sql_commit_bindings(
+    repository: pathlib.Path,
+    commit: str,
+    records: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    root = repository.resolve(strict=True)
+    resolved = _git(root, ["rev-parse", "--verify", commit + "^{commit}"]).rstrip(b"\n")
+    if len(resolved) != 40 or not GIT_OID_RE.fullmatch(resolved.decode("ascii", "strict")):
+        raise MigrationError("repository commit resolution failed")
+    current_commit = resolved.decode("ascii", "strict")
+    adopted_commits: set[str] = set()
+    for path, record in sorted(records.items()):
+        adopted = str(record["repository_commit"])
+        _git(root, ["merge-base", "--is-ancestor", adopted, current_commit])
+        tree = _git(root, ["ls-tree", "-z", adopted, "--", path])
+        entries = [entry for entry in tree.split(b"\0") if entry]
+        if len(entries) != 1:
+            raise MigrationError("external SQL adopted commit path is absent or ambiguous")
+        metadata, separator, encoded_path = entries[0].partition(b"\t")
+        fields = metadata.split()
+        if (
+            not separator
+            or encoded_path.decode("utf-8", "strict") != path
+            or len(fields) != 3
+            or fields[0] != b"100644"
+            or fields[1] != b"blob"
+            or fields[2].decode("ascii", "strict") != record["git_blob"]
+        ):
+            raise MigrationError("external SQL adopted commit binding differs")
+        adopted_commits.add(adopted)
+    return {
+        "adopted_repository_commits": sorted(adopted_commits),
+        "current_repository_commit": current_commit,
+        "status": "bound",
+    }
+
+
+def validate_legacy_sql_path_alias_commit_bindings(
+    repository: pathlib.Path,
+    commit: str,
+    records: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    root = repository.resolve(strict=True)
+    resolved = _git(root, ["rev-parse", "--verify", commit + "^{commit}"]).rstrip(b"\n")
+    if len(resolved) != 40 or not GIT_OID_RE.fullmatch(resolved.decode("ascii", "strict")):
+        raise MigrationError("repository commit resolution failed")
+    current_commit = resolved.decode("ascii", "strict")
+    adopted_commits: set[str] = set()
+    for ledger_path, record in sorted(records.items()):
+        adopted = str(record["repository_commit"])
+        repository_path = str(record["repository_path"])
+        _git(root, ["merge-base", "--is-ancestor", adopted, current_commit])
+        tree = _git(root, ["ls-tree", "-z", adopted, "--", repository_path])
+        entries = [entry for entry in tree.split(b"\0") if entry]
+        if len(entries) != 1:
+            raise MigrationError("legacy path alias adopted path is absent or ambiguous")
+        metadata, separator, encoded_path = entries[0].partition(b"\t")
+        fields = metadata.split()
+        if (
+            not separator
+            or encoded_path.decode("utf-8", "strict") != repository_path
+            or len(fields) != 3
+            or fields[0] != b"100644"
+            or fields[1] != b"blob"
+            or fields[2].decode("ascii", "strict") != record["git_blob"]
+        ):
+            raise MigrationError("legacy SQL path alias adopted commit binding differs")
+        old_tree = _git(root, ["ls-tree", "-z", current_commit, "--", ledger_path])
+        if old_tree:
+            raise MigrationError("legacy SQL path alias ledger path still exists")
+        adopted_commits.add(adopted)
+    return {
+        "adopted_repository_commits": sorted(adopted_commits),
+        "current_repository_commit": current_commit,
+        "status": "identity_only_bound",
+    }
+
+
 def validate_repository_inventory(
     repository: pathlib.Path,
     commit: str,
@@ -545,6 +870,8 @@ def validate_repository_inventory(
     packages: Iterable[LoadedPackage],
     *,
     current_legacy_sources: Iterable[Mapping[str, object]] | None = None,
+    external_deployed_sources: Mapping[str, Mapping[str, object]] | None = None,
+    legacy_path_aliases: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     packages = list(packages)
     baseline_sources = list(baseline_sources)
@@ -554,13 +881,67 @@ def validate_repository_inventory(
         for item in baseline_sources
         if str(item.get("path", "")).endswith(".sql")
     }
+    baseline_by_path = {str(item["path"]): item for item in baseline_sources}
+    legacy_path_aliases = dict(legacy_path_aliases or {})
+    observed_baseline = dict(baseline)
+    alias_repository_paths: set[str] = set()
+    for ledger_path, record in legacy_path_aliases.items():
+        repository_path = str(record["repository_path"])
+        expected_identity = (str(record["git_blob"]), str(record["sha256"]))
+        if (
+            ledger_path not in baseline
+            or baseline[ledger_path] != expected_identity
+            or sha256(canonical_bytes(baseline_by_path[ledger_path]))
+            != record["ledger_source_projection_sha256"]
+            or repository_path in baseline
+            or repository_path in alias_repository_paths
+        ):
+            raise MigrationError("legacy SQL path alias differs from the frozen baseline")
+        del observed_baseline[ledger_path]
+        observed_baseline[repository_path] = expected_identity
+        alias_repository_paths.add(repository_path)
+    external_deployed_sources = dict(external_deployed_sources or {})
+    external = {
+        path: (str(record["git_blob"]), str(record["sha256"]))
+        for path, record in external_deployed_sources.items()
+    }
+    if (
+        set(baseline).intersection(external)
+        or alias_repository_paths.intersection(external)
+        or set(legacy_path_aliases).intersection(external)
+    ):
+        raise MigrationError("external deployed SQL overlaps the frozen baseline")
+    projected_expected_legacy = {**baseline, **external}
+    observed_expected_legacy = {**observed_baseline, **external}
     observed_legacy = {path: value for path, value in inventory.items() if path.endswith(".sql")}
     if current_legacy_sources is None:
-        if observed_legacy != baseline:
+        if observed_legacy != observed_expected_legacy:
             raise MigrationError("legacy SQL baseline changed or an ungoverned .sql source was added")
     else:
         projected = list(current_legacy_sources)
-        if projected != baseline_sources or len(observed_legacy) != len(projected):
+        projected_paths = [
+            str(item.get("path"))
+            for item in projected
+            if isinstance(item, Mapping) and isinstance(item.get("path"), str)
+        ]
+        projected_by_path = {
+            str(item.get("path")): item
+            for item in projected
+            if isinstance(item, Mapping) and isinstance(item.get("path"), str)
+        }
+        if (
+            projected_paths != sorted(projected_expected_legacy)
+            or len(projected_paths) != len(projected)
+            or len(projected_by_path) != len(projected)
+            or set(projected_by_path) != set(projected_expected_legacy)
+            or any(projected_by_path[path] != item for path, item in baseline_by_path.items())
+            or any(
+                sha256(canonical_bytes(projected_by_path[path]))
+                != record["source_projection_sha256"]
+                for path, record in external_deployed_sources.items()
+            )
+            or observed_legacy != observed_expected_legacy
+        ):
             raise MigrationError("legacy SQL baseline changed or an ungoverned .sql source was added")
     governed: dict[str, str] = {}
     for package in packages:
@@ -584,7 +965,14 @@ def validate_repository_inventory(
         raise MigrationError("governed SQL coverage or bytes differ")
     return {
         "legacy_sql_count": len(observed_legacy),
-        "legacy_status": "frozen_unverifiable_not_executable",
+        "legacy_baseline_sql_count": len(baseline),
+        "legacy_status": "frozen_667_unverifiable_not_executable",
+        "legacy_path_alias_count": len(legacy_path_aliases),
+        "legacy_path_alias_execution_authorized": False,
+        "legacy_path_alias_status": "closed_identity_only",
+        "external_deployed_sql_count": len(external),
+        "external_deployed_sql_execution_authorized": False,
+        "external_deployed_sql_status": "closed_hash_bound_read_only",
         "governed_sql_count": len(observed_governed),
         "governed_package_count": len(packages),
         "status": "reconciled",

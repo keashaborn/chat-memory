@@ -15,14 +15,22 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 
 from governed_migration import (  # noqa: E402
     CANONICALIZATION,
+    EXPECTED_EXTERNAL_DEPLOYED_SQL_V1,
+    EXPECTED_LEGACY_SQL_PATH_ALIASES_V1,
     MigrationError,
     canonical_bytes,
     classify_sql,
     load_package,
     load_registry,
     parse_canonical,
+    parse_external_deployed_sql_registry,
+    parse_legacy_sql_path_alias_registry,
     sha256,
     validate_dependency_graph,
+    validate_external_deployed_sql_commit_bindings,
+    validate_external_deployed_sql_registry_append_only,
+    validate_legacy_sql_path_alias_commit_bindings,
+    validate_legacy_sql_path_alias_registry_append_only,
     validate_registry,
     validate_registry_append_only,
     validate_repository_inventory,
@@ -283,6 +291,117 @@ class DependencyAndRegistryTest(unittest.TestCase):
             validate_registry_append_only({"production_one": record}, {"production_one": {**record, "package_sha256": "b" * 64}})
 
 
+class ExternalDeployedSqlRegistryTest(unittest.TestCase):
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": "governed-external-deployed-sql-registry-v1",
+            "canonicalization": CANONICALIZATION,
+            "closed": True,
+            "records": copy.deepcopy(list(EXPECTED_EXTERNAL_DEPLOYED_SQL_V1)),
+        }
+
+    def parse(self, value: dict[str, object]) -> dict[str, dict[str, object]]:
+        return parse_external_deployed_sql_registry(canonical_bytes(value))
+
+    def test_exact_closed_registry_passes(self) -> None:
+        records = self.parse(self.payload())
+        self.assertEqual(
+            set(records),
+            {
+                "ops/sql/20260806_chat_attachments_v1.sql",
+                "ops/sql/20260806_chat_attachments_v1.rollback.sql",
+            },
+        )
+        self.assertTrue(all(record["execution_authorized"] is False for record in records.values()))
+
+    def test_modified_hash_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["sha256"] = "a" * 64
+        with self.assertRaisesRegex(MigrationError, "authorized closed binding"):
+            self.parse(value)
+
+    def test_modified_deployment_evidence_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["deployment_evidence"]["event_sequence"] = 656
+        with self.assertRaisesRegex(MigrationError, "authorized closed binding"):
+            self.parse(value)
+
+    def test_execution_authority_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["execution_authorized"] = True
+        with self.assertRaisesRegex(MigrationError, "grants authority"):
+            self.parse(value)
+
+    def test_added_record_is_rejected(self) -> None:
+        value = self.payload()
+        extra = copy.deepcopy(value["records"][0])
+        extra["record_id"] = "other_source_v1"
+        extra["path"] = "ops/sql/other_source.sql"
+        value["records"].append(extra)
+        with self.assertRaisesRegex(MigrationError, "not closed"):
+            self.parse(value)
+
+    def test_closed_registry_is_immutable_after_creation(self) -> None:
+        current = self.parse(self.payload())
+        validate_external_deployed_sql_registry_append_only({}, current)
+        changed = copy.deepcopy(current)
+        changed["ops/sql/20260806_chat_attachments_v1.sql"]["status"] = "changed"
+        with self.assertRaisesRegex(MigrationError, "registry changed"):
+            validate_external_deployed_sql_registry_append_only(current, changed)
+
+
+class LegacySqlPathAliasRegistryTest(unittest.TestCase):
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": "governed-legacy-sql-path-alias-registry-v1",
+            "canonicalization": CANONICALIZATION,
+            "closed": True,
+            "records": copy.deepcopy(list(EXPECTED_LEGACY_SQL_PATH_ALIASES_V1)),
+        }
+
+    def parse(self, value: dict[str, object]) -> dict[str, dict[str, object]]:
+        return parse_legacy_sql_path_alias_registry(canonical_bytes(value))
+
+    def test_exact_identity_only_registry_passes(self) -> None:
+        records = self.parse(self.payload())
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(record["execution_authorized"] is False for record in records.values()))
+        self.assertTrue(all(record["status"] == "identity_only" for record in records.values()))
+
+    def test_changed_repository_path_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["repository_path"] = "ops/sql/other.sql"
+        with self.assertRaisesRegex(MigrationError, "authorized closed binding"):
+            self.parse(value)
+
+    def test_changed_blob_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["git_blob"] = "a" * 40
+        with self.assertRaisesRegex(MigrationError, "authorized closed binding"):
+            self.parse(value)
+
+    def test_execution_authority_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"][0]["execution_authorized"] = True
+        with self.assertRaisesRegex(MigrationError, "grants authority"):
+            self.parse(value)
+
+    def test_third_alias_is_rejected(self) -> None:
+        value = self.payload()
+        value["records"].append(copy.deepcopy(value["records"][0]))
+        with self.assertRaisesRegex(MigrationError, "not closed"):
+            self.parse(value)
+
+    def test_closed_alias_registry_is_immutable_after_creation(self) -> None:
+        current = self.parse(self.payload())
+        validate_legacy_sql_path_alias_registry_append_only({}, current)
+        changed = copy.deepcopy(current)
+        first = next(iter(changed))
+        changed[first]["status"] = "changed"
+        with self.assertRaisesRegex(MigrationError, "registry changed"):
+            validate_legacy_sql_path_alias_registry_append_only(current, changed)
+
+
 class RepositoryInventoryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -311,6 +430,59 @@ class RepositoryInventoryTest(unittest.TestCase):
         subprocess.run(["/usr/bin/git", "-C", self.repository, "add", "."], check=True)
         subprocess.run(["/usr/bin/git", "-C", self.repository, "commit", "-qm", name], check=True)
 
+    def add_external(self) -> dict[str, dict[str, object]]:
+        path = "ops/sql/adopted.sql"
+        source = self.repository / path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("CREATE TABLE adopted_anchor(id integer);\n")
+        self.commit("adopted external source")
+        commit = subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "rev-parse", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        blob = subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "rev-parse", "HEAD:" + path],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        return {
+            path: {
+                "path": path,
+                "git_blob": blob,
+                "sha256": sha256(source.read_bytes()),
+                "source_projection_sha256": "a" * 64,
+                "repository_commit": commit,
+            }
+        }
+
+    def alias_legacy(self) -> dict[str, dict[str, object]]:
+        ledger_path = "legacy.sql"
+        repository_path = "renamed_legacy.sql"
+        subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "mv", ledger_path, repository_path],
+            check=True,
+        )
+        self.commit("identity-only legacy path alias")
+        commit = subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "rev-parse", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        return {
+            ledger_path: {
+                "ledger_path": ledger_path,
+                "repository_path": repository_path,
+                "git_blob": self.baseline[0]["git_blob"],
+                "sha256": self.baseline[0]["sha256"],
+                "ledger_source_projection_sha256": sha256(canonical_bytes(self.baseline[0])),
+                "repository_commit": commit,
+            }
+        }
+
     def test_exact_inventory_passes(self) -> None:
         report = validate_repository_inventory(self.repository, "HEAD", self.baseline, [self.package])
         self.assertEqual(report["legacy_sql_count"], 1)
@@ -333,6 +505,161 @@ class RepositoryInventoryTest(unittest.TestCase):
         self.commit("altered")
         with self.assertRaisesRegex(MigrationError, "legacy SQL"):
             validate_repository_inventory(self.repository, "HEAD", self.baseline, [self.package])
+
+    def test_exact_external_deployed_source_passes_without_changing_baseline(self) -> None:
+        external = self.add_external()
+        report = validate_repository_inventory(
+            self.repository,
+            "HEAD",
+            self.baseline,
+            [self.package],
+            external_deployed_sources=external,
+        )
+        self.assertEqual(report["legacy_baseline_sql_count"], 1)
+        self.assertEqual(report["external_deployed_sql_count"], 1)
+        self.assertEqual(report["legacy_sql_count"], 2)
+        self.assertFalse(report["external_deployed_sql_execution_authorized"])
+        binding = validate_external_deployed_sql_commit_bindings(
+            self.repository,
+            "HEAD",
+            external,
+        )
+        self.assertEqual(binding["status"], "bound")
+
+    def test_modified_external_deployed_source_is_rejected(self) -> None:
+        external = self.add_external()
+        (self.repository / "ops/sql/adopted.sql").write_text(
+            "CREATE TABLE adopted_anchor(id text);\n"
+        )
+        self.commit("altered adopted source")
+        with self.assertRaisesRegex(MigrationError, "legacy SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                external_deployed_sources=external,
+            )
+
+    def test_reordered_current_legacy_projection_is_rejected(self) -> None:
+        external = self.add_external()
+        external_path = "ops/sql/adopted.sql"
+        external_projection = {
+            "path": external_path,
+            "git_blob": external[external_path]["git_blob"],
+            "sha256": external[external_path]["sha256"],
+        }
+        external[external_path]["source_projection_sha256"] = sha256(
+            canonical_bytes(external_projection)
+        )
+        projected = sorted(
+            [self.baseline[0], external_projection],
+            key=lambda item: str(item["path"]),
+        )
+        report = validate_repository_inventory(
+            self.repository,
+            "HEAD",
+            self.baseline,
+            [self.package],
+            current_legacy_sources=projected,
+            external_deployed_sources=external,
+        )
+        self.assertEqual(report["legacy_sql_count"], 2)
+        with self.assertRaisesRegex(MigrationError, "legacy SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                current_legacy_sources=reversed(projected),
+                external_deployed_sources=external,
+            )
+
+    def test_additional_sql_is_rejected_with_external_registry(self) -> None:
+        external = self.add_external()
+        (self.repository / "ops/sql/unregistered.sql").write_text(
+            "CREATE TABLE unregistered_anchor(id integer);\n"
+        )
+        self.commit("unregistered after adopted source")
+        with self.assertRaisesRegex(MigrationError, "legacy SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                external_deployed_sources=external,
+            )
+
+    def test_adopted_commit_must_be_ancestor(self) -> None:
+        external = self.add_external()
+        subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "commit", "--allow-empty", "-qm", "descendant"],
+            check=True,
+        )
+        orphan = subprocess.run(
+            ["/usr/bin/git", "-C", self.repository, "commit-tree", "HEAD^{tree}", "-m", "orphan"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        changed = copy.deepcopy(external)
+        changed["ops/sql/adopted.sql"]["repository_commit"] = orphan
+        with self.assertRaises(MigrationError):
+            validate_external_deployed_sql_commit_bindings(
+                self.repository,
+                "HEAD",
+                changed,
+            )
+
+    def test_exact_legacy_path_alias_passes_without_changing_baseline(self) -> None:
+        aliases = self.alias_legacy()
+        report = validate_repository_inventory(
+            self.repository,
+            "HEAD",
+            self.baseline,
+            [self.package],
+            legacy_path_aliases=aliases,
+        )
+        self.assertEqual(report["legacy_baseline_sql_count"], 1)
+        self.assertEqual(report["legacy_path_alias_count"], 1)
+        self.assertEqual(report["legacy_sql_count"], 1)
+        self.assertFalse(report["legacy_path_alias_execution_authorized"])
+        binding = validate_legacy_sql_path_alias_commit_bindings(
+            self.repository,
+            "HEAD",
+            aliases,
+        )
+        self.assertEqual(binding["status"], "identity_only_bound")
+
+    def test_legacy_alias_with_changed_bytes_is_rejected(self) -> None:
+        aliases = self.alias_legacy()
+        (self.repository / "renamed_legacy.sql").write_text(
+            "CREATE TABLE legacy_anchor(id text);\n"
+        )
+        self.commit("changed aliased bytes")
+        with self.assertRaisesRegex(MigrationError, "legacy SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                legacy_path_aliases=aliases,
+            )
+
+    def test_legacy_alias_does_not_allow_another_sql_source(self) -> None:
+        aliases = self.alias_legacy()
+        (self.repository / "additional.sql").write_text(
+            "CREATE TABLE additional_anchor(id integer);\n"
+        )
+        self.commit("additional source beside alias")
+        with self.assertRaisesRegex(MigrationError, "legacy SQL"):
+            validate_repository_inventory(
+                self.repository,
+                "HEAD",
+                self.baseline,
+                [self.package],
+                legacy_path_aliases=aliases,
+            )
 
 
 if __name__ == "__main__":
