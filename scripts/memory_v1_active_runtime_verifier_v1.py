@@ -231,13 +231,18 @@ def run_fixed(arguments: list[str], *, allowed_codes: set[int] = {0}) -> str:
 
 
 def git_identity(root: Path) -> dict[str, Any]:
-    commit = run_fixed(["/usr/bin/git", "-C", str(root), "rev-parse", "HEAD"])
-    tree = run_fixed(["/usr/bin/git", "-C", str(root), "rev-parse", "HEAD^{tree}"])
+    git_arguments = [
+        "/usr/bin/git",
+        "-c",
+        f"safe.directory={root}",
+        "-C",
+        str(root),
+    ]
+    commit = run_fixed([*git_arguments, "rev-parse", "HEAD"])
+    tree = run_fixed([*git_arguments, "rev-parse", "HEAD^{tree}"])
     status = run_fixed(
         [
-            "/usr/bin/git",
-            "-C",
-            str(root),
+            *git_arguments,
             "status",
             "--porcelain=v1",
             "--untracked-files=all",

@@ -5,11 +5,13 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from scripts.memory_v1_active_runtime_verifier_v1 import (
     BINDING_CONTRACT,
     RuntimeVerificationError,
     decode_json,
+    git_identity,
     sha256_bytes,
     verify_snapshot,
 )
@@ -172,6 +174,40 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeVerificationError):
             self.verify(snapshot, phase="installed_inactive", binding=None)
+
+    def test_git_identity_uses_exact_command_scoped_safe_directory(self) -> None:
+        root = Path("/opt/chat-memory")
+        responses = iter(["b" * 40, "c" * 40, ""])
+        calls: list[list[str]] = []
+
+        def fixed(arguments: list[str], **_kwargs: object) -> str:
+            calls.append(arguments)
+            return next(responses)
+
+        with mock.patch(
+            "scripts.memory_v1_active_runtime_verifier_v1.run_fixed",
+            side_effect=fixed,
+        ):
+            observed = git_identity(root)
+
+        prefix = [
+            "/usr/bin/git",
+            "-c",
+            "safe.directory=/opt/chat-memory",
+            "-C",
+            "/opt/chat-memory",
+        ]
+        self.assertEqual(
+            calls,
+            [
+                [*prefix, "rev-parse", "HEAD"],
+                [*prefix, "rev-parse", "HEAD^{tree}"],
+                [*prefix, "status", "--porcelain=v1", "--untracked-files=all"],
+            ],
+        )
+        self.assertEqual(observed["commit"], "b" * 40)
+        self.assertEqual(observed["tree"], "c" * 40)
+        self.assertTrue(observed["tracked_clean"])
 
     def test_duplicate_json_and_symlink_inputs_are_rejected(self) -> None:
         with self.assertRaises(RuntimeVerificationError):
