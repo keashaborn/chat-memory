@@ -59,6 +59,11 @@ class ChatAttachmentRequestModelV1Tests(unittest.TestCase):
             {"user_id": OWNER_ID, "thread_id": THREAD_ID},
         )
 
+    def test_accepts_exact_expanded_content_boundary(self) -> None:
+        content = "x" * MAX_ATTACHMENT_BYTES
+        value = ChatAttachmentCreateReq.model_validate(attachment_payload(content))
+        self.assertEqual(len(value.content.encode("utf-8")), MAX_ATTACHMENT_BYTES)
+
     def test_rejects_non_string_and_noncanonical_uuid_values(self) -> None:
         invalid_values = [
             uuid.UUID(OWNER_ID),

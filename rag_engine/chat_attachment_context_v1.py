@@ -17,8 +17,9 @@ from rag_engine.prompt_assembler_v1 import (
 
 ATTACHMENT_CONTEXT_VERSION = "chat_attachment_context_v1"
 MAX_ATTACHMENT_COUNT = 4
-MAX_ATTACHMENT_BYTES = 49_152
-MAX_ATTACHMENT_CONTEXT_BYTES = 65_536
+MAX_ATTACHMENT_BYTES = 73_728
+MAX_ATTACHMENT_TOTAL_BYTES = 73_728
+MAX_ATTACHMENT_CONTEXT_BYTES = 80_000
 SUPPORTED_ATTACHMENT_MEDIA_TYPES = ("text/plain", "text/markdown")
 
 
@@ -107,6 +108,8 @@ def build_attachment_context_block_v1(
     )
     if len({item.attachment_id for item in references}) != len(references):
         raise ValueError("duplicate attachment")
+    if sum(item.byte_size for item in references) > MAX_ATTACHMENT_TOTAL_BYTES:
+        raise ValueError("attachment total exceeds byte limit")
 
     manifest_payload = {
         "contract_version": ATTACHMENT_CONTEXT_VERSION,
@@ -165,6 +168,7 @@ __all__ = [
     "MAX_ATTACHMENT_BYTES",
     "MAX_ATTACHMENT_CONTEXT_BYTES",
     "MAX_ATTACHMENT_COUNT",
+    "MAX_ATTACHMENT_TOTAL_BYTES",
     "SUPPORTED_ATTACHMENT_MEDIA_TYPES",
     "AttachmentReferenceV1",
     "build_attachment_context_block_v1",
