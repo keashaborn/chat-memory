@@ -82,4 +82,6 @@ BEGIN
 END
 $owner$;
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.chat_attachments TO brains_app;
+
 COMMIT;
