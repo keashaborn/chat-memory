@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import socket
@@ -10,7 +10,15 @@ from qdrant_client import QdrantClient
 from rag_engine.qdrant_compat import make_qdrant_client
 from qdrant_client.http import models as qmodels
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from rag_engine.vantage_router import router as vantage_router
 from rag_engine.resse_response_router import router as resse_response_router
 from rag_engine.assistant_response_preferences_router_v1 import (
@@ -55,11 +63,26 @@ class ActiveThreadReq(BaseModel):
     thread_id: str
 
 
+def _canonical_json_uuid(value: Any) -> uuid.UUID:
+    if type(value) is not str:
+        raise ValueError("UUID must be a canonical JSON string")
+    try:
+        parsed = uuid.UUID(value)
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("UUID must be canonical lowercase hyphenated text") from exc
+    if str(parsed) != value:
+        raise ValueError("UUID must be canonical lowercase hyphenated text")
+    return parsed
+
+
+CanonicalJsonUUID = Annotated[uuid.UUID, BeforeValidator(_canonical_json_uuid)]
+
+
 class ChatAttachmentCreateReq(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    user_id: uuid.UUID
-    thread_id: uuid.UUID
+    user_id: CanonicalJsonUUID
+    thread_id: CanonicalJsonUUID
     filename: str = Field(min_length=1, max_length=160)
     media_type: Literal["text/plain", "text/markdown"]
     content: str = Field(min_length=1)
@@ -93,7 +116,7 @@ class ChatAttachmentCreateReq(BaseModel):
 class ChatAttachmentOwnerReq(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    user_id: uuid.UUID
+    user_id: CanonicalJsonUUID
 from rag_engine.voice_tts_router import router as voice_tts_router
 from rag_engine.voice_transcription_router import router as voice_transcription_router
 from rag_engine.voice_realtime_preview_router import (
