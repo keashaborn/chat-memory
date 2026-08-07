@@ -55,6 +55,9 @@ from scripts.memory_v1_relational_extraction_v5_openai_provider import (
     OPENAI_PROVIDER_ID,
     OPENAI_PROVIDER_VERSION,
 )
+from scripts.memory_v1_relational_extraction_v5_observable_provider import (
+    classify_validator_rejection,
+)
 from scripts.memory_v1_relational_extraction_v5_provider import (
     CONTRACT_VERSION_V5_2,
     ProviderPacket,
@@ -74,6 +77,10 @@ DEFAULT_REGISTRY = REPOSITORY_ROOT / "specs/memory_v1_predicate_registry_v5_2.js
 DEFAULT_SCHEMA = REPOSITORY_ROOT / "specs/memory_v1_relational_extraction_v5_2.schema.json"
 EXPECTED_REGISTRY_SHA256 = "e6ac5dfe7d7939aac23223ae76272b2e4f67777decde814d9bf0b8eee82b277e"
 EXPECTED_SCHEMA_SHA256 = "ad35ec61a5816c93c284b32a8e392e7088c26233a7471251915233e97178531c"
+REJECTED_PACKET_EVIDENCE_CONTRACT = (
+    "memory_v1_rejected_provider_packet_evidence_v1"
+)
+MAX_REJECTED_PACKET_EVIDENCE_BYTES = 16_384
 
 
 class _BoundPacketProvider:
@@ -291,6 +298,102 @@ def rejection_code(exc: BaseException) -> str:
     return "worker_rejected"
 
 
+def _rejected_packet_evidence(
+    *,
+    packet: ProviderPacket,
+    exc: ValueError | TypeError,
+    request_sha256: str,
+    reservation_event_id: uuid.UUID,
+) -> dict[str, Any]:
+    if SHA256_RE.fullmatch(request_sha256) is None:
+        raise RuntimeError("rejected packet request hash is invalid")
+    packet_value = packet.model_dump(mode="json")
+    canonical_packet = stable_json(packet_value)
+    packet_bytes = len(canonical_packet.encode("utf-8"))
+    capture_status = (
+        "complete"
+        if packet_bytes <= MAX_REJECTED_PACKET_EVIDENCE_BYTES
+        else "oversize"
+    )
+    return {
+        "capture_status": capture_status,
+        "contract_version": REJECTED_PACKET_EVIDENCE_CONTRACT,
+        "packet": packet_value if capture_status == "complete" else None,
+        "packet_bytes": packet_bytes,
+        "packet_canonicalization": "stable_json_utf8_v1",
+        "packet_sha256": sha256_text(canonical_packet),
+        "request_sha256": request_sha256,
+        "reservation_event_id": str(reservation_event_id),
+        "validator_error_class": (
+            "validator_value_error"
+            if isinstance(exc, ValueError)
+            else "validator_type_error"
+        ),
+        "validator_error_sha256": sha256_text(str(exc)),
+        "validator_rejection_code": classify_validator_rejection(str(exc)),
+    }
+
+
+def _validate_rejected_packet_evidence(
+    evidence: dict[str, Any],
+    *,
+    request_sha256: str,
+    reservation_event_id: uuid.UUID,
+) -> None:
+    if set(evidence) != {
+        "capture_status",
+        "contract_version",
+        "packet",
+        "packet_bytes",
+        "packet_canonicalization",
+        "packet_sha256",
+        "request_sha256",
+        "reservation_event_id",
+        "validator_error_class",
+        "validator_error_sha256",
+        "validator_rejection_code",
+    }:
+        raise RuntimeError("rejected packet evidence shape is invalid")
+    if (
+        evidence["contract_version"] != REJECTED_PACKET_EVIDENCE_CONTRACT
+        or evidence["request_sha256"] != request_sha256
+        or evidence["reservation_event_id"] != str(reservation_event_id)
+        or evidence["packet_canonicalization"] != "stable_json_utf8_v1"
+        or evidence["validator_error_class"]
+        not in {"validator_value_error", "validator_type_error"}
+        or not isinstance(evidence["validator_rejection_code"], str)
+        or not evidence["validator_rejection_code"]
+        or not all(
+            char in "abcdefghijklmnopqrstuvwxyz0123456789_"
+            for char in evidence["validator_rejection_code"]
+        )
+        or len(evidence["validator_rejection_code"]) > 100
+        or SHA256_RE.fullmatch(str(evidence["packet_sha256"])) is None
+        or SHA256_RE.fullmatch(str(evidence["validator_error_sha256"])) is None
+        or type(evidence["packet_bytes"]) is not int
+        or evidence["packet_bytes"] < 2
+    ):
+        raise RuntimeError("rejected packet evidence binding is invalid")
+    if evidence["capture_status"] == "complete":
+        if not isinstance(evidence["packet"], dict):
+            raise RuntimeError("rejected packet evidence content is invalid")
+        canonical_packet = stable_json(evidence["packet"])
+        if (
+            len(canonical_packet.encode("utf-8")) != evidence["packet_bytes"]
+            or sha256_text(canonical_packet) != evidence["packet_sha256"]
+            or evidence["packet_bytes"] > MAX_REJECTED_PACKET_EVIDENCE_BYTES
+        ):
+            raise RuntimeError("rejected packet evidence content is invalid")
+    elif evidence["capture_status"] == "oversize":
+        if (
+            evidence["packet"] is not None
+            or evidence["packet_bytes"] <= MAX_REJECTED_PACKET_EVIDENCE_BYTES
+        ):
+            raise RuntimeError("rejected packet oversize evidence is invalid")
+    else:
+        raise RuntimeError("rejected packet capture status is invalid")
+
+
 def _completion_audit(
     *,
     outcome: str,
@@ -299,8 +402,9 @@ def _completion_audit(
     budget: PostgresBudgetAuthorizerV1 | None,
     transport_audit: Any,
     error_code: str | None = None,
+    rejected_packet_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    audit = {
         "contract_version": "memory_v1_openai_provider_completion_audit_v1",
         "error_code": error_code,
         "outcome": outcome,
@@ -315,6 +419,16 @@ def _completion_audit(
             transport_audit.public_dict() if transport_audit is not None else None
         ),
     }
+    if rejected_packet_evidence is not None:
+        if outcome != "rejected" or error_code != "validator_rejected":
+            raise RuntimeError("rejected packet evidence outcome is invalid")
+        _validate_rejected_packet_evidence(
+            rejected_packet_evidence,
+            request_sha256=request_sha256,
+            reservation_event_id=reservation_event_id,
+        )
+        audit["rejected_packet_evidence"] = rejected_packet_evidence
+    return audit
 
 
 async def process_job(
@@ -333,6 +447,8 @@ async def process_job(
     reservation: dict[str, Any] | None = None
     budget: PostgresBudgetAuthorizerV1 | None = None
     prepared = None
+    rejected_packet_evidence: dict[str, Any] | None = None
+    provider_transport_audit = None
     external_calls = 0
     try:
         source = TrustedExtractionSource.create(
@@ -484,20 +600,30 @@ async def process_job(
         )
         result = adapter.execute_prepared(prepared, transport=transport)
         external_calls = result.external_model_calls
+        provider_transport_audit = result.audit
         provider = _BoundPacketProvider(
             packet=result.packet,
             source_sha256=source.source_sha256,
             external_model_calls=external_calls,
         )
-        validated = validate_and_normalize(
-            provider,
-            source=source,
-            registry=registry,
-            schema=schema,
-            trusted_project_binding=None,
-            allowed_provider_versions={OPENAI_PROVIDER_ID: PROVIDER_VERSION},
-            max_external_model_calls=1,
-        )
+        try:
+            validated = validate_and_normalize(
+                provider,
+                source=source,
+                registry=registry,
+                schema=schema,
+                trusted_project_binding=None,
+                allowed_provider_versions={OPENAI_PROVIDER_ID: PROVIDER_VERSION},
+                max_external_model_calls=1,
+            )
+        except (ValueError, TypeError) as exc:
+            rejected_packet_evidence = _rejected_packet_evidence(
+                packet=result.packet,
+                exc=exc,
+                request_sha256=prepared.request.request_sha256,
+                reservation_event_id=reservation["reservation_event_id"],
+            )
+            raise
         packet_id = uuid.uuid5(PERSIST_NAMESPACE, f"openai:{job['job_id']}")
         persisted = await persist_packet(
             conn,
@@ -573,7 +699,7 @@ async def process_job(
     except ProcessingRejected:
         raise
     except Exception as exc:
-        transport_audit = getattr(exc, "audit", None)
+        transport_audit = getattr(exc, "audit", None) or provider_transport_audit
         if transport_audit is not None:
             external_calls = int(transport_audit.external_call_count)
         code = rejection_code(exc)
@@ -587,6 +713,7 @@ async def process_job(
                 budget=budget,
                 transport_audit=transport_audit,
                 error_code=code,
+                rejected_packet_evidence=rejected_packet_evidence,
             )
             await complete_call(
                 conn,
