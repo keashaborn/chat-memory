@@ -22,14 +22,6 @@ from rag_engine.memory_v1_evidence_context_v1 import (
 from rag_engine.memory_v1_evidence_context_v2 import (
     MemoryEvidenceContextEnvelopeV2,
 )
-from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
-    CONTRACT_VERSION as EXCHANGE_CONTRACT_VERSION,
-    POLICY_SHA256 as EXCHANGE_POLICY_SHA256,
-    POLICY_VERSION as EXCHANGE_POLICY_VERSION,
-    PersonalEvidenceExchangeResultV2,
-    classify_personal_evidence_exchange_v2,
-    is_external_exchange_reason,
-)
 from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
     CONTRACT_VERSION as PREFILTER_CONTRACT_VERSION,
     POLICY_SHA256 as PREFILTER_POLICY_SHA256,
@@ -349,10 +341,7 @@ def compile_extraction_payload_v1(
     *,
     source_text: str,
     owner_user_id: str,
-    gate_result: (
-        PersonalEvidencePrefilterResultV1
-        | PersonalEvidenceExchangeResultV2
-    ),
+    gate_result: PersonalEvidencePrefilterResultV1,
     profile_sha256: str,
     expected_bindings: ExpectedSemanticTaskBindingsV1,
     evidence_context: (
@@ -367,7 +356,6 @@ def compile_extraction_payload_v1(
         _validated_selected_source(
             source_text,
             gate_result,
-            evidence_context,
         )
     )
     owner_binding = owner_binding_sha256_v1(owner_user_id)
@@ -380,10 +368,6 @@ def compile_extraction_payload_v1(
         source_sha256=source_sha256,
         owner_user_id=owner_user_id,
         evidence_context=evidence_context,
-        include_immediate_assistant_question=isinstance(
-            gate_result,
-            PersonalEvidenceExchangeResultV2,
-        ),
     )
     _require_sha256(profile_sha256, "profile_sha256")
     expected_bindings.validate_exact(
@@ -919,54 +903,21 @@ def canonical_sha256(value: Any) -> str:
 
 def _validated_selected_source(
     source_text: str,
-    gate_result: (
-        PersonalEvidencePrefilterResultV1
-        | PersonalEvidenceExchangeResultV2
-    ),
-    evidence_context: (
-        MemoryEvidenceContextEnvelopeV1
-        | MemoryEvidenceContextEnvelopeV2
-        | None
-    ) = None,
+    gate_result: PersonalEvidencePrefilterResultV1,
 ) -> tuple[str, str, list[dict[str, Any]], str]:
     source = _validate_source(source_text)
-    if isinstance(gate_result, PersonalEvidencePrefilterResultV1):
-        if gate_result.contract_version != PREFILTER_CONTRACT_VERSION:
-            raise SemanticTaskContractError("personal-evidence gate contract mismatch")
-        if gate_result.policy_version != PREFILTER_POLICY_VERSION:
-            raise SemanticTaskContractError("personal-evidence gate policy mismatch")
-        if gate_result.policy_sha256 != PREFILTER_POLICY_SHA256:
-            raise SemanticTaskContractError("personal-evidence gate hash mismatch")
-        authoritative = classify_personal_evidence_v1(
-            source,
-            source_role=TRUSTED_SOURCE_ROLE,
-        )
-        allowed_reason = gate_result.reason_codes == (
-            "personal_evidence_selected",
-        )
-    elif isinstance(gate_result, PersonalEvidenceExchangeResultV2):
-        if gate_result.contract_version != EXCHANGE_CONTRACT_VERSION:
-            raise SemanticTaskContractError("exchange gate contract mismatch")
-        if gate_result.policy_version != EXCHANGE_POLICY_VERSION:
-            raise SemanticTaskContractError("exchange gate policy mismatch")
-        if gate_result.policy_sha256 != EXCHANGE_POLICY_SHA256:
-            raise SemanticTaskContractError("exchange gate hash mismatch")
-        if evidence_context is not None and not isinstance(
-            evidence_context,
-            MemoryEvidenceContextEnvelopeV2,
-        ):
-            raise SemanticTaskContractError("exchange context type is invalid")
-        authoritative = classify_personal_evidence_exchange_v2(
-            source,
-            source_role=TRUSTED_SOURCE_ROLE,
-            evidence_context=evidence_context,
-        )
-        allowed_reason = (
-            len(gate_result.reason_codes) == 1
-            and is_external_exchange_reason(gate_result.reason_codes[0])
-        )
-    else:
+    if not isinstance(gate_result, PersonalEvidencePrefilterResultV1):
         raise SemanticTaskContractError("personal-evidence gate type is invalid")
+    if gate_result.contract_version != PREFILTER_CONTRACT_VERSION:
+        raise SemanticTaskContractError("personal-evidence gate contract mismatch")
+    if gate_result.policy_version != PREFILTER_POLICY_VERSION:
+        raise SemanticTaskContractError("personal-evidence gate policy mismatch")
+    if gate_result.policy_sha256 != PREFILTER_POLICY_SHA256:
+        raise SemanticTaskContractError("personal-evidence gate hash mismatch")
+    authoritative = classify_personal_evidence_v1(
+        source,
+        source_role=TRUSTED_SOURCE_ROLE,
+    )
     if gate_result != authoritative:
         raise SemanticTaskContractError(
             "personal-evidence gate is not authoritative"
@@ -975,7 +926,7 @@ def _validated_selected_source(
         raise SemanticTaskContractError(
             "personal-evidence source is not externally eligible"
         )
-    if not allowed_reason:
+    if gate_result.reason_codes != ("personal_evidence_selected",):
         raise SemanticTaskContractError("personal-evidence reason is invalid")
     if not 1 <= len(gate_result.selected_spans) <= MAX_SELECTED_SPANS:
         raise SemanticTaskContractError("selected source span count is invalid")
@@ -1019,7 +970,6 @@ def _validated_context(
         | MemoryEvidenceContextEnvelopeV2
         | None
     ),
-    include_immediate_assistant_question: bool = False,
 ) -> tuple[str | None, list[dict[str, Any]], dict[str, Any]]:
     if evidence_context is None:
         context_header = {
@@ -1087,12 +1037,6 @@ def _validated_context(
             raise SemanticTaskContractError("prior-turn context length mismatch")
         if _sha256_text(turn.content) != turn.content_sha256:
             raise SemanticTaskContractError("prior-turn context hash mismatch")
-        if turn.speaker_role == "assistant" and not (
-            include_immediate_assistant_question
-            and turn.context_distance == 1
-            and "?" in turn.content
-        ):
-            continue
         authority_items.append(
             {
                 "assertion_origin_allowed": False,
@@ -1176,12 +1120,7 @@ def _validated_context(
         "envelope_sha256": context_binding,
     }
     context_authority = {**context_header, "items": authority_items}
-    items = _compile_context_items_from_authority(
-        context_authority,
-        include_immediate_assistant_question=(
-            include_immediate_assistant_question
-        ),
-    )
+    items = _compile_context_items_from_authority(context_authority)
     return (
         context_binding,
         items,
@@ -1191,8 +1130,6 @@ def _validated_context(
 
 def _compile_context_items_from_authority(
     context_authority: Any,
-    *,
-    include_immediate_assistant_question: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(context_authority, dict) or set(context_authority) != {
         "context_policy",
@@ -1257,14 +1194,7 @@ def _compile_context_items_from_authority(
                 item["source_id_binding_sha256"],
                 "prior-turn source ID binding",
             )
-            if speaker_role == "assistant":
-                if not (
-                    include_immediate_assistant_question
-                    and item["context_distance"] == 1
-                    and "?" in item["raw_content"]
-                ):
-                    continue
-            elif speaker_role != "user":
+            if speaker_role != "user":
                 continue
         else:
             _require_sha256(
@@ -1299,22 +1229,6 @@ def _compile_context_items_from_authority(
             item["source_binding_sha256"],
             "context source binding",
         )
-        if speaker_role == "assistant":
-            emitted = {
-                key: value
-                for key, value in item.items()
-                if key not in {"raw_content", "content_sha256"}
-            }
-            emitted.update(
-                {
-                    "context_text": raw_content,
-                    "parent_content_sha256": item["content_sha256"],
-                    "selected_context_spans": [],
-                    "source_binding_sha256": source_binding,
-                }
-            )
-            result.append(emitted)
-            continue
         context_gate = classify_personal_evidence_v1(
             raw_content,
             source_role=TRUSTED_SOURCE_ROLE,
@@ -1548,33 +1462,13 @@ def _validate_compiled_task(compiled: CompiledSemanticTaskV1) -> None:
             "compiled output model is not strict and frozen"
         )
 
-    gate_context = (
-        compiled.evidence_context_authority
-        if compiled.task == "memory_extraction"
-        else None
+    authoritative_gate = classify_personal_evidence_v1(
+        source,
+        source_role=TRUSTED_SOURCE_ROLE,
     )
-    if payload["gate_contract_version"] == EXCHANGE_CONTRACT_VERSION:
-        if gate_context is not None and not isinstance(
-            gate_context,
-            MemoryEvidenceContextEnvelopeV2,
-        ):
-            raise SemanticTaskContractError(
-                "compiled exchange gate context type is invalid"
-            )
-        authoritative_gate = classify_personal_evidence_exchange_v2(
-            source,
-            source_role=TRUSTED_SOURCE_ROLE,
-            evidence_context=gate_context,
-        )
-    else:
-        authoritative_gate = classify_personal_evidence_v1(
-            source,
-            source_role=TRUSTED_SOURCE_ROLE,
-        )
     _, _, selected_spans, gate_result_sha256 = _validated_selected_source(
         source,
         authoritative_gate,
-        gate_context,
     )
     selected_spans_sha256 = _selected_spans_binding_sha256(selected_spans)
     if payload["selected_source_spans"] != selected_spans:
@@ -1656,10 +1550,6 @@ def _validate_compiled_task(compiled: CompiledSemanticTaskV1) -> None:
                 source_sha256=source_sha256,
                 owner_user_id=evidence_context.owner_user_id,
                 evidence_context=evidence_context,
-                include_immediate_assistant_question=(
-                    payload["gate_contract_version"]
-                    == EXCHANGE_CONTRACT_VERSION
-                ),
             )
         expected_context = {**context_header, "items": context_items}
         if context != expected_context:

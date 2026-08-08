@@ -11,17 +11,6 @@ from typing import Any, Generic, Iterable, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from rag_engine.memory_v1_evidence_context_v2 import (
-    MemoryEvidenceContextEnvelopeV2,
-)
-from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
-    CONTRACT_VERSION as EXCHANGE_CONTRACT_VERSION,
-    POLICY_SHA256 as EXCHANGE_POLICY_SHA256,
-    POLICY_VERSION as EXCHANGE_POLICY_VERSION,
-    PersonalEvidenceExchangeResultV2,
-    classify_personal_evidence_exchange_v2,
-    is_external_exchange_reason,
-)
 from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
     CONTRACT_VERSION as PREFILTER_CONTRACT_VERSION,
     POLICY_SHA256 as PREFILTER_POLICY_SHA256,
@@ -547,22 +536,13 @@ class StructuredResponsesRequestV1(Generic[OutputT]):
     owner_binding_sha256: str
     instructions: str = field(repr=False)
     source_text: str = field(repr=False)
-    gate_result: (
-        PersonalEvidencePrefilterResultV1
-        | PersonalEvidenceExchangeResultV2
-    )
+    gate_result: PersonalEvidencePrefilterResultV1
     privacy_authorization: ExternalPrivacyAuthorizationV1
     output_model: type[OutputT]
     safety_identifier: str
     max_output_tokens: int
     timeout_seconds: float
     max_attempts: int = 2
-    structured_input_text: str | None = field(default=None, repr=False)
-    compiled_input_authority: Any | None = field(default=None, repr=False)
-    evidence_context_authority: MemoryEvidenceContextEnvelopeV2 | None = field(
-        default=None,
-        repr=False,
-    )
 
     def validate(self) -> None:
         if not _SAFE_ID_RE.fullmatch(self.request_id):
@@ -595,22 +575,6 @@ class StructuredResponsesRequestV1(Generic[OutputT]):
             raise StructuredTransportError("request_source_empty")
         if len(self.source_text) > MAX_SOURCE_CHARS:
             raise StructuredTransportError("request_source_oversize")
-        if self.structured_input_text is not None:
-            try:
-                structured = json.loads(self.structured_input_text)
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise StructuredTransportError(
-                    "request_structured_input_invalid"
-                ) from exc
-            if _canonical_json(structured) != self.structured_input_text:
-                raise StructuredTransportError(
-                    "request_structured_input_not_canonical"
-                )
-            self._validate_compiled_input_authority()
-        elif self.compiled_input_authority is not None:
-            raise StructuredTransportError(
-                "compiled_input_without_structured_input"
-            )
         if not isinstance(self.output_model, type) or not issubclass(
             self.output_model, BaseModel
         ):
@@ -649,91 +613,25 @@ class StructuredResponsesRequestV1(Generic[OutputT]):
         if len(self.selected_input_text.encode("utf-8")) > MAX_SELECTED_INPUT_BYTES:
             raise StructuredTransportError("selected_input_oversize")
 
-    def _validate_compiled_input_authority(self) -> None:
-        compiled = self.compiled_input_authority
-        if (
-            compiled is None
-            or compiled.__class__.__module__
-            != "rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1"
-            or compiled.__class__.__name__ != "CompiledSemanticTaskV1"
-        ):
-            raise StructuredTransportError(
-                "compiled_input_authority_invalid"
-            )
-        try:
-            compiled.__post_init__()
-        except Exception as exc:
-            raise StructuredTransportError(
-                "compiled_input_authority_invalid"
-            ) from exc
-        binding = compiled.public_binding
-        if (
-            compiled.task != "memory_extraction"
-            or compiled.source_text != self.source_text
-            or compiled.outbound_payload_json != self.structured_input_text
-            or compiled.evidence_context_authority
-            != self.evidence_context_authority
-            or binding.owner_binding_sha256 != self.owner_binding_sha256
-            or binding.profile_sha256 != self.task_contract_sha256
-            or binding.output_schema_sha256 != self.output_schema_sha256
-            or compiled.output_model is not self.output_model
-        ):
-            raise StructuredTransportError(
-                "compiled_input_authority_mismatch"
-            )
-
     def _validate_gate(self) -> None:
         gate = self.gate_result
-        if isinstance(gate, PersonalEvidencePrefilterResultV1):
-            if gate.contract_version != PREFILTER_CONTRACT_VERSION:
-                raise StructuredTransportError("gate_contract_mismatch")
-            if gate.policy_version != PREFILTER_POLICY_VERSION:
-                raise StructuredTransportError("gate_policy_version_mismatch")
-            if gate.policy_sha256 != PREFILTER_POLICY_SHA256:
-                raise StructuredTransportError("gate_policy_identity_mismatch")
-            if self.evidence_context_authority is not None:
-                raise StructuredTransportError(
-                    "message_gate_received_exchange_context"
-                )
-            authoritative_gate = classify_personal_evidence_v1(
-                self.source_text,
-                source_role=TRUSTED_SOURCE_ROLE,
-            )
-            reason_allowed = gate.reason_codes == (
-                "personal_evidence_selected",
-            )
-        elif isinstance(gate, PersonalEvidenceExchangeResultV2):
-            if gate.contract_version != EXCHANGE_CONTRACT_VERSION:
-                raise StructuredTransportError("exchange_gate_contract_mismatch")
-            if gate.policy_version != EXCHANGE_POLICY_VERSION:
-                raise StructuredTransportError("exchange_gate_policy_mismatch")
-            if gate.policy_sha256 != EXCHANGE_POLICY_SHA256:
-                raise StructuredTransportError("exchange_gate_identity_mismatch")
-            context_sha256 = (
-                self.evidence_context_authority.envelope_sha256
-                if self.evidence_context_authority is not None
-                else None
-            )
-            if gate.context_envelope_sha256 != context_sha256:
-                raise StructuredTransportError(
-                    "exchange_gate_context_binding_mismatch"
-                )
-            authoritative_gate = classify_personal_evidence_exchange_v2(
-                self.source_text,
-                source_role=TRUSTED_SOURCE_ROLE,
-                evidence_context=self.evidence_context_authority,
-            )
-            reason_allowed = (
-                len(gate.reason_codes) == 1
-                and is_external_exchange_reason(gate.reason_codes[0])
-            )
-        else:
+        if not isinstance(gate, PersonalEvidencePrefilterResultV1):
             raise StructuredTransportError("gate_result_type_invalid")
+        if gate.contract_version != PREFILTER_CONTRACT_VERSION:
+            raise StructuredTransportError("gate_contract_mismatch")
+        if gate.policy_version != PREFILTER_POLICY_VERSION:
+            raise StructuredTransportError("gate_policy_version_mismatch")
+        if gate.policy_sha256 != PREFILTER_POLICY_SHA256:
+            raise StructuredTransportError("gate_policy_identity_mismatch")
+        authoritative_gate = classify_personal_evidence_v1(
+            self.source_text,
+            source_role=TRUSTED_SOURCE_ROLE,
+        )
         if gate != authoritative_gate:
             raise StructuredTransportError("gate_result_not_authoritative")
         if gate.decision != "send_external":
             raise StructuredTransportError("gate_decision_not_external")
-        if not reason_allowed:
+        if gate.reason_codes != ("personal_evidence_selected",):
             raise StructuredTransportError("gate_reason_invalid")
         if not 1 <= len(gate.selected_spans) <= 64:
             raise StructuredTransportError("gate_span_count_invalid")
@@ -754,8 +652,6 @@ class StructuredResponsesRequestV1(Generic[OutputT]):
 
     @property
     def selected_input_text(self) -> str:
-        if self.structured_input_text is not None:
-            return self.structured_input_text
         spans = []
         for ordinal, span in enumerate(self.gate_result.selected_spans):
             spans.append(

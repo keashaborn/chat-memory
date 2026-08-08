@@ -42,8 +42,6 @@ class ContextConnectionV2(Connection):
 
     async def fetch(self, query: str, *_args):
         self.queries.append(query)
-        if "select_owner_contextual_generation_v1" in query:
-            return []
         if "WITH ranked AS" in query:
             return list(reversed(self.evidence))
         if "ORDER BY created_at DESC" in query:

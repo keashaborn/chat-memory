@@ -13,12 +13,6 @@ import uuid
 
 import asyncpg
 
-from rag_engine.memory_v1_evidence_context_loader_v2 import (
-    load_memory_evidence_context_v2,
-)
-from rag_engine.memory_v1_evidence_context_v1 import (
-    EvidenceContextContractError,
-)
 from rag_engine.memory_v1_openai_postgres_authority_v1 import (
     PostgresBudgetAuthorizerV1,
     PostgresPrivacyAuthorizerV1,
@@ -39,10 +33,6 @@ from rag_engine.memory_v1_openai_structured_transport_v1 import (
 from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
     TRUSTED_SOURCE_ROLE,
     classify_personal_evidence_v1,
-)
-from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
-    classify_personal_evidence_exchange_v2,
-    content_free_disposition_receipt_v2,
 )
 from scripts.memory_v1_extraction_job_store_v1 import (
     PERSIST_NAMESPACE,
@@ -475,54 +465,10 @@ async def process_job(
             source_text=source.content,
             operation_id=f"{run_id}:{job['job_id']}",
         )
-        gate = classify_personal_evidence_v1(
-            source.content,
-            source_role=TRUSTED_SOURCE_ROLE,
-        )
-        if prepared is None and gate.decision == "skip_zero_call":
-            exchange_gate = classify_personal_evidence_exchange_v2(
-                source.content,
-                source_role=TRUSTED_SOURCE_ROLE,
-            )
-            gate = exchange_gate
-            if exchange_gate.decision == "send_external":
-                prepared = adapter.prepare(
-                    owner_user_id=str(owner),
-                    source_text=source.content,
-                    operation_id=f"{run_id}:{job['job_id']}",
-                    exchange_eligibility=True,
-                )
-            elif exchange_gate.reason_codes in {
-                ("context_binding_required",),
-                ("personal_question_needs_context",),
-            }:
-                evidence_context = None
-                try:
-                    evidence_context = await load_memory_evidence_context_v2(
-                        conn,
-                        expected_owner_user_id=owner,
-                        target_evidence_id=job["evidence_id"],
-                        expected_target_content_sha256=(
-                            job["evidence_content_sha256"]
-                        ),
-                    )
-                except EvidenceContextContractError:
-                    evidence_context = None
-                if evidence_context is not None:
-                    gate = classify_personal_evidence_exchange_v2(
-                        source.content,
-                        source_role=TRUSTED_SOURCE_ROLE,
-                        evidence_context=evidence_context,
-                    )
-                    if gate.decision == "send_external":
-                        prepared = adapter.prepare(
-                            owner_user_id=str(owner),
-                            source_text=source.content,
-                            operation_id=f"{run_id}:{job['job_id']}",
-                            exchange_eligibility=True,
-                            evidence_context=evidence_context,
-                        )
         if prepared is None:
+            gate = classify_personal_evidence_v1(
+                source.content, source_role=TRUSTED_SOURCE_ROLE
+            )
             skipped = await skip_job(
                 conn,
                 owner=owner,
@@ -541,9 +487,6 @@ async def process_job(
                 gate_sha256=sha256_text(stable_json(gate.public_dict())),
             )
             return {
-                "eligibility_disposition": content_free_disposition_receipt_v2(
-                    gate
-                ),
                 "job_sha256": sha256_text(str(job["job_id"])),
                 "status": str(skipped["status"]),
                 "outcome": str(skipped["apply_outcome"]),
@@ -582,9 +525,6 @@ async def process_job(
                 ),
             )
             return {
-                "eligibility_disposition": content_free_disposition_receipt_v2(
-                    prepared.gate_result
-                ),
                 "job_sha256": sha256_text(str(job["job_id"])),
                 "status": str(skipped["status"]),
                 "outcome": str(skipped["apply_outcome"]),
@@ -699,9 +639,6 @@ async def process_job(
             binding_event_id=None,
         )
         report = {
-            "eligibility_disposition": content_free_disposition_receipt_v2(
-                prepared.gate_result
-            ),
             "job_sha256": sha256_text(str(job["job_id"])),
             "status": str(persisted["status"]),
             "outcome": str(persisted["apply_outcome"]),
@@ -823,11 +760,6 @@ async def process_job(
             max_attempts=args.max_attempts,
         )
         return {
-            "eligibility_disposition": (
-                content_free_disposition_receipt_v2(prepared.gate_result)
-                if prepared is not None
-                else None
-            ),
             "job_sha256": sha256_text(str(job["job_id"])),
             "status": str(failed["status"]),
             "outcome": str(failed["apply_outcome"]),
