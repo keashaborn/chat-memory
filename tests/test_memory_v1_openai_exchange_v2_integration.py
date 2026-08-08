@@ -207,7 +207,7 @@ class OpenAIExchangeV2IntegrationTest(unittest.TestCase):
         prepared.request.validate()
         self.assertIsNone(prepared.gate_result.context_envelope_sha256)
 
-    def test_high_recall_candidate_prepares_content_free_request_receipt(self) -> None:
+    def test_high_recall_disposition_stays_outside_request_receipt(self) -> None:
         text = "My childhood summers were mostly spent near the lake."
         prepared = adapter().prepare(
             owner_user_id=OWNER,
@@ -222,10 +222,9 @@ class OpenAIExchangeV2IntegrationTest(unittest.TestCase):
             ("high_recall_owner_authored_candidate",),
         )
         receipt = prepared.content_free_receipt()
-        disposition = receipt["eligibility_disposition"]
-        self.assertEqual(disposition["decision"], "send_external")
-        self.assertEqual(disposition["selected_span_count"], 1)
-        self.assertNotIn(text, repr(disposition))
+        self.assertNotIn("eligibility_disposition", receipt)
+        self.assertEqual(len(receipt), 29)
+        self.assertNotIn(text, repr(receipt))
 
     def test_v1_direct_path_remains_wire_compatible(self) -> None:
         text = "I have three sisters: Cindy, Lori, and Heidi."

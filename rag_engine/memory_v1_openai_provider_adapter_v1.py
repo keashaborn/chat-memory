@@ -28,7 +28,6 @@ from rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1 import (
 from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
     PersonalEvidenceExchangeResultV2,
     classify_personal_evidence_exchange_v2,
-    content_free_disposition_receipt_v2,
 )
 from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
     TRUSTED_SOURCE_ROLE,
@@ -121,9 +120,6 @@ class OpenAIPreparedExtractionV1:
             "budget_policy_sha256": request.budget_policy_sha256,
             "budget_policy_version": request.budget_policy_version,
             "estimated_input_tokens": request.estimated_input_tokens,
-            "eligibility_disposition": content_free_disposition_receipt_v2(
-                request.gate_result
-            ),
             "gate_policy_sha256": request.gate_result.policy_sha256,
             "instructions_sha256": request.instructions_sha256,
             "max_attempts": request.max_attempts,

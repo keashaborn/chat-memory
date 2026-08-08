@@ -16,6 +16,15 @@ import scripts.memory_v1_openai_extraction_worker_v1 as worker_module
 from rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1 import (
     OpenAIExtractionResultV1,
 )
+from rag_engine.memory_v1_openai_provider_adapter_v1 import (
+    OpenAIV52ProviderAdapterV1,
+    extraction_model_policy_v1,
+    extraction_task_profile_v1,
+)
+from rag_engine.memory_v1_openai_structured_transport_v1 import (
+    ExternalPrivacyAuthorizationV1,
+    PRIVACY_AUTHORIZATION_TOKEN,
+)
 from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
     classify_personal_evidence_exchange_v2,
 )
@@ -92,6 +101,33 @@ def job() -> dict:
         "evidence_observed_at": "2026-08-06T12:00:00Z",
         "evidence_content": SOURCE,
     }
+
+
+def configured_adapter() -> OpenAIV52ProviderAdapterV1:
+    return OpenAIV52ProviderAdapterV1(
+        transport=None,
+        task_profile=extraction_task_profile_v1(),
+        model_policy=extraction_model_policy_v1(
+            model="gpt-memory-test",
+            sdk_package_version="test-sdk",
+        ),
+        privacy_authorization=ExternalPrivacyAuthorizationV1(
+            policy_version="privacy_v1",
+            policy_sha256="a" * 64,
+            retention_mode="standard_retention_explicitly_accepted",
+            authorization_sha256="b" * 64,
+            standard_retention_risk_accepted=True,
+            retention_attestation_sha256=None,
+            enable_token=PRIVACY_AUTHORIZATION_TOKEN,
+        ),
+        budget_policy_version="budget_v1",
+        budget_policy_sha256="c" * 64,
+        pricing_policy_version="pricing_v1",
+        pricing_policy_sha256="d" * 64,
+        max_output_tokens=128,
+        timeout_seconds=20.0,
+        max_attempts=1,
+    )
 
 
 class NoCallAdapter:
@@ -666,6 +702,107 @@ class WorkerTests(unittest.TestCase):
             reserve.assert_not_awaited()
 
         asyncio.run(run())
+
+    def test_high_recall_reservation_receipt_matches_governed_contract(self) -> None:
+        high_recall_job = job()
+        text = "My childhood summers were mostly spent near the lake."
+        high_recall_job["evidence_content"] = text
+        high_recall_job["evidence_content_sha256"] = hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
+        reserve = mock.AsyncMock(
+            side_effect=ProcessingRejected("stop_after_receipt", 0)
+        )
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={
+                    "input_microusd_per_million_tokens": 1,
+                    "cached_input_microusd_per_million_tokens": 1,
+                    "cache_write_input_microusd_per_million_tokens": 1,
+                    "output_microusd_per_million_tokens": 1,
+                },
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=100,
+            ), mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=reserve,
+            ):
+                with self.assertRaisesRegex(
+                    ProcessingRejected,
+                    "stop_after_receipt",
+                ):
+                    await process_job(
+                        object(),
+                        owner=OWNER,
+                        job=high_recall_job,
+                        worker_id="test-worker",
+                        run_id=uuid.UUID(
+                            "00000000-0000-4000-8000-000000000003"
+                        ),
+                        model="gpt-memory-test",
+                        adapter=configured_adapter(),
+                        registry={},
+                        schema={},
+                        args=args(),
+                    )
+
+        asyncio.run(run())
+        reserve.assert_awaited_once()
+        receipt = reserve.await_args.kwargs["receipt"]
+        self.assertEqual(len(receipt), 37)
+        self.assertNotIn("eligibility_disposition", receipt)
+        self.assertEqual(
+            set(receipt),
+            {
+                "budget_policy_sha256",
+                "budget_policy_version",
+                "contract_version",
+                "estimated_input_tokens",
+                "evidence_content_sha256",
+                "gate_policy_sha256",
+                "instructions_sha256",
+                "job_id",
+                "max_attempts",
+                "max_output_tokens",
+                "max_request_microusd",
+                "max_utc_day_microusd",
+                "maximum_cost_microusd",
+                "model",
+                "model_policy_sha256",
+                "output_schema_sha256",
+                "owner_binding_sha256",
+                "pipeline_version",
+                "pricing_policy_sha256",
+                "pricing_policy_version",
+                "pricing_rates",
+                "privacy_authorization_sha256",
+                "privacy_policy_sha256",
+                "privacy_policy_version",
+                "purpose",
+                "request_id_sha256",
+                "request_sha256",
+                "retention_attestation_sha256",
+                "retention_mode",
+                "run_id",
+                "safety_identifier_sha256",
+                "selected_input_sha256",
+                "source_sha256",
+                "standard_retention_risk_accepted",
+                "task_contract_sha256",
+                "timeout_milliseconds",
+                "worker_id_sha256",
+            },
+        )
 
     def test_context_fragment_stays_zero_call_when_lineage_is_unavailable(self) -> None:
         adapter = NoCallAdapter()
