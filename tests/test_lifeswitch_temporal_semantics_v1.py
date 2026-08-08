@@ -156,6 +156,11 @@ class LifeSwitchTemporalSemanticsV1Tests(unittest.TestCase):
                 self.assertEqual(value.status, "UNAVAILABLE")
                 self.assertEqual(value.windows, ())
 
+    def test_compare_prefix_without_connector_fails_closed(self) -> None:
+        value = resolve("Compare my protein from July 1 through July 7")
+        self.assertEqual(value.status, "UNAVAILABLE")
+        self.assertEqual(value.windows, ())
+
     def test_single_explicit_range_is_unchanged(self) -> None:
         value = resolve("Show my protein from July 1 through July 7")
         self.assertEqual(value.status, "RESOLVED")

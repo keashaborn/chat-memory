@@ -486,7 +486,7 @@ def _comparison_operands(value: str) -> tuple[str, str] | None:
         return body[: marker.start()].strip(), body[marker.end() :].strip()
     if len(to_matches) > 1 or re.search(r"\s+(?:with|to)\s*$", body, re.IGNORECASE):
         return body, ""
-    return None
+    return body, ""
 
 
 def parse_lifeswitch_temporal_windows_v1(

@@ -188,6 +188,12 @@ class LifeSwitchQuerySignalsV2Tests(unittest.TestCase):
                 self.assertEqual(value.output_grain, "comparison")
                 self.assertEqual(value.temporal_request.windows, ())
 
+    def test_compare_prefix_without_connector_is_unavailable(self) -> None:
+        value = signals("Compare my protein from July 1 through July 7")
+        self.assertEqual(value.status, "UNAVAILABLE")
+        self.assertEqual(value.output_grain, "comparison")
+        self.assertEqual(value.temporal_request.windows, ())
+
     def test_missing_stale_cross_owner_or_cross_thread_hint_fails_closed(self) -> None:
         prior = parse_lifeswitch_temporal_windows_v1("last week", context=context()).windows[0]
         for supplied, owner, thread, snapshot in (

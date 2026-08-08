@@ -101,6 +101,12 @@ class LifeSwitchDataPlanV2Tests(unittest.TestCase):
                 self.assertFalse(value.data_access)
                 self.assertEqual(value.selections, ())
 
+    def test_compare_prefix_without_connector_plan_has_zero_access(self) -> None:
+        value = plan("Compare my protein from July 1 through July 7")
+        self.assertEqual(value.status, "UNAVAILABLE")
+        self.assertFalse(value.data_access)
+        self.assertEqual(value.selections, ())
+
     def test_contract_and_runtime_selection_limits_are_enforced(self) -> None:
         value = plan(
             "How am I doing with my plan, nutrition, training, conditioning, and measurements?",
