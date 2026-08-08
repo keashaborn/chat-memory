@@ -449,6 +449,46 @@ def _one(
     return _resolution("NONE", (), ("no_temporal_expression",))
 
 
+def _comparison_operands(value: str) -> tuple[str, str] | None:
+    """Return recognized comparison operands without consuming range separators."""
+
+    infix = re.split(
+        r"\s+(?:versus|vs\.?|compared\s+(?:with|to))\s+",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    if len(infix) == 2:
+        return infix[0].strip(), infix[1].strip()
+
+    incomplete_infix = re.match(
+        r"^(.*?)\s+(?:versus|vs\.?|compared\s+(?:with|to))\s*$",
+        value,
+        re.IGNORECASE,
+    )
+    if incomplete_infix:
+        return incomplete_infix.group(1).strip(), ""
+
+    prefix = re.match(r"^\s*compare\b\s*(.*)$", value, re.IGNORECASE)
+    if prefix is None:
+        return None
+
+    body = prefix.group(1).strip()
+    with_split = re.split(r"\s+with(?:\s+|$)", body, maxsplit=1, flags=re.IGNORECASE)
+    if len(with_split) == 2:
+        return with_split[0].strip(), with_split[1].strip()
+
+    # A single `to` can be the comparison operator. Multiple `to` tokens are
+    # ambiguous with explicit range syntax, so fail closed instead of guessing.
+    to_matches = tuple(re.finditer(r"\s+to(?:\s+|$)", body, re.IGNORECASE))
+    if len(to_matches) == 1:
+        marker = to_matches[0]
+        return body[: marker.start()].strip(), body[marker.end() :].strip()
+    if len(to_matches) > 1 or re.search(r"\s+(?:with|to)\s*$", body, re.IGNORECASE):
+        return body, ""
+    return None
+
+
 def parse_lifeswitch_temporal_windows_v1(
     query: str,
     *,
@@ -462,17 +502,13 @@ def parse_lifeswitch_temporal_windows_v1(
     if not value:
         return _resolution("NONE", (), ("no_temporal_expression",))
 
-    explicit = _explicit(value, context)
-    if explicit is not None:
-        return explicit
-
-    split = re.split(r"\s+(?:versus|vs\.?|compared\s+(?:with|to))\s+", value, maxsplit=1, flags=re.IGNORECASE)
-    if len(split) == 1:
-        compare = re.match(r"^\s*compare\s+(.+?)\s+(?:with|to)\s+(.+?)\s*$", value, re.IGNORECASE)
-        split = [compare.group(1), compare.group(2)] if compare else split
-    if len(split) == 2:
-        left = _one(split[0], context, projection_default_days=projection_default_days, prior_window=prior_window)
-        right = _one(split[1], context, projection_default_days=projection_default_days, prior_window=prior_window)
+    comparison = _comparison_operands(value)
+    if comparison is not None:
+        left_operand, right_operand = comparison
+        if not left_operand or not right_operand:
+            return _resolution("UNAVAILABLE", (), ("TEMPORAL_EXPRESSION_UNSUPPORTED",))
+        left = _one(left_operand, context, projection_default_days=projection_default_days, prior_window=prior_window)
+        right = _one(right_operand, context, projection_default_days=projection_default_days, prior_window=prior_window)
         if left.status == "NONE" and right.status == "NONE":
             return _resolution("NONE", (), ("no_temporal_expression",))
         if left.status != "RESOLVED" or right.status != "RESOLVED" or len(left.windows) != 1 or len(right.windows) != 1:
@@ -481,6 +517,10 @@ def parse_lifeswitch_temporal_windows_v1(
             return _resolution("RESOLVED", (left.windows[0], right.windows[0]), ("explicit_comparison",))
         except ValueError:
             return _resolution("UNAVAILABLE", (), ("TEMPORAL_EXPRESSION_CONFLICT",))
+
+    explicit = _explicit(value, context)
+    if explicit is not None:
+        return explicit
 
     result = _one(value, context, projection_default_days=projection_default_days, prior_window=prior_window)
     broad_matches = sum(

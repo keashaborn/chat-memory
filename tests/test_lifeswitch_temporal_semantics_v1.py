@@ -108,6 +108,63 @@ class LifeSwitchTemporalSemanticsV1Tests(unittest.TestCase):
         self.assertEqual(len(value.windows), 2)
         self.assertLess(value.windows[0].end_date, value.windows[1].start_date)
 
+    def test_explicit_range_comparison_preserves_both_operands(self) -> None:
+        value = resolve(
+            "Compare my protein from July 1 through July 7 with July 8 through July 14"
+        )
+        self.assertEqual(value.status, "RESOLVED")
+        self.assertEqual(
+            [(window.start_date, window.end_date) for window in value.windows],
+            [
+                (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+                (dt.date(2026, 7, 8), dt.date(2026, 7, 14)),
+            ],
+        )
+
+    def test_iso_range_comparison_preserves_query_order(self) -> None:
+        value = resolve(
+            "Compare 2026-07-08 through 2026-07-14 with 2026-07-01 through 2026-07-07"
+        )
+        self.assertEqual(value.status, "RESOLVED")
+        self.assertEqual(
+            [(window.start_date, window.end_date) for window in value.windows],
+            [
+                (dt.date(2026, 7, 8), dt.date(2026, 7, 14)),
+                (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+            ],
+        )
+
+    def test_range_to_tokens_are_not_comparison_separators(self) -> None:
+        value = resolve("Compare July 1 to July 7 with July 8 to July 14")
+        self.assertEqual(value.status, "RESOLVED")
+        self.assertEqual(
+            [(window.start_date, window.end_date) for window in value.windows],
+            [
+                (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+                (dt.date(2026, 7, 8), dt.date(2026, 7, 14)),
+            ],
+        )
+
+    def test_explicit_comparison_overlap_or_missing_operand_fails_closed(self) -> None:
+        for query in (
+            "Compare July 1 through July 7 with July 7 through July 14",
+            "Compare July 1 through July 7 with",
+            "Compare July 1 to July 7 to July 8 to July 14",
+        ):
+            with self.subTest(query=query):
+                value = resolve(query)
+                self.assertEqual(value.status, "UNAVAILABLE")
+                self.assertEqual(value.windows, ())
+
+    def test_single_explicit_range_is_unchanged(self) -> None:
+        value = resolve("Show my protein from July 1 through July 7")
+        self.assertEqual(value.status, "RESOLVED")
+        self.assertEqual(len(value.windows), 1)
+        self.assertEqual(
+            (value.windows[0].start_date, value.windows[0].end_date),
+            (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+        )
+
     def test_comparison_can_use_validated_prior_window_anchor(self) -> None:
         prior = resolve("last week").windows[0]
         value = resolve("compare that with this week", prior_window=prior)

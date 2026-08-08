@@ -72,6 +72,35 @@ class LifeSwitchDataPlanV2Tests(unittest.TestCase):
         )
         self.assertEqual([item.execution_ordinal for item in value.selections], [1, 2, 3])
 
+    def test_explicit_comparison_plan_carries_exactly_two_windows(self) -> None:
+        value = plan(
+            "Compare my protein from July 1 through July 7 with July 8 through July 14"
+        )
+        self.assertEqual(value.status, "ACTIVE")
+        self.assertTrue(value.data_access)
+        self.assertEqual(value.selections[0].projection_id, "nutrition.range.v1")
+        self.assertEqual(
+            [
+                (window.start_date, window.end_date)
+                for window in value.selections[0].windows
+            ],
+            [
+                (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+                (dt.date(2026, 7, 8), dt.date(2026, 7, 14)),
+            ],
+        )
+
+    def test_invalid_explicit_comparison_plan_has_zero_access(self) -> None:
+        for query in (
+            "Compare my protein from July 1 through July 7 with July 7 through July 14",
+            "Compare my protein from July 1 through July 7 with",
+        ):
+            with self.subTest(query=query):
+                value = plan(query)
+                self.assertEqual(value.status, "UNAVAILABLE")
+                self.assertFalse(value.data_access)
+                self.assertEqual(value.selections, ())
+
     def test_contract_and_runtime_selection_limits_are_enforced(self) -> None:
         value = plan(
             "How am I doing with my plan, nutrition, training, conditioning, and measurements?",

@@ -80,6 +80,17 @@
       "end_date": "2026-07-31"
     },
     {
+      "id": "explicit-range-comparison",
+      "query": "Compare my protein from July 1 through July 7 with July 8 through July 14",
+      "status": "ACTIVE",
+      "domains": ["nutrition"],
+      "grain": "comparison",
+      "windows": [
+        ["2026-07-01", "2026-07-07"],
+        ["2026-07-08", "2026-07-14"]
+      ]
+    },
+    {
       "id": "unrelated-control",
       "query": "Who won a television competition in 2015?",
       "status": "OFF",

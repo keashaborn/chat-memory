@@ -72,6 +72,14 @@ class LifeSwitchQuerySignalsV2Tests(unittest.TestCase):
                 if "start_date" in case:
                     self.assertEqual(value.temporal_request.windows[0].start_date.isoformat(), case["start_date"])
                     self.assertEqual(value.temporal_request.windows[0].end_date.isoformat(), case["end_date"])
+                if "windows" in case:
+                    self.assertEqual(
+                        [
+                            [window.start_date.isoformat(), window.end_date.isoformat()]
+                            for window in value.temporal_request.windows
+                        ],
+                        case["windows"],
+                    )
 
     def test_ordinary_verbs_activate_correct_domains(self) -> None:
         self.assertEqual(signals("What did I eat yesterday?").requested_domains, ("nutrition",))
@@ -151,6 +159,34 @@ class LifeSwitchQuerySignalsV2Tests(unittest.TestCase):
         self.assertEqual(len(value.temporal_request.windows), 2)
         denied = signals("Compare that with this week.")
         self.assertEqual(denied.status, "UNAVAILABLE")
+
+    def test_explicit_range_comparison_requires_two_windows(self) -> None:
+        value = signals(
+            "Compare my protein from July 1 through July 7 with July 8 through July 14"
+        )
+        self.assertEqual(value.status, "ACTIVE")
+        self.assertEqual(value.output_grain, "comparison")
+        self.assertEqual(
+            [
+                (window.start_date, window.end_date)
+                for window in value.temporal_request.windows
+            ],
+            [
+                (dt.date(2026, 7, 1), dt.date(2026, 7, 7)),
+                (dt.date(2026, 7, 8), dt.date(2026, 7, 14)),
+            ],
+        )
+
+    def test_invalid_explicit_comparison_is_unavailable_without_windows(self) -> None:
+        for query in (
+            "Compare my protein from July 1 through July 7 with July 7 through July 14",
+            "Compare my protein from July 1 through July 7 with",
+        ):
+            with self.subTest(query=query):
+                value = signals(query)
+                self.assertEqual(value.status, "UNAVAILABLE")
+                self.assertEqual(value.output_grain, "comparison")
+                self.assertEqual(value.temporal_request.windows, ())
 
     def test_missing_stale_cross_owner_or_cross_thread_hint_fails_closed(self) -> None:
         prior = parse_lifeswitch_temporal_windows_v1("last week", context=context()).windows[0]
