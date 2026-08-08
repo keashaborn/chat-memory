@@ -1,0 +1,289 @@
+{
+  "$defs": {
+    "LifeSwitchTemporalResolutionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "lifeswitch_temporal_resolution_v1",
+          "default": "lifeswitch_temporal_resolution_v1",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "parser_version": {
+          "const": "lifeswitch_temporal_parser_v1_0",
+          "default": "lifeswitch_temporal_parser_v1_0",
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "resolution_sha256": {
+          "title": "Resolution Sha256",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "NONE",
+            "RESOLVED",
+            "UNAVAILABLE"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "windows": {
+          "items": {
+            "$ref": "#/$defs/LifeSwitchTemporalWindowV1"
+          },
+          "maxItems": 2,
+          "title": "Windows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status",
+        "windows",
+        "reason_codes",
+        "resolution_sha256"
+      ],
+      "title": "LifeSwitchTemporalResolutionV1",
+      "type": "object"
+    },
+    "LifeSwitchTemporalWindowV1": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of_local_date": {
+          "format": "date",
+          "title": "As Of Local Date",
+          "type": "string"
+        },
+        "as_of_utc": {
+          "format": "date-time",
+          "title": "As Of Utc",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "lifeswitch_temporal_window_v1",
+          "default": "lifeswitch_temporal_window_v1",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "end_date": {
+          "format": "date",
+          "title": "End Date",
+          "type": "string"
+        },
+        "is_complete_period": {
+          "title": "Is Complete Period",
+          "type": "boolean"
+        },
+        "parser_version": {
+          "const": "lifeswitch_temporal_parser_v1_0",
+          "default": "lifeswitch_temporal_parser_v1_0",
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "semantic_kind": {
+          "enum": [
+            "EXPLICIT_DAY",
+            "EXPLICIT_RANGE",
+            "TRAILING_DAYS",
+            "CURRENT_CALENDAR_WEEK",
+            "PREVIOUS_CALENDAR_WEEK",
+            "CURRENT_CALENDAR_MONTH",
+            "PREVIOUS_CALENDAR_MONTH",
+            "PROJECTION_DEFAULT",
+            "INHERITED_PRIOR_WINDOW"
+          ],
+          "title": "Semantic Kind",
+          "type": "string"
+        },
+        "source_phrase_kind": {
+          "enum": [
+            "TODAY",
+            "YESTERDAY",
+            "LAST_N_DAYS",
+            "THIS_WEEK",
+            "LAST_WEEK",
+            "THIS_MONTH",
+            "LAST_MONTH",
+            "OVER_LAST_MONTH",
+            "IN_MONTH",
+            "THIS_WEEKDAY",
+            "LAST_WEEKDAY",
+            "EXPLICIT_DAY",
+            "EXPLICIT_RANGE",
+            "RECENTLY",
+            "WEEK_BEFORE_THAT",
+            "IMPLIED_PREVIOUS_PERIOD"
+          ],
+          "title": "Source Phrase Kind",
+          "type": "string"
+        },
+        "start_date": {
+          "format": "date",
+          "title": "Start Date",
+          "type": "string"
+        },
+        "timezone_name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Timezone Name",
+          "type": "string"
+        },
+        "timezone_source": {
+          "enum": [
+            "account_setting",
+            "active_plan_fallback"
+          ],
+          "title": "Timezone Source",
+          "type": "string"
+        },
+        "window_manifest_sha256": {
+          "title": "Window Manifest Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "semantic_kind",
+        "timezone_name",
+        "timezone_source",
+        "as_of_utc",
+        "as_of_local_date",
+        "start_date",
+        "end_date",
+        "is_complete_period",
+        "source_phrase_kind",
+        "window_manifest_sha256"
+      ],
+      "title": "LifeSwitchTemporalWindowV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "continuation_kind": {
+      "enum": [
+        "none",
+        "prior_domain",
+        "prior_window",
+        "prior_subject"
+      ],
+      "title": "Continuation Kind",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "lifeswitch_query_signals_v2",
+      "default": "lifeswitch_query_signals_v2",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "named_subject": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Named Subject"
+    },
+    "output_grain": {
+      "enum": [
+        "current",
+        "day",
+        "daily_rows",
+        "summary",
+        "ranking",
+        "trend",
+        "comparison"
+      ],
+      "title": "Output Grain",
+      "type": "string"
+    },
+    "plan_relationship": {
+      "enum": [
+        "targets",
+        "adherence",
+        "historical_comparison",
+        "none"
+      ],
+      "title": "Plan Relationship",
+      "type": "string"
+    },
+    "policy_version": {
+      "const": "lifeswitch_query_signals_policy_v2_0",
+      "default": "lifeswitch_query_signals_policy_v2_0",
+      "title": "Policy Version",
+      "type": "string"
+    },
+    "query_sha256": {
+      "title": "Query Sha256",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "requested_domains": {
+      "items": {
+        "enum": [
+          "plan",
+          "nutrition",
+          "training",
+          "conditioning",
+          "measurements"
+        ],
+        "type": "string"
+      },
+      "title": "Requested Domains",
+      "type": "array"
+    },
+    "signal_manifest_sha256": {
+      "title": "Signal Manifest Sha256",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ACTIVE",
+        "OFF",
+        "UNAVAILABLE"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "subject_scope": {
+      "const": "SELF",
+      "default": "SELF",
+      "title": "Subject Scope",
+      "type": "string"
+    },
+    "temporal_request": {
+      "$ref": "#/$defs/LifeSwitchTemporalResolutionV1"
+    }
+  },
+  "required": [
+    "status",
+    "requested_domains",
+    "output_grain",
+    "temporal_request",
+    "plan_relationship",
+    "continuation_kind",
+    "reason_codes",
+    "query_sha256",
+    "signal_manifest_sha256"
+  ],
+  "title": "LifeSwitchQuerySignalsV2",
+  "type": "object"
+}
