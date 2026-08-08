@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 import unittest
 import uuid
@@ -14,6 +15,13 @@ import scripts.memory_v1_openai_extraction_worker_v1 as worker_module
 
 from rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1 import (
     OpenAIExtractionResultV1,
+)
+from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
+    classify_personal_evidence_exchange_v2,
+)
+from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
+    TRUSTED_SOURCE_ROLE,
+    classify_personal_evidence_v1,
 )
 from scripts.memory_v1_openai_extraction_worker_v1 import (
     APPLY_ENABLE_TOKEN,
@@ -73,6 +81,7 @@ def args(*, apply: bool = False) -> argparse.Namespace:
 def job() -> dict:
     return {
         "job_id": uuid.UUID("00000000-0000-4000-8000-000000000010"),
+        "evidence_id": uuid.UUID("00000000-0000-4000-8000-000000000012"),
         "evidence_source_system": "public.chat_log",
         "evidence_external_id": (
             "chat_log:legacy-capture:"
@@ -357,6 +366,10 @@ class WorkerTests(unittest.TestCase):
         prepared.request.estimated_input_tokens = 100
         prepared.request.max_output_tokens = 100
         prepared.request.request_sha256 = SOURCE_SHA
+        prepared.gate_result = classify_personal_evidence_v1(
+            SOURCE,
+            source_role=TRUSTED_SOURCE_ROLE,
+        )
         prepared.content_free_receipt.return_value = {}
         result = mock.Mock(
             packet=packet,
@@ -554,6 +567,14 @@ class WorkerTests(unittest.TestCase):
                 )
             self.assertEqual(result["status"], "skipped")
             self.assertEqual(result["rejection_code"], "pure_general_question")
+            self.assertEqual(
+                result["eligibility_disposition"]["decision"],
+                "skip_zero_call",
+            )
+            self.assertEqual(
+                result["eligibility_disposition"]["selected_span_count"],
+                0,
+            )
             self.assertFalse(result["provider_reservation_created"])
             self.assertEqual(calls, 0)
             skip.assert_awaited_once()
@@ -561,6 +582,256 @@ class WorkerTests(unittest.TestCase):
 
         asyncio.run(run())
         self.assertEqual(adapter.calls, 1)
+
+    def test_high_recall_candidate_reaches_pre_reservation_prepare(self) -> None:
+        high_recall_job = job()
+        text = "My childhood summers were mostly spent near the lake."
+        high_recall_job["evidence_content"] = text
+        high_recall_job["evidence_content_sha256"] = hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
+
+        class RoutingAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def prepare(self, **kwargs: object):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return None
+                gate = classify_personal_evidence_exchange_v2(
+                    text,
+                    source_role=TRUSTED_SOURCE_ROLE,
+                )
+                return SimpleNamespace(
+                    request=SimpleNamespace(
+                        estimated_input_tokens=1,
+                        max_output_tokens=16,
+                    ),
+                    gate_result=gate,
+                )
+
+        adapter = RoutingAdapter()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={},
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=1,
+            ), mock.patch.object(
+                worker_module,
+                "skip_job",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "skipped",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as skip, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=high_recall_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,  # type: ignore[arg-type]
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["rejection_code"], "request_budget_exceeded")
+            self.assertEqual(
+                result["eligibility_disposition"]["reason_codes"],
+                ["high_recall_owner_authored_candidate"],
+            )
+            self.assertEqual(calls, 0)
+            self.assertEqual(len(adapter.calls), 2)
+            self.assertTrue(adapter.calls[1]["exchange_eligibility"])
+            skip.assert_awaited_once()
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_context_fragment_stays_zero_call_when_lineage_is_unavailable(self) -> None:
+        adapter = NoCallAdapter()
+        contextual_job = job()
+        contextual_job["evidence_content"] = "Three."
+        contextual_job["evidence_content_sha256"] = hashlib.sha256(
+            b"Three."
+        ).hexdigest()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "load_memory_evidence_context_v2",
+                new=mock.AsyncMock(
+                    side_effect=worker_module.EvidenceContextContractError(
+                        "lineage unavailable"
+                    )
+                ),
+            ) as load_context, mock.patch.object(
+                worker_module,
+                "skip_job",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "skipped",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as skip, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=contextual_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(
+                result["rejection_code"],
+                "context_binding_required",
+            )
+            self.assertEqual(calls, 0)
+            self.assertEqual(adapter.calls, 1)
+            load_context.assert_awaited_once()
+            skip.assert_awaited_once()
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_context_fragment_reaches_pre_reservation_prepare_when_bound(
+        self,
+    ) -> None:
+        contextual_job = job()
+        contextual_job["evidence_content"] = "Three."
+        contextual_job["evidence_content_sha256"] = hashlib.sha256(
+            b"Three."
+        ).hexdigest()
+        context = object()
+        review_gate = SimpleNamespace(
+            decision="review_context",
+            reason_codes=("context_binding_required",),
+        )
+        send_gate = SimpleNamespace(
+            decision="send_external",
+            reason_codes=("contextual_answer_selected",),
+            public_dict=lambda: {"decision": "send_external"},
+        )
+
+        class RoutingAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def prepare(self, **kwargs: object):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return None
+                return SimpleNamespace(
+                    request=SimpleNamespace(
+                        estimated_input_tokens=1,
+                        max_output_tokens=16,
+                    ),
+                    gate_result=send_gate,
+                )
+
+        adapter = RoutingAdapter()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "classify_personal_evidence_exchange_v2",
+                side_effect=(review_gate, send_gate),
+            ), mock.patch.object(
+                worker_module,
+                "content_free_disposition_receipt_v2",
+                return_value={"decision": "send_external"},
+            ), mock.patch.object(
+                worker_module,
+                "load_memory_evidence_context_v2",
+                new=mock.AsyncMock(return_value=context),
+            ) as load_context, mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={},
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=1,
+            ), mock.patch.object(
+                worker_module,
+                "skip_job",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "skipped",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as skip, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=contextual_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["rejection_code"], "request_budget_exceeded")
+            self.assertEqual(calls, 0)
+            self.assertEqual(len(adapter.calls), 2)
+            self.assertTrue(adapter.calls[1]["exchange_eligibility"])
+            self.assertIs(adapter.calls[1]["evidence_context"], context)
+            load_context.assert_awaited_once_with(
+                mock.ANY,
+                expected_owner_user_id=OWNER,
+                target_evidence_id=contextual_job["evidence_id"],
+                expected_target_content_sha256=(
+                    contextual_job["evidence_content_sha256"]
+                ),
+            )
+            skip.assert_awaited_once()
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
 
     def test_bound_packet_provider_rejects_cross_source_use(self) -> None:
         packet = OpenAIExtractionResultV1.model_validate(
