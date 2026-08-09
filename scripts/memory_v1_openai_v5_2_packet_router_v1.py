@@ -153,6 +153,28 @@ def stable_ids(
     )
 
 
+async def bind_postgres_artifact_hashes(
+    conn: asyncpg.Connection, artifact: dict[str, Any]
+) -> dict[str, Any]:
+    hash_query = """
+        SELECT encode(public.digest(
+          convert_to($1::jsonb::text,'UTF8'),'sha256'
+        ),'hex')
+    """
+    report_sha = await conn.fetchval(hash_query, stable_json(artifact["review"]))
+    if not isinstance(report_sha, str) or len(report_sha) != 64:
+        raise RuntimeError("PostgreSQL review artifact hash is invalid")
+    artifact["bundle"]["source_report"]["sha256"] = report_sha
+    bundle_sha = await conn.fetchval(hash_query, stable_json(artifact["bundle"]))
+    if not isinstance(bundle_sha, str) or len(bundle_sha) != 64:
+        raise RuntimeError("PostgreSQL stage bundle hash is invalid")
+    return {
+        **artifact,
+        "report_sha256": report_sha,
+        "bundle_sha256": bundle_sha,
+    }
+
+
 async def plan_owner(
     conn: asyncpg.Connection,
     owner: uuid.UUID,
@@ -336,6 +358,7 @@ async def run() -> int:
             owner, target = selected
             packet_id = uuid.UUID(str(target["packet_id"]))
             artifact = await build_artifacts(args, owner=owner, packet_id=packet_id)
+            artifact = await bind_postgres_artifact_hashes(conn, artifact)
             applied, replayed = await record_review(
                 conn, owner=owner, target=target, artifact=artifact
             )

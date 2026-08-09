@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import unittest
@@ -108,6 +109,27 @@ class OpenAIV52PacketRouterTests(unittest.TestCase):
             router.stable_ids(**base),
             router.stable_ids(**{**base, "bundle_sha256": "4" * 64}),
         )
+
+    def test_postgres_jsonb_hashes_bind_the_stored_artifacts(self) -> None:
+        report, bundle = artifact_pair()
+        with mock.patch.object(router, "repository_commit_valid", return_value=True):
+            artifact = router.validate_artifacts(
+                report=report,
+                bundle=bundle,
+                owner=OWNER,
+                packet_id=PACKET,
+            )
+        conn = mock.AsyncMock()
+        conn.fetchval.side_effect = ["a" * 64, "b" * 64]
+        result = asyncio.run(router.bind_postgres_artifact_hashes(conn, artifact))
+        self.assertEqual(result["report_sha256"], "a" * 64)
+        self.assertEqual(result["bundle_sha256"], "b" * 64)
+        self.assertEqual(
+            result["bundle"]["source_report"]["sha256"], "a" * 64
+        )
+        self.assertEqual(conn.fetchval.await_count, 2)
+        for call in conn.fetchval.await_args_list:
+            self.assertIn("$1::jsonb::text", call.args[0])
 
     def test_source_and_unit_have_no_filesystem_or_provider_authority(self) -> None:
         root = Path(__file__).resolve().parents[1]

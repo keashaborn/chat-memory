@@ -166,7 +166,7 @@
     {
       "component_id": "openai_packet_router",
       "path": "scripts/memory_v1_openai_v5_2_packet_router_v1.py",
-      "sha256": "e8f21fecd6e414c416a826ab40ec4cec544a435485db2e0aecf65ec031b49a81",
+      "sha256": "9b99f7a9008c76a5aabc6fd240d2d53f4489e88a7187a6ff84bbe35aecbd98b6",
       "classification": "canonical_inactive"
     },
     {
