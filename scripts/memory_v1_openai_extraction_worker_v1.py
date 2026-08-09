@@ -776,8 +776,34 @@ async def process_job(
             audit_receipt=completion_audit,
         )
         return report, external_calls
-    except ProcessingRejected:
-        raise
+    except ProcessingRejected as exc:
+        if reservation is not None:
+            raise
+        failed = await fail_job(
+            conn,
+            owner=owner,
+            operation_id=uuid.uuid5(
+                PERSIST_NAMESPACE,
+                f"openai-control-reject:{job['job_id']}:{exc.code}",
+            ),
+            job=job,
+            worker_id=worker_id,
+            code=exc.code,
+            max_attempts=args.max_attempts,
+        )
+        return {
+            "eligibility_disposition": (
+                content_free_disposition_receipt_v2(prepared.gate_result)
+                if prepared is not None
+                else None
+            ),
+            "job_sha256": sha256_text(str(job["job_id"])),
+            "status": str(failed["status"]),
+            "outcome": str(failed["apply_outcome"]),
+            "rejection_code": exc.code,
+            "provider_reservation_created": False,
+            "external_model_calls": exc.external_model_calls,
+        }, exc.external_model_calls
     except Exception as exc:
         transport_audit = getattr(exc, "audit", None) or provider_transport_audit
         if transport_audit is not None:

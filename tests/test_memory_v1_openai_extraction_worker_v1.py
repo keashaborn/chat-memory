@@ -709,7 +709,7 @@ class WorkerTests(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_high_recall_reservation_receipt_matches_governed_contract(self) -> None:
+    def test_control_rejection_terminalizes_job_and_preserves_receipt(self) -> None:
         high_recall_job = job()
         text = "My childhood summers were mostly spent near the lake."
         high_recall_job["evidence_content"] = text
@@ -718,6 +718,10 @@ class WorkerTests(unittest.TestCase):
         ).hexdigest()
         reserve = mock.AsyncMock(
             side_effect=ProcessingRejected("stop_after_receipt", 0)
+        )
+
+        fail = mock.AsyncMock(
+            return_value={"status": "skipped", "apply_outcome": "applied"}
         )
 
         async def run() -> None:
@@ -742,28 +746,34 @@ class WorkerTests(unittest.TestCase):
                 worker_module,
                 "reserve_call",
                 new=reserve,
+            ), mock.patch.object(
+                worker_module,
+                "fail_job",
+                new=fail,
             ):
-                with self.assertRaisesRegex(
-                    ProcessingRejected,
-                    "stop_after_receipt",
-                ):
-                    await process_job(
-                        object(),
-                        owner=OWNER,
-                        job=high_recall_job,
-                        worker_id="test-worker",
-                        run_id=uuid.UUID(
-                            "00000000-0000-4000-8000-000000000003"
-                        ),
-                        model="gpt-memory-test",
-                        adapter=configured_adapter(),
-                        registry={},
-                        schema={},
-                        args=args(),
-                    )
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=high_recall_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=configured_adapter(),
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(calls, 0)
+            self.assertEqual(result["rejection_code"], "stop_after_receipt")
+            self.assertEqual(result["status"], "skipped")
+            self.assertFalse(result["provider_reservation_created"])
 
         asyncio.run(run())
         reserve.assert_awaited_once()
+        fail.assert_awaited_once()
+        self.assertEqual(fail.await_args.kwargs["code"], "stop_after_receipt")
         receipt = reserve.await_args.kwargs["receipt"]
         self.assertEqual(len(receipt), 38)
         self.assertIn("eligibility_disposition", receipt)
