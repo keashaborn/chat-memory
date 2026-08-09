@@ -20,7 +20,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             self.value["activation_state"],
-            "candidate_target_installed_inactive_with_compatibility_active",
+            "installed_inactive_with_compatibility_active",
         )
         self.assertEqual(self.value["current_target_phase"], "installed_inactive")
         self.assertEqual(
@@ -96,49 +96,43 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             self.assertEqual(expected["enabled_state"], "enabled")
             self.assertEqual(expected["active_state"], "active")
 
-    def test_candidate_admission_partial_lifecycle_and_raw_conflict_are_first_class(self) -> None:
+    def test_manual_pilot_and_authenticated_validation_gates_are_first_class(self) -> None:
         blockers = {item["id"]: item for item in self.value["blockers"]}
         self.assertEqual(
-            blockers["review_to_claim_admission_candidate_pending_install"]["status"],
-            "candidate_pending_install_and_manual_activation",
+            blockers["review_to_claim_admission_manual_pilot_authorization_required"]["status"],
+            "installed_manual_exact_proposition_activation_required",
         )
         self.assertEqual(
-            blockers["user_claim_lifecycle_http_partial_candidate"]["status"],
-            "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation",
+            blockers["user_claim_lifecycle_authenticated_validation_pending"]["status"],
+            "installed_backend_deployed_authenticated_ui_validation_pending",
         )
         self.assertEqual(
-            blockers["governed_owner_activation_unverified"]["status"],
-            "content_free_verifier_candidate_pending_deploy_and_execution",
-        )
-        self.assertEqual(
-            blockers[
-                "ordinary_log_raw_memory_isolation_candidate_pending_deploy"
-            ]["status"],
-            "candidate_pending_deploy",
+            blockers["governed_owner_activation_refresh_required"]["status"],
+            "content_free_verifier_required_before_each_pilot",
         )
         handoffs = {item["stage"]: item for item in self.value["runtime_handoffs"]}
         self.assertEqual(
             handoffs["review_to_claim_admission"]["status"],
-            "candidate_pending_install_and_manual_activation",
+            "installed_manual_exact_proposition_activation_required",
         )
         self.assertEqual(
             handoffs["derived_projection"]["status"],
-            "active_but_candidate_outbox_held",
+            "active_outbox_held_for_manual_pilot",
         )
         self.assertEqual(
             handoffs["user_provenance_and_lifecycle"]["status"],
-            "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation",
+            "installed_backend_deployed_authenticated_ui_validation_pending",
         )
         self.assertEqual(
             handoffs["answer_binding"]["status"],
-            "candidate_provenance_pending_backend_deploy",
+            "deployed_inactive_until_governed_memory_selected",
         )
         raw = {
             item["component"]: item for item in self.value["compatibility_boundaries"]
         }
         self.assertEqual(
             raw["backend_/log_raw_memory_qdrant_side_effect"]["classification"],
-            "candidate_removed_from_ordinary_log_pending_deploy",
+            "removed_from_ordinary_log_identity_bootstrap_only",
         )
         self.assertFalse(
             raw["backend_/log_raw_memory_qdrant_side_effect"][
@@ -153,11 +147,9 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         packages = {
             item["migration_id"]: item for item in self.value["database_packages"]
         }
-        self.assertEqual(
-            packages["memory_openai_eligibility_disposition_v2"]["installation_state"],
-            "candidate_pending_install",
-        )
         for migration_id in (
+            "memory_openai_circuit_window_v1",
+            "memory_openai_eligibility_disposition_v2",
             "memory_v1_openai_review_admission_authority_v1",
             "memory_openai_review_admission_authority_v1",
             "memory_v1_governed_claim_lifecycle_outbox_authority_v1",
@@ -166,22 +158,26 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         ):
             self.assertEqual(
                 packages[migration_id]["installation_state"],
-                "candidate_pending_install",
+                "installed_definition_verified",
             )
         components = {
             item["component_id"]: item for item in self.value["source_components"]
         }
         self.assertEqual(
             components["openai_review_admission"]["classification"],
-            "canonical_candidate_manual_admission",
+            "canonical_active_manual_admission",
         )
         self.assertEqual(
             components["governed_claim_transition"]["classification"],
-            "canonical_candidate_manual_claim_transition",
+            "canonical_active_manual_claim_transition",
         )
         self.assertEqual(
             components["governed_claim_lifecycle_router"]["classification"],
-            "canonical_candidate_owner_lifecycle_with_reviewed_correction",
+            "canonical_active_owner_lifecycle_with_reviewed_correction",
+        )
+        self.assertEqual(
+            components["openai_provider_adapter"]["classification"],
+            "canonical_inactive_provider_contract",
         )
         self.assertEqual(
             components["governed_response_route"]["path"],
@@ -189,15 +185,15 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             components["governed_answer_provenance"]["classification"],
-            "canonical_candidate_bounded_model_exposure_not_semantic_use",
+            "canonical_active_bounded_model_exposure_not_semantic_use",
         )
         self.assertEqual(
             components["governed_owner_activation_verifier"]["classification"],
-            "canonical_candidate_content_free_verifier",
+            "canonical_active_content_free_verifier",
         )
         self.assertEqual(
             components["active_runtime_verifier"]["classification"],
-            "canonical_candidate_fail_closed_complete_path_verifier",
+            "canonical_active_fail_closed_complete_path_verifier",
         )
         functions = {
             item["signature"]: item["sha256"]
@@ -210,7 +206,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             functions[claim],
-            "8d7e736f01863966e3b2a715eb6a928989cf77f17186e0a913494d8dafbdfe76",
+            "f71bccae8e2496969daf06d4657bae71dae70630bcf9a302b033ddd91af2137e",
         )
         for signature in (
             "memory.preflight_owner_openai_review_admission_v1(uuid,text,text,text,text,jsonb)",

@@ -1,5 +1,5 @@
 {
-  "activation_state": "candidate_target_installed_inactive_with_compatibility_active",
+  "activation_state": "installed_inactive_with_compatibility_active",
   "canonical_authority": {
     "postgresql": "authoritative",
     "qdrant": "derived_rebuildable_only_for_governed_claim_projection",
@@ -13,7 +13,12 @@
     {
       "migration_id": "memory_openai_eligibility_disposition_v2",
       "package_sha256": "3a0d3ed09275239a7208692b5a59432ddf2f4371c924ea00c5cc7356ee0b8b26",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
+    },
+    {
+      "migration_id": "memory_openai_circuit_window_v1",
+      "package_sha256": "217ad9d421a00e56c16cb4b87a006659cf4266524973665de605917e0d7e3c54",
+      "installation_state": "installed_definition_verified"
     },
     {
       "migration_id": "memory_openai_extraction_authority_v1",
@@ -28,27 +33,27 @@
     {
       "migration_id": "memory_v1_openai_review_admission_authority_v1",
       "package_sha256": "c444f2414cdde240b24f77ca5c700666c8b79eee168c085af619e024d1942df9",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
     },
     {
       "migration_id": "memory_openai_review_admission_authority_v1",
       "package_sha256": "39c4d029b5061d57219c0f293315d7a2065bf1f5c4f2291efead8aaf3a0155ea",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
     },
     {
       "migration_id": "memory_v1_governed_claim_lifecycle_outbox_authority_v1",
       "package_sha256": "6f86140b32cf55849180a2368f1958b0703ea4df207cf16134e48289b42d4908",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
     },
     {
       "migration_id": "memory_v1_governed_claim_transition_authority_v1",
       "package_sha256": "44da05a4a0eca6e75e15022a1ef901e869a1652702571dc08b852b2f2cb57d94",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
     },
     {
       "migration_id": "memory_governed_claim_lifecycle_v1",
       "package_sha256": "d7e504f6967ac7324753d038a528ef6ea025369bec60adf729f514da4c27d07a",
-      "installation_state": "candidate_pending_install"
+      "installation_state": "installed_definition_verified"
     }
   ],
   "first_vertical_slice": {
@@ -64,24 +69,19 @@
   },
   "blockers": [
     {
-      "id": "review_to_claim_admission_candidate_pending_install",
-      "status": "candidate_pending_install_and_manual_activation",
+      "id": "review_to_claim_admission_manual_pilot_authorization_required",
+      "status": "installed_manual_exact_proposition_activation_required",
       "blocks_activation": true
     },
     {
-      "id": "user_claim_lifecycle_http_partial_candidate",
-      "status": "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation",
+      "id": "user_claim_lifecycle_authenticated_validation_pending",
+      "status": "installed_backend_deployed_authenticated_ui_validation_pending",
       "blocks_acceptance": true
     },
     {
-      "id": "governed_owner_activation_unverified",
-      "status": "content_free_verifier_candidate_pending_deploy_and_execution",
+      "id": "governed_owner_activation_refresh_required",
+      "status": "content_free_verifier_required_before_each_pilot",
       "blocks_acceptance": true
-    },
-    {
-      "id": "ordinary_log_raw_memory_isolation_candidate_pending_deploy",
-      "status": "candidate_pending_deploy",
-      "blocks_governed_claim": true
     }
   ],
   "source_components": [
@@ -89,31 +89,31 @@
       "component_id": "backend_api_routes",
       "path": "app.py",
       "sha256": "60a324100818ee9e8983df567d0d2e9296ab6056dce1a0c3502363a5cdcda363",
-      "classification": "mixed_candidate_ordinary_log_postgres_only"
+      "classification": "canonical_active_ordinary_log_postgresql_only_with_identity_card_compatibility"
     },
     {
       "component_id": "governed_response_route",
       "path": "rag_engine/resse_response_router.py",
       "sha256": "5caeba4edc71bf451f04a183aaa55afafd7c9d52ec363ab9d364ce51612142c5",
-      "classification": "canonical_active_owner_gated_postgres_revalidated_with_candidate_provenance"
+      "classification": "canonical_active_owner_gated_postgres_revalidated_with_bounded_provenance"
     },
     {
       "component_id": "governed_answer_provenance",
       "path": "rag_engine/memory_v1_answer_provenance_v1.py",
       "sha256": "85d94be79cde4d507e882edd8950b2e0440e9a0204cbb418402b6f35d51bc07a",
-      "classification": "canonical_candidate_bounded_model_exposure_not_semantic_use"
+      "classification": "canonical_active_bounded_model_exposure_not_semantic_use"
     },
     {
       "component_id": "governed_owner_activation_verifier",
       "path": "scripts/memory_v1_governed_activation_verifier_v1.py",
       "sha256": "9ca536ec081997eab48acdc184dd5ca0d6e11f0aaf1011db4a50ee4c9a9e252e",
-      "classification": "canonical_candidate_content_free_verifier"
+      "classification": "canonical_active_content_free_verifier"
     },
     {
       "component_id": "active_runtime_verifier",
       "path": "scripts/memory_v1_active_runtime_verifier_v1.py",
-      "sha256": "0351e92128df4f9bd3a84f7af39220e4abb1ae14b86ceda7ef52acc929b4bdb1",
-      "classification": "canonical_candidate_fail_closed_complete_path_verifier"
+      "sha256": "d616c6f506f8a67244e1d5bc591e0ffd9ad13f35344fa59368ba19519cfc6969",
+      "classification": "canonical_active_fail_closed_complete_path_verifier"
     },
     {
       "component_id": "governed_memory_provider",
@@ -152,6 +152,12 @@
       "classification": "canonical_inactive"
     },
     {
+      "component_id": "openai_provider_adapter",
+      "path": "rag_engine/memory_v1_openai_provider_adapter_v1.py",
+      "sha256": "1b8d9bcde91c031cb7c3a0dbc0427c32b08bcb6c42f6484f7990b999a7bae4de",
+      "classification": "canonical_inactive_provider_contract"
+    },
+    {
       "component_id": "openai_packet_router",
       "path": "scripts/memory_v1_openai_v5_2_packet_router_v1.py",
       "sha256": "e8f21fecd6e414c416a826ab40ec4cec544a435485db2e0aecf65ec031b49a81",
@@ -185,19 +191,19 @@
       "component_id": "openai_review_admission",
       "path": "rag_engine/memory_v1_openai_review_admission_v1.py",
       "sha256": "decb56d45fcd1fe2060d5b28607627d53d8b5f36449d039e39d841670afc379f",
-      "classification": "canonical_candidate_manual_admission"
+      "classification": "canonical_active_manual_admission"
     },
     {
       "component_id": "governed_claim_transition",
       "path": "rag_engine/memory_v1_governed_claim_transition_v1.py",
       "sha256": "65dd0ffa98dda6b7800fe5bd818f1679d831cb8a59d2a9bf94ccbd461af34a01",
-      "classification": "canonical_candidate_manual_claim_transition"
+      "classification": "canonical_active_manual_claim_transition"
     },
     {
       "component_id": "governed_claim_lifecycle_router",
       "path": "rag_engine/memory_v1_governed_claim_lifecycle_router_v1.py",
       "sha256": "3c5d3b6b91e30f1896499144fe443752dbbcd7ec27af3657ab27eb7b3b013e5c",
-      "classification": "canonical_candidate_owner_lifecycle_with_reviewed_correction"
+      "classification": "canonical_active_owner_lifecycle_with_reviewed_correction"
     },
     {
       "component_id": "projection_worker",
@@ -900,7 +906,7 @@
       },
       {
         "signature": "memory.claim_owner_v5_bounded_extraction_job_v1(uuid,uuid,text,text,integer,integer,text,text,text,integer,integer,integer)",
-        "sha256": "8d7e736f01863966e3b2a715eb6a928989cf77f17186e0a913494d8dafbdfe76",
+        "sha256": "f71bccae8e2496969daf06d4657bae71dae70630bcf9a302b033ddd91af2137e",
         "purpose": "eligibility_reservation_and_disposition"
       },
       {
@@ -1012,7 +1018,7 @@
       "stage": "eligibility_disposition",
       "producer": "contextual_intake",
       "consumer": "openai_extractor",
-      "status": "candidate_pending_install"
+      "status": "installed_inactive"
     },
     {
       "stage": "provider_extraction",
@@ -1030,37 +1036,37 @@
       "stage": "review_to_claim_admission",
       "producer": "postgresql_review_route",
       "consumer": "canonical_claim_and_outbox",
-      "status": "candidate_pending_install_and_manual_activation"
+      "status": "installed_manual_exact_proposition_activation_required"
     },
     {
       "stage": "derived_projection",
       "producer": "canonical_claim_and_outbox",
       "consumer": "qdrant_governed_claim_projection",
-      "status": "active_but_candidate_outbox_held"
+      "status": "active_outbox_held_for_manual_pilot"
     },
     {
       "stage": "chat_b_retrieval",
       "producer": "qdrant_candidate_ids",
       "consumer": "postgresql_revalidated_prompt_context",
-      "status": "source_wired_owner_activation_content_free_verifier_candidate"
+      "status": "source_wired_owner_activation_content_free_verification_required"
     },
     {
       "stage": "answer_binding",
       "producer": "postgresql_revalidated_prompt_context",
       "consumer": "final_answer_memory_binding_and_bounded_user_provenance",
-      "status": "candidate_provenance_pending_backend_deploy"
+      "status": "deployed_inactive_until_governed_memory_selected"
     },
     {
       "stage": "user_provenance_and_lifecycle",
       "producer": "final_answer_memory_binding",
       "consumer": "bounded_answer_model_exposure_provenance_and_inspect_correct_retract_semantic_delete",
-      "status": "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation"
+      "status": "installed_backend_deployed_authenticated_ui_validation_pending"
     }
   ],
   "compatibility_boundaries": [
     {
       "component": "backend_/log_raw_memory_qdrant_side_effect",
-      "classification": "candidate_removed_from_ordinary_log_pending_deploy",
+      "classification": "removed_from_ordinary_log_identity_bootstrap_only",
       "may_be_present_in_governed_prompt": false
     },
     {

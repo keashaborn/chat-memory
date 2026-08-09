@@ -196,6 +196,16 @@ class ProviderAdapterTests(unittest.TestCase):
             hashlib.sha256(source.encode("utf-8")).hexdigest(),
         )
 
+    def test_self_entity_contract_is_explicit_and_complete(self) -> None:
+        for required in (
+            "entity_type=self",
+            "mention_kind=self_reference",
+            "name_text=null",
+            "relationship_role=user:self",
+        ):
+            self.assertIn(required, EXTRACTION_INSTRUCTIONS)
+        self.assertIn("Do not use a relationship role", EXTRACTION_INSTRUCTIONS)
+
     def test_owner_changes_request_and_safety_bindings(self) -> None:
         source = "I prefer quiet mornings."
         transports = (RecordingTransport(), RecordingTransport())

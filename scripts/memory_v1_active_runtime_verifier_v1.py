@@ -22,7 +22,7 @@ CONTRACT_VERSION = "memory_v1_active_runtime_verifier_v1"
 MANIFEST_CONTRACT = "memory_v1_active_runtime_manifest_v1"
 BINDING_CONTRACT = "memory_v1_active_runtime_release_binding_v1"
 TARGET_ACTIVATION_STATE = (
-    "candidate_target_installed_inactive_with_compatibility_active"
+    "installed_inactive_with_compatibility_active"
 )
 DEFAULT_BINDING = Path(
     "/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json"
@@ -525,10 +525,9 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise RuntimeVerificationError("forced-RLS relation contract is invalid")
     blockers = manifest.get("blockers")
     required_blockers = {
-        "review_to_claim_admission_candidate_pending_install",
-        "user_claim_lifecycle_http_partial_candidate",
-        "governed_owner_activation_unverified",
-        "ordinary_log_raw_memory_isolation_candidate_pending_deploy",
+        "review_to_claim_admission_manual_pilot_authorization_required",
+        "user_claim_lifecycle_authenticated_validation_pending",
+        "governed_owner_activation_refresh_required",
     }
     if not isinstance(blockers, list):
         raise RuntimeVerificationError("runtime manifest blockers are invalid")
