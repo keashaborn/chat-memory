@@ -40,7 +40,7 @@ class MemoryV1MinimumUsefulProfileRoutingTests(unittest.TestCase):
                     query,
                     request_classification="GENERAL",
                 )
-                self.assertEqual(VERSION, "memory_intent_adapter_v16")
+                self.assertEqual(VERSION, "memory_intent_adapter_v17")
                 self.assertEqual(plan["domains"], ["self_identity"])
                 self.assertTrue(plan["routes"]["governed_claims"])
                 self.assertEqual(

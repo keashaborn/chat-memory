@@ -39,6 +39,22 @@ class StanceRecallRoutingTest(unittest.TestCase):
     def test_broad_opinion_recall_routes_to_reported_stances(self) -> None:
         self.assert_stance_route("What are some opinions I have shared?")
 
+    def test_position_told_to_assistant_routes_to_reported_stances(self) -> None:
+        self.assert_stance_route(
+            "What position have I told you I hold about who should control "
+            "what an AI remembers about me?"
+        )
+
+    def test_inflected_view_recall_routes_to_reported_stances(self) -> None:
+        self.assert_stance_route(
+            "What views have I expressed about AI memory?"
+        )
+
+    def test_my_position_recall_routes_to_reported_stances(self) -> None:
+        self.assert_stance_route(
+            "Do you remember my position on AI memory?"
+        )
+
     def test_fm_explicit_prior_stance_recall_remains_memory_eligible(self) -> None:
         self.assert_stance_route(
             "What have I said about how Fractal Monism can help people?",
@@ -70,6 +86,24 @@ class StanceRecallRoutingTest(unittest.TestCase):
         )
         self.assertEqual(plan["memory_intent"], "none")
         self.assertFalse(plan["claim_context"]["eligible"])
+
+    def test_general_stance_question_does_not_retrieve_owner_memory(self) -> None:
+        plan = classify_memory_intent(
+            "Who should control what an AI remembers?",
+            request_classification="GENERAL",
+        )
+        self.assertEqual(plan["memory_intent"], "none")
+        self.assertFalse(plan["direct_relevance"])
+        self.assertFalse(plan["routes"]["governed_claims"])
+
+    def test_unrelated_factual_question_does_not_retrieve_owner_memory(self) -> None:
+        plan = classify_memory_intent(
+            "What is the boiling point of water?",
+            request_classification="GENERAL",
+        )
+        self.assertEqual(plan["memory_intent"], "none")
+        self.assertFalse(plan["direct_relevance"])
+        self.assertFalse(plan["routes"]["governed_claims"])
 
     def test_technical_stance_question_remains_suppressed(self) -> None:
         context = classify_v5_shadow_context(

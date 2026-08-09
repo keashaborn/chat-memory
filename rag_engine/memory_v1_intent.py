@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict
 
 
-VERSION = "memory_intent_adapter_v16"
+VERSION = "memory_intent_adapter_v17"
 PROJECT_KEY = "verbal-sage"
 PROJECT_INTENTS = {
     "project_recall",
@@ -302,7 +302,14 @@ STANCE_RECALL_RE = re.compile(
     r"(?:beliefs?|opinions?|views?|positions?) i "
     r"(?:have )?(?:shared|stated|expressed|mentioned)|"
     r"what (?:beliefs?|opinions?|views?|positions?) "
-    r"(?:have|did) i (?:share|state|express|mention)|"
+    r"(?:have|did) i "
+    r"(?:share|shared|state|stated|express|expressed|mention|mentioned)|"
+    r"what (?:belief|opinion|view|position) "
+    r"have i told you i (?:hold|have|expressed|stated) (?:about|on)|"
+    r"what (?:is|was) my "
+    r"(?:belief|opinion|view|position) (?:about|on)|"
+    r"do you (?:know|remember) my "
+    r"(?:belief|opinion|view|position) (?:about|on)|"
     r"do you (?:know|remember) what i "
     r"(?:think|believe|said|have said|shared))\b"
 )

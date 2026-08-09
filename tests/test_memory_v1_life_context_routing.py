@@ -12,8 +12,8 @@ class MemoryV1LifeContextRoutingTests(unittest.TestCase):
         expected_predicates: list[str],
     ) -> dict[str, object]:
         plan = classify_memory_intent(query, request_classification="GENERAL")
-        self.assertEqual(plan["version"], "memory_intent_adapter_v16")
-        self.assertEqual(VERSION, "memory_intent_adapter_v16")
+        self.assertEqual(plan["version"], "memory_intent_adapter_v17")
+        self.assertEqual(VERSION, "memory_intent_adapter_v17")
         self.assertEqual(plan["memory_intent"], "personal_recall")
         self.assertEqual(plan["domains"], ["life_context"])
         self.assertTrue(plan["direct_relevance"])
