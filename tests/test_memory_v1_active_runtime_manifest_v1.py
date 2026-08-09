@@ -100,7 +100,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         blockers = {item["id"]: item for item in self.value["blockers"]}
         self.assertEqual(
             blockers["review_to_claim_admission_manual_pilot_authorization_required"]["status"],
-            "installed_manual_exact_proposition_activation_required",
+            "exact_item_release_and_projection_available_manual_pilot_required",
         )
         self.assertEqual(
             blockers["user_claim_lifecycle_authenticated_validation_pending"]["status"],
@@ -113,11 +113,11 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         handoffs = {item["stage"]: item for item in self.value["runtime_handoffs"]}
         self.assertEqual(
             handoffs["review_to_claim_admission"]["status"],
-            "installed_manual_exact_proposition_activation_required",
+            "installed_manual_exact_proposition_admission_available",
         )
         self.assertEqual(
             handoffs["derived_projection"]["status"],
-            "active_outbox_held_for_manual_pilot",
+            "active_exact_item_release_and_projection_available_manual_pilot_required",
         )
         self.assertEqual(
             handoffs["user_provenance_and_lifecycle"]["status"],
@@ -156,6 +156,8 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             "memory_v1_governed_claim_lifecycle_outbox_authority_v1",
             "memory_v1_governed_claim_transition_authority_v1",
             "memory_governed_claim_lifecycle_v1",
+            "memory_v1_projection_outbox_release_authority_v1",
+            "memory_projection_outbox_release_v1",
         ):
             self.assertEqual(
                 packages[migration_id]["installation_state"],
@@ -204,6 +206,10 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             components["active_runtime_verifier"]["classification"],
             "canonical_active_fail_closed_complete_path_verifier",
         )
+        self.assertEqual(
+            components["projection_core"]["classification"],
+            "canonical_active_exact_item_and_bounded_backlog_projection",
+        )
         functions = {
             item["signature"]: item["sha256"]
             for item in self.value["catalog_contract"]["functions"]
@@ -227,6 +233,8 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         for signature in (
             "memory.read_owner_governed_claim_lifecycle_v1(integer)",
             "memory.retract_owner_governed_claim_v1(uuid,uuid,uuid,integer,text,text)",
+            "memory.release_owner_projection_outbox_v1(uuid,uuid,uuid,text,text,text)",
+            "memory.release_owner_projection_outbox_write_v1(uuid,uuid,uuid,text)",
         ):
             self.assertIn(signature, functions)
         self.assertGreaterEqual(

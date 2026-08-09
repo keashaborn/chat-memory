@@ -497,6 +497,87 @@ async def claim_projection_jobs(
     ]
 
 
+async def claim_exact_projection_job(
+    conn: asyncpg.Connection,
+    actor_user_id: str | uuid.UUID,
+    *,
+    outbox_id: str | uuid.UUID,
+    claim_id: str | uuid.UUID,
+    expected_payload_sha256: str,
+    worker_id: str,
+    lease_seconds: int = 600,
+    max_attempts: int = 8,
+) -> Optional[ProjectionJob]:
+    """Claim one hash-bound outbox item without selecting from the backlog."""
+    try:
+        actor = actor_uuid(actor_user_id)
+        exact_outbox_id = uuid.UUID(str(outbox_id))
+        exact_claim_id = uuid.UUID(str(claim_id))
+    except (InvalidActor, ValueError, TypeError, AttributeError) as exc:
+        raise ProjectionError("exact projection identifiers are invalid") from exc
+    expected_hash = str(expected_payload_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise ProjectionError("expected_payload_sha256 is malformed")
+    if not 1 <= int(max_attempts) <= 50:
+        raise ProjectionError("max_attempts must be between 1 and 50")
+    worker = " ".join(str(worker_id or "").split()).strip()
+    if not worker or len(worker) > 200:
+        raise ProjectionError("worker_id must contain between 1 and 200 characters")
+    if not 30 <= int(lease_seconds) <= 3600:
+        raise ProjectionError("lease_seconds must be between 30 and 3600")
+    async with conn.transaction():
+        await _set_actor(conn, actor)
+        row = await conn.fetchrow(
+            """
+            UPDATE memory.projection_outbox AS outbox
+            SET status='processing'::memory.outbox_status,
+                attempts=outbox.attempts + 1,
+                last_error=NULL,
+                lease_token=gen_random_uuid(),
+                lease_expires_at=clock_timestamp() + make_interval(secs => $6),
+                worker_id=$5,
+                updated_at=clock_timestamp()
+            WHERE outbox.owner_user_id=$1
+              AND outbox.outbox_id=$2
+              AND outbox.aggregate_type='claim'
+              AND outbox.aggregate_id=$3
+              AND outbox.operation='upsert'
+              AND outbox.attempts < $7
+              AND outbox.status='pending'
+              AND outbox.available_at <= clock_timestamp()
+              AND outbox.lease_token IS NULL
+              AND outbox.lease_expires_at IS NULL
+              AND outbox.worker_id IS NULL
+              AND memory.v5_digest_text(
+                    memory.v5_canonical_json_text(outbox.payload)
+                  )=$4
+            RETURNING outbox.outbox_id, outbox.aggregate_id,
+                      outbox.operation, outbox.payload, outbox.attempts,
+                      outbox.lease_token, outbox.worker_id,
+                      outbox.lease_expires_at
+            """,
+            actor,
+            exact_outbox_id,
+            exact_claim_id,
+            expected_hash,
+            worker,
+            int(lease_seconds),
+            int(max_attempts),
+        )
+    if row is None:
+        return None
+    return ProjectionJob(
+        outbox_id=uuid.UUID(str(row["outbox_id"])),
+        claim_id=uuid.UUID(str(row["aggregate_id"])),
+        operation=str(row["operation"]),
+        payload=_json_object(row["payload"], "outbox payload"),
+        attempts=int(row["attempts"]),
+        lease_token=uuid.UUID(str(row["lease_token"])),
+        worker_id=str(row["worker_id"]),
+        lease_expires_at=row["lease_expires_at"],
+    )
+
+
 async def _claim_snapshot(
     conn: asyncpg.Connection, actor: uuid.UUID, claim_id: uuid.UUID
 ) -> Optional[Dict[str, Any]]:
@@ -617,26 +698,14 @@ async def _embedding(
     return result
 
 
-async def process_owner_projection_outbox(
+async def _process_projection_jobs(
     conn: asyncpg.Connection,
-    actor_user_id: str | uuid.UUID,
+    actor: uuid.UUID,
+    jobs: Sequence[ProjectionJob],
     *,
     index: ClaimVectorIndex,
     embedder: Callable[[str], Sequence[float] | Awaitable[Sequence[float]]],
-    worker_id: str,
-    lease_seconds: int = 600,
-    limit: int = 25,
-    max_attempts: int = 8,
 ) -> Dict[str, Any]:
-    actor = actor_uuid(actor_user_id)
-    jobs = await claim_projection_jobs(
-        conn,
-        actor,
-        worker_id=worker_id,
-        lease_seconds=lease_seconds,
-        limit=limit,
-        max_attempts=max_attempts,
-    )
     result = {"claimed": len(jobs), "upserted": 0, "deleted": 0, "errors": 0, "stale": 0}
     for job in jobs:
         try:
@@ -657,9 +726,6 @@ async def process_owner_projection_outbox(
             if await _finish_job(conn, actor, job):
                 result[action] += 1
             else:
-                # A newer lease may already have completed before this stale
-                # worker's external write. Requeue the newer payload so Qdrant
-                # converges instead of leaving the stale write as final state.
                 await _repair_after_stale_external_write(conn, actor, job)
                 result["stale"] += 1
         except Exception as exc:  # Worker records and retries individual failures.
@@ -668,3 +734,65 @@ async def process_owner_projection_outbox(
             else:
                 result["stale"] += 1
     return result
+
+
+async def process_exact_owner_projection_outbox(
+    conn: asyncpg.Connection,
+    actor_user_id: str | uuid.UUID,
+    *,
+    outbox_id: str | uuid.UUID,
+    claim_id: str | uuid.UUID,
+    expected_payload_sha256: str,
+    index: ClaimVectorIndex,
+    embedder: Callable[[str], Sequence[float] | Awaitable[Sequence[float]]],
+    worker_id: str,
+    lease_seconds: int = 600,
+    max_attempts: int = 8,
+) -> Dict[str, Any]:
+    actor = actor_uuid(actor_user_id)
+    job = await claim_exact_projection_job(
+        conn,
+        actor,
+        outbox_id=outbox_id,
+        claim_id=claim_id,
+        expected_payload_sha256=expected_payload_sha256,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        max_attempts=max_attempts,
+    )
+    return await _process_projection_jobs(
+        conn,
+        actor,
+        [] if job is None else [job],
+        index=index,
+        embedder=embedder,
+    )
+
+
+async def process_owner_projection_outbox(
+    conn: asyncpg.Connection,
+    actor_user_id: str | uuid.UUID,
+    *,
+    index: ClaimVectorIndex,
+    embedder: Callable[[str], Sequence[float] | Awaitable[Sequence[float]]],
+    worker_id: str,
+    lease_seconds: int = 600,
+    limit: int = 25,
+    max_attempts: int = 8,
+) -> Dict[str, Any]:
+    actor = actor_uuid(actor_user_id)
+    jobs = await claim_projection_jobs(
+        conn,
+        actor,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        limit=limit,
+        max_attempts=max_attempts,
+    )
+    return await _process_projection_jobs(
+        conn,
+        actor,
+        jobs,
+        index=index,
+        embedder=embedder,
+    )

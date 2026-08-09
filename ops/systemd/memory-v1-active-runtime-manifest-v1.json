@@ -56,6 +56,16 @@
       "installation_state": "installed_definition_verified"
     },
     {
+      "migration_id": "memory_v1_projection_outbox_release_authority_v1",
+      "package_sha256": "d5c48fb050fc964ce7f93cf76af1110e2f8b981d33e5a5e82c9a48f1000916c1",
+      "installation_state": "installed_definition_verified"
+    },
+    {
+      "migration_id": "memory_projection_outbox_release_v1",
+      "package_sha256": "5e8c5cb0e5dff5f11960d17447cce7a0f4aa17a98eeb001bc306045f7b0a15a1",
+      "installation_state": "installed_definition_verified"
+    },
+    {
       "migration_id": "memory_openai_review_reference_authority_v3",
       "package_sha256": "3db9290d91e04ef689794e4a86ca276af23d81f0a410cea8d3ea4188c2f223aa",
       "installation_state": "installed_definition_verified"
@@ -75,7 +85,7 @@
   "blockers": [
     {
       "id": "review_to_claim_admission_manual_pilot_authorization_required",
-      "status": "installed_manual_exact_proposition_activation_required",
+      "status": "exact_item_release_and_projection_available_manual_pilot_required",
       "blocks_activation": true
     },
     {
@@ -227,6 +237,12 @@
       "path": "scripts/memory_v1_projection_worker.py",
       "sha256": "a38bc9d4433e57480f3ca8a4f0019a37c3699c7186177e8c172cfe0902feb659",
       "classification": "canonical_active_derived_projection"
+    },
+    {
+      "component_id": "projection_core",
+      "path": "rag_engine/memory_v1_projection.py",
+      "sha256": "704c5cf297f8cc2f61fa8c2a37686619d3dd4d73052f67047fc51f3ae38267b2",
+      "classification": "canonical_active_exact_item_and_bounded_backlog_projection"
     },
     {
       "component_id": "deferred_reconciliation",
@@ -982,6 +998,16 @@
         "purpose": "manual_claim_plan"
       },
       {
+        "signature": "memory.release_owner_projection_outbox_v1(uuid,uuid,uuid,text,text,text)",
+        "sha256": "5ae7d24b93dc32f6b80b6ae6dc915926be2a851343bdea933a6d02aa8da8c44b",
+        "purpose": "exact_owner_projection_outbox_release"
+      },
+      {
+        "signature": "memory.release_owner_projection_outbox_write_v1(uuid,uuid,uuid,text)",
+        "sha256": "7f7ce305f2fcca0d748d668f56876bf17c1f944842e6cf161d49e4d6487bc015",
+        "purpose": "internal_exact_projection_outbox_state_transition"
+      },
+      {
         "signature": "memory.read_governed_claims_v2(uuid[])",
         "sha256": "2b3a85e3ff6e73389b2ae70685cf4dd52fb3fd1ffb8d7bad35039a57471931a5",
         "purpose": "postgres_revalidation"
@@ -1053,13 +1079,13 @@
       "stage": "review_to_claim_admission",
       "producer": "postgresql_review_route",
       "consumer": "canonical_claim_and_outbox",
-      "status": "installed_manual_exact_proposition_activation_required"
+      "status": "installed_manual_exact_proposition_admission_available"
     },
     {
       "stage": "derived_projection",
       "producer": "canonical_claim_and_outbox",
       "consumer": "qdrant_governed_claim_projection",
-      "status": "active_outbox_held_for_manual_pilot"
+      "status": "active_exact_item_release_and_projection_available_manual_pilot_required"
     },
     {
       "stage": "chat_b_retrieval",
