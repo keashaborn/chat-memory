@@ -112,7 +112,7 @@
     {
       "component_id": "active_runtime_verifier",
       "path": "scripts/memory_v1_active_runtime_verifier_v1.py",
-      "sha256": "6ffcba60e59a88d34a17518d48165de71b1bb0d6b1065a3005f772b1e22a3832",
+      "sha256": "77d5628e4a288c91ef32199a5376304deadfd700c9200a12946812269d100af9",
       "classification": "canonical_active_fail_closed_complete_path_verifier"
     },
     {

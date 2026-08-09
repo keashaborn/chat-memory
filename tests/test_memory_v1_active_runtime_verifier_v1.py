@@ -42,6 +42,9 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
             units[item["name"]] = copy.deepcopy(
                 item["expected"]["installed_inactive"]
             )
+            units[item["name"]]["fragment_path"] = (
+                f"/etc/systemd/system/{item['name']}"
+            )
         function_hashes = {
             item["signature"]: item["sha256"]
             for item in self.manifest["catalog_contract"]["functions"]

@@ -876,7 +876,10 @@ def verify_snapshot(
     for item in manifest["systemd_units"]:
         name = item["name"]
         state_value = units.get(name)
-        if state_value != item["expected"][phase]:
+        required_state = item["expected"][phase]
+        if not isinstance(state_value, dict) or {
+            key: state_value.get(key) for key in required_state
+        } != required_state:
             raise RuntimeVerificationError(f"{name} state does not match policy")
         if installed_hashes.get(name) != item["installed_sha256"]:
             raise RuntimeVerificationError(f"{name} installed hash does not match")
