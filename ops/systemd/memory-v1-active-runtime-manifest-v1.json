@@ -154,7 +154,13 @@
     {
       "component_id": "openai_provider_adapter",
       "path": "rag_engine/memory_v1_openai_provider_adapter_v1.py",
-      "sha256": "3e80191f88ddd03e514c199d439f464b447d3c39c50f4e58fbc4f17486370e17",
+      "sha256": "8d3af15c5b64adf9755d7f52a34d6ffaa82099314f1980752184dfe70a216183",
+      "classification": "canonical_inactive_provider_contract"
+    },
+    {
+      "component_id": "openai_v5_2_semantic_tasks",
+      "path": "rag_engine/memory_v1_openai_v5_2_semantic_tasks_v1.py",
+      "sha256": "c92c77efbb45a51d4387e2ab561e740e236806b654bb19598e872a31c37ad916",
       "classification": "canonical_inactive_provider_contract"
     },
     {
