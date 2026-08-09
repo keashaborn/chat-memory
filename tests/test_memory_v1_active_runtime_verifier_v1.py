@@ -125,7 +125,7 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
         self.assertTrue(report["catalog_matches_manifest"])
         self.assertTrue(report["successor_exclusivity_verified"])
         self.assertEqual(report["installed_memory_unit_count"], 39)
-        self.assertEqual(report["blocker_count"], 3)
+        self.assertEqual(report["blocker_count"], 1)
         self.assertEqual(report["provider_calls"], 0)
         self.assertIsNotNone(report["binding_sha256"])
 

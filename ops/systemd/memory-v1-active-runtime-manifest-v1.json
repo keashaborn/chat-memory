@@ -84,18 +84,8 @@
   },
   "blockers": [
     {
-      "id": "review_to_claim_admission_manual_pilot_authorization_required",
-      "status": "exact_item_release_and_projection_available_manual_pilot_required",
-      "blocks_activation": true
-    },
-    {
       "id": "user_claim_lifecycle_authenticated_validation_pending",
       "status": "installed_backend_deployed_authenticated_ui_validation_pending",
-      "blocks_acceptance": true
-    },
-    {
-      "id": "governed_owner_activation_refresh_required",
-      "status": "content_free_verifier_required_before_each_pilot",
       "blocks_acceptance": true
     }
   ],
@@ -127,7 +117,7 @@
     {
       "component_id": "active_runtime_verifier",
       "path": "scripts/memory_v1_active_runtime_verifier_v1.py",
-      "sha256": "77d5628e4a288c91ef32199a5376304deadfd700c9200a12946812269d100af9",
+      "sha256": "e98feecdc599d16d69e2caf32d0e527d349042a8b14b76b4e1f72fcd3b36cbf6",
       "classification": "canonical_active_fail_closed_complete_path_verifier"
     },
     {
@@ -135,6 +125,12 @@
       "path": "rag_engine/governed_memory_provider_v1.py",
       "sha256": "ab3abb60a9ca9bc8a37d7b009c227fc6ffb95aba4f9dc830ba002c005e37c162",
       "classification": "canonical_active_postgres_revalidated"
+    },
+    {
+      "component_id": "governed_memory_intent_adapter",
+      "path": "rag_engine/memory_v1_intent.py",
+      "sha256": "f4cea61fc4d879ff8f608ef87aab7ac1e7b7ae5370fe8632a4cdc70d2ce75d09",
+      "classification": "canonical_active_owner_recall_gated_predicate_bounded"
     },
     {
       "component_id": "governed_postgres_loader",
@@ -1085,7 +1081,7 @@
       "stage": "derived_projection",
       "producer": "canonical_claim_and_outbox",
       "consumer": "qdrant_governed_claim_projection",
-      "status": "active_exact_item_release_and_projection_available_manual_pilot_required"
+      "status": "active_exact_item_release_and_projection_pilot_passed"
     },
     {
       "stage": "chat_b_retrieval",
@@ -1097,7 +1093,7 @@
       "stage": "answer_binding",
       "producer": "postgresql_revalidated_prompt_context",
       "consumer": "final_answer_memory_binding_and_bounded_user_provenance",
-      "status": "deployed_inactive_until_governed_memory_selected"
+      "status": "live_provider_backed_exact_claim_exposed_pilot_passed"
     },
     {
       "stage": "user_provenance_and_lifecycle",

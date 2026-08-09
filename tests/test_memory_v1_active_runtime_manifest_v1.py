@@ -96,19 +96,19 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             self.assertEqual(expected["enabled_state"], "enabled")
             self.assertEqual(expected["active_state"], "active")
 
-    def test_manual_pilot_and_authenticated_validation_gates_are_first_class(self) -> None:
+    def test_completed_pilot_and_remaining_authenticated_gate_are_first_class(self) -> None:
         blockers = {item["id"]: item for item in self.value["blockers"]}
-        self.assertEqual(
-            blockers["review_to_claim_admission_manual_pilot_authorization_required"]["status"],
-            "exact_item_release_and_projection_available_manual_pilot_required",
+        self.assertNotIn(
+            "review_to_claim_admission_manual_pilot_authorization_required",
+            blockers,
         )
         self.assertEqual(
             blockers["user_claim_lifecycle_authenticated_validation_pending"]["status"],
             "installed_backend_deployed_authenticated_ui_validation_pending",
         )
-        self.assertEqual(
-            blockers["governed_owner_activation_refresh_required"]["status"],
-            "content_free_verifier_required_before_each_pilot",
+        self.assertNotIn(
+            "governed_owner_activation_refresh_required",
+            blockers,
         )
         handoffs = {item["stage"]: item for item in self.value["runtime_handoffs"]}
         self.assertEqual(
@@ -117,7 +117,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             handoffs["derived_projection"]["status"],
-            "active_exact_item_release_and_projection_available_manual_pilot_required",
+            "active_exact_item_release_and_projection_pilot_passed",
         )
         self.assertEqual(
             handoffs["user_provenance_and_lifecycle"]["status"],
@@ -125,7 +125,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             handoffs["answer_binding"]["status"],
-            "deployed_inactive_until_governed_memory_selected",
+            "live_provider_backed_exact_claim_exposed_pilot_passed",
         )
         raw = {
             item["component"]: item for item in self.value["compatibility_boundaries"]
@@ -181,6 +181,10 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             components["openai_provider_adapter"]["classification"],
             "canonical_inactive_provider_contract",
+        )
+        self.assertEqual(
+            components["governed_memory_intent_adapter"]["classification"],
+            "canonical_active_owner_recall_gated_predicate_bounded",
         )
         self.assertEqual(
             components["openai_packet_review_builder"]["classification"],

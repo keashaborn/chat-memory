@@ -571,9 +571,7 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise RuntimeVerificationError("forced-RLS relation contract is invalid")
     blockers = manifest.get("blockers")
     required_blockers = {
-        "review_to_claim_admission_manual_pilot_authorization_required",
         "user_claim_lifecycle_authenticated_validation_pending",
-        "governed_owner_activation_refresh_required",
     }
     if not isinstance(blockers, list):
         raise RuntimeVerificationError("runtime manifest blockers are invalid")
