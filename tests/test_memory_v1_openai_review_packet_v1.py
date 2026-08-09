@@ -71,6 +71,8 @@ class OpenAIPacketReviewTests(unittest.TestCase):
         self.assertIn("SELECT set_config('app.user_id',$1,true)", source)
         self.assertIn("plan_owner_v5_2_exact_packet_route_v1", source)
         self.assertNotIn("FROM memory.relational_stage_batch", source)
+        self.assertIn("evidence.external_id AS evidence_external_id", source)
+        self.assertNotIn("ELSE evidence.evidence_id::text", source)
         self.assertNotIn("read_owner_v5_openai_packet_review_v1", source)
 
     def test_exact_route_preflight_is_required(self) -> None:

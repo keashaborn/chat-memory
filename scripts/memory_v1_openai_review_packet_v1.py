@@ -194,12 +194,7 @@ async def build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any
                     AS job_lease_present,
                   (job.last_error IS NOT NULL) AS job_error_present,
                   evidence.source_system AS evidence_source_system,
-                  CASE
-                    WHEN evidence.external_id ~*
-                      '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                      THEN lower(evidence.external_id)
-                    ELSE evidence.evidence_id::text
-                  END AS evidence_external_id,
+                  evidence.external_id AS evidence_external_id,
                   evidence.content AS evidence_content,
                   evidence.content_sha256 AS evidence_authority_sha256,
                   evidence.status::text AS evidence_status,

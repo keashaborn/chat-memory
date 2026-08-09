@@ -172,7 +172,7 @@
     {
       "component_id": "openai_packet_review_builder",
       "path": "scripts/memory_v1_openai_review_packet_v1.py",
-      "sha256": "f5abed2c502bbafd60e7b1ea692ccdae9caf1e67629bb48f89039cd8e36d6488",
+      "sha256": "45ed74f6cbeb8c30c93e34834576e314f4d390419bd771d9f57f6ed6391ee596",
       "classification": "canonical_inactive_exact_route_authorized_reader"
     },
     {
