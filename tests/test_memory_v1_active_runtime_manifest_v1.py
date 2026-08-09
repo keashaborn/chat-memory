@@ -152,6 +152,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             "memory_openai_eligibility_disposition_v2",
             "memory_v1_openai_review_admission_authority_v1",
             "memory_openai_review_admission_authority_v1",
+            "memory_openai_review_reference_authority_v3",
             "memory_v1_governed_claim_lifecycle_outbox_authority_v1",
             "memory_v1_governed_claim_transition_authority_v1",
             "memory_governed_claim_lifecycle_v1",
