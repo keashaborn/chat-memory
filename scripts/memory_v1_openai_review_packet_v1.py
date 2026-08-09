@@ -90,6 +90,19 @@ def openai_model_call_provenance_valid(
     return local_model_calls == 0 and external_model_calls == 1
 
 
+def validate_exact_route_preflight(
+    rows: list[dict[str, Any]], *, packet_id: uuid.UUID
+) -> None:
+    if (
+        len(rows) != 1
+        or uuid.UUID(str(rows[0].get("packet_id"))) != packet_id
+        or rows[0].get("route") != "manual_review_artifact_ready"
+    ):
+        raise OpenAIPacketReviewError(
+            "OpenAI packet is not eligible for exact review routing"
+        )
+
+
 def validate_openai_row(row: dict[str, Any], packet: dict[str, Any]) -> None:
     hash_fields = (
         "evidence_content_sha256",
@@ -163,6 +176,13 @@ async def build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any
             raise OpenAIPacketReviewError("review requires a brains_app session")
         async with conn.transaction(isolation="repeatable_read", readonly=True):
             await conn.execute("SELECT set_config('app.user_id',$1,true)", str(owner))
+            route_rows = await conn.fetch(
+                "SELECT * FROM memory.plan_owner_v5_2_exact_packet_route_v1($1)",
+                packet_id,
+            )
+            validate_exact_route_preflight(
+                [dict(route_row) for route_row in route_rows], packet_id=packet_id
+            )
             rows = await conn.fetch(
                 """
                 SELECT
@@ -188,20 +208,8 @@ async def build(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any
                       packet.normalized_packet::text,'UTF8'
                     ),'sha256'),'hex')=packet.packet_storage_sha256
                   ) AS storage_integrity_verified,
-                  (
-                    SELECT count(*)
-                    FROM memory.relational_stage_batch AS stage
-                    WHERE stage.owner_user_id=packet.owner_user_id
-                      AND stage.evidence_id=packet.evidence_id
-                      AND stage.extraction_packet_sha256=
-                        packet.validator_packet_sha256
-                  ) AS exact_stage_batch_count,
-                  (
-                    SELECT count(*)
-                    FROM memory.relational_stage_batch AS stage
-                    WHERE stage.owner_user_id=packet.owner_user_id
-                      AND stage.evidence_id=packet.evidence_id
-                  ) AS evidence_stage_batch_count
+                  0::bigint AS exact_stage_batch_count,
+                  0::bigint AS evidence_stage_batch_count
                 FROM memory.evidence_extraction_packet_v5 AS packet
                 JOIN memory.evidence_extraction_job AS job
                   ON job.owner_user_id=packet.owner_user_id

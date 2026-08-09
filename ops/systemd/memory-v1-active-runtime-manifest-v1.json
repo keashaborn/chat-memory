@@ -170,6 +170,12 @@
       "classification": "canonical_inactive"
     },
     {
+      "component_id": "openai_packet_review_builder",
+      "path": "scripts/memory_v1_openai_review_packet_v1.py",
+      "sha256": "f5abed2c502bbafd60e7b1ea692ccdae9caf1e67629bb48f89039cd8e36d6488",
+      "classification": "canonical_inactive_exact_route_authorized_reader"
+    },
+    {
       "component_id": "local_packet_router",
       "path": "scripts/memory_v1_v5_2_local_packet_router.py",
       "sha256": "d56065171cb1ccf4059409743d7cbb29bb6182012275fb19c33f5a01c09a533d",

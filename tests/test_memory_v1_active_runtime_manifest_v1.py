@@ -180,6 +180,14 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             "canonical_inactive_provider_contract",
         )
         self.assertEqual(
+            components["openai_packet_review_builder"]["classification"],
+            "canonical_inactive_exact_route_authorized_reader",
+        )
+        self.assertEqual(
+            components["openai_packet_review_builder"]["path"],
+            "scripts/memory_v1_openai_review_packet_v1.py",
+        )
+        self.assertEqual(
             components["governed_response_route"]["path"],
             "rag_engine/resse_response_router.py",
         )

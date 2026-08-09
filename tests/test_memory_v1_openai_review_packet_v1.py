@@ -10,6 +10,7 @@ from scripts.memory_v1_openai_review_packet_v1 import (
     EXPECTED_PROVIDER_VERSION,
     OpenAIPacketReviewError,
     openai_model_call_provenance_valid,
+    validate_exact_route_preflight,
     validate_openai_row,
 )
 from scripts.memory_v1_relational_extraction_v5_provider import canonical_sha256
@@ -17,6 +18,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import canonical_sha256
 
 SHA = hashlib.sha256(b"fixture").hexdigest()
 JOB_ID = uuid.UUID("00000000-0000-4000-8000-000000000010")
+PACKET_ID = uuid.UUID("00000000-0000-4000-8000-000000000011")
 
 
 def packet() -> dict:
@@ -67,7 +69,24 @@ class OpenAIPacketReviewTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("FROM memory.evidence_extraction_packet_v5 AS packet", source)
         self.assertIn("SELECT set_config('app.user_id',$1,true)", source)
+        self.assertIn("plan_owner_v5_2_exact_packet_route_v1", source)
+        self.assertNotIn("FROM memory.relational_stage_batch", source)
         self.assertNotIn("read_owner_v5_openai_packet_review_v1", source)
+
+    def test_exact_route_preflight_is_required(self) -> None:
+        validate_exact_route_preflight(
+            [{"packet_id": PACKET_ID, "route": "manual_review_artifact_ready"}],
+            packet_id=PACKET_ID,
+        )
+        for candidate in (
+            [],
+            [{"packet_id": uuid.uuid4(), "route": "manual_review_artifact_ready"}],
+            [{"packet_id": PACKET_ID, "route": "already_routed"}],
+        ):
+            with self.assertRaisesRegex(
+                OpenAIPacketReviewError, "not eligible for exact review routing"
+            ):
+                validate_exact_route_preflight(candidate, packet_id=PACKET_ID)
 
     def test_exact_one_external_call_is_required(self) -> None:
         self.assertTrue(
