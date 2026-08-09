@@ -365,6 +365,42 @@ def parse_environment_file(value: bytes) -> dict[str, str]:
     return result
 
 
+def parse_environment_value(value: bytes, *, key: str) -> str:
+    """Read one exact assignment without interpreting unrelated entries."""
+    if not ENV_KEY.fullmatch(key):
+        raise RuntimeVerificationError("environment lookup key is invalid")
+    try:
+        text = value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeVerificationError("catalog environment is not UTF-8") from exc
+    result: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        candidate, separator, raw_value = line.partition("=")
+        if candidate != key:
+            continue
+        if not separator or result is not None:
+            raise RuntimeVerificationError(
+                "catalog environment assignment is invalid"
+            )
+        try:
+            values = shlex.split(raw_value, comments=False, posix=True)
+        except ValueError as exc:
+            raise RuntimeVerificationError(
+                "catalog environment quoting is invalid"
+            ) from exc
+        if len(values) != 1 or not values[0]:
+            raise RuntimeVerificationError(
+                "catalog environment value is ambiguous"
+            )
+        result = values[0]
+    if result is None:
+        raise RuntimeVerificationError(f"{key} is absent")
+    return result
+
+
 def _manifest_catalog_functions(manifest: dict[str, Any]) -> list[dict[str, str]]:
     contract = manifest.get("catalog_contract")
     if not isinstance(contract, dict) or not isinstance(contract.get("functions"), list):
@@ -666,11 +702,14 @@ def probe_live(manifest: dict[str, Any], *, root: Path) -> dict[str, Any]:
         label="catalog environment",
         require_root_0600=True,
     )
-    catalog_environment = parse_environment_file(catalog_environment_value)
+    catalog_dsn = parse_environment_value(
+        catalog_environment_value,
+        key="POSTGRES_DSN",
+    )
     catalog = asyncio.run(
         probe_catalog(
             manifest,
-            dsn=catalog_environment.get("POSTGRES_DSN", ""),
+            dsn=catalog_dsn,
         )
     )
     config_state = {

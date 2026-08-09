@@ -14,6 +14,7 @@ from scripts.memory_v1_active_runtime_verifier_v1 import (
     decode_json,
     git_identity,
     parse_environment_file,
+    parse_environment_value,
     sha256_bytes,
     validate_manifest,
     verify_snapshot,
@@ -231,6 +232,24 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
             parse_environment_file(b"POSTGRES_DSN=one\nPOSTGRES_DSN=two\n")
         with self.assertRaises(RuntimeVerificationError):
             parse_environment_file(b"POSTGRES_DSN=$UNEXPANDED value\n")
+
+    def test_catalog_environment_reads_only_exact_dsn_assignment(self) -> None:
+        value = (
+            b"OTHER=unquoted value with spaces\n"
+            b'POSTGRES_DSN="postgresql://example/db"\n'
+            b"ANOTHER=$UNEXPANDED value\n"
+        )
+        self.assertEqual(
+            parse_environment_value(value, key="POSTGRES_DSN"),
+            "postgresql://example/db",
+        )
+        with self.assertRaises(RuntimeVerificationError):
+            parse_environment_value(
+                value + b"POSTGRES_DSN=postgresql://duplicate/db\n",
+                key="POSTGRES_DSN",
+            )
+        with self.assertRaises(RuntimeVerificationError):
+            parse_environment_value(value, key="MISSING_DSN")
 
     def test_git_identity_uses_exact_command_scoped_safe_directory(self) -> None:
         root = Path("/opt/chat-memory")
