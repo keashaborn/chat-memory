@@ -42,6 +42,7 @@ from scripts.memory_v1_relational_extraction_v5_provider import (
     ProviderEntityMention,
     ProviderObservation,
     ProviderPacket,
+    ProviderTemporal,
 )
 
 
@@ -99,6 +100,16 @@ class StrictFrozenModel(BaseModel):
     )
 
 
+class OpenAIProviderTemporalV1(ProviderTemporal):
+    """Provider-owned temporal value; trusted server anchoring is forbidden."""
+
+    anchored_to_source_time: Literal[False]
+
+
+class OpenAIProviderObservationV1(ProviderObservation):
+    temporal: OpenAIProviderTemporalV1
+
+
 class OpenAIExtractionResultV1(ProviderPacket):
     """ProviderPacket-compatible output with the transport's frozen contract."""
 
@@ -108,6 +119,8 @@ class OpenAIExtractionResultV1(ProviderPacket):
         frozen=True,
         allow_inf_nan=False,
     )
+
+    observations: list[OpenAIProviderObservationV1] = Field(max_length=32)
 
     @model_validator(mode="after")
     def _json_safe(self) -> "OpenAIExtractionResultV1":

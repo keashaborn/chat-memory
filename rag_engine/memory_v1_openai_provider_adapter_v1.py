@@ -136,8 +136,10 @@ Use the self entity only for first-person claims by the owner.
 For every self entity, use exactly entity_type=self, mention_kind=self_reference,
 name_text=null, and relationship_role=user:self. Do not use a relationship role from
 the asserted proposition as the self entity's relationship_role. Preserve uncertainty,
-negation, time, sensitivity, and relationship direction. Defer anything not directly
-supported. The only allowed predicates are: age.reported, credential.reported,
+negation, time, sensitivity, and relationship direction. Always emit
+anchored_to_source_time=false; only the trusted server normalizer may anchor temporal
+values to source time. Defer anything not directly supported. The only allowed
+predicates are: age.reported, credential.reported,
 health.user_reported_observation, health.user_reported_uncertain_label,
 identity.name, identity.name_canonical, life_event.died, occupation.works_as,
 pet.breed, pet.coat_color, pet.eye_color, pet.hearing_status, pet.sex,

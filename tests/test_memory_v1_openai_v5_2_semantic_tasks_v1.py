@@ -279,6 +279,27 @@ class SemanticTasksV1Test(unittest.TestCase):
                 self.assertTrue(_structured_schema_is_strict(schema))
                 self.assertNotIn('"default"', semantic.canonical_json(schema))
 
+    def test_extraction_schema_reserves_trusted_source_time_for_server(self) -> None:
+        schema = semantic.OpenAIExtractionResultV1.model_json_schema()
+        observation = schema["$defs"]["OpenAIProviderObservationV1"]
+        temporal_ref = observation["properties"]["temporal"]["$ref"]
+        temporal_name = temporal_ref.rsplit("/", 1)[-1]
+        anchored = schema["$defs"][temporal_name]["properties"][
+            "anchored_to_source_time"
+        ]
+        self.assertEqual(anchored["const"], False)
+
+        source = "I work at Acme."
+        packet = extraction_packet(source)
+        packet["observations"][0]["temporal"][
+            "anchored_to_source_time"
+        ] = True
+        with self.assertRaises(ValidationError):
+            semantic.OpenAIExtractionResultV1.model_validate(
+                packet,
+                strict=True,
+            )
+
     def test_output_and_canonical_result_envelopes_are_immutable(self) -> None:
         entity = semantic.parse_entity_validation_result_v1(
             {"decision": "supported", "confidence": "high"}

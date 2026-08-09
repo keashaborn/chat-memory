@@ -210,6 +210,16 @@ class ProviderAdapterTests(unittest.TestCase):
             self.assertIn(required, EXTRACTION_INSTRUCTIONS)
         self.assertIn("Do not use a relationship role", EXTRACTION_INSTRUCTIONS)
 
+    def test_trusted_source_time_is_reserved_for_server_normalization(self) -> None:
+        self.assertIn(
+            "anchored_to_source_time=false",
+            EXTRACTION_INSTRUCTIONS,
+        )
+        self.assertIn(
+            "trusted server normalizer may anchor temporal",
+            EXTRACTION_INSTRUCTIONS,
+        )
+
     def test_predicate_registry_guidance_is_exact_and_complete(self) -> None:
         registry_path = (
             Path(__file__).resolve().parents[1]
