@@ -148,13 +148,13 @@
     {
       "component_id": "openai_extraction_worker",
       "path": "scripts/memory_v1_openai_extraction_worker_v1.py",
-      "sha256": "7de3d6aa9580ded73bd51be8080982093ceb698e721ef11483cd95e60c374c72",
+      "sha256": "48929c365187d41dc29c69f4b5f4477de6f27d3148b5b7fccc8499f3bc026755",
       "classification": "canonical_inactive"
     },
     {
       "component_id": "openai_provider_adapter",
       "path": "rag_engine/memory_v1_openai_provider_adapter_v1.py",
-      "sha256": "1b8d9bcde91c031cb7c3a0dbc0427c32b08bcb6c42f6484f7990b999a7bae4de",
+      "sha256": "3e80191f88ddd03e514c199d439f464b447d3c39c50f4e58fbc4f17486370e17",
       "classification": "canonical_inactive_provider_contract"
     },
     {
