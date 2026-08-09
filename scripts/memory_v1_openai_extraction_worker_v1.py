@@ -25,6 +25,7 @@ from rag_engine.memory_v1_openai_postgres_authority_v1 import (
     PostgresProviderReservationV1,
 )
 from rag_engine.memory_v1_openai_provider_adapter_v1 import (
+    EXPECTED_PREDICATE_REGISTRY_SHA256,
     OpenAIV52ProviderAdapterV1,
     extraction_model_policy_v1,
     extraction_task_profile_v1,
@@ -87,7 +88,7 @@ MAX_JOBS = 1
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REGISTRY = REPOSITORY_ROOT / "specs/memory_v1_predicate_registry_v5_2.json"
 DEFAULT_SCHEMA = REPOSITORY_ROOT / "specs/memory_v1_relational_extraction_v5_2.schema.json"
-EXPECTED_REGISTRY_SHA256 = "e6ac5dfe7d7939aac23223ae76272b2e4f67777decde814d9bf0b8eee82b277e"
+EXPECTED_REGISTRY_SHA256 = EXPECTED_PREDICATE_REGISTRY_SHA256
 EXPECTED_SCHEMA_SHA256 = "21d0438d381715d7e2397564eb093364aee2149312b870caed6e0753a6cd31f5"
 REJECTED_PACKET_EVIDENCE_CONTRACT = (
     "memory_v1_rejected_provider_packet_evidence_v1"

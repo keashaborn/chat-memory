@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
+from pathlib import Path
 import unittest
 
 from rag_engine.memory_v1_openai_provider_adapter_v1 import (
+    ALLOWED_EXTRACTION_PREDICATES,
+    EXPECTED_PREDICATE_REGISTRY_SHA256,
     EXTRACTION_INSTRUCTIONS,
+    PREDICATE_REGISTRY_GUIDANCE_V1,
     OpenAIV52ProviderAdapterV1,
     OpenAIProviderAdapterError,
     extraction_model_policy_v1,
@@ -205,6 +209,61 @@ class ProviderAdapterTests(unittest.TestCase):
         ):
             self.assertIn(required, EXTRACTION_INSTRUCTIONS)
         self.assertIn("Do not use a relationship role", EXTRACTION_INSTRUCTIONS)
+
+    def test_predicate_registry_guidance_is_exact_and_complete(self) -> None:
+        registry_path = (
+            Path(__file__).resolve().parents[1]
+            / "specs/memory_v1_predicate_registry_v5_2.json"
+        )
+        registry_bytes = registry_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(registry_bytes).hexdigest(),
+            EXPECTED_PREDICATE_REGISTRY_SHA256,
+        )
+        registry = json.loads(registry_bytes)
+        guidance = json.loads(PREDICATE_REGISTRY_GUIDANCE_V1)
+        rules_by_predicate = {
+            rule["predicate"]: rule for rule in registry["predicates"]
+        }
+        expected_rules = {
+            predicate: rules_by_predicate[predicate]
+            for predicate in ALLOWED_EXTRACTION_PREDICATES
+        }
+        expected_contract_ids = sorted(
+            {rule["object_contract"] for rule in expected_rules.values()}
+        )
+        self.assertEqual(guidance["predicates"], expected_rules)
+        self.assertEqual(
+            guidance["object_contracts"],
+            {
+                contract_id: registry["object_contracts"][contract_id]
+                for contract_id in expected_contract_ids
+            },
+        )
+        self.assertEqual(
+            guidance["predicate_registry_sha256"],
+            EXPECTED_PREDICATE_REGISTRY_SHA256,
+        )
+        self.assertIn(PREDICATE_REGISTRY_GUIDANCE_V1, EXTRACTION_INSTRUCTIONS)
+
+    def test_response_preference_guidance_matches_validator_contract(self) -> None:
+        guidance = json.loads(PREDICATE_REGISTRY_GUIDANCE_V1)
+        rule = guidance["predicates"]["preference.response"]
+        contract = guidance["object_contracts"][rule["object_contract"]]
+        self.assertEqual(rule["subject_entity_types"], ["self"])
+        self.assertEqual(rule["projection_classes"], ["response_preference"])
+        self.assertEqual(rule["surface_policies"], ["zero_token_control_only"])
+        self.assertEqual(
+            rule["temporal_semantics"],
+            ["observation_time", "state_validity"],
+        )
+        self.assertEqual(contract["datatype"], "json")
+        self.assertEqual(contract["allowed_units"], [])
+        self.assertFalse(contract["approximate_allowed"])
+        self.assertEqual(
+            contract["value_schema"]["required"],
+            ["dimension", "value"],
+        )
 
     def test_owner_changes_request_and_safety_bindings(self) -> None:
         source = "I prefer quiet mornings."

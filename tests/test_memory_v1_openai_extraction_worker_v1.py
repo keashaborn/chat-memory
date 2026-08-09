@@ -17,6 +17,7 @@ from rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1 import (
     OpenAIExtractionResultV1,
 )
 from rag_engine.memory_v1_openai_provider_adapter_v1 import (
+    EXPECTED_PREDICATE_REGISTRY_SHA256,
     OpenAIV52ProviderAdapterV1,
     extraction_model_policy_v1,
     extraction_task_profile_v1,
@@ -1190,6 +1191,10 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(
             hashlib.sha256(DEFAULT_REGISTRY.read_bytes()).hexdigest(),
             EXPECTED_REGISTRY_SHA256,
+        )
+        self.assertEqual(
+            EXPECTED_REGISTRY_SHA256,
+            EXPECTED_PREDICATE_REGISTRY_SHA256,
         )
         self.assertEqual(
             hashlib.sha256(DEFAULT_SCHEMA.read_bytes()).hexdigest(),

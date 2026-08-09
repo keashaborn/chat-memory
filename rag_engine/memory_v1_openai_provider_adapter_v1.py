@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
+from pathlib import Path
 from typing import Any
 
 from rag_engine.memory_v1_openai_structured_transport_v1 import (
@@ -41,6 +43,87 @@ PIPELINE_VERSION = "memory_openai_bridge_v1"
 TASK_PROFILE_VERSION = "memory_extract_v1"
 MODEL_POLICY_VERSION = "memory_model_v1"
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+PREDICATE_REGISTRY_PATH = (
+    REPOSITORY_ROOT / "specs/memory_v1_predicate_registry_v5_2.json"
+)
+EXPECTED_PREDICATE_REGISTRY_SHA256 = (
+    "e6ac5dfe7d7939aac23223ae76272b2e4f67777decde814d9bf0b8eee82b277e"
+)
+ALLOWED_EXTRACTION_PREDICATES = (
+    "age.reported",
+    "credential.reported",
+    "health.user_reported_observation",
+    "health.user_reported_uncertain_label",
+    "identity.name",
+    "identity.name_canonical",
+    "life_event.died",
+    "occupation.works_as",
+    "pet.breed",
+    "pet.coat_color",
+    "pet.eye_color",
+    "pet.hearing_status",
+    "pet.sex",
+    "pet.species",
+    "pet.weight_reported",
+    "preference.life",
+    "preference.response",
+    "project.constraint",
+    "project.current_state",
+    "project.proposed_feature",
+    "project.requirement",
+    "relationship.has_pet",
+    "relationship.parent_of",
+    "relationship.sibling_of",
+    "residence.lives_at",
+)
+
+
+class OpenAIProviderAdapterError(RuntimeError):
+    pass
+
+
+def _predicate_registry_guidance_v1() -> str:
+    registry_bytes = PREDICATE_REGISTRY_PATH.read_bytes()
+    observed_sha256 = hashlib.sha256(registry_bytes).hexdigest()
+    if observed_sha256 != EXPECTED_PREDICATE_REGISTRY_SHA256:
+        raise OpenAIProviderAdapterError("predicate_registry_sha256_mismatch")
+    registry = json.loads(registry_bytes)
+    rules_by_predicate = {
+        rule["predicate"]: rule for rule in registry["predicates"]
+    }
+    missing = sorted(set(ALLOWED_EXTRACTION_PREDICATES) - rules_by_predicate.keys())
+    if missing:
+        raise OpenAIProviderAdapterError(
+            "predicate_registry_missing_allowed_predicate:" + ",".join(missing)
+        )
+    selected_rules = {
+        predicate: rules_by_predicate[predicate]
+        for predicate in ALLOWED_EXTRACTION_PREDICATES
+    }
+    referenced_contracts = sorted(
+        {rule["object_contract"] for rule in selected_rules.values()}
+    )
+    guidance = {
+        "contract_version": "memory_v1_openai_predicate_registry_guidance_v1",
+        "object_contracts": {
+            contract_id: registry["object_contracts"][contract_id]
+            for contract_id in referenced_contracts
+        },
+        "predicate_registry_sha256": observed_sha256,
+        "predicate_registry_version": registry["registry_version"],
+        "predicates": selected_rules,
+    }
+    return json.dumps(
+        guidance,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+PREDICATE_REGISTRY_GUIDANCE_V1 = _predicate_registry_guidance_v1()
+
 EXTRACTION_INSTRUCTIONS = """You are a constrained personal-memory extraction engine.
 Return only JSON matching the supplied schema. Use only the selected source spans in
 the input. Do not add world knowledge, answer questions, infer unstated facts, or
@@ -63,11 +146,15 @@ project.constraint, project.current_state, project.proposed_feature,
 project.requirement, relationship.has_pet, relationship.parent_of,
 relationship.sibling_of, and residence.lives_at. Defer unsupported predicates as
 unregistered_predicate. Empty arrays are correct when no supported personal claim
-remains."""
+remains. For each observation, look up its predicate in the exact machine-readable
+registry guidance below and obey every listed subject type, modality, projection
+class, surface policy, temporal semantic, sensitivity floor, and object contract.
+Literal objects must match datatype, unit, approximate, and value-schema constraints
+exactly. Entity objects must match the referenced entity contract. If a supported
+claim cannot satisfy its predicate rule exactly, defer it instead of guessing.
 
-
-class OpenAIProviderAdapterError(RuntimeError):
-    pass
+PREDICATE_REGISTRY_GUIDANCE_V1:
+""" + PREDICATE_REGISTRY_GUIDANCE_V1
 
 
 @dataclass(frozen=True)
