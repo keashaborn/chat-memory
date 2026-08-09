@@ -20,3 +20,13 @@ Nothing in this directory connects to production PostgreSQL or Qdrant. The
 only database executor is `tools/full_chain_harness.py`, which accepts a
 CI-only fixture and an absolute Docker executable and creates a labeled,
 resource-bounded, networkless disposable container.
+
+Function authority is split into two non-overlapping contracts. Existing
+functions may be changed only through `governed-function-migrations` and its
+replacement-only validator. New functions may be introduced only through
+`governed-function-creations`, the separate create-only registry, and
+`tools/governed_function_creation.py`. The create-only lane requires proven
+prior absence, exact `CREATE FUNCTION` bytes, a fixed SECURITY DEFINER search
+path, exact non-PUBLIC execute ACLs, forced-RLS dependencies, an exact-drop
+rollback, deterministic reapplication, and final restoration to absence.
+Neither lane can accept the other lane's operation.

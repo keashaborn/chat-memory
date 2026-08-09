@@ -303,11 +303,15 @@ FORBIDDEN_SQL = tuple(
         r"/\*",
     )
 )
-NARROW_INSERT_GRANT_RE = re.compile(
-    r"^GRANT (?:SELECT\s*,\s*INSERT|INSERT\s*,\s*SELECT|INSERT) "
+NARROW_INSERT_PRIVILEGE_RE = re.compile(
+    r"^(?:GRANT (?:SELECT\s*,\s*INSERT|INSERT\s*,\s*SELECT|INSERT) "
     r"ON (?:TABLE )?[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?"
     r"(?:\s*,\s*[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?)* "
-    r"TO [A-Z_][A-Z0-9_]*(?:\s*,\s*[A-Z_][A-Z0-9_]*)*$"
+    r"TO [A-Z_][A-Z0-9_]*(?:\s*,\s*[A-Z_][A-Z0-9_]*)*"
+    r"|REVOKE (?:SELECT\s*,\s*INSERT|INSERT\s*,\s*SELECT|INSERT) "
+    r"ON (?:TABLE )?[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?"
+    r"(?:\s*,\s*[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)?)* "
+    r"FROM [A-Z_][A-Z0-9_]*(?:\s*,\s*[A-Z_][A-Z0-9_]*)*)$"
 )
 FORWARD_PREFIXES = (
     "CREATE SCHEMA ",
@@ -352,11 +356,11 @@ def classify_sql(payload: bytes, action: str) -> tuple[str, ...]:
     allowed = FORWARD_PREFIXES if action == "forward" else ROLLBACK_PREFIXES
     for statement in statements:
         normalized = re.sub(r"\s+", " ", statement).strip().upper()
-        if re.search(r"\bINSERT\b", normalized) and not NARROW_INSERT_GRANT_RE.fullmatch(
+        if re.search(r"\bINSERT\b", normalized) and not NARROW_INSERT_PRIVILEGE_RE.fullmatch(
             normalized
         ):
             raise MigrationError(
-                action + " SQL uses INSERT outside a narrow table privilege grant"
+                action + " SQL uses INSERT outside a narrow table privilege statement"
             )
         if not normalized.startswith(allowed):
             raise MigrationError(action + " SQL statement is not allowlisted")

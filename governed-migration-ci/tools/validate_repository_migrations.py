@@ -20,6 +20,13 @@ from governed_function_migration import (
     validate_function_registry,
     validate_function_registry_append_only,
 )
+from governed_function_creation import (
+    LoadedFunctionCreationPackage,
+    load_function_creation_package,
+    parse_function_creation_registry,
+    validate_function_creation_registry,
+    validate_function_creation_registry_append_only,
+)
 from governed_migration import (
     MigrationError,
     canonical_bytes,
@@ -140,6 +147,51 @@ def function_governed_sources(
             if repository_relative in output:
                 raise MigrationError("governed function SQL source is referenced twice")
             output[repository_relative] = expected_hash
+    return output
+
+
+def function_creation_package_directories(repository: pathlib.Path) -> list[pathlib.Path]:
+    location = repository / "governed-function-creations"
+    if not location.exists():
+        return []
+    if location.is_symlink() or not location.is_dir():
+        raise MigrationError("governed function creation package root is unsafe")
+    output: list[pathlib.Path] = []
+    for child in sorted(location.iterdir(), key=lambda item: item.name):
+        if child.is_symlink() or not child.is_dir() or not (child / "package.json").is_file():
+            raise MigrationError("governed function creation package entry is unsafe")
+        output.append(child)
+    return output
+
+
+def function_creation_governed_sources(
+    repository: pathlib.Path,
+    packages: Iterable[LoadedFunctionCreationPackage],
+) -> dict[str, str]:
+    root = repository.resolve(strict=True)
+    output: dict[str, str] = {}
+    for package in packages:
+        for spec in package.functions:
+            for relative, expected_hash in (
+                (spec.forward_path, spec.forward_sha256),
+                (spec.rollback_path, spec.rollback_sha256),
+            ):
+                try:
+                    repository_relative = (
+                        (package.directory / relative)
+                        .resolve(strict=True)
+                        .relative_to(root)
+                        .as_posix()
+                    )
+                except ValueError as error:
+                    raise MigrationError(
+                        "governed function creation package is outside the repository"
+                    ) from error
+                if repository_relative in output:
+                    raise MigrationError(
+                        "governed function creation SQL source is referenced twice"
+                    )
+                output[repository_relative] = expected_hash
     return output
 
 
@@ -330,6 +382,37 @@ def main() -> int:
     )
     validate_function_registry(function_packages, function_registry)
     function_sources = function_governed_sources(repository, function_packages)
+    function_creation_packages = [
+        load_function_creation_package(directory, identity)
+        for directory in function_creation_package_directories(repository)
+    ]
+    function_creation_registry_path = (
+        root / "registry/governed-function-creations-v1.json"
+    )
+    function_creation_registry = parse_function_creation_registry(
+        function_creation_registry_path.read_bytes()
+    )
+    validate_function_creation_registry_append_only(
+        previous_optional_registry(
+            repository,
+            args.repository_commit,
+            "governed-migration-ci/registry/governed-function-creations-v1.json",
+            parse_function_creation_registry,
+            "function creation",
+        ),
+        function_creation_registry,
+    )
+    validate_function_creation_registry(
+        function_creation_packages,
+        function_creation_registry,
+    )
+    function_creation_sources = function_creation_governed_sources(
+        repository,
+        function_creation_packages,
+    )
+    if set(function_sources).intersection(function_creation_sources):
+        raise MigrationError("governed function SQL source belongs to multiple contracts")
+    governed_function_sources = {**function_sources, **function_creation_sources}
     external_registry = load_external_deployed_sql_registry(
         root / "registry/external-deployed-sql-v1.json"
     )
@@ -363,7 +446,7 @@ def main() -> int:
         current_legacy_sources=projected,
         external_deployed_sources=external_registry,
         legacy_path_aliases=legacy_alias_registry,
-        function_governed_sources=function_sources,
+        function_governed_sources=governed_function_sources,
     )
     if classifications != {"duplicated": 3, "source-only": 173, "unverifiable": 491}:
         raise MigrationError("legacy classifications changed")
@@ -392,6 +475,19 @@ def main() -> int:
             for package in sorted(function_packages, key=lambda item: item.migration_id)
         },
         "function_registry_sha256": sha256(function_registry_path.read_bytes()),
+        "function_creation_package_ids": sorted(
+            package.migration_id for package in function_creation_packages
+        ),
+        "function_creation_package_sha256": {
+            package.migration_id: package.package_sha256
+            for package in sorted(
+                function_creation_packages,
+                key=lambda item: item.migration_id,
+            )
+        },
+        "function_creation_registry_sha256": sha256(
+            function_creation_registry_path.read_bytes()
+        ),
         "status": "valid",
     }
     sys.stdout.buffer.write(canonical_bytes(report))

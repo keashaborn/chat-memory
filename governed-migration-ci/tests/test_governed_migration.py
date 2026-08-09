@@ -199,6 +199,23 @@ class SqlPolicyTest(unittest.TestCase):
             ("GRANT SELECT, INSERT ON TABLE protected TO reader",),
         )
 
+    def test_exact_narrow_insert_table_privilege_rollback_is_allowlisted(self) -> None:
+        statements = classify_sql(
+            b"REVOKE SELECT, INSERT ON TABLE protected FROM reader;\n",
+            "rollback",
+        )
+        self.assertEqual(
+            statements,
+            ("REVOKE SELECT, INSERT ON TABLE protected FROM reader",),
+        )
+
+    def test_malformed_insert_table_privilege_rollback_is_rejected(self) -> None:
+        with self.assertRaisesRegex(MigrationError, "narrow table privilege"):
+            classify_sql(
+                b"REVOKE SELECT, INSERT ON TABLE protected TO reader;\n",
+                "rollback",
+            )
+
     def test_sql_requires_final_newline(self) -> None:
         with self.assertRaisesRegex(MigrationError, "final newline"):
             classify_sql(b"CREATE TABLE x(y int);", "forward")

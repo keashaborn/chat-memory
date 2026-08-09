@@ -37,6 +37,9 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchProvenanceProviderV1,
 )
 from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
+from rag_engine.memory_v1_answer_provenance_v1 import (
+    build_governed_memory_answer_provenance_v1,
+)
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
 from rag_engine.response_composition_root_v0_2 import (
@@ -362,6 +365,9 @@ async def resse_response_query(
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
+            "memory_provenance": build_governed_memory_answer_provenance_v1(
+                finalized.memory_binding
+            ).model_dump(mode="json"),
             "runtime": (
                 "resse_response_v0_4" if lifeswitch_enabled else "resse_response_v0_2"
             ),

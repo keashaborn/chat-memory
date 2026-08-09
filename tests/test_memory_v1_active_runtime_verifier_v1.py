@@ -12,7 +12,9 @@ from scripts.memory_v1_active_runtime_verifier_v1 import (
     RuntimeVerificationError,
     decode_json,
     git_identity,
+    parse_environment_file,
     sha256_bytes,
+    validate_manifest,
     verify_snapshot,
 )
 
@@ -25,155 +27,185 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
     def setUp(self) -> None:
         self.manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.manifest_sha256 = sha256_bytes(MANIFEST.read_bytes())
-        source_hashes: dict[str, str] = {}
+        source_hashes = {
+            item["path"]: item["sha256"]
+            for item in self.manifest["source_components"]
+        }
+        unit_hashes: dict[str, str] = {}
         units: dict[str, dict[str, str]] = {}
-        sentinels: dict[str, str] = {}
-        for service in self.manifest["services"]:
-            source_hashes[service["unit"]] = service["source_sha256"]
-            source_hashes[service["timer"]] = service["timer_source_sha256"]
-            units[service["unit"]] = {
-                "active_state": "inactive",
-                "enabled_state": "not-found",
-                "fragment_path": "",
-                "load_state": "not-found",
-            }
-            units[service["timer"]] = {
-                "active_state": "inactive",
-                "enabled_state": "not-found",
-                "fragment_path": "",
-                "load_state": "not-found",
-            }
-            sentinels[service["timer_enable_sentinel"]] = "absent"
-        legacy = {
-            item["component"]: {
-                "active_state": item["required_activation_state"],
-                "enabled_state": item.get("required_enabled_state", "disabled"),
-                "fragment_path": f"/etc/systemd/system/{item['component']}",
-                "load_state": "loaded",
-            }
-            for item in self.manifest["legacy_exclusivity"]
-            if "required_activation_state" in item
+        for item in self.manifest["systemd_units"]:
+            if "source_path" in item:
+                source_hashes[item["source_path"]] = item["source_sha256"]
+            unit_hashes[item["name"]] = item["installed_sha256"]
+            units[item["name"]] = copy.deepcopy(
+                item["expected"]["installed_inactive"]
+            )
+        function_hashes = {
+            item["signature"]: item["sha256"]
+            for item in self.manifest["catalog_contract"]["functions"]
+        }
+        relation_states = {
+            name: {"forced_rls": True, "rls": True}
+            for name in self.manifest["catalog_contract"]["forced_rls_relations"]
         }
         self.snapshot = {
-            "config": {"state": "absent"},
-            "installed_unit_sha256": {},
-            "legacy_units": legacy,
-            "openai_sdk_version": self.manifest["verification"]["openai_sdk_version"],
+            "catalog": {
+                "actor_role": copy.deepcopy(
+                    self.manifest["catalog_contract"]["actor_role"]
+                ),
+                "function_sha256": function_hashes,
+                "relations": relation_states,
+            },
+            "config": {
+                "sha256": "d" * 64,
+                "state": "root_owned_0600_regular_single_link",
+                "size": 512,
+            },
+            "discovered_memory_units": copy.deepcopy(
+                self.manifest["exact_installed_memory_unit_set"]
+            ),
+            "installed_unit_sha256": unit_hashes,
+            "openai_sdk_version": self.manifest["verification"][
+                "openai_sdk_version"
+            ],
             "python_executable_sha256": "a" * 64,
             "repository": {
                 "commit": "b" * 40,
                 "tree": "c" * 40,
                 "tracked_clean": True,
             },
-            "sentinels": sentinels,
-            "source_unit_sha256": source_hashes,
+            "sentinels": {
+                item["path"]: item["expected"]["installed_inactive"]
+                for item in self.manifest["timer_sentinels"]
+            },
+            "source_sha256": source_hashes,
             "units": units,
         }
+        self.binding = {
+            "catalog_function_sha256": function_hashes,
+            "contract_version": BINDING_CONTRACT,
+            "manifest_sha256": self.manifest_sha256,
+            "openai_sdk_version": self.snapshot["openai_sdk_version"],
+            "phase": "installed_inactive",
+            "python_executable_sha256": self.snapshot[
+                "python_executable_sha256"
+            ],
+            "repository_commit": self.snapshot["repository"]["commit"],
+            "repository_tree": self.snapshot["repository"]["tree"],
+            "runtime_config_sha256": self.snapshot["config"]["sha256"],
+            "source_sha256": source_hashes,
+            "unit_sha256": unit_hashes,
+        }
 
-    def verify(self, snapshot: dict, *, phase: str, binding: dict | None = None) -> dict:
+    def verify(self, snapshot: dict, binding: dict | None = None) -> dict:
         return verify_snapshot(
             self.manifest,
             snapshot,
             manifest_sha256=self.manifest_sha256,
-            phase=phase,
-            binding=binding,
+            phase="installed_inactive",
+            binding=self.binding if binding is None else binding,
         )
 
-    def test_exact_preactivation_snapshot_passes_without_binding(self) -> None:
-        report = self.verify(self.snapshot, phase="preactivation")
+    def test_exact_complete_snapshot_and_binding_pass(self) -> None:
+        report = self.verify(self.snapshot)
         self.assertTrue(report["runtime_matches_manifest"])
-        self.assertTrue(report["legacy_exclusivity_verified"])
+        self.assertTrue(report["catalog_matches_manifest"])
+        self.assertTrue(report["successor_exclusivity_verified"])
+        self.assertEqual(report["installed_memory_unit_count"], 39)
+        self.assertGreaterEqual(report["blocker_count"], 4)
         self.assertEqual(report["provider_calls"], 0)
-        self.assertIsNone(report["binding_sha256"])
-
-    def test_preactivation_fails_closed_on_unit_sentinel_config_or_legacy_drift(self) -> None:
-        cases: list[dict] = []
-
-        active = copy.deepcopy(self.snapshot)
-        first_unit = self.manifest["services"][0]["unit"]
-        active["units"][first_unit]["active_state"] = "active"
-        cases.append(active)
-
-        sentinel = copy.deepcopy(self.snapshot)
-        first_sentinel = self.manifest["services"][0]["timer_enable_sentinel"]
-        sentinel["sentinels"][first_sentinel] = "present"
-        cases.append(sentinel)
-
-        config = copy.deepcopy(self.snapshot)
-        config["config"] = {
-            "sha256": "d" * 64,
-            "state": "root_owned_0600_regular_single_link",
-        }
-        cases.append(config)
-
-        legacy = copy.deepcopy(self.snapshot)
-        first_legacy = next(iter(legacy["legacy_units"]))
-        legacy["legacy_units"][first_legacy]["active_state"] = "active"
-        cases.append(legacy)
-
-        for changed in cases:
-            with self.subTest(changed=changed):
-                with self.assertRaises(RuntimeVerificationError):
-                    self.verify(changed, phase="preactivation")
-
-    def installed_snapshot_and_binding(self) -> tuple[dict, dict]:
-        snapshot = copy.deepcopy(self.snapshot)
-        snapshot["config"] = {
-            "sha256": "d" * 64,
-            "state": "root_owned_0600_regular_single_link",
-            "size": 512,
-        }
-        for state in snapshot["units"].values():
-            state.update(
-                {
-                    "active_state": "inactive",
-                    "enabled_state": "disabled",
-                    "fragment_path": "/etc/systemd/system/example",
-                    "load_state": "loaded",
-                }
-            )
-        snapshot["installed_unit_sha256"] = copy.deepcopy(
-            snapshot["source_unit_sha256"]
-        )
-        binding = {
-            "contract_version": BINDING_CONTRACT,
-            "manifest_sha256": self.manifest_sha256,
-            "openai_sdk_version": snapshot["openai_sdk_version"],
-            "phase": "installed_inactive",
-            "python_executable_sha256": snapshot["python_executable_sha256"],
-            "repository_commit": snapshot["repository"]["commit"],
-            "repository_tree": snapshot["repository"]["tree"],
-            "runtime_config_sha256": snapshot["config"]["sha256"],
-            "unit_sha256": snapshot["installed_unit_sha256"],
-        }
-        return snapshot, binding
-
-    def test_exact_installed_inactive_snapshot_and_binding_pass(self) -> None:
-        snapshot, binding = self.installed_snapshot_and_binding()
-        report = self.verify(
-            snapshot, phase="installed_inactive", binding=binding
-        )
-        self.assertTrue(report["runtime_matches_manifest"])
         self.assertIsNotNone(report["binding_sha256"])
 
-    def test_installed_runtime_rejects_binding_or_installed_unit_drift(self) -> None:
-        snapshot, binding = self.installed_snapshot_and_binding()
-
-        wrong_commit = copy.deepcopy(binding)
-        wrong_commit["repository_commit"] = "e" * 40
+    def test_unlisted_or_missing_installed_memory_unit_fails_closed(self) -> None:
+        extra = copy.deepcopy(self.snapshot)
+        extra["discovered_memory_units"].append("memory-v1-unknown.timer")
         with self.assertRaises(RuntimeVerificationError):
-            self.verify(
-                snapshot, phase="installed_inactive", binding=wrong_commit
+            self.verify(extra)
+
+        missing = copy.deepcopy(self.snapshot)
+        missing["discovered_memory_units"].pop()
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(missing)
+
+    def test_state_source_unit_and_binding_drift_fail_closed(self) -> None:
+        openai = copy.deepcopy(self.snapshot)
+        openai["units"]["memory-v1-openai-extraction.timer"][
+            "active_state"
+        ] = "active"
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(openai)
+
+        source = copy.deepcopy(self.snapshot)
+        first_source = next(iter(source["source_sha256"]))
+        source["source_sha256"][first_source] = "e" * 64
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(source)
+
+        installed = copy.deepcopy(self.snapshot)
+        first_unit = next(iter(installed["installed_unit_sha256"]))
+        installed["installed_unit_sha256"][first_unit] = "f" * 64
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(installed)
+
+        wrong_binding = copy.deepcopy(self.binding)
+        wrong_binding["repository_commit"] = "e" * 40
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(self.snapshot, binding=wrong_binding)
+
+    def test_catalog_function_role_and_rls_drift_fail_closed(self) -> None:
+        function = copy.deepcopy(self.snapshot)
+        first_function = next(iter(function["catalog"]["function_sha256"]))
+        function["catalog"]["function_sha256"][first_function] = "e" * 64
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(function)
+
+        role = copy.deepcopy(self.snapshot)
+        role["catalog"]["actor_role"]["bypass_rls"] = True
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(role)
+
+        relation = copy.deepcopy(self.snapshot)
+        first_relation = next(iter(relation["catalog"]["relations"]))
+        relation["catalog"]["relations"][first_relation]["forced_rls"] = False
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(relation)
+
+    def test_binding_is_mandatory_and_covers_complete_hash_maps(self) -> None:
+        with self.assertRaises(RuntimeVerificationError):
+            verify_snapshot(
+                self.manifest,
+                self.snapshot,
+                manifest_sha256=self.manifest_sha256,
+                phase="installed_inactive",
+                binding=None,
             )
-
-        wrong_unit = copy.deepcopy(snapshot)
-        first_unit = next(iter(wrong_unit["installed_unit_sha256"]))
-        wrong_unit["installed_unit_sha256"][first_unit] = "f" * 64
+        wrong_source = copy.deepcopy(self.binding)
+        wrong_source["source_sha256"] = dict(wrong_source["source_sha256"])
+        wrong_source["source_sha256"].pop(next(iter(wrong_source["source_sha256"])))
         with self.assertRaises(RuntimeVerificationError):
-            self.verify(wrong_unit, phase="installed_inactive", binding=binding)
+            self.verify(self.snapshot, binding=wrong_source)
 
+    def test_manifest_rejects_hidden_required_blocker_or_handoff(self) -> None:
+        blocker = copy.deepcopy(self.manifest)
+        blocker["blockers"] = blocker["blockers"][1:]
         with self.assertRaises(RuntimeVerificationError):
-            self.verify(snapshot, phase="installed_inactive", binding=None)
+            validate_manifest(blocker)
+
+        handoff = copy.deepcopy(self.manifest)
+        handoff["runtime_handoffs"] = handoff["runtime_handoffs"][1:]
+        with self.assertRaises(RuntimeVerificationError):
+            validate_manifest(handoff)
+
+    def test_environment_parser_is_bounded_and_does_not_expand(self) -> None:
+        parsed = parse_environment_file(
+            b'# comment\nPOSTGRES_DSN="postgresql://example/db"\nOTHER=value\n'
+        )
+        self.assertEqual(parsed["POSTGRES_DSN"], "postgresql://example/db")
+        self.assertEqual(parsed["OTHER"], "value")
+        with self.assertRaises(RuntimeVerificationError):
+            parse_environment_file(b"POSTGRES_DSN=one\nPOSTGRES_DSN=two\n")
+        with self.assertRaises(RuntimeVerificationError):
+            parse_environment_file(b"POSTGRES_DSN=$UNEXPANDED value\n")
 
     def test_git_identity_uses_exact_command_scoped_safe_directory(self) -> None:
         root = Path("/opt/chat-memory")
@@ -206,7 +238,6 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
             ],
         )
         self.assertEqual(observed["commit"], "b" * 40)
-        self.assertEqual(observed["tree"], "c" * 40)
         self.assertTrue(observed["tracked_clean"])
 
     def test_duplicate_json_and_symlink_inputs_are_rejected(self) -> None:

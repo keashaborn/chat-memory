@@ -2,87 +2,106 @@
 
 ## Purpose
 
-This candidate replaces the inactive local-GPU extraction dependency with a
-bounded OpenAI Responses extraction lane while preserving PostgreSQL as the
-canonical authority. It does not activate automatic memory, drain historical
-jobs, promote claims, write Qdrant, or change chat retrieval.
+This runtime uses a bounded OpenAI Responses extraction lane while preserving
+PostgreSQL as the canonical authority. Provider output is an untrusted proposal.
+Qdrant is rebuildable derived data for governed claims and is not an authority.
 
-The first production milestone is deliberately one exact owner, one exact
-evidence-extraction job, one exact content hash, at most one provider attempt,
-one immutable request receipt, one validated packet, and one PostgreSQL review
-artifact. Promotion remains a separate governed decision.
+The runtime is not one complete active Chat A to Chat B pipeline yet. Capture and
+contextual intake are active. The OpenAI extractor and PostgreSQL-only packet
+router are installed but disabled and inactive. A governed review-to-claim
+admission handoff and user-facing claim lifecycle are still missing. The local
+filesystem review/staging lane and raw `memory_raw` routes remain explicit
+compatibility paths, not governed claim memory.
 
-## First vertical slice
+## Exact first vertical slice
 
 ```text
-owner-scoped chat evidence
-  -> exact job and content-hash probe
-  -> deterministic personal-evidence gate
-       -> terminal skip, zero reservation, zero provider calls; or
-       -> eligible request
-  -> PostgreSQL provider reservation and canonical content-free request receipt
-  -> one-use privacy and budget grants derived from that reservation
-  -> at most one OpenAI Responses structured-output call
-  -> deterministic schema and provenance validation
-  -> atomic PostgreSQL packet persistence
-  -> existing call completion plus request-receipt finalization
-  -> in-process review artifact persisted in forced-RLS PostgreSQL
-  -> manual-review route only
+owner-scoped Chat A transcript
+  -> active PostgreSQL chat capture
+  -> active contextual evidence intake
+  -> exact owner/evidence/job/content-hash binding
+  -> five-outcome deterministic exchange/window gate
+       -> skip_zero_call: durable terminal skip, zero provider reservation
+       -> review_context: durable review-required disposition, zero reservation
+       -> route_internal: durable internal disposition, zero reservation
+       -> block_local: durable protected disposition, zero reservation
+       -> send_external: continue to exact provider reservation
+  -> at most one OpenAI structured-output call
+  -> content-free request and completion receipts
+  -> immutable PostgreSQL packet
+  -> PostgreSQL-only packet review route
+  -> one explicitly reviewed proposition admission (currently missing)
+  -> one canonical claim/revision and held outbox item
+  -> one derived Qdrant governed-claim point
+  -> Chat B candidate discovery and PostgreSQL claim revalidation
+  -> final-answer memory binding and bounded provenance
+  -> inspect/correct/retract/delete operations (currently missing)
 ```
 
-Qdrant is not part of this slice. It remains a rebuildable projection and may
-only receive governed canonical claim revisions through the existing projection
-outbox after a later activation gate.
+The first pilot permits one exact owner, one exact evidence job and content hash,
+at most one provider call, one packet, one reviewed proposition, one canonical
+claim, one projection item, and one later Chat B. Recurring OpenAI timers,
+automatic claim promotion, and backlog drain remain forbidden.
+
+## Current installed topology
+
+`ops/systemd/memory-v1-active-runtime-manifest-v1.json` records the complete
+target installed-inactive checkpoint rather than pretending the OpenAI units are
+absent. It declares:
+
+- both OpenAI service/timer pairs installed, disabled, and inactive;
+- every installed `memory-v1-*` unit and its exact source/installed hash;
+- active capture, contextual intake, local compatibility routing/staging,
+  local resolution, manual claim planning, projection, and reconciliation timers;
+- elapsed historical timers and disabled/inactive GPU, entailment, entity, and
+  reintake components as superseded but not retired;
+- `brains.service` and the installed-only daily Git-sync service/timer hashes;
+- loaded backend route and worker source hashes;
+- exact critical PostgreSQL function hashes and forced-RLS relations;
+- the missing review-to-claim and user lifecycle handoffs;
+- raw `/log`, `/cards`, `/vantage`, filesystem review, and legacy router
+  compatibility boundaries;
+- one authoritative consumer per declared job type.
+
+An unlisted installed Memory unit, unexpected active claimer/router, changed
+source or installed unit byte, catalog function drift, lost forced RLS, stale
+Git identity, changed runtime configuration hash, present OpenAI timer sentinel,
+or stale release binding makes verification fail closed.
 
 ## Authority boundaries
 
-- PostgreSQL owns evidence, jobs, provider reservations, request receipts,
-  packets, review artifacts, governed decisions, claims, corrections,
-  retractions, deletions, and projection authority.
-- Provider output is an untrusted proposal. It cannot become a claim merely
-  because extraction succeeded.
-- The deterministic prefilter executes before provider reservation. General
-  questions and non-personal text end as audited skips and consume no provider
-  reservation.
-- The outbound request receipt contains hashes, policy identities, token and
-  cost ceilings, and exact owner/job/evidence bindings. It contains no raw
-  private text.
-- Human-readable review files are not an authority. Review and stage JSON are
-  bounded PostgreSQL values protected by forced RLS.
-- The new worker imports provider-neutral job-store functions, not the legacy
-  worker command.
+- PostgreSQL owns transcript evidence, jobs, eligibility dispositions,
+  reservations, receipts, packets, review state, canonical claims and revisions,
+  outbox authority, final-answer bindings, corrections, retractions, and deletes.
+- The provider cannot create a claim. A validated packet is still only a proposal.
+- Eligibility and bounded exchange/window classification occur before provider
+  reservation. Every non-send outcome is durable and consumes no provider call.
+- Qdrant may propose governed claim IDs, but the response path must reload and
+  owner-check them through PostgreSQL before prompt inclusion.
+- The `/log` raw-Qdrant side effect and `/cards` API are compatibility surfaces.
+  Their data must never be treated as PostgreSQL-governed claim memory.
+- Filesystem review artifacts are compatibility inputs only. The intended OpenAI
+  packet router writes its review state to PostgreSQL.
+- The active local claim-projection timer produces manual-review plans with zero
+  claims. It is not an automatic claim-admission service.
 
-## Runtime state
+## Content-free verifier and release binding
 
-`ops/systemd/memory-v1-active-runtime-manifest-v1.json` is the machine-readable
-candidate manifest. Both new services and timers are source-only and inactive.
-The timer definitions also require root-owned enable sentinels that are outside
-this candidate. An activation release must bind the final commit/tree, install
-the reviewed units and configuration, prove legacy extraction exclusivity, and
-start only the exact one-job pilot.
-
-The manifest is policy, not a self-referential release receipt. The exact
-commit, tree, manifest hash, installed unit hashes, root-owned configuration
-hash, Python executable hash, and OpenAI SDK version are bound by the external
-root-owned
-`/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json`. The
-binding contains no provider key, prompt text, owner content, or other private
-value. `scripts/memory_v1_active_runtime_verifier_v1.py` verifies the policy
-and binding against live source, systemd, filesystem, and toolchain state.
-
-Before any installation, run the content-free preactivation check:
+The external root-owned release binding remains:
 
 ```text
-/opt/chat-memory/venv/bin/python \
-  /opt/chat-memory/scripts/memory_v1_active_runtime_verifier_v1.py \
-  --phase preactivation
+/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json
 ```
 
-It requires both new service/timer pairs, both enable sentinels, and the
-root-owned runtime configuration to be absent. It also requires the legacy GPU
-scheduler, tunnel, and health timer to remain disabled and inactive.
+The binding contains no provider key, prompt, response, owner text, or other
+private value. It binds the exact repository commit/tree, manifest hash, all
+declared source hashes, all installed unit hashes, critical catalog function
+hashes, root-owned runtime configuration hash, Python executable hash, OpenAI SDK
+version, and phase.
 
-After a separately authorized installation, but before a provider call, run:
+After the eligibility package, source candidate, reviewed unit bytes, and a new
+binding are installed—but while both OpenAI timers remain disabled—run in a
+separately authorized quiescent window:
 
 ```text
 sudo /opt/chat-memory/venv/bin/python \
@@ -91,61 +110,34 @@ sudo /opt/chat-memory/venv/bin/python \
   --binding /etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json
 ```
 
-This requires exact source/installed unit-byte equality, disabled and inactive
-new units, absent timer sentinels, a regular single-link root-owned mode-0600
-configuration, the pinned SDK, a clean exact Git identity, and the exact release
-binding. A mismatch fails closed before provider or database work. The first
-pilot invokes one exact service manually; recurring timers remain disabled
-until a later continuous-processing release.
+The verifier reads only content-free runtime/config hashes and PostgreSQL catalog
+metadata. It uses `POSTGRES_DSN` internally from the root-owned environment file
+but never prints the DSN or configuration values. It reads no application row and
+makes no provider or Qdrant call. Because recurrent timers can make oneshot
+services temporarily active, the verifier is a quiescent release gate; a worker
+running during the snapshot correctly causes a failure.
 
-The local GPU scheduler and tunnel must remain inactive. Existing local packet
-and claim-processing components are not silently retired by this candidate;
-their eventual retirement requires an inventory showing that no accepted
-packet, claim, correction, retraction, deletion, or projection behavior depends
-on them.
+The former `preactivation` phase is retired. It required the OpenAI units and
+configuration to be absent, which is no longer true. Current source must not use
+that historical phase to claim runtime validity.
 
-## Independent audit dispositions
+## Remaining activation gates
 
-The 2026-08-06 independent audit was advisory. Its material recommendations are
-resolved as follows:
+Before one provider-backed pilot:
 
-1. **Accept now — eligibility before reservation.** The exact job is probed
-   without claim/reservation, and ineligible content is terminally skipped.
-2. **Accept now — one canonical outbound request receipt.** The actual transport
-   request has one deterministic, content-free PostgreSQL receipt linked to the
-   provider completion audit.
-3. **Accept now — remove filesystem review authority.** Review artifacts are
-   built in process and stored only in owner-scoped PostgreSQL.
-4. **Accept now — remove the legacy-worker import.** The new entrypoint uses the
-   provider-neutral `memory_v1_extraction_job_store_v1` boundary.
-5. **Accept now — first slice versus follow-on.** One exact job through manual
-   review is the initial slice. Automatic claim promotion, backlog drain,
-   Qdrant projection, and broad continuous extraction are follow-on work.
-6. **Accept now — three validation tiers.** Unit/static tests are the edit loop;
-   one synthetic PostgreSQL fixture is the candidate checkpoint; one production-
-   schema forward/rollback/reapply clone is the release gate.
-7. **Accept now — active runtime manifest.** The JSON manifest names the new
-   units, entrypoints, packages, state transitions, and exclusivity boundary.
-   The verifier additionally proves preinstallation and installed-inactive
-   host state against an external exact release binding.
-8. **Defer — full legacy retirement.** The candidate proves the old extraction
-   worker is not imported and the GPU lane must remain inactive. Deleting old
-   code or disabling other proven production consumers is a separate release.
-9. **Reject — rewrite or weakened governance.** The governed function framework,
-   exact hashes, forced RLS, owner isolation, rollback/reapply proof, and manual
-   promotion boundary remain required.
+1. Install and validate the eligibility-disposition package and this combined
+   source candidate without starting either OpenAI timer.
+2. Generate and install the exact full-path release binding; run the verifier in
+   a quiescent window.
+3. Add one PostgreSQL-only, owner-scoped, append-only manual review-to-claim
+   admission operation and inspect/correct/retract/delete lifecycle.
+4. Isolate raw `memory_raw` compatibility data from governed retrieval without
+   deleting existing vectors or artifacts.
+5. Obtain separate authority for one exact application item, at most one provider
+   call, one manual service invocation, one proposition admission, one outbox
+   projection, and authenticated Chat B browser verification.
 
-## Activation gates still required
-
-Before a provider-backed pilot can run, the final candidate must pass focused,
-compatibility, governance, manifest, repository, security, and disposable
-PostgreSQL forward/rollback/reapply validation. Production activation then
-requires a fresh database backup/restore proof, exact migration lease, exact
-source/deploy lease, reviewed root-only runtime configuration, verification that
-the local GPU scheduler/tunnel cannot claim the same job, and one exact synthetic
-or user-approved pilot job.
-
-After the pilot packet reaches manual review, later releases still have to wire
-governed claim admission, projection-outbox dispatch, Qdrant rebuild/cutover,
-PostgreSQL-revalidated retrieval, and the Chat A to Chat B acceptance test with
-correction, retraction, deletion, provenance, and owner-isolation evidence.
+Any provider call, database installation or application-row access, Qdrant write,
+service/timer action, configuration/binding installation, source deployment, or
+frontend activation remains a separate production authorization. This document
+and manifest do not grant it.

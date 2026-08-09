@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 import unittest
 import uuid
@@ -14,6 +15,22 @@ import scripts.memory_v1_openai_extraction_worker_v1 as worker_module
 
 from rag_engine.memory_v1_openai_v5_2_semantic_tasks_v1 import (
     OpenAIExtractionResultV1,
+)
+from rag_engine.memory_v1_openai_provider_adapter_v1 import (
+    OpenAIV52ProviderAdapterV1,
+    extraction_model_policy_v1,
+    extraction_task_profile_v1,
+)
+from rag_engine.memory_v1_openai_structured_transport_v1 import (
+    ExternalPrivacyAuthorizationV1,
+    PRIVACY_AUTHORIZATION_TOKEN,
+)
+from rag_engine.memory_v1_personal_evidence_exchange_v2 import (
+    classify_personal_evidence_exchange_v2,
+)
+from rag_engine.memory_v1_personal_evidence_prefilter_v1 import (
+    TRUSTED_SOURCE_ROLE,
+    classify_personal_evidence_v1,
 )
 from scripts.memory_v1_openai_extraction_worker_v1 import (
     APPLY_ENABLE_TOKEN,
@@ -73,6 +90,7 @@ def args(*, apply: bool = False) -> argparse.Namespace:
 def job() -> dict:
     return {
         "job_id": uuid.UUID("00000000-0000-4000-8000-000000000010"),
+        "evidence_id": uuid.UUID("00000000-0000-4000-8000-000000000012"),
         "evidence_source_system": "public.chat_log",
         "evidence_external_id": (
             "chat_log:legacy-capture:"
@@ -83,6 +101,33 @@ def job() -> dict:
         "evidence_observed_at": "2026-08-06T12:00:00Z",
         "evidence_content": SOURCE,
     }
+
+
+def configured_adapter() -> OpenAIV52ProviderAdapterV1:
+    return OpenAIV52ProviderAdapterV1(
+        transport=None,
+        task_profile=extraction_task_profile_v1(),
+        model_policy=extraction_model_policy_v1(
+            model="gpt-memory-test",
+            sdk_package_version="test-sdk",
+        ),
+        privacy_authorization=ExternalPrivacyAuthorizationV1(
+            policy_version="privacy_v1",
+            policy_sha256="a" * 64,
+            retention_mode="standard_retention_explicitly_accepted",
+            authorization_sha256="b" * 64,
+            standard_retention_risk_accepted=True,
+            retention_attestation_sha256=None,
+            enable_token=PRIVACY_AUTHORIZATION_TOKEN,
+        ),
+        budget_policy_version="budget_v1",
+        budget_policy_sha256="c" * 64,
+        pricing_policy_version="pricing_v1",
+        pricing_policy_sha256="d" * 64,
+        max_output_tokens=128,
+        timeout_seconds=20.0,
+        max_attempts=1,
+    )
 
 
 class NoCallAdapter:
@@ -357,6 +402,10 @@ class WorkerTests(unittest.TestCase):
         prepared.request.estimated_input_tokens = 100
         prepared.request.max_output_tokens = 100
         prepared.request.request_sha256 = SOURCE_SHA
+        prepared.gate_result = classify_personal_evidence_v1(
+            SOURCE,
+            source_role=TRUSTED_SOURCE_ROLE,
+        )
         prepared.content_free_receipt.return_value = {}
         result = mock.Mock(
             packet=packet,
@@ -526,14 +575,14 @@ class WorkerTests(unittest.TestCase):
         async def run() -> None:
             with mock.patch.object(
                 worker_module,
-                "skip_job",
+                "record_eligibility_disposition",
                 new=mock.AsyncMock(
                     return_value={
                         "status": "skipped",
                         "apply_outcome": "applied",
                     }
                 ),
-            ) as skip, mock.patch.object(
+            ) as disposition, mock.patch.object(
                 worker_module,
                 "reserve_call",
                 new=mock.AsyncMock(),
@@ -554,13 +603,394 @@ class WorkerTests(unittest.TestCase):
                 )
             self.assertEqual(result["status"], "skipped")
             self.assertEqual(result["rejection_code"], "pure_general_question")
+            self.assertEqual(
+                result["eligibility_disposition"]["decision"],
+                "skip_zero_call",
+            )
+            self.assertEqual(
+                result["eligibility_disposition"]["selected_span_count"],
+                0,
+            )
             self.assertFalse(result["provider_reservation_created"])
             self.assertEqual(calls, 0)
-            skip.assert_awaited_once()
+            disposition.assert_awaited_once()
+            durable = disposition.await_args.kwargs["eligibility_disposition"]
+            self.assertEqual(durable["decision"], "skip_zero_call")
+            self.assertEqual(
+                durable["reason_codes"], ["pure_general_question"]
+            )
             reserve.assert_not_awaited()
 
         asyncio.run(run())
         self.assertEqual(adapter.calls, 1)
+
+    def test_high_recall_candidate_reaches_pre_reservation_prepare(self) -> None:
+        high_recall_job = job()
+        text = "My childhood summers were mostly spent near the lake."
+        high_recall_job["evidence_content"] = text
+        high_recall_job["evidence_content_sha256"] = hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
+
+        class RoutingAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def prepare(self, **kwargs: object):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return None
+                gate = classify_personal_evidence_exchange_v2(
+                    text,
+                    source_role=TRUSTED_SOURCE_ROLE,
+                )
+                return SimpleNamespace(
+                    request=SimpleNamespace(
+                        estimated_input_tokens=1,
+                        max_output_tokens=16,
+                    ),
+                    gate_result=gate,
+                )
+
+        adapter = RoutingAdapter()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={},
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=1,
+            ), mock.patch.object(
+                worker_module,
+                "skip_job",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "skipped",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as skip, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=high_recall_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,  # type: ignore[arg-type]
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["rejection_code"], "request_budget_exceeded")
+            self.assertEqual(
+                result["eligibility_disposition"]["reason_codes"],
+                ["high_recall_owner_authored_candidate"],
+            )
+            self.assertEqual(calls, 0)
+            self.assertEqual(len(adapter.calls), 2)
+            self.assertTrue(adapter.calls[1]["exchange_eligibility"])
+            skip.assert_awaited_once()
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_high_recall_reservation_receipt_matches_governed_contract(self) -> None:
+        high_recall_job = job()
+        text = "My childhood summers were mostly spent near the lake."
+        high_recall_job["evidence_content"] = text
+        high_recall_job["evidence_content_sha256"] = hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
+        reserve = mock.AsyncMock(
+            side_effect=ProcessingRejected("stop_after_receipt", 0)
+        )
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={
+                    "input_microusd_per_million_tokens": 1,
+                    "cached_input_microusd_per_million_tokens": 1,
+                    "cache_write_input_microusd_per_million_tokens": 1,
+                    "output_microusd_per_million_tokens": 1,
+                },
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=100,
+            ), mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=reserve,
+            ):
+                with self.assertRaisesRegex(
+                    ProcessingRejected,
+                    "stop_after_receipt",
+                ):
+                    await process_job(
+                        object(),
+                        owner=OWNER,
+                        job=high_recall_job,
+                        worker_id="test-worker",
+                        run_id=uuid.UUID(
+                            "00000000-0000-4000-8000-000000000003"
+                        ),
+                        model="gpt-memory-test",
+                        adapter=configured_adapter(),
+                        registry={},
+                        schema={},
+                        args=args(),
+                    )
+
+        asyncio.run(run())
+        reserve.assert_awaited_once()
+        receipt = reserve.await_args.kwargs["receipt"]
+        self.assertEqual(len(receipt), 38)
+        self.assertIn("eligibility_disposition", receipt)
+        self.assertEqual(
+            receipt["eligibility_disposition"]["decision"],
+            "send_external",
+        )
+        self.assertEqual(
+            set(receipt),
+            {
+                "budget_policy_sha256",
+                "budget_policy_version",
+                "contract_version",
+                "eligibility_disposition",
+                "estimated_input_tokens",
+                "evidence_content_sha256",
+                "gate_policy_sha256",
+                "instructions_sha256",
+                "job_id",
+                "max_attempts",
+                "max_output_tokens",
+                "max_request_microusd",
+                "max_utc_day_microusd",
+                "maximum_cost_microusd",
+                "model",
+                "model_policy_sha256",
+                "output_schema_sha256",
+                "owner_binding_sha256",
+                "pipeline_version",
+                "pricing_policy_sha256",
+                "pricing_policy_version",
+                "pricing_rates",
+                "privacy_authorization_sha256",
+                "privacy_policy_sha256",
+                "privacy_policy_version",
+                "purpose",
+                "request_id_sha256",
+                "request_sha256",
+                "retention_attestation_sha256",
+                "retention_mode",
+                "run_id",
+                "safety_identifier_sha256",
+                "selected_input_sha256",
+                "source_sha256",
+                "standard_retention_risk_accepted",
+                "task_contract_sha256",
+                "timeout_milliseconds",
+                "worker_id_sha256",
+            },
+        )
+
+    def test_context_fragment_stays_zero_call_when_lineage_is_unavailable(self) -> None:
+        adapter = NoCallAdapter()
+        contextual_job = job()
+        contextual_job["evidence_content"] = "Three."
+        contextual_job["evidence_content_sha256"] = hashlib.sha256(
+            b"Three."
+        ).hexdigest()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "load_memory_evidence_context_v2",
+                new=mock.AsyncMock(
+                    side_effect=worker_module.EvidenceContextContractError(
+                        "lineage unavailable"
+                    )
+                ),
+            ) as load_context, mock.patch.object(
+                worker_module,
+                "record_eligibility_disposition",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "review_required",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as disposition, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=contextual_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["status"], "review_required")
+            self.assertEqual(
+                result["rejection_code"],
+                "context_binding_required",
+            )
+            self.assertEqual(calls, 0)
+            self.assertEqual(adapter.calls, 1)
+            load_context.assert_awaited_once()
+            disposition.assert_awaited_once()
+            durable = disposition.await_args.kwargs["eligibility_disposition"]
+            self.assertEqual(durable["decision"], "review_context")
+            self.assertEqual(
+                durable["reason_codes"], ["context_binding_required"]
+            )
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_context_fragment_reaches_pre_reservation_prepare_when_bound(
+        self,
+    ) -> None:
+        contextual_job = job()
+        contextual_job["evidence_content"] = "Three."
+        contextual_job["evidence_content_sha256"] = hashlib.sha256(
+            b"Three."
+        ).hexdigest()
+        context = object()
+        review_gate = SimpleNamespace(
+            decision="review_context",
+            reason_codes=("context_binding_required",),
+        )
+        send_gate = SimpleNamespace(
+            decision="send_external",
+            reason_codes=("contextual_answer_selected",),
+            public_dict=lambda: {"decision": "send_external"},
+        )
+
+        class RoutingAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def prepare(self, **kwargs: object):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return None
+                return SimpleNamespace(
+                    request=SimpleNamespace(
+                        estimated_input_tokens=1,
+                        max_output_tokens=16,
+                    ),
+                    gate_result=send_gate,
+                )
+
+        adapter = RoutingAdapter()
+
+        async def run() -> None:
+            with mock.patch.object(
+                worker_module,
+                "classify_personal_evidence_exchange_v2",
+                side_effect=(review_gate, send_gate),
+            ), mock.patch.object(
+                worker_module,
+                "content_free_disposition_receipt_v2",
+                return_value={"decision": "send_external"},
+            ), mock.patch.object(
+                worker_module,
+                "bind_eligibility_disposition_v2",
+                return_value={
+                    "decision": "send_external",
+                    "exchange_id": "00000000-0000-4000-8000-000000000099",
+                },
+            ), mock.patch.object(
+                worker_module,
+                "load_memory_evidence_context_v2",
+                new=mock.AsyncMock(return_value=context),
+            ) as load_context, mock.patch.object(
+                worker_module,
+                "pricing_rates",
+                return_value={},
+            ), mock.patch.object(
+                worker_module,
+                "maximum_request_cost",
+                return_value=2,
+            ), mock.patch.object(
+                worker_module,
+                "_positive_int_env",
+                return_value=1,
+            ), mock.patch.object(
+                worker_module,
+                "skip_job",
+                new=mock.AsyncMock(
+                    return_value={
+                        "status": "skipped",
+                        "apply_outcome": "applied",
+                    }
+                ),
+            ) as skip, mock.patch.object(
+                worker_module,
+                "reserve_call",
+                new=mock.AsyncMock(),
+            ) as reserve:
+                result, calls = await process_job(
+                    object(),
+                    owner=OWNER,
+                    job=contextual_job,
+                    worker_id="test-worker",
+                    run_id=uuid.UUID(
+                        "00000000-0000-4000-8000-000000000003"
+                    ),
+                    model="gpt-memory-test",
+                    adapter=adapter,
+                    registry={},
+                    schema={},
+                    args=args(),
+                )
+            self.assertEqual(result["rejection_code"], "request_budget_exceeded")
+            self.assertEqual(calls, 0)
+            self.assertEqual(len(adapter.calls), 2)
+            self.assertTrue(adapter.calls[1]["exchange_eligibility"])
+            self.assertIs(adapter.calls[1]["evidence_context"], context)
+            load_context.assert_awaited_once_with(
+                mock.ANY,
+                expected_owner_user_id=OWNER,
+                target_evidence_id=contextual_job["evidence_id"],
+                expected_target_content_sha256=(
+                    contextual_job["evidence_content_sha256"]
+                ),
+            )
+            skip.assert_awaited_once()
+            reserve.assert_not_awaited()
+
+        asyncio.run(run())
 
     def test_bound_packet_provider_rejects_cross_source_use(self) -> None:
         packet = OpenAIExtractionResultV1.model_validate(

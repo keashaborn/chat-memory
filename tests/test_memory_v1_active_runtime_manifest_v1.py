@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from pathlib import Path
 import unittest
 
@@ -11,89 +11,260 @@ MANIFEST = ROOT / "ops/systemd/memory-v1-active-runtime-manifest-v1.json"
 
 
 class ActiveRuntimeManifestTests(unittest.TestCase):
-    def test_manifest_is_closed_inactive_and_postgres_authoritative(self) -> None:
-        value = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    def setUp(self) -> None:
+        self.value = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+    def test_manifest_states_target_and_authorities_without_hiding_compatibility(self) -> None:
         self.assertEqual(
-            value["contract_version"], "memory_v1_active_runtime_manifest_v1"
+            self.value["contract_version"], "memory_v1_active_runtime_manifest_v1"
         )
-        self.assertEqual(value["activation_state"], "candidate_only_inactive")
-        self.assertEqual(value["canonical_authority"]["postgresql"], "authoritative")
-        self.assertEqual(value["canonical_authority"]["qdrant"], "derived_rebuildable")
-        self.assertFalse(value["first_vertical_slice"]["backlog_drain"])
+        self.assertEqual(
+            self.value["activation_state"],
+            "candidate_target_installed_inactive_with_compatibility_active",
+        )
+        self.assertEqual(self.value["current_target_phase"], "installed_inactive")
+        self.assertEqual(
+            self.value["canonical_authority"]["postgresql"], "authoritative"
+        )
+        self.assertIn(
+            "compatibility_only",
+            self.value["canonical_authority"]["raw_memory_qdrant"],
+        )
+        self.assertFalse(self.value["first_vertical_slice"]["backlog_drain"])
         self.assertFalse(
-            value["first_vertical_slice"]["automatic_claim_promotion"]
+            self.value["first_vertical_slice"]["automatic_claim_promotion"]
         )
-        self.assertEqual(value["first_vertical_slice"]["jobs_maximum"], 1)
+        self.assertFalse(
+            self.value["first_vertical_slice"]["recurring_openai_timers"]
+        )
+
+    def test_all_declared_source_and_unit_bytes_are_hash_bound(self) -> None:
+        for component in self.value["source_components"]:
+            path = ROOT / component["path"]
+            self.assertTrue(path.is_file(), component["path"])
+            self.assertEqual(
+                hashlib.sha256(path.read_bytes()).hexdigest(), component["sha256"]
+            )
+        for unit in self.value["systemd_units"]:
+            if "source_path" not in unit:
+                continue
+            path = ROOT / unit["source_path"]
+            self.assertTrue(path.is_file(), unit["source_path"])
+            observed = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertEqual(observed, unit["source_sha256"])
+            self.assertEqual(observed, unit["installed_sha256"])
+
+    def test_exact_installed_memory_inventory_is_complete_and_unique(self) -> None:
+        units = self.value["systemd_units"]
+        names = [item["name"] for item in units]
+        self.assertEqual(len(names), len(set(names)))
+        memory_names = sorted(name for name in names if name.startswith("memory-v1-"))
         self.assertEqual(
-            value["first_vertical_slice"]["external_provider_calls_maximum"], 1
+            memory_names, self.value["exact_installed_memory_unit_set"]
+        )
+        self.assertEqual(len(memory_names), 39)
+
+        by_name = {item["name"]: item for item in units}
+        for name in (
+            "memory-v1-openai-extraction.service",
+            "memory-v1-openai-extraction.timer",
+            "memory-v1-openai-v5-2-packet-router.service",
+            "memory-v1-openai-v5-2-packet-router.timer",
+        ):
+            expected = by_name[name]["expected"]["installed_inactive"]
+            self.assertEqual(expected["load_state"], "loaded")
+            self.assertEqual(expected["enabled_state"], "disabled")
+            self.assertEqual(expected["active_state"], "inactive")
+            self.assertIn("canonical_inactive", by_name[name]["classification"])
+
+    def test_active_and_elapsed_compatibility_timers_are_explicit(self) -> None:
+        by_name = {item["name"]: item for item in self.value["systemd_units"]}
+        for name in (
+            "memory-v1-v5-chat-capture.timer",
+            "memory-v1-evidence-intake-dispatcher.timer",
+            "memory-v1-v5-2-local-packet-router.timer",
+            "memory-v1-v5-local-auto-stage.timer",
+            "memory-v1-v5-local-auto-resolution.timer",
+            "memory-v1-v5-local-claim-projection.timer",
+            "memory-v1-projection.timer",
+            "memory-v1-deferred-reconciliation-scan.timer",
+            "memory-v1-v5-local-legacy-reintake-audit.timer",
+            "memory-v1-v5-local-packet-router.timer",
+        ):
+            expected = by_name[name]["expected"]["installed_inactive"]
+            self.assertEqual(expected["load_state"], "loaded")
+            self.assertEqual(expected["enabled_state"], "enabled")
+            self.assertEqual(expected["active_state"], "active")
+
+    def test_candidate_admission_partial_lifecycle_and_raw_conflict_are_first_class(self) -> None:
+        blockers = {item["id"]: item for item in self.value["blockers"]}
+        self.assertEqual(
+            blockers["review_to_claim_admission_candidate_pending_install"]["status"],
+            "candidate_pending_install_and_manual_activation",
+        )
+        self.assertEqual(
+            blockers["user_claim_lifecycle_http_partial_candidate"]["status"],
+            "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation",
+        )
+        self.assertEqual(
+            blockers["governed_owner_activation_unverified"]["status"],
+            "content_free_verifier_candidate_pending_deploy_and_execution",
+        )
+        self.assertEqual(
+            blockers[
+                "ordinary_log_raw_memory_isolation_candidate_pending_deploy"
+            ]["status"],
+            "candidate_pending_deploy",
+        )
+        handoffs = {item["stage"]: item for item in self.value["runtime_handoffs"]}
+        self.assertEqual(
+            handoffs["review_to_claim_admission"]["status"],
+            "candidate_pending_install_and_manual_activation",
+        )
+        self.assertEqual(
+            handoffs["derived_projection"]["status"],
+            "active_but_candidate_outbox_held",
+        )
+        self.assertEqual(
+            handoffs["user_provenance_and_lifecycle"]["status"],
+            "candidate_complete_pending_install_backend_deploy_and_authenticated_ui_validation",
+        )
+        self.assertEqual(
+            handoffs["answer_binding"]["status"],
+            "candidate_provenance_pending_backend_deploy",
+        )
+        raw = {
+            item["component"]: item for item in self.value["compatibility_boundaries"]
+        }
+        self.assertEqual(
+            raw["backend_/log_raw_memory_qdrant_side_effect"]["classification"],
+            "candidate_removed_from_ordinary_log_pending_deploy",
+        )
+        self.assertFalse(
+            raw["backend_/log_raw_memory_qdrant_side_effect"][
+                "may_be_present_in_governed_prompt"
+            ]
+        )
+        self.assertFalse(
+            raw["backend_/cards_raw_qdrant_api"]["may_be_present_in_governed_prompt"]
         )
 
-    def test_every_declared_entrypoint_and_unit_exists_and_is_inactive(self) -> None:
-        value = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        for service in value["services"]:
-            self.assertFalse(service["installed"])
-            self.assertTrue((ROOT / service["entrypoint"]).is_file())
-            unit = ROOT / "ops/systemd" / service["unit"]
-            timer = ROOT / "ops/systemd" / service["timer"]
-            self.assertTrue(unit.is_file())
-            self.assertTrue(timer.is_file())
+    def test_package_catalog_and_binding_cover_the_combined_target(self) -> None:
+        packages = {
+            item["migration_id"]: item for item in self.value["database_packages"]
+        }
+        self.assertEqual(
+            packages["memory_openai_eligibility_disposition_v2"]["installation_state"],
+            "candidate_pending_install",
+        )
+        for migration_id in (
+            "memory_v1_openai_review_admission_authority_v1",
+            "memory_openai_review_admission_authority_v1",
+            "memory_v1_governed_claim_lifecycle_outbox_authority_v1",
+            "memory_v1_governed_claim_transition_authority_v1",
+            "memory_governed_claim_lifecycle_v1",
+        ):
             self.assertEqual(
-                hashlib.sha256(unit.read_bytes()).hexdigest(),
-                service["source_sha256"],
+                packages[migration_id]["installation_state"],
+                "candidate_pending_install",
             )
-            self.assertEqual(
-                hashlib.sha256(timer.read_bytes()).hexdigest(),
-                service["timer_source_sha256"],
-            )
-            timer_source = timer.read_text(encoding="utf-8")
-            self.assertIn(
-                f"ConditionPathExists={service['timer_enable_sentinel']}",
-                timer_source,
-            )
-
-    def test_new_runtime_has_no_legacy_worker_or_review_filesystem_dependency(self) -> None:
-        extraction = (
-            ROOT / "scripts/memory_v1_openai_extraction_worker_v1.py"
-        ).read_text(encoding="utf-8")
-        router = (
-            ROOT / "scripts/memory_v1_openai_v5_2_packet_router_v1.py"
-        ).read_text(encoding="utf-8")
-        router_unit = (
-            ROOT / "ops/systemd/memory-v1-openai-v5-2-packet-router.service"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("memory_v1_v5_bounded_extraction_worker", extraction)
-        self.assertNotIn("memory-v1-reviews", router)
-        self.assertNotIn("ReadWritePaths=", router_unit)
-
-    def test_release_binding_and_live_verification_are_external_and_fail_closed(self) -> None:
-        value = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        binding = value["release_binding"]
+        components = {
+            item["component_id"]: item for item in self.value["source_components"]
+        }
+        self.assertEqual(
+            components["openai_review_admission"]["classification"],
+            "canonical_candidate_manual_admission",
+        )
+        self.assertEqual(
+            components["governed_claim_transition"]["classification"],
+            "canonical_candidate_manual_claim_transition",
+        )
+        self.assertEqual(
+            components["governed_claim_lifecycle_router"]["classification"],
+            "canonical_candidate_owner_lifecycle_with_reviewed_correction",
+        )
+        self.assertEqual(
+            components["governed_response_route"]["path"],
+            "rag_engine/resse_response_router.py",
+        )
+        self.assertEqual(
+            components["governed_answer_provenance"]["classification"],
+            "canonical_candidate_bounded_model_exposure_not_semantic_use",
+        )
+        self.assertEqual(
+            components["governed_owner_activation_verifier"]["classification"],
+            "canonical_candidate_content_free_verifier",
+        )
+        self.assertEqual(
+            components["active_runtime_verifier"]["classification"],
+            "canonical_candidate_fail_closed_complete_path_verifier",
+        )
+        functions = {
+            item["signature"]: item["sha256"]
+            for item in self.value["catalog_contract"]["functions"]
+        }
+        claim = next(
+            signature
+            for signature in functions
+            if signature.startswith("memory.claim_owner_v5_bounded_extraction_job_v1(")
+        )
+        self.assertEqual(
+            functions[claim],
+            "8d7e736f01863966e3b2a715eb6a928989cf77f17186e0a913494d8dafbdfe76",
+        )
+        for signature in (
+            "memory.preflight_owner_openai_review_admission_v1(uuid,text,text,text,text,jsonb)",
+            "memory.apply_owner_openai_review_admission_v1(uuid,uuid,text,text,text,text,jsonb,text)",
+            "memory.read_owner_openai_review_admission_receipt_v1(uuid,text,uuid,uuid,uuid,text,text,text,jsonb,text)",
+            "memory.read_owner_governed_claim_lifecycle_v1(integer)",
+            "memory.retract_owner_governed_claim_v1(uuid,uuid,uuid,integer,text,text)",
+        ):
+            self.assertIn(signature, functions)
+        self.assertGreaterEqual(
+            len(self.value["catalog_contract"]["forced_rls_relations"]), 18
+        )
+        binding = self.value["release_binding"]
         self.assertEqual(
             binding["contract_version"],
             "memory_v1_active_runtime_release_binding_v1",
         )
         self.assertEqual(
-            binding["exact_path"],
-            "/etc/chat-memory/memory-v1-active-runtime-release-binding-v1.json",
+            set(binding["required_fields"]),
+            {
+                "catalog_function_sha256",
+                "manifest_sha256",
+                "openai_sdk_version",
+                "phase",
+                "python_executable_sha256",
+                "repository_commit",
+                "repository_tree",
+                "runtime_config_sha256",
+                "source_sha256",
+                "unit_sha256",
+            },
         )
-        self.assertTrue(binding["self_digest_forbidden"])
-        self.assertNotIn("commit", binding)
-        self.assertNotIn("tree", binding)
-        verification = value["verification"]
+
+    def test_verifier_has_one_current_fail_closed_phase(self) -> None:
+        verification = self.value["verification"]
         self.assertEqual(
             verification["contract_version"],
             "memory_v1_active_runtime_verifier_v1",
         )
         self.assertEqual(
-            verification["runtime_config"],
-            "/etc/chat-memory/memory-openai-extraction.env",
+            set(verification["supported_phases"]), {"installed_inactive"}
         )
-        self.assertEqual(
-            set(verification["supported_phases"]),
-            {"preactivation", "installed_inactive"},
-        )
+        self.assertTrue(verification["reject_unlisted_installed_memory_units"])
         self.assertTrue(
             (ROOT / "scripts/memory_v1_active_runtime_verifier_v1.py").is_file()
+        )
+        activation = verification["governed_owner_activation"]
+        self.assertEqual(
+            activation["contract_version"],
+            "memory_v1_governed_activation_verifier_v1",
+        )
+        self.assertEqual(
+            activation["output"],
+            "boolean_owner_allowlisted_and_configuration_sha256_only",
         )
 
 

@@ -132,6 +132,9 @@ from rag_engine.memory_actor_auth_v1 import (
     memory_actor_authority_v1,
     require_memory_actor_v1,
 )
+from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
+    router as memory_v1_governed_claim_lifecycle_router_v1,
+)
 from rag_engine.raw_memory_ownership import (
     RawMemoryOwnershipError,
     assert_raw_payload_owner,
@@ -180,6 +183,10 @@ from scripts.review_promotion_plan import build_personal_event_promotion_preview
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(vantage_router, prefix="/vantage")
 app.include_router(resse_response_router, prefix="/response")
+app.include_router(
+    memory_v1_governed_claim_lifecycle_router_v1,
+    prefix="/memory/governed/claims",
+)
 app.include_router(
     assistant_response_preferences_router_v1,
     prefix="/assistant-preferences",
@@ -1409,7 +1416,8 @@ async def log_chat(req: Request):
                 tags.append(tt)
                 existing.add(tt)
 
-    # Special case: identity logs from frontend (FULL_NAME:...)
+    # Explicit compatibility-only identity-card path. This route does not
+    # create governed claim memory and returns before transcript capture.
     if source == "frontend/identity" and text.startswith("FULL_NAME:"):
         full_name = text.split("FULL_NAME:", 1)[1].strip()
 
@@ -1442,16 +1450,14 @@ async def log_chat(req: Request):
 
         return {"status": "ok", "id": user_id, "note": "identity_card"}
 
-    # Stable id used for BOTH Postgres row id and Qdrant point id
+    # Stable transcript row id. Ordinary chat is captured only in PostgreSQL;
+    # governed Memory projection is driven later from canonical claims.
     rec_id = str(uuid.uuid4())
 
-    # Single timestamp used for BOTH Postgres + Qdrant payload
-    # - asyncpg wants a datetime object for timestamptz
-    # - Qdrant payload wants an ISO string (we store Z form)
+    # asyncpg wants a datetime object for timestamptz.
     created_dt = datetime.utcnow()
-    created = created_dt.isoformat() + "Z"
 
-    # 1) Save to Postgres (authoritative transcript)
+    # Save to PostgreSQL (authoritative transcript).
     conn = None
     transaction = None
     try:
@@ -1586,32 +1592,6 @@ async def log_chat(req: Request):
     finally:
         if conn:
             await conn.close()
-
-    # 2) Embed + upsert into Qdrant (best-effort)
-    if client:
-        try:
-            emb = client.embeddings.create(model=EMBED_MODEL, input=text)
-            vec = emb.data[0].embedding
-
-            payload = owned_raw_payload(user_id, {
-                "text": text,
-                "request_id": request_id,
-                "user_id_alias": user_id_alias,
-                "source": source,
-                "tags": tags,
-                "thread_id": str(thread_id) if thread_id else None,
-                "vantage_id": vantage_id,
-                "created_at": created,
-                "updated_at": created,
-            })
-
-            qpoint = qmodels.PointStruct(id=rec_id, vector=vec, payload=payload)
-            get_qdrant().upsert(collection_name="memory_raw", points=[qpoint])
-        except Exception as e:
-            # Don't fail the request if Qdrant/OpenAI is down; Postgres transcript is authoritative.
-            print("qdrant upsert error:", e)
-    else:
-        print("log_chat: OPENAI_API_KEY missing; skipping Qdrant upsert")
 
     return {"status": "ok", "id": rec_id, "request_id": request_id}
 
@@ -2275,7 +2255,9 @@ CARD_KINDS_DEFAULT = [
 @app.get("/cards/{user_id}")
 async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
     """
-    Lists card-like artifacts in Qdrant memory_raw for a user.
+    Lists compatibility-only card artifacts in Qdrant memory_raw for a user.
+    These records are not governed claim memory and are excluded from the
+    governed response prompt path.
     kinds: comma-separated list. Defaults to CARD_KINDS_DEFAULT.
     """
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
@@ -2437,7 +2419,8 @@ async def vantage_cards_list(
 @app.post("/cards/{user_id}")
 async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vantage_id: str = "default"):
     """
-    Idempotent card upsert into Qdrant memory_raw.
+    Idempotent compatibility-card upsert into Qdrant memory_raw.
+    This route does not create governed claim memory.
 
     Deterministic identity:
       card_id = uuid5(NAMESPACE_DNS, f"{user_id}|{kind}|{topic_key}")
@@ -2525,7 +2508,8 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
 @app.delete("/cards/{user_id}/{card_id}")
 async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str = "default"):
     """
-    Deletes a card point from Qdrant memory_raw.
+    Deletes a compatibility-card point from Qdrant memory_raw.
+    This route is not a governed claim lifecycle operation.
     Safety: only delete if payload.user_id matches.
     """
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)

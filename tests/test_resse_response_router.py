@@ -132,6 +132,15 @@ class ResseResponseRouterTests(unittest.TestCase):
         self.assertEqual(response.headers["pragma"], "no-cache")
         self.assertEqual(response.headers["expires"], "0")
 
+    def test_normal_response_exposes_only_bounded_answer_binding_provenance(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn(
+            '"memory_provenance": build_governed_memory_answer_provenance_v1(',
+            source,
+        )
+        self.assertIn("finalized.memory_binding", source)
+        self.assertNotIn('result["memory_provenance"] = inspection', source)
+
 
 if __name__ == "__main__":
     unittest.main()
