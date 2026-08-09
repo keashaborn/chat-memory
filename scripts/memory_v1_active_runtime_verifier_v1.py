@@ -469,6 +469,16 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     phases = verification.get("supported_phases")
     if not isinstance(phases, dict) or set(phases) != {"installed_inactive"}:
         raise RuntimeVerificationError("runtime verification phases are invalid")
+    runtime_config = Path(str(verification.get("runtime_config", "")))
+    catalog_environment = Path(
+        str(verification.get("catalog_environment", ""))
+    )
+    if (
+        not runtime_config.is_absolute()
+        or not catalog_environment.is_absolute()
+        or runtime_config == catalog_environment
+    ):
+        raise RuntimeVerificationError("runtime environment paths are invalid")
 
     source_ids: set[str] = set()
     source_paths: set[str] = set()
@@ -645,14 +655,33 @@ def probe_live(manifest: dict[str, Any], *, root: Path) -> dict[str, Any]:
     config_value, config_info = read_regular(
         config_path, label="runtime configuration", require_root_0600=True
     )
-    environment = parse_environment_file(config_value)
+    parse_environment_file(config_value)
+    catalog_environment_path = Path(
+        str(verification.get("catalog_environment", ""))
+    )
+    if not catalog_environment_path.is_absolute():
+        raise RuntimeVerificationError("catalog environment path is invalid")
+    catalog_environment_value, catalog_environment_info = read_regular(
+        catalog_environment_path,
+        label="catalog environment",
+        require_root_0600=True,
+    )
+    catalog_environment = parse_environment_file(catalog_environment_value)
     catalog = asyncio.run(
-        probe_catalog(manifest, dsn=environment.get("POSTGRES_DSN", ""))
+        probe_catalog(
+            manifest,
+            dsn=catalog_environment.get("POSTGRES_DSN", ""),
+        )
     )
     config_state = {
         "sha256": sha256_bytes(config_value),
         "state": "root_owned_0600_regular_single_link",
         "size": config_info.st_size,
+    }
+    catalog_environment_state = {
+        "sha256": sha256_bytes(catalog_environment_value),
+        "state": "root_owned_0600_regular_single_link",
+        "size": catalog_environment_info.st_size,
     }
 
     python_path = Path(str(verification.get("python_executable", "")))
@@ -668,6 +697,7 @@ def probe_live(manifest: dict[str, Any], *, root: Path) -> dict[str, Any]:
 
     return {
         "catalog": catalog,
+        "catalog_environment": catalog_environment_state,
         "config": config_state,
         "discovered_memory_units": discovered_memory_units(),
         "installed_unit_sha256": installed_hashes,
@@ -686,6 +716,7 @@ def load_binding(path: Path) -> tuple[dict[str, Any], str]:
     value, _ = read_regular(path, label="release binding", require_root_0600=True)
     binding = decode_json(value, label="release binding")
     allowed = {
+        "catalog_environment_sha256",
         "catalog_function_sha256",
         "contract_version",
         "manifest_sha256",
@@ -715,6 +746,48 @@ def _required_hash_map(value: Any, *, label: str) -> dict[str, str]:
     return value
 
 
+def build_binding(
+    manifest: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    manifest_sha256: str,
+    phase: str,
+) -> dict[str, Any]:
+    """Build the canonical content-free binding for one verified snapshot."""
+    validate_manifest(manifest)
+    if phase not in manifest["verification"]["supported_phases"]:
+        raise RuntimeVerificationError("runtime verification phase is unsupported")
+    catalog = snapshot.get("catalog")
+    if not isinstance(catalog, dict):
+        raise RuntimeVerificationError("catalog snapshot is absent")
+    binding = {
+        "catalog_environment_sha256": snapshot.get(
+            "catalog_environment", {}
+        ).get("sha256"),
+        "catalog_function_sha256": catalog.get("function_sha256"),
+        "contract_version": BINDING_CONTRACT,
+        "manifest_sha256": manifest_sha256,
+        "openai_sdk_version": snapshot.get("openai_sdk_version"),
+        "phase": phase,
+        "python_executable_sha256": snapshot.get(
+            "python_executable_sha256"
+        ),
+        "repository_commit": snapshot.get("repository", {}).get("commit"),
+        "repository_tree": snapshot.get("repository", {}).get("tree"),
+        "runtime_config_sha256": snapshot.get("config", {}).get("sha256"),
+        "source_sha256": snapshot.get("source_sha256"),
+        "unit_sha256": snapshot.get("installed_unit_sha256"),
+    }
+    verify_snapshot(
+        manifest,
+        snapshot,
+        manifest_sha256=manifest_sha256,
+        phase=phase,
+        binding=binding,
+    )
+    return binding
+
+
 def verify_snapshot(
     manifest: dict[str, Any],
     snapshot: dict[str, Any],
@@ -732,6 +805,12 @@ def verify_snapshot(
         raise RuntimeVerificationError("runtime release binding disposition is invalid")
     if snapshot.get("config", {}).get("state") != policy.get("runtime_config_state"):
         raise RuntimeVerificationError("runtime configuration state does not match policy")
+    if snapshot.get("catalog_environment", {}).get("state") != policy.get(
+        "catalog_environment_state"
+    ):
+        raise RuntimeVerificationError(
+            "catalog environment state does not match policy"
+        )
     if snapshot.get("openai_sdk_version") != manifest["verification"].get(
         "openai_sdk_version"
     ):
@@ -799,6 +878,10 @@ def verify_snapshot(
             ("manifest_sha256", manifest_sha256),
             ("repository_commit", snapshot["repository"]["commit"]),
             ("repository_tree", snapshot["repository"]["tree"]),
+            (
+                "catalog_environment_sha256",
+                snapshot["catalog_environment"].get("sha256"),
+            ),
             ("runtime_config_sha256", snapshot["config"].get("sha256")),
             ("python_executable_sha256", snapshot["python_executable_sha256"]),
             ("openai_sdk_version", snapshot["openai_sdk_version"]),
@@ -810,6 +893,7 @@ def verify_snapshot(
             if binding.get(field) != observed:
                 raise RuntimeVerificationError(f"release binding {field} does not match")
         for field in (
+            "catalog_environment_sha256",
             "manifest_sha256",
             "runtime_config_sha256",
             "python_executable_sha256",
@@ -858,7 +942,9 @@ def arguments() -> argparse.Namespace:
         description="Verify the content-free complete-path state for governed Memory V1."
     )
     parser.add_argument("--phase", choices=("installed_inactive",), required=True)
-    parser.add_argument("--binding", type=Path, required=True)
+    disposition = parser.add_mutually_exclusive_group(required=True)
+    disposition.add_argument("--binding", type=Path)
+    disposition.add_argument("--emit-binding", action="store_true")
     return parser.parse_args()
 
 
@@ -867,6 +953,15 @@ def main() -> int:
     try:
         manifest, manifest_sha256 = load_manifest(DEFAULT_MANIFEST)
         snapshot = probe_live(manifest, root=ROOT)
+        if args.emit_binding:
+            binding = build_binding(
+                manifest,
+                snapshot,
+                manifest_sha256=manifest_sha256,
+                phase=args.phase,
+            )
+            print(stable_json(binding))
+            return 0
         binding, binding_file_sha256 = load_binding(args.binding)
         report = verify_snapshot(
             manifest,

@@ -227,6 +227,7 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             set(binding["required_fields"]),
             {
+                "catalog_environment_sha256",
                 "catalog_function_sha256",
                 "manifest_sha256",
                 "openai_sdk_version",
@@ -250,6 +251,16 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             set(verification["supported_phases"]), {"installed_inactive"}
         )
         self.assertTrue(verification["reject_unlisted_installed_memory_units"])
+        self.assertEqual(
+            verification["catalog_environment"],
+            "/opt/chat-memory/.env",
+        )
+        self.assertEqual(
+            verification["supported_phases"]["installed_inactive"][
+                "catalog_environment_state"
+            ],
+            "root_owned_0600_regular_single_link",
+        )
         self.assertTrue(
             (ROOT / "scripts/memory_v1_active_runtime_verifier_v1.py").is_file()
         )

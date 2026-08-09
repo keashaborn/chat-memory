@@ -10,6 +10,7 @@ from unittest import mock
 from scripts.memory_v1_active_runtime_verifier_v1 import (
     BINDING_CONTRACT,
     RuntimeVerificationError,
+    build_binding,
     decode_json,
     git_identity,
     parse_environment_file,
@@ -56,6 +57,11 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
                 "function_sha256": function_hashes,
                 "relations": relation_states,
             },
+            "catalog_environment": {
+                "sha256": "e" * 64,
+                "state": "root_owned_0600_regular_single_link",
+                "size": 1024,
+            },
             "config": {
                 "sha256": "d" * 64,
                 "state": "root_owned_0600_regular_single_link",
@@ -82,6 +88,9 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
             "units": units,
         }
         self.binding = {
+            "catalog_environment_sha256": self.snapshot[
+                "catalog_environment"
+            ]["sha256"],
             "catalog_function_sha256": function_hashes,
             "contract_version": BINDING_CONTRACT,
             "manifest_sha256": self.manifest_sha256,
@@ -115,6 +124,17 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
         self.assertEqual(report["blocker_count"], 3)
         self.assertEqual(report["provider_calls"], 0)
         self.assertIsNotNone(report["binding_sha256"])
+
+    def test_binding_generation_is_exact_and_content_free(self) -> None:
+        generated = build_binding(
+            self.manifest,
+            self.snapshot,
+            manifest_sha256=self.manifest_sha256,
+            phase="installed_inactive",
+        )
+        self.assertEqual(generated, self.binding)
+        self.assertNotIn("POSTGRES_DSN", generated)
+        self.assertNotIn("runtime_config", generated)
 
     def test_unlisted_or_missing_installed_memory_unit_fails_closed(self) -> None:
         extra = copy.deepcopy(self.snapshot)
@@ -151,6 +171,11 @@ class ActiveRuntimeVerifierTests(unittest.TestCase):
         wrong_binding["repository_commit"] = "e" * 40
         with self.assertRaises(RuntimeVerificationError):
             self.verify(self.snapshot, binding=wrong_binding)
+
+        wrong_catalog_environment = copy.deepcopy(self.binding)
+        wrong_catalog_environment["catalog_environment_sha256"] = "f" * 64
+        with self.assertRaises(RuntimeVerificationError):
+            self.verify(self.snapshot, binding=wrong_catalog_environment)
 
     def test_catalog_function_role_and_rls_drift_fail_closed(self) -> None:
         function = copy.deepcopy(self.snapshot)
