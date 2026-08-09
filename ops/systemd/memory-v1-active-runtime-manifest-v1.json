@@ -148,7 +148,7 @@
     {
       "component_id": "openai_extraction_worker",
       "path": "scripts/memory_v1_openai_extraction_worker_v1.py",
-      "sha256": "48929c365187d41dc29c69f4b5f4477de6f27d3148b5b7fccc8499f3bc026755",
+      "sha256": "9b8ef47fc52536800e546979353056fdbfd16c696689fdd0663c3cc9c8d6eaed",
       "classification": "canonical_inactive"
     },
     {
