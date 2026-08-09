@@ -275,6 +275,30 @@ class ProviderAdapterTests(unittest.TestCase):
             ["dimension", "value"],
         )
 
+    def test_reported_stance_is_distinct_from_response_preference(self) -> None:
+        guidance = json.loads(PREDICATE_REGISTRY_GUIDANCE_V1)
+        stance = guidance["predicates"]["stance.reported"]
+        normalized_instructions = " ".join(EXTRACTION_INSTRUCTIONS.split())
+        self.assertEqual(stance["subject_entity_types"], ["person", "self"])
+        self.assertEqual(stance["modalities"], ["reported_belief", "uncertain"])
+        self.assertEqual(stance["projection_classes"], ["reported_stance"])
+        self.assertEqual(
+            stance["surface_policies"],
+            ["relevant_recall_or_explicit_recall"],
+        )
+        self.assertIn(
+            "stance.reported for an explicitly reported opinion",
+            normalized_instructions,
+        )
+        self.assertIn(
+            "Use preference.response only for an explicit stable instruction",
+            normalized_instructions,
+        )
+        self.assertIn(
+            "do not duplicate a proposition as paraphrased observations",
+            normalized_instructions,
+        )
+
     def test_owner_changes_request_and_safety_bindings(self) -> None:
         source = "I prefer quiet mornings."
         transports = (RecordingTransport(), RecordingTransport())

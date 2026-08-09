@@ -709,7 +709,7 @@ class WorkerTests(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_control_rejection_terminalizes_job_and_preserves_receipt(self) -> None:
+    def test_control_rejection_holds_unleased_job_and_preserves_receipt(self) -> None:
         high_recall_job = job()
         text = "My childhood summers were mostly spent near the lake."
         high_recall_job["evidence_content"] = text
@@ -720,9 +720,7 @@ class WorkerTests(unittest.TestCase):
             side_effect=ProcessingRejected("stop_after_receipt", 0)
         )
 
-        fail = mock.AsyncMock(
-            return_value={"status": "skipped", "apply_outcome": "applied"}
-        )
+        fail = mock.AsyncMock()
 
         async def run() -> None:
             with mock.patch.object(
@@ -767,13 +765,13 @@ class WorkerTests(unittest.TestCase):
                 )
             self.assertEqual(calls, 0)
             self.assertEqual(result["rejection_code"], "stop_after_receipt")
-            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["status"], "pending")
+            self.assertEqual(result["outcome"], "control_held_pending")
             self.assertFalse(result["provider_reservation_created"])
 
         asyncio.run(run())
         reserve.assert_awaited_once()
-        fail.assert_awaited_once()
-        self.assertEqual(fail.await_args.kwargs["code"], "stop_after_receipt")
+        fail.assert_not_awaited()
         receipt = reserve.await_args.kwargs["receipt"]
         self.assertEqual(len(receipt), 38)
         self.assertIn("eligibility_disposition", receipt)

@@ -76,6 +76,7 @@ ALLOWED_EXTRACTION_PREDICATES = (
     "relationship.parent_of",
     "relationship.sibling_of",
     "residence.lives_at",
+    "stance.reported",
 )
 
 
@@ -146,11 +147,16 @@ pet.breed, pet.coat_color, pet.eye_color, pet.hearing_status, pet.sex,
 pet.species, pet.weight_reported, preference.life, preference.response,
 project.constraint, project.current_state, project.proposed_feature,
 project.requirement, relationship.has_pet, relationship.parent_of,
-relationship.sibling_of, and residence.lives_at. Defer unsupported predicates as
-unregistered_predicate. Empty arrays are correct when no supported personal claim
-remains. For each observation, look up its predicate in the exact machine-readable
-registry guidance below and obey every listed subject type, modality, projection
-class, surface policy, temporal semantic, sensitivity floor, and object contract.
+relationship.sibling_of, residence.lives_at, and stance.reported. Use
+stance.reported for an explicitly reported opinion, interpretation, or belief. Use
+preference.response only for an explicit stable instruction controlling how the
+assistant should respond; never use it as a substitute for a general belief. Emit
+one observation for each distinct proposition and do not duplicate a proposition
+as paraphrased observations. Defer unsupported predicates as unregistered_predicate.
+Empty arrays are correct when no supported personal claim remains. For each
+observation, look up its predicate in the exact machine-readable registry guidance
+below and obey every listed subject type, modality, projection class, surface policy,
+temporal semantic, sensitivity floor, and object contract.
 Literal objects must match datatype, unit, approximate, and value-schema constraints
 exactly. Entity objects must match the referenced entity contract. If a supported
 claim cannot satisfy its predicate rule exactly, defer it instead of guessing.
