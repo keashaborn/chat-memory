@@ -217,10 +217,14 @@ class ActiveRuntimeManifestTests(unittest.TestCase):
             functions[claim],
             "f71bccae8e2496969daf06d4657bae71dae70630bcf9a302b033ddd91af2137e",
         )
+        expected_review_hashes = {
+            "memory.preflight_owner_openai_review_admission_v1(uuid,text,text,text,text,jsonb)": "8d503ad82beab0c010e96350bc88fe8b133c5ab48d0a462462bbd5be864ac770",
+            "memory.apply_owner_openai_review_admission_v1(uuid,uuid,text,text,text,text,jsonb,text)": "9eabd51c82611ec80d8a0f9732baacd7f863c4c9d54c61c0f8a51b7e0590ab0f",
+            "memory.read_owner_openai_review_admission_receipt_v1(uuid,text,uuid,uuid,uuid,text,text,text,jsonb,text)": "7bb694266195cf56b8ba0d9bda8c9d6cfa162b700532f5130061fa68cd2de07a",
+        }
+        for signature, expected_hash in expected_review_hashes.items():
+            self.assertEqual(functions[signature], expected_hash)
         for signature in (
-            "memory.preflight_owner_openai_review_admission_v1(uuid,text,text,text,text,jsonb)",
-            "memory.apply_owner_openai_review_admission_v1(uuid,uuid,text,text,text,text,jsonb,text)",
-            "memory.read_owner_openai_review_admission_receipt_v1(uuid,text,uuid,uuid,uuid,text,text,text,jsonb,text)",
             "memory.read_owner_governed_claim_lifecycle_v1(integer)",
             "memory.retract_owner_governed_claim_v1(uuid,uuid,uuid,integer,text,text)",
         ):

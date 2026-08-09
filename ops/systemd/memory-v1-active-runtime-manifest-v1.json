@@ -953,17 +953,17 @@
       },
       {
         "signature": "memory.preflight_owner_openai_review_admission_v1(uuid,text,text,text,text,jsonb)",
-        "sha256": "2309d2e0dc2a15345434b48e5a531845ad727f2f8258bdc5944675c75a0e4c06",
+        "sha256": "8d503ad82beab0c010e96350bc88fe8b133c5ab48d0a462462bbd5be864ac770",
         "purpose": "manual_review_admission_preflight"
       },
       {
         "signature": "memory.apply_owner_openai_review_admission_v1(uuid,uuid,text,text,text,text,jsonb,text)",
-        "sha256": "f9c98521c07db0f878740dd10e289d4190fa2155a369cf0ea412aa8b5153bf16",
+        "sha256": "9eabd51c82611ec80d8a0f9732baacd7f863c4c9d54c61c0f8a51b7e0590ab0f",
         "purpose": "manual_review_admission_apply"
       },
       {
         "signature": "memory.read_owner_openai_review_admission_receipt_v1(uuid,text,uuid,uuid,uuid,text,text,text,jsonb,text)",
-        "sha256": "72e9ff4add162a25f47ae222001fe48779a3e1f3e08a9842451e5175d073a929",
+        "sha256": "7bb694266195cf56b8ba0d9bda8c9d6cfa162b700532f5130061fa68cd2de07a",
         "purpose": "manual_review_admission_receipt"
       },
       {
