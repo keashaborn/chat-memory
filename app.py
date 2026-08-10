@@ -139,6 +139,9 @@ from rag_engine.governed_memory.conversation_capture import (
     enqueue_captured_chat_log_message,
     normalize_capture_text,
 )
+from rag_engine.governed_memory.exclusive_cutover import (
+    legacy_memory_surfaces_enabled,
+)
 from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
     router as memory_v1_governed_claim_lifecycle_router_v1,
 )
@@ -187,17 +190,22 @@ from rag_engine.usage_ledger_v1 import (
 from scripts.review_promotion_plan import build_personal_event_promotion_preview
 
 
+LEGACY_MEMORY_SURFACES_ENABLED = legacy_memory_surfaces_enabled()
+
+
 app = FastAPI(title="Brains API", version="1.0.0")
-app.include_router(vantage_router, prefix="/vantage")
+if LEGACY_MEMORY_SURFACES_ENABLED:
+    app.include_router(vantage_router, prefix="/vantage")
 app.include_router(resse_response_router, prefix="/response")
-app.include_router(
-    memory_v1_governed_claim_lifecycle_router_v1,
-    prefix="/memory/governed/claims",
-)
-app.include_router(
-    assistant_response_preferences_router_v1,
-    prefix="/assistant-preferences",
-)
+if LEGACY_MEMORY_SURFACES_ENABLED:
+    app.include_router(
+        memory_v1_governed_claim_lifecycle_router_v1,
+        prefix="/memory/governed/claims",
+    )
+    app.include_router(
+        assistant_response_preferences_router_v1,
+        prefix="/assistant-preferences",
+    )
 app.include_router(lifeswitch_sage_router, prefix="/lifeswitch/sage")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
@@ -235,6 +243,18 @@ app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
 app.include_router(voice_realtime_preview_router)
 app.include_router(voice_session_router)
+
+
+def _legacy_memory_retired(operation: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "status": "conflict",
+            "detail": "legacy_memory_surface_retired",
+            "operation": operation,
+        },
+        status_code=409,
+    )
+
 
 # ---------- request correlation ----------
 def _sanitize_request_id(raw: Optional[str]) -> Optional[str]:
@@ -1426,6 +1446,14 @@ async def log_chat(req: Request):
     # Explicit compatibility-only identity-card path. This route does not
     # create governed claim memory and returns before transcript capture.
     if source == "frontend/identity" and text.startswith("FULL_NAME:"):
+        if not LEGACY_MEMORY_SURFACES_ENABLED:
+            return JSONResponse(
+                {
+                    "status": "retired",
+                    "detail": "legacy_identity_memory_retired",
+                },
+                status_code=410,
+            )
         full_name = text.split("FULL_NAME:", 1)[1].strip()
 
         if not full_name:
@@ -2265,6 +2293,8 @@ async def threads_delete(thread_id: str, req: Request):
     actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("thread_delete")
 
     conn = await asyncpg.connect(DSN)
     try:
@@ -2345,6 +2375,8 @@ async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optiona
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_list")
     vid = (vantage_id or "default").strip() or "default"
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else CARD_KINDS_DEFAULT) if k.strip()]
@@ -2425,6 +2457,8 @@ async def vantage_cards_list(
     actor_err, uid = await _require_actor_for_user(req, user_id, vid)
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("vantage_cards_list")
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else []) if k.strip()]
     limit_n = max(1, min(int(limit or 100), 500))
@@ -2512,6 +2546,8 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
     actor_err, uid = await _require_actor_for_user(request, user_id, vantage_id)
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_upsert")
     kind = (req.kind or "").strip()
     if not kind:
         return JSONResponse({"status": "bad_request", "detail": "missing kind"}, status_code=400)
@@ -2597,6 +2633,8 @@ async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_delete")
     qdrant = get_qdrant()
 
     # verify ownership
@@ -2663,6 +2701,8 @@ async def delete_all_user_data(user_id: str, req: Request):
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("delete_all_user_data")
 
     # 1) Delete Postgres transcript + threads
     pg_chat = None
@@ -2727,6 +2767,8 @@ async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60)
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("delete_recent_user_data")
     minutes = int(minutes or 60)
     if minutes < 1:
         return JSONResponse({"status":"bad_request","detail":"minutes must be >= 1"}, status_code=400)
@@ -2832,6 +2874,8 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("export_user_data")
     limit = int(limit or 20000)
     if limit < 1:
         return JSONResponse({"status":"bad_request","detail":"limit must be >= 1"}, status_code=400)
