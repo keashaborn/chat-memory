@@ -104,6 +104,7 @@ _NO_STORE_HEADERS = {
 
 PoolFactory = Callable[..., Awaitable[Any]]
 ActorResolverFactory = Callable[..., ActorResolver]
+DEFAULT_GOVERNED_MEMORY_POOL_FACTORY: PoolFactory = asyncpg.create_pool
 
 
 class LiveAuthorityVerifier(Protocol):
@@ -354,7 +355,7 @@ def create_governed_memory_http_service(
     settings: GovernedMemoryHttpServiceSettings | None = None,
     *,
     environment: Mapping[str, str] | None = None,
-    pool_factory: PoolFactory = asyncpg.create_pool,
+    pool_factory: PoolFactory = DEFAULT_GOVERNED_MEMORY_POOL_FACTORY,
     actor_resolver_factory: ActorResolverFactory = create_supabase_actor_resolver,
     authority_verifier: LiveAuthorityVerifier | None = None,
     token_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -521,6 +522,7 @@ def create_governed_memory_http_service(
 
 
 __all__ = [
+    "DEFAULT_GOVERNED_MEMORY_POOL_FACTORY",
     "EXPECTED_DATABASE_NAME",
     "EXPECTED_DATABASE_ROLE",
     "GovernedMemoryHttpServiceSettings",

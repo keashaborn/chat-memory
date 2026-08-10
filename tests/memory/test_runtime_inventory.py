@@ -51,6 +51,7 @@ EXPECTED_PACKAGE_FILES = {
     "conversation_capture.py",
     "conversation_source.py",
     "eligibility.py",
+    "exclusive_cutover.py",
     "extraction.py",
     "http_api.py",
     "http_auth.py",
@@ -61,7 +62,11 @@ EXPECTED_PACKAGE_FILES = {
     "postgres_adapter.py",
     "projection.py",
     "repository.py",
+    "response_postgres.py",
+    "response_provider.py",
+    "response_runtime.py",
     "retrieval.py",
+    "successor_live_authority.py",
     "worker.py",
 }
 
@@ -70,6 +75,7 @@ EXPECTED_RUNTIME_PACKAGE_FILES = {
     "__main__.py",
     "application.py",
     "calibration.py",
+    "environment.py",
     "once_worker.py",
     "pilot_marker.py",
     "qdrant_adapter.py",
@@ -90,6 +96,7 @@ EXPECTED_TEST_FILES = {
     "test_conversation_bridge.py",
     "test_conversation_capture.py",
     "test_eligibility.py",
+    "test_exclusive_cutover.py",
     "test_extraction.py",
     "test_https_transport.py",
     "test_http_api.py",
@@ -109,10 +116,13 @@ EXPECTED_TEST_FILES = {
     "test_prompt_and_binding.py",
     "test_qdrant_adapter.py",
     "test_release_contracts.py",
+    "test_response_provider.py",
+    "test_response_runtime.py",
     "test_retrieval.py",
     "test_retrieval_calibration.py",
     "test_runtime_inventory.py",
     "test_runtime_release.py",
+    "test_successor_live_authority.py",
     "test_schema_and_rls.py",
     "test_worker_recovery.py",
 }
@@ -497,9 +507,9 @@ class RuntimeManifestTests(unittest.TestCase):
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
                 "candidate_python": RECORDED_CANDIDATE_PYTHON,
-                "receipt_scope": "current_phase5_source_bound_disposable_proof_attested",
-                "current_phase5_source_bound": True,
-                "final_phase5_runtime_rebuild_pending": False,
+                "receipt_scope": "prior_phase5_source_bound_disposable_proof_historical_stale",
+                "current_phase5_source_bound": False,
+                "final_phase6b_runtime_rebuild_pending": True,
                 "candidate_owned_environment": True,
                 "install_lock": True,
                 "build_lock_verified": True,
@@ -540,7 +550,10 @@ class RuntimeManifestTests(unittest.TestCase):
             build_receipt["project_wheel_sha256"],
             EXPECTED_PROJECT_WHEEL_SHA256,
         )
-        self.assertEqual(RECORDED_SOURCE_TREE_SHA256, EXPECTED_SOURCE_TREE_SHA256)
+        self.assertNotEqual(
+            RECORDED_SOURCE_TREE_SHA256,
+            EXPECTED_SOURCE_TREE_SHA256,
+        )
 
     def test_schema_validation_scope_is_versionless_and_exact(self) -> None:
         contract = json.loads(SCHEMA_CONTRACT.read_text(encoding="utf-8"))
@@ -975,7 +988,7 @@ class SourceInventoryTests(unittest.TestCase):
         runtime = json.loads(MANIFEST.read_text(encoding="utf-8"))[
             "validation_runtime"
         ]
-        if runtime["final_phase5_runtime_rebuild_pending"]:
+        if runtime["final_phase6b_runtime_rebuild_pending"]:
             self.assertFalse(runtime["current_phase5_source_bound"])
             self.assertEqual(
                 runtime["source_tree_sha256"],

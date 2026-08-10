@@ -24,7 +24,6 @@ from rag_engine.chat_attachment_context_v1 import (
 from rag_engine.assistant_response_preferences_v1 import (
     default_assistant_response_preferences_v1,
 )
-from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
@@ -34,14 +33,10 @@ from rag_engine.governed_memory.response_provider import (
     choose_response_memory_provider,
     response_mode_from_environment,
 )
-from rag_engine.governed_memory.http_auth import HttpAuthError
-from rag_engine.governed_memory.http_service import SUPABASE_ISSUER_ENV
-from rag_engine.governed_memory.runtime.application import SUPABASE_API_KEY_ENV
-from rag_engine.governed_memory.runtime.live_supabase import (
-    LiveSupabaseAuthorityConfig,
-    LiveSupabaseAuthorityVerifier,
-    LiveSupabaseSessionVerifier,
-    LiveSupabaseUserVerifier,
+from rag_engine.governed_memory.response_runtime import SuccessorResponseRuntime
+from rag_engine.governed_memory.successor_live_authority import (
+    SuccessorLiveAuthorityConfigurationError,
+    successor_live_authority_from_environment,
 )
 from rag_engine.lifeswitch_chat_runtime_v1 import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
@@ -125,44 +120,40 @@ SuccessorResponseProviderFactory = Callable[
 SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
 
 
-def _unconfigured_successor_response_provider(
+SUCCESSOR_RESPONSE_RUNTIME = SuccessorResponseRuntime()
+
+
+def _production_successor_response_provider(
     binding: SuccessorResponseActorBinding,
 ) -> SuccessorGovernedMemoryAssemblyProviderV1:
-    del binding
-    raise SuccessorResponseConfigurationError(
-        "successor_response_runtime_unconfigured"
-    )
+    return SUCCESSOR_RESPONSE_RUNTIME.provider(binding, os.environ)
 
 
 SUCCESSOR_RESPONSE_PROVIDER_FACTORY: SuccessorResponseProviderFactory = (
-    _unconfigured_successor_response_provider
+    _production_successor_response_provider
 )
 
 
-def _live_successor_authority_from_environment() -> MemoryLiveAuthorityVerifierV1:
-    try:
-        config = LiveSupabaseAuthorityConfig(
-            issuer=os.environ.get(SUPABASE_ISSUER_ENV, ""),
-            api_key=os.environ.get(SUPABASE_API_KEY_ENV, ""),
-        )
-        return LiveSupabaseAuthorityVerifier(
-            user_verifier=LiveSupabaseUserVerifier(config),
-            session_verifier=LiveSupabaseSessionVerifier(config),
-        )
-    except HttpAuthError as exc:
-        raise SuccessorResponseConfigurationError(
-            "successor_live_authority_unconfigured"
-        ) from exc
+def _legacy_response_memory_provider(conn: object) -> object:
+    # Keep the retired implementation out of the successor import graph.
+    from rag_engine.governed_memory_provider_v1 import (
+        LiveGovernedMemoryAssemblyProviderV1,
+    )
+
+    return LiveGovernedMemoryAssemblyProviderV1(conn)
 
 
 SUCCESSOR_LIVE_AUTHORITY_FACTORY: SuccessorLiveAuthorityFactory = (
-    _live_successor_authority_from_environment
+    successor_live_authority_from_environment
 )
 
 
 @router.on_event("shutdown")
 async def close_lifeswitch_chat_pool_v1() -> None:
-    await LIFESWITCH_CHAT_POOL.close()
+    try:
+        await LIFESWITCH_CHAT_POOL.close()
+    finally:
+        await SUCCESSOR_RESPONSE_RUNTIME.close()
 
 
 def apply_no_store_headers(response: Response) -> None:
@@ -272,7 +263,7 @@ async def resse_response_query(
                 if tentative_successor_eligible
                 else None
             )
-        except SuccessorResponseConfigurationError:
+        except SuccessorLiveAuthorityConfigurationError:
             raise _no_store_http_exception(
                 503,
                 "successor_live_authority_unconfigured",
@@ -411,9 +402,7 @@ async def resse_response_query(
             memory_provider, successor_memory_lifecycle = (
                 choose_response_memory_provider(
                     mode=response_memory_mode,
-                    legacy_factory=lambda: LiveGovernedMemoryAssemblyProviderV1(
-                        conn
-                    ),
+                    legacy_factory=lambda: _legacy_response_memory_provider(conn),
                     successor_factory=(
                         (
                             lambda: SUCCESSOR_RESPONSE_PROVIDER_FACTORY(

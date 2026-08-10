@@ -19,6 +19,10 @@ from rag_engine.governed_memory.response_provider import (
     choose_response_memory_provider,
     response_mode_from_environment,
 )
+from rag_engine.governed_memory.exclusive_cutover import (
+    ExclusiveMemoryMode,
+    exclusive_memory_mode,
+)
 from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
 from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
@@ -149,10 +153,22 @@ class SuccessorResponseModeTests(unittest.TestCase):
     def test_default_is_legacy_and_mode_text_is_exact(self) -> None:
         self.assertEqual(response_mode_from_environment({}), EXCLUSIVE_MODE_LEGACY)
         self.assertEqual(
+            response_mode_from_environment({}),
+            exclusive_memory_mode({}).value,
+        )
+        self.assertEqual(
             response_mode_from_environment(
                 {EXCLUSIVE_MODE_ENV: EXCLUSIVE_MODE_SUCCESSOR}
             ),
             EXCLUSIVE_MODE_SUCCESSOR,
+        )
+        self.assertEqual(
+            EXCLUSIVE_MODE_LEGACY,
+            ExclusiveMemoryMode.LEGACY.value,
+        )
+        self.assertEqual(
+            EXCLUSIVE_MODE_SUCCESSOR,
+            ExclusiveMemoryMode.SUCCESSOR_PILOT.value,
         )
         for invalid in (
             "",

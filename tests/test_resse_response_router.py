@@ -329,6 +329,7 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
         environment = dict(os.environ)
         environment.pop(EXCLUSIVE_MODE_ENV, None)
         successor_factory = Mock()
+        response_runtime_provider = Mock()
         with (
             patch.dict(os.environ, environment, clear=True),
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
@@ -336,6 +337,11 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 response_router,
                 "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
                 successor_factory,
+            ),
+            patch.object(
+                response_router.SUCCESSOR_RESPONSE_RUNTIME,
+                "provider",
+                response_runtime_provider,
             ),
             patch.object(
                 response_router,
@@ -351,6 +357,7 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 )
         legacy_auth.assert_awaited_once()
         successor_factory.assert_not_called()
+        response_runtime_provider.assert_not_called()
 
 
 if __name__ == "__main__":

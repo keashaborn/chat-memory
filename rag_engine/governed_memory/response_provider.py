@@ -22,6 +22,12 @@ from rag_engine.governed_memory.contracts import (
     require_utc,
     require_uuid,
 )
+from rag_engine.governed_memory.exclusive_cutover import (
+    EXCLUSIVE_MODE_ENV,
+    ExclusiveMemoryConfigurationError,
+    ExclusiveMemoryMode,
+    exclusive_memory_mode,
+)
 from rag_engine.governed_memory.retrieval import (
     ANSWER_RENDERER_SHA256,
     RetrievalPolicy,
@@ -41,9 +47,8 @@ from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 
 
-EXCLUSIVE_MODE_ENV = "GOVERNED_MEMORY_EXCLUSIVE_MODE"
-EXCLUSIVE_MODE_LEGACY = "legacy"
-EXCLUSIVE_MODE_SUCCESSOR = "successor_pilot"
+EXCLUSIVE_MODE_LEGACY = ExclusiveMemoryMode.LEGACY.value
+EXCLUSIVE_MODE_SUCCESSOR = ExclusiveMemoryMode.SUCCESSOR_PILOT.value
 SUCCESSOR_CONTEXT_CONTRACT = "governed-memory-answer-context-v1"
 
 
@@ -146,13 +151,12 @@ class InactiveSuccessorMemoryProviderV1:
 
 
 def response_mode_from_environment(environment: Mapping[str, str]) -> str:
-    raw = environment.get(EXCLUSIVE_MODE_ENV, EXCLUSIVE_MODE_LEGACY)
-    if not isinstance(raw, str) or raw not in {
-        EXCLUSIVE_MODE_LEGACY,
-        EXCLUSIVE_MODE_SUCCESSOR,
-    }:
-        raise SuccessorResponseConfigurationError("response_memory_mode_invalid")
-    return raw
+    try:
+        return exclusive_memory_mode(environment).value
+    except ExclusiveMemoryConfigurationError as exc:
+        raise SuccessorResponseConfigurationError(
+            "response_memory_mode_invalid"
+        ) from exc
 
 
 def choose_response_memory_provider(
