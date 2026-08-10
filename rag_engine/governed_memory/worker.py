@@ -430,13 +430,35 @@ def process_ingest_item(
     review_count = source.context_review_count
     if review_count == 0 and source.eligibility_decision is not None:
         raise ContractViolation("bridge_eligibility_replay_mismatch")
-    if successor_ingest_receipt is not None and review_count != 1:
-        raise ContractViolation("unexpected_ingest_successor_receipt")
     replay_receipt = (
         _validated_ingest_successor_receipt(successor_ingest_receipt, source)
         if successor_ingest_receipt is not None
         else None
     )
+    if replay_receipt is not None and review_count == 0:
+        replay_result = evaluate_eligibility(payload, policy=source.policy)
+        if (
+            replay_result["source_binding_sha256"]
+            != source.source_binding_sha256
+            or replay_result["policy_sha256"] != source.policy_sha256
+            or replay_result["decision"]
+            != EligibilityDecision.SEND_EXTERNAL.value
+        ):
+            raise ContractViolation("ingest_successor_receipt_authority_mismatch")
+        return {
+            "decision": EligibilityDecision.SEND_EXTERNAL.value,
+            "reason_codes": list(replay_result["reason_codes"]),
+            "bridge_state": "completed",
+            "selected_evidence": None,
+            "provider_allowed": False,
+            "effects": ["ack_existing_memory_ingest"],
+            "receipt": replay_result["receipt"],
+            "context_review_count": 0,
+            "resolution": "successor_receipt_replayed",
+            "successor_evidence_id": replay_receipt["evidence_id"],
+            "successor_job_id": replay_receipt["extraction_job_id"],
+            "ingest_receipt_sha256": replay_receipt["receipt_sha256"],
+        }
     if review_count == 1:
         receipt = {
             "owner_user_id_sha256": canonical_sha256(

@@ -25,6 +25,7 @@ WORKER_MODE_ENV = "GOVERNED_MEMORY_WORKER_MODE"
 
 
 class WorkKind(str, Enum):
+    INGEST = "ingest"
     EXTRACTION = "extraction"
     PROJECTION_UPSERT = "projection_upsert"
     PROJECTION_DELETE = "projection_delete"
@@ -33,13 +34,32 @@ class WorkKind(str, Enum):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ExtractionWork:
     work_id: UUID
-    provider_request: Mapping[str, Any]
+    provider_request: Mapping[str, Any] | None = None
+    local_failure_code: str | None = None
     kind: WorkKind = WorkKind.EXTRACTION
 
     def __post_init__(self) -> None:
         require_uuid(self.work_id, "invalid_worker_work_id")
-        if not isinstance(self.provider_request, Mapping):
+        if (self.provider_request is None) == (self.local_failure_code is None):
             raise ContractViolation("invalid_worker_provider_request")
+        if self.provider_request is not None and not isinstance(
+            self.provider_request,
+            Mapping,
+        ):
+            raise ContractViolation("invalid_worker_provider_request")
+        if self.local_failure_code not in {
+            None,
+            "local_serialization_failed_before_send",
+        }:
+            raise ContractViolation("invalid_worker_local_failure")
+
+
+class WorkerLocalFailure(RuntimeError):
+    """A claimed item that must fail before any external provider call."""
+
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(reason_code)
+        self.reason_code = reason_code
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -79,6 +99,8 @@ class OnceWorkerRepository(Protocol):
     async def claim_one(self) -> WorkerWork | None: ...
 
     async def complete(self, work: WorkerWork, result: object) -> None: ...
+
+    async def fail(self, work: WorkerWork, error: Exception) -> None: ...
 
 
 class ExtractionProvider(Protocol):
@@ -162,27 +184,37 @@ class OnceWorker:
                     work_kind=None,
                 )
 
-            if isinstance(work, ExtractionWork):
-                result = await self._provider.extract(work.provider_request)
-            elif isinstance(work, ProjectionUpsertWork):
-                preflight = await self._qdrant.preflight()
-                preflight_sha256 = preflight.receipt_sha256
-                embedding_input = render_projection_surface(work.claim)
-                vector = await self._embedder.embed(embedding_input)
-                point = build_projection_point(
-                    work.claim,
-                    work.outbox_record,
-                    vector,
-                )
-                result = await self._qdrant.upsert_projection_point(point)
-            elif isinstance(work, ProjectionDeleteWork):
-                preflight = await self._qdrant.preflight()
-                preflight_sha256 = preflight.receipt_sha256
-                result = await self._qdrant.delete_projection_point(
-                    work.delete_command
-                )
-            else:
-                raise ContractViolation("invalid_worker_work_kind")
+            try:
+                if isinstance(work, ExtractionWork):
+                    if work.local_failure_code is not None:
+                        raise WorkerLocalFailure(work.local_failure_code)
+                    if work.provider_request is None:
+                        raise ContractViolation("invalid_worker_provider_request")
+                    result = await self._provider.extract(work.provider_request)
+                elif isinstance(work, ProjectionUpsertWork):
+                    preflight = await self._qdrant.preflight()
+                    preflight_sha256 = preflight.receipt_sha256
+                    embedding_input = render_projection_surface(work.claim)
+                    vector = await self._embedder.embed(embedding_input)
+                    point = build_projection_point(
+                        work.claim,
+                        work.outbox_record,
+                        vector,
+                    )
+                    result = await self._qdrant.upsert_projection_point(point)
+                elif isinstance(work, ProjectionDeleteWork):
+                    preflight = await self._qdrant.preflight()
+                    preflight_sha256 = preflight.receipt_sha256
+                    result = await self._qdrant.delete_projection_point(
+                        work.delete_command
+                    )
+                else:
+                    raise ContractViolation("invalid_worker_work_kind")
+            except Exception as error:
+                failure_handler = getattr(self._repository, "fail", None)
+                if callable(failure_handler):
+                    await failure_handler(work, error)
+                raise
 
             await self._repository.complete(work, result)
             material = {
@@ -242,10 +274,33 @@ def main(
     if values.get(WORKER_MODE_ENV, "off") != "on":
         _refusal("governed_memory_worker_disabled")
         return 1
+    runtime_refusal_type: type[Exception] | None = None
     if once_runner is None:
-        _refusal("governed_memory_worker_adapters_unconfigured")
+        try:
+            from .worker_application import (
+                WorkerRuntimeRefusal,
+                create_runtime_once_runner,
+            )
+        except Exception:
+            _refusal("governed_memory_worker_runtime_unavailable")
+            return 1
+        runtime_refusal_type = WorkerRuntimeRefusal
+        try:
+            once_runner = create_runtime_once_runner(values)
+        except WorkerRuntimeRefusal as error:
+            _refusal(error.code)
+            return 1
+    try:
+        asyncio.run(once_runner())
+    except Exception as error:
+        code = (
+            error.code
+            if runtime_refusal_type is not None
+            and isinstance(error, runtime_refusal_type)
+            else "governed_memory_worker_run_failed"
+        )
+        _refusal(code)
         return 1
-    asyncio.run(once_runner())
     return 0
 
 
@@ -261,6 +316,7 @@ __all__ = [
     "ProjectionUpsertWork",
     "WORKER_MODE_ENV",
     "WorkKind",
+    "WorkerLocalFailure",
     "WorkerQdrant",
     "main",
 ]

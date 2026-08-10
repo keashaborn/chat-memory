@@ -71,7 +71,7 @@ class CaptureSettings:
 @dataclass(frozen=True, slots=True)
 class CaptureReceipt:
     outcome: str
-    outbox_id: UUID
+    outbox_id: UUID | None
     policy_sha256: str
 
 
@@ -240,13 +240,17 @@ async def enqueue_captured_chat_log_message(
     )
     if row is None or tuple(row.keys()) != ("outcome", "outbox_id"):
         raise ContractViolation("invalid_capture_enqueue_receipt")
-    if row["outcome"] not in {"enqueued", "replayed"}:
+    outcome = row["outcome"]
+    if outcome not in {"enqueued", "replayed", "pilot_limit_reached"}:
         raise ContractViolation("invalid_capture_enqueue_outcome")
     outbox_id = row["outbox_id"]
-    if not isinstance(outbox_id, UUID):
+    if outcome == "pilot_limit_reached":
+        if outbox_id is not None:
+            raise ContractViolation("invalid_capture_outbox_id")
+    elif not isinstance(outbox_id, UUID):
         raise ContractViolation("invalid_capture_outbox_id")
     return CaptureReceipt(
-        outcome=str(row["outcome"]),
+        outcome=str(outcome),
         outbox_id=outbox_id,
         policy_sha256=policy_sha256,
     )
