@@ -90,6 +90,22 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
 
     def test_mutating_or_partial_legacy_operations_guard_before_store_access(self) -> None:
         expectations = {
+            "admin_memory_health": (
+                "admin_memory_health",
+                "build_admin_memory_health_v1",
+            ),
+            "admin_memory_workbench": (
+                "admin_memory_workbench",
+                "list_admin_memory_workbench_v1",
+            ),
+            "admin_memory_workbench_feedback": (
+                "admin_memory_workbench_feedback",
+                "record_admin_memory_workbench_feedback_v2",
+            ),
+            "admin_memory_review_plan": (
+                "admin_memory_review_plan",
+                "build_personal_event_promotion_preview",
+            ),
             "threads_delete": ("thread_delete", "asyncpg.connect"),
             "cards_list": ("cards_list", "get_qdrant"),
             "vantage_cards_list": ("vantage_cards_list", "asyncpg.connect"),

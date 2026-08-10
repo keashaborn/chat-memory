@@ -948,6 +948,8 @@ async def admin_memory_health(req: Request):
     The response contains aggregate counts and timestamps only. It never
     exposes stored memory content, record identifiers, or owner identifiers.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("admin_memory_health")
     actor = _actor_user_id(req)
     if not actor:
         return _actor_missing_response()
@@ -1030,6 +1032,8 @@ def _require_memory_workbench_actor(
 
 @app.get("/admin/memory/workbench")
 async def admin_memory_workbench(req: Request):
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("admin_memory_workbench")
     denied, actor = _require_memory_workbench_actor(
         req,
         "memory_system.view",
@@ -1079,6 +1083,8 @@ async def admin_memory_workbench_feedback(
     payload: AdminMemoryWorkbenchFeedbackV1,
     req: Request,
 ):
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("admin_memory_workbench_feedback")
     denied, actor = _require_memory_workbench_actor(
         req,
         "memory_system.manage",
@@ -1137,6 +1143,8 @@ async def admin_memory_review_plan(req: Request):
     The frontend admin proxy is responsible for user/admin capability checks.
     No writes are performed here.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("admin_memory_review_plan")
     actor = _actor_user_id(req)
     if not actor:
         return _actor_missing_response()
