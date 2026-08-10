@@ -226,6 +226,90 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
             msg=completed.stderr or completed.stdout,
         )
 
+    @unittest.skipUnless(
+        all(
+            importlib.util.find_spec(module) is not None
+            for module in ("asyncpg", "fastapi", "jwt", "openai", "qdrant_client")
+        ),
+        "full Brains runtime dependencies are unavailable",
+    )
+    def test_retired_routes_refuse_before_auth_or_resource_construction(self) -> None:
+        script = textwrap.dedent(
+            """
+            import asyncio
+            from starlette.requests import Request
+            import app
+
+            calls = []
+
+            async def async_bomb(*args, **kwargs):
+                calls.append(("async", args, kwargs))
+                raise AssertionError("retired route reached async resource")
+
+            def sync_bomb(*args, **kwargs):
+                calls.append(("sync", args, kwargs))
+                raise AssertionError("retired route reached sync resource")
+
+            app.asyncpg.connect = async_bomb
+            app.get_qdrant = sync_bomb
+            app._require_actor_for_user = async_bomb
+            app._require_actor_for_thread = async_bomb
+            app.SUCCESSOR_LIVE_AUTHORITY_FACTORY = sync_bomb
+            app.client = sync_bomb
+
+            request = Request({
+                "type": "http",
+                "method": "GET",
+                "path": "/retired",
+                "query_string": b"",
+                "headers": [],
+            })
+
+            async def main():
+                checks = (
+                    app.admin_memory_health(request),
+                    app.admin_memory_workbench(request),
+                    app.admin_memory_workbench_feedback(None, request),
+                    app.admin_memory_review_plan(request),
+                    app.threads_delete("not-a-uuid", request),
+                    app.cards_list("not-a-uuid", request),
+                    app.vantage_cards_list("not-a-uuid", request),
+                    app.cards_upsert("not-a-uuid", None, request),
+                    app.cards_delete("not-a-uuid", "card", request),
+                    app.delete_all_user_data("not-a-uuid", request),
+                    app.delete_recent_user_data("not-a-uuid", request),
+                    app.export_user_data("not-a-uuid", request),
+                )
+                responses = await asyncio.gather(*checks)
+                assert all(response.status_code == 409 for response in responses)
+                assert calls == []
+
+            asyncio.run(main())
+            """
+        )
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "POSTGRES_DSN": "postgresql://synthetic",
+                EXCLUSIVE_MODE_ENV: "successor_pilot",
+                "GOVERNED_MEMORY_CAPTURE_MODE": "off",
+            }
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=completed.stderr or completed.stdout,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
