@@ -13,7 +13,7 @@ from rag_engine.governed_memory.contracts import (
     require_uuid,
 )
 from rag_engine.governed_memory.postgres_adapter import normalize_postgres_record
-from rag_engine.governed_memory.response_provider import SuccessorResponseActorBinding
+from rag_engine.governed_memory.response_contracts import SuccessorResponseActorBinding
 
 
 _READ_CLAIMS_SQL = (

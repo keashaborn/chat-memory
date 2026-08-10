@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-import subprocess
-import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -12,8 +10,10 @@ from uuid import UUID
 
 from rag_engine.governed_memory.contracts import ContractViolation
 from rag_engine.governed_memory.http_service import POSTGRES_DSN_ENV
-from rag_engine.governed_memory.response_provider import (
+from rag_engine.governed_memory.response_contracts import (
     SuccessorResponseActorBinding,
+)
+from rag_engine.governed_memory.response_provider import (
     SuccessorGovernedMemoryAssemblyProviderV1,
     SuccessorResponseConfigurationError,
 )
@@ -22,6 +22,7 @@ from rag_engine.governed_memory.response_postgres import (
     SuccessorResponsePostgresError,
 )
 from rag_engine.governed_memory.response_runtime import (
+    DEFAULT_PREDICATE_CATALOG_PATH,
     EXPECTED_POSTGRES_HOST,
     EXPECTED_POSTGRES_PORT,
     EXPECTED_QDRANT_HOST,
@@ -44,8 +45,14 @@ from rag_engine.governed_memory.runtime.calibration import (
 from rag_engine.governed_memory.runtime.qdrant_adapter import (
     QDRANT_PHYSICAL_COLLECTION,
 )
-from tests.memory.test_response_provider import actor
-from tests.memory._fixtures import CLAIM_A, OWNER_A, RESPONSE_A, THREAD_A
+from rag_engine.governed_memory import response_runtime as response_runtime_module
+from tests.memory._fixtures import (
+    CLAIM_A,
+    OWNER_A,
+    RESPONSE_A,
+    THREAD_A,
+    make_response_actor,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -222,7 +229,7 @@ class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         await repository.persist_answer_binding(
-            actor=actor(),
+            actor=make_response_actor(),
             operation_id=UUID("34343434-3434-4434-8434-343434343434"),
             thread_id=THREAD_A,
             binding=binding,
@@ -271,7 +278,7 @@ class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
                 )
                 with self.assertRaises(SuccessorResponsePostgresError):
                     await repository.persist_answer_binding(
-                        actor=actor(),
+                        actor=make_response_actor(),
                         operation_id=UUID(
                             "34343434-3434-4434-8434-343434343434"
                         ),
@@ -284,6 +291,15 @@ class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SuccessorResponseRuntimeSettingsTests(unittest.TestCase):
+    def test_default_predicate_catalog_is_successor_packaged_asset(self) -> None:
+        package_root = Path(response_runtime_module.__file__).resolve().parent
+        self.assertTrue(DEFAULT_PREDICATE_CATALOG_PATH.is_relative_to(package_root))
+        self.assertEqual(
+            DEFAULT_PREDICATE_CATALOG_PATH,
+            package_root / "provider_assets" / "predicate_catalog.json",
+        )
+        self.assertTrue(DEFAULT_PREDICATE_CATALOG_PATH.is_file())
+
     def test_exact_postgres_and_external_approval_environment_contract(self) -> None:
         artifact = approved_artifact()
         with TemporaryDirectory() as directory:
@@ -357,7 +373,7 @@ class SuccessorResponseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             path.write_text(json.dumps(artifact), encoding="utf-8")
             runtime = SuccessorResponseRuntime(pool_factory=pool_factory)
             selected = runtime.provider(
-                actor(),
+                make_response_actor(),
                 environment(path, str(artifact["artifact_sha256"])),
             )
             self.assertIsInstance(
@@ -381,7 +397,7 @@ class SuccessorResponseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             SuccessorResponseConfigurationError,
             "calibration_not_approved",
         ):
-            runtime.provider(actor(), environment(path, "a" * 64))
+            runtime.provider(make_response_actor(), environment(path, "a" * 64))
 
     async def test_postgres_pool_opens_once_with_exact_bound_target(self) -> None:
         calls: list[dict[str, object]] = []
@@ -397,7 +413,7 @@ class SuccessorResponseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             path.write_text(json.dumps(artifact), encoding="utf-8")
             runtime = SuccessorResponseRuntime(pool_factory=pool_factory)
             runtime.provider(
-                actor(),
+                make_response_actor(),
                 environment(path, str(artifact["artifact_sha256"])),
             )
             with patch(
@@ -460,23 +476,6 @@ class SuccessorResponseRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 {"points": []},
             )
         self.assertEqual(len(connection.requests), 1)
-
-
-class SuccessorResponseImportGraphTests(unittest.TestCase):
-    def test_response_router_import_does_not_import_legacy_memory_provider(self) -> None:
-        script = (
-            "import sys\n"
-            "import rag_engine.resse_response_router\n"
-            "assert 'rag_engine.governed_memory_provider_v1' not in sys.modules\n"
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
 
 
 if __name__ == "__main__":

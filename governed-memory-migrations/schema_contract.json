@@ -220,7 +220,7 @@
     "detail_literal_max_utf8_bytes": 2000,
     "direct_runtime_table_access": false,
     "migration": "0003_owner_claim_detail/forward.pgsql",
-    "disposable_validated": true,
+    "disposable_validated": false,
     "production_applied": false
   },
   "pilot_marker": {
@@ -237,7 +237,7 @@
     "read_function": "memory_private.read_pilot_marker()",
     "start_function": "memory_private.mark_pilot_started(text,uuid,text,text,timestamptz)",
     "migration": "0004_pilot_marker/forward.pgsql",
-    "disposable_validated": true,
+    "disposable_validated": false,
     "production_applied": false,
     "pilot_ever_started": false
   },
@@ -523,7 +523,6 @@
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
       "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-      "final_phase6b_runtime_rebuild_and_receipt_pending",
       "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
       "frontend_candidate_6d80ba_undeployed_visual_qa_pending",

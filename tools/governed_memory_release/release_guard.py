@@ -18,6 +18,13 @@ from pathlib import Path
 import re
 import sys
 
+try:
+    from tools.governed_memory_release.build_candidate_runtime import (
+        _source_tree_sha256,
+    )
+except ModuleNotFoundError:  # Direct script execution from this directory.
+    from build_candidate_runtime import _source_tree_sha256
+
 
 ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "ops" / "governed_memory"
@@ -25,6 +32,11 @@ BOOTSTRAP = OPS / "bootstrap_contract.json"
 PILOT = OPS / "pilot_contract.json"
 RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 COMPOSE = OPS / "compose.candidate.yaml"
+RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
+RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
+RUNTIME_LOCK = OPS / "runtime-requirements.lock"
+BUILD_LOCK = OPS / "build-requirements.lock"
+RUNTIME_PACKAGES = ROOT / "tools" / "governed_memory_validation" / "runtime_packages.json"
 SYSTEMD_HTTP_TEMPLATE = OPS / "systemd" / "governed-memory-http.service.in"
 SYSTEMD_WORKER_TEMPLATE = OPS / "systemd" / "governed-memory-worker.service.in"
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -59,13 +71,94 @@ OBSERVATION_KEYS = {
 EXPECTED_CREATE_BLOCKERS = [
     "production_activation_not_authorized",
     "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-    "final_phase6b_runtime_rebuild_and_receipt_pending",
     "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
     "calibration_artifact_unapproved_retrieval_off",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
 ]
 EXPECTED_CLEANUP_BLOCKERS: list[str] = []
+EXPECTED_RUNTIME_SOURCE_SHA256 = (
+    "d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0"
+)
+EXPECTED_RUNTIME_RECEIPT_SHA256 = (
+    "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
+)
+EXPECTED_RUNTIME_MANIFEST_SHA256 = (
+    "1e2d6ccb127064e449eb4f7836d58f75ffa93cb37313b60e9c6efa954d0c0276"
+)
+EXPECTED_RUNTIME_PYTHON_SHA256 = (
+    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+)
+EXPECTED_RUNTIME_WHEEL_SHA256 = (
+    "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db"
+)
+EXPECTED_RUNTIME_LOCK_SHA256 = (
+    "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365"
+)
+EXPECTED_BUILD_LOCK_SHA256 = (
+    "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc"
+)
+EXPECTED_RUNTIME_PACKAGES_SHA256 = (
+    "ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882"
+)
+EXPECTED_RUNTIME_PYTHON = (
+    "/tmp/governed-memory-successor-runtime-"
+    f"{EXPECTED_RUNTIME_LOCK_SHA256}-"
+    f"{EXPECTED_RUNTIME_SOURCE_SHA256}/bin/python"
+)
+EXPECTED_RUNTIME_WHEEL = (
+    "/tmp/governed-memory-successor-build-"
+    f"{EXPECTED_BUILD_LOCK_SHA256}-{EXPECTED_RUNTIME_SOURCE_SHA256}/dist/"
+    "governed_memory_successor-0.0.0-py3-none-any.whl"
+)
+EXPECTED_RUNTIME_RECEIPT_KEYS = {
+    "build_lock",
+    "build_lock_sha256",
+    "candidate_python",
+    "candidate_python_is_symlink",
+    "candidate_python_sha256",
+    "legacy_environment_imported",
+    "network_calls",
+    "persistent_resources_created",
+    "pip_present",
+    "platform",
+    "production_state_changed",
+    "project_distribution",
+    "project_wheel",
+    "project_wheel_sha256",
+    "provider_calls",
+    "python_version",
+    "runtime_lock",
+    "runtime_lock_sha256",
+    "runtime_package_count",
+    "runtime_packages",
+    "schema_version",
+    "setuptools_present",
+    "source_tree_sha256",
+    "user_site_enabled",
+    "wheel_present",
+}
+EXPECTED_ACTIVATION_BLOCKERS = [
+    "production_activation_not_authorized",
+    "semantic_calibration_artifact_unapproved_retrieval_off",
+    "live_supabase_runtime_credentials_not_mounted_or_verified",
+    "supabase_auth_sessions_rpc_not_installed_or_live_verified",
+    "fresh_isolated_persistent_postgresql_not_created",
+    "private_frontend_source_firewall_not_proved",
+    "tls_termination_or_private_transport_not_decided",
+    "production_store_role_bootstrap_not_implemented_or_authorized",
+    "successor_http_service_not_installed",
+    "successor_worker_service_not_installed",
+    "successor_conversation_capture_not_activated",
+    "provider_adapter_real_call_validation_not_authorized_or_completed",
+    "embedding_adapter_real_call_validation_not_authorized_or_completed",
+    "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
+    "phase6b_migration_contract_disposable_proof_pending",
+    "chat_deletion_memory_cancellation_coordination_not_implemented",
+    "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
+    "pilot_owner_and_scope_not_authorized",
+    "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved",
+]
 
 
 class ReleaseGuardError(RuntimeError):
@@ -110,8 +203,170 @@ def verify_candidate_artifacts() -> dict[str, object]:
     bootstrap = _load_json(BOOTSTRAP)
     pilot = _load_json(PILOT)
     receipt = _load_json(RECEIPT_SCHEMA)
-    if not isinstance(bootstrap, dict) or not isinstance(pilot, dict) or not isinstance(receipt, dict):
+    runtime_manifest = _load_json(RUNTIME_MANIFEST)
+    runtime_build_receipt = _load_json(RUNTIME_BUILD_RECEIPT)
+    if not all(
+        isinstance(value, dict)
+        for value in (
+            bootstrap,
+            pilot,
+            receipt,
+            runtime_manifest,
+            runtime_build_receipt,
+        )
+    ):
         raise ReleaseGuardError("release_contract_invalid")
+    for path, expected_sha256 in (
+        (RUNTIME_LOCK, EXPECTED_RUNTIME_LOCK_SHA256),
+        (BUILD_LOCK, EXPECTED_BUILD_LOCK_SHA256),
+        (RUNTIME_PACKAGES, EXPECTED_RUNTIME_PACKAGES_SHA256),
+    ):
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or _sha256(path) != expected_sha256
+        ):
+            raise ReleaseGuardError("release_runtime_dependency_invalid")
+    runtime_package_manifest = _load_json(RUNTIME_PACKAGES)
+    if (
+        not isinstance(runtime_package_manifest, dict)
+        or set(runtime_package_manifest)
+        != {
+            "schema_version",
+            "python_implementation",
+            "python_version",
+            "runtime_lock_path",
+            "runtime_lock_sha256",
+            "candidate_project",
+            "packages",
+        }
+        or runtime_package_manifest.get("schema_version")
+        != "governed-memory-validation-runtime-v2"
+        or runtime_package_manifest.get("python_implementation") != "CPython"
+        or runtime_package_manifest.get("python_version") != "3.12.3"
+        or runtime_package_manifest.get("runtime_lock_path")
+        != "ops/governed_memory/runtime-requirements.lock"
+        or runtime_package_manifest.get("runtime_lock_sha256")
+        != EXPECTED_RUNTIME_LOCK_SHA256
+        or runtime_package_manifest.get("candidate_project")
+        != {"name": "governed-memory-successor", "version": "0.0.0"}
+        or not isinstance(runtime_package_manifest.get("packages"), dict)
+        or len(runtime_package_manifest["packages"]) != 19
+    ):
+        raise ReleaseGuardError("release_runtime_dependency_invalid")
+    expected_receipt_packages = {
+        re.sub(r"[-_.]+", "-", name).lower(): version
+        for name, version in runtime_package_manifest["packages"].items()
+    }
+    runtime_validation = runtime_manifest.get("validation_runtime")
+    runtime_disposable = runtime_manifest.get("disposable_validation")
+    runtime_activation = runtime_manifest.get("activation")
+    runtime_release_guard = runtime_manifest.get("release_guard")
+    if (
+        set(runtime_build_receipt) != EXPECTED_RUNTIME_RECEIPT_KEYS
+        or _sha256(RUNTIME_BUILD_RECEIPT) != EXPECTED_RUNTIME_RECEIPT_SHA256
+        or _sha256(RUNTIME_MANIFEST) != EXPECTED_RUNTIME_MANIFEST_SHA256
+        or _source_tree_sha256(ROOT) != EXPECTED_RUNTIME_SOURCE_SHA256
+        or runtime_manifest.get("schema_version")
+        != "governed-memory-successor-runtime-manifest-v1"
+        or runtime_manifest.get("production_state_changed") is not False
+        or runtime_build_receipt.get("schema_version")
+        != "governed-memory-runtime-build-receipt-v1"
+        or runtime_build_receipt.get("python_version") != "3.12.3"
+        or runtime_build_receipt.get("platform") != "linux_x86_64"
+        or runtime_build_receipt.get("runtime_lock")
+        != "ops/governed_memory/runtime-requirements.lock"
+        or runtime_build_receipt.get("build_lock")
+        != "ops/governed_memory/build-requirements.lock"
+        or runtime_build_receipt.get("project_distribution")
+        != {"name": "governed-memory-successor", "version": "0.0.0"}
+        or runtime_build_receipt.get("source_tree_sha256")
+        != EXPECTED_RUNTIME_SOURCE_SHA256
+        or runtime_build_receipt.get("candidate_python")
+        != EXPECTED_RUNTIME_PYTHON
+        or runtime_build_receipt.get("candidate_python_sha256")
+        != EXPECTED_RUNTIME_PYTHON_SHA256
+        or runtime_build_receipt.get("runtime_lock_sha256")
+        != EXPECTED_RUNTIME_LOCK_SHA256
+        or runtime_build_receipt.get("build_lock_sha256")
+        != EXPECTED_BUILD_LOCK_SHA256
+        or runtime_build_receipt.get("project_wheel") != EXPECTED_RUNTIME_WHEEL
+        or runtime_build_receipt.get("project_wheel_sha256")
+        != EXPECTED_RUNTIME_WHEEL_SHA256
+        or type(runtime_build_receipt.get("runtime_package_count")) is not int
+        or runtime_build_receipt["runtime_package_count"] != 19
+        or not isinstance(runtime_build_receipt.get("runtime_packages"), dict)
+        or len(runtime_build_receipt["runtime_packages"]) != 19
+        or runtime_build_receipt["runtime_packages"]
+        != expected_receipt_packages
+        or type(runtime_build_receipt.get("network_calls")) is not int
+        or runtime_build_receipt["network_calls"] != 0
+        or type(runtime_build_receipt.get("provider_calls")) is not int
+        or runtime_build_receipt["provider_calls"] != 0
+        or runtime_build_receipt.get("candidate_python_is_symlink") is not False
+        or runtime_build_receipt.get("legacy_environment_imported") is not False
+        or runtime_build_receipt.get("pip_present") is not False
+        or runtime_build_receipt.get("setuptools_present") is not False
+        or runtime_build_receipt.get("wheel_present") is not False
+        or runtime_build_receipt.get("user_site_enabled") is not False
+        or runtime_build_receipt.get("persistent_resources_created") is not False
+        or runtime_build_receipt.get("production_state_changed") is not False
+        or not isinstance(runtime_validation, dict)
+        or runtime_validation
+        != {
+            "manifest": "tools/governed_memory_validation/runtime_packages.json",
+            "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
+            "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
+            "build_lock": "ops/governed_memory/build-requirements.lock",
+            "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
+            "current_source_tree_sha256": EXPECTED_RUNTIME_SOURCE_SHA256,
+            "current_candidate_python": EXPECTED_RUNTIME_PYTHON,
+            "current_candidate_python_sha256": EXPECTED_RUNTIME_PYTHON_SHA256,
+            "current_project_wheel_sha256": EXPECTED_RUNTIME_WHEEL_SHA256,
+            "current_source_bound": True,
+            "final_phase6b_runtime_rebuild_pending": False,
+            "current_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
+            "current_build_receipt_sha256": EXPECTED_RUNTIME_RECEIPT_SHA256,
+            "current_build_receipt_present": True,
+        }
+        or runtime_validation.get("current_source_tree_sha256")
+        != runtime_build_receipt["source_tree_sha256"]
+        or runtime_validation.get("current_candidate_python")
+        != runtime_build_receipt["candidate_python"]
+        or runtime_validation.get("current_candidate_python_sha256")
+        != runtime_build_receipt["candidate_python_sha256"]
+        or runtime_validation.get("current_project_wheel_sha256")
+        != runtime_build_receipt["project_wheel_sha256"]
+        or runtime_validation.get("current_build_receipt_sha256")
+        != EXPECTED_RUNTIME_RECEIPT_SHA256
+        or runtime_validation.get("current_source_bound") is not True
+        or runtime_validation.get("final_phase6b_runtime_rebuild_pending")
+        is not False
+        or runtime_validation.get("current_build_receipt_present") is not True
+        or not isinstance(runtime_disposable, dict)
+        or runtime_disposable.get("current_full_proof_complete") is not False
+        or runtime_disposable.get("current_candidate_python") is not None
+        or runtime_disposable.get("current_proof_receipt") is not None
+        or runtime_disposable.get("final_resources_absent") is not False
+        or runtime_disposable.get("resource_cleanup_complete") is not False
+        or not isinstance(runtime_activation, dict)
+        or runtime_activation.get("production_authorized") is not False
+        or runtime_activation.get("installed_services") != []
+        or runtime_activation.get("enabled_services") != []
+        or runtime_activation.get("running_services") != []
+        or runtime_activation.get("installed_timers") != []
+        or runtime_activation.get("enabled_timers") != []
+        or runtime_activation.get("blockers") != EXPECTED_ACTIVATION_BLOCKERS
+        or runtime_release_guard
+        != {
+            "create_allowed": False,
+            "create_refusal_code": "activation_blockers_open",
+            "cleanup_allowed": False,
+            "cleanup_refusal_code": "authorization_missing",
+            "commands_executed": 0,
+        }
+    ):
+        raise ReleaseGuardError("release_runtime_contract_invalid")
     if (
         bootstrap.get("schema_version") != "governed-memory-bootstrap-contract-v1"
         or bootstrap.get("state") != "inactive_candidate_no_resources_created"
@@ -134,6 +389,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
         != EXPECTED_CREATE_BLOCKERS
         or not isinstance(implementation, dict)
         or implementation.get("session_id_required") is not True
+        or implementation.get("runtime")
+        != "phase6b_source_bound_receipt_present_disposable_execution_pending"
         or implementation.get("owner_claim_fact_detail")
         != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
         or implementation.get("qdrant_adapter")
@@ -187,6 +444,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
         != "independently_bound_unapproved_retrieval_off"
         or pilot.get("candidate_surfaces", {}).get("owner_claim_fact_detail")
         != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
+        or pilot.get("candidate_surfaces", {}).get("runtime")
+        != "phase6b_source_bound_receipt_present_disposable_execution_pending"
         or pilot.get("candidate_surfaces", {}).get("pilot_marker")
         != "implemented_phase6b_disposable_revalidation_pending_not_production_applied"
         or pilot.get("provider_policy", {}).get("qdrant_adapter_status")
@@ -243,6 +502,11 @@ def verify_candidate_artifacts() -> dict[str, object]:
             PILOT,
             RECEIPT_SCHEMA,
             COMPOSE,
+            RUNTIME_MANIFEST,
+            RUNTIME_BUILD_RECEIPT,
+            RUNTIME_LOCK,
+            BUILD_LOCK,
+            RUNTIME_PACKAGES,
             SYSTEMD_HTTP_TEMPLATE,
             SYSTEMD_WORKER_TEMPLATE,
         )

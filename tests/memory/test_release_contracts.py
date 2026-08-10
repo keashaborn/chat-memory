@@ -9,8 +9,10 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
+from tools.governed_memory_release import release_guard
 from tools.governed_memory_release.build_candidate_runtime import (
     BUILD_LOCK,
     CandidateBuildError,
@@ -27,6 +29,7 @@ from tools.governed_memory_release.build_candidate_runtime import (
 )
 from tools.governed_memory_release.release_guard import (
     EXACT_TARGETS,
+    ReleaseGuardError,
     evaluate_release_observation,
     verify_candidate_artifacts,
 )
@@ -67,11 +70,168 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(result["external_calls"], 0)
         self.assertFalse(result["production_state_changed"])
-        self.assertEqual(len(result["artifact_sha256"]), 6)
+        self.assertEqual(len(result["artifact_sha256"]), 11)
         self.assertIn(
             "ops/governed_memory/systemd/governed-memory-worker.service.in",
             result["artifact_sha256"],
         )
+        self.assertIn(
+            "ops/governed_memory/runtime_build_receipt.json",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "ops/governed_memory/runtime_manifest.json",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "ops/governed_memory/runtime-requirements.lock",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "ops/governed_memory/build-requirements.lock",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "tools/governed_memory_validation/runtime_packages.json",
+            result["artifact_sha256"],
+        )
+
+    def test_runtime_manifest_or_lock_drift_is_rejected(self) -> None:
+        original = json.loads(
+            (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
+        )
+        variants = []
+        redirected = json.loads(json.dumps(original))
+        redirected["validation_runtime"]["current_build_receipt"] = (
+            "ops/governed_memory/history/phase5/runtime_build_receipt.json"
+        )
+        variants.append(redirected)
+        activated = json.loads(json.dumps(original))
+        activated["activation"]["production_authorized"] = True
+        activated["activation"]["running_services"] = [
+            "governed-memory-worker.service"
+        ]
+        activated["release_guard"]["create_allowed"] = True
+        activated["production_state_changed"] = True
+        variants.append(activated)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index, variant in enumerate(variants):
+                path = root / f"runtime-manifest-{index}.json"
+                path.write_text(
+                    json.dumps(variant, sort_keys=True),
+                    encoding="utf-8",
+                )
+                with self.subTest(index=index), mock.patch.object(
+                    release_guard, "RUNTIME_MANIFEST", path
+                ):
+                    with self.assertRaisesRegex(
+                        ReleaseGuardError,
+                        "release_runtime_contract_invalid",
+                    ):
+                        verify_candidate_artifacts()
+
+            lock = root / "runtime-requirements.lock"
+            lock.write_text("drift\n", encoding="utf-8")
+            with mock.patch.object(release_guard, "RUNTIME_LOCK", lock):
+                with self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    "release_runtime_dependency_invalid",
+                ):
+                    verify_candidate_artifacts()
+
+    def test_historical_or_semantically_malformed_runtime_receipt_is_rejected(
+        self,
+    ) -> None:
+        historical = OPS / "history" / "phase5" / "runtime_build_receipt.json"
+        with mock.patch.object(
+            release_guard, "RUNTIME_BUILD_RECEIPT", historical
+        ):
+            with self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_runtime_contract_invalid",
+            ):
+                verify_candidate_artifacts()
+
+        original_receipt = json.loads(
+            (OPS / "runtime_build_receipt.json").read_text(encoding="ascii")
+        )
+        original_manifest = json.loads(
+            (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
+        )
+        variants: list[tuple[str, dict[str, object]]] = []
+        for label, key, value in (
+            ("python", "python_version", "3.12.2"),
+            ("platform", "platform", "linux_aarch64"),
+            ("runtime_lock", "runtime_lock", "history/phase5/runtime.lock"),
+            ("build_lock", "build_lock", "history/phase5/build.lock"),
+            (
+                "project",
+                "project_distribution",
+                {"name": "legacy-memory", "version": "0.0.0"},
+            ),
+        ):
+            variant = json.loads(json.dumps(original_receipt))
+            variant[key] = value
+            variants.append((label, variant))
+        packages = json.loads(json.dumps(original_receipt))
+        packages["runtime_packages"]["fastapi"] = "0.1.0"
+        variants.append(("packages", packages))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for label, receipt in variants:
+                receipt_path = root / f"runtime-receipt-{label}.json"
+                receipt_path.write_text(
+                    json.dumps(receipt, sort_keys=True),
+                    encoding="ascii",
+                )
+                receipt_sha256 = hashlib.sha256(
+                    receipt_path.read_bytes()
+                ).hexdigest()
+                manifest = json.loads(json.dumps(original_manifest))
+                manifest["validation_runtime"][
+                    "current_build_receipt_sha256"
+                ] = receipt_sha256
+                manifest_path = root / f"runtime-manifest-{label}.json"
+                manifest_path.write_text(
+                    json.dumps(manifest, sort_keys=True),
+                    encoding="utf-8",
+                )
+                manifest_sha256 = hashlib.sha256(
+                    manifest_path.read_bytes()
+                ).hexdigest()
+                patches = (
+                    mock.patch.object(
+                        release_guard,
+                        "RUNTIME_BUILD_RECEIPT",
+                        receipt_path,
+                    ),
+                    mock.patch.object(
+                        release_guard,
+                        "EXPECTED_RUNTIME_RECEIPT_SHA256",
+                        receipt_sha256,
+                    ),
+                    mock.patch.object(
+                        release_guard,
+                        "RUNTIME_MANIFEST",
+                        manifest_path,
+                    ),
+                    mock.patch.object(
+                        release_guard,
+                        "EXPECTED_RUNTIME_MANIFEST_SHA256",
+                        manifest_sha256,
+                    ),
+                )
+                with self.subTest(label=label), patches[0], patches[1], patches[
+                    2
+                ], patches[3]:
+                    with self.assertRaisesRegex(
+                        ReleaseGuardError,
+                        "release_runtime_contract_invalid",
+                    ):
+                        verify_candidate_artifacts()
 
     def test_runtime_and_build_locks_are_closed_and_exact(self) -> None:
         runtime = _parse_hash_lock(RUNTIME_LOCK)
@@ -317,6 +477,10 @@ class ReleaseArtifactTests(unittest.TestCase):
             "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
         )
         self.assertEqual(
+            contract["candidate_implementation_status"]["runtime"],
+            "phase6b_source_bound_receipt_present_disposable_execution_pending",
+        )
+        self.assertEqual(
             contract["candidate_implementation_status"]["qdrant_adapter"],
             "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
         )
@@ -330,7 +494,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             "owner_claim_fact_detail_api_not_implemented",
             contract["create_policy"]["unresolved_creation_prerequisites"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "final_phase6b_runtime_rebuild_and_receipt_pending",
             contract["create_policy"]["unresolved_creation_prerequisites"],
         )
@@ -396,7 +560,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             "owner_claim_fact_detail_api_not_implemented",
             pilot["start_blockers"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "final_phase6b_runtime_rebuild_and_receipt_pending",
             pilot["start_blockers"],
         )
@@ -419,6 +583,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertEqual(
             pilot["candidate_surfaces"]["owner_claim_fact_detail"],
             "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
+        )
+        self.assertEqual(
+            pilot["candidate_surfaces"]["runtime"],
+            "phase6b_source_bound_receipt_present_disposable_execution_pending",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["pilot_marker"],

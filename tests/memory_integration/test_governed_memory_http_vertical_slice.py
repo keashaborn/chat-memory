@@ -1049,12 +1049,15 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             ),
             1,
         )
-        await self.bridge_admin.execute(
-            "DELETE FROM public.chat_log WHERE id=$1::uuid; "
-            "DELETE FROM public.threads WHERE id=$2::uuid",
-            CONTEXT_RUNTIME_MESSAGE,
-            CONTEXT_RUNTIME_THREAD,
-        )
+        async with self.bridge_admin.transaction():
+            await self.bridge_admin.execute(
+                "DELETE FROM public.chat_log WHERE id=$1::uuid",
+                CONTEXT_RUNTIME_MESSAGE,
+            )
+            await self.bridge_admin.execute(
+                "DELETE FROM public.threads WHERE id=$1::uuid",
+                CONTEXT_RUNTIME_THREAD,
+            )
         return runtime_proof_sha256
 
     async def read_claims(self, owner: UUID, claim_ids: list[UUID]) -> list[dict[str, Any]]:

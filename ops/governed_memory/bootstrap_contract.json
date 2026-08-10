@@ -116,6 +116,7 @@
     "import_legacy_vectors": false
   },
   "candidate_implementation_status": {
+    "runtime": "phase6b_source_bound_receipt_present_disposable_execution_pending",
     "session_id_required": true,
     "supabase_auth_sessions_rpc": "staged_candidate_not_installed_or_live_verified",
     "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
@@ -142,7 +143,6 @@
     "unresolved_creation_prerequisites": [
       "production_activation_not_authorized",
       "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-      "final_phase6b_runtime_rebuild_and_receipt_pending",
       "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
       "calibration_artifact_unapproved_retrieval_off",

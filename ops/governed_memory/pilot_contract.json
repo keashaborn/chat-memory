@@ -74,6 +74,7 @@
     "profile_metadata_authority": false
   },
   "candidate_surfaces": {
+    "runtime": "phase6b_source_bound_receipt_present_disposable_execution_pending",
     "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
     "pilot_marker": "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
     "frontend": "6d80ba_built_undeployed_visual_qa_pending"
@@ -89,7 +90,6 @@
     "provider_adapter_real_call_validation_not_authorized_or_completed",
     "embedding_adapter_real_call_validation_not_authorized_or_completed",
     "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-    "final_phase6b_runtime_rebuild_and_receipt_pending",
     "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",

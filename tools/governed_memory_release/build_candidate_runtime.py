@@ -810,6 +810,66 @@ def _create_runtime(
         ]
     )
     _run([str(runtime_python), "-I", "-m", "pip", "check"])
+    import_sweep = """\
+import importlib
+import importlib.util
+from pathlib import Path
+import pkgutil
+import sys
+
+SUCCESSOR_PACKAGE = "rag_engine.governed_memory"
+MAX_SUCCESSOR_MODULES = 128
+
+package = importlib.import_module(SUCCESSOR_PACKAGE)
+module_names = [SUCCESSOR_PACKAGE]
+module_names.extend(
+    item.name
+    for item in pkgutil.walk_packages(
+        package.__path__,
+        SUCCESSOR_PACKAGE + ".",
+    )
+)
+module_names = sorted(set(module_names))
+if not module_names or len(module_names) > MAX_SUCCESSOR_MODULES:
+    raise SystemExit("candidate successor module inventory invalid")
+for module_name in module_names:
+    importlib.import_module(module_name)
+
+prefix = Path(sys.prefix).resolve(strict=True)
+successor_modules = sorted(
+    (name, module)
+    for name, module in sys.modules.items()
+    if name == SUCCESSOR_PACKAGE or name.startswith(SUCCESSOR_PACKAGE + ".")
+)
+if not successor_modules or len(successor_modules) > MAX_SUCCESSOR_MODULES:
+    raise SystemExit("candidate successor import inventory invalid")
+for _name, module in successor_modules:
+    module_file = getattr(module, "__file__", None)
+    if not isinstance(module_file, str):
+        raise SystemExit("candidate successor module origin missing")
+    try:
+        resolved = Path(module_file).resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit("candidate successor module origin invalid") from exc
+    if not resolved.is_relative_to(prefix):
+        raise SystemExit("candidate successor module outside runtime")
+
+if any(
+    name.startswith("rag_engine.")
+    and name != SUCCESSOR_PACKAGE
+    and not name.startswith(SUCCESSOR_PACKAGE + ".")
+    for name in sys.modules
+):
+    raise SystemExit("candidate successor imported external rag_engine module")
+if importlib.util.find_spec("openai") is not None:
+    raise SystemExit("openai unexpectedly importable")
+if any(name == "openai" or name.startswith("openai.") for name in sys.modules):
+    raise SystemExit("openai unexpectedly loaded")
+"""
+    _run(
+        [str(runtime_python), "-I", "-B", "-c", import_sweep],
+        cwd=runtime_root,
+    )
     _run(
         [
             str(runtime_python),

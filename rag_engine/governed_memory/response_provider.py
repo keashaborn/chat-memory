@@ -8,7 +8,6 @@ not open resources.  Qdrant supplies only bounded candidate identifiers;
 PostgreSQL rows are revalidated before any prompt content is constructed.
 """
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import math
@@ -43,15 +42,14 @@ from rag_engine.governed_memory.response_provenance import (
     build_successor_no_memory_selected_provenance_v1,
     build_successor_not_applicable_provenance_v1,
 )
-from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
-from rag_engine.prompt_assembler_v1 import (
-    ContextKind,
-    PromptReferenceContextBlockV1,
-    PromptReferenceFragmentV1,
+from rag_engine.governed_memory.response_contracts import (
+    SuccessorMemoryAssemblyV1,
+    SuccessorPromptReferenceContextBlockV1,
+    SuccessorPromptReferenceFragmentV1,
+    SuccessorResponseActorBinding,
+    SuccessorResponseRequestV1,
 )
-from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
 
 
 EXCLUSIVE_MODE_LEGACY = ExclusiveMemoryMode.LEGACY.value
@@ -61,33 +59,6 @@ SUCCESSOR_CONTEXT_CONTRACT = "governed-memory-answer-context-v1"
 
 class SuccessorResponseConfigurationError(RuntimeError):
     """A successor response lane was requested without exact runtime wiring."""
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SuccessorResponseActorBinding:
-    owner_user_id: UUID
-    session_id: UUID
-    authentication_manifest_sha256: str
-    request_id: str
-    thread_id: UUID
-    eligible: bool
-
-    def __post_init__(self) -> None:
-        require_uuid(self.owner_user_id, "invalid_response_memory_owner")
-        require_uuid(self.session_id, "invalid_response_memory_session")
-        require_sha256(
-            self.authentication_manifest_sha256,
-            "invalid_response_memory_authentication_manifest",
-        )
-        if (
-            not isinstance(self.request_id, str)
-            or not self.request_id
-            or len(self.request_id.encode("utf-8")) > 200
-        ):
-            raise ContractViolation("invalid_response_memory_request")
-        require_uuid(self.thread_id, "invalid_response_memory_thread")
-        if type(self.eligible) is not bool:
-            raise ContractViolation("invalid_response_memory_eligibility")
 
 
 class SuccessorResponseRepository(Protocol):
@@ -147,15 +118,14 @@ class InactiveSuccessorMemoryProviderV1:
     def prepare(
         self,
         *,
-        authenticated_actor_user_id: UUID,
-        conversation_snapshot: ConversationSnapshotV1,
-        trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
-        del authenticated_actor_user_id, conversation_snapshot, trusted_policy_signals
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorMemoryAssemblyV1:
+        if not isinstance(request, SuccessorResponseRequestV1):
+            raise ContractViolation("invalid_response_memory_request_contract")
         if self._prepared:
             raise ContractViolation("response_memory_provider_reused")
         self._prepared = True
-        return GovernedMemoryAssemblyV1()
+        return SuccessorMemoryAssemblyV1()
 
     async def persist_dispatched_answer_binding(
         self,
@@ -281,13 +251,13 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
     def has_selected_claims(self) -> bool:
         return bool(self._selected_claims) and not self._terminal
 
-    def _finish_without_selection(self) -> GovernedMemoryAssemblyV1:
+    def _finish_without_selection(self) -> SuccessorMemoryAssemblyV1:
         self._no_selection_pending = True
         self._policy = None
         self._selected_claims = ()
         self._rendered_context = None
         self._query_sha256 = None
-        return GovernedMemoryAssemblyV1()
+        return SuccessorMemoryAssemblyV1()
 
     def _clear_selected_state(self) -> None:
         self._terminal = True
@@ -301,51 +271,37 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         if self._prepared and not self._terminal:
             self._clear_selected_state()
 
-    def _verified_snapshot(
+    def _verified_request(
         self,
         *,
-        authenticated_actor_user_id: UUID,
-        conversation_snapshot: ConversationSnapshotV1,
-        trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> ConversationSnapshotV1:
-        if not isinstance(trusted_policy_signals, ResponsePolicySignalsV0_2):
-            raise ContractViolation("invalid_response_memory_policy_signals")
-        ResponsePolicySignalsV0_2.model_validate_json(
-            trusted_policy_signals.model_dump_json()
-        )
-        if not isinstance(conversation_snapshot, ConversationSnapshotV1):
-            raise ContractViolation("invalid_response_memory_snapshot")
-        snapshot = ConversationSnapshotV1.model_validate_json(
-            conversation_snapshot.model_dump_json()
-        )
-        actor = require_uuid(
-            authenticated_actor_user_id,
-            "invalid_response_memory_authenticated_actor",
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorResponseRequestV1:
+        if not isinstance(request, SuccessorResponseRequestV1):
+            raise ContractViolation("invalid_response_memory_request_contract")
+        verified = SuccessorResponseRequestV1(
+            authenticated_actor_user_id=request.authenticated_actor_user_id,
+            thread_id=request.thread_id,
+            request_id=request.request_id,
+            current_message=request.current_message,
+            conversation_snapshot_sha256=request.conversation_snapshot_sha256,
+            trusted_policy_signals_sha256=request.trusted_policy_signals_sha256,
+            contract_version=request.contract_version,
         )
         if (
-            actor != self._actor.owner_user_id
-            or snapshot.authenticated_actor_user_id != self._actor.owner_user_id
-            or snapshot.current_request_id != self._actor.request_id
-            or snapshot.thread_id != self._actor.thread_id
-            or not snapshot.messages
-            or snapshot.messages[-1].role.value != "user"
+            verified.authenticated_actor_user_id != self._actor.owner_user_id
+            or verified.request_id != self._actor.request_id
+            or verified.thread_id != self._actor.thread_id
         ):
             raise ContractViolation("response_memory_request_binding_mismatch")
-        return snapshot
+        return verified
 
     async def prepare(
         self,
         *,
-        authenticated_actor_user_id: UUID,
-        conversation_snapshot: ConversationSnapshotV1,
-        trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorMemoryAssemblyV1:
         try:
-            return await self._prepare_once(
-                authenticated_actor_user_id=authenticated_actor_user_id,
-                conversation_snapshot=conversation_snapshot,
-                trusted_policy_signals=trusted_policy_signals,
-            )
+            return await self._prepare_once(request=request)
         except Exception:
             self._clear_selected_state()
             raise
@@ -353,19 +309,13 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
     async def _prepare_once(
         self,
         *,
-        authenticated_actor_user_id: UUID,
-        conversation_snapshot: ConversationSnapshotV1,
-        trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorMemoryAssemblyV1:
         if self._prepared:
             raise ContractViolation("response_memory_provider_reused")
         self._prepared = True
-        snapshot = self._verified_snapshot(
-            authenticated_actor_user_id=authenticated_actor_user_id,
-            conversation_snapshot=conversation_snapshot,
-            trusted_policy_signals=trusted_policy_signals,
-        )
-        query = snapshot.messages[-1].content
+        verified_request = self._verified_request(request=request)
+        query = verified_request.current_message
         self._query_sha256 = _sha256_text(query)
         if not self._actor.eligible:
             raise ContractViolation("ineligible_successor_response_provider")
@@ -418,9 +368,9 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         content_sha256 = _sha256_text(content)
         if rendered["memory_block_sha256"] != content_sha256:
             raise ContractViolation("response_memory_render_hash_mismatch")
-        block = PromptReferenceContextBlockV1(
+        block = SuccessorPromptReferenceContextBlockV1(
             block_id="governed_memory_successor_v1",
-            kind=ContextKind.MEMORY,
+            kind="memory",
             source_contract_version=SUCCESSOR_CONTEXT_CONTRACT,
             source_manifest_sha256=content_sha256,
             request_id_sha256=_sha256_text(self._actor.request_id),
@@ -430,7 +380,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
             content_bytes=len(raw),
             estimated_tokens=math.ceil(len(raw) / 4),
             fragments=(
-                PromptReferenceFragmentV1(
+                SuccessorPromptReferenceFragmentV1(
                     ordinal=0,
                     byte_offset=0,
                     byte_length=len(raw),
@@ -441,7 +391,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         )
         self._selected_claims = tuple(dict(item) for item in selected)
         self._rendered_context = dict(rendered)
-        return GovernedMemoryAssemblyV1(
+        return SuccessorMemoryAssemblyV1(
             successor_memory_context_block=block,
         )
 

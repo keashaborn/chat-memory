@@ -21,24 +21,34 @@ All invocation-owned resources were removed and proof ports were released.
 This is historical evidence only: Phase 6B changed runtime and migration bytes,
 so none of these receipts validate the current candidate.
 
-The prior source-bound CPython 3.12.3 runtime receipt binds source SHA-256
-`af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
+The current Phase 6B source-bound CPython 3.12.3 runtime receipt at
+`ops/governed_memory/runtime_build_receipt.json` has SHA-256
+`ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69`.
+It binds installable successor source-inventory SHA-256
+`d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0`
 and wheel SHA-256
-`58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
-A fresh Phase 6B runtime build and receipt are pending.
+`c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db`.
+Its isolated import sweep covers all installed successor modules and rejects
+outer `rag_engine` modules, the OpenAI SDK, and files outside the runtime.
+The build is complete, but that runtime has not yet been used by the full Phase
+6B disposable migration and two-database worker run.
 
-The proof-metadata promotion changes the Git tree, so the attested
+The first current-candidate reproduction uses the explicit preliminary
+migration-proof authorization because validation metadata remains pending. It
+emits a new `SUCCESSOR_DISPOSABLE_RECEIPT=` JSON line from
+`tools/governed_memory_validation/run_disposable_successor.sh`. A separately
+authorized proof-metadata promotion changes the Git tree, so the attested
 pre-promotion HEAD/tree remain immutable receipt facts rather than being
-rewritten as the promoted tree. A default-mode reproduction emits a new
-`SUCCESSOR_DISPOSABLE_RECEIPT=` JSON line from
-`tools/governed_memory_validation/run_disposable_successor.sh`. The receipt is
-not added to the tree it attests because doing so would change the tree hash.
-Neither receipt extends to production.
+rewritten as the promoted tree. After that promotion, a default-mode
+reproduction omits the preliminary authorization. A receipt is not added to
+the tree it attests because doing so would change the tree hash. Neither mode
+extends to production.
 
 Reproduce on the seebx backend only, from the sealed candidate commit:
 
 ```bash
 GM_VALIDATION_DISPOSABLE_AUTHORIZATION='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
+GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
 GM_VALIDATION_RUNTIME_PYTHON='<phase6b-candidate-python>' \
 GM_VALIDATION_EXPECTED_ROOT='<absolute-candidate-worktree>' \
 GM_VALIDATION_EXPECTED_BRANCH='<candidate-branch>' \

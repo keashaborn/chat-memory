@@ -69,6 +69,9 @@ from rag_engine.response_composition_root_v0_3 import (
 from rag_engine.response_composition_root_v0_4 import (
     IntegratedLifeSwitchResponseCompositionRootV0_4,
 )
+from rag_engine.successor_memory_chat_adapter_v1 import (
+    SuccessorMemoryChatAdapterV1,
+)
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from rag_engine.response_inspection_v3 import build_response_inspection_v3
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
@@ -498,22 +501,26 @@ async def resse_response_query(
                     legacy_factory=lambda: _legacy_response_memory_provider(conn),
                     successor_factory=(
                         (
-                            lambda: SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
-                                SuccessorResponseActorBinding(
-                                    owner_user_id=owner,
-                                    session_id=actor_context.session_id,
-                                    authentication_manifest_sha256=(
-                                        actor_context.authentication_manifest_sha256
-                                    ),
-                                    request_id=request_id,
-                                    thread_id=thread_id,
-                                    eligible=True,
+                            lambda: SuccessorMemoryChatAdapterV1(
+                                SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
+                                    SuccessorResponseActorBinding(
+                                        owner_user_id=owner,
+                                        session_id=actor_context.session_id,
+                                        authentication_manifest_sha256=(
+                                            actor_context.authentication_manifest_sha256
+                                        ),
+                                        request_id=request_id,
+                                        thread_id=thread_id,
+                                        eligible=True,
+                                    )
                                 )
                             )
                         )
                         if successor_eligible and actor_context is not None
-                        else lambda: _inactive_successor_response_provider(
-                            exclusion_reason
+                        else lambda: SuccessorMemoryChatAdapterV1(
+                            _inactive_successor_response_provider(
+                                exclusion_reason
+                            )
                         )
                     ),
                 )

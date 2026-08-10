@@ -13,12 +13,15 @@
     "runtime_lock_sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
     "build_lock": "ops/governed_memory/build-requirements.lock",
     "build_lock_sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
-    "current_source_tree_sha256": null,
-    "current_candidate_python": null,
-    "current_source_bound": false,
-    "final_phase6b_runtime_rebuild_pending": true,
+    "current_source_tree_sha256": "d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0",
+    "current_candidate_python": "/tmp/governed-memory-successor-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0/bin/python",
+    "current_candidate_python_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+    "current_project_wheel_sha256": "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db",
+    "current_source_bound": true,
+    "final_phase6b_runtime_rebuild_pending": false,
     "current_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
-    "current_build_receipt_present": false
+    "current_build_receipt_sha256": "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69",
+    "current_build_receipt_present": true
   },
   "authority": {
     "database": "governed_memory",
@@ -99,7 +102,6 @@
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
       "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-      "final_phase6b_runtime_rebuild_and_receipt_pending",
       "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
       "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
@@ -183,8 +185,8 @@
     "production_endpoint_calls": 0,
     "provider_external_calls": 0,
     "persistent_resources_created": false,
-    "final_resources_absent": true,
-    "resource_cleanup_complete": true,
+    "final_resources_absent": false,
+    "resource_cleanup_complete": false,
     "current_proof_receipt": null
   },
   "calibration": {
@@ -193,7 +195,9 @@
     "retrieval_enabled": false
   },
   "frontend_candidate": {
+    "git_commit": "6d80ba00c93bfa74c4e44604a41ac36e779e93a9",
     "git_commit_short": "6d80ba",
+    "git_tree": "f5e72973cff3e9dc28ecb9555c974ae93672955b",
     "built": true,
     "deployed": false,
     "authenticated_visual_qa_complete": false

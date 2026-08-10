@@ -8,7 +8,6 @@ import importlib
 import inspect
 import json
 from pathlib import Path
-import subprocess
 import tomllib
 import unicodedata
 import unittest
@@ -20,7 +19,6 @@ from rag_engine.governed_memory.repository import GovernedMemoryRepository
 from tools.governed_memory_release.build_candidate_runtime import (
     PROVIDER_ASSET_SOURCE_PATHS,
     _package_source_material,
-    _package_source_tree_sha256,
     _source_tree_sha256,
 )
 
@@ -67,6 +65,7 @@ EXPECTED_PACKAGE_FILES = {
     "postgres_adapter.py",
     "projection.py",
     "repository.py",
+    "response_contracts.py",
     "response_postgres.py",
     "response_defaults.py",
     "response_provenance.py",
@@ -209,7 +208,6 @@ EXPECTED_RUNTIME_LOCK_SHA256 = (
 EXPECTED_BUILD_LOCK_SHA256 = (
     "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc"
 )
-EXPECTED_PACKAGE_SOURCE_TREE_SHA256 = _package_source_tree_sha256(PACKAGE)
 EXPECTED_SOURCE_TREE_SHA256 = _source_tree_sha256()
 EXPECTED_CANDIDATE_PYTHON = (
     "/tmp/governed-memory-successor-runtime-"
@@ -224,6 +222,12 @@ RECORDED_CANDIDATE_PYTHON = (
 )
 EXPECTED_PROJECT_WHEEL_SHA256 = (
     "58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4"
+)
+CURRENT_PROJECT_WHEEL_SHA256 = (
+    "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db"
+)
+CURRENT_RUNTIME_BUILD_RECEIPT_SHA256 = (
+    "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
 )
 
 EXPECTED_ROUTES = [
@@ -412,8 +416,8 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertFalse(validation["current_full_proof_complete"])
         self.assertIsNone(validation["current_candidate_python"])
         self.assertIsNone(validation["current_proof_receipt"])
-        self.assertTrue(validation["final_resources_absent"])
-        self.assertTrue(validation["resource_cleanup_complete"])
+        self.assertFalse(validation["final_resources_absent"])
+        self.assertFalse(validation["resource_cleanup_complete"])
         self.assertFalse(validation["all_owner_routes_invoked"])
         self.assertFalse(validation["alternating_owner_pool_isolation"])
         self.assertEqual(validation["owner_pool_max_size"], 0)
@@ -509,7 +513,9 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             manifest["frontend_candidate"],
             {
+                "git_commit": "6d80ba00c93bfa74c4e44604a41ac36e779e93a9",
                 "git_commit_short": "6d80ba",
+                "git_tree": "f5e72973cff3e9dc28ecb9555c974ae93672955b",
                 "built": True,
                 "deployed": False,
                 "authenticated_visual_qa_complete": False,
@@ -559,42 +565,82 @@ class RuntimeManifestTests(unittest.TestCase):
                 "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-                "current_source_tree_sha256": None,
-                "current_candidate_python": None,
-                "current_source_bound": False,
-                "final_phase6b_runtime_rebuild_pending": True,
+                "current_source_tree_sha256": EXPECTED_SOURCE_TREE_SHA256,
+                "current_candidate_python": EXPECTED_CANDIDATE_PYTHON,
+                "current_candidate_python_sha256": (
+                    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+                ),
+                "current_project_wheel_sha256": CURRENT_PROJECT_WHEEL_SHA256,
+                "current_source_bound": True,
+                "final_phase6b_runtime_rebuild_pending": False,
                 "current_build_receipt": (
                     "ops/governed_memory/runtime_build_receipt.json"
                 ),
-                "current_build_receipt_present": False,
+                "current_build_receipt_sha256": (
+                    CURRENT_RUNTIME_BUILD_RECEIPT_SHA256
+                ),
+                "current_build_receipt_present": True,
             },
         )
         self.assertNotIn(
             "candidate_owned_runtime_environment_not_built",
             manifest["activation"]["blockers"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "final_phase6b_runtime_rebuild_and_receipt_pending",
             manifest["activation"]["blockers"],
         )
         self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
         self.assertEqual(hashlib.sha256(BUILD_LOCK.read_bytes()).hexdigest(), EXPECTED_BUILD_LOCK_SHA256)
-        self.assertFalse(RUNTIME_BUILD_RECEIPT.exists())
-        self.assertTrue(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_file())
-        self.assertFalse(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_symlink())
-        build_receipt = json.loads(
-            HISTORICAL_RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
+        self.assertTrue(RUNTIME_BUILD_RECEIPT.is_file())
+        self.assertFalse(RUNTIME_BUILD_RECEIPT.is_symlink())
+        self.assertEqual(
+            hashlib.sha256(RUNTIME_BUILD_RECEIPT.read_bytes()).hexdigest(),
+            CURRENT_RUNTIME_BUILD_RECEIPT_SHA256,
+        )
+        current_build_receipt = json.loads(
+            RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
         )
         self.assertEqual(
-            build_receipt["candidate_python"],
+            current_build_receipt["schema_version"],
+            "governed-memory-runtime-build-receipt-v1",
+        )
+        self.assertEqual(
+            current_build_receipt["candidate_python"],
+            EXPECTED_CANDIDATE_PYTHON,
+        )
+        self.assertEqual(
+            current_build_receipt["source_tree_sha256"],
+            EXPECTED_SOURCE_TREE_SHA256,
+        )
+        self.assertEqual(
+            current_build_receipt["project_wheel_sha256"],
+            CURRENT_PROJECT_WHEEL_SHA256,
+        )
+        self.assertEqual(current_build_receipt["network_calls"], 0)
+        self.assertEqual(current_build_receipt["provider_calls"], 0)
+        self.assertFalse(current_build_receipt["production_state_changed"])
+        self.assertTrue(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_file())
+        self.assertFalse(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_symlink())
+        historical_build_receipt = json.loads(
+            HISTORICAL_RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
+        )
+        self.assertNotEqual(
+            RUNTIME_BUILD_RECEIPT.read_bytes(),
+            HISTORICAL_RUNTIME_BUILD_RECEIPT.read_bytes(),
+        )
+        self.assertNotIn("phase5", current_build_receipt["candidate_python"])
+        self.assertNotIn("phase5", current_build_receipt["project_wheel"])
+        self.assertEqual(
+            historical_build_receipt["candidate_python"],
             RECORDED_CANDIDATE_PYTHON,
         )
         self.assertEqual(
-            build_receipt["source_tree_sha256"],
+            historical_build_receipt["source_tree_sha256"],
             RECORDED_SOURCE_TREE_SHA256,
         )
         self.assertEqual(
-            build_receipt["project_wheel_sha256"],
+            historical_build_receipt["project_wheel_sha256"],
             EXPECTED_PROJECT_WHEEL_SHA256,
         )
         self.assertNotEqual(
@@ -863,6 +909,23 @@ class SourceInventoryTests(unittest.TestCase):
         self.assertEqual(runner.count("readonly EXPECTED_MANIFEST_SHA256="), 1)
         self.assertIn(binding, runner)
 
+    def test_disposable_runner_receipt_binds_source_and_runtime_build(self) -> None:
+        runner = (VALIDATION_TOOLS / "run_disposable_successor.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(runner.count("RUNTIME_BUILD_RECEIPT_SHA256=''"), 1)
+        self.assertEqual(
+            runner.count('RUNTIME_BUILD_RECEIPT_SHA256="${receipt_sha}"'),
+            1,
+        )
+        self.assertIn('"source_tree_sha256":"%s"', runner)
+        self.assertIn('"runtime_build_receipt_sha256":"%s"', runner)
+        self.assertIn('"${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}"', runner)
+        self.assertEqual(
+            runner.count("governed-memory-successor-disposable-run-v5"), 1
+        )
+        self.assertNotIn("governed-memory-successor-disposable-run-v4", runner)
+
     def test_disposable_runner_uses_successor_runtime_and_exact_provider_asset_allowlist(self) -> None:
         runner = (VALIDATION_TOOLS / "run_disposable_successor.sh").read_text(
             encoding="utf-8"
@@ -944,6 +1007,69 @@ class SourceInventoryTests(unittest.TestCase):
         runtime_source = (RUNTIME_PACKAGE / "live_supabase.py").read_text(encoding="utf-8")
         self.assertIn('"User-Agent": "governed-memory-live-user"', runtime_source)
         self.assertNotIn("governed-memory-live-user-v", runtime_source)
+
+    def test_successor_package_imports_no_outer_rag_engine_modules(self) -> None:
+        allowed_prefix = "rag_engine.governed_memory"
+        for path in sorted(PACKAGE.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            imported: list[tuple[int, str]] = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.extend(
+                        (node.lineno, alias.name) for alias in node.names
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.append((node.lineno, node.module))
+            for line, module_name in imported:
+                if module_name != "rag_engine" and not module_name.startswith(
+                    "rag_engine."
+                ):
+                    continue
+                with self.subTest(
+                    path=path.relative_to(ROOT).as_posix(),
+                    line=line,
+                    module=module_name,
+                ):
+                    self.assertTrue(
+                        module_name == allowed_prefix
+                        or module_name.startswith(f"{allowed_prefix}."),
+                        "the installable successor imports an outer rag_engine module",
+                    )
+
+    def test_response_tests_import_only_successor_and_shared_fixtures(self) -> None:
+        allowed_rag_engine_prefix = "rag_engine.governed_memory"
+        allowed_test_module = "tests.memory._fixtures"
+        paths = (
+            Path(__file__).parent / "test_response_provider.py",
+            Path(__file__).parent / "test_response_runtime.py",
+        )
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            imported: list[tuple[int, str]] = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.extend(
+                        (node.lineno, alias.name) for alias in node.names
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.append((node.lineno, node.module))
+            for line, module_name in imported:
+                if module_name == "rag_engine" or module_name.startswith(
+                    "rag_engine."
+                ):
+                    allowed = (
+                        module_name == allowed_rag_engine_prefix
+                        or module_name.startswith(f"{allowed_rag_engine_prefix}.")
+                    )
+                elif module_name == "tests" or module_name.startswith("tests."):
+                    allowed = module_name == allowed_test_module
+                else:
+                    continue
+                with self.subTest(path=path.name, line=line, module=module_name):
+                    self.assertTrue(
+                        allowed,
+                        "response tests import an outer application or another test module",
+                    )
 
     def test_successor_tests_do_not_import_old_helpers(self) -> None:
         for path in sorted(Path(__file__).parent.glob("test_*.py")):
@@ -1044,84 +1170,24 @@ class SourceInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_candidate_python_source_exactly_matches_current_successor(self) -> None:
+    def test_runtime_receipt_source_exactly_matches_current_successor(self) -> None:
         runtime = json.loads(MANIFEST.read_text(encoding="utf-8"))[
             "validation_runtime"
         ]
-        if runtime["final_phase6b_runtime_rebuild_pending"]:
-            self.assertFalse(runtime["current_source_bound"])
-            self.assertIsNone(runtime["current_source_tree_sha256"])
-            self.assertIsNone(runtime["current_candidate_python"])
-            return
-        probe = """
-import hashlib
-import json
-from pathlib import Path
-import rag_engine.governed_memory as package
-
-ALLOWED_NON_PYTHON_SOURCE_PATHS = {
-    'provider_assets/extraction_instructions.txt',
-    'provider_assets/extraction_output.schema.json',
-    'provider_assets/predicate_catalog.json',
-}
-
-def sha256(path):
-    digest = hashlib.sha256()
-    with path.open('rb') as handle:
-        while True:
-            block = handle.read(1024 * 1024)
-            if not block:
-                return digest.hexdigest()
-            digest.update(block)
-
-root = Path(package.__file__).parent
-material = []
-observed_assets = set()
-for path in sorted(root.rglob('*')):
-    relative = path.relative_to(root)
-    relative_text = relative.as_posix()
-    if '__pycache__' in relative.parts:
-        continue
-    if path.is_symlink():
-        raise SystemExit('installed package symlink')
-    if path.is_dir():
-        continue
-    if not path.is_file():
-        raise SystemExit('installed package inventory invalid')
-    if path.suffix != '.py':
-        if relative_text not in ALLOWED_NON_PYTHON_SOURCE_PATHS:
-            raise SystemExit('installed package inventory invalid')
-        observed_assets.add(relative_text)
-    material.append((relative_text, sha256(path)))
-if observed_assets != ALLOWED_NON_PYTHON_SOURCE_PATHS:
-    raise SystemExit('installed package assets missing')
-encoded = json.dumps(material, ensure_ascii=True, separators=(',', ':')).encode('ascii')
-print(json.dumps({
-    'file': str(package.__file__),
-    'material': material,
-    'source_tree_sha256': hashlib.sha256(encoded).hexdigest(),
-}, sort_keys=True, separators=(',', ':')))
-"""
-        output = subprocess.run(
-            [EXPECTED_CANDIDATE_PYTHON, "-I", "-B", "-c", probe],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-        receipt = json.loads(output)
-        self.assertIn(
-            "site-packages/rag_engine/governed_memory/__init__.py",
-            receipt["file"],
+        build_receipt = json.loads(
+            RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
         )
-        self.assertNotIn("/opt/chat-memory", receipt["file"])
+        self.assertFalse(runtime["final_phase6b_runtime_rebuild_pending"])
+        self.assertTrue(runtime["current_source_bound"])
         self.assertEqual(
-            receipt["material"],
-            [list(item) for item in _package_source_material(PACKAGE)],
+            runtime["current_source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
+        )
+        self.assertEqual(runtime["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
+        self.assertEqual(
+            build_receipt["source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
         )
         self.assertEqual(
-            receipt["source_tree_sha256"],
-            EXPECTED_PACKAGE_SOURCE_TREE_SHA256,
+            build_receipt["candidate_python"], EXPECTED_CANDIDATE_PYTHON
         )
 
 

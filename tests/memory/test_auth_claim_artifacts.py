@@ -149,7 +149,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": True,
+                "disposable_validated": False,
                 "production_applied": False,
             },
         )
@@ -157,7 +157,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='ca03e57974778319cd9ee514ab47ef1cecdc3b52'",
+            "readonly EXPECTED_BASE='594535ae717cf90f3031286804b9fe5effe2c1aa'",
             runner,
         )
         qdrant_digest = (

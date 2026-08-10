@@ -42,6 +42,10 @@ from rag_engine.governed_memory.projection import (
     ProjectionOperation,
     projection_manifest_sha256,
 )
+from rag_engine.governed_memory.response_contracts import (
+    SuccessorResponseActorBinding,
+    SuccessorResponseRequestV1,
+)
 
 
 FIXTURE_PROVENANCE = "synthetic-governed-memory-successor"
@@ -70,6 +74,9 @@ WINDOW_A = UUID("44444444-4444-4444-8444-444444444444")
 WORKER_A = UUID("33333333-3333-4333-8333-333333333333")
 BRIDGE_OUTBOX_A = UUID("32323232-3232-4232-8232-323232323232")
 BRIDGE_LEASE_A = UUID("31313131-3131-4131-8131-313131313131")
+RESPONSE_SESSION_A = UUID("12121212-1212-4212-8212-121212121212")
+RESPONSE_REQUEST_A = "successor-response-request"
+RESPONSE_QUERY_A = "Which synthetic interface theme do I prefer?"
 
 SOURCE_TEXT = "Synthetic owner prefers the cobalt interface theme."
 SOURCE_SHA256 = sha256(SOURCE_TEXT.encode("utf-8")).hexdigest()
@@ -87,6 +94,40 @@ PREDICATE_CATALOG = json.loads(
 SYNTHETIC_PREDICATE_CATALOG_SHA256 = (
     "5b1b31b9bc60e4727c9c70f8e634098536bd139a112f6193b29611fda60beded"
 )
+
+
+def make_response_actor(
+    *,
+    eligible: bool = True,
+    owner_user_id: UUID = OWNER_A,
+    thread_id: UUID = THREAD_A,
+    request_id: str = RESPONSE_REQUEST_A,
+) -> SuccessorResponseActorBinding:
+    return SuccessorResponseActorBinding(
+        owner_user_id=owner_user_id,
+        session_id=RESPONSE_SESSION_A,
+        authentication_manifest_sha256="a" * 64,
+        request_id=request_id,
+        thread_id=thread_id,
+        eligible=eligible,
+    )
+
+
+def make_response_request(
+    *,
+    owner_user_id: UUID = OWNER_A,
+    thread_id: UUID = THREAD_A,
+    request_id: str = RESPONSE_REQUEST_A,
+    current_message: str = RESPONSE_QUERY_A,
+) -> SuccessorResponseRequestV1:
+    return SuccessorResponseRequestV1(
+        authenticated_actor_user_id=owner_user_id,
+        thread_id=thread_id,
+        request_id=request_id,
+        current_message=current_message,
+        conversation_snapshot_sha256="b" * 64,
+        trusted_policy_signals_sha256="c" * 64,
+    )
 
 
 def make_worker_actor(*, owner_user_id: UUID = OWNER_A) -> VerifiedActor:

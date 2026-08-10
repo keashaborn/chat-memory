@@ -27,12 +27,13 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='ca03e57974778319cd9ee514ab47ef1cecdc3b52'
+readonly EXPECTED_BASE='594535ae717cf90f3031286804b9fe5effe2c1aa'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PRELIMINARY_PROOF_AUTHORIZATION_VALUE='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='719b34f82b41722db4ed6f7aae737a2e6370ecd346a0a4d29b28fe3dbfb4bb91'
+readonly EXPECTED_MANIFEST_SHA256='3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
+readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
 readonly LABEL_SCOPE_VALUE='successor-disposable'
@@ -87,6 +88,7 @@ MIGRATION_MANIFEST_SHA256=''
 RUNTIME_PACKAGES_SHA256=''
 RUNTIME_LOCK_SHA256=''
 SOURCE_TREE_SHA256=''
+RUNTIME_BUILD_RECEIPT_SHA256=''
 FOUNDATION_DUMP_SHA256=''
 BRIDGE_DUMP_SHA256=''
 INTEGRATION_RECEIPT_SHA256=''
@@ -274,7 +276,8 @@ verify_runtime_build_receipt() {
   receipt_sha="$(
     "${TEST_PYTHON}" -I -B - \
       "${RUNTIME_BUILD_RECEIPT}" "${TEST_PYTHON}" \
-      "${SOURCE_TREE_SHA256}" "${RUNTIME_LOCK}" "${BUILD_LOCK}" <<'PY'
+      "${SOURCE_TREE_SHA256}" "${RUNTIME_LOCK}" "${BUILD_LOCK}" \
+      "${RUNTIME_PACKAGES}" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -306,10 +309,15 @@ candidate_python = Path(sys.argv[2])
 source_tree_sha256 = sys.argv[3]
 runtime_lock = Path(sys.argv[4])
 build_lock = Path(sys.argv[5])
+runtime_packages_path = Path(sys.argv[6])
 raw = receipt_path.read_bytes()
 if not raw or len(raw) > 128 * 1024:
     raise ValueError("runtime build receipt size invalid")
 receipt = json.loads(raw.decode("ascii"), object_pairs_hook=unique_object)
+runtime_packages_manifest = json.loads(
+    runtime_packages_path.read_bytes().decode("ascii"),
+    object_pairs_hook=unique_object,
+)
 expected_keys = {
     "build_lock",
     "build_lock_sha256",
@@ -387,6 +395,16 @@ if (
     )
 ):
     raise ValueError("runtime build package inventory invalid")
+if not isinstance(runtime_packages_manifest, dict) or not isinstance(
+    runtime_packages_manifest.get("packages"), dict
+):
+    raise ValueError("runtime package manifest invalid")
+canonical_manifest_packages = {
+    re.sub(r"[-_.]+", "-", name).lower(): version
+    for name, version in runtime_packages_manifest["packages"].items()
+}
+if receipt["runtime_packages"] != canonical_manifest_packages:
+    raise ValueError("runtime build package receipt differs")
 if re.fullmatch(r"[0-9a-f]{64}", source_tree_sha256) is None:
     raise ValueError("runtime source hash invalid")
 print(hashlib.sha256(raw).hexdigest())
@@ -394,6 +412,10 @@ PY
   )" || die 'runtime_build_receipt_verification_failed'
   [[ "${receipt_sha}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'runtime_build_receipt_sha256_invalid'
+  [[ "${receipt_sha}" == "${EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256}" ]] \
+    || die 'runtime_build_receipt_sha256_mismatch'
+  RUNTIME_BUILD_RECEIPT_SHA256="${receipt_sha}"
+  readonly RUNTIME_BUILD_RECEIPT_SHA256
 }
 
 verify_installed_successor_source() {
@@ -405,9 +427,12 @@ verify_installed_successor_source() {
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 from importlib import metadata
 import json
 from pathlib import Path
+import pkgutil
 import sys
 
 
@@ -416,6 +441,8 @@ ALLOWED_NON_PYTHON_SOURCE_PATHS = {
     "provider_assets/extraction_output.schema.json",
     "provider_assets/predicate_catalog.json",
 }
+MAX_SUCCESSOR_MODULES = 128
+SUCCESSOR_PACKAGE = "rag_engine.governed_memory"
 
 
 def sha256(path: Path) -> str:
@@ -475,6 +502,48 @@ installed_root = Path(
 prefix = Path(sys.prefix).resolve(strict=True)
 if not installed_root.is_relative_to(prefix):
     raise ValueError("installed successor is outside candidate runtime")
+package = importlib.import_module(SUCCESSOR_PACKAGE)
+module_names = [SUCCESSOR_PACKAGE]
+module_names.extend(
+    item.name
+    for item in pkgutil.walk_packages(
+        package.__path__,
+        SUCCESSOR_PACKAGE + ".",
+    )
+)
+module_names = sorted(set(module_names))
+if not module_names or len(module_names) > MAX_SUCCESSOR_MODULES:
+    raise ValueError("installed successor module inventory invalid")
+for module_name in module_names:
+    importlib.import_module(module_name)
+successor_modules = sorted(
+    (name, module)
+    for name, module in sys.modules.items()
+    if name == SUCCESSOR_PACKAGE or name.startswith(SUCCESSOR_PACKAGE + ".")
+)
+if not successor_modules or len(successor_modules) > MAX_SUCCESSOR_MODULES:
+    raise ValueError("installed successor import inventory invalid")
+for _name, module in successor_modules:
+    module_file = getattr(module, "__file__", None)
+    if not isinstance(module_file, str):
+        raise ValueError("installed successor module origin missing")
+    try:
+        resolved = Path(module_file).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("installed successor module origin invalid") from exc
+    if not resolved.is_relative_to(prefix):
+        raise ValueError("installed successor module is outside candidate runtime")
+if any(
+    name.startswith("rag_engine.")
+    and name != SUCCESSOR_PACKAGE
+    and not name.startswith(SUCCESSOR_PACKAGE + ".")
+    for name in sys.modules
+):
+    raise ValueError("installed successor imported external rag_engine module")
+if importlib.util.find_spec("openai") is not None:
+    raise ValueError("openai unexpectedly importable")
+if any(name == "openai" or name.startswith("openai.") for name in sys.modules):
+    raise ValueError("openai unexpectedly loaded")
 source_material = material(source_root)
 installed_material = material(installed_root)
 if source_material != installed_material:
@@ -2004,10 +2073,15 @@ full() {
   assert_no_listening_port "${JWKS_PORT}"
   assert_no_listening_port "${API_PORT}"
   assert_candidate_binding
+  [[ "${SOURCE_TREE_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'final_source_tree_sha256_invalid'
+  [[ "${RUNTIME_BUILD_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'final_runtime_build_receipt_sha256_invalid'
 
   trap - EXIT INT TERM HUP
-  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v4"}\n' \
+  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","source_tree_sha256":"%s","runtime_build_receipt_sha256":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v5"}\n' \
     "${EXPECTED_BRANCH}" "${EXPECTED_HEAD}" "${EXPECTED_TREE}" \
+    "${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}" \
     "${CONNECT_TRACE_SHA256}" "${RUN_ID}" "${INVOCATION_ID}" "${NETWORK_ID}" \
     "${POSTGRES_CONTAINER_ID}" "${QDRANT_CONTAINER_ID}" \
     "${POSTGRES_IMAGE_ID}" "${QDRANT_IMAGE_ID}" "${QDRANT_IMAGE_DIGEST}" \

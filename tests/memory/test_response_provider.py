@@ -9,13 +9,15 @@ from rag_engine.governed_memory.contracts import (
     ContractViolation,
     canonical_json_bytes,
 )
+from rag_engine.governed_memory.response_contracts import (
+    SuccessorResponseActorBinding,
+)
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_ENV,
     EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
     SuccessorGovernedMemoryAssemblyProviderV1,
-    SuccessorResponseActorBinding,
     SuccessorResponseConfigurationError,
     choose_response_memory_provider,
     response_mode_from_environment,
@@ -28,10 +30,6 @@ from rag_engine.governed_memory.exclusive_cutover import (
     exclusive_memory_mode,
 )
 from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
-from rag_engine.response_conversation_snapshot_v1 import (
-    create_current_only_conversation_snapshot_v1,
-)
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from tests.memory._fixtures import (
     CLAIM_A,
     NOW,
@@ -39,35 +37,16 @@ from tests.memory._fixtures import (
     PREDICATE_CATALOG,
     RESPONSE_A,
     THREAD_A,
+    RESPONSE_QUERY_A,
     deterministic_vector,
+    make_response_actor,
+    make_response_request,
     make_candidate,
     make_claim_row,
 )
 
 
-SESSION = UUID("12121212-1212-4212-8212-121212121212")
-REQUEST = "successor-response-request"
-QUERY = "Which synthetic interface theme do I prefer?"
-
-
-def actor(*, eligible: bool = True) -> SuccessorResponseActorBinding:
-    return SuccessorResponseActorBinding(
-        owner_user_id=OWNER_A,
-        session_id=SESSION,
-        authentication_manifest_sha256="a" * 64,
-        request_id=REQUEST,
-        thread_id=THREAD_A,
-        eligible=eligible,
-    )
-
-
-def snapshot():
-    return create_current_only_conversation_snapshot_v1(
-        authenticated_actor_user_id=OWNER_A,
-        thread_id=THREAD_A,
-        current_request_id=REQUEST,
-        current_message=QUERY,
-    )
+QUERY = RESPONSE_QUERY_A
 
 
 def calibration(*, enabled: bool = True) -> CalibrationDecision:
@@ -140,7 +119,7 @@ def provider(
     decision: CalibrationDecision | None = None,
 ) -> SuccessorGovernedMemoryAssemblyProviderV1:
     return SuccessorGovernedMemoryAssemblyProviderV1(
-        actor=binding or actor(),
+        actor=binding or make_response_actor(),
         repository=repository or RecordingRepository(),
         vector_index=vector_index or RecordingVectorIndex(),
         embedder=embedder or RecordingEmbedder(),
@@ -227,7 +206,7 @@ class SuccessorResponseModeTests(unittest.TestCase):
 class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_ineligible_real_provider_refuses_with_zero_successor_io(self) -> None:
         selected = SuccessorGovernedMemoryAssemblyProviderV1(
-            actor=actor(eligible=False),
+            actor=make_response_actor(eligible=False),
             repository=ResourceTrap(),
             vector_index=ResourceTrap(),
             embedder=ResourceTrap(),
@@ -240,16 +219,12 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             "ineligible_successor_response_provider",
         ):
             await selected.prepare(
-                authenticated_actor_user_id=OWNER_A,
-                conversation_snapshot=snapshot(),
-                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+                request=make_response_request(),
             )
         self.assertFalse(selected.has_selected_claims)
         with self.assertRaisesRegex(ContractViolation, "provider_reused"):
             await selected.prepare(
-                authenticated_actor_user_id=OWNER_A,
-                conversation_snapshot=snapshot(),
-                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+                request=make_response_request(),
             )
 
     async def test_inactive_exclusion_emits_not_applicable_without_resources(
@@ -259,9 +234,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             SuccessorMemoryNotApplicableReason.ATTACHMENT
         )
         assembly = selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            request=make_response_request(),
         )
         self.assertIsNone(assembly.successor_memory_context_block)
         receipt = await selected.persist_dispatched_answer_binding(
@@ -286,9 +259,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             embedder=embedder,
         )
         assembly = await selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            request=make_response_request(),
         )
         block = assembly.successor_memory_context_block
         self.assertIsNotNone(block)
@@ -353,9 +324,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             vector_index=RecordingVectorIndex(candidates=()),
         )
         assembly = await selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            request=make_response_request(),
         )
         self.assertIsNone(assembly.successor_memory_context_block)
         provenance = await selected.persist_dispatched_answer_binding(
@@ -373,9 +342,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         selected = provider(repository=repository)
         assembly = await selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            request=make_response_request(),
         )
         self.assertIsNone(assembly.successor_memory_context_block)
         self.assertFalse(selected.has_selected_claims)
@@ -397,9 +364,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             "cross_owner_authoritative_row",
         ):
             await selected.prepare(
-                authenticated_actor_user_id=OWNER_A,
-                conversation_snapshot=snapshot(),
-                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+                request=make_response_request(),
             )
         self.assertFalse(selected.has_selected_claims)
         self.assertEqual(repository.persisted, [])
@@ -408,9 +373,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         repository = RecordingRepository(fail_persist=True)
         selected = provider(repository=repository)
         assembly = await selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            request=make_response_request(),
         )
         block = assembly.successor_memory_context_block
         assert block is not None

@@ -33,6 +33,9 @@ from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
+from rag_engine.successor_memory_chat_adapter_v1 import (
+    SuccessorMemoryChatAdapterV1,
+)
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
 from tests.test_response_composition_root_v0_4 import CurrentProvider, PriorProvider
 from tests.test_response_composition_root_v0_2 import (
@@ -287,8 +290,10 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
     async def test_excluded_successor_surface_is_typed_not_applicable(
         self,
     ) -> None:
-        lifecycle = InactiveSuccessorMemoryProviderV1(
-            SuccessorMemoryNotApplicableReason.NO_STORE
+        lifecycle = SuccessorMemoryChatAdapterV1(
+            InactiveSuccessorMemoryProviderV1(
+                SuccessorMemoryNotApplicableReason.NO_STORE
+            )
         )
         root = InactiveResponseCompositionRootV0_2(
             openai_client=CombinedOpenAIClient(),

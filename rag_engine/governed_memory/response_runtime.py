@@ -34,9 +34,9 @@ from rag_engine.governed_memory.http_service import (
 from rag_engine.governed_memory.response_postgres import (
     PostgresSuccessorResponseRepository,
 )
+from rag_engine.governed_memory.response_contracts import SuccessorResponseActorBinding
 from rag_engine.governed_memory.response_provider import (
     SuccessorGovernedMemoryAssemblyProviderV1,
-    SuccessorResponseActorBinding,
     SuccessorResponseConfigurationError,
 )
 from rag_engine.governed_memory.runtime.calibration import (
@@ -76,9 +76,8 @@ EXPECTED_POSTGRES_ROLE = "governed_memory_api"
 EXPECTED_QDRANT_HOST = "127.0.0.1"
 EXPECTED_QDRANT_PORT = 6_343
 
-_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PREDICATE_CATALOG_PATH = (
-    _ROOT / "governed-memory-migrations" / "predicate_catalog.json"
+    Path(__file__).resolve().parent / "provider_assets" / "predicate_catalog.json"
 )
 _MAX_QDRANT_RESPONSE_BYTES = 2_097_152
 _QDRANT_TIMEOUT_SECONDS = 5.0

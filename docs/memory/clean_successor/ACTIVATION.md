@@ -9,14 +9,13 @@ marker row exists. The release guard returns `activation_blockers_open` for
 create and `authorization_missing` for cleanup, with an empty action plan and
 zero executed commands.
 
-The prior Phase 5 CPython 3.12.3 runtime receipt binds historical source SHA-256
-`af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
-and wheel SHA-256
-`58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
-The historical Phase 5 disposable harness passed against that older source.
-Phase 6B changed runtime and migration bytes; a fresh source-bound runtime and
-full disposable receipt are pending. The old receipt closes no current Phase
-6B proof blocker and is not production activation evidence.
+The current checked Phase 6B runtime receipt has SHA-256
+`ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69`
+and binds installable successor source-inventory SHA-256
+`d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0`
+to the sealed CPython 3.12.3 candidate. The full Phase 6B disposable migration
+and two-database worker receipt remain pending. The runtime receipt alone is
+not production activation evidence.
 
 ## Exact candidate targets
 
@@ -75,7 +74,7 @@ list. Before any persistent pilot, all of the following remain required:
 3. Mount and verify live Supabase runtime credentials without exposing them.
 4. Keep semantic retrieval off until an independently authorized calibration
    artifact is approved.
-5. Build a fresh sealed runtime and prove the Phase 6B two-database worker,
+5. Use the fresh sealed runtime to prove the Phase 6B two-database worker,
    persistent fairness cursor, attachment exclusion, exact pilot identity, and
    cross-process singleton against fresh disposable stores.
 6. Authorize any real provider/embedding validation separately; unknown
@@ -102,9 +101,10 @@ Each step is a separate checkpoint:
 
 1. Capture seebx hostname, HEAD/tree, services, ports, store identities, and
    legacy flags in a content-free pre-state receipt.
-2. Build a new runtime receipt that binds the exact sealed Phase 6B source,
-   runtime/build locks, installed package, and wheel bytes; do not reuse the
-   Phase 5 receipt.
+2. Verify and use the checked runtime receipt that binds the sealed Phase 6B
+   source, runtime/build locks, installed package, and wheel bytes. Rebuild it
+   if any successor package byte or lock changes; never reuse the Phase 5
+   receipt.
 3. Reproduce the full disposable proof if the sealed source, runtime, migration
    manifest, pinned images, or proof environment changes.
 4. Review and authorize exact persistent targets and credentials. Existing
