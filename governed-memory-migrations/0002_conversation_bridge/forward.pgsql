@@ -1,11 +1,21 @@
--- Content-free conversation-to-Memory bridge. Apply to the existing
--- conversation database only. This migration does not inspect or depend on the
--- shape of any conversation, thread, attachment, account, or legacy table.
+-- Content-free conversation-to-Memory bridge. Apply only to the canonical
+-- `memory` conversation database as `sage`.  The migration reads catalog
+-- metadata only: it never scans chat, thread, or attachment rows.  Runtime
+-- source reads are possible only for the exact newly inserted chat_log row
+-- bound to an active worker lease.
 
 DO $preflight$
+DECLARE
+  expected_column record;
+  forbidden_relation text;
+  privilege_name text;
 BEGIN
   IF pg_catalog.current_setting('server_version_num')::integer < 150000 THEN
     RAISE EXCEPTION 'PostgreSQL 15 or newer is required';
+  END IF;
+  IF pg_catalog.current_database() <> 'memory'
+     OR pg_catalog.current_setting('server_encoding') <> 'UTF8' THEN
+    RAISE EXCEPTION 'conversation bridge requires UTF8 database memory';
   END IF;
   IF current_user <> 'sage' THEN
     RAISE EXCEPTION 'conversation bridge migration requires sage';
@@ -25,6 +35,149 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'bridge runtime roles are absent or unsafe';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'brains_app'
+      AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND rolinherit
+  ) THEN
+    RAISE EXCEPTION 'brains_app role is absent or unsafe';
+  END IF;
+  IF pg_catalog.pg_has_role(
+    'brains_app', 'memory_ingest_writer', 'MEMBER'
+  ) THEN
+    RAISE EXCEPTION 'capture writer membership must be absent before migration';
+  END IF;
+  IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL THEN
+    RAISE EXCEPTION 'conversation bridge schema already exists';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('chat_log'), ('threads'), ('chat_attachments')
+    ) AS expected(relname)
+    LEFT JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.nspname = 'public'
+    LEFT JOIN pg_catalog.pg_class AS relation
+      ON relation.relnamespace = namespace.oid
+     AND relation.relname = expected.relname
+     AND relation.relkind = 'r'
+    WHERE relation.oid IS NULL
+       OR relation.relowner <> 'sage'::regrole
+       OR NOT relation.relrowsecurity
+       OR NOT relation.relforcerowsecurity
+  ) THEN
+    RAISE EXCEPTION 'conversation source table owner or forced RLS differs';
+  END IF;
+
+  FOR expected_column IN
+    SELECT * FROM (VALUES
+      ('chat_log', 'id', 'uuid'),
+      ('chat_log', 'owner_user_id', 'uuid'),
+      ('chat_log', 'thread_id', 'uuid'),
+      ('chat_log', 'source', 'text'),
+      ('chat_log', 'text', 'text'),
+      ('chat_log', 'created_at', 'timestamp with time zone'),
+      ('threads', 'id', 'uuid'),
+      ('threads', 'owner_user_id', 'uuid')
+    ) AS required(relation_name, column_name, type_name)
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = pg_catalog.to_regclass(
+              'public.' || expected_column.relation_name
+            )
+        AND attribute.attname = expected_column.column_name
+        AND attribute.atttypid = expected_column.type_name::regtype
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ) THEN
+      RAISE EXCEPTION 'conversation source column contract differs: %.%',
+        expected_column.relation_name, expected_column.column_name;
+    END IF;
+  END LOOP;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = 'public.chat_log'::regclass
+      AND attname = 'id' AND attnotnull AND NOT attisdropped
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.chat_log'::regclass
+      AND conname = 'chat_log_pkey' AND contype = 'p' AND convalidated
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.chat_log'::regclass
+      AND conname = 'chat_log_owner_thread_fk' AND contype = 'f'
+      AND NOT convalidated
+      AND pg_catalog.pg_get_constraintdef(oid, true) =
+        'FOREIGN KEY (owner_user_id, thread_id) '
+        'REFERENCES threads(owner_user_id, id) NOT VALID'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_index
+    WHERE indexrelid = pg_catalog.to_regclass(
+            'public.chat_log_id_owner_thread_chat_attachments_uq'
+          )
+      AND indrelid = 'public.chat_log'::regclass
+      AND indisunique AND indisvalid AND indisready
+      AND indpred IS NULL AND indexprs IS NULL
+      AND pg_catalog.pg_get_indexdef(indexrelid) =
+        'CREATE UNIQUE INDEX chat_log_id_owner_thread_chat_attachments_uq '
+        'ON public.chat_log USING btree (id, owner_user_id, thread_id)'
+  ) THEN
+    RAISE EXCEPTION 'chat_log key or owner/thread lineage contract differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname = 'chat_log_guard_canonical_owner'
+      AND tgenabled = 'O' AND NOT tgisinternal
+      AND tgfoid = 'public.guard_canonical_owner()'::regprocedure
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname = 'chat_log_guard_immutable'
+      AND tgenabled = 'O' AND NOT tgisinternal
+      AND tgfoid = 'public.guard_chat_log_immutable()'::regprocedure
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
+      AND tgenabled = 'D' AND NOT tgisinternal
+      AND tgfoid = 'memory.enqueue_chat_log_consolidation()'::regprocedure
+  ) OR EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname NOT IN (
+        'chat_log_guard_canonical_owner',
+        'chat_log_guard_immutable',
+        'chat_log_enqueue_memory_v1_consolidation'
+      )
+      AND tgenabled <> 'D'
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'chat_log trigger contract differs or legacy capture is enabled';
+  END IF;
+
+  FOREACH forbidden_relation IN ARRAY ARRAY[
+    'public.chat_log', 'public.threads', 'public.chat_attachments'
+  ] LOOP
+    FOREACH privilege_name IN ARRAY ARRAY[
+      'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+      'REFERENCES', 'TRIGGER'
+    ] LOOP
+      IF pg_catalog.has_table_privilege(
+        'memory_ingest_writer', forbidden_relation, privilege_name
+      ) OR pg_catalog.has_table_privilege(
+        'governed_memory_worker', forbidden_relation, privilege_name
+      ) THEN
+        RAISE EXCEPTION 'bridge role already has direct authority on %',
+          forbidden_relation;
+      END IF;
+    END LOOP;
+  END LOOP;
 END;
 $preflight$;
 
@@ -69,6 +222,58 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION memory_ingest_private.timestamp_utc_text(timestamptz)
   FROM PUBLIC;
+
+CREATE FUNCTION memory_ingest_private.ingest_window_sha256(
+  p_owner_user_id uuid,
+  p_thread_id uuid,
+  p_exchange_id uuid,
+  p_window_id uuid,
+  p_message_id uuid,
+  p_content_sha256 text
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY INVOKER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    '{"domain":"governed_memory.ingest_window","material":{'
+      || '"content_sha256":'
+      || pg_catalog.to_json(p_content_sha256)::text || ','
+      || '"exchange_id":'
+      || pg_catalog.to_json(p_exchange_id::text)::text || ','
+      || '"message_id":'
+      || pg_catalog.to_json(p_message_id::text)::text || ','
+      || '"owner_user_id":'
+      || pg_catalog.to_json(p_owner_user_id::text)::text || ','
+      || '"thread_id":'
+      || pg_catalog.to_json(p_thread_id::text)::text || ','
+      || '"window_id":'
+      || pg_catalog.to_json(p_window_id::text)::text
+      || '}}',
+    'UTF8'
+  )), 'hex')
+$function$;
+REVOKE ALL ON FUNCTION memory_ingest_private.ingest_window_sha256(
+  uuid,uuid,uuid,uuid,uuid,text
+) FROM PUBLIC;
+
+DO $ingest_window_hash_self_check$
+BEGIN
+  IF memory_ingest_private.ingest_window_sha256(
+       '00000000-0000-4000-8000-000000000001'::uuid,
+       '00000000-0000-4000-8000-000000000002'::uuid,
+       '00000000-0000-4000-8000-000000000003'::uuid,
+       '00000000-0000-4000-8000-000000000004'::uuid,
+       '00000000-0000-4000-8000-000000000005'::uuid,
+       pg_catalog.repeat('1', 64)
+     ) <> 'e9ffcbf890a6ce88bc705ba71354e77060449e0a378b5c3b2dc1138ef8105206'
+  THEN
+    RAISE EXCEPTION 'bridge ingest-window hash self-check failed';
+  END IF;
+END;
+$ingest_window_hash_self_check$;
 
 CREATE FUNCTION memory_ingest_private.source_binding_sha256(
   p_owner_user_id uuid,
@@ -190,7 +395,7 @@ REVOKE ALL ON FUNCTION memory_ingest_private.terminal_receipt_sha256(
   text,text,text,integer,uuid,uuid,text,timestamptz
 ) FROM PUBLIC;
 
-CREATE TABLE public.memory_ingest_outbox (
+CREATE TABLE memory_ingest_private.memory_ingest_outbox (
   outbox_id uuid PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
   owner_user_id uuid NOT NULL,
   operation_id uuid NOT NULL,
@@ -360,31 +565,26 @@ CREATE TABLE public.memory_ingest_outbox (
 );
 
 CREATE INDEX memory_ingest_outbox_lease_idx
-  ON public.memory_ingest_outbox(
+  ON memory_ingest_private.memory_ingest_outbox(
     state, available_at, source_created_at, outbox_id
   ) WHERE state IN ('pending', 'retryable', 'claimed');
 CREATE INDEX memory_ingest_outbox_hash_expiry_idx
-  ON public.memory_ingest_outbox(content_hash_expires_at)
+  ON memory_ingest_private.memory_ingest_outbox(content_hash_expires_at)
   WHERE content_sha256 IS NOT NULL;
 
-REVOKE ALL ON TABLE public.memory_ingest_outbox FROM PUBLIC;
-REVOKE ALL ON TABLE public.memory_ingest_outbox FROM memory_ingest_writer;
-REVOKE ALL ON TABLE public.memory_ingest_outbox FROM governed_memory_worker;
-ALTER TABLE public.memory_ingest_outbox ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.memory_ingest_outbox FORCE ROW LEVEL SECURITY;
-CREATE POLICY owner_internal ON public.memory_ingest_outbox
+ALTER TABLE memory_ingest_private.memory_ingest_outbox OWNER TO sage;
+REVOKE ALL ON TABLE memory_ingest_private.memory_ingest_outbox FROM PUBLIC;
+REVOKE ALL ON TABLE memory_ingest_private.memory_ingest_outbox FROM memory_ingest_writer;
+REVOKE ALL ON TABLE memory_ingest_private.memory_ingest_outbox FROM governed_memory_worker;
+REVOKE ALL ON TABLE public.chat_log, public.threads, public.chat_attachments
+  FROM memory_ingest_writer, governed_memory_worker;
+ALTER TABLE memory_ingest_private.memory_ingest_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.memory_ingest_outbox FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_internal ON memory_ingest_private.memory_ingest_outbox
   TO sage USING (true) WITH CHECK (true);
 
-CREATE FUNCTION memory_ingest_private.enqueue_memory_ingest(
-  p_owner_user_id uuid,
+CREATE FUNCTION memory_ingest_private.enqueue_chat_log_message(
   p_message_id uuid,
-  p_thread_id uuid,
-  p_content_sha256 text,
-  p_source_created_at timestamptz,
-  p_exchange_id uuid,
-  p_window_id uuid,
-  p_window_ordinal integer,
-  p_window_sha256 text,
   p_policy_sha256 text
 )
 RETURNS TABLE(outcome text, outbox_id uuid)
@@ -395,99 +595,102 @@ SET search_path TO pg_catalog
 AS $function$
 DECLARE
   actor uuid;
-  existing public.memory_ingest_outbox%ROWTYPE;
+  source_row record;
+  current_xid xid;
+  existing memory_ingest_private.memory_ingest_outbox%ROWTYPE;
   new_outbox_id uuid;
   captured_at timestamptz;
+  content_hash text;
+  window_hash text;
   source_binding text;
 BEGIN
-  IF NOT pg_catalog.pg_has_role(
-    session_user, 'memory_ingest_writer', 'MEMBER'
-  ) THEN
-    RAISE EXCEPTION 'memory_ingest_writer membership required'
+  IF session_user <> 'brains_app'
+     OR NOT pg_catalog.pg_has_role(
+       session_user, 'memory_ingest_writer', 'MEMBER'
+     ) THEN
+    RAISE EXCEPTION 'authorized brains_app capture membership required'
       USING ERRCODE = '42501';
   END IF;
   actor := NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid;
-  IF actor IS NULL OR p_owner_user_id IS NULL OR actor <> p_owner_user_id
-     OR COALESCE(
+  IF actor IS NULL OR COALESCE(
        pg_catalog.current_setting('app.auth_context_sha256', true), ''
      ) !~ '^[0-9a-f]{64}$'
-     OR p_message_id IS NULL OR p_thread_id IS NULL OR p_exchange_id IS NULL
-     OR p_window_id IS NULL
-     OR p_window_id = '00000000-0000-0000-0000-000000000000'::uuid
-     OR p_content_sha256 IS NULL
-     OR p_content_sha256 !~ '^[0-9a-f]{64}$'
-     OR p_window_sha256 IS NULL
-     OR p_window_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_message_id IS NULL
      OR p_policy_sha256 IS NULL
-     OR p_policy_sha256 !~ '^[0-9a-f]{64}$'
-     OR p_source_created_at IS NULL
-     OR p_window_ordinal IS NULL
-     OR p_window_ordinal NOT BETWEEN 0 AND 10000 THEN
+     OR p_policy_sha256 !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'invalid memory ingest enqueue input'
       USING ERRCODE = '22023';
   END IF;
+  captured_at := pg_catalog.transaction_timestamp();
+  -- xmin is a 32-bit xid while pg_current_xact_id() is epoch-aware xid8.
+  current_xid := (
+    (pg_catalog.pg_current_xact_id()::text::numeric % 4294967296)::text
+  )::xid;
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(
       actor::text || '|memory_ingest|' || p_message_id::text, 0
     )
   );
+
+  SELECT source.*, source.xmin AS source_xmin INTO source_row
+  FROM public.chat_log AS source
+  WHERE source.id = p_message_id
+    AND source.owner_user_id = actor
+  FOR KEY SHARE;
+  IF NOT FOUND
+     OR source_row.thread_id IS NULL
+     OR source_row.source IS DISTINCT FROM 'frontend/chat:user'
+     OR source_row.text IS NULL
+     OR source_row.created_at IS NULL
+     OR source_row.source_xmin <> current_xid
+     OR source_row.created_at <> captured_at
+     OR normalize(source_row.text, NFC) <> source_row.text THEN
+    RAISE EXCEPTION 'message is not an NFC current-transaction chat row'
+      USING ERRCODE = '22023';
+  END IF;
+  content_hash := pg_catalog.encode(pg_catalog.sha256(
+    pg_catalog.convert_to(source_row.text, 'UTF8')
+  ), 'hex');
+  window_hash := memory_ingest_private.ingest_window_sha256(
+    actor, source_row.thread_id, p_message_id, p_message_id,
+    p_message_id, content_hash
+  );
+  source_binding := memory_ingest_private.source_binding_sha256(
+    actor, p_message_id, source_row.thread_id, p_message_id, p_message_id,
+    0, window_hash, content_hash, p_policy_sha256, source_row.created_at
+  );
+
   SELECT value.* INTO existing
-  FROM public.memory_ingest_outbox AS value
+  FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.owner_user_id = actor AND value.message_id = p_message_id;
   IF FOUND THEN
-    source_binding := memory_ingest_private.source_binding_sha256(
-      actor, p_message_id, p_thread_id, p_exchange_id, p_window_id,
-      p_window_ordinal, p_window_sha256, p_content_sha256, p_policy_sha256,
-      p_source_created_at
-    );
-    IF existing.thread_id <> p_thread_id
-       OR existing.exchange_id <> p_exchange_id
-       OR existing.window_id <> p_window_id
-       OR existing.window_ordinal <> p_window_ordinal
-       OR existing.window_sha256 <> p_window_sha256
-       OR existing.source_created_at <> p_source_created_at
+    IF existing.thread_id <> source_row.thread_id
+       OR existing.exchange_id <> p_message_id
+       OR existing.window_id <> p_message_id
+       OR existing.window_ordinal <> 0
+       OR existing.window_sha256 <> window_hash
+       OR existing.content_sha256 <> content_hash
+       OR existing.source_created_at <> source_row.created_at
        OR existing.policy_sha256 <> p_policy_sha256
        OR existing.source_binding_sha256 IS DISTINCT FROM source_binding THEN
       RAISE EXCEPTION 'memory ingest enqueue replay drifted'
         USING ERRCODE = '23514';
     END IF;
-    IF existing.state IN ('pending', 'claimed', 'retryable') AND (
-      existing.content_sha256 IS DISTINCT FROM p_content_sha256
-      OR existing.source_binding_sha256 IS DISTINCT FROM source_binding
-    ) THEN
-      RAISE EXCEPTION 'active memory ingest replay content hash drifted'
-        USING ERRCODE = '23514';
-    END IF;
-    RETURN QUERY SELECT
-      CASE WHEN existing.state IN (
-        'completed', 'skipped', 'expired', 'failed_terminal'
-      ) THEN 'terminal_replayed' ELSE 'replayed' END,
-      existing.outbox_id;
+    RETURN QUERY SELECT 'replayed'::text, existing.outbox_id;
     RETURN;
   END IF;
   new_outbox_id := pg_catalog.gen_random_uuid();
-  captured_at := pg_catalog.transaction_timestamp();
-  IF p_source_created_at < captured_at
-     OR p_source_created_at > pg_catalog.clock_timestamp() THEN
-    RAISE EXCEPTION 'message is outside the current bridge cutover transaction'
-      USING ERRCODE = '22023';
-  END IF;
-  source_binding := memory_ingest_private.source_binding_sha256(
-    actor, p_message_id, p_thread_id, p_exchange_id, p_window_id,
-    p_window_ordinal, p_window_sha256, p_content_sha256, p_policy_sha256,
-    p_source_created_at
-  );
-  INSERT INTO public.memory_ingest_outbox(
+  INSERT INTO memory_ingest_private.memory_ingest_outbox(
     outbox_id, owner_user_id, operation_id, message_id, thread_id,
     exchange_id, window_id, window_ordinal, window_sha256, content_sha256,
     source_binding_sha256,
     ingest_after, source_created_at, policy_sha256,
     content_hash_expires_at, purge_after, available_at, created_at, updated_at
   ) VALUES (
-    new_outbox_id, actor, p_message_id, p_message_id, p_thread_id,
-    p_exchange_id, p_window_id, p_window_ordinal, p_window_sha256,
-    p_content_sha256, source_binding, captured_at,
-    p_source_created_at, p_policy_sha256,
+    new_outbox_id, actor, p_message_id, p_message_id, source_row.thread_id,
+    p_message_id, p_message_id, 0, window_hash,
+    content_hash, source_binding, captured_at,
+    source_row.created_at, p_policy_sha256,
     captured_at + interval '24 hours', captured_at + interval '7 days',
     captured_at, captured_at, captured_at
   );
@@ -540,7 +743,7 @@ BEGIN
     RAISE EXCEPTION 'invalid bridge lease input' USING ERRCODE = '22023';
   END IF;
   captured_at := pg_catalog.transaction_timestamp();
-  UPDATE public.memory_ingest_outbox AS expired
+  UPDATE memory_ingest_private.memory_ingest_outbox AS expired
   SET state = CASE
         WHEN expired.attempt_count >= expired.max_attempts THEN 'failed_terminal'
         ELSE 'retryable'
@@ -567,7 +770,7 @@ BEGIN
 
   FOR candidate IN
     SELECT value.*
-    FROM public.memory_ingest_outbox AS value
+    FROM memory_ingest_private.memory_ingest_outbox AS value
     WHERE value.state IN ('pending', 'retryable')
       AND value.available_at <= pg_catalog.clock_timestamp()
       AND value.content_hash_expires_at > pg_catalog.clock_timestamp()
@@ -579,7 +782,7 @@ BEGIN
     new_lease_token := pg_catalog.gen_random_uuid();
     new_lease_expires_at := pg_catalog.clock_timestamp()
       + pg_catalog.make_interval(secs => p_lease_seconds);
-    UPDATE public.memory_ingest_outbox
+    UPDATE memory_ingest_private.memory_ingest_outbox
     SET state = 'claimed', attempt_count = attempt_count + 1,
         lease_token = new_lease_token, claimed_by = p_worker_id,
         claimed_at = pg_catalog.clock_timestamp(),
@@ -599,7 +802,7 @@ BEGIN
 END;
 $function$;
 
-CREATE FUNCTION memory_ingest_private.read_memory_ingest_lease(
+CREATE FUNCTION memory_ingest_private.read_leased_chat_log_message(
   p_outbox_id uuid,
   p_lease_token uuid
 )
@@ -620,13 +823,21 @@ RETURNS TABLE(
   context_review_count integer,
   eligibility_decision text,
   lease_token uuid,
-  lease_expires_at timestamptz
+  lease_expires_at timestamptz,
+  role text,
+  content text
 )
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path TO pg_catalog
 AS $function$
+DECLARE
+  target memory_ingest_private.memory_ingest_outbox%ROWTYPE;
+  source_row public.chat_log%ROWTYPE;
+  observed_content_sha256 text;
+  observed_window_sha256 text;
+  observed_source_binding_sha256 text;
 BEGIN
   IF session_user <> 'governed_memory_worker' THEN
     RAISE EXCEPTION 'worker role required' USING ERRCODE = '42501';
@@ -634,19 +845,64 @@ BEGIN
   IF p_outbox_id IS NULL OR p_lease_token IS NULL THEN
     RAISE EXCEPTION 'invalid bridge lease read input' USING ERRCODE = '22023';
   END IF;
-  RETURN QUERY
-  SELECT value.outbox_id, value.owner_user_id, value.message_id,
-         value.thread_id, value.exchange_id, value.window_id,
-         value.window_ordinal, value.window_sha256, value.content_sha256,
-         value.source_binding_sha256, value.policy_sha256,
-         value.source_created_at, value.ingest_after,
-         value.context_review_count, value.eligibility_decision,
-         value.lease_token, value.lease_expires_at
-  FROM public.memory_ingest_outbox AS value
+  SELECT value.* INTO STRICT target
+  FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.outbox_id = p_outbox_id
-    AND value.state = 'claimed'
-    AND value.lease_token = p_lease_token
-    AND value.lease_expires_at > pg_catalog.clock_timestamp();
+  FOR UPDATE;
+  IF target.state <> 'claimed'
+     OR target.lease_token <> p_lease_token
+     OR target.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'stale bridge lease' USING ERRCODE = '40001';
+  END IF;
+
+  SELECT source.* INTO STRICT source_row
+  FROM public.chat_log AS source
+  WHERE source.id = target.message_id
+    AND source.owner_user_id = target.owner_user_id
+    AND source.thread_id = target.thread_id
+  FOR KEY SHARE;
+  IF source_row.text IS NULL
+     OR source_row.source IS DISTINCT FROM 'frontend/chat:user'
+     OR source_row.created_at IS NULL
+     OR source_row.created_at <> target.source_created_at
+     OR source_row.created_at < target.ingest_after
+     OR normalize(source_row.text, NFC) <> source_row.text
+     OR target.exchange_id <> target.message_id
+     OR target.window_id <> target.message_id
+     OR target.window_ordinal <> 0 THEN
+    RAISE EXCEPTION 'leased chat source contract drifted'
+      USING ERRCODE = '23514';
+  END IF;
+  observed_content_sha256 := pg_catalog.encode(pg_catalog.sha256(
+    pg_catalog.convert_to(source_row.text, 'UTF8')
+  ), 'hex');
+  observed_window_sha256 := memory_ingest_private.ingest_window_sha256(
+    target.owner_user_id, target.thread_id, target.exchange_id,
+    target.window_id, target.message_id, observed_content_sha256
+  );
+  observed_source_binding_sha256 :=
+    memory_ingest_private.source_binding_sha256(
+      target.owner_user_id, target.message_id, target.thread_id,
+      target.exchange_id, target.window_id, target.window_ordinal,
+      observed_window_sha256, observed_content_sha256,
+      target.policy_sha256, target.source_created_at
+    );
+  IF target.content_sha256 IS DISTINCT FROM observed_content_sha256
+     OR target.window_sha256 <> observed_window_sha256
+     OR target.source_binding_sha256 <> observed_source_binding_sha256 THEN
+    RAISE EXCEPTION 'leased chat source binding drifted'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN QUERY SELECT
+    target.outbox_id, target.owner_user_id, target.message_id,
+    target.thread_id, target.exchange_id, target.window_id,
+    target.window_ordinal, target.window_sha256, target.content_sha256,
+    target.source_binding_sha256, target.policy_sha256,
+    target.source_created_at, target.ingest_after,
+    target.context_review_count, target.eligibility_decision,
+    target.lease_token, target.lease_expires_at,
+    'user'::text, source_row.text;
 END;
 $function$;
 
@@ -661,7 +917,7 @@ SECURITY DEFINER
 SET search_path TO pg_catalog
 AS $function$
 DECLARE
-  target public.memory_ingest_outbox%ROWTYPE;
+  target memory_ingest_private.memory_ingest_outbox%ROWTYPE;
   captured_at timestamptz;
   receipt_hash text;
 BEGIN
@@ -672,7 +928,7 @@ BEGIN
     RAISE EXCEPTION 'invalid context-review mark input' USING ERRCODE = '22023';
   END IF;
   SELECT value.* INTO STRICT target
-  FROM public.memory_ingest_outbox AS value
+  FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.outbox_id = p_outbox_id
   FOR UPDATE;
   IF target.state <> 'claimed' OR target.lease_token <> p_lease_token
@@ -685,7 +941,7 @@ BEGIN
       target.source_binding_sha256, 'skipped', 'review_context', 1,
       NULL::uuid, NULL::uuid, 'context_review_unresolved', captured_at
     );
-    UPDATE public.memory_ingest_outbox
+    UPDATE memory_ingest_private.memory_ingest_outbox
     SET state = 'skipped', eligibility_decision = 'review_context',
         content_sha256 = NULL,
         completed_at = captured_at,
@@ -703,7 +959,7 @@ BEGIN
   ELSIF target.context_review_count <> 0 THEN
     RAISE EXCEPTION 'invalid context review count' USING ERRCODE = '23514';
   END IF;
-  UPDATE public.memory_ingest_outbox
+  UPDATE memory_ingest_private.memory_ingest_outbox
   SET context_review_count = 1, eligibility_decision = 'review_context',
       updated_at = captured_at
   WHERE memory_ingest_outbox.outbox_id = target.outbox_id
@@ -731,7 +987,7 @@ SECURITY DEFINER
 SET search_path TO pg_catalog
 AS $function$
 DECLARE
-  target public.memory_ingest_outbox%ROWTYPE;
+  target memory_ingest_private.memory_ingest_outbox%ROWTYPE;
   captured_at timestamptz;
   receipt_hash text;
   resulting_state text;
@@ -753,7 +1009,7 @@ BEGIN
     RAISE EXCEPTION 'invalid bridge acknowledgment' USING ERRCODE = '22023';
   END IF;
   SELECT value.* INTO STRICT target
-  FROM public.memory_ingest_outbox AS value
+  FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.outbox_id = p_outbox_id
   FOR UPDATE;
   resulting_state := CASE WHEN p_decision = 'send_external'
@@ -787,7 +1043,7 @@ BEGIN
     target.context_review_count, p_successor_evidence_id,
     p_successor_job_id, NULL::text, captured_at
   );
-  UPDATE public.memory_ingest_outbox
+  UPDATE memory_ingest_private.memory_ingest_outbox
   SET state = resulting_state,
       eligibility_decision = p_decision,
       successor_evidence_id = p_successor_evidence_id,
@@ -815,7 +1071,7 @@ SECURITY DEFINER
 SET search_path TO pg_catalog
 AS $function$
 DECLARE
-  target public.memory_ingest_outbox%ROWTYPE;
+  target memory_ingest_private.memory_ingest_outbox%ROWTYPE;
   resulting_state text;
   captured_at timestamptz;
   receipt_hash text;
@@ -848,7 +1104,7 @@ BEGIN
     RAISE EXCEPTION 'invalid bridge failure input' USING ERRCODE = '22023';
   END IF;
   SELECT value.* INTO STRICT target
-  FROM public.memory_ingest_outbox AS value
+  FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.outbox_id = p_outbox_id
   FOR UPDATE;
   IF target.state = 'failed_terminal' THEN
@@ -905,7 +1161,7 @@ BEGIN
       NULL::uuid, NULL::uuid, p_error_code, captured_at
     );
   END IF;
-  UPDATE public.memory_ingest_outbox
+  UPDATE memory_ingest_private.memory_ingest_outbox
   SET state = resulting_state,
       available_at = CASE WHEN resulting_state = 'retryable'
         THEN pg_catalog.clock_timestamp()
@@ -944,14 +1200,14 @@ BEGIN
   captured_at := pg_catalog.transaction_timestamp();
   WITH candidates AS (
     SELECT value.outbox_id
-    FROM public.memory_ingest_outbox AS value
+    FROM memory_ingest_private.memory_ingest_outbox AS value
     WHERE value.state IN ('pending', 'retryable')
       AND value.content_hash_expires_at <= pg_catalog.clock_timestamp()
     ORDER BY value.content_hash_expires_at, value.outbox_id
     FOR UPDATE SKIP LOCKED
     LIMIT p_limit
   ), expired AS (
-    UPDATE public.memory_ingest_outbox AS value
+    UPDATE memory_ingest_private.memory_ingest_outbox AS value
     SET state = 'expired', content_sha256 = NULL,
         completed_at = captured_at,
         terminal_receipt_sha256 =
@@ -992,7 +1248,7 @@ BEGIN
   END IF;
   WITH candidates AS (
     SELECT value.outbox_id
-    FROM public.memory_ingest_outbox AS value
+    FROM memory_ingest_private.memory_ingest_outbox AS value
     WHERE value.state IN (
       'completed', 'skipped', 'expired', 'failed_terminal'
     )
@@ -1001,7 +1257,7 @@ BEGIN
     FOR UPDATE SKIP LOCKED
     LIMIT p_limit
   ), purged AS (
-    DELETE FROM public.memory_ingest_outbox AS value
+    DELETE FROM memory_ingest_private.memory_ingest_outbox AS value
     USING candidates
     WHERE value.outbox_id = candidates.outbox_id
     RETURNING 1
@@ -1013,12 +1269,12 @@ $function$;
 
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA memory_ingest_private
   FROM PUBLIC, memory_ingest_writer, governed_memory_worker;
-GRANT EXECUTE ON FUNCTION memory_ingest_private.enqueue_memory_ingest(
-  uuid,uuid,uuid,text,timestamptz,uuid,uuid,integer,text,text
+GRANT EXECUTE ON FUNCTION memory_ingest_private.enqueue_chat_log_message(
+  uuid,text
 ) TO memory_ingest_writer;
 GRANT EXECUTE ON FUNCTION
   memory_ingest_private.lease_memory_ingest(text,integer,integer),
-  memory_ingest_private.read_memory_ingest_lease(uuid,uuid),
+  memory_ingest_private.read_leased_chat_log_message(uuid,uuid),
   memory_ingest_private.mark_memory_ingest_context_review(uuid,uuid),
   memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid),
   memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer),
@@ -1029,13 +1285,16 @@ TO governed_memory_worker;
 DO $postflight$
 DECLARE
   forbidden_role text;
+  forbidden_relation text;
+  runtime_role text;
+  privilege_name text;
 BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_catalog.pg_class AS relation
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = relation.relnamespace
-    WHERE namespace.nspname = 'public'
+    WHERE namespace.nspname = 'memory_ingest_private'
       AND relation.relname = 'memory_ingest_outbox'
       AND relation.relrowsecurity
       AND relation.relforcerowsecurity
@@ -1043,39 +1302,77 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'bridge table owner or forced RLS differs';
   END IF;
-  IF pg_catalog.has_table_privilege(
-    'memory_ingest_writer', 'public.memory_ingest_outbox', 'SELECT'
-  ) OR pg_catalog.has_table_privilege(
-    'memory_ingest_writer', 'public.memory_ingest_outbox', 'INSERT'
-  ) OR pg_catalog.has_table_privilege(
-    'memory_ingest_writer', 'public.memory_ingest_outbox', 'UPDATE'
-  ) OR pg_catalog.has_table_privilege(
-    'memory_ingest_writer', 'public.memory_ingest_outbox', 'DELETE'
-  ) OR pg_catalog.has_table_privilege(
-    'governed_memory_worker', 'public.memory_ingest_outbox', 'SELECT'
-  ) OR pg_catalog.has_table_privilege(
-    'governed_memory_worker', 'public.memory_ingest_outbox', 'UPDATE'
-  ) OR pg_catalog.has_table_privilege(
-    'governed_memory_worker', 'public.memory_ingest_outbox', 'INSERT'
-  ) OR pg_catalog.has_table_privilege(
-    'governed_memory_worker', 'public.memory_ingest_outbox', 'DELETE'
-  ) THEN
-    RAISE EXCEPTION 'bridge runtime role has direct table authority';
+  FOREACH runtime_role IN ARRAY ARRAY[
+    'memory_ingest_writer', 'governed_memory_worker'
+  ] LOOP
+    FOREACH forbidden_relation IN ARRAY ARRAY[
+      'memory_ingest_private.memory_ingest_outbox',
+      'public.chat_log', 'public.threads', 'public.chat_attachments'
+    ] LOOP
+      FOREACH privilege_name IN ARRAY ARRAY[
+        'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+        'REFERENCES', 'TRIGGER'
+      ] LOOP
+        IF pg_catalog.has_table_privilege(
+          runtime_role, forbidden_relation, privilege_name
+        ) THEN
+          RAISE EXCEPTION 'bridge role % has direct authority on %',
+            runtime_role, forbidden_relation;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+  IF pg_catalog.has_function_privilege(
+       'brains_app',
+       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+       'EXECUTE'
+     ) OR NOT pg_catalog.has_function_privilege(
+       'memory_ingest_writer',
+       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+       'EXECUTE'
+     ) OR pg_catalog.has_function_privilege(
+       'governed_memory_worker',
+       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+       'EXECUTE'
+     ) OR NOT pg_catalog.has_function_privilege(
+       'governed_memory_worker',
+       'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'bridge function privilege contract differs';
   END IF;
   FOREACH forbidden_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
     IF pg_catalog.to_regrole(forbidden_role) IS NOT NULL AND (
       pg_catalog.has_table_privilege(
-        forbidden_role, 'public.memory_ingest_outbox', 'SELECT'
+        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'SELECT'
       ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'public.memory_ingest_outbox', 'INSERT'
+        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'INSERT'
       ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'public.memory_ingest_outbox', 'UPDATE'
+        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'UPDATE'
       ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'public.memory_ingest_outbox', 'DELETE'
+        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'DELETE'
+      ) OR pg_catalog.has_schema_privilege(
+        forbidden_role, 'memory_ingest_private', 'USAGE'
+      ) OR pg_catalog.has_function_privilege(
+        forbidden_role,
+        'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+        'EXECUTE'
+      ) OR pg_catalog.has_function_privilege(
+        forbidden_role,
+        'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
+        'EXECUTE'
       )
     ) THEN
       RAISE EXCEPTION 'forbidden role % can access bridge table', forbidden_role;
     END IF;
   END LOOP;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
+      AND tgenabled = 'D' AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'legacy chat capture trigger changed during migration';
+  END IF;
 END;
 $postflight$;

@@ -25,11 +25,11 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='ec67bc2de46774432b722f89deeecea8242007ad'
+readonly EXPECTED_BASE='60e6749c7b94a9eb057b07bfe97818990743cb6d'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='8236db4024af38c099e73cda756a88af236a6f98525dfc9137d8099151a9ade1'
-readonly EXPECTED_RUNTIME_PACKAGES_SHA256='7438462eea5cf34e2034961610a0b2721a9c9cf10b77d6b828a5cd30f222e8bb'
+readonly EXPECTED_MANIFEST_SHA256='90387f5f6420f6586fc2faf12a1374c6c7f505d69f097f185091291763829ad4'
+readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
 readonly LABEL_SCOPE_VALUE='successor-disposable'
@@ -46,13 +46,19 @@ readonly QDRANT_PORT='6339'
 readonly JWKS_PORT='18091'
 readonly API_PORT='18092'
 readonly POSTGRES_PASSWORD='successor_disposable_only'
-readonly TEST_PYTHON='/opt/chat-memory/venv/bin/python'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 MIGRATIONS="${ROOT}/governed-memory-migrations"
 RUNTIME_PACKAGES="${SCRIPT_DIR}/runtime_packages.json"
-readonly SCRIPT_DIR ROOT MIGRATIONS RUNTIME_PACKAGES
+RUNTIME_LOCK="${ROOT}/ops/governed_memory/runtime-requirements.lock"
+BUILD_LOCK="${ROOT}/ops/governed_memory/build-requirements.lock"
+RUNTIME_BUILD_RECEIPT="${ROOT}/ops/governed_memory/runtime_build_receipt.json"
+VALIDATION_RUNTIME_PYTHON="${GM_VALIDATION_RUNTIME_PYTHON:-}"
+TEST_PYTHON=''
+readonly SCRIPT_DIR ROOT MIGRATIONS RUNTIME_PACKAGES RUNTIME_LOCK BUILD_LOCK
+readonly RUNTIME_BUILD_RECEIPT
+readonly VALIDATION_RUNTIME_PYTHON
 
 EXPECTED_ROOT="${GM_VALIDATION_EXPECTED_ROOT:-}"
 EXPECTED_BRANCH="${GM_VALIDATION_EXPECTED_BRANCH:-}"
@@ -74,6 +80,8 @@ RUN_TMP=''
 RUN_TMP_IDENTITY=''
 MIGRATION_MANIFEST_SHA256=''
 RUNTIME_PACKAGES_SHA256=''
+RUNTIME_LOCK_SHA256=''
+SOURCE_TREE_SHA256=''
 FOUNDATION_DUMP_SHA256=''
 BRIDGE_DUMP_SHA256=''
 INTEGRATION_RECEIPT_SHA256=''
@@ -90,6 +98,341 @@ die() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "command_missing:$1"
+}
+
+bind_validation_runtime_python() {
+  local canonical lock_sha receipt runtime_gid runtime_mode runtime_root runtime_sha runtime_uid source_receipt source_sha
+
+  [[ "${VALIDATION_RUNTIME_PYTHON}" == /* ]] \
+    || die 'validation_runtime_python_not_absolute'
+  canonical="$(realpath -e -- "${VALIDATION_RUNTIME_PYTHON}")" \
+    || die 'validation_runtime_python_unresolvable'
+  [[ "${canonical}" == "${VALIDATION_RUNTIME_PYTHON}" ]] \
+    || die 'validation_runtime_python_not_real_path'
+  [[ -f "${canonical}" && -x "${canonical}" && ! -L "${canonical}" ]] \
+    || die 'validation_runtime_python_invalid_file'
+  [[ "${canonical}" != /opt/chat-memory/* \
+     && "${canonical}" != "${ROOT}"/* \
+     && "${canonical}" != */.local/* \
+     && "${canonical}" != */site-packages/* ]] \
+    || die 'validation_runtime_python_old_or_user_environment'
+  [[ -f "${RUNTIME_LOCK}" && ! -L "${RUNTIME_LOCK}" ]] \
+    || die 'runtime_lock_invalid'
+  lock_sha="$(sha256sum "${RUNTIME_LOCK}")" || die 'runtime_lock_sha256_failed'
+  lock_sha="${lock_sha%% *}"
+  [[ "${lock_sha}" =~ ^[0-9a-f]{64}$ ]] || die 'runtime_lock_sha256_invalid'
+  [[ "${canonical}" =~ ^/tmp/governed-memory-phase4-runtime-([0-9a-f]{64})-([0-9a-f]{64})/bin/python$ ]] \
+    || die 'validation_runtime_python_not_invocation_owned'
+  runtime_sha="${BASH_REMATCH[1]}"
+  source_sha="${BASH_REMATCH[2]}"
+  [[ "${runtime_sha}" == "${lock_sha}" ]] \
+    || die 'validation_runtime_python_lock_binding_mismatch'
+  runtime_root="${canonical%/bin/python}"
+  [[ -d "${runtime_root}" && ! -L "${runtime_root}" ]] \
+    || die 'validation_runtime_root_invalid'
+  runtime_uid="$(stat -c '%u' -- "${runtime_root}")" \
+    || die 'validation_runtime_root_owner_unreadable'
+  runtime_gid="$(stat -c '%g' -- "${runtime_root}")" \
+    || die 'validation_runtime_root_group_unreadable'
+  [[ "${runtime_uid}" == "$(id -u)" && "${runtime_gid}" == "$(id -g)" ]] \
+    || die 'validation_runtime_root_not_invocation_owned'
+  runtime_mode="$(stat -c '%a' -- "${runtime_root}")" \
+    || die 'validation_runtime_root_mode_unreadable'
+  (( (8#${runtime_mode} & 8#022) == 0 )) \
+    || die 'validation_runtime_root_group_or_world_writable'
+  [[ "$(stat -c '%u:%g' -- "${canonical}")" == "${runtime_uid}:${runtime_gid}" ]] \
+    || die 'validation_runtime_python_not_invocation_owned'
+  receipt="$(
+    "${canonical}" -I -B - "${canonical}" "${runtime_root}" <<'PY'
+import platform
+from pathlib import Path
+import site
+import sys
+
+expected_executable = Path(sys.argv[1])
+expected_prefix = Path(sys.argv[2])
+if platform.python_implementation() != "CPython":
+    raise SystemExit("runtime is not CPython")
+if platform.python_version() != "3.12.3":
+    raise SystemExit("runtime Python version differs")
+if site.ENABLE_USER_SITE is not False:
+    raise SystemExit("runtime user site is enabled")
+if sys.prefix == sys.base_prefix:
+    raise SystemExit("runtime interpreter is not a virtual environment")
+if Path(sys.executable) != expected_executable:
+    raise SystemExit("runtime executable differs")
+if Path(sys.prefix) != expected_prefix:
+    raise SystemExit("runtime prefix differs")
+print(platform.python_implementation())
+print(platform.python_version())
+PY
+  )" || die 'validation_runtime_python_identity_failed'
+  [[ "${receipt}" == $'CPython\n3.12.3' ]] \
+    || die 'validation_runtime_python_receipt_invalid'
+  source_receipt="$(
+    "${canonical}" -I -B - "${ROOT}/rag_engine/governed_memory" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+package_root = Path(sys.argv[1])
+if (
+    not package_root.is_absolute()
+    or not package_root.is_dir()
+    or package_root.is_symlink()
+):
+    raise SystemExit("source package root invalid")
+material: list[tuple[str, str]] = []
+for path in sorted(package_root.rglob("*")):
+    relative = path.relative_to(package_root)
+    if "__pycache__" in relative.parts:
+        continue
+    if path.is_symlink():
+        raise SystemExit("source package symlink")
+    if path.is_dir():
+        continue
+    if not path.is_file() or path.suffix != ".py":
+        raise SystemExit("source package inventory invalid")
+    material.append((relative.as_posix(), sha256(path)))
+if not material:
+    raise SystemExit("source package inventory empty")
+encoded = json.dumps(
+    material,
+    ensure_ascii=True,
+    separators=(",", ":"),
+).encode("ascii")
+print(hashlib.sha256(encoded).hexdigest())
+PY
+  )" || die 'validation_runtime_source_inventory_failed'
+  [[ "${source_receipt}" == "${source_sha}" ]] \
+    || die 'validation_runtime_python_source_binding_mismatch'
+  TEST_PYTHON="${canonical}"
+  RUNTIME_LOCK_SHA256="${lock_sha}"
+  SOURCE_TREE_SHA256="${source_sha}"
+  readonly TEST_PYTHON
+  readonly SOURCE_TREE_SHA256
+}
+
+verify_runtime_build_receipt() {
+  local receipt_sha
+
+  [[ -f "${RUNTIME_BUILD_RECEIPT}" && ! -L "${RUNTIME_BUILD_RECEIPT}" ]] \
+    || die 'runtime_build_receipt_invalid_file'
+  receipt_sha="$(
+    "${TEST_PYTHON}" -I -B - \
+      "${RUNTIME_BUILD_RECEIPT}" "${TEST_PYTHON}" \
+      "${SOURCE_TREE_SHA256}" "${RUNTIME_LOCK}" "${BUILD_LOCK}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+
+
+def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate runtime build receipt key")
+        result[key] = value
+    return result
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+receipt_path = Path(sys.argv[1])
+candidate_python = Path(sys.argv[2])
+source_tree_sha256 = sys.argv[3]
+runtime_lock = Path(sys.argv[4])
+build_lock = Path(sys.argv[5])
+raw = receipt_path.read_bytes()
+if not raw or len(raw) > 128 * 1024:
+    raise ValueError("runtime build receipt size invalid")
+receipt = json.loads(raw.decode("ascii"), object_pairs_hook=unique_object)
+expected_keys = {
+    "build_lock",
+    "build_lock_sha256",
+    "candidate_python",
+    "candidate_python_is_symlink",
+    "candidate_python_sha256",
+    "legacy_environment_imported",
+    "network_calls",
+    "persistent_resources_created",
+    "pip_present",
+    "platform",
+    "production_state_changed",
+    "project_distribution",
+    "project_wheel",
+    "project_wheel_sha256",
+    "provider_calls",
+    "python_version",
+    "runtime_lock",
+    "runtime_lock_sha256",
+    "runtime_package_count",
+    "runtime_packages",
+    "schema_version",
+    "setuptools_present",
+    "source_tree_sha256",
+    "user_site_enabled",
+    "wheel_present",
+}
+if not isinstance(receipt, dict) or set(receipt) != expected_keys:
+    raise ValueError("runtime build receipt is not closed")
+if (
+    receipt["schema_version"] != "governed-memory-runtime-build-receipt-v1"
+    or receipt["candidate_python"] != str(candidate_python)
+    or receipt["candidate_python_sha256"] != sha256(candidate_python)
+    or receipt["python_version"] != "3.12.3"
+    or receipt["platform"] != "linux_x86_64"
+    or receipt["runtime_lock"] != "ops/governed_memory/runtime-requirements.lock"
+    or receipt["runtime_lock_sha256"] != sha256(runtime_lock)
+    or receipt["build_lock"] != "ops/governed_memory/build-requirements.lock"
+    or receipt["build_lock_sha256"] != sha256(build_lock)
+    or receipt["source_tree_sha256"] != source_tree_sha256
+    or receipt["runtime_package_count"] != 19
+    or receipt["project_distribution"]
+    != {"name": "governed-memory-successor", "version": "0.0.0"}
+    or receipt["candidate_python_is_symlink"] is not False
+    or receipt["pip_present"] is not False
+    or receipt["setuptools_present"] is not False
+    or receipt["wheel_present"] is not False
+    or receipt["user_site_enabled"] is not False
+    or receipt["legacy_environment_imported"] is not False
+    or receipt["network_calls"] != 0
+    or receipt["provider_calls"] != 0
+    or receipt["persistent_resources_created"] is not False
+    or receipt["production_state_changed"] is not False
+):
+    raise ValueError("runtime build receipt differs")
+project_wheel = Path(receipt["project_wheel"])
+expected_build_root = Path(
+    "/tmp/governed-memory-phase4-build-"
+    f"{receipt['build_lock_sha256']}-{source_tree_sha256}"
+)
+if (
+    project_wheel.name != "governed_memory_successor-0.0.0-py3-none-any.whl"
+    or project_wheel.parent != expected_build_root / "dist"
+    or not project_wheel.is_file()
+    or project_wheel.is_symlink()
+    or receipt["project_wheel_sha256"] != sha256(project_wheel)
+):
+    raise ValueError("runtime build wheel differs")
+if (
+    not isinstance(receipt["runtime_packages"], dict)
+    or len(receipt["runtime_packages"]) != 19
+    or any(
+        not isinstance(name, str) or not isinstance(version, str)
+        for name, version in receipt["runtime_packages"].items()
+    )
+):
+    raise ValueError("runtime build package inventory invalid")
+if re.fullmatch(r"[0-9a-f]{64}", source_tree_sha256) is None:
+    raise ValueError("runtime source hash invalid")
+print(hashlib.sha256(raw).hexdigest())
+PY
+  )" || die 'runtime_build_receipt_verification_failed'
+  [[ "${receipt_sha}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'runtime_build_receipt_sha256_invalid'
+}
+
+verify_installed_successor_source() {
+  local observed
+
+  observed="$(
+    "${TEST_PYTHON}" -I -B - \
+      "${ROOT}/rag_engine/governed_memory" "${SOURCE_TREE_SHA256}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+from importlib import metadata
+import json
+from pathlib import Path
+import sys
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def material(package_root: Path) -> list[tuple[str, str]]:
+    if (
+        not package_root.is_absolute()
+        or not package_root.is_dir()
+        or package_root.is_symlink()
+    ):
+        raise ValueError("package root invalid")
+    result: list[tuple[str, str]] = []
+    for path in sorted(package_root.rglob("*")):
+        relative = path.relative_to(package_root)
+        if "__pycache__" in relative.parts:
+            continue
+        if path.is_symlink():
+            raise ValueError("package symlink invalid")
+        if path.is_dir():
+            continue
+        if not path.is_file() or path.suffix != ".py":
+            raise ValueError("package inventory invalid")
+        result.append((relative.as_posix(), sha256(path)))
+    if not result:
+        raise ValueError("package inventory empty")
+    return result
+
+
+def tree_sha256(value: list[tuple[str, str]]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+source_root = Path(sys.argv[1])
+expected_sha256 = sys.argv[2]
+distribution = metadata.distribution("governed-memory-successor")
+installed_root = Path(
+    distribution.locate_file("rag_engine/governed_memory")
+).resolve(strict=True)
+prefix = Path(sys.prefix).resolve(strict=True)
+if not installed_root.is_relative_to(prefix):
+    raise ValueError("installed successor is outside candidate runtime")
+source_material = material(source_root)
+installed_material = material(installed_root)
+if source_material != installed_material:
+    raise ValueError("installed successor source differs")
+if tree_sha256(source_material) != expected_sha256:
+    raise ValueError("current successor source hash differs")
+if tree_sha256(installed_material) != expected_sha256:
+    raise ValueError("installed successor source hash differs")
+print(expected_sha256)
+PY
+  )" || die 'installed_successor_source_verification_failed'
+  [[ "${observed}" == "${SOURCE_TREE_SHA256}" ]] \
+    || die 'installed_successor_source_receipt_invalid'
 }
 
 assert_ambient_authority_clean() {
@@ -131,13 +474,14 @@ verify_runtime_packages() {
   [[ -f "${RUNTIME_PACKAGES}" && ! -L "${RUNTIME_PACKAGES}" ]] \
     || die 'runtime_packages_manifest_invalid'
   receipt="$(
-    "${TEST_PYTHON}" -B - "${RUNTIME_PACKAGES}" <<'PY'
+    "${TEST_PYTHON}" -I -B - "${RUNTIME_PACKAGES}" "${RUNTIME_LOCK}" <<'PY'
 from __future__ import annotations
 
 import hashlib
 from importlib import metadata
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -150,51 +494,109 @@ def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-expected_packages = {
-    "anyio": "4.11.0",
-    "asyncpg": "0.30.0",
-    "cryptography": "49.0.0",
-    "fastapi": "0.120.4",
-    "h11": "0.16.0",
-    "PyJWT": "2.13.0",
-    "pydantic": "2.12.3",
-    "pydantic_core": "2.41.4",
-    "starlette": "0.49.2",
-    "typing_extensions": "4.15.0",
-    "uvicorn": "0.38.0",
-}
+def canonical_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
 path = Path(sys.argv[1])
+lock_path = Path(sys.argv[2])
 raw = path.read_bytes()
 value = json.loads(raw, object_pairs_hook=unique_object)
 if not isinstance(value, dict) or set(value) != {
+    "candidate_project",
     "packages",
+    "python_implementation",
     "python_version",
+    "runtime_lock_path",
+    "runtime_lock_sha256",
     "schema_version",
 }:
     raise ValueError("runtime package manifest is not closed")
-if value["schema_version"] != "governed-memory-validation-runtime-v1":
+if value["schema_version"] != "governed-memory-validation-runtime-v2":
     raise ValueError("unexpected runtime package schema")
+if value["python_implementation"] != "CPython":
+    raise ValueError("unexpected Python implementation")
 if value["python_version"] != "3.12.3":
     raise ValueError("unexpected declared Python version")
 if sys.version.split()[0] != value["python_version"]:
     raise ValueError("runtime Python version mismatch")
-if value["packages"] != expected_packages:
-    raise ValueError("runtime package declaration mismatch")
-actual_packages = {
-    name: metadata.version(name)
-    for name in expected_packages
+if value["runtime_lock_path"] != "ops/governed_memory/runtime-requirements.lock":
+    raise ValueError("runtime lock path differs")
+lock_raw = lock_path.read_bytes()
+lock_sha256 = hashlib.sha256(lock_raw).hexdigest()
+if value["runtime_lock_sha256"] != lock_sha256:
+    raise ValueError("runtime lock digest differs")
+
+lock_packages: dict[str, str] = {}
+lines = lock_raw.decode("utf-8").splitlines()
+index = 0
+while index < len(lines):
+    line = lines[index]
+    if not line or line.startswith("#"):
+        index += 1
+        continue
+    match = re.fullmatch(
+        r"([A-Za-z0-9][A-Za-z0-9._-]*)==([^\\\s]+) " + r"\\",
+        line,
+    )
+    if match is None or index + 1 >= len(lines):
+        raise ValueError("runtime lock package line is malformed")
+    hash_match = re.fullmatch(r"    --hash=sha256:([0-9a-f]{64})", lines[index + 1])
+    if hash_match is None:
+        raise ValueError("runtime lock hash line is malformed")
+    name = canonical_name(match.group(1))
+    if name in lock_packages:
+        raise ValueError("duplicate runtime lock package")
+    lock_packages[name] = match.group(2)
+    index += 2
+
+declared_packages = {
+    canonical_name(name): version for name, version in value["packages"].items()
 }
-if actual_packages != expected_packages:
+if declared_packages != lock_packages:
+    raise ValueError("runtime package declaration differs from lock")
+actual_packages = {name: metadata.version(name) for name in lock_packages}
+if actual_packages != lock_packages:
     raise ValueError("installed runtime package mismatch")
+project = value["candidate_project"]
+if not isinstance(project, dict) or project != {
+    "name": "governed-memory-successor",
+    "version": "0.0.0",
+}:
+    raise ValueError("candidate project declaration differs")
+if metadata.version(project["name"]) != project["version"]:
+    raise ValueError("candidate project is not installed")
+
+installed = {
+    canonical_name(distribution.metadata["Name"]): distribution.version
+    for distribution in metadata.distributions()
+    if distribution.metadata.get("Name")
+}
+expected_installed = {
+    **lock_packages,
+    canonical_name(project["name"]): project["version"],
+}
+if installed != expected_installed:
+    raise ValueError("candidate runtime contains unlocked distributions")
+prefix = Path(sys.prefix).resolve()
+for distribution in metadata.distributions():
+    location = Path(distribution.locate_file("")).resolve()
+    if not location.is_relative_to(prefix):
+        raise ValueError("runtime distribution is outside candidate venv")
 print(value["python_version"])
 print(hashlib.sha256(raw).hexdigest())
+print(lock_sha256)
+print(project["version"])
 PY
   )" || die 'runtime_packages_verification_failed'
   mapfile -t fields <<< "${receipt}"
-  [[ "${#fields[@]}" -eq 2 && "${fields[0]}" == '3.12.3' ]] \
+  [[ "${#fields[@]}" -eq 4 && "${fields[0]}" == '3.12.3' ]] \
     || die 'runtime_packages_receipt_invalid'
   [[ "${fields[1]}" == "${EXPECTED_RUNTIME_PACKAGES_SHA256}" ]] \
     || die 'runtime_packages_sha256_mismatch'
+  [[ "${fields[2]}" == "${RUNTIME_LOCK_SHA256}" \
+     && "${fields[3]}" == '0.0.0' ]] \
+    || die 'runtime_lock_or_project_receipt_invalid'
   RUNTIME_PACKAGES_SHA256="${fields[1]}"
 }
 
@@ -260,12 +662,12 @@ verify_migration_manifest() {
   local -a fields
 
   receipt="$(
-    "${TEST_PYTHON}" \
+    "${TEST_PYTHON}" -I -B \
       "${SCRIPT_DIR}/verify_migration_manifest.py" "${MIGRATIONS}"
   )" || die 'migration_manifest_verification_failed'
 
   mapfile -t fields < <(
-    "${TEST_PYTHON}" - "${receipt}" <<'PY'
+    "${TEST_PYTHON}" -I -B - "${receipt}" <<'PY'
 import json
 import sys
 
@@ -308,7 +710,7 @@ assert_image_binding() {
   repo_digests="$(
     docker image inspect "${QDRANT_IMAGE_ID}" --format '{{json .RepoDigests}}'
   )" || die 'qdrant_repo_digests_unreadable'
-  "${TEST_PYTHON}" - "${repo_digests}" "${QDRANT_IMAGE_DIGEST}" <<'PY' \
+  "${TEST_PYTHON}" -I -B - "${repo_digests}" "${QDRANT_IMAGE_DIGEST}" <<'PY' \
     || die 'qdrant_image_digest_mismatch'
 import json
 import sys
@@ -327,7 +729,7 @@ assert_no_listening_port() {
 }
 
 assert_ports_bindable() {
-  "${TEST_PYTHON}" - \
+  "${TEST_PYTHON}" -I -B - \
     "${POSTGRES_PORT}" "${QDRANT_PORT}" "${JWKS_PORT}" "${API_PORT}" <<'PY' \
     || die 'loopback_ports_not_bindable'
 import socket
@@ -503,7 +905,7 @@ capture_container_attachment_ip() {
   network_ip="${network_ip%%/*}"
   [[ -n "${container_ip}" && "${container_ip}" == "${network_ip}" ]] \
     || return 1
-  "${TEST_PYTHON}" -B - "${container_ip}" <<'PY' || return 1
+  "${TEST_PYTHON}" -I -B - "${container_ip}" <<'PY' || return 1
 from ipaddress import IPv4Address
 import sys
 
@@ -707,7 +1109,7 @@ capture_runtime_versions() {
       "http://${QDRANT_CONTAINER_IP}:6333/"
   )" || die 'qdrant_version_unreadable'
   QDRANT_SERVER_VERSION="$(
-    "${TEST_PYTHON}" - "${qdrant_root}" <<'PY'
+    "${TEST_PYTHON}" -I -B - "${qdrant_root}" <<'PY'
 import json
 import sys
 
@@ -844,18 +1246,146 @@ apply_migrations() {
   run_migration governed_memory governed_memory_owner \
     governed_memory_foundation_0001 \
     "${MIGRATIONS}/0001_foundation/forward.pgsql"
-  run_migration successor_conversation sage \
+  run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c 'GRANT memory_ingest_writer TO brains_app' >/dev/null \
+    || die 'disposable_capture_membership_grant_failed'
 }
 
 rollback_migrations() {
-  run_migration successor_conversation sage \
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c 'REVOKE memory_ingest_writer FROM brains_app' >/dev/null \
+    || die 'disposable_capture_membership_revoke_failed'
+  run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql"
   run_migration governed_memory governed_memory_owner \
     governed_memory_foundation_0001 \
     "${MIGRATIONS}/0001_foundation/rollback.pgsql"
+}
+
+verify_rollback_refuses_inflight_enqueue() {
+  local attempt observed ready=0 rollback_pid writer_pid
+  local rollback_log="${RUN_TMP}/bridge-rollback-race.log"
+  local writer_log="${RUN_TMP}/bridge-enqueue-race.log"
+
+  docker exec -i "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    >"${writer_log}" 2>&1 <<'SQL' &
+SET SESSION AUTHORIZATION brains_app;
+BEGIN;
+SELECT set_config(
+  'app.user_id', '71111111-1111-4111-8111-111111111111', true
+);
+SELECT set_config('app.auth_context_sha256', repeat('a', 64), true);
+INSERT INTO public.threads(id,owner_user_id,user_id,title)
+VALUES (
+  '72222222-2222-4222-8222-222222222222'::uuid,
+  '71111111-1111-4111-8111-111111111111'::uuid,
+  '71111111-1111-4111-8111-111111111111',
+  'Synthetic rollback race'
+);
+INSERT INTO public.chat_log(
+  id,owner_user_id,user_id,source,text,thread_id,created_at
+)
+VALUES (
+  '73333333-3333-4333-8333-333333333333'::uuid,
+  '71111111-1111-4111-8111-111111111111'::uuid,
+  '71111111-1111-4111-8111-111111111111',
+  'frontend/chat:user',
+  'Synthetic in-flight enqueue retained by empty-only rollback.',
+  '72222222-2222-4222-8222-222222222222'::uuid,
+  transaction_timestamp()
+);
+SELECT outcome,outbox_id
+FROM memory_ingest_private.enqueue_chat_log_message(
+  '73333333-3333-4333-8333-333333333333'::uuid,
+  repeat('b', 64)
+);
+\! touch /tmp/governed-memory-bridge-race-ready
+\! while [ ! -f /tmp/governed-memory-bridge-race-release ]; do sleep 1; done
+COMMIT;
+SQL
+  writer_pid="$!"
+
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    if docker exec "${POSTGRES_CONTAINER_ID}" \
+      test -f /tmp/governed-memory-bridge-race-ready
+    then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${ready}" -ne 1 ]]; then
+    docker exec "${POSTGRES_CONTAINER_ID}" \
+      touch /tmp/governed-memory-bridge-race-release >/dev/null 2>&1 || true
+    wait "${writer_pid}" || true
+    die 'bridge_rollback_race_writer_not_ready'
+  fi
+
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c 'REVOKE memory_ingest_writer FROM brains_app' >/dev/null \
+    || die 'bridge_rollback_race_membership_revoke_failed'
+
+  run_migration memory sage governed_memory_conversation_bridge_0002 \
+    "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql" \
+    >"${rollback_log}" 2>&1 &
+  rollback_pid="$!"
+
+  observed=0
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    observed="$(
+      docker exec "${POSTGRES_CONTAINER_ID}" psql \
+        -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+        -c "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='memory' AND wait_event_type='Lock' AND query LIKE '%LOCK TABLE memory_ingest_private.memory_ingest_outbox%'"
+    )" || die 'bridge_rollback_race_lock_wait_query_failed'
+    [[ "${observed}" == '1' ]] && break
+    sleep 1
+  done
+  if [[ "${observed}" != '1' ]]; then
+    docker exec "${POSTGRES_CONTAINER_ID}" \
+      touch /tmp/governed-memory-bridge-race-release >/dev/null 2>&1 || true
+    wait "${writer_pid}" || true
+    wait "${rollback_pid}" || true
+    die 'bridge_rollback_race_lock_wait_not_observed'
+  fi
+
+  docker exec "${POSTGRES_CONTAINER_ID}" \
+    touch /tmp/governed-memory-bridge-race-release >/dev/null \
+    || die 'bridge_rollback_race_writer_release_failed'
+  wait "${writer_pid}" || die 'bridge_rollback_race_writer_commit_failed'
+  if wait "${rollback_pid}"; then
+    die 'bridge_rollback_race_unexpectedly_succeeded'
+  fi
+  [[ "$(<"${rollback_log}")" == \
+    *'conversation bridge rollback is empty-only; rows exist'* ]] \
+    || die 'bridge_rollback_race_refusal_missing'
+
+  observed="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+      -c "SELECT pg_catalog.to_regclass('memory_ingest_private.memory_ingest_outbox')::text"
+  )" || die 'bridge_rollback_race_table_query_failed'
+  [[ "${observed}" == 'memory_ingest_private.memory_ingest_outbox' ]] \
+    || die 'bridge_rollback_race_table_not_preserved'
+  observed="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+      -c "SELECT count(*) FROM memory_ingest_private.memory_ingest_outbox WHERE message_id='73333333-3333-4333-8333-333333333333'::uuid"
+  )" || die 'bridge_rollback_race_row_query_failed'
+  [[ "${observed}" == '1' ]] || die 'bridge_rollback_race_row_not_preserved'
+
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c "DELETE FROM memory_ingest_private.memory_ingest_outbox WHERE message_id='73333333-3333-4333-8333-333333333333'::uuid; DELETE FROM public.chat_log WHERE id='73333333-3333-4333-8333-333333333333'::uuid; DELETE FROM public.threads WHERE id='72222222-2222-4222-8222-222222222222'::uuid" \
+    >/dev/null || die 'bridge_rollback_race_cleanup_failed'
+  printf 'SUCCESSOR_BRIDGE_ROLLBACK_RACE=inflight-commit-refused-row-preserved\n'
 }
 
 bootstrap_postgres() {
@@ -875,7 +1405,7 @@ bootstrap_postgres() {
   marker="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -A -t -v ON_ERROR_STOP=1 -U postgres -d postgres \
-      -c "SELECT pg_catalog.shobj_description(oid, 'pg_database') FROM pg_catalog.pg_database WHERE datname = 'successor_conversation'"
+      -c "SELECT pg_catalog.shobj_description(oid, 'pg_database') FROM pg_catalog.pg_database WHERE datname = 'memory'"
   )" || die 'conversation_marker_unreadable'
   [[ "${marker}" == "governed-memory-successor-disposable:${RUN_ID}" ]] \
     || die 'conversation_marker_invalid'
@@ -910,7 +1440,7 @@ validate_connect_trace() {
   [[ -f "${trace_path}" && ! -L "${trace_path}" && -s "${trace_path}" ]] \
     || die 'connect_trace_missing'
   observed_count="$(
-    "${TEST_PYTHON}" -B - \
+    "${TEST_PYTHON}" -I -B - \
       "${trace_path}" "${postgres_ip}" "${qdrant_ip}" <<'PY'
 from __future__ import annotations
 
@@ -980,8 +1510,8 @@ assert_rollback_absence() {
 
   result="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
-      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d successor_conversation \
-      -c "SELECT CASE WHEN pg_catalog.to_regnamespace('memory_ingest_private') IS NULL AND pg_catalog.to_regclass('public.memory_ingest_outbox') IS NULL THEN 'absent' ELSE 'present' END"
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+      -c "SELECT CASE WHEN pg_catalog.to_regnamespace('memory_ingest_private') IS NULL AND pg_catalog.to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL THEN 'absent' ELSE 'present' END"
   )" || die 'bridge_absence_query_failed'
   [[ "${result}" == 'absent' ]] || die 'bridge_rollback_objects_remain'
 }
@@ -994,14 +1524,15 @@ verify_apply_rollback_reapply() {
 
   apply_migrations
   normalized_schema_dump governed_memory "${foundation_first}"
-  normalized_schema_dump successor_conversation "${bridge_first}"
+  normalized_schema_dump memory "${bridge_first}"
 
+  verify_rollback_refuses_inflight_enqueue
   rollback_migrations
   assert_rollback_absence
 
   apply_migrations
   normalized_schema_dump governed_memory "${foundation_second}"
-  normalized_schema_dump successor_conversation "${bridge_second}"
+  normalized_schema_dump memory "${bridge_second}"
 
   cmp -s "${foundation_first}" "${foundation_second}" \
     || die 'foundation_reapply_logical_dump_mismatch'
@@ -1017,7 +1548,7 @@ validate_integration_receipt() {
   local -a fields
 
   validated="$(
-    "${TEST_PYTHON}" - "${receipt_json}" <<'PY'
+    "${TEST_PYTHON}" -I -B - "${receipt_json}" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -1154,6 +1685,7 @@ run_integration() {
       no_proxy=127.0.0.1,localhost \
       PYTHONUTF8=1 \
       PYTHONHASHSEED=0 \
+      PYTHONNOUSERSITE=1 \
       PYTHONDONTWRITEBYTECODE=1 \
       PYTHONPATH="${ROOT}" \
       GM_VALIDATION_RUN=1 \
@@ -1166,7 +1698,7 @@ run_integration() {
       GM_VALIDATION_API_URL="http://127.0.0.1:${API_PORT}" \
       GM_VALIDATION_INVOCATION_ID="${INVOCATION_ID}" \
       GM_VALIDATION_SERVICE_TOKEN="${SERVICE_TOKEN}" \
-      "${TEST_PYTHON}" -B -m unittest \
+      "${TEST_PYTHON}" -B -P -m unittest \
         tests.memory_integration.test_governed_memory_http_vertical_slice.GovernedMemoryHttpVerticalSliceTests.test_http_chat_a_to_chat_b_rebuild_and_deletion \
         -v
   ) > "${test_log}" 2>&1
@@ -1228,11 +1760,11 @@ preflight() {
 
   for command in \
     awk chmod cmp curl docker env flock git hostname id mapfile mktemp \
-    rm sed sha256sum sleep ss stat strace timeout
+    realpath rm sed sha256sum sleep ss stat strace timeout
   do
     require_command "${command}"
   done
-  [[ -x "${TEST_PYTHON}" ]] || die 'test_python_missing'
+  bind_validation_runtime_python
   bind_local_docker_authority
   docker version --format '{{.Server.Version}}' >/dev/null \
     || die 'docker_daemon_unavailable'
@@ -1240,7 +1772,9 @@ preflight() {
   acquire_lock
   assert_candidate_binding
   verify_migration_manifest
+  verify_runtime_build_receipt
   verify_runtime_packages
+  verify_installed_successor_source
   assert_image_binding
   assert_resource_namespace_empty
   initialize_invocation
@@ -1273,13 +1807,14 @@ full() {
   assert_candidate_binding
 
   trap - EXIT INT TERM HUP
-  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v3"}\n' \
+  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v4"}\n' \
     "${EXPECTED_BRANCH}" "${EXPECTED_HEAD}" "${EXPECTED_TREE}" \
     "${CONNECT_TRACE_SHA256}" "${RUN_ID}" "${INVOCATION_ID}" "${NETWORK_ID}" \
     "${POSTGRES_CONTAINER_ID}" "${QDRANT_CONTAINER_ID}" \
     "${POSTGRES_IMAGE_ID}" "${QDRANT_IMAGE_ID}" "${QDRANT_IMAGE_DIGEST}" \
     "${POSTGRES_SERVER_VERSION}" "${QDRANT_SERVER_VERSION}" \
     "${MIGRATION_MANIFEST_SHA256}" "${RUNTIME_PACKAGES_SHA256}" \
+    "${RUNTIME_LOCK_SHA256}" \
     "${FOUNDATION_DUMP_SHA256}" "${BRIDGE_DUMP_SHA256}" \
     "${INTEGRATION_RECEIPT_SHA256}"
 }

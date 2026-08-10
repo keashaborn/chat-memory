@@ -1,0 +1,94 @@
+{
+  "schema_version": "governed-memory-pilot-contract-v1",
+  "state": "blocked_not_authorized",
+  "pilot_id": "governed_memory_pilot_9a54cf123493_000001",
+  "authority": {
+    "account": "supabase_signed_sub",
+    "claim_truth": "new_governed_memory_postgresql_only",
+    "vector_index": "new_qdrant_collection_derived_only"
+  },
+  "limits": {
+    "maximum_owner_accounts": 1,
+    "maximum_post_cutover_user_messages": 20,
+    "maximum_duration_hours": 24,
+    "maximum_generation_calls_per_exact_attempt": 1,
+    "maximum_worker_concurrency": 1,
+    "owner_allowlist_in_repository": false,
+    "owner_allowlist_requires_external_scoped_authorization": true
+  },
+  "eligible_input": {
+    "new_user_chat_messages": true,
+    "assistant_messages": false,
+    "old_conversations": false,
+    "historical_backfill": false,
+    "attachment_content": false,
+    "voice_transcripts": false,
+    "web_results": false,
+    "no_store_turns": false,
+    "compatibility_memory": false,
+    "assistant_preferences": false
+  },
+  "required_start_state": {
+    "postgresql_user_row_count": 0,
+    "qdrant_point_count": 0,
+    "legacy_import_count": 0,
+    "unprocessed_prefill_count": 0,
+    "accounts_copied": false,
+    "supabase_accounts_remain_authoritative": true
+  },
+  "owner_lifecycle_routes": [
+    "GET /memory/status",
+    "GET /memory/claims",
+    "GET /memory/claims/{claim_id}",
+    "GET /memory/proposals",
+    "POST /memory/proposals/{proposal_id}/review",
+    "POST /memory/claims/{claim_id}/correct",
+    "POST /memory/claims/{claim_id}/retract",
+    "DELETE /memory/claims/{claim_id}",
+    "GET /memory/operations/{operation_id}"
+  ],
+  "provider_policy": {
+    "provider_calls_before_pilot_authorization": 0,
+    "provider_adapter_status": "not_implemented_activation_blocker",
+    "embedding_adapter_status": "not_implemented_activation_blocker",
+    "qdrant_worker_adapter_status": "not_implemented_activation_blocker",
+    "automatic_retry_after_unknown_dispatch": false
+  },
+  "authentication": {
+    "jwt_signature": "asymmetric_jwks",
+    "owner_source": "signed_sub_only",
+    "fresh_user_check": "bounded_https_supabase_auth_v1_user",
+    "fresh_user_check_claimed_as_immediate_signout_revocation": false,
+    "strict_session_revocation_decision": "blocked_pending_session_id_auth_sessions_policy",
+    "profile_metadata_authority": false
+  },
+  "start_blockers": [
+    "production_activation_not_authorized",
+    "fresh_isolated_stores_not_created",
+    "private_frontend_source_firewall_not_proved",
+    "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
+    "tls_termination_or_private_transport_not_decided",
+    "strict_session_revocation_policy_not_decided",
+    "durable_pilot_ever_started_marker_not_implemented",
+    "live_supabase_credentials_not_mounted",
+    "semantic_score_threshold_not_calibrated",
+    "real_provider_adapter_not_implemented",
+    "real_embedding_adapter_not_implemented",
+    "real_qdrant_worker_adapter_not_implemented",
+    "authenticated_frontend_not_validated",
+    "owner_claim_fact_detail_api_not_implemented",
+    "pilot_owner_not_authorized",
+    "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
+  ],
+  "stop_conditions": [
+    "owner_isolation_failure",
+    "authority_or_session_ambiguity",
+    "provider_dispatch_outcome_unknown",
+    "unexpected_legacy_read_or_import",
+    "unexpected_attachment_content_read",
+    "unexpected_unprocessed_prefill",
+    "projection_hash_mismatch",
+    "source_firewall_proof_failure"
+  ],
+  "production_state_changed": false
+}

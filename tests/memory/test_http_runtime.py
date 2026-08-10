@@ -409,7 +409,7 @@ class AsyncActorResolverTests(unittest.IsolatedAsyncioTestCase):
     def raw_headers(self) -> list[tuple[bytes, bytes]]:
         return [
             (b"authorization", f"Bearer {self.token()}".encode("ascii")),
-            (b"x-vs-service-token", SERVICE_TOKEN.encode("ascii")),
+            (b"x-governed-memory-service-token", SERVICE_TOKEN.encode("ascii")),
         ]
 
     def resolver(self, fetcher: StaticFetcher | None = None):
@@ -438,7 +438,7 @@ class AsyncActorResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_sensitive_duplicate_headers_fail_before_mapping_or_fetch(self) -> None:
         for name in (
             b"authorization",
-            b"x-vs-service-token",
+            b"x-governed-memory-service-token",
             b"x-owner-user-id",
             b"x-custom-actor-reference",
         ):
@@ -472,10 +472,13 @@ class AsyncActorResolverTests(unittest.IsolatedAsyncioTestCase):
         resolver, fetcher = self.resolver()
 
         class StatusFacade:
-            async def status(self, actor: object) -> dict[str, object]:
+            async def status(self, _actor: object) -> dict[str, object]:
                 return {
-                    "owner_user_id": str(actor.owner_user_id),  # type: ignore[attr-defined]
-                    "status": "synthetic_ok",
+                    "active_claims": 1,
+                    "pending_proposals": 2,
+                    "pending_projection": 0,
+                    "failed_projection": 0,
+                    "last_transition_at": NOW,
                 }
 
         app = create_owner_memory_app(
@@ -503,7 +506,13 @@ class AsyncActorResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(start["status"], 200)
         self.assertEqual(
             json.loads(body),
-            {"owner_user_id": str(OWNER_A), "status": "synthetic_ok"},
+            {
+                "active_claims": 1,
+                "pending_proposals": 2,
+                "pending_projection": 0,
+                "failed_projection": 0,
+                "last_transition_at": NOW.isoformat(),
+            },
         )
         self.assertEqual(len(fetcher.calls), 1)
 

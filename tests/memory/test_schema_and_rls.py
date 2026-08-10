@@ -536,9 +536,12 @@ class CrossLanguageHashContractTests(unittest.TestCase):
         )
         self.assertIn(BRIDGE_SOURCE_SHA256, executable_checks)
 
-        for function_name in (
-            "memory_ingest_private.lease_memory_ingest",
-            "memory_ingest_private.read_memory_ingest_lease",
+        for function_name, expected_fields in (
+            ("memory_ingest_private.lease_memory_ingest", BRIDGE_LEASE_FIELDS),
+            (
+                "memory_ingest_private.read_leased_chat_log_message",
+                BRIDGE_LEASE_FIELDS + ("role", "content"),
+            ),
         ):
             returns = definitions[function_name].split("RETURNS TABLE(", 1)[1].split(
                 ")", 1
@@ -552,10 +555,10 @@ class CrossLanguageHashContractTests(unittest.TestCase):
                 )
             )
             with self.subTest(function=function_name):
-                self.assertEqual(observed, BRIDGE_LEASE_FIELDS)
+                self.assertEqual(observed, expected_fields)
                 self.assertRegex(
                     definitions[function_name],
-                    r"state\s*=\s*'claimed'",
+                    r"(?:state\s*=|target\.state\s*<>)\s*'claimed'",
                 )
                 self.assertIn("lease_token", definitions[function_name])
                 self.assertIn("lease_expires_at", definitions[function_name])
@@ -1102,11 +1105,29 @@ class SchemaContractTests(unittest.TestCase):
             set(self.contract["tables"]) - {"predicate_catalog"},
         )
         bridge = self.contract["bridge"]
-        self.assertEqual(bridge["table"], "public.memory_ingest_outbox")
+        self.assertEqual(bridge["table"], "memory_ingest_private.memory_ingest_outbox")
         self.assertEqual(bridge["private_schema"], "memory_ingest_private")
         self.assertFalse(bridge["contains_message_text"])
         self.assertFalse(bridge["contains_attachment_text"])
-        self.assertFalse(bridge["assumes_conversation_table_shape"])
+        self.assertTrue(bridge["assumes_conversation_table_shape"])
+        self.assertEqual(bridge["database"], "memory")
+        self.assertEqual(bridge["application_login_role"], "brains_app")
+        self.assertEqual(bridge["source_table"], "public.chat_log")
+        self.assertEqual(
+            bridge["source_row_capture"],
+            "same_transaction_xmin_and_timestamp_exact_match",
+        )
+        self.assertEqual(bridge["source_reader"], "exact_claimed_unexpired_lease_token")
+        self.assertEqual(bridge["source_value"], "frontend/chat:user")
+        self.assertEqual(
+            bridge["application_capture_authority"],
+            "supabase_access_token_v1",
+        )
+        self.assertEqual(bridge["worker_base_table_privileges"], [])
+        self.assertEqual(bridge["writer_base_table_privileges"], [])
+        self.assertFalse(bridge["attachment_reads"])
+        self.assertFalse(bridge["attachment_message_capture"])
+        self.assertFalse(bridge["historical_scan_or_backfill"])
         self.assertEqual(len(bridge["functions"]), len(set(bridge["functions"])))
 
     def test_lifecycle_and_epistemic_states_are_not_collapsed(self) -> None:
@@ -1285,7 +1306,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
             (self.foundation, "memory.provider_call", "error_code"),
             (self.foundation, "memory.projection_outbox", "last_error_code"),
             (self.foundation, "memory.audit_event", "reason_code"),
-            (self.bridge, "public.memory_ingest_outbox", "last_error_code"),
+            (self.bridge, "memory_ingest_private.memory_ingest_outbox", "last_error_code"),
         )
         for sql, table, field in scalar_fields:
             block = _table_definition(sql, table)
@@ -2819,7 +2840,10 @@ class StaticSQLPolicyTests(unittest.TestCase):
             )
 
     def test_bridge_contains_hashes_and_lineage_but_no_raw_content_columns(self) -> None:
-        self.assertRegex(self.bridge, r"\bCREATE\s+TABLE\s+public\.memory_ingest_outbox\b")
+        self.assertRegex(
+            self.bridge,
+            r"\bCREATE\s+TABLE\s+memory_ingest_private\.memory_ingest_outbox\b",
+        )
         for required in (
             "owner_user_id",
             "message_id",
@@ -2835,23 +2859,33 @@ class StaticSQLPolicyTests(unittest.TestCase):
             self.assertNotIn(prohibited, self.bridge.lower())
 
     def test_bridge_enqueue_binds_exact_window_lineage_and_auth_context(self) -> None:
-        expected_signature = (
-            "memory_ingest_private.enqueue_memory_ingest("
-            "uuid,uuid,uuid,text,timestamptz,"
-            "uuid,uuid,integer,text,text)"
-        )
+        expected_signature = "memory_ingest_private.enqueue_chat_log_message(uuid,text)"
         self.assertIn(expected_signature, self.contract["bridge"]["functions"])
         enqueue = _function_definitions(self.bridge)[
-            "memory_ingest_private.enqueue_memory_ingest"
+            "memory_ingest_private.enqueue_chat_log_message"
         ]
-        for declaration in (
-            "p_exchange_id uuid",
-            "p_window_id uuid",
-            "p_window_ordinal integer",
-            "p_window_sha256 text",
+        signature = enqueue.split("RETURNS", 1)[0]
+        for prohibited in (
+            "p_owner_user_id",
+            "p_thread_id",
+            "p_content_sha256",
+            "p_source_created_at",
+            "p_exchange_id",
+            "p_window_id",
+            "p_window_ordinal",
+            "p_window_sha256",
         ):
-            with self.subTest(declaration=declaration):
-                self.assertIn(declaration, enqueue)
+            with self.subTest(prohibited=prohibited):
+                self.assertNotIn(prohibited, signature)
+        self.assertIn("session_user <> 'brains_app'", enqueue)
+        self.assertRegex(
+            enqueue,
+            r"FROM\s+public\.chat_log\s+AS\s+source",
+        )
+        self.assertRegex(enqueue, r"source\.owner_user_id\s*=\s*actor")
+        self.assertIn("normalize(source_row.text, NFC)", enqueue)
+        self.assertIn("memory_ingest_private.ingest_window_sha256(", enqueue)
+        self.assertRegex(enqueue, r"p_message_id,\s*p_message_id,\s*0")
         self.assertRegex(
             enqueue,
             r"COALESCE\(\s*pg_catalog\.current_setting\("
@@ -2859,47 +2893,29 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertRegex(
             enqueue,
-            r"existing\.window_id\s*<>\s*p_window_id",
+            r"existing\.window_id\s*<>\s*p_message_id",
         )
         self.assertRegex(
             enqueue,
-            r"existing\.window_sha256\s*<>\s*p_window_sha256",
-        )
-        self.assertRegex(
-            enqueue,
-            r"exchange_id,\s*window_id,\s*window_ordinal,\s*window_sha256,"
-            r"\s*content_sha256",
-        )
-        self.assertRegex(
-            enqueue,
-            r"p_exchange_id,\s*p_window_id,\s*p_window_ordinal,"
-            r"\s*p_window_sha256,\s*p_content_sha256",
+            r"existing\.window_sha256\s*<>\s*window_hash",
         )
 
     def test_bridge_cutover_is_transaction_owned_and_cannot_be_backfilled(self) -> None:
         enqueue = _function_definitions(self.bridge)[
-            "memory_ingest_private.enqueue_memory_ingest"
+            "memory_ingest_private.enqueue_chat_log_message"
         ]
         signature = enqueue.split("RETURNS", 1)[0]
         self.assertNotIn("p_ingest_after", signature)
-        self.assertNotRegex(
-            self.bridge,
-            r"enqueue_memory_ingest\([^)]*p_ingest_after",
-        )
+        self.assertNotIn("p_source_created_at", signature)
         self.assertIn("pg_catalog.transaction_timestamp()", enqueue)
         self.assertRegex(
             enqueue,
-            r"p_source_created_at\s*<\s*(?:captured_at|"
-            r"pg_catalog\.transaction_timestamp\(\))",
+            r"source_row\.created_at\s*<>\s*captured_at",
         )
+        self.assertIn("source_row.created_at, p_policy_sha256", enqueue)
         self.assertRegex(
             enqueue,
             r"ingest_after,\s*source_created_at",
-        )
-        self.assertRegex(
-            enqueue,
-            r"(?:captured_at|pg_catalog\.transaction_timestamp\(\)),"
-            r"\s*p_source_created_at",
         )
         self.assertRegex(
             self.bridge,
@@ -2944,7 +2960,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertIn("content_sha256 = NULL", ack)
 
-    def test_terminal_enqueue_replay_revalidates_retained_source_binding(self) -> None:
+    def test_same_transaction_replay_and_leased_reader_revalidate_source(self) -> None:
         definitions = _function_definitions(self.bridge)
         binding_functions = {
             name: definition
@@ -2981,7 +2997,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
 
         enqueue = _function_definitions(self.bridge)[
-            "memory_ingest_private.enqueue_memory_ingest"
+            "memory_ingest_private.enqueue_chat_log_message"
         ]
         self.assertIn(binding_name + "(", enqueue)
         self.assertRegex(
@@ -2994,19 +3010,21 @@ class StaticSQLPolicyTests(unittest.TestCase):
             r"existing\.state\s+IN\s*\([^)]*\)\s*AND\s+"
             r"existing\.source_binding_sha256",
         )
+        self.assertIn("existing.content_sha256 <> content_hash", enqueue)
+        self.assertIn("RETURN QUERY SELECT 'replayed'::text", enqueue)
+        self.assertNotIn("terminal_replayed", enqueue)
         self.assertRegex(
             enqueue,
-            r"(?s)existing\.state\s+IN\s*\(\s*'pending',\s*'claimed',\s*"
-            r"'retryable'\s*\)\s+AND\s*\(.*?"
-            r"existing\.content_sha256\s+IS\s+DISTINCT\s+FROM\s+"
-            r"p_content_sha256.*?existing\.source_binding_sha256",
+            r"sha256\(\s*pg_catalog\.convert_to\(source_row\.text,\s*'UTF8'\)",
         )
-        self.assertRegex(
-            enqueue,
-            r"existing\.state\s+IN\s*\(\s*'completed',\s*'skipped',"
-            r"\s*'expired',\s*'failed_terminal'\s*\)"
-            r"\s+THEN\s+'terminal_replayed'",
-        )
+        reader = definitions[
+            "memory_ingest_private.read_leased_chat_log_message"
+        ]
+        self.assertIn("session_user <> 'governed_memory_worker'", reader)
+        self.assertRegex(reader, r"target\.lease_token\s*<>\s*p_lease_token")
+        self.assertIn("FROM public.chat_log AS source", reader)
+        self.assertIn("observed_source_binding_sha256", reader)
+        self.assertNotIn("chat_attachments", reader)
         self.assertRegex(
             self.bridge,
             r"state\s+IN\s*\(\s*'completed',\s*'skipped',\s*'expired',"
@@ -3014,7 +3032,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
             r"\s+AND\s+content_sha256\s+IS\s+NULL",
         )
         table_definition = self.bridge.split(
-            "CREATE TABLE public.memory_ingest_outbox", 1
+            "CREATE TABLE memory_ingest_private.memory_ingest_outbox", 1
         )[1].split(");", 1)[0]
         self.assertRegex(
             table_definition,
@@ -3040,7 +3058,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
                 self.assertRegex(
                     postflight,
                     r"pg_catalog\.has_table_privilege\(\s*forbidden_role,"
-                    r"\s*'public\.memory_ingest_outbox',\s*'"
+                    r"\s*'memory_ingest_private\.memory_ingest_outbox',\s*'"
                     + privilege
                     + r"'\s*\)",
                 )
@@ -3081,7 +3099,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertRegex(purge, r"LIMIT\s+p_limit")
         self.assertRegex(
             purge,
-            r"DELETE\s+FROM\s+public\.memory_ingest_outbox",
+            r"DELETE\s+FROM\s+memory_ingest_private\.memory_ingest_outbox",
         )
 
     def test_answer_binding_sql_has_exact_outcomes_limits_and_manifests(self) -> None:
@@ -3814,7 +3832,14 @@ class StaticSQLPolicyTests(unittest.TestCase):
         combined = "\n".join(
             (self.roles, self.foundation, self.foundation_rollback, self.bridge, self.bridge_rollback)
         )
-        for prohibited in ("memory_" + "v1", "memory_" + "raw", "vantage", " CASCADE"):
+        legacy_trigger = "chat_log_enqueue_memory_" + "v1_consolidation"
+        legacy_mentions = re.findall(
+            r"[a-z0-9_]*memory_" + r"v1[a-z0-9_]*",
+            combined.lower(),
+        )
+        self.assertTrue(legacy_mentions)
+        self.assertEqual(set(legacy_mentions), {legacy_trigger})
+        for prohibited in ("memory_" + "raw", "vantage", " CASCADE"):
             with self.subTest(prohibited=prohibited):
                 self.assertNotIn(prohibited.lower(), combined.lower())
         self.assertNotRegex(combined, r"GRANT\s+EXECUTE\b[^;]*\bTO\s+PUBLIC\b")

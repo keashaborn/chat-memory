@@ -165,6 +165,7 @@
         "memory_private.reject_pending_correction_for_lifecycle(uuid,uuid,uuid)",
     "memory_ingest_private.framed_utf8_field(text,text)",
     "memory_ingest_private.timestamp_utc_text(timestamptz)",
+    "memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)",
     "memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)",
     "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)"
   ],
@@ -172,7 +173,7 @@
     "evidence_selection": "Full source hash is distinct from the selected excerpt hash; UTF-8 offsets, window lineage, optional one-review context lineage, bridge source binding, and canonical selection binding are persisted.",
     "ingest_recovery": "A deterministic successor receipt binds owner, operation, bridge source binding, send_external, deterministic evidence id, and deterministic extraction job id; a worker-only read verifies the complete binding after cross-database uncertainty.",
     "excerpt_retention": "The caller cannot choose retention. A send_external review excerpt receives a server-owned seven-day deadline and remains available while work is active. At the deadline, any pre-dispatch reserved or claimed attempt is first made retryable or terminal with evidence_excerpt_expired_before_dispatch; the excerpt is then redacted and no provider dispatch is authorized without evidence.",
-    "worker_restart_reconstruction": "The PostgreSQL lease returns immutable source and context identifiers and hashes. A cold worker reloads the exact source from conversation authority after bridge purge; cached eligibility or selection objects are never authority.",
+    "worker_restart_reconstruction": "While the bridge lease is active, the worker receives the exact same-transaction user message only through the lease-token-bound SECURITY DEFINER reader. After selected evidence is persisted, bounded successor evidence is retry authority; bridge purge never enables a historical conversation read.",
         "provider_dispatch": "Only a reserved call can return dispatched and authorize one network call. An already-dispatched call fails closed even when the request hash matches, so replay cannot authorize a second provider call; expired dispatched calls become outcome_unknown and are never automatically retried.",
         "terminal_proposal_replay": "Terminal proposal exact replay is guaranteed only during the 30 days before terminal proposal retention purge. After the content-bearing proposal is removed, exact replay is unavailable and the API returns proposal_retention_purged using content-free audit evidence rather than reconstructing deleted proposal content.",
         "proposal_review_cas": "Proposal hash, source hash, selected evidence hash, selection binding hash, predicate catalog semantic hash, exact decision, and canonical reason-code array must all match.",
@@ -185,14 +186,26 @@
     "hard_delete": "A verified applied Qdrant delete is required before content purge. Reciprocal proposal and revision foreign keys use deferred NO ACTION so the closed graph is checked at commit. The immutable claim_deletion_receipt remains content-free and is not part of retention purge."
   },
   "bridge": {
-    "database": "existing_conversation_database",
-    "table": "public.memory_ingest_outbox",
+    "database": "memory",
+    "application_login_role": "brains_app",
+    "table": "memory_ingest_private.memory_ingest_outbox",
     "private_schema": "memory_ingest_private",
     "contains_message_text": false,
     "contains_attachment_text": false,
-    "assumes_conversation_table_shape": false,
+    "assumes_conversation_table_shape": true,
+    "source_table": "public.chat_log",
+    "source_row_capture": "same_transaction_xmin_and_timestamp_exact_match",
+    "source_reader": "exact_claimed_unexpired_lease_token",
+    "source_role": "literal_user_not_request_metadata",
+    "source_value": "frontend/chat:user",
+    "application_capture_authority": "supabase_access_token_v1",
+    "worker_base_table_privileges": [],
+    "writer_base_table_privileges": [],
+    "attachment_reads": false,
+    "attachment_message_capture": false,
+    "historical_scan_or_backfill": false,
     "operation_id_is_message_id": true,
-    "cutover": "Replay is allowed first; new source_created_at must be at or after the enqueue transaction timestamp and no later than clock_timestamp. ingest_after is database-owned and is not hash material.",
+    "cutover": "The chat_log row source must be exactly frontend/chat:user, xmin must equal the enqueue transaction id, and created_at must exactly equal the enqueue transaction timestamp. Replay is possible only in that same transaction; committed, alternate-source, and historical rows cannot enqueue. ingest_after is database-owned and is not hash material.",
     "source_binding_domain": "governed_memory.bridge_source.v1",
     "source_binding_fields": [
       "owner_user_id",
@@ -225,13 +238,17 @@
       "lease_token",
       "lease_expires_at"
     ],
+    "reader_content_fields": [
+      "role",
+      "content"
+    ],
     "content_hash_max_retention_hours": 24,
     "terminal_row_retention_days": 7,
     "review_context_behavior": "The first context-review mark changes count zero to one without releasing the lease. A second mark on count one terminalizes a content-free skipped row with context_review_unresolved.",
     "functions": [
-      "memory_ingest_private.enqueue_memory_ingest(uuid,uuid,uuid,text,timestamptz,uuid,uuid,integer,text,text)",
+      "memory_ingest_private.enqueue_chat_log_message(uuid,text)",
       "memory_ingest_private.lease_memory_ingest(text,integer,integer)",
-      "memory_ingest_private.read_memory_ingest_lease(uuid,uuid)",
+      "memory_ingest_private.read_leased_chat_log_message(uuid,uuid)",
       "memory_ingest_private.mark_memory_ingest_context_review(uuid,uuid)",
       "memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid)",
       "memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer)",
@@ -241,6 +258,7 @@
     "internal_functions": [
       "memory_ingest_private.framed_utf8_field(text,text)",
       "memory_ingest_private.timestamp_utc_text(timestamptz)",
+      "memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)",
       "memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)",
       "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)"
     ],
@@ -426,11 +444,22 @@
     "production_activation_blockers": [
       "semantic_score_threshold_not_calibrated",
       "live_supabase_keys_and_session_freshness_not_mounted",
-      "durable_auth_session_provenance_policy_not_decided",
-      "candidate_owned_runtime_environment_not_built",
-      "successor_http_routes_not_mounted_in_production",
-      "real_provider_and_embedding_adapters_not_exercised",
-      "authenticated_frontend_not_validated"
+      "strict_session_id_auth_sessions_revocation_policy_not_decided",
+      "fresh_isolated_persistent_postgresql_not_created",
+      "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
+      "private_frontend_source_firewall_not_proved",
+      "tls_termination_or_private_transport_not_decided",
+      "production_store_role_bootstrap_not_implemented_or_authorized",
+      "successor_http_service_not_installed",
+      "successor_conversation_capture_not_activated",
+      "real_provider_adapter_not_implemented",
+      "real_embedding_adapter_not_implemented",
+      "real_qdrant_worker_adapter_not_implemented",
+      "authenticated_frontend_not_validated",
+      "owner_claim_fact_detail_api_not_implemented",
+      "pilot_owner_and_scope_not_authorized",
+      "durable_pilot_ever_started_marker_not_implemented",
+      "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
     ]
   }
 }

@@ -18,8 +18,8 @@ tools/governed_memory_validation/
 ops/governed_memory/runtime_manifest.json
 ```
 
-The successor requires Python 3.11 or newer. Disposable validation uses Python
-3.12.3 and the exact installed package versions recorded in
+The successor requires CPython 3.12.x. Disposable validation uses CPython 3.12.3
+and the exact installed package versions recorded in
 `tools/governed_memory_validation/runtime_packages.json`. That artifact records
 the environment actually exercised; it is not a candidate-built install lock.
 PostgreSQL is canonical. Qdrant is a derived index rebuilt only from current
@@ -68,7 +68,12 @@ hashes, and enforces retrieval policy before model-visible rendering.
 
 The model-visible record contains only predicate, subject display, object, and
 epistemic state. Answer binding has two terminal outcomes: `exposed` and
-`no_memory_selected`. It persists content-free hashes, identifiers, policy
+`no_memory_selected`. The current owner claim-list and claim-detail responses do
+not expose the subject and object fact fields needed to render an admitted
+Memory or prefill an exact correction. Persistent pilot activation is therefore
+blocked on an exact, owner-scoped claim fact-detail API contract; the generic
+authenticated-frontend blocker does not substitute for that missing surface.
+It persists content-free hashes, identifiers, policy
 metadata, and offsets for 90 days. Pending proposals expire.
 Terminal proposal replay is bounded to 30 days; after that, exact replay is
 unavailable and
@@ -120,7 +125,8 @@ prefilled with old or unprocessed Memory data.
 Activation remains blocked on semantic-threshold calibration, live Supabase
 signing-key and session-freshness wiring, a durable authentication-provenance
 policy, a candidate-owned runtime environment, production service mounting,
-real provider/embedding adapters, and authenticated frontend validation.
+real provider/embedding adapters, an exact owner claim fact-detail API, and
+authenticated frontend validation.
 
 Old services, timers, SQL objects, vectors, source, tests, branches, worktrees,
 and compatibility routes are not deleted by this candidate. After activation,

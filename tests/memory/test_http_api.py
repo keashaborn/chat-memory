@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from typing import Any, Mapping
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -35,6 +36,7 @@ HASH_B = "b" * 64
 HASH_C = "c" * 64
 HASH_D = "d" * 64
 HASH_E = "e" * 64
+NOW = datetime(2030, 1, 2, 12, 0, tzinfo=timezone.utc)
 
 
 def owner_actor(
@@ -101,6 +103,103 @@ def transition_body() -> dict[str, Any]:
         "expected_revision_sha256": HASH_A,
         "expected_state_sha256": HASH_B,
         "operation_id": str(OPERATION),
+    }
+
+
+def status_result() -> dict[str, Any]:
+    return {
+        "active_claims": 1,
+        "pending_proposals": 2,
+        "pending_projection": 0,
+        "failed_projection": 0,
+        "last_transition_at": NOW,
+    }
+
+
+def claim_result(claim_id: UUID = CLAIM) -> dict[str, Any]:
+    return {
+        "claim_id": str(claim_id),
+        "lifecycle_state": "active",
+        "revision_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "revision_number": 1,
+        "revision_sha256": HASH_A,
+        "current_state_sha256": HASH_B,
+        "revision_fact_policy_sha256": HASH_C,
+        "predicate_catalog_sha256": HASH_D,
+        "selected_sha256": HASH_E,
+        "selection_binding_sha256": HASH_A,
+        "object_kind": "literal",
+        "predicate": "preference.personal",
+        "epistemic_state": "supported",
+        "sensitivity": "ordinary",
+        "updated_at": NOW,
+    }
+
+
+def proposal_result() -> dict[str, Any]:
+    return {
+        "proposal_id": str(PROPOSAL),
+        "operation_id": str(OPERATION),
+        "proposal_sha256": HASH_A,
+        "source_sha256": HASH_B,
+        "selected_sha256": HASH_C,
+        "selection_binding_sha256": HASH_D,
+        "predicate_catalog_sha256": HASH_E,
+        "source_excerpt": "Synthetic source excerpt.",
+        "subject_entity_type": "self",
+        "subject_entity_key": "self",
+        "subject_display_name": None,
+        "predicate": "preference.personal",
+        "object_kind": "literal",
+        "object_entity_type": None,
+        "object_entity_key": None,
+        "object_display_name": None,
+        "object_literal": "synthetic literal",
+        "epistemic_state": "supported",
+        "sensitivity": "ordinary",
+        "projectable": True,
+        "domains": ["personal"],
+        "intents": ["recall"],
+        "surface": "normal",
+        "requires_explicit": False,
+        "valid_from": None,
+        "valid_to": None,
+        "correction_of_claim_id": None,
+        "expires_at": NOW + timedelta(days=1),
+        "created_at": NOW,
+    }
+
+
+def review_result(decision: str) -> dict[str, Any]:
+    if decision == "admit":
+        return {
+            "outcome": "admitted",
+            "claim_id": str(CLAIM),
+            "revision_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "outbox_id": str(OPERATION),
+        }
+    return {
+        "outcome": "rejected",
+        "claim_id": None,
+        "revision_id": None,
+        "outbox_id": None,
+    }
+
+
+def operation_result(operation_id: UUID = OPERATION) -> dict[str, Any]:
+    return {
+        "operation_id": str(operation_id),
+        "events": [
+            {
+                "operation_id": str(operation_id),
+                "transition_code": "claim_retracted",
+                "object_type": "claim",
+                "object_id": str(CLAIM),
+                "reason_code": "explicit_owner_retraction",
+                "new_state_sha256": HASH_A,
+                "created_at": NOW,
+            }
+        ],
     }
 
 
@@ -200,6 +299,7 @@ class FakeFacade:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.failures: dict[str, Exception] = {}
         self.missing: set[str] = set()
+        self.results: dict[str, object] = {}
 
     def _result(self, name: str, *args: Any) -> Any:
         self.calls.append((name, args))
@@ -207,9 +307,35 @@ class FakeFacade:
             raise self.failures[name]
         if name in self.missing:
             return None
-        if name in {"list_claims", "list_proposals"}:
-            return [{"operation": name, "owner_user_id": str(args[0].owner_user_id)}]
-        return {"operation": name, "owner_user_id": str(args[0].owner_user_id)}
+        if name in self.results:
+            return self.results[name]
+        if name == "status":
+            return status_result()
+        if name == "list_claims":
+            return [claim_result()]
+        if name == "get_claim":
+            return claim_result(args[1])
+        if name == "list_proposals":
+            return [proposal_result()]
+        if name == "review_proposal":
+            return review_result(args[2]["decision"])
+        if name == "correct_claim":
+            return {
+                "outcome": "correction_pending",
+                "proposal_id": str(PROPOSAL),
+                "proposal_sha256": HASH_A,
+                "review_operation_id": str(OPERATION),
+            }
+        if name == "retract_claim":
+            return {"outcome": "retracted", "outbox_id": str(PROPOSAL)}
+        if name == "delete_claim":
+            return {
+                "outcome": "deletion_pending",
+                "outbox_id": str(PROPOSAL),
+            }
+        if name == "get_operation":
+            return operation_result(args[1])
+        raise AssertionError("unexpected_fake_facade_operation")
 
     async def status(self, actor: VerifiedActor) -> Mapping[str, Any]:
         return self._result("status", actor)
@@ -380,9 +506,7 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(headers["cache-control"], "no-store")
-                material = body[0] if isinstance(body, list) else body
-                self.assertEqual(material["operation"], operation)
-                self.assertEqual(material["owner_user_id"], str(OWNER))
+                self.assertIsInstance(body, (dict, list))
                 self.assertEqual(facade.calls[-1][0], operation)
                 self.assertIs(facade.calls[-1][1][0], resolver.actor)
                 self.assertEqual(resolver.calls[-1][1], (expected_scope,))
@@ -672,6 +796,238 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(status, expected_status)
                 self.assertEqual(body, {"error": {"code": expected_code}})
                 self.assertNotIn("sensitive", json.dumps(body))
+
+    async def test_all_success_contracts_fail_closed_on_backend_drift(self) -> None:
+        invalid_claim = claim_result(OTHER_OWNER)
+        invalid_proposal = proposal_result()
+        invalid_proposal["object_literal"] = {"unexpected": "json-object"}
+        invalid_operation = operation_result()
+        invalid_operation["events"][0]["operation_id"] = str(OTHER_OWNER)
+        cases = (
+            (
+                "GET",
+                "/memory/status",
+                "status",
+                {**status_result(), "unexpected": 1},
+                _UNSET,
+                500,
+                "memory_internal_error",
+            ),
+            (
+                "GET",
+                "/memory/claims",
+                "list_claims",
+                (claim_result(),),
+                _UNSET,
+                500,
+                "memory_internal_error",
+            ),
+            (
+                "GET",
+                f"/memory/claims/{CLAIM}",
+                "get_claim",
+                invalid_claim,
+                _UNSET,
+                500,
+                "memory_internal_error",
+            ),
+            (
+                "GET",
+                "/memory/proposals",
+                "list_proposals",
+                [invalid_proposal],
+                _UNSET,
+                500,
+                "memory_internal_error",
+            ),
+            (
+                "POST",
+                f"/memory/proposals/{PROPOSAL}/review",
+                "review_proposal",
+                {
+                    "outcome": "admitted",
+                    "claim_id": str(CLAIM),
+                    "revision_id": str(PROPOSAL),
+                },
+                review_body(),
+                503,
+                "memory_operation_outcome_unknown",
+            ),
+            (
+                "POST",
+                f"/memory/claims/{CLAIM}/correct",
+                "correct_claim",
+                {
+                    "outcome": "pending_review",
+                    "proposal_id": str(PROPOSAL),
+                    "proposal_sha256": HASH_A,
+                    "review_operation_id": str(OPERATION),
+                },
+                correction_body(),
+                503,
+                "memory_operation_outcome_unknown",
+            ),
+            (
+                "POST",
+                f"/memory/claims/{CLAIM}/retract",
+                "retract_claim",
+                {"outcome": "requested", "outbox_id": str(PROPOSAL)},
+                transition_body(),
+                503,
+                "memory_operation_outcome_unknown",
+            ),
+            (
+                "DELETE",
+                f"/memory/claims/{CLAIM}",
+                "delete_claim",
+                {
+                    "outcome": "deletion_pending",
+                    "outbox_id": str(PROPOSAL),
+                    "unexpected": True,
+                },
+                transition_body(),
+                503,
+                "memory_operation_outcome_unknown",
+            ),
+            (
+                "GET",
+                f"/memory/operations/{OPERATION}",
+                "get_operation",
+                invalid_operation,
+                _UNSET,
+                500,
+                "memory_internal_error",
+            ),
+        )
+        for method, target, operation, result, body_value, expected_status, code in cases:
+            with self.subTest(operation=operation):
+                facade = FakeFacade()
+                facade.results[operation] = result
+                app = create_owner_memory_app(
+                    actor_resolver=FakeResolver(),
+                    facade=facade,
+                    feature_enabled=True,
+                )
+                kwargs = {} if body_value is _UNSET else {"json_body": body_value}
+                status, _, body = await asgi_request(
+                    app,
+                    method,
+                    target,
+                    **kwargs,
+                )
+                self.assertEqual(status, expected_status)
+                self.assertEqual(body, {"error": {"code": code}})
+                self.assertNotIn("unexpected", json.dumps(body))
+
+    async def test_review_receipt_nullability_fails_closed(self) -> None:
+        reject_body = review_body()
+        reject_body["decision"] = "reject"
+        cases = (
+            (
+                review_body(),
+                {
+                    "outcome": "admitted",
+                    "claim_id": str(CLAIM),
+                    "revision_id": str(PROPOSAL),
+                    "outbox_id": None,
+                },
+            ),
+            (
+                reject_body,
+                {
+                    "outcome": "rejected",
+                    "claim_id": str(CLAIM),
+                    "revision_id": None,
+                    "outbox_id": None,
+                },
+            ),
+        )
+        for request_body, result in cases:
+            with self.subTest(
+                decision=request_body["decision"],
+                outcome=result["outcome"],
+            ):
+                facade = FakeFacade()
+                facade.results["review_proposal"] = result
+                app = create_owner_memory_app(
+                    actor_resolver=FakeResolver(),
+                    facade=facade,
+                    feature_enabled=True,
+                )
+                status, _, body = await asgi_request(
+                    app,
+                    "POST",
+                    f"/memory/proposals/{PROPOSAL}/review",
+                    json_body=request_body,
+                )
+                self.assertEqual(status, 503)
+                self.assertEqual(
+                    body,
+                    {"error": {"code": "memory_operation_outcome_unknown"}},
+                )
+
+    async def test_mutation_nondeterministic_failures_are_outcome_unknown(self) -> None:
+        failures = (
+            TimeoutError("sensitive inner timeout"),
+            ConnectionError("sensitive connection loss"),
+            OSError("sensitive operating system failure"),
+            OwnerStoreCodeError("database_unavailable"),
+            RuntimeError("sensitive unexpected mutation failure"),
+            DatabaseError("08006"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                facade = FakeFacade()
+                facade.failures["delete_claim"] = failure
+                app = create_owner_memory_app(
+                    actor_resolver=FakeResolver(),
+                    facade=facade,
+                    feature_enabled=True,
+                )
+                status, _, body = await asgi_request(
+                    app,
+                    "DELETE",
+                    f"/memory/claims/{CLAIM}",
+                    json_body=transition_body(),
+                )
+                self.assertEqual(status, 503)
+                self.assertEqual(
+                    body,
+                    {"error": {"code": "memory_operation_outcome_unknown"}},
+                )
+                self.assertNotIn("sensitive", json.dumps(body))
+
+    async def test_success_encoding_failure_is_operation_aware(self) -> None:
+        cases = (
+            ("GET", "/memory/status", _UNSET, 500, "memory_internal_error"),
+            (
+                "DELETE",
+                f"/memory/claims/{CLAIM}",
+                transition_body(),
+                503,
+                "memory_operation_outcome_unknown",
+            ),
+        )
+        for method, target, body_value, expected_status, code in cases:
+            with self.subTest(method=method):
+                app = create_owner_memory_app(
+                    actor_resolver=FakeResolver(),
+                    facade=FakeFacade(),
+                    feature_enabled=True,
+                )
+                kwargs = {} if body_value is _UNSET else {"json_body": body_value}
+                with patch(
+                    "rag_engine.governed_memory.http_api.jsonable_encoder",
+                    side_effect=RuntimeError("sensitive encoding failure"),
+                ):
+                    status, _, body = await asgi_request(
+                        app,
+                        method,
+                        target,
+                        **kwargs,
+                    )
+                self.assertEqual(status, expected_status)
+                self.assertEqual(body, {"error": {"code": code}})
 
     async def test_missing_owner_resources_are_masked_as_not_found(self) -> None:
         resolver = FakeResolver()

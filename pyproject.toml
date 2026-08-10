@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "governed-memory-successor"
+version = "0.0.0"
+description = "Hash-bound clean governed-Memory successor candidate"
+requires-python = "==3.12.*"
+dependencies = [
+  "asyncpg==0.30.0",
+  "cryptography==49.0.0",
+  "fastapi==0.120.4",
+  "PyJWT==2.13.0",
+  "uvicorn==0.38.0",
+]
+
+[project.scripts]
+governed-memory-http = "rag_engine.governed_memory.runtime.application:main"
+
+[tool.setuptools.packages.find]
+include = ["rag_engine.governed_memory", "rag_engine.governed_memory.*"]
+namespaces = false

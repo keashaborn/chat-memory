@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lifeswitch:governed-memory:release-receipt:v1",
+  "title": "Governed Memory content-free release receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "event_type",
+    "result",
+    "recorded_at",
+    "candidate_git_commit",
+    "bootstrap_contract_sha256",
+    "authorization_scope_sha256",
+    "postgresql",
+    "qdrant",
+    "network",
+    "reason_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "governed-memory-release-receipt-v1"
+    },
+    "receipt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "enum": [
+        "create_preflight",
+        "create_completed",
+        "verify_completed",
+        "pilot_start",
+        "pilot_stop",
+        "cleanup_preflight",
+        "cleanup_refused",
+        "cleanup_completed"
+      ]
+    },
+    "result": {
+      "enum": [
+        "allowed",
+        "completed",
+        "refused"
+      ]
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "candidate_git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "bootstrap_contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authorization_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "postgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container",
+        "volume",
+        "database",
+        "user_row_count"
+      ],
+      "properties": {
+        "container": {
+          "const": "governed-memory-postgres-9a54cf123493-000001"
+        },
+        "volume": {
+          "const": "governed-memory-postgres-data-9a54cf123493-000001"
+        },
+        "database": {
+          "const": "governed_memory"
+        },
+        "user_row_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "qdrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container",
+        "volume",
+        "collection",
+        "alias",
+        "point_count"
+      ],
+      "properties": {
+        "container": {
+          "const": "governed-memory-qdrant-9a54cf123493-000001"
+        },
+        "volume": {
+          "const": "governed-memory-qdrant-data-9a54cf123493-000001"
+        },
+        "collection": {
+          "const": "governed_memory_9a54cf123493_000001"
+        },
+        "alias": {
+          "const": "governed_memory_active"
+        },
+        "point_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api_bind",
+        "allowed_source_ipv4",
+        "firewall_proof_sha256"
+      ],
+      "properties": {
+        "api_bind": {
+          "const": "172.31.32.171:8091"
+        },
+        "allowed_source_ipv4": {
+          "const": "172.31.43.160/32"
+        },
+        "firewall_proof_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "reason_code": {
+      "enum": [
+        "exact_absent_targets_verified",
+        "exact_resources_created",
+        "exact_resources_verified",
+        "pilot_authorized_and_started",
+        "pilot_stopped",
+        "exact_empty_targets_verified",
+        "pilot_ever_started",
+        "postgresql_not_empty",
+        "qdrant_not_empty",
+        "active_clients_present",
+        "authorization_missing",
+        "activation_blockers_open",
+        "durable_pilot_marker_unavailable",
+        "contract_mismatch",
+        "exact_empty_targets_deleted"
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

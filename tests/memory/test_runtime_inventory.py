@@ -1,12 +1,15 @@
-"""Offline source-inventory checks; this is not installed-runtime proof."""
+"""Source-inventory and installed candidate-runtime identity checks."""
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import inspect
 import json
 from pathlib import Path
+import subprocess
+import tomllib
 import unicodedata
 import unittest
 
@@ -14,18 +17,27 @@ from rag_engine.governed_memory.contracts import ContractViolation, canonical_sh
 from rag_engine.governed_memory.auth import ActorRole
 from rag_engine.governed_memory.api import OWNER_ROUTE_SPECIFICATIONS
 from rag_engine.governed_memory.repository import GovernedMemoryRepository
+from tools.governed_memory_release.build_candidate_runtime import (
+    _package_source_material,
+    _package_source_tree_sha256,
+)
 
 
 FIXTURE_PROVENANCE = "synthetic-governed-memory-successor"
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "rag_engine" / "governed_memory"
+RUNTIME_PACKAGE = PACKAGE / "runtime"
 MANIFEST = ROOT / "ops" / "governed_memory" / "runtime_manifest.json"
+RUNTIME_LOCK = ROOT / "ops" / "governed_memory" / "runtime-requirements.lock"
+BUILD_LOCK = ROOT / "ops" / "governed_memory" / "build-requirements.lock"
 SUCCESSOR_README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
 SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
 INTEGRATION_TESTS = ROOT / "tests" / "memory_integration"
 VALIDATION_TOOLS = ROOT / "tools" / "governed_memory_validation"
+RELEASE_TOOLS = ROOT / "tools" / "governed_memory_release"
 CLEAN_SUCCESSOR_DOCS = ROOT / "docs" / "memory" / "clean_successor"
 RUNTIME_PACKAGES = VALIDATION_TOOLS / "runtime_packages.json"
+RUNTIME_BUILD_RECEIPT = ROOT / "ops" / "governed_memory" / "runtime_build_receipt.json"
 
 EXPECTED_PACKAGE_FILES = {
     "__init__.py",
@@ -33,11 +45,14 @@ EXPECTED_PACKAGE_FILES = {
     "api.py",
     "auth.py",
     "contracts.py",
+    "conversation_capture.py",
+    "conversation_source.py",
     "eligibility.py",
     "extraction.py",
     "http_api.py",
     "http_auth.py",
     "http_runtime.py",
+    "http_service.py",
     "http_store.py",
     "lifecycle.py",
     "postgres_adapter.py",
@@ -47,21 +62,34 @@ EXPECTED_PACKAGE_FILES = {
     "worker.py",
 }
 
+EXPECTED_RUNTIME_PACKAGE_FILES = {
+    "__init__.py",
+    "__main__.py",
+    "application.py",
+    "live_supabase.py",
+}
+
 EXPECTED_TEST_FILES = {
     "test_admission.py",
     "test_chat_memory_e2e.py",
+    "test_conversation_bridge.py",
+    "test_conversation_capture.py",
     "test_eligibility.py",
     "test_extraction.py",
     "test_http_api.py",
     "test_http_auth.py",
+    "test_http_live_auth_mapping.py",
     "test_http_runtime.py",
+    "test_http_service.py",
     "test_http_store.py",
     "test_intake_boundary.py",
     "test_lifecycle.py",
     "test_projection.py",
     "test_prompt_and_binding.py",
+    "test_release_contracts.py",
     "test_retrieval.py",
     "test_runtime_inventory.py",
+    "test_runtime_release.py",
     "test_schema_and_rls.py",
     "test_worker_recovery.py",
 }
@@ -79,28 +107,62 @@ EXPECTED_VALIDATION_TOOL_FILES = {
     "verify_migration_manifest.py",
 }
 
+EXPECTED_RELEASE_TOOL_FILES = {
+    "__init__.py",
+    "build_candidate_runtime.py",
+    "release_guard.py",
+}
+
 EXPECTED_CLEAN_SUCCESSOR_DOC_FILES = {
+    "ACTIVATION.md",
     "README.md",
     "VALIDATION.md",
 }
 
 EXPECTED_RUNTIME_PACKAGES = {
-    "schema_version": "governed-memory-validation-runtime-v1",
+    "schema_version": "governed-memory-validation-runtime-v2",
+    "python_implementation": "CPython",
     "python_version": "3.12.3",
+    "runtime_lock_path": "ops/governed_memory/runtime-requirements.lock",
+    "runtime_lock_sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
+    "candidate_project": {
+        "name": "governed-memory-successor",
+        "version": "0.0.0",
+    },
     "packages": {
+        "annotated-doc": "0.0.5",
+        "annotated-types": "0.7.0",
         "anyio": "4.11.0",
         "asyncpg": "0.30.0",
+        "cffi": "2.1.0",
+        "click": "8.3.0",
         "cryptography": "49.0.0",
         "fastapi": "0.120.4",
         "h11": "0.16.0",
-        "PyJWT": "2.13.0",
+        "idna": "3.11",
+        "pycparser": "3.0",
         "pydantic": "2.12.3",
-        "pydantic_core": "2.41.4",
+        "pydantic-core": "2.41.4",
+        "PyJWT": "2.13.0",
+        "sniffio": "1.3.1",
         "starlette": "0.49.2",
-        "typing_extensions": "4.15.0",
+        "typing-extensions": "4.15.0",
+        "typing-inspection": "0.4.2",
         "uvicorn": "0.38.0",
     },
 }
+
+EXPECTED_RUNTIME_LOCK_SHA256 = (
+    "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365"
+)
+EXPECTED_BUILD_LOCK_SHA256 = (
+    "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc"
+)
+EXPECTED_SOURCE_TREE_SHA256 = _package_source_tree_sha256(PACKAGE)
+EXPECTED_CANDIDATE_PYTHON = (
+    "/tmp/governed-memory-phase4-runtime-"
+    f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_SOURCE_TREE_SHA256}/bin/python"
+)
 
 EXPECTED_ROUTES = [
     "GET /memory/status",
@@ -124,25 +186,47 @@ class RuntimeManifestTests(unittest.TestCase):
     def test_candidate_is_explicitly_uninstalled_and_content_free(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
-            manifest["schema_version"], "governed-memory-runtime-manifest-v3"
+            manifest["schema_version"], "governed-memory-runtime-manifest-v4"
         )
-        self.assertEqual(manifest["phase"], "candidate_uninstalled")
+        self.assertEqual(
+            manifest["phase"],
+            "candidate_built_uninstalled_activation_blocked",
+        )
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
             manifest["authority"],
             {
                 "database": "governed_memory",
-                "conversation_bridge": "public.memory_ingest_outbox",
+                "database_target": "127.0.0.1:55432",
+                "conversation_database": "memory",
+                "conversation_application_login": "brains_app",
+                "conversation_bridge": "memory_ingest_private.memory_ingest_outbox",
+                "qdrant_target": "127.0.0.1:6343",
+                "qdrant_collection": "governed_memory_9a54cf123493_000001",
                 "qdrant_alias": "governed_memory_active",
             },
         )
         self.assertEqual(
             manifest["ingestion"],
             {
+                "capture_mode_default": "off",
+                "capture_owner_allowlist_in_repository": False,
+                "writer_membership_granted_in_production": False,
                 "historical_import": False,
                 "historical_backfill": False,
                 "attachment_content_release_1": False,
-                "requires_post_cutover_message": True,
+                "requires_post_cutover_user_message": True,
+                "worker_base_conversation_table_select": False,
+            },
+        )
+        self.assertEqual(
+            set(manifest),
+            {
+                "schema_version", "phase", "python_runtime", "validation_runtime",
+                "authority", "infrastructure", "http_runtime", "activation",
+                "release_guard", "ingestion", "worker_adapters", "provider_policy",
+                "disposable_validation", "owner_routes", "prohibited_routes",
+                "legacy_imports_allowed", "production_state_changed",
             },
         )
 
@@ -150,15 +234,26 @@ class RuntimeManifestTests(unittest.TestCase):
         activation = self.load_manifest()["activation"]
         self.assertEqual(activation["installed_services"], [])
         self.assertEqual(activation["enabled_services"], [])
+        self.assertEqual(activation["running_services"], [])
         self.assertEqual(activation["installed_timers"], [])
         self.assertEqual(activation["enabled_timers"], [])
         self.assertEqual(
-            activation["future_target_service"],
-            "governed-memory-worker.service",
+            activation["future_target_services"],
+            [
+                "governed-memory-http.service",
+                "governed-memory-worker.service",
+            ],
+        )
+        self.assertEqual(
+            activation["shipped_inactive_templates"],
+            ["ops/governed_memory/systemd/governed-memory-http.service.in"],
         )
         self.assertFalse(
-            (ROOT / "ops" / "systemd" / "governed-memory-worker.service").exists(),
-            "The candidate must not ship a non-runnable systemd unit",
+            (
+                ROOT / "ops" / "governed_memory" / "systemd"
+                / "governed-memory-worker.service.in"
+            ).exists(),
+            "No worker unit may pretend the missing real adapters exist",
         )
 
     def test_provider_policy_records_zero_disposable_external_calls(self) -> None:
@@ -185,26 +280,54 @@ class RuntimeManifestTests(unittest.TestCase):
             manifest["activation"]["blockers"],
         )
         self.assertIn(
-            "durable_auth_session_provenance_policy_not_decided",
+            "strict_session_id_auth_sessions_revocation_policy_not_decided",
             manifest["activation"]["blockers"],
         )
+        self.assertIn(
+            "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "durable_pilot_ever_started_marker_not_implemented",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "owner_claim_fact_detail_api_not_implemented",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved",
+            manifest["activation"]["blockers"],
+        )
+        self.assertEqual(
+            manifest["release_guard"],
+            {
+                "create_allowed": False,
+                "create_refusal_code": "activation_blockers_open",
+                "cleanup_allowed": False,
+                "cleanup_refusal_code": "durable_pilot_marker_unavailable",
+                "commands_executed": 0,
+            },
+        )
 
-    def test_python_runtime_floor_is_explicit_and_at_least_3_11(self) -> None:
+    def test_python_runtime_is_exact_candidate_contract(self) -> None:
         manifest = self.load_manifest()
         runtime = manifest["python_runtime"]
-        self.assertEqual(set(runtime), {"minimum", "validated_candidate"})
-        minimum = tuple(int(part) for part in runtime["minimum"].split("."))
-        validated = tuple(
-            int(part) for part in runtime["validated_candidate"].split(".")
+        self.assertEqual(
+            runtime,
+            {
+                "implementation": "CPython",
+                "required": "3.12.*",
+                "validated_candidate": "3.12.3",
+                "platform": "linux_x86_64",
+            },
         )
-        self.assertGreaterEqual(minimum, (3, 11))
-        self.assertGreaterEqual(validated, minimum)
         readme = SUCCESSOR_README.read_text(encoding="utf-8")
         normalized_readme = " ".join(readme.split())
-        self.assertIn("requires Python 3.11 or newer", normalized_readme)
-        self.assertIn("Python 3.12.3", normalized_readme)
+        self.assertIn("requires CPython 3.12.x", normalized_readme)
+        self.assertIn("CPython 3.12.3", normalized_readme)
 
-    def test_validation_runtime_is_exact_evidence_not_an_install_lock(self) -> None:
+    def test_validation_runtime_is_candidate_owned_and_hash_locked(self) -> None:
         runtime_packages = json.loads(RUNTIME_PACKAGES.read_text(encoding="utf-8"))
         self.assertEqual(runtime_packages, EXPECTED_RUNTIME_PACKAGES)
         manifest = self.load_manifest()
@@ -212,13 +335,47 @@ class RuntimeManifestTests(unittest.TestCase):
             manifest["validation_runtime"],
             {
                 "manifest": "tools/governed_memory_validation/runtime_packages.json",
-                "candidate_owned_environment": False,
-                "install_lock": False,
+                "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
+                "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
+                "source_tree_sha256": EXPECTED_SOURCE_TREE_SHA256,
+                "build_lock": "ops/governed_memory/build-requirements.lock",
+                "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
+                "candidate_python": EXPECTED_CANDIDATE_PYTHON,
+                "candidate_owned_environment": True,
+                "install_lock": True,
+                "build_lock_verified": True,
+                "isolated_wheel_build_verified": True,
+                "isolated_project_install_verified": True,
+                "runtime_package_count": 19,
+                "candidate_python_is_symlink": False,
+                "pip_present": False,
+                "setuptools_present": False,
+                "wheel_present": False,
+                "user_site_enabled": False,
+                "legacy_environment_imported": False,
+                "final_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
             },
         )
-        self.assertIn(
+        self.assertNotIn(
             "candidate_owned_runtime_environment_not_built",
             manifest["activation"]["blockers"],
+        )
+        self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
+        self.assertEqual(hashlib.sha256(BUILD_LOCK.read_bytes()).hexdigest(), EXPECTED_BUILD_LOCK_SHA256)
+        candidate_python = Path(EXPECTED_CANDIDATE_PYTHON)
+        self.assertTrue(candidate_python.is_file())
+        self.assertFalse(candidate_python.is_symlink())
+        self.assertEqual(candidate_python.stat().st_mode & 0o022, 0)
+        self.assertTrue(RUNTIME_BUILD_RECEIPT.is_file())
+        self.assertFalse(RUNTIME_BUILD_RECEIPT.is_symlink())
+        build_receipt = json.loads(RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii"))
+        self.assertEqual(
+            build_receipt["candidate_python"],
+            EXPECTED_CANDIDATE_PYTHON,
+        )
+        self.assertEqual(
+            build_receipt["source_tree_sha256"],
+            EXPECTED_SOURCE_TREE_SHA256,
         )
 
     def test_schema_validation_scope_is_versionless_and_exact(self) -> None:
@@ -423,6 +580,21 @@ class SourceInventoryTests(unittest.TestCase):
         observed = {path.name for path in PACKAGE.glob("*.py")}
         self.assertEqual(observed, EXPECTED_PACKAGE_FILES)
 
+    def test_runtime_adapter_file_set_and_exports_are_exact(self) -> None:
+        observed = {path.name for path in RUNTIME_PACKAGE.glob("*.py")}
+        self.assertEqual(observed, EXPECTED_RUNTIME_PACKAGE_FILES)
+        for path in sorted(RUNTIME_PACKAGE.glob("*.py")):
+            module_name = f"rag_engine.governed_memory.runtime.{path.stem}"
+            module = importlib.import_module(module_name)
+            exports = getattr(module, "__all__", None)
+            with self.subTest(module=module_name):
+                self.assertIsInstance(exports, (list, tuple))
+                self.assertEqual(len(exports), len(set(exports)))
+                self.assertEqual(
+                    [name for name in exports if not hasattr(module, name)],
+                    [],
+                )
+
     def test_test_module_file_set_is_exact(self) -> None:
         observed = {path.name for path in Path(__file__).parent.glob("test_*.py")}
         self.assertEqual(observed, EXPECTED_TEST_FILES)
@@ -434,6 +606,20 @@ class SourceInventoryTests(unittest.TestCase):
     def test_validation_tool_file_set_is_exact(self) -> None:
         observed = {path.name for path in VALIDATION_TOOLS.iterdir() if path.is_file()}
         self.assertEqual(observed, EXPECTED_VALIDATION_TOOL_FILES)
+
+    def test_disposable_runner_binds_exact_migration_manifest(self) -> None:
+        migration_manifest = ROOT / "governed-memory-migrations" / "manifest.json"
+        manifest_sha256 = hashlib.sha256(migration_manifest.read_bytes()).hexdigest()
+        runner = (VALIDATION_TOOLS / "run_disposable_successor.sh").read_text(
+            encoding="utf-8"
+        )
+        binding = f"readonly EXPECTED_MANIFEST_SHA256='{manifest_sha256}'"
+        self.assertEqual(runner.count("readonly EXPECTED_MANIFEST_SHA256="), 1)
+        self.assertIn(binding, runner)
+
+    def test_release_tool_file_set_is_exact(self) -> None:
+        observed = {path.name for path in RELEASE_TOOLS.iterdir() if path.is_file()}
+        self.assertEqual(observed, EXPECTED_RELEASE_TOOL_FILES)
 
     def test_clean_successor_document_file_set_is_exact(self) -> None:
         observed = {
@@ -451,6 +637,9 @@ class SourceInventoryTests(unittest.TestCase):
             "assistant_response_preferences",
         )
         prohibited_import_roots = {"openai", "asyncpg", "qdrant_client"}
+        allowed_outer_import_roots = {
+            "http_service.py": {"asyncpg"},
+        }
         for path in sorted(PACKAGE.glob("*.py")):
             source = path.read_text(encoding="utf-8")
             lowered = source.lower()
@@ -464,10 +653,14 @@ class SourceInventoryTests(unittest.TestCase):
                     roots.update(alias.name.split(".", 1)[0] for alias in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     roots.add(node.module.split(".", 1)[0])
-            self.assertFalse(
+            self.assertEqual(
                 roots & prohibited_import_roots,
-                f"{path.name} imports a production adapter in the offline core",
+                allowed_outer_import_roots.get(path.name, set()),
+                f"{path.name} has an unclassified outer-adapter import",
             )
+        runtime_source = (RUNTIME_PACKAGE / "live_supabase.py").read_text(encoding="utf-8")
+        self.assertIn('"User-Agent": "governed-memory-live-user"', runtime_source)
+        self.assertNotIn("governed-memory-live-user-v", runtime_source)
 
     def test_successor_tests_do_not_import_old_helpers(self) -> None:
         for path in sorted(Path(__file__).parent.glob("test_*.py")):
@@ -533,6 +726,89 @@ class SourceInventoryTests(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, normalized)
+
+    def test_pyproject_packages_only_the_successor_and_has_exact_entrypoint(self) -> None:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(project["build-system"], {
+            "requires": ["setuptools==84.0.0"],
+            "build-backend": "setuptools.build_meta",
+        })
+        self.assertEqual(
+            project["project"]["scripts"],
+            {
+                "governed-memory-http": (
+                    "rag_engine.governed_memory.runtime.application:main"
+                )
+            },
+        )
+        self.assertEqual(
+            project["tool"]["setuptools"]["packages"]["find"],
+            {
+                "include": [
+                    "rag_engine.governed_memory",
+                    "rag_engine.governed_memory.*",
+                ],
+                "namespaces": False,
+            },
+        )
+
+    def test_candidate_python_source_exactly_matches_current_successor(self) -> None:
+        probe = """
+import hashlib
+import json
+from pathlib import Path
+import rag_engine.governed_memory as package
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                return digest.hexdigest()
+            digest.update(block)
+
+root = Path(package.__file__).parent
+material = []
+for path in sorted(root.rglob('*')):
+    relative = path.relative_to(root)
+    if '__pycache__' in relative.parts:
+        continue
+    if path.is_symlink():
+        raise SystemExit('installed package symlink')
+    if path.is_dir():
+        continue
+    if not path.is_file() or path.suffix != '.py':
+        raise SystemExit('installed package inventory invalid')
+    material.append((relative.as_posix(), sha256(path)))
+encoded = json.dumps(material, ensure_ascii=True, separators=(',', ':')).encode('ascii')
+print(json.dumps({
+    'file': str(package.__file__),
+    'material': material,
+    'source_tree_sha256': hashlib.sha256(encoded).hexdigest(),
+}, sort_keys=True, separators=(',', ':')))
+"""
+        output = subprocess.run(
+            [EXPECTED_CANDIDATE_PYTHON, "-I", "-B", "-c", probe],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        receipt = json.loads(output)
+        self.assertIn(
+            "site-packages/rag_engine/governed_memory/__init__.py",
+            receipt["file"],
+        )
+        self.assertNotIn("/opt/chat-memory", receipt["file"])
+        self.assertEqual(
+            receipt["material"],
+            [list(item) for item in _package_source_material(PACKAGE)],
+        )
+        self.assertEqual(
+            receipt["source_tree_sha256"],
+            EXPECTED_SOURCE_TREE_SHA256,
+        )
 
 
 if __name__ == "__main__":

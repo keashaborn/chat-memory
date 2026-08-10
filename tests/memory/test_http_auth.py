@@ -368,7 +368,7 @@ class SupabaseHttpAuthTests(unittest.TestCase):
     def valid_headers(self) -> dict[str, str]:
         return {
             "Authorization": self.authorization(),
-            "X-VS-Service-Token": SERVICE_TOKEN,
+            "X-Governed-Memory-Service-Token": SERVICE_TOKEN,
         }
 
     def test_request_authenticator_repr_redacts_service_token(self) -> None:
@@ -393,7 +393,7 @@ class SupabaseHttpAuthTests(unittest.TestCase):
         )
 
         missing = self.valid_headers()
-        del missing["X-VS-Service-Token"]
+        del missing["X-Governed-Memory-Service-Token"]
         self.assert_error(
             "auth_service_token_missing",
             lambda: authenticator.authenticate(
@@ -401,7 +401,7 @@ class SupabaseHttpAuthTests(unittest.TestCase):
             ),
         )
         wrong = self.valid_headers()
-        wrong["X-VS-Service-Token"] = "wrong"
+        wrong["X-Governed-Memory-Service-Token"] = "wrong"
         self.assert_error(
             "auth_service_token_invalid",
             lambda: authenticator.authenticate(

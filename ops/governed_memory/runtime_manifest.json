@@ -1,42 +1,125 @@
 {
-  "schema_version": "governed-memory-runtime-manifest-v3",
-  "phase": "candidate_uninstalled",
+  "schema_version": "governed-memory-runtime-manifest-v4",
+  "phase": "candidate_built_uninstalled_activation_blocked",
   "python_runtime": {
-    "minimum": "3.11",
-    "validated_candidate": "3.12.3"
+    "implementation": "CPython",
+    "required": "3.12.*",
+    "validated_candidate": "3.12.3",
+    "platform": "linux_x86_64"
   },
   "validation_runtime": {
     "manifest": "tools/governed_memory_validation/runtime_packages.json",
-    "candidate_owned_environment": false,
-    "install_lock": false
+    "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
+    "runtime_lock_sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
+    "source_tree_sha256": "9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b",
+    "build_lock": "ops/governed_memory/build-requirements.lock",
+    "build_lock_sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
+    "candidate_python": "/tmp/governed-memory-phase4-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b/bin/python",
+    "candidate_owned_environment": true,
+    "install_lock": true,
+    "build_lock_verified": true,
+    "isolated_wheel_build_verified": true,
+    "isolated_project_install_verified": true,
+    "runtime_package_count": 19,
+    "candidate_python_is_symlink": false,
+    "pip_present": false,
+    "setuptools_present": false,
+    "wheel_present": false,
+    "user_site_enabled": false,
+    "legacy_environment_imported": false,
+    "final_build_receipt": "ops/governed_memory/runtime_build_receipt.json"
   },
   "authority": {
     "database": "governed_memory",
-    "conversation_bridge": "public.memory_ingest_outbox",
+    "database_target": "127.0.0.1:55432",
+    "conversation_database": "memory",
+    "conversation_application_login": "brains_app",
+    "conversation_bridge": "memory_ingest_private.memory_ingest_outbox",
+    "qdrant_target": "127.0.0.1:6343",
+    "qdrant_collection": "governed_memory_9a54cf123493_000001",
     "qdrant_alias": "governed_memory_active"
   },
+  "infrastructure": {
+    "bootstrap_contract": "ops/governed_memory/bootstrap_contract.json",
+    "pilot_contract": "ops/governed_memory/pilot_contract.json",
+    "compose_candidate": "ops/governed_memory/compose.candidate.yaml",
+    "compose_scope": "disposable_validation_only",
+    "postgresql_image": "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "postgresql_persistent_resource_created": false,
+    "qdrant_disposable_validation_image": "qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170",
+    "qdrant_persistent_pilot_image": null,
+    "qdrant_persistent_resource_created": false,
+    "existing_production_store_reuse_allowed": false,
+    "legacy_snapshot_or_mount_reuse_allowed": false
+  },
+  "http_runtime": {
+    "entrypoint": "governed-memory-http",
+    "default_mode": "off",
+    "candidate_bind": "172.31.32.171:8091",
+    "allowed_frontend_source": "172.31.43.160/32",
+    "firewall_proof_complete": false,
+    "live_supabase_user_check_implemented": true,
+    "live_supabase_user_check_external_calls": 0,
+    "live_supabase_user_check_claimed_as_immediate_signout_revocation": false,
+    "strict_session_id_auth_sessions_policy_decided": false,
+    "profile_metadata_authority": false
+  },
   "activation": {
+    "production_authorized": false,
     "installed_services": [],
     "enabled_services": [],
+    "running_services": [],
     "installed_timers": [],
     "enabled_timers": [],
-    "future_target_service": "governed-memory-worker.service",
-    "production_authorized": false,
+    "shipped_inactive_templates": [
+      "ops/governed_memory/systemd/governed-memory-http.service.in"
+    ],
+    "future_target_services": [
+      "governed-memory-http.service",
+      "governed-memory-worker.service"
+    ],
     "blockers": [
       "semantic_score_threshold_not_calibrated",
       "live_supabase_keys_and_session_freshness_not_mounted",
-      "durable_auth_session_provenance_policy_not_decided",
-      "candidate_owned_runtime_environment_not_built",
-      "successor_http_routes_not_mounted_in_production",
-      "real_provider_and_embedding_adapters_not_exercised",
-      "authenticated_frontend_not_validated"
+      "strict_session_id_auth_sessions_revocation_policy_not_decided",
+      "fresh_isolated_persistent_postgresql_not_created",
+      "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
+      "private_frontend_source_firewall_not_proved",
+      "tls_termination_or_private_transport_not_decided",
+      "production_store_role_bootstrap_not_implemented_or_authorized",
+      "successor_http_service_not_installed",
+      "successor_conversation_capture_not_activated",
+      "real_provider_adapter_not_implemented",
+      "real_embedding_adapter_not_implemented",
+      "real_qdrant_worker_adapter_not_implemented",
+      "authenticated_frontend_not_validated",
+      "owner_claim_fact_detail_api_not_implemented",
+      "pilot_owner_and_scope_not_authorized",
+      "durable_pilot_ever_started_marker_not_implemented",
+      "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
     ]
   },
+  "release_guard": {
+    "create_allowed": false,
+    "create_refusal_code": "activation_blockers_open",
+    "cleanup_allowed": false,
+    "cleanup_refusal_code": "durable_pilot_marker_unavailable",
+    "commands_executed": 0
+  },
   "ingestion": {
+    "capture_mode_default": "off",
+    "capture_owner_allowlist_in_repository": false,
+    "writer_membership_granted_in_production": false,
     "historical_import": false,
     "historical_backfill": false,
     "attachment_content_release_1": false,
-    "requires_post_cutover_message": true
+    "requires_post_cutover_user_message": true,
+    "worker_base_conversation_table_select": false
+  },
+  "worker_adapters": {
+    "provider": "activation_blocker_not_implemented",
+    "embedding": "activation_blocker_not_implemented",
+    "qdrant": "activation_blocker_not_implemented"
   },
   "provider_policy": {
     "import_time_calls": false,
@@ -48,6 +131,7 @@
     "scope": "successor_disposable_only",
     "validation_document": "docs/memory/clean_successor/VALIDATION.md",
     "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
+    "candidate_python": "/tmp/governed-memory-phase4-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b/bin/python",
     "postgresql_fresh_empty": true,
     "qdrant_fresh_empty": true,
     "migration_forward_rollback_reapply": true,
@@ -62,6 +146,7 @@
     "cold_extraction_reconstruction": true,
     "cold_postgresql_projection_rebuild": true,
     "correction_retraction_hard_delete_and_retention": true,
+    "live_supabase_user_adapter_unit_validated": true,
     "live_supabase_session_freshness_verified": false,
     "production_routes_installed": false,
     "authenticated_frontend_verified": false,
@@ -69,6 +154,7 @@
     "production_data_read": false,
     "production_endpoint_calls": 0,
     "provider_external_calls": 0,
+    "persistent_resources_created": false,
     "final_resources_absent": true
   },
   "owner_routes": [

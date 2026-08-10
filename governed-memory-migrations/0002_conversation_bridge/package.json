@@ -4,8 +4,9 @@
   "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
-    "database": "existing_conversation_database",
-    "execution_role": "sage"
+    "database": "memory",
+    "execution_role": "sage",
+    "application_login_role": "brains_app"
   },
   "dependencies": [
     "roles_preflight.pgsql",
@@ -19,11 +20,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "9b11a485713293fc98863a6e1a7ea324385bf7a099021899737b458d1c25feb1"
+    "sha256": "2e3642977b5fdba40f161e67f775d4a504e01e347de51ac2ae7d5121513188cb"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "b2fdac9c04b69ab45ac948675ec9424e73fc9a3b49d6757b3ad61a74972c4fb5",
+    "sha256": "80fa1ecc78ededf2bda0147f2748b226b70ab4fc5a78a6d11a5c3bf6a89cfb71",
     "empty_only": true
   },
   "data_policy": {
@@ -36,11 +37,20 @@
   },
   "object_contract": {
     "schema": "memory_ingest_private",
-    "table": "public.memory_ingest_outbox",
+    "table": "memory_ingest_private.memory_ingest_outbox",
     "forced_rls": true,
     "direct_runtime_table_access": false,
     "bounded_context_reviews": 1,
-    "cascade_ddl": false
+    "cascade_ddl": false,
+    "source_table": "public.chat_log",
+    "source_row_capture": "same_transaction_only",
+    "source_reader": "exact_active_lease_only",
+    "source_role": "literal_user",
+    "source_value": "frontend/chat:user",
+    "application_capture_authority": "supabase_access_token_v1",
+    "attachment_reads": false,
+    "attachment_message_capture": false,
+    "history_or_backfill_surface": false
   },
   "activation": {
     "production_authorized": false,

@@ -10,6 +10,7 @@ Run on the seebx backend only, from the clean candidate commit:
 
 ```bash
 GM_VALIDATION_DISPOSABLE_AUTHORIZATION='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
+GM_VALIDATION_RUNTIME_PYTHON='<exact source-bound candidate Python from runtime_manifest.json>' \
 GM_VALIDATION_EXPECTED_ROOT='<absolute-candidate-worktree>' \
 GM_VALIDATION_EXPECTED_BRANCH='<candidate-branch>' \
 GM_VALIDATION_EXPECTED_HEAD='<candidate-head>' \
@@ -21,7 +22,9 @@ The runner refuses any pre-existing successor resource and any occupied
 disposable port. It rejects ambient Docker, Git, and Python authority
 variables; binds Docker to the local `/var/run/docker.sock`; and verifies the
 daemon identity. It verifies the exact Git commit/tree, migration manifest,
-and validation-runtime package manifest. Cached pinned PostgreSQL and Qdrant
+validation-runtime package manifest, checked-in runtime build receipt, canonical
+package source-tree hash, and byte equality between every current and installed
+successor Python source file. Cached pinned PostgreSQL and Qdrant
 images use no persistent store, run on an `Internal=true` Docker network, and
 publish no container ports. The integration process owns the two loopback TCP
 relays. The ID-bound cleanup trap is installed before resource creation.

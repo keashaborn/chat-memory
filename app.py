@@ -132,6 +132,13 @@ from rag_engine.memory_actor_auth_v1 import (
     memory_actor_authority_v1,
     require_memory_actor_v1,
 )
+from rag_engine.governed_memory.conversation_capture import (
+    CaptureConfigurationError,
+    capture_auth_context_sha256,
+    capture_decision_for_owner,
+    enqueue_captured_chat_log_message,
+    normalize_capture_text,
+)
 from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
     router as memory_v1_governed_claim_lifecycle_router_v1,
 )
@@ -1450,12 +1457,46 @@ async def log_chat(req: Request):
 
         return {"status": "ok", "id": user_id, "note": "identity_card"}
 
-    # Stable transcript row id. Ordinary chat is captured only in PostgreSQL;
-    # governed Memory projection is driven later from canonical claims.
+    try:
+        governed_memory_capture = capture_decision_for_owner(
+            user_id,
+            authority=memory_actor_authority_v1(req),
+            source=source,
+            has_attachments=bool(attachment_ids),
+        )
+    except CaptureConfigurationError:
+        return JSONResponse(
+            {
+                "status": "unavailable",
+                "detail": "governed_memory_capture_configuration_invalid",
+            },
+            status_code=503,
+        )
+    if governed_memory_capture.enabled:
+        if thread_id is None:
+            return JSONResponse(
+                {
+                    "status": "conflict",
+                    "detail": "governed_memory_capture_thread_required",
+                },
+                status_code=409,
+            )
+        text = normalize_capture_text(text)
+
+    # Stable transcript row id. Ineligible/default-off writes remain transcript-only;
+    # an eligible pilot write atomically creates its content-free bridge row below.
     rec_id = str(uuid.uuid4())
 
-    # asyncpg wants a datetime object for timestamptz.
-    created_dt = datetime.utcnow()
+    # Preserve the existing timestamp input exactly while capture is off.
+    created_dt = None if governed_memory_capture.enabled else datetime.utcnow()
+    capture_auth_context = None
+    capture_source_created_at = None
+    if governed_memory_capture.enabled:
+        capture_auth_context = capture_auth_context_sha256(
+            owner_user_id=uuid.UUID(user_id),
+            authority=memory_actor_authority_v1(req),
+            request_id=request_id,
+        )
 
     # Save to PostgreSQL (authoritative transcript).
     conn = None
@@ -1465,6 +1506,13 @@ async def log_chat(req: Request):
         await _set_connection_actor(conn, user_id)
         transaction = conn.transaction()
         await transaction.start()
+        if governed_memory_capture.enabled:
+            if capture_auth_context is None:
+                raise RuntimeError("governed_memory_capture_auth_context_missing")
+            await conn.execute(
+                "SELECT set_config('app.auth_context_sha256',$1,true)",
+                capture_auth_context,
+            )
         await conn.fetchval(
             """
             SELECT memory.register_authenticated_owner_v1($1,$2,$3)
@@ -1540,12 +1588,36 @@ async def log_chat(req: Request):
             if bound_message_ids != {None}:
                 raise ValueError("attachment_binding_failed")
 
-        await conn.execute(
-            "INSERT INTO chat_log("
-            "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
-            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-            rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
-        )
+        if governed_memory_capture.enabled:
+            inserted_capture_row = await conn.fetchrow(
+                "INSERT INTO chat_log("
+                "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
+                ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,transaction_timestamp()) "
+                "RETURNING id,created_at",
+                rec_id,
+                user_id,
+                user_id,
+                user_id_alias,
+                source,
+                text,
+                tags,
+                thread_id,
+                vantage_id,
+                request_id,
+            )
+            if (
+                inserted_capture_row is None
+                or str(inserted_capture_row["id"]) != rec_id
+            ):
+                raise RuntimeError("governed_memory_capture_insert_failed")
+            capture_source_created_at = inserted_capture_row["created_at"]
+        else:
+            await conn.execute(
+                "INSERT INTO chat_log("
+                "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
+                ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+                rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
+            )
 
         if attachment_ids:
             bound_rows = await conn.fetch(
@@ -1564,6 +1636,16 @@ async def log_chat(req: Request):
             )
             if len(bound_rows) != len(attachment_ids):
                 raise ValueError("attachment_binding_failed")
+
+        if governed_memory_capture.enabled:
+            if capture_source_created_at is None:
+                raise RuntimeError("governed_memory_capture_timestamp_missing")
+            await enqueue_captured_chat_log_message(
+                conn,
+                decision=governed_memory_capture,
+                message_id=uuid.UUID(rec_id),
+                source_created_at=capture_source_created_at,
+            )
 
         # Touch thread timestamp so list ordering works
         if thread_id:

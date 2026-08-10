@@ -65,6 +65,9 @@ from rag_engine.governed_memory.postgres_adapter import (
     normalize_postgres_record,
     projection_rebuild_row_to_inputs,
 )
+from rag_engine.governed_memory.conversation_source import (
+    split_leased_chat_log_message,
+)
 from rag_engine.governed_memory.retrieval import (
     ANSWER_RENDERER_SHA256,
     CANDIDATE_FIELDS,
@@ -77,14 +80,12 @@ from rag_engine.governed_memory.retrieval import (
 )
 from rag_engine.governed_memory.worker import process_ingest_item
 from tests.memory._fixtures import (
-    EXCHANGE_A,
     MESSAGE_A,
     OWNER_A,
     OWNER_B,
     PREDICATE_CATALOG,
     SOURCE_TEXT,
     THREAD_A,
-    WINDOW_A,
     deterministic_vector,
     make_claim_row,
     make_ingest_payload,
@@ -119,6 +120,7 @@ DELETION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999995")
 OWNER_B_CORRECTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999996")
 OWNER_B_RETRACTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999997")
 OWNER_B_DELETION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999998")
+ALTERNATE_SOURCE_MESSAGE = UUID("99999999-9999-4999-8999-999999999999")
 THREAD_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")
 OWNER_B_CLAIM_ID = UUID("22222222-2222-4222-8222-222222222226")
 OWNER_B_REVISION_ID = UUID("22222222-2222-4222-8222-222222222227")
@@ -558,7 +560,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.connections: list[Any] = []
         self.admin = await self._connect("postgres", "successor_disposable_only", "governed_memory")
         self.bridge_admin = await self._connect(
-            "postgres", "successor_disposable_only", "successor_conversation"
+            "postgres", "successor_disposable_only", "memory"
         )
         self.api = await self._connect(
             "governed_memory_api", "successor_api_disposable_only", "governed_memory"
@@ -576,12 +578,12 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.bridge_worker = await self._connect(
             "governed_memory_worker",
             "successor_worker_disposable_only",
-            "successor_conversation",
+            "memory",
         )
         self.ingest = await self._connect(
-            "successor_ingest_login",
-            "successor_ingest_disposable_only",
-            "successor_conversation",
+            "brains_app",
+            "successor_brains_app_disposable_only",
+            "memory",
         )
         self.qdrant.remove_all()
         self.addCleanup(self.qdrant.remove_all)
@@ -709,7 +711,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
         if include_service_token:
-            headers["X-VS-Service-Token"] = self.service_token
+            headers["X-Governed-Memory-Service-Token"] = self.service_token
         if extra_headers:
             headers.update(dict(extra_headers))
         if body is not None and raw_body is not None:
@@ -784,7 +786,6 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
     async def ingest_context(self, owner_user_id: UUID) -> AsyncIterator[None]:
         async with self.ingest.transaction():
-            await self.ingest.execute("SET LOCAL ROLE memory_ingest_writer")
             await self.ingest.execute(
                 "SELECT pg_catalog.set_config('app.user_id', $1::text, true)",
                 str(owner_user_id),
@@ -1044,7 +1045,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             "GET",
             "/memory/status",
             token=self.owner_a_token,
-            extra_headers={"X-VS-Service-Token": "wrong-disposable-token"},
+            extra_headers={"X-Governed-Memory-Service-Token": "wrong-disposable-token"},
         )
         await self.assert_http_failure(
             400,
@@ -1151,46 +1152,118 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             transaction_time = await self.ingest.fetchval(
                 "SELECT pg_catalog.transaction_timestamp()"
             )
-            source_created_at = await self.ingest.fetchval(
-                "SELECT pg_catalog.clock_timestamp()"
-            )
             policy = EligibilityPolicy(ingest_after=transaction_time)
-            payload = make_ingest_payload(created_at=source_created_at)
-            await self.bridge_admin.execute(
-                "INSERT INTO public.successor_conversation_message_fixture("
-                "owner_user_id,message_id,thread_id,role,content,"
-                "content_sha256,created_at) VALUES("
-                "$1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::text,"
-                "$7::timestamptz)",
-                OWNER_A,
-                MESSAGE_A,
-                THREAD_A,
-                payload["role"],
-                payload["content"],
-                payload["content_sha256"],
-                source_created_at,
+            payload = make_ingest_payload(
+                created_at=transaction_time,
+                window_ordinal=0,
             )
-            enqueued = await self.ingest.fetchrow(
-                "SELECT * FROM memory_ingest_private.enqueue_memory_ingest("
-                "$1::uuid,$2::uuid,$3::uuid,$4::text,$5::timestamptz,"
-                "$6::uuid,$7::uuid,$8::integer,$9::text,$10::text)",
-                OWNER_A,
-                MESSAGE_A,
+            payload["exchange_id"] = str(MESSAGE_A)
+            payload["window_id"] = str(MESSAGE_A)
+            payload["window_sha256"] = canonical_sha256(
+                "governed_memory.ingest_window",
+                {
+                    "owner_user_id": OWNER_A,
+                    "thread_id": THREAD_A,
+                    "exchange_id": MESSAGE_A,
+                    "window_id": MESSAGE_A,
+                    "message_id": MESSAGE_A,
+                    "content_sha256": payload["content_sha256"],
+                },
+            )
+            await self.ingest.execute(
+                "INSERT INTO public.threads("
+                "id,owner_user_id,user_id,title) "
+                "VALUES($1::uuid,$2::uuid,$2::text,'Synthetic thread')",
                 THREAD_A,
-                payload["content_sha256"],
-                source_created_at,
-                EXCHANGE_A,
-                WINDOW_A,
-                payload["window_ordinal"],
-                payload["window_sha256"],
+                OWNER_A,
+            )
+            inserted = await self.ingest.fetchrow(
+                "INSERT INTO public.chat_log("
+                "id,owner_user_id,user_id,source,text,thread_id,created_at) "
+                "VALUES($1::uuid,$2::uuid,$2::text,'frontend/chat:user',"
+                "$3::text,$4::uuid,pg_catalog.transaction_timestamp()) "
+                "RETURNING id,created_at",
+                MESSAGE_A,
+                OWNER_A,
+                payload["content"],
+                THREAD_A,
+            )
+            self.assertEqual(inserted["created_at"], transaction_time)
+            source_created_at = inserted["created_at"]
+            enqueued = await self.ingest.fetchrow(
+                "SELECT * FROM "
+                "memory_ingest_private.enqueue_chat_log_message("
+                "$1::uuid,$2::text)",
+                MESSAGE_A,
                 policy.policy_sha256,
             )
         self.assertEqual(enqueued["outcome"], "enqueued")
+
+        async with self.ingest_context(OWNER_A):
+            await self.ingest.execute(
+                "INSERT INTO public.chat_log("
+                "id,owner_user_id,user_id,source,text,thread_id,created_at) "
+                "VALUES($1::uuid,$2::uuid,$2::text,'trusted-web',"
+                "'Synthetic alternate source.', $3::uuid,"
+                "pg_catalog.transaction_timestamp())",
+                ALTERNATE_SOURCE_MESSAGE,
+                OWNER_A,
+                THREAD_A,
+            )
+            with self.assertRaises(asyncpg.PostgresError) as alternate_source:
+                await self.ingest.fetchrow(
+                    "SELECT * FROM "
+                    "memory_ingest_private.enqueue_chat_log_message("
+                    "$1::uuid,$2::text)",
+                    ALTERNATE_SOURCE_MESSAGE,
+                    policy.policy_sha256,
+                )
+        self.assertEqual(alternate_source.exception.sqlstate, "22023")
 
         bridge_lease = await self.bridge_worker.fetchrow(
             "SELECT * FROM memory_ingest_private.lease_memory_ingest("
             "'successor_bridge_worker',1,120)"
         )
+        for runtime_role in ("memory_ingest_writer", "governed_memory_worker"):
+            for relation in (
+                "public.chat_log",
+                "public.threads",
+                "public.chat_attachments",
+                "memory_ingest_private.memory_ingest_outbox",
+            ):
+                self.assertFalse(
+                    await self.bridge_admin.fetchval(
+                        "SELECT pg_catalog.has_table_privilege("
+                        "$1::text,$2::text,'SELECT')",
+                        runtime_role,
+                        relation,
+                    )
+                )
+        with self.assertRaises(asyncpg.PostgresError) as direct_source_read:
+            await self.bridge_worker.fetchval(
+                "SELECT pg_catalog.count(*) FROM public.chat_log"
+            )
+        self.assertEqual(direct_source_read.exception.sqlstate, "42501")
+        with self.assertRaises(asyncpg.PostgresError) as wrong_lease_token:
+            await self.bridge_worker.fetchrow(
+                "SELECT * FROM "
+                "memory_ingest_private.read_leased_chat_log_message("
+                "$1::uuid,pg_catalog.gen_random_uuid())",
+                bridge_lease["outbox_id"],
+            )
+        self.assertEqual(wrong_lease_token.exception.sqlstate, "40001")
+        leased_chat_log = await self.bridge_worker.fetchrow(
+            "SELECT * FROM "
+            "memory_ingest_private.read_leased_chat_log_message("
+            "$1::uuid,$2::uuid)",
+            bridge_lease["outbox_id"],
+            bridge_lease["lease_token"],
+        )
+        lease_envelope, payload = split_leased_chat_log_message(
+            dict(leased_chat_log)
+        )
+        self.assertNotIn("attachments", payload)
+        self.assertNotIn("attachment_ids", payload)
         transaction_time = await self.bridge_worker.fetchval(
             "SELECT pg_catalog.clock_timestamp()"
         )
@@ -1204,7 +1277,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         plan = process_ingest_item(
             payload,
-            lease_envelope=dict(bridge_lease),
+            lease_envelope=lease_envelope,
             actor=actor,
             expected_owner_user_id=OWNER_A,
             transaction_time=transaction_time,
@@ -1225,7 +1298,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             bridge_lease["source_binding_sha256"],
             MESSAGE_A,
             THREAD_A,
-            WINDOW_A,
+            MESSAGE_A,
             payload["window_sha256"],
             payload["content_sha256"],
             selected["selected_sha256"],
@@ -1257,24 +1330,27 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(acknowledged, "completed")
         async with self.ingest_context(OWNER_A):
-            terminal_replay = await self.ingest.fetchrow(
-                "SELECT * FROM memory_ingest_private.enqueue_memory_ingest("
-                "$1::uuid,$2::uuid,$3::uuid,$4::text,$5::timestamptz,"
-                "$6::uuid,$7::uuid,$8::integer,$9::text,$10::text)",
-                OWNER_A,
-                MESSAGE_A,
-                THREAD_A,
-                payload["content_sha256"],
-                source_created_at,
-                EXCHANGE_A,
-                WINDOW_A,
-                payload["window_ordinal"],
-                payload["window_sha256"],
-                policy.policy_sha256,
-            )
-        self.assertEqual(terminal_replay["outcome"], "terminal_replayed")
+            with self.assertRaises(asyncpg.PostgresError) as historical_enqueue:
+                await self.ingest.fetchrow(
+                    "SELECT * FROM "
+                    "memory_ingest_private.enqueue_chat_log_message("
+                    "$1::uuid,$2::text)",
+                    MESSAGE_A,
+                    policy.policy_sha256,
+                )
+        self.assertEqual(historical_enqueue.exception.sqlstate, "22023")
+        async with self.ingest_context(OWNER_B):
+            with self.assertRaises(asyncpg.PostgresError) as cross_owner_enqueue:
+                await self.ingest.fetchrow(
+                    "SELECT * FROM "
+                    "memory_ingest_private.enqueue_chat_log_message("
+                    "$1::uuid,$2::text)",
+                    MESSAGE_A,
+                    policy.policy_sha256,
+                )
+        self.assertEqual(cross_owner_enqueue.exception.sqlstate, "22023")
         await self.bridge_admin.execute(
-            "UPDATE public.memory_ingest_outbox "
+            "UPDATE memory_ingest_private.memory_ingest_outbox "
             "SET created_at=pg_catalog.transaction_timestamp()-interval '31 days', "
             "content_hash_expires_at="
             "pg_catalog.transaction_timestamp()-interval '30 days 1 hour', "
@@ -1290,7 +1366,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             await self.bridge_admin.fetchval(
-                "SELECT pg_catalog.count(*) FROM public.memory_ingest_outbox"
+                "SELECT pg_catalog.count(*) FROM "
+                "memory_ingest_private.memory_ingest_outbox"
             ),
             0,
         )
@@ -1347,36 +1424,22 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extraction_lease["attempt_number"], 2)
         lease_inputs = extraction_lease_to_provider_inputs(dict(extraction_lease))
         source_lookup = lease_inputs["source_lookup"]
-        source_record = await self.bridge_worker.fetchrow(
-            "SELECT role,content,content_sha256 FROM "
-            "public.successor_conversation_message_fixture "
-            "WHERE owner_user_id=$1::uuid AND message_id=$2::uuid "
-            "AND thread_id=$3::uuid AND content_sha256=$4::text",
-            UUID(source_lookup["owner_user_id"]),
-            UUID(source_lookup["message_id"]),
-            UUID(source_lookup["thread_id"]),
-            source_lookup["content_sha256"],
-        )
-        self.assertIsNotNone(source_record)
         self.assertEqual(
-            sha256(source_record["content"].encode("utf-8")).hexdigest(),
-            source_record["content_sha256"],
+            source_lookup,
+            {
+                "owner_user_id": str(OWNER_A),
+                "message_id": str(MESSAGE_A),
+                "thread_id": str(THREAD_A),
+                "content_sha256": payload["content_sha256"],
+            },
         )
+        self.assertIsNone(lease_inputs["context_lookup"])
         bounded_context = None
-        context_lookup = lease_inputs["context_lookup"]
-        if context_lookup is not None:
-            context_record = await self.bridge_worker.fetchrow(
-                "SELECT role,content,content_sha256 FROM "
-                "public.successor_conversation_message_fixture "
-                "WHERE owner_user_id=$1::uuid AND message_id=$2::uuid "
-                "AND role='assistant' AND content_sha256=$3::text",
-                UUID(context_lookup["owner_user_id"]),
-                UUID(context_lookup["message_id"]),
-                context_lookup["content_sha256"],
-            )
-            self.assertIsNotNone(context_record)
-            bounded_context = dict(context_record)
         cold_evidence = lease_inputs["evidence"]
+        self.assertEqual(
+            sha256(cold_evidence["selected_text"].encode("utf-8")).hexdigest(),
+            cold_evidence["selected_sha256"],
+        )
         request = build_provider_request(
             lease_inputs["job"],
             cold_evidence,

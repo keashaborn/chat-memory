@@ -1,0 +1,76 @@
+# DISPOSABLE VALIDATION ONLY. The release guard refuses persistent creation
+# until a current immutable Qdrant digest passes security and compatibility
+# review and this checked-in contract is replaced.
+x-governed-memory-scope: disposable-validation-only
+name: governed-memory-9a54cf123493-000001
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    container_name: governed-memory-postgres-9a54cf123493-000001
+    restart: "no"
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: governed_memory_bootstrap
+      POSTGRES_PASSWORD: "${GOVERNED_MEMORY_BOOTSTRAP_PASSWORD:?required}"
+    command:
+      - postgres
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
+      - -c
+      - password_encryption=scram-sha-256
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - governed-memory-postgres-data-9a54cf123493-000001:/var/lib/postgresql/data
+    networks:
+      - governed-memory-net-9a54cf123493-000001
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U governed_memory_bootstrap -d postgres
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    labels:
+      lifeswitch.governed-memory.candidate: "9a54cf123493-000001"
+      lifeswitch.governed-memory.authority: canonical
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170
+    container_name: governed-memory-qdrant-9a54cf123493-000001
+    restart: "no"
+    environment:
+      QDRANT__SERVICE__API_KEY: "${GOVERNED_MEMORY_QDRANT_API_KEY:?required}"
+    ports:
+      - "127.0.0.1:6343:6333"
+    volumes:
+      - governed-memory-qdrant-data-9a54cf123493-000001:/qdrant/storage
+    networks:
+      - governed-memory-net-9a54cf123493-000001
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    labels:
+      lifeswitch.governed-memory.candidate: "9a54cf123493-000001"
+      lifeswitch.governed-memory.authority: derived-only
+
+volumes:
+  governed-memory-postgres-data-9a54cf123493-000001:
+    name: governed-memory-postgres-data-9a54cf123493-000001
+  governed-memory-qdrant-data-9a54cf123493-000001:
+    name: governed-memory-qdrant-data-9a54cf123493-000001
+
+networks:
+  governed-memory-net-9a54cf123493-000001:
+    name: governed-memory-net-9a54cf123493-000001
+    driver: bridge
+    internal: true

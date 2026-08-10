@@ -26,7 +26,7 @@
         },
     {
       "path": "schema_contract.json",
-            "sha256": "ffaa2aa478b2fb199f77754437120af399f5662e7a18a1f8041b7bc1c8d34877"
+      "sha256": "a27f7173cb0f4a9e276425c6a3c3c8f16b71e2678523568d12a20dc0db83e5b4"
     },
     {
       "path": "predicate_catalog.json",
@@ -46,15 +46,15 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-            "sha256": "113e7bc5217088a2a63950e1a3235de28551029ab0ee6cd31adc520940fd16ed"
+      "sha256": "3d9fd1947eda36f4620983bf9d188dcf2320291b055f9b67edb2b93631998984"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-            "sha256": "9b11a485713293fc98863a6e1a7ea324385bf7a099021899737b458d1c25feb1"
+      "sha256": "2e3642977b5fdba40f161e67f775d4a504e01e347de51ac2ae7d5121513188cb"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",
-            "sha256": "b2fdac9c04b69ab45ac948675ec9424e73fc9a3b49d6757b3ad61a74972c4fb5"
+      "sha256": "80fa1ecc78ededf2bda0147f2748b226b70ab4fc5a78a6d11a5c3bf6a89cfb71"
     }
   ],
   "safety": {

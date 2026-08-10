@@ -1,0 +1,142 @@
+{
+  "schema_version": "governed-memory-bootstrap-contract-v1",
+  "state": "inactive_candidate_no_resources_created",
+  "candidate_id": "governed_memory_9a54cf123493_000001",
+  "host": {
+    "hostname": "ip-172-31-32-171",
+    "private_ipv4": "172.31.32.171"
+  },
+  "api": {
+    "bind": "172.31.32.171:8091",
+    "allowed_source_ipv4": [
+      "172.31.43.160/32"
+    ],
+    "other_source_action": "deny",
+    "source_firewall_proof_required_before_activation": true,
+    "tls_termination_decision_required_before_activation": true
+  },
+  "postgresql": {
+    "authority": "canonical",
+    "image": "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "container": "governed-memory-postgres-9a54cf123493-000001",
+    "volume": "governed-memory-postgres-data-9a54cf123493-000001",
+    "host_bind": "127.0.0.1:55432",
+    "container_port": 5432,
+    "database": "governed_memory",
+    "encoding": "UTF8",
+    "required_settings": {
+      "log_parameter_max_length": "0",
+      "log_parameter_max_length_on_error": "0"
+    },
+    "required_roles": [
+      {
+        "name": "governed_memory_owner",
+        "login": false,
+        "inherit": false,
+        "superuser": false,
+        "bypassrls": false
+      },
+      {
+        "name": "governed_memory_api",
+        "login": true,
+        "inherit": false,
+        "superuser": false,
+        "bypassrls": false
+      },
+      {
+        "name": "governed_memory_worker",
+        "login": true,
+        "inherit": false,
+        "superuser": false,
+        "bypassrls": false
+      }
+    ],
+    "existing_target_action": "refuse",
+    "snapshot_restore_allowed": false,
+    "legacy_database_mount_allowed": false,
+    "initial_user_row_count": 0
+  },
+  "qdrant": {
+    "authority": "derived_only",
+    "image_scope": "disposable_validation_only",
+    "image": "qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170",
+    "persistent_pilot_image": null,
+    "persistent_pilot_digest_status": "blocked_pending_current_security_review_and_compatibility_validation",
+    "container": "governed-memory-qdrant-9a54cf123493-000001",
+    "volume": "governed-memory-qdrant-data-9a54cf123493-000001",
+    "host_bind": "127.0.0.1:6343",
+    "container_port": 6333,
+    "collection": "governed_memory_9a54cf123493_000001",
+    "alias": "governed_memory_active",
+    "vectors": {
+      "size": 3072,
+      "distance": "Dot"
+    },
+    "existing_target_action": "refuse",
+    "snapshot_restore_allowed": false,
+    "legacy_collection_mount_allowed": false,
+    "initial_point_count": 0
+  },
+  "conversation_bridge": {
+    "database_kind": "existing_conversation_database_only",
+    "host_bind": "127.0.0.1:5432",
+    "database": "memory",
+    "application_login": "brains_app",
+    "outbox": "memory_ingest_private.memory_ingest_outbox",
+    "content_free": true,
+    "message_content_storage": false,
+    "attachment_content_storage": false,
+    "historical_scan_allowed": false,
+    "historical_backfill_allowed": false,
+    "base_table_select_for_worker_allowed": false,
+    "post_cutover_user_messages_only": true
+  },
+  "isolation": {
+    "reuse_existing_postgres_daemon": false,
+    "reuse_existing_qdrant_daemon": false,
+    "reuse_existing_database": false,
+    "reuse_existing_collection": false,
+    "reuse_existing_volume": false,
+    "reuse_existing_snapshot": false,
+    "reuse_existing_virtual_environment": false,
+    "import_legacy_rows": false,
+    "import_legacy_vectors": false
+  },
+  "create_policy": {
+    "operation": "create_exact_absent_targets_only",
+    "current_create_authorized": false,
+    "mutation_of_existing_target": false,
+    "requires_external_scoped_authorization_receipt": true,
+    "requires_all_activation_blockers_closed": true,
+    "credentials_in_repository": false,
+    "activation_marker_in_repository": false,
+    "unresolved_activation_blockers": [
+      "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
+      "owner_claim_fact_detail_api_not_implemented"
+    ]
+  },
+  "cleanup_policy": {
+    "operation": "delete_exact_empty_candidate_targets_only",
+    "current_cleanup_authorized": false,
+    "unresolved_activation_blockers": [
+      "durable_pilot_ever_started_marker_not_implemented"
+    ],
+    "requires_external_scoped_cleanup_authorization": true,
+    "requires_pilot_ever_started_false": true,
+    "requires_postgresql_user_row_count": 0,
+    "requires_qdrant_point_count": 0,
+    "requires_active_client_count": 0,
+    "refuse_after_any_pilot_row": true,
+    "sql_cascade_allowed": false,
+    "wildcard_target_allowed": false,
+    "prefix_target_allowed": false,
+    "exact_targets": [
+      "governed-memory-postgres-9a54cf123493-000001",
+      "governed-memory-qdrant-9a54cf123493-000001",
+      "governed-memory-postgres-data-9a54cf123493-000001",
+      "governed-memory-qdrant-data-9a54cf123493-000001",
+      "governed-memory-net-9a54cf123493-000001"
+    ]
+  },
+  "production_state_changed": false
+}

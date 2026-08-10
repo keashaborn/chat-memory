@@ -177,7 +177,7 @@ class SupabaseHttpRuntimeConfig:
     audience: str
     jwks_url: str
     expected_service_token: str = field(repr=False)
-    service_token_header: str = "x-vs-service-token"
+    service_token_header: str = "x-governed-memory-service-token"
     allow_disposable_loopback_http: bool = False
     cache_ttl_seconds: int = 300
     minimum_refresh_interval_seconds: int = 10

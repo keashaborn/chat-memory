@@ -328,7 +328,7 @@ class GovernedMemoryRequestAuthenticator:
 
     verifier: SupabaseJwtVerifier
     expected_service_token: str = field(repr=False)
-    service_token_header: str = "x-vs-service-token"
+    service_token_header: str = "x-governed-memory-service-token"
 
     def __post_init__(self) -> None:
         try:
