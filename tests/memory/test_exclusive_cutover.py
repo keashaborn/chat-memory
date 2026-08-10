@@ -127,6 +127,17 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
                 store = source.index(first_store_call)
                 self.assertLess(guard, store)
 
+    def test_successor_log_does_not_refresh_legacy_owner_registry(self) -> None:
+        source = _async_function_source("log_chat")
+        guarded_write = (
+            "if LEGACY_MEMORY_SURFACES_ENABLED:\n"
+            "            await conn.fetchval(\n"
+            "                \"\"\"\n"
+            "                SELECT memory.register_authenticated_owner_v1"
+        )
+        self.assertIn(guarded_write, source)
+        self.assertEqual(source.count("memory.register_authenticated_owner_v1"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

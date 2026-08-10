@@ -1549,14 +1549,15 @@ async def log_chat(req: Request):
                 "SELECT set_config('app.auth_context_sha256',$1,true)",
                 capture_auth_context,
             )
-        await conn.fetchval(
-            """
-            SELECT memory.register_authenticated_owner_v1($1,$2,$3)
-            """,
-            uuid.UUID(user_id),
-            memory_actor_authority_v1(req),
-            request_id,
-        )
+        if LEGACY_MEMORY_SURFACES_ENABLED:
+            await conn.fetchval(
+                """
+                SELECT memory.register_authenticated_owner_v1($1,$2,$3)
+                """,
+                uuid.UUID(user_id),
+                memory_actor_authority_v1(req),
+                request_id,
+            )
 
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.

@@ -50,7 +50,9 @@ class RawMemoryCompatibilityBoundaryV1Tests(unittest.TestCase):
             APP.read_text(encoding="utf-8"), _log_chat_node()
         )
         assert source is not None
-        self.assertIn("memory.register_authenticated_owner_v1", source)
+        registry_guard = source.index("if LEGACY_MEMORY_SURFACES_ENABLED:")
+        registry_write = source.index("memory.register_authenticated_owner_v1")
+        self.assertLess(registry_guard, registry_write)
         self.assertIn("INSERT INTO chat_log(", source)
         self.assertIn("UPDATE public.chat_attachments", source)
         self.assertIn('"transcript_write_failed"', source)
