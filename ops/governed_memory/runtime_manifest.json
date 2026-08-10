@@ -1,9 +1,14 @@
 {
-  "schema_version": "governed-memory-runtime-manifest-v2",
+  "schema_version": "governed-memory-runtime-manifest-v3",
   "phase": "candidate_uninstalled",
   "python_runtime": {
     "minimum": "3.11",
-    "validated_candidate": "3.12"
+    "validated_candidate": "3.12.3"
+  },
+  "validation_runtime": {
+    "manifest": "tools/governed_memory_validation/runtime_packages.json",
+    "candidate_owned_environment": false,
+    "install_lock": false
   },
   "authority": {
     "database": "governed_memory",
@@ -19,9 +24,12 @@
     "production_authorized": false,
     "blockers": [
       "semantic_score_threshold_not_calibrated",
-      "supabase_to_database_owner_context_not_integration_tested",
-      "service_http_routes_not_installed_or_invoked",
-      "real_provider_and_embedding_adapters_not_exercised"
+      "live_supabase_keys_and_session_freshness_not_mounted",
+      "durable_auth_session_provenance_policy_not_decided",
+      "candidate_owned_runtime_environment_not_built",
+      "successor_http_routes_not_mounted_in_production",
+      "real_provider_and_embedding_adapters_not_exercised",
+      "authenticated_frontend_not_validated"
     ]
   },
   "ingestion": {
@@ -33,23 +41,33 @@
   "provider_policy": {
     "import_time_calls": false,
     "production_calls_authorized": false,
-    "disposable_phase_2_external_calls": 0,
+    "disposable_external_calls": 0,
     "generation_calls_per_exact_attempt": 1
   },
   "disposable_validation": {
-    "scope": "phase_2_disposable_only",
-    "validation_document": "docs/memory/clean_successor/PHASE2_VALIDATION.md",
-    "runner_receipt": "stdout:PHASE2_DISPOSABLE_RECEIPT",
+    "scope": "successor_disposable_only",
+    "validation_document": "docs/memory/clean_successor/VALIDATION.md",
+    "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
     "postgresql_fresh_empty": true,
     "qdrant_fresh_empty": true,
     "migration_forward_rollback_reapply": true,
     "normalized_catalog_equivalent_after_reapply": true,
     "forced_rls_owner_isolation_and_direct_dml_denial": true,
+    "asymmetric_jwt_and_jwks_boundary_invoked": true,
+    "owner_http_lifecycle_invoked": true,
+    "all_owner_routes_invoked": true,
+    "alternating_owner_pool_isolation": true,
+    "owner_pool_max_size": 1,
     "distinct_chat_a_chat_b": true,
     "cold_extraction_reconstruction": true,
     "cold_postgresql_projection_rebuild": true,
     "correction_retraction_hard_delete_and_retention": true,
+    "live_supabase_session_freshness_verified": false,
+    "production_routes_installed": false,
+    "authenticated_frontend_verified": false,
+    "semantic_threshold_calibrated": false,
     "production_data_read": false,
+    "production_endpoint_calls": 0,
     "provider_external_calls": 0,
     "final_resources_absent": true
   },

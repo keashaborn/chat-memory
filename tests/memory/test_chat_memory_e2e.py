@@ -1,4 +1,4 @@
-"""Offline synthetic composition of the Phase 1 contracts.
+"""Offline synthetic composition of the current successor contracts.
 
 This is not a database, Qdrant, provider, HTTP, service, or production E2E test.
 It composes the pure core with recording fakes so cross-layer drift is visible.

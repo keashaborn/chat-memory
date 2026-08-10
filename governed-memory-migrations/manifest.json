@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
-  "candidate_id": "clean-governed-memory-phase2-2026-08-10",
+  "candidate_id": "clean-governed-memory-successor-2026-08-10",
   "status": "isolated_candidate_disposable_validated_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
@@ -26,7 +26,7 @@
         },
     {
       "path": "schema_contract.json",
-            "sha256": "aa1420d52b3766606b745c258f8270bcde20dbb400a107ef13f5d4b9678e635e"
+            "sha256": "ffaa2aa478b2fb199f77754437120af399f5662e7a18a1f8041b7bc1c8d34877"
     },
     {
       "path": "predicate_catalog.json",

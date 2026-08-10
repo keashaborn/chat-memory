@@ -57,13 +57,13 @@ from rag_engine.governed_memory.worker import (
 )
 
 
-FIXTURE_PROVENANCE = "synthetic-governed-memory-phase1"
+FIXTURE_PROVENANCE = "synthetic-governed-memory-successor"
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "governed-memory-migrations"
 CONTRACT_PATH = MIGRATIONS / "schema_contract.json"
 ROOT_MANIFEST_PATH = MIGRATIONS / "manifest.json"
 MANIFEST_VERIFIER_PATH = (
-    ROOT / "tools" / "governed_memory_phase2" / "verify_migration_manifest.py"
+    ROOT / "tools" / "governed_memory_validation" / "verify_migration_manifest.py"
 )
 ROLES_PATH = MIGRATIONS / "roles_preflight.pgsql"
 SUCCESSOR_README_PATH = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
@@ -1244,7 +1244,7 @@ class PackageIntegrityTests(unittest.TestCase):
                 relative,
             )
 
-    def test_fail_closed_manifest_verifier_accepts_only_unique_v2_json(self) -> None:
+    def test_fail_closed_manifest_verifier_accepts_only_unique_v3_json(self) -> None:
         verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
@@ -1252,7 +1252,7 @@ class PackageIntegrityTests(unittest.TestCase):
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v2",
+            "governed-memory-migration-verification-v3",
         )
 
 

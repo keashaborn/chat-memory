@@ -7,7 +7,7 @@
     "memory_private"
   ],
   "validation_scope": {
-    "phase": 2,
+    "scope": "successor_disposable_only",
     "environment": "disposable_only",
     "production_data_read": false,
     "provider_external_calls": 0,
@@ -422,12 +422,15 @@
     "cascade_ddl_allowed": false,
     "production_schema_applied": false,
     "production_service_activation_authorized": false,
-    "disposable_phase_2_validation_only": true,
+    "disposable_successor_validation_only": true,
     "production_activation_blockers": [
       "semantic_score_threshold_not_calibrated",
-      "supabase_to_database_owner_context_not_integration_tested",
-      "service_http_routes_not_installed_or_invoked",
-      "real_provider_and_embedding_adapters_not_exercised"
+      "live_supabase_keys_and_session_freshness_not_mounted",
+      "durable_auth_session_provenance_policy_not_decided",
+      "candidate_owned_runtime_environment_not_built",
+      "successor_http_routes_not_mounted_in_production",
+      "real_provider_and_embedding_adapters_not_exercised",
+      "authenticated_frontend_not_validated"
     ]
   }
 }

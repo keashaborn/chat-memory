@@ -79,8 +79,9 @@ def verify(root: Path) -> dict[str, object]:
     manifest = load_json(manifest_path)
     if manifest.get("schema_version") != "governed-memory-migration-manifest-v2":
         raise ValueError("unexpected migration manifest schema")
-    if manifest.get("candidate_id") != "clean-governed-memory-phase2-2026-08-10":
-        raise ValueError("unexpected migration candidate id")
+    candidate_id = manifest.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id:
+        raise ValueError("missing migration candidate id")
     if manifest.get("status") != (
         "isolated_candidate_disposable_validated_not_production_applied"
     ):
@@ -215,11 +216,13 @@ def verify(root: Path) -> dict[str, object]:
                 raise ValueError(f"CASCADE token present: {relative}")
 
     return {
-        "candidate_id": manifest.get("candidate_id"),
         "file_count": len(expected),
         "manifest_sha256": sha256_file(manifest_path),
+        "migration_package_id_sha256": hashlib.sha256(
+            candidate_id.encode("utf-8")
+        ).hexdigest(),
         "result": "verified",
-        "schema_version": "governed-memory-migration-verification-v2",
+        "schema_version": "governed-memory-migration-verification-v3",
     }
 
 

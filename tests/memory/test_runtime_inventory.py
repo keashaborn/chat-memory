@@ -16,11 +16,16 @@ from rag_engine.governed_memory.api import OWNER_ROUTE_SPECIFICATIONS
 from rag_engine.governed_memory.repository import GovernedMemoryRepository
 
 
-FIXTURE_PROVENANCE = "synthetic-governed-memory-phase1"
+FIXTURE_PROVENANCE = "synthetic-governed-memory-successor"
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "rag_engine" / "governed_memory"
 MANIFEST = ROOT / "ops" / "governed_memory" / "runtime_manifest.json"
 SUCCESSOR_README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
+SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
+INTEGRATION_TESTS = ROOT / "tests" / "memory_integration"
+VALIDATION_TOOLS = ROOT / "tools" / "governed_memory_validation"
+CLEAN_SUCCESSOR_DOCS = ROOT / "docs" / "memory" / "clean_successor"
+RUNTIME_PACKAGES = VALIDATION_TOOLS / "runtime_packages.json"
 
 EXPECTED_PACKAGE_FILES = {
     "__init__.py",
@@ -30,6 +35,10 @@ EXPECTED_PACKAGE_FILES = {
     "contracts.py",
     "eligibility.py",
     "extraction.py",
+    "http_api.py",
+    "http_auth.py",
+    "http_runtime.py",
+    "http_store.py",
     "lifecycle.py",
     "postgres_adapter.py",
     "projection.py",
@@ -43,6 +52,10 @@ EXPECTED_TEST_FILES = {
     "test_chat_memory_e2e.py",
     "test_eligibility.py",
     "test_extraction.py",
+    "test_http_api.py",
+    "test_http_auth.py",
+    "test_http_runtime.py",
+    "test_http_store.py",
     "test_intake_boundary.py",
     "test_lifecycle.py",
     "test_projection.py",
@@ -51,6 +64,42 @@ EXPECTED_TEST_FILES = {
     "test_runtime_inventory.py",
     "test_schema_and_rls.py",
     "test_worker_recovery.py",
+}
+
+EXPECTED_INTEGRATION_FILES = {
+    "__init__.py",
+    "local_jwks_server.py",
+    "test_governed_memory_http_vertical_slice.py",
+}
+
+EXPECTED_VALIDATION_TOOL_FILES = {
+    "postgres_bootstrap.pgsql",
+    "run_disposable_successor.sh",
+    "runtime_packages.json",
+    "verify_migration_manifest.py",
+}
+
+EXPECTED_CLEAN_SUCCESSOR_DOC_FILES = {
+    "README.md",
+    "VALIDATION.md",
+}
+
+EXPECTED_RUNTIME_PACKAGES = {
+    "schema_version": "governed-memory-validation-runtime-v1",
+    "python_version": "3.12.3",
+    "packages": {
+        "anyio": "4.11.0",
+        "asyncpg": "0.30.0",
+        "cryptography": "49.0.0",
+        "fastapi": "0.120.4",
+        "h11": "0.16.0",
+        "PyJWT": "2.13.0",
+        "pydantic": "2.12.3",
+        "pydantic_core": "2.41.4",
+        "starlette": "0.49.2",
+        "typing_extensions": "4.15.0",
+        "uvicorn": "0.38.0",
+    },
 }
 
 EXPECTED_ROUTES = [
@@ -75,7 +124,7 @@ class RuntimeManifestTests(unittest.TestCase):
     def test_candidate_is_explicitly_uninstalled_and_content_free(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
-            manifest["schema_version"], "governed-memory-runtime-manifest-v2"
+            manifest["schema_version"], "governed-memory-runtime-manifest-v3"
         )
         self.assertEqual(manifest["phase"], "candidate_uninstalled")
         self.assertFalse(manifest["production_state_changed"])
@@ -109,27 +158,34 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertFalse(
             (ROOT / "ops" / "systemd" / "governed-memory-worker.service").exists(),
-            "Phase 1 must not ship a non-runnable systemd unit",
+            "The candidate must not ship a non-runnable systemd unit",
         )
 
     def test_provider_policy_records_zero_disposable_external_calls(self) -> None:
         policy = self.load_manifest()["provider_policy"]
         self.assertFalse(policy["import_time_calls"])
         self.assertFalse(policy["production_calls_authorized"])
-        self.assertEqual(policy["disposable_phase_2_external_calls"], 0)
+        self.assertEqual(policy["disposable_external_calls"], 0)
         self.assertEqual(policy["generation_calls_per_exact_attempt"], 1)
 
-    def test_phase_2_validation_is_disposable_and_not_activation_proof(self) -> None:
+    def test_successor_validation_is_disposable_and_not_activation_proof(self) -> None:
         manifest = self.load_manifest()
         validation = manifest["disposable_validation"]
-        self.assertEqual(validation["scope"], "phase_2_disposable_only")
+        self.assertEqual(validation["scope"], "successor_disposable_only")
         self.assertFalse(validation["production_data_read"])
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertTrue(validation["migration_forward_rollback_reapply"])
         self.assertTrue(validation["final_resources_absent"])
+        self.assertTrue(validation["all_owner_routes_invoked"])
+        self.assertTrue(validation["alternating_owner_pool_isolation"])
+        self.assertEqual(validation["owner_pool_max_size"], 1)
         self.assertFalse(manifest["activation"]["production_authorized"])
         self.assertIn(
             "semantic_score_threshold_not_calibrated",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "durable_auth_session_provenance_policy_not_decided",
             manifest["activation"]["blockers"],
         )
 
@@ -144,8 +200,43 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertGreaterEqual(minimum, (3, 11))
         self.assertGreaterEqual(validated, minimum)
         readme = SUCCESSOR_README.read_text(encoding="utf-8")
-        self.assertIn("requires Python 3.11 or newer", readme)
-        self.assertIn("Python 3.12", readme)
+        normalized_readme = " ".join(readme.split())
+        self.assertIn("requires Python 3.11 or newer", normalized_readme)
+        self.assertIn("Python 3.12.3", normalized_readme)
+
+    def test_validation_runtime_is_exact_evidence_not_an_install_lock(self) -> None:
+        runtime_packages = json.loads(RUNTIME_PACKAGES.read_text(encoding="utf-8"))
+        self.assertEqual(runtime_packages, EXPECTED_RUNTIME_PACKAGES)
+        manifest = self.load_manifest()
+        self.assertEqual(
+            manifest["validation_runtime"],
+            {
+                "manifest": "tools/governed_memory_validation/runtime_packages.json",
+                "candidate_owned_environment": False,
+                "install_lock": False,
+            },
+        )
+        self.assertIn(
+            "candidate_owned_runtime_environment_not_built",
+            manifest["activation"]["blockers"],
+        )
+
+    def test_schema_validation_scope_is_versionless_and_exact(self) -> None:
+        contract = json.loads(SCHEMA_CONTRACT.read_text(encoding="utf-8"))
+        self.assertEqual(
+            contract["validation_scope"],
+            {
+                "scope": "successor_disposable_only",
+                "environment": "disposable_only",
+                "production_data_read": False,
+                "provider_external_calls": 0,
+                "production_state_changed": False,
+            },
+        )
+        self.assertEqual(
+            contract["hard_requirements"]["production_activation_blockers"],
+            self.load_manifest()["activation"]["blockers"],
+        )
 
     def test_route_surface_is_exact_and_owner_is_not_a_path_parameter(self) -> None:
         manifest = self.load_manifest()
@@ -332,9 +423,23 @@ class SourceInventoryTests(unittest.TestCase):
         observed = {path.name for path in PACKAGE.glob("*.py")}
         self.assertEqual(observed, EXPECTED_PACKAGE_FILES)
 
-    def test_exactly_twelve_test_modules_are_discoverable(self) -> None:
+    def test_test_module_file_set_is_exact(self) -> None:
         observed = {path.name for path in Path(__file__).parent.glob("test_*.py")}
         self.assertEqual(observed, EXPECTED_TEST_FILES)
+
+    def test_integration_module_file_set_is_exact(self) -> None:
+        observed = {path.name for path in INTEGRATION_TESTS.iterdir() if path.is_file()}
+        self.assertEqual(observed, EXPECTED_INTEGRATION_FILES)
+
+    def test_validation_tool_file_set_is_exact(self) -> None:
+        observed = {path.name for path in VALIDATION_TOOLS.iterdir() if path.is_file()}
+        self.assertEqual(observed, EXPECTED_VALIDATION_TOOL_FILES)
+
+    def test_clean_successor_document_file_set_is_exact(self) -> None:
+        observed = {
+            path.name for path in CLEAN_SUCCESSOR_DOCS.iterdir() if path.is_file()
+        }
+        self.assertEqual(observed, EXPECTED_CLEAN_SUCCESSOR_DOC_FILES)
 
     def test_successor_has_no_legacy_names_or_imports(self) -> None:
         prohibited_text = (

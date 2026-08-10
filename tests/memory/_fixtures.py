@@ -1,4 +1,4 @@
-"""Synthetic, content-free-adjacent fixtures for the Phase 1 offline suite.
+"""Synthetic, content-free-adjacent fixtures for the successor offline suite.
 
 Nothing in this module is copied from production conversations, accounts,
 attachments, preferences, claims, jobs, vectors, or review artifacts.
@@ -44,7 +44,7 @@ from rag_engine.governed_memory.projection import (
 )
 
 
-FIXTURE_PROVENANCE = "synthetic-governed-memory-phase1"
+FIXTURE_PROVENANCE = "synthetic-governed-memory-successor"
 
 NOW = datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 CUTOVER = datetime(2030, 1, 1, tzinfo=timezone.utc)

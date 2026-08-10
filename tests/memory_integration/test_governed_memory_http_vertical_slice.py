@@ -4,24 +4,41 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
+from ipaddress import IPv4Address
 import json
 import os
+import select
+import socket
+import socketserver
+import threading
+import time
 from typing import Any, AsyncIterator, Mapping
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import UUID
 
-if os.environ.get("GM_PHASE2_RUN") == "1":
+if os.environ.get("GM_VALIDATION_RUN") == "1":
     import asyncpg
+    import uvicorn
 else:  # Keep offline unit discovery free of the integration dependency.
     asyncpg = None  # type: ignore[assignment]
+    uvicorn = None  # type: ignore[assignment]
+
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from rag_engine.governed_memory.auth import (
     ActorRole,
     ActorScope,
     VerifiedActor,
 )
+from rag_engine.governed_memory.api import route_manifest_sha256
+from rag_engine.governed_memory.http_api import create_owner_memory_app
+from rag_engine.governed_memory.http_runtime import (
+    SupabaseHttpRuntimeConfig,
+    create_supabase_actor_resolver,
+)
+from rag_engine.governed_memory.http_store import PostgresOwnerStore
 from rag_engine.governed_memory.contracts import (
     ContractViolation,
     canonical_json_bytes,
@@ -74,15 +91,23 @@ from tests.memory._fixtures import (
     make_projection_outbox,
     make_provider_output,
 )
+from tests.memory_integration.local_jwks_server import (
+    JWKS_ISSUER,
+    JWKS_URL,
+    LocalJwksAuthority,
+)
 
 
-RUN_MARKER = "governed-memory-phase2-disposable:019fe927"
+RUN_MARKER = "governed-memory-successor-disposable:019fe927"
+API_BASE_URL = "http://127.0.0.1:18092"
+API_HOST = "127.0.0.1"
+API_PORT = 18092
 AUTH_CONTEXT_SHA256 = "a" * 64
 MODEL = "synthetic-extraction-model"
 SCHEMA = "governed-memory-extraction"
 SCHEMA_SHA256 = sha256(SCHEMA.encode("utf-8")).hexdigest()
 PRIVACY_MANIFEST_SHA256 = sha256(
-    b"governed-memory-phase2-disposable-privacy"
+    b"governed-memory-successor-disposable-privacy"
 ).hexdigest()
 PROMPT_SHA256 = "d" * 64
 QUERY_SHA256 = "e" * 64
@@ -91,12 +116,15 @@ ANSWER_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999992")
 CORRECTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999993")
 RETRACTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999994")
 DELETION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999995")
+OWNER_B_CORRECTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999996")
+OWNER_B_RETRACTION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999997")
+OWNER_B_DELETION_OPERATION_ID = UUID("99999999-9999-4999-8999-999999999998")
 THREAD_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")
 OWNER_B_CLAIM_ID = UUID("22222222-2222-4222-8222-222222222226")
 OWNER_B_REVISION_ID = UUID("22222222-2222-4222-8222-222222222227")
 ALIAS = "governed_memory_active"
-PHYSICAL_A = "governed_memory_phase2_a_019fe927"
-PHYSICAL_B = "governed_memory_phase2_b_019fe927"
+PHYSICAL_A = "governed_memory_successor_a_019fe927"
+PHYSICAL_B = "governed_memory_successor_b_019fe927"
 INDEX_FIELDS = {
     "owner_user_id": "keyword",
     "lifecycle_state": "keyword",
@@ -124,6 +152,151 @@ OWNER_TABLES = (
 )
 
 
+def _validated_relay_target(variable_name: str) -> str:
+    value = os.environ.get(variable_name, "")
+    try:
+        address = IPv4Address(value)
+    except ValueError as exc:
+        raise AssertionError(f"invalid relay target: {variable_name}") from exc
+    if (
+        not address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    ):
+        raise AssertionError(f"unsafe relay target: {variable_name}")
+    return str(address)
+
+
+class _RelayServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = False
+    block_on_close = True
+    request_queue_size = 64
+
+    def __init__(self, local_port: int, target_host: str, target_port: int) -> None:
+        self.target = (target_host, target_port)
+        self.stopping = threading.Event()
+        self._active_lock = threading.Lock()
+        self._active_sockets: set[socket.socket] = set()
+        super().__init__(("127.0.0.1", local_port), _RelayHandler)
+
+    def register_sockets(self, *sockets: socket.socket) -> None:
+        with self._active_lock:
+            self._active_sockets.update(sockets)
+
+    def unregister_sockets(self, *sockets: socket.socket) -> None:
+        with self._active_lock:
+            self._active_sockets.difference_update(sockets)
+
+    def close_active_sockets(self) -> None:
+        with self._active_lock:
+            sockets = tuple(self._active_sockets)
+        for active_socket in sockets:
+            try:
+                active_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                active_socket.close()
+            except OSError:
+                pass
+
+    def handle_error(
+        self,
+        request: socket.socket,
+        client_address: tuple[str, int],
+    ) -> None:
+        self.stopping.set()
+
+
+class _RelayHandler(socketserver.BaseRequestHandler):
+    def handle(self) -> None:
+        server = self.server
+        if not isinstance(server, _RelayServer) or server.stopping.is_set():
+            return
+        try:
+            upstream = socket.create_connection(server.target, timeout=10)
+        except OSError:
+            return
+        server.register_sockets(self.request, upstream)
+        try:
+            self.request.settimeout(None)
+            upstream.settimeout(None)
+            readable_sockets = {self.request, upstream}
+            while readable_sockets and not server.stopping.is_set():
+                readable, _, exceptional = select.select(
+                    tuple(readable_sockets),
+                    (),
+                    tuple(readable_sockets),
+                    0.25,
+                )
+                if exceptional:
+                    return
+                for source in readable:
+                    destination = upstream if source is self.request else self.request
+                    try:
+                        payload = source.recv(65_536)
+                    except OSError:
+                        return
+                    if not payload:
+                        readable_sockets.discard(source)
+                        try:
+                            destination.shutdown(socket.SHUT_WR)
+                        except OSError:
+                            pass
+                        continue
+                    try:
+                        destination.sendall(payload)
+                    except OSError:
+                        return
+        finally:
+            server.unregister_sockets(self.request, upstream)
+            try:
+                upstream.close()
+            except OSError:
+                pass
+
+
+class _LoopbackTcpRelay:
+    def __init__(self, local_port: int, target_host: str, target_port: int) -> None:
+        self._server = _RelayServer(local_port, target_host, target_port)
+        if self._server.server_address != ("127.0.0.1", local_port):
+            self._server.server_close()
+            raise AssertionError("relay did not bind the exact loopback endpoint")
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            kwargs={"poll_interval": 0.05},
+            name=f"governed-memory-relay-{local_port}",
+        )
+        self._started = False
+        self._closed = False
+
+    def start(self) -> None:
+        if self._started or self._closed:
+            raise AssertionError("relay start state is invalid")
+        self._thread.start()
+        self._started = True
+        if not self._thread.is_alive():
+            raise AssertionError("relay thread did not start")
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._server.stopping.set()
+        if self._started:
+            self._server.shutdown()
+        self._server.close_active_sockets()
+        self._server.server_close()
+        if self._started:
+            self._thread.join(timeout=10)
+            if self._thread.is_alive():
+                raise AssertionError("relay thread did not stop")
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, UUID):
         return str(value)
@@ -136,10 +309,19 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise AssertionError(f"duplicate HTTP response key: {key}")
+        result[key] = value
+    return result
+
+
 class QdrantRest:
     def __init__(self, base_url: str) -> None:
-        if base_url != "http://127.0.0.1:6338":
-            raise RuntimeError("Phase 2 Qdrant URL is not the isolated endpoint")
+        if base_url != "http://127.0.0.1:6339":
+            raise RuntimeError("Governed Memory successor Qdrant URL is not the isolated endpoint")
         self.base_url = base_url
 
     def request(
@@ -331,53 +513,165 @@ class QdrantRest:
 
 
 @unittest.skipUnless(
-    os.environ.get("GM_PHASE2_RUN") == "1",
-    "requires explicitly authorized disposable Phase 2 infrastructure",
+    os.environ.get("GM_VALIDATION_RUN") == "1",
+    "requires explicitly authorized disposable Governed Memory successor infrastructure",
 )
-class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
+class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        assert asyncpg is not None
-        host = os.environ.get("GM_PHASE2_POSTGRES_HOST")
-        port_text = os.environ.get("GM_PHASE2_POSTGRES_PORT")
-        if host != "127.0.0.1" or port_text != "55442":
-            self.fail("Phase 2 PostgreSQL endpoint is not the isolated endpoint")
+        assert asyncpg is not None and uvicorn is not None
+        host = os.environ.get("GM_VALIDATION_POSTGRES_HOST")
+        port_text = os.environ.get("GM_VALIDATION_POSTGRES_PORT")
+        if host != "127.0.0.1" or port_text != "55443":
+            self.fail("Governed Memory successor PostgreSQL endpoint is not the isolated endpoint")
+        if os.environ.get("GM_VALIDATION_API_URL") != API_BASE_URL:
+            self.fail("successor API URL is not the isolated endpoint")
+        if os.environ.get("GM_VALIDATION_JWKS_URL") != (
+            JWKS_ISSUER + "/.well-known/jwks.json"
+        ):
+            self.fail("successor JWKS URL is not the isolated endpoint")
+        postgres_container_ip = _validated_relay_target(
+            "GM_VALIDATION_POSTGRES_CONTAINER_IP"
+        )
+        qdrant_container_ip = _validated_relay_target(
+            "GM_VALIDATION_QDRANT_CONTAINER_IP"
+        )
+        if postgres_container_ip == qdrant_container_ip:
+            self.fail("successor relay targets are not distinct")
+        self.relays: list[_LoopbackTcpRelay] = []
+        try:
+            for local_port, target_host, target_port in (
+                (55443, postgres_container_ip, 5432),
+                (6339, qdrant_container_ip, 6333),
+            ):
+                relay = _LoopbackTcpRelay(
+                    local_port, target_host, target_port
+                )
+                self.relays.append(relay)
+                relay.start()
+        except BaseException:
+            self._close_relays()
+            raise
+        self.addAsyncCleanup(asyncio.to_thread, self._close_relays)
         self.host = host
         self.port = int(port_text)
-        self.qdrant = QdrantRest(os.environ.get("GM_PHASE2_QDRANT_URL", ""))
+        self.qdrant = QdrantRest(os.environ.get("GM_VALIDATION_QDRANT_URL", ""))
         self.connections: list[Any] = []
-        self.admin = await self._connect("postgres", "phase2_disposable_only", "governed_memory")
+        self.admin = await self._connect("postgres", "successor_disposable_only", "governed_memory")
         self.bridge_admin = await self._connect(
-            "postgres", "phase2_disposable_only", "phase2_conversation"
+            "postgres", "successor_disposable_only", "successor_conversation"
         )
         self.api = await self._connect(
-            "governed_memory_api", "phase2_api_disposable_only", "governed_memory"
+            "governed_memory_api", "successor_api_disposable_only", "governed_memory"
         )
         self.worker = await self._connect(
             "governed_memory_worker",
-            "phase2_worker_disposable_only",
+            "successor_worker_disposable_only",
             "governed_memory",
         )
         self.worker_two = await self._connect(
             "governed_memory_worker",
-            "phase2_worker_disposable_only",
+            "successor_worker_disposable_only",
             "governed_memory",
         )
         self.bridge_worker = await self._connect(
             "governed_memory_worker",
-            "phase2_worker_disposable_only",
-            "phase2_conversation",
+            "successor_worker_disposable_only",
+            "successor_conversation",
         )
         self.ingest = await self._connect(
-            "phase2_ingest_login",
-            "phase2_ingest_disposable_only",
-            "phase2_conversation",
+            "successor_ingest_login",
+            "successor_ingest_disposable_only",
+            "successor_conversation",
         )
         self.qdrant.remove_all()
         self.addCleanup(self.qdrant.remove_all)
 
+        invocation_text = os.environ.get("GM_VALIDATION_INVOCATION_ID", "")
+        service_token = os.environ.get("GM_VALIDATION_SERVICE_TOKEN", "")
+        try:
+            self.invocation_id = UUID(invocation_text)
+        except ValueError:
+            self.fail("invalid successor invocation id")
+        if not service_token or len(service_token) > 1024:
+            self.fail("invalid successor service token")
+        self.service_token = service_token
+
+        self.jwks = LocalJwksAuthority(invocation_id=self.invocation_id)
+        await asyncio.to_thread(self.jwks.start)
+        self.addAsyncCleanup(asyncio.to_thread, self.jwks.close)
+        actor_resolver = create_supabase_actor_resolver(
+            SupabaseHttpRuntimeConfig(
+                allow_disposable_loopback_http=True,
+                audience="authenticated",
+                expected_service_token=self.service_token,
+                issuer=JWKS_ISSUER,
+                jwks_url=JWKS_URL,
+            ),
+            token_clock=lambda: datetime.now(timezone.utc),
+        )
+
+        async def configure_pool_connection(connection: Any) -> None:
+            await connection.set_type_codec(
+                "jsonb",
+                schema="pg_catalog",
+                encoder=json.dumps,
+                decoder=json.loads,
+            )
+
+        self.http_pool = await asyncpg.create_pool(
+            user="governed_memory_api",
+            password="successor_api_disposable_only",
+            database="governed_memory",
+            host=self.host,
+            port=self.port,
+            min_size=1,
+            max_size=1,
+            command_timeout=30,
+            init=configure_pool_connection,
+        )
+        self.addAsyncCleanup(self.http_pool.close)
+
+        app = create_owner_memory_app(
+            actor_resolver=actor_resolver,
+            facade=PostgresOwnerStore(self.http_pool),
+            feature_enabled=True,
+        )
+        configuration = uvicorn.Config(
+            app,
+            host=API_HOST,
+            port=API_PORT,
+            access_log=False,
+            log_config=None,
+            lifespan="off",
+            server_header=False,
+        )
+        self.http_server = uvicorn.Server(configuration)
+        self.http_server.install_signal_handlers = lambda: None
+        self.http_server_task = asyncio.create_task(self.http_server.serve())
+        self.addAsyncCleanup(self._stop_http_server)
+        for _attempt in range(200):
+            if self.http_server.started:
+                break
+            if self.http_server_task.done():
+                await self.http_server_task
+            await asyncio.sleep(0.025)
+        if not self.http_server.started:
+            self.fail("successor HTTP server did not start")
+
+        self.owner_a_token = self.jwks.token(OWNER_A)
+        self.owner_b_token = self.jwks.token(OWNER_B)
+
     async def asyncTearDown(self) -> None:
         for connection in reversed(self.connections):
             await connection.close()
+
+    def _close_relays(self) -> None:
+        for relay in reversed(self.relays):
+            relay.close()
+
+    async def _stop_http_server(self) -> None:
+        self.http_server.should_exit = True
+        await asyncio.wait_for(self.http_server_task, timeout=10)
 
     async def _connect(self, user: str, password: str, database: str) -> Any:
         assert asyncpg is not None
@@ -397,6 +691,79 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.connections.append(connection)
         return connection
+
+    async def http_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        body: Mapping[str, Any] | None = None,
+        raw_body: bytes | None = None,
+        extra_headers: Mapping[str, str] | None = None,
+        include_service_token: bool = True,
+    ) -> tuple[int, dict[str, Any] | list[Any]]:
+        if not path.startswith("/memory/"):
+            self.fail("HTTP test path is outside the closed owner surface")
+        headers = {"Accept": "application/json"}
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        if include_service_token:
+            headers["X-VS-Service-Token"] = self.service_token
+        if extra_headers:
+            headers.update(dict(extra_headers))
+        if body is not None and raw_body is not None:
+            self.fail("HTTP request has two body representations")
+        encoded = raw_body
+        if body is not None:
+            encoded = json.dumps(
+                dict(body),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+        if encoded is not None:
+            headers["Content-Type"] = "application/json"
+
+        def send() -> tuple[int, dict[str, Any] | list[Any]]:
+            request = Request(
+                API_BASE_URL + path,
+                data=encoded,
+                method=method,
+                headers=headers,
+            )
+            try:
+                with urlopen(request, timeout=10) as response:
+                    status = response.status
+                    cache_control = response.headers.get("Cache-Control")
+                    raw = response.read(1_048_577)
+            except HTTPError as error:
+                status = error.code
+                cache_control = error.headers.get("Cache-Control")
+                raw = error.read(1_048_577)
+            if cache_control != "no-store":
+                raise AssertionError("HTTP response is not no-store")
+            if len(raw) > 1_048_576:
+                raise AssertionError("HTTP response exceeded the test bound")
+            value = json.loads(raw, object_pairs_hook=_closed_json_object)
+            if not isinstance(value, (dict, list)):
+                raise AssertionError("HTTP response is not a JSON object or list")
+            return status, value
+
+        return await asyncio.to_thread(send)
+
+    async def assert_http_failure(
+        self,
+        expected_status: int,
+        expected_code: str,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> None:
+        status, value = await self.http_request(method, path, **kwargs)
+        self.assertEqual(status, expected_status)
+        self.assertEqual(value, {"error": {"code": expected_code}})
 
     @asynccontextmanager
     async def owner_context(
@@ -571,7 +938,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(finalized["outcome"], "deleted")
         return receipt
 
-    async def test_real_chat_a_to_chat_b_rebuild_and_deletion(self) -> None:
+    async def test_http_chat_a_to_chat_b_rebuild_and_deletion(self) -> None:
         marker = await self.admin.fetchval(
             "SELECT pg_catalog.shobj_description(oid, 'pg_database') "
             "FROM pg_catalog.pg_database WHERE datname = current_database()"
@@ -649,6 +1016,137 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(asyncpg.InsufficientPrivilegeError):
                     await connection.execute(statement)
 
+        status_code, status_body = await self.http_request(
+            "GET", "/memory/status", token=self.owner_a_token
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_body["active_claims"], 0)
+        self.assertEqual(status_body["pending_proposals"], 0)
+
+        await self.assert_http_failure(
+            401,
+            "memory_authentication_required",
+            "GET",
+            "/memory/status",
+            token=None,
+        )
+        await self.assert_http_failure(
+            401,
+            "memory_authentication_required",
+            "GET",
+            "/memory/status",
+            token=self.owner_a_token,
+            include_service_token=False,
+        )
+        await self.assert_http_failure(
+            401,
+            "memory_authentication_required",
+            "GET",
+            "/memory/status",
+            token=self.owner_a_token,
+            extra_headers={"X-VS-Service-Token": "wrong-disposable-token"},
+        )
+        await self.assert_http_failure(
+            400,
+            "memory_request_invalid",
+            "GET",
+            "/memory/status?owner_user_id=" + str(OWNER_B),
+            token=self.owner_a_token,
+        )
+        await self.assert_http_failure(
+            403,
+            "memory_authorization_denied",
+            "GET",
+            "/memory/status",
+            token=self.owner_a_token,
+            extra_headers={"X-VS-Actor-User-ID": str(OWNER_B)},
+        )
+
+        now = int(time.time())
+        authentication_invalid_tokens = (
+            ("malformed_bearer", "not-a-jwt"),
+            (
+                "expired",
+                self.jwks.token(
+                    OWNER_A,
+                    claims={"iat": now - 300, "exp": now - 1},
+                ),
+            ),
+            ("wrong_audience", self.jwks.token(OWNER_A, claims={"aud": "other"})),
+            (
+                "wrong_issuer",
+                self.jwks.token(
+                    OWNER_A, claims={"iss": "https://wrong.invalid/auth/v1"}
+                ),
+            ),
+            ("unknown_key", self.jwks.token(OWNER_A, key_id="unpublished-key")),
+            (
+                "bad_signature",
+                self.jwks.token(
+                    OWNER_A,
+                    private_key=ec.generate_private_key(ec.SECP256R1()),
+                ),
+            ),
+            (
+                "prohibited_algorithm",
+                self.jwks.token(
+                    OWNER_A,
+                    algorithm="HS256",
+                    private_key=b"successor-test-only-hmac-key-000",
+                ),
+            ),
+            ("invalid_subject_uuid", self.jwks.token(OWNER_A, claims={"sub": "invalid"})),
+            ("invalid_session_uuid", self.jwks.token(OWNER_A, claims={"session_id": "invalid"})),
+            ("missing_required_claim", self.jwks.token(OWNER_A, omit_claims=("session_id",))),
+        )
+        for _case_name, invalid_token in authentication_invalid_tokens:
+            await self.assert_http_failure(
+                401,
+                "memory_authentication_required",
+                "GET",
+                "/memory/status",
+                token=invalid_token,
+            )
+        authorization_denied_tokens = (
+            self.jwks.token(OWNER_A, claims={"is_anonymous": True}),
+            self.jwks.token(OWNER_A, claims={"role": "service_role"}),
+        )
+        for denied_token in authorization_denied_tokens:
+            await self.assert_http_failure(
+                403,
+                "memory_authorization_denied",
+                "GET",
+                "/memory/status",
+                token=denied_token,
+            )
+
+        forged_metadata_token = self.jwks.token(
+            OWNER_A,
+            claims={"user_metadata": {"owner_user_id": str(OWNER_B)}},
+        )
+        forged_status, forged_body = await self.http_request(
+            "GET", "/memory/status", token=forged_metadata_token
+        )
+        self.assertEqual(forged_status, 200)
+        self.assertEqual(forged_body, status_body)
+
+        await self.assert_http_failure(
+            400,
+            "memory_request_invalid",
+            "POST",
+            "/memory/claims/11111111-1111-4111-8111-111111111111/correct",
+            token=self.owner_a_token,
+            body={"owner_user_id": str(OWNER_B)},
+        )
+        await self.assert_http_failure(
+            400,
+            "memory_request_invalid",
+            "POST",
+            "/memory/claims/11111111-1111-4111-8111-111111111111/correct",
+            token=self.owner_a_token,
+            raw_body=b'{"operation_id":"a","operation_id":"b"}',
+        )
+
         async with self.ingest_context(OWNER_A):
             transaction_time = await self.ingest.fetchval(
                 "SELECT pg_catalog.transaction_timestamp()"
@@ -659,7 +1157,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             policy = EligibilityPolicy(ingest_after=transaction_time)
             payload = make_ingest_payload(created_at=source_created_at)
             await self.bridge_admin.execute(
-                "INSERT INTO public.phase2_conversation_message_fixture("
+                "INSERT INTO public.successor_conversation_message_fixture("
                 "owner_user_id,message_id,thread_id,role,content,"
                 "content_sha256,created_at) VALUES("
                 "$1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::text,"
@@ -691,7 +1189,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
 
         bridge_lease = await self.bridge_worker.fetchrow(
             "SELECT * FROM memory_ingest_private.lease_memory_ingest("
-            "'phase2_bridge_worker',1,120)"
+            "'successor_bridge_worker',1,120)"
         )
         transaction_time = await self.bridge_worker.fetchval(
             "SELECT pg_catalog.clock_timestamp()"
@@ -802,7 +1300,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         catalog_sha256 = CANONICAL_PREDICATE_CATALOG_SHA256
         first_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_extraction_jobs("
-            "'phase2_extractor',1,120,$1::text,$2::text,$3::text,$4::text,"
+            "'successor_extractor',1,120,$1::text,$2::text,$3::text,$4::text,"
             "'responses.create'::text,$5::text,4096,30000)",
             "synthetic",
             MODEL,
@@ -838,7 +1336,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         extraction_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_extraction_jobs("
-            "'phase2_extractor',1,120,$1::text,$2::text,$3::text,$4::text,"
+            "'successor_extractor',1,120,$1::text,$2::text,$3::text,$4::text,"
             "'responses.create'::text,$5::text,4096,30000)",
             "synthetic",
             MODEL,
@@ -851,7 +1349,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         source_lookup = lease_inputs["source_lookup"]
         source_record = await self.bridge_worker.fetchrow(
             "SELECT role,content,content_sha256 FROM "
-            "public.phase2_conversation_message_fixture "
+            "public.successor_conversation_message_fixture "
             "WHERE owner_user_id=$1::uuid AND message_id=$2::uuid "
             "AND thread_id=$3::uuid AND content_sha256=$4::text",
             UUID(source_lookup["owner_user_id"]),
@@ -869,7 +1367,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         if context_lookup is not None:
             context_record = await self.bridge_worker.fetchrow(
                 "SELECT role,content,content_sha256 FROM "
-                "public.phase2_conversation_message_fixture "
+                "public.successor_conversation_message_fixture "
                 "WHERE owner_user_id=$1::uuid AND message_id=$2::uuid "
                 "AND role='assistant' AND content_sha256=$3::text",
                 UUID(context_lookup["owner_user_id"]),
@@ -938,19 +1436,15 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(completed_replay["outcome"], "replayed")
         del batch
-        async with self.owner_context(self.api, OWNER_B):
-            self.assertEqual(
-                await self.api.fetch(
-                    "SELECT * FROM memory_private.list_proposals("
-                    "100,NULL::timestamptz,NULL::uuid)"
-                ),
-                [],
-            )
-        async with self.owner_context(self.api, OWNER_A):
-            review_rows = await self.api.fetch(
-                "SELECT * FROM memory_private.list_proposals("
-                "100,NULL::timestamptz,NULL::uuid)"
-            )
+        owner_b_proposals_status, owner_b_proposals = await self.http_request(
+            "GET", "/memory/proposals", token=self.owner_b_token
+        )
+        self.assertEqual(owner_b_proposals_status, 200)
+        self.assertEqual(owner_b_proposals, [])
+        proposals_status, review_rows = await self.http_request(
+            "GET", "/memory/proposals", token=self.owner_a_token
+        )
+        self.assertEqual(proposals_status, 200)
         self.assertEqual(len(review_rows), 1)
         review_surface = dict(review_rows[0])
         self.assertEqual(review_surface["source_excerpt"], SOURCE_TEXT)
@@ -959,40 +1453,141 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(review_surface["object_kind"], "literal")
         self.assertEqual(review_surface["object_literal"], "cobalt")
 
-        async with self.owner_context(self.api, OWNER_B):
-            with self.assertRaises(asyncpg.PostgresError):
-                await self.api.fetchrow(
-                    "SELECT * FROM memory_private.review_proposal("
-                    "$1::uuid,$2::uuid,'admitted'::text,$3::text,$4::text,"
-                    "$5::text,$6::text,$7::text,$8::text[])",
-                    review_surface["operation_id"],
-                    review_surface["proposal_id"],
-                    review_surface["proposal_sha256"],
-                    review_surface["source_sha256"],
-                    review_surface["selected_sha256"],
-                    review_surface["selection_binding_sha256"],
-                    review_surface["predicate_catalog_sha256"],
-                    ["explicit_owner_review"],
-                )
-        async with self.owner_context(self.api, OWNER_A):
-            review = await self.api.fetchrow(
-                "SELECT * FROM memory_private.review_proposal("
-                "$1::uuid,$2::uuid,'admitted'::text,$3::text,$4::text,"
-                "$5::text,$6::text,$7::text,$8::text[])",
-                review_surface["operation_id"],
-                review_surface["proposal_id"],
-                review_surface["proposal_sha256"],
-                review_surface["source_sha256"],
-                review_surface["selected_sha256"],
-                review_surface["selection_binding_sha256"],
-                review_surface["predicate_catalog_sha256"],
-                ["explicit_owner_review"],
-            )
+        review_body = {
+            "decision": "admit",
+            "expected_predicate_catalog_sha256": review_surface[
+                "predicate_catalog_sha256"
+            ],
+            "expected_proposal_sha256": review_surface["proposal_sha256"],
+            "expected_selected_sha256": review_surface["selected_sha256"],
+            "expected_selection_binding_sha256": review_surface[
+                "selection_binding_sha256"
+            ],
+            "expected_source_sha256": review_surface["source_sha256"],
+            "operation_id": review_surface["operation_id"],
+            "reason_codes": ["explicit_owner_review"],
+        }
+        proposal_path = f"/memory/proposals/{review_surface['proposal_id']}/review"
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "POST",
+            proposal_path,
+            token=self.owner_b_token,
+            body=review_body,
+        )
+        review_status, review = await self.http_request(
+            "POST",
+            proposal_path,
+            token=self.owner_a_token,
+            body=review_body,
+        )
+        self.assertEqual(review_status, 200)
         self.assertEqual(review["outcome"], "admitted")
-        claim_id = review["claim_id"]
+        claim_id = UUID(review["claim_id"])
+        claim_status, claim_surface = await self.http_request(
+            "GET", f"/memory/claims/{claim_id}", token=self.owner_a_token
+        )
+        self.assertEqual(claim_status, 200)
+        self.assertEqual(claim_surface["claim_id"], str(claim_id))
+        owner_a_claims_status, owner_a_claims = await self.http_request(
+            "GET", "/memory/claims", token=self.owner_a_token
+        )
+        self.assertEqual(owner_a_claims_status, 200)
+        self.assertEqual(
+            [row["claim_id"] for row in owner_a_claims], [str(claim_id)]
+        )
+        owner_b_claims_status, owner_b_claims = await self.http_request(
+            "GET", "/memory/claims", token=self.owner_b_token
+        )
+        self.assertEqual(owner_b_claims_status, 200)
+        self.assertEqual(owner_b_claims, [])
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "GET",
+            f"/memory/claims/{claim_id}",
+            token=self.owner_b_token,
+        )
         claims = await self.read_claims(OWNER_A, [claim_id])
         self.assertEqual(len(claims), 1)
         self.assertEqual(await self.read_claims(OWNER_B, [claim_id]), [])
+        owner_b_correction_body = {
+            "expected_predicate_catalog_sha256": claim_surface[
+                "predicate_catalog_sha256"
+            ],
+            "expected_revision_sha256": claim_surface["revision_sha256"],
+            "expected_state_sha256": claim_surface["current_state_sha256"],
+            "operation_id": str(OWNER_B_CORRECTION_OPERATION_ID),
+            "replacement": {
+                "epistemic_state": "supported",
+                "object_display_name": None,
+                "object_entity_type": None,
+                "object_kind": "literal",
+                "object_literal": "owner-b-must-not-change-owner-a",
+                "sensitivity": "ordinary",
+            },
+        }
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "POST",
+            f"/memory/claims/{claim_id}/correct",
+            token=self.owner_b_token,
+            body=owner_b_correction_body,
+        )
+        owner_b_retraction_body = {
+            "expected_revision_sha256": claim_surface["revision_sha256"],
+            "expected_state_sha256": claim_surface["current_state_sha256"],
+            "operation_id": str(OWNER_B_RETRACTION_OPERATION_ID),
+        }
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "POST",
+            f"/memory/claims/{claim_id}/retract",
+            token=self.owner_b_token,
+            body=owner_b_retraction_body,
+        )
+        owner_b_deletion_body = {
+            "expected_revision_sha256": claim_surface["revision_sha256"],
+            "expected_state_sha256": claim_surface["current_state_sha256"],
+            "operation_id": str(OWNER_B_DELETION_OPERATION_ID),
+        }
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "DELETE",
+            f"/memory/claims/{claim_id}",
+            token=self.owner_b_token,
+            body=owner_b_deletion_body,
+        )
+        status_code, status_body = await self.http_request(
+            "GET", "/memory/status", token=self.owner_a_token
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_body["active_claims"], 1)
+        owner_b_status_code, owner_b_status = await self.http_request(
+            "GET", "/memory/status", token=self.owner_b_token
+        )
+        self.assertEqual(owner_b_status_code, 200)
+        self.assertEqual(owner_b_status["active_claims"], 0)
+        operation_status, operation_surface = await self.http_request(
+            "GET",
+            f"/memory/operations/{review_surface['operation_id']}",
+            token=self.owner_a_token,
+        )
+        self.assertEqual(operation_status, 200)
+        self.assertEqual(
+            operation_surface["operation_id"], review_surface["operation_id"]
+        )
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "GET",
+            f"/memory/operations/{review_surface['operation_id']}",
+            token=self.owner_b_token,
+        )
 
         await self.admin.execute("GRANT SELECT ON memory.claim TO governed_memory_api")
         try:
@@ -1011,7 +1606,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.qdrant.create_alias(ALIAS, PHYSICAL_A)
         projection_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'phase2_projector',1,120)"
+            "'successor_projector',1,120)"
         )
         point = build_projection_point(
             claims[0], self.projection_outbox(projection_lease), deterministic_vector()
@@ -1177,17 +1772,19 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             "object_literal": "amber",
             "sensitivity": "ordinary",
         }
-        async with self.owner_context(self.api, OWNER_A):
-            correction = await self.api.fetchrow(
-                "SELECT * FROM memory_private.correct_claim("
-                "$1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::jsonb)",
-                CORRECTION_OPERATION_ID,
-                claim_id,
-                claims[0]["revision_sha256"],
-                claims[0]["state_sha256"],
-                catalog_sha256,
-                replacement,
-            )
+        correction_status, correction = await self.http_request(
+            "POST",
+            f"/memory/claims/{claim_id}/correct",
+            token=self.owner_a_token,
+            body={
+                "expected_predicate_catalog_sha256": catalog_sha256,
+                "expected_revision_sha256": claims[0]["revision_sha256"],
+                "expected_state_sha256": claims[0]["state_sha256"],
+                "operation_id": str(CORRECTION_OPERATION_ID),
+                "replacement": replacement,
+            },
+        )
+        self.assertEqual(correction_status, 200)
         self.assertEqual(correction["outcome"], "correction_pending")
         stale_results = self.qdrant.search(ALIAS, OWNER_A, list(point["vector"]))
         self.assertEqual(len(stale_results), 1)
@@ -1205,39 +1802,50 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         correction_delete_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'phase2_projector',1,120)"
+            "'successor_projector',1,120)"
         )
         await self.finish_delete(
             correction_delete_lease, physical=PHYSICAL_A, finalize=False
         )
-        async with self.owner_context(self.api, OWNER_A):
-            proposals = await self.api.fetch(
-                "SELECT * FROM memory_private.list_proposals("
-                "100,NULL::timestamptz,NULL::uuid)"
-            )
-        correction_proposal = next(
-            row for row in proposals if row["proposal_id"] == correction["proposal_id"]
+        proposals_status, proposals = await self.http_request(
+            "GET", "/memory/proposals", token=self.owner_a_token
         )
-        async with self.owner_context(self.api, OWNER_A):
-            corrected_review = await self.api.fetchrow(
-                "SELECT * FROM memory_private.review_proposal("
-                "$1::uuid,$2::uuid,'admitted'::text,$3::text,$4::text,"
-                "$5::text,$6::text,$7::text,$8::text[])",
-                correction["review_operation_id"],
-                correction["proposal_id"],
-                correction_proposal["proposal_sha256"],
-                correction_proposal["source_sha256"],
-                correction_proposal["selected_sha256"],
-                correction_proposal["selection_binding_sha256"],
-                correction_proposal["predicate_catalog_sha256"],
-                ["explicit_owner_review"],
-            )
+        self.assertEqual(proposals_status, 200)
+        correction_proposal = next(
+            row
+            for row in proposals
+            if row["proposal_id"] == correction["proposal_id"]
+        )
+        corrected_review_status, corrected_review = await self.http_request(
+            "POST",
+            f"/memory/proposals/{correction['proposal_id']}/review",
+            token=self.owner_a_token,
+            body={
+                "decision": "admit",
+                "expected_predicate_catalog_sha256": correction_proposal[
+                    "predicate_catalog_sha256"
+                ],
+                "expected_proposal_sha256": correction_proposal[
+                    "proposal_sha256"
+                ],
+                "expected_selected_sha256": correction_proposal[
+                    "selected_sha256"
+                ],
+                "expected_selection_binding_sha256": correction_proposal[
+                    "selection_binding_sha256"
+                ],
+                "expected_source_sha256": correction_proposal["source_sha256"],
+                "operation_id": correction["review_operation_id"],
+                "reason_codes": ["explicit_owner_review"],
+            },
+        )
+        self.assertEqual(corrected_review_status, 200)
         self.assertEqual(corrected_review["outcome"], "admitted")
         corrected_claim = (await self.read_claims(OWNER_A, [claim_id]))[0]
         self.assertEqual(corrected_claim["revision_number"], 2)
         corrected_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'phase2_projector',1,120)"
+            "'successor_projector',1,120)"
         )
         corrected_point = build_projection_point(
             corrected_claim,
@@ -1275,7 +1883,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         point_a = self.qdrant.retrieve(PHYSICAL_A, claim_id)[0]
         point_b = self.qdrant.retrieve(PHYSICAL_B, claim_id)[0]
         rebuild_manifest_a = canonical_sha256(
-            "governed_memory.phase2_rebuild_point",
+            "governed_memory.successor_rebuild_point",
             {
                 "point_id": str(point_a["id"]),
                 "vector_sha256": vector_sha256(point_a["vector"]),
@@ -1283,7 +1891,7 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         rebuild_manifest_b = canonical_sha256(
-            "governed_memory.phase2_rebuild_point",
+            "governed_memory.successor_rebuild_point",
             {
                 "point_id": str(point_b["id"]),
                 "vector_sha256": vector_sha256(point_b["vector"]),
@@ -1311,25 +1919,28 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(
             canonical_sha256(
-                "governed_memory.phase2_candidates", candidate_manifest_a
+                "governed_memory.successor_candidates", candidate_manifest_a
             ),
             canonical_sha256(
-                "governed_memory.phase2_candidates", candidate_manifest_b
+                "governed_memory.successor_candidates", candidate_manifest_b
             ),
         )
         self.qdrant.swap_alias(ALIAS, PHYSICAL_A, PHYSICAL_B)
         self.assertEqual(self.qdrant.aliases().get(ALIAS), PHYSICAL_B)
         corrected_claim = (await self.read_claims(OWNER_A, [claim_id]))[0]
 
-        async with self.owner_context(self.api, OWNER_A):
-            retracted = await self.api.fetchrow(
-                "SELECT * FROM memory_private.retract_claim("
-                "$1::uuid,$2::uuid,$3::text,$4::text)",
-                RETRACTION_OPERATION_ID,
-                claim_id,
-                corrected_claim["revision_sha256"],
-                corrected_claim["state_sha256"],
-            )
+        retraction_body = {
+            "expected_revision_sha256": corrected_claim["revision_sha256"],
+            "expected_state_sha256": corrected_claim["state_sha256"],
+            "operation_id": str(RETRACTION_OPERATION_ID),
+        }
+        retraction_status, retracted = await self.http_request(
+            "POST",
+            f"/memory/claims/{claim_id}/retract",
+            token=self.owner_a_token,
+            body=retraction_body,
+        )
+        self.assertEqual(retraction_status, 200)
         self.assertEqual(retracted["outcome"], "retracted")
         stale_after_retraction = self.qdrant.search(
             ALIAS, OWNER_A, list(rebuilt_point["vector"])
@@ -1338,25 +1949,28 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.read_claims(OWNER_A, [claim_id]), [])
         retraction_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'phase2_projector',1,120)"
+            "'successor_projector',1,120)"
         )
         await self.finish_delete(retraction_lease, physical=PHYSICAL_B, finalize=False)
 
         retracted_state = (await self.list_claims(OWNER_A))[0]
-        async with self.owner_context(self.api, OWNER_A):
-            deletion = await self.api.fetchrow(
-                "SELECT * FROM memory_private.request_claim_deletion("
-                "$1::uuid,$2::uuid,$3::text,$4::text)",
-                DELETION_OPERATION_ID,
-                claim_id,
-                retracted_state["revision_sha256"],
-                retracted_state["current_state_sha256"],
-            )
+        deletion_body = {
+            "expected_revision_sha256": retracted_state["revision_sha256"],
+            "expected_state_sha256": retracted_state["current_state_sha256"],
+            "operation_id": str(DELETION_OPERATION_ID),
+        }
+        deletion_status, deletion = await self.http_request(
+            "DELETE",
+            f"/memory/claims/{claim_id}",
+            token=self.owner_a_token,
+            body=deletion_body,
+        )
+        self.assertEqual(deletion_status, 200)
         self.assertEqual(deletion["outcome"], "deletion_pending")
         deletion_state = (await self.list_claims(OWNER_A))[0]
         deletion_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'phase2_projector',1,120)"
+            "'successor_projector',1,120)"
         )
         deletion_receipt = await self.finish_delete(
             deletion_lease,
@@ -1409,20 +2023,79 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await self.list_claims(OWNER_A), [])
         self.assertEqual(await self.read_claims(OWNER_A, [claim_id]), [])
-        async with self.owner_context(self.api, OWNER_A):
-            deletion_replay = await self.api.fetchrow(
-                "SELECT * FROM memory_private.request_claim_deletion("
-                "$1::uuid,$2::uuid,$3::text,$4::text)",
-                DELETION_OPERATION_ID,
-                claim_id,
-                retracted_state["revision_sha256"],
-                retracted_state["current_state_sha256"],
-            )
+        await self.assert_http_failure(
+            404,
+            "memory_resource_not_found",
+            "GET",
+            f"/memory/claims/{claim_id}",
+            token=self.owner_a_token,
+        )
+        deletion_replay_status, deletion_replay = await self.http_request(
+            "DELETE",
+            f"/memory/claims/{claim_id}",
+            token=self.owner_a_token,
+            body=deletion_body,
+        )
+        self.assertEqual(deletion_replay_status, 200)
         self.assertEqual(deletion_replay["outcome"], "replayed")
         self.assertFalse(self.qdrant.retrieve(ALIAS, claim_id))
+        self.assertGreaterEqual(self.jwks.fetch_count, 1)
+
+        auth_negative_matrix_sha256 = canonical_sha256(
+            "governed_memory.successor_http_auth_negative_matrix",
+            (
+                "anonymous",
+                "bad_service_token",
+                "bad_signature",
+                "explicit_actor_header",
+                "expired",
+                "forged_user_metadata_ignored",
+                "invalid_session_uuid",
+                "invalid_subject_uuid",
+                "malformed_bearer",
+                "missing_bearer",
+                "missing_required_claim",
+                "missing_service_token",
+                "prohibited_algorithm",
+                "prohibited_owner_body",
+                "prohibited_owner_query",
+                "role_denied",
+                "unknown_key",
+                "wrong_audience",
+                "wrong_issuer",
+            ),
+        )
+        http_lifecycle_sha256 = canonical_sha256(
+            "governed_memory.successor_http_lifecycle",
+            {
+                "claim_id": claim_id,
+                "correction_outcome": correction["outcome"],
+                "corrected_review_outcome": corrected_review["outcome"],
+                "delete_outcome": deletion["outcome"],
+                "delete_replay_outcome": deletion_replay["outcome"],
+                "initial_review_outcome": review["outcome"],
+                "retraction_outcome": retracted["outcome"],
+            },
+        )
+        owner_isolation_sha256 = canonical_sha256(
+            "governed_memory.successor_http_owner_isolation",
+            {
+                "owner_b_claim_hidden": True,
+                "owner_b_claim_list_empty": True,
+                "owner_b_correction_denied": True,
+                "owner_b_deletion_denied": True,
+                "owner_b_operation_hidden": True,
+                "owner_b_proposals_empty": True,
+                "owner_b_retraction_denied": True,
+                "owner_b_review_denied": True,
+                "rls_direct_table_isolation": True,
+                "vector_owner_filter": True,
+            },
+        )
 
         receipt = {
-            "schema": "governed-memory-phase2-integration-receipt-v1",
+            "schema": "governed-memory-successor-http-integration-receipt-v1",
+            "auth_negative_matrix_sha256": auth_negative_matrix_sha256,
             "claim_id": str(claim_id),
             "initial_revision_id": str(claims[0]["revision_id"]),
             "corrected_revision_id": str(corrected_claim["revision_id"]),
@@ -1430,14 +2103,29 @@ class Phase2VerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             "chat_b_thread_id": str(THREAD_B),
             "cold_extraction_lease": True,
             "cold_projection_rebuild": True,
+            "http_lifecycle_sha256": http_lifecycle_sha256,
+            "http_owner_lifecycle": True,
+            "jwks_fetch_count": self.jwks.fetch_count,
+            "jwks_manifest_sha256": canonical_sha256(
+                "governed_memory.successor_disposable_jwks", self.jwks.document
+            ),
+            "owner_isolation_sha256": owner_isolation_sha256,
             "rebuild_manifest_sha256": rebuild_manifest_b,
             "review_surface_sha256": canonical_sha256(
-                "governed_memory.phase2_review_surface",
+                "governed_memory.successor_review_surface",
                 _jsonable(review_surface),
             ),
             "answer_binding_sha256": binding["binding_sha256"],
             "deletion_receipt_sha256": deletion_receipt["receipt_sha256"],
             "provider_external_calls": 0,
             "production_data_read": False,
+            "production_endpoint_calls": 0,
+            "production_service_invoked": False,
+            "route_manifest_sha256": route_manifest_sha256(),
+            "semantic_threshold_calibrated": False,
+            "synthetic_jwt_only": True,
         }
-        print("PHASE2_VERTICAL_SLICE_RECEIPT=" + json.dumps(receipt, sort_keys=True))
+        print(
+            "SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT="
+            + json.dumps(receipt, sort_keys=True)
+        )
