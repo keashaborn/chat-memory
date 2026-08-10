@@ -1,5 +1,6 @@
 # Candidate template only. It is not installed, enabled, started, or activated.
-# There is intentionally no install section and no worker unit.
+# There is intentionally no install section. The worker template is separate
+# and equally dormant; neither template is installed or enabled.
 [Unit]
 Description=Governed Memory clean successor HTTP candidate
 After=network-online.target

@@ -7,14 +7,18 @@ from .application import (
     create_runtime_application,
 )
 from .live_supabase import (
-    LiveSupabaseUserConfig,
+    LiveSupabaseAuthorityConfig,
+    LiveSupabaseAuthorityVerifier,
+    LiveSupabaseSessionVerifier,
     LiveSupabaseUserVerifier,
 )
 
 __all__ = [
     "API_BIND_HOST",
     "API_BIND_PORT",
-    "LiveSupabaseUserConfig",
+    "LiveSupabaseAuthorityConfig",
+    "LiveSupabaseAuthorityVerifier",
+    "LiveSupabaseSessionVerifier",
     "LiveSupabaseUserVerifier",
     "SUPABASE_API_KEY_ENV",
     "create_runtime_application",

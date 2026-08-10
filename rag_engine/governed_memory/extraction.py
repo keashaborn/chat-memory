@@ -867,7 +867,10 @@ def build_provider_request(
         "bounded_context": transient_context,
         "predicate_catalog": catalog.external_material(),
         "result_contract": {
-            "top_level_keys": ["facts", "schema", "usage"],
+            # Provider-visible output contains only model-produced material.
+            # Trusted API usage metadata is added by the adapter after the
+            # response is received and before validate_provider_result().
+            "top_level_keys": ["facts", "schema"],
             "fact_keys": [
                 "epistemic_status",
                 "object",
@@ -886,7 +889,6 @@ def build_provider_request(
             },
             "minimum_facts": 0,
             "maximum_facts": 8,
-            "usage_keys": ["input_tokens", "output_tokens"],
         },
     }
     external_payload_sha256 = canonical_sha256(
@@ -1002,7 +1004,7 @@ def _validated_request(request: Mapping[str, Any]) -> ProviderRequestBinding:
         if external[key] != row[key]:
             raise ContractViolation("external_payload_binding_mismatch")
     expected_result_contract = {
-        "top_level_keys": ["facts", "schema", "usage"],
+        "top_level_keys": ["facts", "schema"],
         "fact_keys": [
             "epistemic_status",
             "object",
@@ -1021,7 +1023,6 @@ def _validated_request(request: Mapping[str, Any]) -> ProviderRequestBinding:
         },
         "minimum_facts": 0,
         "maximum_facts": 8,
-        "usage_keys": ["input_tokens", "output_tokens"],
     }
     if external["result_contract"] != expected_result_contract:
         raise ContractViolation("external_result_contract_mismatch")
@@ -1098,6 +1099,14 @@ def _validated_request(request: Mapping[str, Any]) -> ProviderRequestBinding:
     if binding.selection_binding_sha256 != expected_selection:
         raise ContractViolation("provider_request_selection_binding_mismatch")
     return binding
+
+
+def validate_provider_request_binding(
+    request: Mapping[str, Any],
+) -> ProviderRequestBinding:
+    """Public fail-closed validation boundary for runtime provider adapters."""
+
+    return _validated_request(request)
 
 
 COMPLETE_EXTRACTION_ITEM_FIELDS = (
@@ -2029,5 +2038,6 @@ __all__ = [
     "recompute_extraction_proposal_sha256",
     "recompute_proposal_sha256",
     "validate_provider_result",
+    "validate_provider_request_binding",
     "validate_proposal_item",
 ]

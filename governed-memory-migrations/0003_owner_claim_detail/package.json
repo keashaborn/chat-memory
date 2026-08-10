@@ -1,0 +1,54 @@
+{
+  "schema_version": "governed-memory-migration-package-v2",
+  "migration_id": "governed_memory_owner_claim_detail_0003",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "target": {
+    "server": "seebx",
+    "database": "governed_memory",
+    "execution_role": "governed_memory_owner"
+  },
+  "dependencies": [
+    "roles_preflight.pgsql",
+    "governed_memory_foundation_0001"
+  ],
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true,
+    "runner_supplies_timeouts": true,
+    "runner_supplies_advisory_lock": true
+  },
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "86bd3ca3452a2a6655d4218aec4098ac1dbabd2816e64536d6613b684be9b668"
+  },
+  "rollback": {
+    "path": "rollback.pgsql",
+    "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68",
+    "empty_only": false,
+    "data_mutation": false
+  },
+  "data_policy": {
+    "owner_rows_read_by_migration": false,
+    "owner_rows_mutated_by_migration": false,
+    "owner_rows_deleted_by_rollback": false,
+    "historical_backfill": false
+  },
+  "object_contract": {
+    "schema": "memory_private",
+    "function": "memory_private.read_claim(uuid)",
+    "runtime_role": "governed_memory_api",
+    "security_definer": true,
+    "search_path": "pg_catalog",
+    "owner_context_required": true,
+    "list_claims_content_free": true,
+    "detail_literal_max_utf8_bytes": 2000,
+    "direct_runtime_table_access": false,
+    "cascade_ddl": false
+  },
+  "activation": {
+    "production_authorized": false,
+    "production_services_changed": false,
+    "production_database_applied": false,
+    "disposable_database_validated": true
+  }
+}

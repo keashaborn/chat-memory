@@ -93,6 +93,7 @@ def make_worker_actor(*, owner_user_id: UUID = OWNER_A) -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=owner_user_id,
         actor_id=WORKER_A,
+        session_id=owner_user_id,
         role=ActorRole.WORKER,
         scopes=(ActorScope.PROCESS_MEMORY_INGEST,),
         authentication_manifest_sha256="a" * 64,

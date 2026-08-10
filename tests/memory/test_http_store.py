@@ -29,6 +29,7 @@ def actor(scope: ActorScope) -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER_A,
         actor_id=OWNER_A,
+        session_id=OWNER_A,
         role=ActorRole.OWNER,
         scopes=(scope,),
         authentication_manifest_sha256=AUTH_SHA256,
@@ -113,6 +114,23 @@ class _Connection:
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
         self.fetch_calls.append((query, args))
+        if "read_claim" in query:
+            if args != (CLAIM_A,):
+                return []
+            return [
+                {
+                    "claim_id": CLAIM_A,
+                    "lifecycle_state": "active",
+                    "revision_sha256": "c" * 64,
+                    "subject_entity_type": "self",
+                    "subject_entity_key": "self",
+                    "subject_display_name": None,
+                    "object_entity_type": None,
+                    "object_entity_key": None,
+                    "object_display_name": None,
+                    "object_literal": "synthetic literal",
+                }
+            ]
         if "list_claims" in query:
             if args[0] not in (None, CLAIM_A):
                 return []
@@ -242,6 +260,12 @@ class PostgresOwnerStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("memory_private.list_claims", first_query)
         self.assertEqual(first_args, (None, 100))
         self.assertNotIn(str(OWNER_A), first_args)
+        detail_query, detail_args = self.connection.fetch_calls[1]
+        self.assertIn("memory_private.read_claim", detail_query)
+        self.assertNotIn("list_claims", detail_query)
+        self.assertEqual(detail_args, (CLAIM_A,))
+        self.assertNotIn(OWNER_A, detail_args)
+        self.assertEqual(claim["object_literal"], "synthetic literal")
 
     async def test_review_uses_exact_static_procedure_and_no_owner_argument(self) -> None:
         body = {

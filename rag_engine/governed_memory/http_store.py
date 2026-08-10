@@ -26,6 +26,7 @@ _LIST_CLAIMS_SQL = (
     "SELECT * FROM memory_private.list_claims("
     "$1::uuid,$2::integer,NULL::timestamptz,NULL::uuid)"
 )
+_READ_CLAIM_SQL = "SELECT * FROM memory_private.read_claim($1::uuid)"
 _LIST_PROPOSALS_SQL = (
     "SELECT * FROM memory_private.list_proposals("
     "$1::integer,NULL::timestamptz,NULL::uuid)"
@@ -194,7 +195,7 @@ class PostgresOwnerStore:
     ) -> dict[str, Any] | None:
         claim = require_uuid(claim_id, "invalid_claim_id")
         async with self._owner_transaction(actor, ActorScope.READ_CLAIMS) as connection:
-            rows = await connection.fetch(_LIST_CLAIMS_SQL, claim, 1)
+            rows = await connection.fetch(_READ_CLAIM_SQL, claim)
         normalized = self._rows(rows)
         if len(normalized) > 1:
             raise OwnerStoreError("database_claim_cardinality_violation")

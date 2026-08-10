@@ -30,6 +30,7 @@ def actor(*, owner=OWNER_A, actor_id=OWNER_A, scopes=(ActorScope.REVIEW_PROPOSAL
     return VerifiedActor(
         owner_user_id=owner,
         actor_id=actor_id,
+        session_id=owner,
         role=ActorRole.OWNER,
         scopes=scopes,
         authentication_manifest_sha256="a" * 64,

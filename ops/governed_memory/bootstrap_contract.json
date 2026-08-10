@@ -58,10 +58,12 @@
   },
   "qdrant": {
     "authority": "derived_only",
-    "image_scope": "disposable_validation_only",
-    "image": "qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170",
+    "image_scope": "pinned_disposable_candidate_real_compatibility_verified",
+    "image": "qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc",
     "persistent_pilot_image": null,
-    "persistent_pilot_digest_status": "blocked_pending_current_security_review_and_compatibility_validation",
+    "persistent_pilot_digest_status": "v1_19_0_digest_pinned_disposable_verified_persistent_pilot_unapproved",
+    "real_disposable_compatibility_verified": true,
+    "persistent_pilot_approved": false,
     "container": "governed-memory-qdrant-9a54cf123493-000001",
     "volume": "governed-memory-qdrant-data-9a54cf123493-000001",
     "host_bind": "127.0.0.1:6343",
@@ -71,6 +73,14 @@
     "vectors": {
       "size": 3072,
       "distance": "Dot"
+    },
+    "required_payload_indexes": {
+      "is_current": "bool",
+      "lifecycle_state": "keyword",
+      "owner_user_id": "keyword",
+      "predicate": "keyword",
+      "projectable": "bool",
+      "requires_explicit": "bool"
     },
     "existing_target_action": "refuse",
     "snapshot_restore_allowed": false,
@@ -102,6 +112,20 @@
     "import_legacy_rows": false,
     "import_legacy_vectors": false
   },
+  "candidate_implementation_status": {
+    "session_id_required": true,
+    "supabase_auth_sessions_rpc": "staged_candidate_not_installed_or_live_verified",
+    "owner_claim_fact_detail": "implemented_candidate_disposable_proof_passed_not_production_applied",
+    "provider_adapter": "strict_fake_tested_zero_real_calls",
+    "embedding_adapter": "strict_3072_fake_tested_zero_real_calls",
+    "qdrant_adapter": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
+    "pilot_marker": "implemented_disposable_proof_passed_not_production_applied",
+    "worker_algorithm": "implemented_fake_tested",
+    "worker_runtime_composition": "blocked_cli_repository_transport_config_unwired",
+    "worker_cross_process_singleton": "not_implemented_activation_blocker",
+    "calibration": "independently_bound_unapproved_retrieval_off",
+    "frontend_candidate": "35a684_built_undeployed_visual_qa_pending"
+  },
   "create_policy": {
     "operation": "create_exact_absent_targets_only",
     "current_create_authorized": false,
@@ -110,17 +134,19 @@
     "requires_all_activation_blockers_closed": true,
     "credentials_in_repository": false,
     "activation_marker_in_repository": false,
-    "unresolved_activation_blockers": [
-      "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
-      "owner_claim_fact_detail_api_not_implemented"
+      "unresolved_activation_blockers": [
+      "production_activation_not_authorized",
+      "supabase_auth_sessions_rpc_not_installed_or_live_verified",
+      "worker_cli_repository_transport_config_unwired",
+      "worker_cross_process_singleton_not_implemented",
+      "calibration_artifact_unapproved_retrieval_off",
+      "frontend_candidate_35a684_undeployed_visual_qa_pending"
     ]
   },
   "cleanup_policy": {
     "operation": "delete_exact_empty_candidate_targets_only",
     "current_cleanup_authorized": false,
-    "unresolved_activation_blockers": [
-      "durable_pilot_ever_started_marker_not_implemented"
-    ],
+    "unresolved_activation_blockers": [],
     "requires_external_scoped_cleanup_authorization": true,
     "requires_pilot_ever_started_false": true,
     "requires_postgresql_user_row_count": 0,

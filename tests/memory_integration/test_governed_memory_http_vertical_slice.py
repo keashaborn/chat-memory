@@ -78,6 +78,12 @@ from rag_engine.governed_memory.retrieval import (
     revalidate_candidates,
     validate_vector_candidates,
 )
+from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
+from rag_engine.governed_memory.runtime.qdrant_adapter import (
+    ExactQdrantAdapter,
+    QDRANT_PHYSICAL_COLLECTION,
+    QDRANT_REQUIRED_PAYLOAD_INDEXES,
+)
 from rag_engine.governed_memory.worker import process_ingest_item
 from tests.memory._fixtures import (
     MESSAGE_A,
@@ -125,7 +131,7 @@ THREAD_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")
 OWNER_B_CLAIM_ID = UUID("22222222-2222-4222-8222-222222222226")
 OWNER_B_REVISION_ID = UUID("22222222-2222-4222-8222-222222222227")
 ALIAS = "governed_memory_active"
-PHYSICAL_A = "governed_memory_successor_a_019fe927"
+PHYSICAL_A = QDRANT_PHYSICAL_COLLECTION
 PHYSICAL_B = "governed_memory_successor_b_019fe927"
 INDEX_FIELDS = {
     "owner_user_id": "keyword",
@@ -512,6 +518,20 @@ class QdrantRest:
         for name in (PHYSICAL_A, PHYSICAL_B):
             if self.collection_exists(name):
                 self.request("DELETE", f"/collections/{name}?timeout=10")
+
+
+class AsyncQdrantRestTransport:
+    def __init__(self, client: QdrantRest) -> None:
+        self._client = client
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, object] | None = None,
+    ) -> Mapping[str, Any]:
+        _, payload = self._client.request(method, path, body)
+        return payload
 
 
 @unittest.skipUnless(
@@ -956,7 +976,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 "JOIN pg_catalog.pg_namespace AS n ON n.oid=c.relnamespace "
                 "WHERE n.nspname='memory' AND c.relkind='r'"
             ),
-            13,
+            14,
         )
         self.assertEqual(
             await self.admin.fetchval(
@@ -965,7 +985,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 "WHERE n.nspname='memory' AND c.relkind='r' "
                 "AND c.relrowsecurity AND c.relforcerowsecurity"
             ),
-            12,
+            13,
         )
         lease_result = await self.admin.fetchval(
             "SELECT pg_catalog.pg_get_function_result(p.oid) "
@@ -994,7 +1014,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 (table, policy)
                 for table in OWNER_TABLES
                 for policy in ("owner_internal", "owner_isolation")
-            },
+            }
+            | {("pilot_marker", "pilot_marker_owner_only")},
         )
         for row in policies:
             if row["policyname"] == "owner_isolation":
@@ -1270,6 +1291,7 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         actor = VerifiedActor(
             owner_user_id=OWNER_A,
             actor_id=UUID("33333333-3333-4333-8333-333333333333"),
+            session_id=UUID("34444444-4444-4444-8444-444444444444"),
             role=ActorRole.WORKER,
             scopes=(ActorScope.PROCESS_MEMORY_INGEST,),
             authentication_manifest_sha256=AUTH_CONTEXT_SHA256,
@@ -1667,6 +1689,15 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
 
         self.qdrant.create_collection(PHYSICAL_A)
         self.qdrant.create_alias(ALIAS, PHYSICAL_A)
+        exact_qdrant = ExactQdrantAdapter(AsyncQdrantRestTransport(self.qdrant))
+        preflight = await exact_qdrant.preflight()
+        self.assertEqual(preflight.physical_collection, PHYSICAL_A)
+        self.assertEqual(preflight.vector_size, 3072)
+        self.assertEqual(preflight.distance, "Dot")
+        self.assertEqual(
+            dict(preflight.payload_indexes),
+            dict(QDRANT_REQUIRED_PAYLOAD_INDEXES),
+        )
         projection_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
             "'successor_projector',1,120)"
@@ -1674,7 +1705,9 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         point = build_projection_point(
             claims[0], self.projection_outbox(projection_lease), deterministic_vector()
         )
-        self.qdrant.upsert(PHYSICAL_A, point)
+        upsert_receipt = await exact_qdrant.upsert_projection_point(point)
+        self.assertEqual(upsert_receipt.physical_collection, PHYSICAL_A)
+        self.assertFalse(upsert_receipt.resolved_by_readback)
         stored = self.qdrant.retrieve(PHYSICAL_A, claim_id)
         self.assertEqual(len(stored), 1)
         self.assertEqual(tuple(sorted(stored[0]["payload"])), QDRANT_PAYLOAD_FIELDS)
@@ -1695,6 +1728,29 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             deterministic_vector(),
         )
         self.qdrant.upsert(PHYSICAL_A, owner_b_point)
+        calibration = CalibrationDecision(
+            artifact_sha256="a" * 64,
+            reason_code="disposable_compatibility_proof_only",
+            retrieval_enabled=True,
+            threshold_micros=0,
+        )
+        adapter_results = list(
+            await exact_qdrant.search_owner_candidates(
+                owner_user_id=OWNER_A,
+                query_vector=point["vector"],
+                allowed_predicates=("preference.personal",),
+                limit=8,
+                calibration=calibration,
+            )
+        )
+        self.assertEqual(
+            tuple(sorted(adapter_results[0])),
+            CANDIDATE_FIELDS,
+        )
+        self.assertEqual(
+            [item["claim_id"] for item in adapter_results],
+            [str(claim_id)],
+        )
         owner_a_results = self.qdrant.search(ALIAS, OWNER_A, list(point["vector"]))
         self.assertEqual([item["id"] for item in owner_a_results], [str(claim_id)])
         owner_b_result = self.qdrant.search(ALIAS, OWNER_B, list(point["vector"]))[0]

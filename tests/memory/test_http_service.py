@@ -255,6 +255,7 @@ class RecordingActorResolverFactory:
             return VerifiedActor(
                 owner_user_id=OWNER,
                 actor_id=OWNER,
+                session_id=OWNER,
                 role=ActorRole.OWNER,
                 scopes=scopes,
                 authentication_manifest_sha256=HASH,
@@ -264,7 +265,7 @@ class RecordingActorResolverFactory:
         return resolve
 
 
-class RecordingFreshnessVerifier:
+class RecordingAuthorityVerifier:
     def __init__(self) -> None:
         self.calls: list[tuple[str, UUID]] = []
 
@@ -335,7 +336,7 @@ class ServiceSettingsTests(unittest.TestCase):
             "governed_memory_supabase_configuration_invalid",
         )
 
-    def test_on_refuses_without_live_session_freshness_verifier(self) -> None:
+    def test_on_refuses_without_live_authority_verifier(self) -> None:
         actor_calls: list[str] = []
         pool_calls: list[str] = []
 
@@ -355,7 +356,7 @@ class ServiceSettingsTests(unittest.TestCase):
             )
         self.assertEqual(
             caught.exception.code,
-            "governed_memory_live_session_freshness_verifier_required",
+            "governed_memory_live_authority_verifier_required",
         )
         self.assertEqual(actor_calls, [])
         self.assertEqual(pool_calls, [])
@@ -511,12 +512,12 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
         pool = FakePool(connection)
         pool_factory = RecordingPoolFactory(pool)
         actor_factory = RecordingActorResolverFactory()
-        freshness = RecordingFreshnessVerifier()
+        authority = RecordingAuthorityVerifier()
         service = create_governed_memory_http_service(
             active_settings(),
             pool_factory=pool_factory,
             actor_resolver_factory=actor_factory,
-            freshness_verifier=freshness,
+            authority_verifier=authority,
             token_clock=lambda: NOW,
         )
         self.assertEqual(len(actor_factory.calls), 1)
@@ -575,7 +576,7 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             ].isoformat()
             self.assertEqual(status[0], 200)
             self.assertEqual(status[2], expected_status)
-            self.assertEqual(freshness.calls, [("/memory/status", OWNER)])
+            self.assertEqual(authority.calls, [("/memory/status", OWNER)])
             self.assertEqual(
                 actor_factory.resolve_calls,
                 [("/memory/status", (ActorScope.READ_CLAIMS,))],
@@ -599,7 +600,7 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             active_settings(),
             pool_factory=RecordingPoolFactory(pool),
             actor_resolver_factory=RecordingActorResolverFactory(),
-            freshness_verifier=RecordingFreshnessVerifier(),
+            authority_verifier=RecordingAuthorityVerifier(),
             token_clock=lambda: NOW,
         )
 
@@ -626,7 +627,7 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             active_settings(),
             pool_factory=RecordingPoolFactory(pool),
             actor_resolver_factory=RecordingActorResolverFactory(),
-            freshness_verifier=RecordingFreshnessVerifier(),
+            authority_verifier=RecordingAuthorityVerifier(),
             token_clock=lambda: NOW,
         )
         with self.assertRaises(HttpServicePreflightError):

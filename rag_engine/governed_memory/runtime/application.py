@@ -22,8 +22,11 @@ from ..http_service import (
     create_governed_memory_http_service,
 )
 from .live_supabase import (
-    LiveSupabaseUserConfig,
+    LiveSupabaseAuthorityConfig,
+    LiveSupabaseAuthorityVerifier,
+    LiveSupabaseSessionVerifier,
     LiveSupabaseUserVerifier,
+    SessionFetcher,
     UserFetcher,
 )
 
@@ -56,6 +59,7 @@ def create_runtime_application(
     environment: Mapping[str, str] | None = None,
     *,
     user_fetcher: UserFetcher | None = None,
+    session_fetcher: SessionFetcher | None = None,
     http_service_factory: HttpServiceFactory = create_governed_memory_http_service,
 ) -> FastAPI:
     """Compose the service without performing network or database I/O."""
@@ -70,19 +74,29 @@ def create_runtime_application(
             "governed_memory_supabase_configuration_invalid"
         )
     api_key = _required_secret(values, SUPABASE_API_KEY_ENV)
-    verifier_kwargs: dict[str, object] = {}
+    config = LiveSupabaseAuthorityConfig(
+        issuer=settings.supabase_issuer,
+        api_key=api_key,
+    )
+    user_verifier_kwargs: dict[str, object] = {}
     if user_fetcher is not None:
-        verifier_kwargs["fetcher"] = user_fetcher
-    freshness_verifier = LiveSupabaseUserVerifier(
-        LiveSupabaseUserConfig(
-            issuer=settings.supabase_issuer,
-            api_key=api_key,
+        user_verifier_kwargs["fetcher"] = user_fetcher
+    session_verifier_kwargs: dict[str, object] = {}
+    if session_fetcher is not None:
+        session_verifier_kwargs["fetcher"] = session_fetcher
+    authority_verifier = LiveSupabaseAuthorityVerifier(
+        user_verifier=LiveSupabaseUserVerifier(
+            config,
+            **user_verifier_kwargs,
         ),
-        **verifier_kwargs,
+        session_verifier=LiveSupabaseSessionVerifier(
+            config,
+            **session_verifier_kwargs,
+        ),
     )
     return http_service_factory(
         settings=settings,
-        freshness_verifier=freshness_verifier,
+        authority_verifier=authority_verifier,
     )
 
 

@@ -66,6 +66,7 @@ class IntakeBoundaryTests(unittest.TestCase):
             wrong_actor = VerifiedActor(
                 owner_user_id=OWNER_A,
                 actor_id=OWNER_B,
+                session_id=OWNER_A,
                 role=ActorRole.WORKER,
                 scopes=(wrong_scope,),
                 authentication_manifest_sha256="a" * 64,
@@ -151,6 +152,7 @@ class VerifiedActorBoundaryTests(unittest.TestCase):
         return VerifiedActor(
             owner_user_id=OWNER_A,
             actor_id=OWNER_A,
+            session_id=OWNER_A,
             role=ActorRole.OWNER,
             scopes=(ActorScope.READ_CLAIMS,),
             authentication_manifest_sha256="a" * 64,
@@ -175,6 +177,7 @@ class VerifiedActorBoundaryTests(unittest.TestCase):
             VerifiedActor(
                 owner_user_id=OWNER_A,
                 actor_id=OWNER_B,
+                session_id=OWNER_A,
                 role=ActorRole.OWNER,
                 scopes=(ActorScope.READ_CLAIMS,),
                 authentication_manifest_sha256="a" * 64,

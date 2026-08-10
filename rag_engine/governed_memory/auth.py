@@ -36,6 +36,7 @@ class ActorScope(str, Enum):
 class VerifiedActor:
     owner_user_id: UUID
     actor_id: UUID
+    session_id: UUID
     role: ActorRole
     scopes: tuple[ActorScope, ...]
     authentication_manifest_sha256: str
@@ -44,6 +45,7 @@ class VerifiedActor:
     def __post_init__(self) -> None:
         require_uuid(self.owner_user_id, "invalid_actor_owner")
         require_uuid(self.actor_id, "invalid_actor_id")
+        require_uuid(self.session_id, "invalid_actor_session")
         if not isinstance(self.role, ActorRole):
             raise ContractViolation("invalid_actor_role")
         if any(not isinstance(scope, ActorScope) for scope in self.scopes):
@@ -68,6 +70,7 @@ class VerifiedActor:
             {
                 "owner_user_id": self.owner_user_id,
                 "actor_id": self.actor_id,
+                "session_id": self.session_id,
                 "role": self.role,
                 "scopes": self.scopes,
                 "authentication_manifest_sha256": (

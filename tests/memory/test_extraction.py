@@ -176,6 +176,13 @@ class ExtractionContractTests(unittest.TestCase):
                 "subject",
             ],
         )
+        self.assertEqual(
+            request["external_payload"]["result_contract"]["top_level_keys"],
+            ["facts", "schema"],
+        )
+        self.assertNotIn(
+            "usage_keys", request["external_payload"]["result_contract"]
+        )
 
     def test_external_payload_has_no_internal_identifier_or_uuid(self) -> None:
         evidence = make_selected_evidence()

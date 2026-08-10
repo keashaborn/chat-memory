@@ -7,6 +7,8 @@ from io import StringIO
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+from urllib.error import HTTPError
 from uuid import UUID
 
 from fastapi import FastAPI, Request
@@ -23,7 +25,9 @@ from rag_engine.governed_memory.runtime.application import (
     main,
 )
 from rag_engine.governed_memory.runtime.live_supabase import (
-    LiveSupabaseUserConfig,
+    LiveSupabaseAuthorityConfig,
+    LiveSupabaseAuthorityVerifier,
+    LiveSupabaseSessionVerifier,
     LiveSupabaseUserVerifier,
 )
 import rag_engine.governed_memory.runtime.live_supabase as live_supabase_module
@@ -32,6 +36,7 @@ import rag_engine.governed_memory.runtime.live_supabase as live_supabase_module
 ISSUER = "https://synthetic.supabase.invalid/auth/v1"
 OWNER = UUID("11111111-1111-4111-8111-111111111111")
 OTHER = UUID("22222222-2222-4222-8222-222222222222")
+SESSION = UUID("33333333-3333-4333-8333-333333333333")
 AUTHORIZATION = "Bearer aaa.bbb.ccc"
 API_KEY = "synthetic-public-api-key"
 HASH = "a" * 64
@@ -42,6 +47,7 @@ def owner_actor() -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER,
         actor_id=OWNER,
+        session_id=SESSION,
         role=ActorRole.OWNER,
         scopes=(ActorScope.READ_CLAIMS,),
         authentication_manifest_sha256=HASH,
@@ -53,6 +59,7 @@ def worker_actor() -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER,
         actor_id=OTHER,
+        session_id=SESSION,
         role=ActorRole.WORKER,
         scopes=(ActorScope.LEASE_EXTRACTION,),
         authentication_manifest_sha256=HASH,
@@ -111,22 +118,37 @@ class RuntimeCompositionTests(unittest.TestCase):
         application = create_runtime_application(
             {},
             user_fetcher=forbidden_fetch,
+            session_fetcher=forbidden_fetch,
             http_service_factory=service_factory,
         )
         self.assertIsInstance(application, FastAPI)
         self.assertEqual(fetch_calls, 0)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["settings"].mode, "off")
-        self.assertNotIn("freshness_verifier", calls[0])
+        self.assertNotIn("authority_verifier", calls[0])
 
     def test_on_mode_composes_live_verifier_but_performs_no_fetch(self) -> None:
         calls: list[dict[str, object]] = []
-        fetch_calls = 0
+        user_fetch_calls = 0
+        session_fetch_calls = 0
 
-        def fetcher(*_args: object) -> bytes:
-            nonlocal fetch_calls
-            fetch_calls += 1
+        def user_fetcher(*_args: object) -> bytes:
+            nonlocal user_fetch_calls
+            user_fetch_calls += 1
             return json.dumps({"id": str(OWNER)}).encode("utf-8")
+
+        def session_fetcher(*_args: object) -> bytes:
+            nonlocal session_fetch_calls
+            session_fetch_calls += 1
+            return json.dumps(
+                [
+                    {
+                        "owner_user_id": str(OWNER),
+                        "session_id": str(SESSION),
+                        "session_present": True,
+                    }
+                ]
+            ).encode("utf-8")
 
         def service_factory(**kwargs: object) -> FastAPI:
             calls.append(dict(kwargs))
@@ -134,15 +156,23 @@ class RuntimeCompositionTests(unittest.TestCase):
 
         create_runtime_application(
             active_environment(),
-            user_fetcher=fetcher,
+            user_fetcher=user_fetcher,
+            session_fetcher=session_fetcher,
             http_service_factory=service_factory,
         )
-        self.assertEqual(fetch_calls, 0)
+        self.assertEqual(user_fetch_calls, 0)
+        self.assertEqual(session_fetch_calls, 0)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["settings"].mode, "on")
         self.assertIsInstance(
-            calls[0]["freshness_verifier"],
-            LiveSupabaseUserVerifier,
+            calls[0]["authority_verifier"],
+            LiveSupabaseAuthorityVerifier,
+        )
+        authority = calls[0]["authority_verifier"]
+        self.assertIsInstance(authority.user_verifier, LiveSupabaseUserVerifier)
+        self.assertIsInstance(
+            authority.session_verifier,
+            LiveSupabaseSessionVerifier,
         )
 
     def test_on_mode_requires_dedicated_supabase_api_key(self) -> None:
@@ -216,9 +246,14 @@ class RuntimeCompositionTests(unittest.TestCase):
 
 class LiveSupabaseConfigurationTests(unittest.TestCase):
     def test_https_user_endpoint_is_derived_exactly(self) -> None:
-        config = LiveSupabaseUserConfig(issuer=ISSUER, api_key=API_KEY)
+        config = LiveSupabaseAuthorityConfig(issuer=ISSUER, api_key=API_KEY)
         self.assertEqual(config.issuer_url, ISSUER)
         self.assertEqual(config.user_url, f"{ISSUER}/user")
+        self.assertEqual(
+            config.session_url,
+            "https://synthetic.supabase.invalid/rest/v1/rpc/"
+            "governed_memory_current_session_v1",
+        )
         self.assertNotIn(API_KEY, repr(config))
 
     def test_non_https_redirectable_or_ambiguous_issuers_are_refused(self) -> None:
@@ -234,7 +269,7 @@ class LiveSupabaseConfigurationTests(unittest.TestCase):
                 HttpAuthError,
                 "auth_live_configuration_invalid",
             ):
-                LiveSupabaseUserConfig(issuer=issuer, api_key=API_KEY)
+                LiveSupabaseAuthorityConfig(issuer=issuer, api_key=API_KEY)
 
 
 class LiveSupabaseVerifierTests(unittest.IsolatedAsyncioTestCase):
@@ -246,7 +281,7 @@ class LiveSupabaseVerifierTests(unittest.IsolatedAsyncioTestCase):
         headers: list[tuple[bytes, bytes]] | None = None,
     ) -> None:
         verifier = LiveSupabaseUserVerifier(
-            LiveSupabaseUserConfig(issuer=ISSUER, api_key=API_KEY),
+            LiveSupabaseAuthorityConfig(issuer=ISSUER, api_key=API_KEY),
             fetcher=fetcher,  # type: ignore[arg-type]
         )
         await verifier(
@@ -254,6 +289,23 @@ class LiveSupabaseVerifierTests(unittest.IsolatedAsyncioTestCase):
                 headers
                 if headers is not None
                 else [(b"authorization", AUTHORIZATION.encode("ascii"))]
+            ),
+            actor if actor is not None else owner_actor(),
+        )
+
+    async def invoke_session(
+        self,
+        fetcher: object,
+        *,
+        actor: VerifiedActor | None = None,
+    ) -> None:
+        verifier = LiveSupabaseSessionVerifier(
+            LiveSupabaseAuthorityConfig(issuer=ISSUER, api_key=API_KEY),
+            fetcher=fetcher,  # type: ignore[arg-type]
+        )
+        await verifier(
+            request_with_headers(
+                [(b"authorization", AUTHORIZATION.encode("ascii"))]
             ),
             actor if actor is not None else owner_actor(),
         )
@@ -336,7 +388,7 @@ class LiveSupabaseVerifierTests(unittest.IsolatedAsyncioTestCase):
             return json.dumps({"id": str(OWNER)}).encode("utf-8")
 
         verifier = LiveSupabaseUserVerifier(
-            LiveSupabaseUserConfig(
+            LiveSupabaseAuthorityConfig(
                 issuer=ISSUER,
                 api_key=API_KEY,
                 timeout_seconds=1,
@@ -355,6 +407,159 @@ class LiveSupabaseVerifierTests(unittest.IsolatedAsyncioTestCase):
                 owner_actor(),
             )
         self.assertLess(asyncio.get_running_loop().time() - started, 2.25)
+
+    async def test_session_rpc_match_succeeds_and_fetch_is_bounded(self) -> None:
+        observed: list[tuple[object, ...]] = []
+
+        def fetcher(*args: object) -> bytes:
+            observed.append(args)
+            return json.dumps(
+                [
+                    {
+                        "owner_user_id": str(OWNER),
+                        "session_id": str(SESSION),
+                        "session_present": True,
+                    }
+                ]
+            ).encode("utf-8")
+
+        await self.invoke_session(fetcher)
+        self.assertEqual(
+            observed,
+            [
+                (
+                    "https://synthetic.supabase.invalid/rest/v1/rpc/"
+                    "governed_memory_current_session_v1",
+                    AUTHORIZATION,
+                    API_KEY,
+                    5,
+                    65_536,
+                )
+            ],
+        )
+
+    async def test_session_rpc_failures_are_strict_and_stable(self) -> None:
+        def response(
+            *,
+            owner: UUID = OWNER,
+            session: UUID = SESSION,
+            present: bool = True,
+            extra: bool = False,
+        ) -> bytes:
+            row: dict[str, object] = {
+                "owner_user_id": str(owner),
+                "session_id": str(session),
+                "session_present": present,
+            }
+            if extra:
+                row["unexpected"] = "denied"
+            return json.dumps([row]).encode("utf-8")
+
+        cases: list[tuple[str, object]] = [
+            (
+                "auth_live_session_denied",
+                lambda *_args: response(present=False),
+            ),
+            (
+                "auth_live_session_denied",
+                lambda *_args: (_ for _ in ()).throw(
+                    live_supabase_module._LiveSessionDenied()
+                ),
+            ),
+            (
+                "auth_live_session_mismatch",
+                lambda *_args: response(owner=OTHER),
+            ),
+            (
+                "auth_live_session_mismatch",
+                lambda *_args: response(session=OTHER),
+            ),
+            (
+                "auth_live_session_response_invalid",
+                lambda *_args: response(extra=True),
+            ),
+            (
+                "auth_live_session_response_invalid",
+                lambda *_args: b"[]",
+            ),
+            (
+                "auth_live_authority_unavailable",
+                lambda *_args: (_ for _ in ()).throw(OSError()),
+            ),
+        ]
+        for expected, fetcher in cases:
+            with self.subTest(expected=expected), self.assertRaisesRegex(
+                HttpAuthError,
+                expected,
+            ):
+                await self.invoke_session(fetcher)
+
+    async def test_session_http_status_mapping_is_closed(self) -> None:
+        class ErrorOpener:
+            def __init__(self, status: int) -> None:
+                self.status = status
+
+            def open(self, request: object, timeout: int) -> object:
+                raise HTTPError(
+                    getattr(request, "full_url", "https://invalid"),
+                    self.status,
+                    "sensitive authority response",
+                    {},
+                    None,
+                )
+
+        arguments = (
+            "https://synthetic.supabase.invalid/rest/v1/rpc/"
+            "governed_memory_current_session_v1",
+            AUTHORIZATION,
+            API_KEY,
+            5,
+            65_536,
+        )
+        with patch.object(
+            live_supabase_module,
+            "build_opener",
+            return_value=ErrorOpener(401),
+        ), self.assertRaises(live_supabase_module._LiveSessionDenied):
+            live_supabase_module._default_fetch_session(*arguments)
+        for status in (302, 403, 404, 429, 500):
+            with self.subTest(status=status), patch.object(
+                live_supabase_module,
+                "build_opener",
+                return_value=ErrorOpener(status),
+            ), self.assertRaises(live_supabase_module._LiveAuthorityUnavailable):
+                live_supabase_module._default_fetch_session(*arguments)
+
+    async def test_composite_checks_user_before_session_on_every_call(self) -> None:
+        observed: list[str] = []
+
+        def user_fetcher(*_args: object) -> bytes:
+            observed.append("user")
+            return json.dumps({"id": str(OWNER)}).encode("utf-8")
+
+        def session_fetcher(*_args: object) -> bytes:
+            observed.append("session")
+            return json.dumps(
+                [
+                    {
+                        "owner_user_id": str(OWNER),
+                        "session_id": str(SESSION),
+                        "session_present": True,
+                    }
+                ]
+            ).encode("utf-8")
+
+        config = LiveSupabaseAuthorityConfig(issuer=ISSUER, api_key=API_KEY)
+        verifier = LiveSupabaseAuthorityVerifier(
+            LiveSupabaseUserVerifier(config, fetcher=user_fetcher),
+            LiveSupabaseSessionVerifier(config, fetcher=session_fetcher),
+        )
+        request = request_with_headers(
+            [(b"authorization", AUTHORIZATION.encode("ascii"))]
+        )
+        await verifier(request, owner_actor())
+        await verifier(request, owner_actor())
+        self.assertEqual(observed, ["user", "session", "user", "session"])
 
 
 if __name__ == "__main__":

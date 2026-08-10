@@ -1,0 +1,12 @@
+{
+  "approval_receipt_sha256": null,
+  "artifact_sha256": "1fb8b0876df7552a5144e1eb18b9f84587c87f32109d5d55d7379ffce966f805",
+  "cases_sha256": null,
+  "holdout_manifest_sha256": null,
+  "metrics": null,
+  "retrieval_enabled": false,
+  "schema_version": "governed-memory-retrieval-calibration-v1",
+  "score_scale": 1000000,
+  "status": "unapproved",
+  "threshold_micros": null
+}

@@ -1,0 +1,45 @@
+# Dormant candidate template only. Do not install, enable, start, or schedule it.
+# There is intentionally no Install section and no timer artifact.
+[Unit]
+Description=Governed Memory clean successor one-shot worker candidate
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/governed-memory/worker.env
+ConditionPathExists=/etc/governed-memory/pilot.env
+
+[Service]
+Type=oneshot
+User=governed-memory
+Group=governed-memory
+Environment=GOVERNED_MEMORY_WORKER_MODE=off
+EnvironmentFile=/etc/governed-memory/worker.env
+EnvironmentFile=/etc/governed-memory/pilot.env
+ExecStart=/opt/governed-memory/current/venv/bin/python -m rag_engine.governed_memory.runtime.once_worker --once
+Restart=no
+TimeoutStartSec=120
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=governed-memory-worker

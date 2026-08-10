@@ -12,6 +12,8 @@ from pathlib import Path
 
 EXPECTED_PACKAGES = (
     "0001_foundation/package.json",
+    "0003_owner_claim_detail/package.json",
+    "0004_pilot_marker/package.json",
     "0002_conversation_bridge/package.json",
 )
 EXPECTED_FILES = {
@@ -21,6 +23,12 @@ EXPECTED_FILES = {
     "0001_foundation/package.json",
     "0001_foundation/forward.pgsql",
     "0001_foundation/rollback.pgsql",
+    "0003_owner_claim_detail/package.json",
+    "0003_owner_claim_detail/forward.pgsql",
+    "0003_owner_claim_detail/rollback.pgsql",
+    "0004_pilot_marker/package.json",
+    "0004_pilot_marker/forward.pgsql",
+    "0004_pilot_marker/rollback.pgsql",
     "0002_conversation_bridge/package.json",
     "0002_conversation_bridge/forward.pgsql",
     "0002_conversation_bridge/rollback.pgsql",
@@ -28,13 +36,86 @@ EXPECTED_FILES = {
 EXPECTED_EXECUTION_ORDER = [
     "roles_preflight.pgsql",
     "0001_foundation/forward.pgsql",
+    "0003_owner_claim_detail/forward.pgsql",
+    "0004_pilot_marker/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql",
 ]
 EXPECTED_ROLLBACK_ORDER = [
     "0002_conversation_bridge/rollback.pgsql",
+    "0004_pilot_marker/rollback.pgsql",
+    "0003_owner_claim_detail/rollback.pgsql",
     "0001_foundation/rollback.pgsql",
 ]
+VALIDATED_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
+NOT_VALIDATED_STATUS = (
+    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+)
+EXPECTED_PACKAGE_CONTRACTS = {
+    "0001_foundation/package.json": {
+        "status": VALIDATED_STATUS,
+        "rollback_empty_only": True,
+        "activation": {
+            "production_authorized": False,
+            "production_services_changed": False,
+            "production_database_applied": False,
+            "production_qdrant_changed": False,
+            "disposable_database_validated": True,
+            "disposable_qdrant_validated": True,
+        },
+    },
+    "0003_owner_claim_detail/package.json": {
+        "status": VALIDATED_STATUS,
+        "rollback_empty_only": False,
+        "rollback_data_mutation": False,
+        "activation": {
+            "production_authorized": False,
+            "production_services_changed": False,
+            "production_database_applied": False,
+            "disposable_database_validated": True,
+        },
+    },
+    "0004_pilot_marker/package.json": {
+        "status": VALIDATED_STATUS,
+        "rollback_empty_only": True,
+        "activation": {
+            "production_authorized": False,
+            "production_database_applied": False,
+            "production_services_changed": False,
+            "disposable_database_validated": True,
+        },
+    },
+    "0002_conversation_bridge/package.json": {
+        "status": VALIDATED_STATUS,
+        "rollback_empty_only": True,
+        "activation": {
+            "production_authorized": False,
+            "production_writer_membership_granted": False,
+            "production_services_changed": False,
+            "production_database_applied": False,
+            "disposable_writer_membership_validated": True,
+            "disposable_database_validated": True,
+        },
+    },
+}
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def expected_package_contracts(*, preliminary: bool) -> dict[str, dict[str, object]]:
+    contracts = {
+        relative: {
+            **contract,
+            "activation": dict(contract["activation"]),
+        }
+        for relative, contract in EXPECTED_PACKAGE_CONTRACTS.items()
+    }
+    if preliminary:
+        for relative in (
+            "0003_owner_claim_detail/package.json",
+            "0004_pilot_marker/package.json",
+        ):
+            contracts[relative]["status"] = NOT_VALIDATED_STATUS
+            contracts[relative]["activation"]["disposable_database_validated"] = False
+    return contracts
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -73,7 +154,7 @@ def checked_path(root: Path, relative: str) -> Path:
     return candidate
 
 
-def verify(root: Path) -> dict[str, object]:
+def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
     root = root.resolve(strict=True)
     manifest_path = root / "manifest.json"
     manifest = load_json(manifest_path)
@@ -82,9 +163,8 @@ def verify(root: Path) -> dict[str, object]:
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id:
         raise ValueError("missing migration candidate id")
-    if manifest.get("status") != (
-        "isolated_candidate_disposable_validated_not_production_applied"
-    ):
+    expected_manifest_status = NOT_VALIDATED_STATUS if preliminary else VALIDATED_STATUS
+    if manifest.get("status") != expected_manifest_status:
         raise ValueError("unexpected migration candidate status")
     if manifest.get("authority") != {
         "production_apply_authorized": False,
@@ -103,9 +183,11 @@ def verify(root: Path) -> dict[str, object]:
         "migration_runner_transaction_required": True,
         "migration_runner_timeouts_required": True,
         "migration_runner_advisory_lock_required": True,
-        "rollback_empty_only": True,
+        "rollback_empty_only": False,
+        "claim_detail_rollback_data_mutation": False,
+        "pilot_marker_rollback_empty_only": True,
         "cascade_ddl_allowed": False,
-        "disposable_database_execution_performed": True,
+        "disposable_database_execution_performed": not preliminary,
         "production_database_execution_performed": False,
         "production_checkout_files_changed": False,
         "production_data_read": False,
@@ -144,6 +226,7 @@ def verify(root: Path) -> dict[str, object]:
     if observed != EXPECTED_FILES:
         raise ValueError("migration directory contains an undeclared file")
 
+    package_contracts = expected_package_contracts(preliminary=preliminary)
     for package_relative in EXPECTED_PACKAGES:
         if package_relative not in expected:
             raise ValueError(f"package missing from manifest: {package_relative}")
@@ -151,9 +234,8 @@ def verify(root: Path) -> dict[str, object]:
         package = load_json(package_path)
         if package.get("schema_version") != "governed-memory-migration-package-v2":
             raise ValueError(f"unexpected package schema: {package_relative}")
-        if package.get("status") != (
-            "isolated_candidate_disposable_validated_not_production_applied"
-        ):
+        expected_contract = package_contracts[package_relative]
+        if package.get("status") != expected_contract["status"]:
             raise ValueError(f"unexpected package status: {package_relative}")
         if package.get("transaction") != {
             "required": True,
@@ -163,33 +245,22 @@ def verify(root: Path) -> dict[str, object]:
         }:
             raise ValueError(f"unsafe transaction contract: {package_relative}")
         rollback = package.get("rollback")
-        if not isinstance(rollback, dict) or rollback.get("empty_only") is not True:
-            raise ValueError(f"rollback is not empty-only: {package_relative}")
+        if not isinstance(rollback, dict) or rollback.get("empty_only") is not (
+            expected_contract["rollback_empty_only"]
+        ):
+            raise ValueError(f"unexpected rollback contract: {package_relative}")
+        if "rollback_data_mutation" in expected_contract and rollback.get(
+            "data_mutation"
+        ) is not expected_contract["rollback_data_mutation"]:
+            raise ValueError(
+                f"unexpected rollback data-mutation contract: {package_relative}"
+            )
         object_contract = package.get("object_contract")
         if not isinstance(object_contract, dict) or object_contract.get(
             "cascade_ddl"
         ) is not False:
             raise ValueError(f"CASCADE is not prohibited: {package_relative}")
-        activation = package.get("activation")
-        if package_relative == "0001_foundation/package.json":
-            expected_activation = {
-                "production_authorized": False,
-                "production_services_changed": False,
-                "production_database_applied": False,
-                "production_qdrant_changed": False,
-                "disposable_database_validated": True,
-                "disposable_qdrant_validated": True,
-            }
-        else:
-            expected_activation = {
-                "production_authorized": False,
-                "production_writer_membership_granted": False,
-                "production_services_changed": False,
-                "production_database_applied": False,
-                "disposable_writer_membership_validated": True,
-                "disposable_database_validated": True,
-            }
-        if activation != expected_activation:
+        if package.get("activation") != expected_contract["activation"]:
             raise ValueError(f"unexpected activation contract: {package_relative}")
         package_dir = Path(package_relative).parent
         for direction in ("forward", "rollback"):
@@ -222,17 +293,30 @@ def verify(root: Path) -> dict[str, object]:
             candidate_id.encode("utf-8")
         ).hexdigest(),
         "result": "verified",
-        "schema_version": "governed-memory-migration-verification-v3",
+        "schema_version": "governed-memory-migration-verification-v4",
+        "validation_state": (
+            "preliminary_disposable_proof_candidate"
+            if preliminary
+            else "disposable_validated"
+        ),
     }
 
 
 def main() -> int:
-    if len(sys.argv) > 2:
-        raise SystemExit("usage: verify_migration_manifest.py [migration_root]")
+    arguments = list(sys.argv[1:])
+    preliminary = False
+    if arguments[:1] == ["--preliminary-disposable-proof"]:
+        preliminary = True
+        arguments.pop(0)
+    if len(arguments) > 1:
+        raise SystemExit(
+            "usage: verify_migration_manifest.py "
+            "[--preliminary-disposable-proof] [migration_root]"
+        )
     default_root = Path(__file__).resolve().parents[2] / "governed-memory-migrations"
-    root = Path(sys.argv[1]) if len(sys.argv) == 2 else default_root
+    root = Path(arguments[0]) if arguments else default_root
     try:
-        receipt = verify(root)
+        receipt = verify(root, preliminary=preliminary)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"MIGRATION_MANIFEST_INVALID={error}", file=sys.stderr)
         return 1

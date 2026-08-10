@@ -13,7 +13,13 @@ content-free receipt is emitted.
 
 from collections.abc import Mapping, Sequence
 import argparse
+import base64
+import configparser
+import csv
+from email import policy
+from email.parser import BytesParser
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -24,6 +30,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import MappingProxyType
 import venv
 import zipfile
 
@@ -33,6 +40,12 @@ RUNTIME_LOCK = ROOT / "ops" / "governed_memory" / "runtime-requirements.lock"
 BUILD_LOCK = ROOT / "ops" / "governed_memory" / "build-requirements.lock"
 PYPROJECT = ROOT / "pyproject.toml"
 PACKAGE_ROOT = ROOT / "rag_engine" / "governed_memory"
+PROVIDER_ASSET_SOURCE_PATHS = frozenset(
+    {
+        "provider_assets/extraction_instructions.txt",
+        "provider_assets/extraction_output.schema.json",
+    }
+)
 SETUPTOOLS_WHEEL = "setuptools-84.0.0-py3-none-any.whl"
 SETUPTOOLS_SHA256 = (
     "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
@@ -40,6 +53,31 @@ SETUPTOOLS_SHA256 = (
 PROJECT_DISTRIBUTION = "governed-memory-successor"
 PROJECT_VERSION = "0.0.0"
 PROJECT_WHEEL = "governed_memory_successor-0.0.0-py3-none-any.whl"
+DIST_INFO_PREFIX = "governed_memory_successor-0.0.0.dist-info/"
+DIST_INFO_MEMBERS = frozenset(
+    {
+        f"{DIST_INFO_PREFIX}METADATA",
+        f"{DIST_INFO_PREFIX}WHEEL",
+        f"{DIST_INFO_PREFIX}entry_points.txt",
+        f"{DIST_INFO_PREFIX}top_level.txt",
+        f"{DIST_INFO_PREFIX}RECORD",
+    }
+)
+EXPECTED_WHEEL_HEADERS = MappingProxyType(
+    {
+        "Generator": "setuptools (84.0.0)",
+        "Root-Is-Purelib": "true",
+        "Tag": "py3-none-any",
+        "Wheel-Version": "1.0",
+    }
+)
+EXPECTED_CONSOLE_SCRIPTS = MappingProxyType(
+    {
+        "governed-memory-http": (
+            "rag_engine.governed_memory.runtime.application:main"
+        )
+    }
+)
 SOURCE_DATE_EPOCH = "1786381200"
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 WHEEL_NAME_RE = re.compile(
@@ -262,25 +300,88 @@ def _package_source_material(package_root: Path) -> list[tuple[str, str]]:
     ):
         raise CandidateBuildError("candidate_source_inventory_invalid")
     material: list[tuple[str, str]] = []
+    observed_assets: set[str] = set()
     for source in sorted(package_root.rglob("*")):
         relative = source.relative_to(package_root)
+        relative_text = relative.as_posix()
         if "__pycache__" in relative.parts:
             continue
         if source.is_symlink():
             raise CandidateBuildError("candidate_source_inventory_invalid")
         if source.is_dir():
             continue
-        if not source.is_file() or source.suffix != ".py":
+        if not source.is_file():
             raise CandidateBuildError("candidate_source_inventory_invalid")
-        material.append((relative.as_posix(), _sha256(source)))
-    if not material:
+        if source.suffix != ".py":
+            if relative_text not in PROVIDER_ASSET_SOURCE_PATHS:
+                raise CandidateBuildError("candidate_source_inventory_invalid")
+            observed_assets.add(relative_text)
+        material.append((relative_text, _sha256(source)))
+    if not material or observed_assets != PROVIDER_ASSET_SOURCE_PATHS:
         raise CandidateBuildError("candidate_source_inventory_invalid")
     return material
 
 
 def _package_source_tree_sha256(package_root: Path = PACKAGE_ROOT) -> str:
+    """Hash only the installable governed-memory package inventory."""
+
     encoded = json.dumps(
         _package_source_material(package_root),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _required_source_file(path: Path, *, maximum_bytes: int) -> str:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise CandidateBuildError("candidate_source_inventory_invalid") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or not 0 <= metadata.st_size <= maximum_bytes
+    ):
+        raise CandidateBuildError("candidate_source_inventory_invalid")
+    return _sha256(path)
+
+
+def _source_tree_material(source_root: Path = ROOT) -> list[tuple[str, str]]:
+    """Bind packaging authority and every installable package/asset byte."""
+
+    if (
+        not source_root.is_absolute()
+        or not source_root.is_dir()
+        or source_root.is_symlink()
+    ):
+        raise CandidateBuildError("candidate_source_inventory_invalid")
+    pyproject = source_root / "pyproject.toml"
+    namespace_init = source_root / "rag_engine" / "__init__.py"
+    package_root = source_root / "rag_engine" / "governed_memory"
+    material = [
+        (
+            "pyproject.toml",
+            _required_source_file(pyproject, maximum_bytes=128 * 1024),
+        ),
+        (
+            "rag_engine/__init__.py",
+            _required_source_file(namespace_init, maximum_bytes=128 * 1024),
+        ),
+    ]
+    material.extend(
+        (
+            f"rag_engine/governed_memory/{relative}",
+            digest,
+        )
+        for relative, digest in _package_source_material(package_root)
+    )
+    return sorted(material)
+
+
+def _source_tree_sha256(source_root: Path = ROOT) -> str:
+    encoded = json.dumps(
+        _source_tree_material(source_root),
         ensure_ascii=True,
         separators=(",", ":"),
     ).encode("ascii")
@@ -300,7 +401,7 @@ def _source_bound_root(
     ):
         raise CandidateBuildError("candidate_source_binding_invalid")
     return Path(
-        f"/tmp/governed-memory-phase4-{kind}-{lock_sha256}-{source_tree_sha256}"
+        f"/tmp/governed-memory-phase5-{kind}-{lock_sha256}-{source_tree_sha256}"
     )
 
 
@@ -308,21 +409,36 @@ def _copy_candidate_source(
     destination: Path,
     *,
     expected_source_tree_sha256: str,
+    source_root: Path = ROOT,
 ) -> str:
     if HASH_RE.fullmatch(expected_source_tree_sha256) is None:
         raise CandidateBuildError("candidate_source_binding_invalid")
-    source_root = destination / "source"
+    if _source_tree_sha256(source_root) != expected_source_tree_sha256:
+        raise CandidateBuildError("candidate_source_changed_during_build")
+    copied_root = destination / "source"
+    copied_package = copied_root / "rag_engine" / "governed_memory"
     source_package = source_root / "rag_engine" / "governed_memory"
-    source_package.mkdir(parents=True)
-    shutil.copyfile(PYPROJECT, source_root / "pyproject.toml")
-    shutil.copyfile(ROOT / "rag_engine" / "__init__.py", source_root / "rag_engine" / "__init__.py")
-    for relative_text, _source_sha256 in _package_source_material(PACKAGE_ROOT):
-        relative = Path(relative_text)
-        source = PACKAGE_ROOT / relative
-        target = source_package / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-    copied_source_tree_sha256 = _package_source_tree_sha256(source_package)
+    try:
+        copied_package.mkdir(parents=True)
+        shutil.copyfile(
+            source_root / "pyproject.toml",
+            copied_root / "pyproject.toml",
+        )
+        shutil.copyfile(
+            source_root / "rag_engine" / "__init__.py",
+            copied_root / "rag_engine" / "__init__.py",
+        )
+        for relative_text, _source_sha256 in _package_source_material(
+            source_package
+        ):
+            relative = Path(relative_text)
+            source = source_package / relative
+            target = copied_package / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+    except OSError as exc:
+        raise CandidateBuildError("candidate_source_copy_failed") from exc
+    copied_source_tree_sha256 = _source_tree_sha256(copied_root)
     if copied_source_tree_sha256 != expected_source_tree_sha256:
         raise CandidateBuildError("candidate_source_changed_during_build")
     return copied_source_tree_sha256
@@ -387,51 +503,224 @@ def _build_project_wheel(
         [str(build_python), "-I", "-c", script, str(dist)],
         cwd=source_root,
     )
-    wheel_names = [line.strip() for line in output.splitlines() if line.strip().endswith(".whl")]
+    wheel_names = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip().endswith(".whl")
+    ]
     if wheel_names[-1:] != [PROJECT_WHEEL]:
         raise CandidateBuildError("candidate_project_wheel_invalid")
     wheels = sorted(dist.glob("*.whl"))
     if len(wheels) != 1 or wheels[0].name != PROJECT_WHEEL:
         raise CandidateBuildError("candidate_project_wheel_invalid")
-    _verify_project_wheel(wheels[0])
+    _verify_project_wheel(
+        wheels[0],
+        expected_package_root=source_root / "rag_engine" / "governed_memory",
+    )
     return wheels[0], source_sha256
 
 
-def _verify_project_wheel(path: Path) -> None:
+def _read_dist_info_member(
+    archive: zipfile.ZipFile,
+    name: str,
+) -> bytes:
+    try:
+        member = archive.getinfo(name)
+        if member.is_dir() or not 0 < member.file_size <= 512 * 1024:
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+        return archive.read(member)
+    except (KeyError, OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+
+
+def _verify_metadata_member(raw: bytes) -> None:
+    try:
+        metadata = BytesParser(policy=policy.default).parsebytes(raw)
+    except (TypeError, ValueError) as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+    if metadata.defects:
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+
+    expected_single = {
+        "Name": PROJECT_DISTRIBUTION,
+        "Requires-Python": "==3.12.*",
+        "Version": PROJECT_VERSION,
+    }
+    for name, expected in expected_single.items():
+        observed = [str(value) for value in metadata.get_all(name, [])]
+        if observed != [expected]:
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+    expected_requirements = [
+        "asyncpg==0.30.0",
+        "cryptography==49.0.0",
+        "fastapi==0.120.4",
+        "PyJWT==2.13.0",
+        "uvicorn==0.38.0",
+    ]
+    if [
+        str(value) for value in metadata.get_all("Requires-Dist", [])
+    ] != expected_requirements:
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+
+
+def _verify_wheel_member(raw: bytes) -> None:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+    if not text.endswith("\n") or "\r" in text:
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+    lines = text.splitlines()
+    while lines and not lines[-1]:
+        lines.pop()
+    if not lines or any(not line or ": " not in line for line in lines):
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+    headers: dict[str, str] = {}
+    for line in lines:
+        name, value = line.split(": ", 1)
+        if not name or not value or name in headers:
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+        headers[name] = value
+    if headers != EXPECTED_WHEEL_HEADERS:
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+
+
+def _verify_entry_points_member(raw: bytes) -> None:
+    try:
+        text = raw.decode("utf-8")
+        parser = configparser.ConfigParser(
+            allow_no_value=False,
+            comment_prefixes=(),
+            delimiters=("=",),
+            empty_lines_in_values=False,
+            inline_comment_prefixes=None,
+            interpolation=None,
+            strict=True,
+        )
+        parser.optionxform = str
+        parser.read_string(text)
+    except (UnicodeDecodeError, configparser.Error, ValueError) as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+    if (
+        not text.endswith("\n")
+        or "\r" in text
+        or parser.defaults()
+        or parser.sections() != ["console_scripts"]
+        or dict(parser.items("console_scripts", raw=True))
+        != EXPECTED_CONSOLE_SCRIPTS
+    ):
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+
+
+def _record_sha256(value: bytes) -> str:
+    encoded = base64.urlsafe_b64encode(hashlib.sha256(value).digest())
+    return "sha256=" + encoded.rstrip(b"=").decode("ascii")
+
+
+def _verify_record_member(
+    archive: zipfile.ZipFile,
+    names: set[str],
+    raw: bytes,
+) -> None:
+    try:
+        text = raw.decode("utf-8")
+        rows = list(csv.reader(io.StringIO(text, newline=""), strict=True))
+    except (UnicodeDecodeError, csv.Error, TypeError, ValueError) as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+    if not text.endswith("\n") or len(rows) != len(names):
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+    records: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        if len(row) != 3 or not row[0] or row[0] in records:
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+        records[row[0]] = (row[1], row[2])
+    if set(records) != names:
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+    record_name = f"{DIST_INFO_PREFIX}RECORD"
+    if records[record_name] != ("", ""):
+        raise CandidateBuildError("candidate_project_wheel_invalid")
+    for name in sorted(names - {record_name}):
+        try:
+            member = archive.read(name)
+        except (KeyError, OSError, RuntimeError, zipfile.BadZipFile) as exc:
+            raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+        if records[name] != (_record_sha256(member), str(len(member))):
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+
+
+def _verify_project_wheel(
+    path: Path,
+    *,
+    expected_package_root: Path,
+) -> None:
     if path.name != PROJECT_WHEEL or path.is_symlink() or not path.is_file():
         raise CandidateBuildError("candidate_project_wheel_invalid")
-    with zipfile.ZipFile(path) as archive:
-        names = archive.namelist()
-        if len(names) != len(set(names)) or not names:
-            raise CandidateBuildError("candidate_project_wheel_invalid")
-        for name in names:
-            parts = PurePosixPath(name).parts
-            if (
-                "__pycache__" in parts
-                or name.endswith((".pyc", ".pyo"))
-                or not (
-                    name.startswith("rag_engine/governed_memory/")
-                    or name.startswith("governed_memory_successor-0.0.0.dist-info/")
+    expected_material = dict(_package_source_material(expected_package_root))
+    package_prefix = "rag_engine/governed_memory/"
+    expected_package_members = {
+        package_prefix + relative for relative in expected_material
+    }
+    expected_names = expected_package_members | set(DIST_INFO_MEMBERS)
+    expected_sizes = {
+        package_prefix + relative: (expected_package_root / relative).stat().st_size
+        for relative in expected_material
+    }
+    try:
+        archive_context = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+    with archive_context as archive:
+        members = archive.infolist()
+        names = [member.filename for member in members]
+        if (
+            not names
+            or len(names) != len(set(names))
+            or set(names) != expected_names
+            or any(
+                member.is_dir()
+                or stat.S_ISLNK(member.external_attr >> 16)
+                or PurePosixPath(member.filename).is_absolute()
+                or "\\" in member.filename
+                or any(
+                    part in {"", ".", "..", "__pycache__"}
+                    for part in PurePosixPath(member.filename).parts
                 )
-            ):
+                or member.filename.endswith((".pyc", ".pyo"))
+                for member in members
+            )
+        ):
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+        for name, expected_size in expected_sizes.items():
+            if archive.getinfo(name).file_size != expected_size:
                 raise CandidateBuildError("candidate_project_wheel_invalid")
-        metadata_name = "governed_memory_successor-0.0.0.dist-info/METADATA"
-        try:
-            metadata = archive.read(metadata_name).decode("utf-8")
-        except (KeyError, UnicodeDecodeError) as exc:
-            raise CandidateBuildError("candidate_project_wheel_invalid") from exc
-    required = (
-        "Name: governed-memory-successor\n",
-        "Version: 0.0.0\n",
-        "Requires-Python: ==3.12.*\n",
-        "Requires-Dist: asyncpg==0.30.0\n",
-        "Requires-Dist: cryptography==49.0.0\n",
-        "Requires-Dist: fastapi==0.120.4\n",
-        "Requires-Dist: PyJWT==2.13.0\n",
-        "Requires-Dist: uvicorn==0.38.0\n",
-    )
-    if any(item not in metadata for item in required):
-        raise CandidateBuildError("candidate_project_wheel_invalid")
+        for relative, expected_sha256 in expected_material.items():
+            try:
+                member = archive.read(package_prefix + relative)
+            except (KeyError, OSError, RuntimeError, zipfile.BadZipFile) as exc:
+                raise CandidateBuildError("candidate_project_wheel_invalid") from exc
+            if hashlib.sha256(member).hexdigest() != expected_sha256:
+                raise CandidateBuildError("candidate_project_wheel_invalid")
+
+        metadata = _read_dist_info_member(
+            archive,
+            f"{DIST_INFO_PREFIX}METADATA",
+        )
+        wheel = _read_dist_info_member(archive, f"{DIST_INFO_PREFIX}WHEEL")
+        entry_points = _read_dist_info_member(
+            archive,
+            f"{DIST_INFO_PREFIX}entry_points.txt",
+        )
+        top_level = _read_dist_info_member(
+            archive,
+            f"{DIST_INFO_PREFIX}top_level.txt",
+        )
+        record = _read_dist_info_member(archive, f"{DIST_INFO_PREFIX}RECORD")
+        _verify_metadata_member(metadata)
+        _verify_wheel_member(wheel)
+        _verify_entry_points_member(entry_points)
+        if top_level != b"rag_engine\n":
+            raise CandidateBuildError("candidate_project_wheel_invalid")
+        _verify_record_member(archive, set(names), record)
 
 
 def _distribution_inventory(python: Path) -> dict[str, str]:
@@ -580,7 +869,7 @@ def build_candidate_runtime(
     _verify_runtime_wheelhouse(runtime_wheelhouse, runtime_packages)
     runtime_lock_sha256 = _sha256(RUNTIME_LOCK)
     build_lock_sha256 = _sha256(BUILD_LOCK)
-    source_tree_sha256 = _package_source_tree_sha256()
+    source_tree_sha256 = _source_tree_sha256()
     runtime_root = _source_bound_root(
         kind="runtime",
         lock_sha256=runtime_lock_sha256,

@@ -1,6 +1,6 @@
-# DISPOSABLE VALIDATION ONLY. The release guard refuses persistent creation
-# until a current immutable Qdrant digest passes security and compatibility
-# review and this checked-in contract is replaced.
+# DISPOSABLE VALIDATION ONLY. Qdrant v1.19.0 is pinned by immutable digest,
+# but real disposable compatibility proof is pending. This compose candidate
+# is not persistent-pilot approval and the release guard still refuses create.
 x-governed-memory-scope: disposable-validation-only
 name: governed-memory-9a54cf123493-000001
 
@@ -40,7 +40,7 @@ services:
       lifeswitch.governed-memory.authority: canonical
 
   qdrant:
-    image: qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170
+    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
     container_name: governed-memory-qdrant-9a54cf123493-000001
     restart: "no"
     environment:

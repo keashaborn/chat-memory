@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AbstractContextManager
 import json
 import unittest
 from typing import Any, Mapping
@@ -35,8 +36,8 @@ from tests.memory.test_http_store import _Connection, _Pool
 AUTHORIZATION = {"authorization": "Bearer a.b.c"}
 
 
-def _live_config() -> live_supabase_runtime.LiveSupabaseUserConfig:
-    return live_supabase_runtime.LiveSupabaseUserConfig(
+def _live_config() -> live_supabase_runtime.LiveSupabaseAuthorityConfig:
+    return live_supabase_runtime.LiveSupabaseAuthorityConfig(
         issuer="https://synthetic.supabase.co/auth/v1",
         api_key="synthetic-publishable-key",
     )
@@ -48,6 +49,22 @@ def _verifier(
     return live_supabase_runtime.LiveSupabaseUserVerifier(
         _live_config(),
         fetcher=fetcher,
+    )
+
+
+def _authority_verifier(
+    session_fetcher: live_supabase_runtime.SessionFetcher,
+) -> live_supabase_runtime.LiveSupabaseAuthorityVerifier:
+    config = _live_config()
+    return live_supabase_runtime.LiveSupabaseAuthorityVerifier(
+        live_supabase_runtime.LiveSupabaseUserVerifier(
+            config,
+            fetcher=_owner_body,
+        ),
+        live_supabase_runtime.LiveSupabaseSessionVerifier(
+            config,
+            fetcher=session_fetcher,
+        ),
     )
 
 
@@ -101,8 +118,76 @@ def _denied(
     raise live_supabase_runtime._LiveAuthorityDenied  # type: ignore[attr-defined]
 
 
+def _session_body(
+    _url: str,
+    _authorization: str,
+    _api_key: str,
+    _timeout_seconds: int,
+    _maximum_bytes: int,
+) -> bytes:
+    actor = owner_actor()
+    return json.dumps(
+        [
+            {
+                "owner_user_id": str(actor.owner_user_id),
+                "session_id": str(actor.session_id),
+                "session_present": True,
+            }
+        ]
+    ).encode("utf-8")
+
+
+def _session_absent(*args: object) -> bytes:
+    row = json.loads(_session_body(*args).decode("utf-8"))[0]
+    row["session_present"] = False
+    return json.dumps([row]).encode("utf-8")
+
+
+def _session_mismatch(*args: object) -> bytes:
+    row = json.loads(_session_body(*args).decode("utf-8"))[0]
+    row["session_id"] = str(OTHER_OWNER)
+    return json.dumps([row]).encode("utf-8")
+
+
+def _session_malformed(*_args: object) -> bytes:
+    return b"[]"
+
+
+class _FetchUserResponse(AbstractContextManager["_FetchUserResponse"]):
+    status = 200
+    headers = {
+        "Content-Length": "2",
+        "Content-Type": "application/json",
+    }
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+
+    def __enter__(self) -> "_FetchUserResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def geturl(self) -> str:
+        return self._url
+
+    def read(self, _maximum: int) -> bytes:
+        return b"{}"
+
+
+class _CapturingOpener:
+    def __init__(self) -> None:
+        self.request: object | None = None
+
+    def open(self, request: object, *, timeout: int) -> _FetchUserResponse:
+        self.request = request
+        self.timeout = timeout
+        return _FetchUserResponse(request.full_url)  # type: ignore[attr-defined]
+
+
 def _live_resolver(
-    verifier: live_supabase_runtime.LiveSupabaseUserVerifier,
+    verifier: Any,
     *,
     actor: VerifiedActor | None = None,
 ) -> Any:
@@ -186,6 +271,30 @@ class LiveAuthPublicMappingTests(unittest.IsolatedAsyncioTestCase):
                 503,
                 "memory_successor_unavailable",
             ),
+            (
+                _live_resolver(_authority_verifier(_session_absent)),
+                AUTHORIZATION,
+                401,
+                "memory_authentication_required",
+            ),
+            (
+                _live_resolver(_authority_verifier(_session_mismatch)),
+                AUTHORIZATION,
+                401,
+                "memory_authentication_required",
+            ),
+            (
+                _live_resolver(_authority_verifier(_session_malformed)),
+                AUTHORIZATION,
+                503,
+                "memory_successor_unavailable",
+            ),
+            (
+                _live_resolver(_authority_verifier(_unavailable)),
+                AUTHORIZATION,
+                503,
+                "memory_successor_unavailable",
+            ),
         )
         for resolver, headers, expected_status, expected_code in runtime_cases:
             with self.subTest(expected_status=expected_status, expected_code=expected_code):
@@ -209,7 +318,7 @@ class LiveAuthPublicMappingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(HttpAuthError) as configuration_error:
-            live_supabase_runtime.LiveSupabaseUserConfig(
+            live_supabase_runtime.LiveSupabaseAuthorityConfig(
                 issuer="http://synthetic.invalid/auth/v1",
                 api_key="synthetic-publishable-key",
             )
@@ -223,6 +332,30 @@ class LiveAuthPublicMappingTests(unittest.IsolatedAsyncioTestCase):
             expected_status=503,
             expected_code="memory_successor_unavailable",
         )
+
+    def test_default_live_user_request_explicitly_disables_caching(self) -> None:
+        opener = _CapturingOpener()
+        url = "https://synthetic.supabase.co/auth/v1/user"
+        with patch.object(live_supabase_runtime, "build_opener", return_value=opener):
+            self.assertEqual(
+                live_supabase_runtime._default_fetch_user(  # type: ignore[attr-defined]
+                    url,
+                    "Bearer a.b.c",
+                    "synthetic-publishable-key",
+                    2,
+                    1024,
+                ),
+                b"{}",
+            )
+        request = opener.request
+        self.assertIsNotNone(request)
+        headers = {
+            key.lower(): value
+            for key, value in request.header_items()  # type: ignore[attr-defined]
+        }
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(headers["pragma"], "no-cache")
+        self.assertEqual(opener.timeout, 2)
 
 
 class OwnerRequestDeadlineTests(unittest.IsolatedAsyncioTestCase):

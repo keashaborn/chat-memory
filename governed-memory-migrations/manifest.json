@@ -13,36 +13,64 @@
   "execution_order": [
     "roles_preflight.pgsql",
     "0001_foundation/forward.pgsql",
+    "0003_owner_claim_detail/forward.pgsql",
+    "0004_pilot_marker/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql"
   ],
   "rollback_order": [
     "0002_conversation_bridge/rollback.pgsql",
+    "0004_pilot_marker/rollback.pgsql",
+    "0003_owner_claim_detail/rollback.pgsql",
     "0001_foundation/rollback.pgsql"
   ],
   "files": [
-        {
-            "path": "roles_preflight.pgsql",
-            "sha256": "8aac9a36c1b078282ea71195e1e81d2870f93ee1d84f02af2e7645fa70e1922c"
-        },
+    {
+      "path": "roles_preflight.pgsql",
+      "sha256": "8aac9a36c1b078282ea71195e1e81d2870f93ee1d84f02af2e7645fa70e1922c"
+    },
     {
       "path": "schema_contract.json",
-      "sha256": "a27f7173cb0f4a9e276425c6a3c3c8f16b71e2678523568d12a20dc0db83e5b4"
+      "sha256": "ce42f4c466da533c3b5ba0e1ad1c585cb4835d5ac9ddb095b942a1f04f97bff2"
     },
     {
       "path": "predicate_catalog.json",
-            "sha256": "3e9e62b8281c31067c0416b33e7a2ccb12f2a6e7b5f6f88c090e9eb332c9fcdd"
+      "sha256": "3e9e62b8281c31067c0416b33e7a2ccb12f2a6e7b5f6f88c090e9eb332c9fcdd"
     },
     {
       "path": "0001_foundation/package.json",
-            "sha256": "3efc7de48b24441fe27fa030957570b1ac4dca08a262157a924450d560e293be"
+      "sha256": "3efc7de48b24441fe27fa030957570b1ac4dca08a262157a924450d560e293be"
     },
     {
       "path": "0001_foundation/forward.pgsql",
-            "sha256": "6818557e6cb885e06368922e79e9a382f37cab66b1ea9e24f2f441d8acde0adc"
+      "sha256": "6818557e6cb885e06368922e79e9a382f37cab66b1ea9e24f2f441d8acde0adc"
     },
     {
       "path": "0001_foundation/rollback.pgsql",
-            "sha256": "816b679cbc08e9abe14007be046504fc543909ac65822a91abb1f0573a77639c"
+      "sha256": "816b679cbc08e9abe14007be046504fc543909ac65822a91abb1f0573a77639c"
+    },
+    {
+      "path": "0003_owner_claim_detail/package.json",
+      "sha256": "fc247723a82ddb061047dd9b23a72e33f12dfe2ec5b3ba70642550707cc1da39"
+    },
+    {
+      "path": "0003_owner_claim_detail/forward.pgsql",
+      "sha256": "86bd3ca3452a2a6655d4218aec4098ac1dbabd2816e64536d6613b684be9b668"
+    },
+    {
+      "path": "0003_owner_claim_detail/rollback.pgsql",
+      "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68"
+    },
+    {
+      "path": "0004_pilot_marker/package.json",
+      "sha256": "00e9cae13891fdc0e1bb8e025679cd44155d20bda1a7bab31bdab48f5e542b59"
+    },
+    {
+      "path": "0004_pilot_marker/forward.pgsql",
+      "sha256": "90b4d1aac35a538a24444d33273e516f484252a9e4a5ea67f495a04499f6ff58"
+    },
+    {
+      "path": "0004_pilot_marker/rollback.pgsql",
+      "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775"
     },
     {
       "path": "0002_conversation_bridge/package.json",
@@ -61,7 +89,9 @@
     "migration_runner_transaction_required": true,
     "migration_runner_timeouts_required": true,
     "migration_runner_advisory_lock_required": true,
-    "rollback_empty_only": true,
+    "rollback_empty_only": false,
+    "claim_detail_rollback_data_mutation": false,
+    "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
     "disposable_database_execution_performed": true,
     "production_database_execution_performed": false,

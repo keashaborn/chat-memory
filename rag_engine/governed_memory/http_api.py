@@ -191,6 +191,7 @@ _AUTHENTICATION_ERROR_CODES = frozenset(
         "auth_live_authorization_invalid",
         "auth_live_request_invalid",
         "auth_live_session_denied",
+        "auth_live_session_mismatch",
         "auth_live_user_mismatch",
         "auth_iat_invalid",
         "auth_issuer_mismatch",
@@ -228,6 +229,7 @@ _AUTH_UNAVAILABLE_ERROR_CODES = frozenset(
         "auth_live_authority_unavailable",
         "auth_live_configuration_invalid",
         "auth_live_response_invalid",
+        "auth_live_session_response_invalid",
         "auth_key_resolution_unavailable",
         "auth_service_token_configuration_invalid",
     }
@@ -297,6 +299,17 @@ _CLAIM_KEYS = frozenset(
         "epistemic_state",
         "sensitivity",
         "updated_at",
+    }
+)
+_CLAIM_DETAIL_KEYS = _CLAIM_KEYS | frozenset(
+    {
+        "subject_entity_type",
+        "subject_entity_key",
+        "subject_display_name",
+        "object_entity_type",
+        "object_entity_key",
+        "object_display_name",
+        "object_literal",
     }
 )
 _PROPOSAL_KEYS = frozenset(
@@ -468,8 +481,10 @@ def _validate_status_success(
     return result
 
 
-def _validate_claim_row(value: object, expected_claim_id: UUID | None) -> dict[str, Any]:
-    result = _closed_success_mapping(value, _CLAIM_KEYS)
+def _validate_claim_common(
+    result: dict[str, Any],
+    expected_claim_id: UUID | None,
+) -> dict[str, Any]:
     claim_id = _success_uuid(result["claim_id"])
     if expected_claim_id is not None and claim_id != str(expected_claim_id):
         raise _SuccessContractError
@@ -494,6 +509,50 @@ def _validate_claim_row(value: object, expected_claim_id: UUID | None) -> dict[s
     return result
 
 
+def _validate_claim_row(value: object, expected_claim_id: UUID | None) -> dict[str, Any]:
+    return _validate_claim_common(
+        _closed_success_mapping(value, _CLAIM_KEYS),
+        expected_claim_id,
+    )
+
+
+def _validate_claim_detail_row(
+    value: object,
+    expected_claim_id: UUID,
+) -> dict[str, Any]:
+    result = _validate_claim_common(
+        _closed_success_mapping(value, _CLAIM_DETAIL_KEYS),
+        expected_claim_id,
+    )
+    subject_type = _success_enum(result["subject_entity_type"], _ENTITY_TYPES)
+    subject_key = _success_nfc_text(result["subject_entity_key"], 200)
+    if subject_type == "self":
+        if subject_key != "self" or result["subject_display_name"] is not None:
+            raise _SuccessContractError
+    else:
+        if subject_key == "self":
+            raise _SuccessContractError
+        _success_nfc_text(result["subject_display_name"], 256)
+    if result["object_kind"] == "literal":
+        _success_nfc_text(result["object_literal"], 2_000)
+        if any(
+            result[field] is not None
+            for field in (
+                "object_entity_type",
+                "object_entity_key",
+                "object_display_name",
+            )
+        ):
+            raise _SuccessContractError
+    else:
+        _success_enum(result["object_entity_type"], _ENTITY_TYPES)
+        _success_nfc_text(result["object_entity_key"], 200)
+        _success_nfc_text(result["object_display_name"], 256)
+        if result["object_literal"] is not None:
+            raise _SuccessContractError
+    return result
+
+
 def _validate_claim_list_success(
     value: object,
     _resource_id: UUID | None,
@@ -511,7 +570,7 @@ def _validate_claim_success(
 ) -> dict[str, Any]:
     if resource_id is None:
         raise _SuccessContractError
-    return _validate_claim_row(value, resource_id)
+    return _validate_claim_detail_row(value, resource_id)
 
 
 def _validate_proposal_row(value: object) -> dict[str, Any]:
@@ -962,21 +1021,31 @@ def create_owner_memory_router(
 
     router = APIRouter(route_class=_OwnerRequestDeadlineRoute)
 
-    async def prepare(
-        request: Request, operation: str
-    ) -> tuple[VerifiedActor, RouteSpecification] | JSONResponse:
+    def prepare_input(
+        request: Request,
+        operation: str,
+    ) -> RouteSpecification | JSONResponse:
         if feature_enabled is not True:
             return _disabled_response()
         if actor_resolver is None or facade is None:
             return _unconfigured_response()
         try:
             _prohibit_identity_assertions(request)
-            actor = await _resolve_owner_actor(
+            return _SPECIFICATIONS[operation]
+        except MemoryHttpError as exc:
+            return _failure_response(exc.failure)
+
+    async def authenticate_for_store(
+        request: Request,
+        operation: str,
+    ) -> VerifiedActor | JSONResponse:
+        assert actor_resolver is not None
+        try:
+            return await _resolve_owner_actor(
                 request,
                 resolver=actor_resolver,
                 scopes=_OPERATION_SCOPES[operation],
             )
-            return actor, _SPECIFICATIONS[operation]
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
 
@@ -1001,39 +1070,45 @@ def create_owner_memory_router(
         )
 
     async def status_endpoint(request: Request) -> JSONResponse:
-        prepared = await prepare(request, "status")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "status")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "status")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service("status", facade.status(actor))
 
     async def list_claims_endpoint(request: Request) -> JSONResponse:
-        prepared = await prepare(request, "list_claims")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "list_claims")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "list_claims")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service("list_claims", facade.list_claims(actor))
 
     async def get_claim_endpoint(request: Request, claim_id: str) -> JSONResponse:
-        prepared = await prepare(request, "get_claim")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "get_claim")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(claim_id)
             await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "get_claim")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "get_claim",
@@ -1043,29 +1118,33 @@ def create_owner_memory_router(
         )
 
     async def list_proposals_endpoint(request: Request) -> JSONResponse:
-        prepared = await prepare(request, "list_proposals")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "list_proposals")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "list_proposals")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service("list_proposals", facade.list_proposals(actor))
 
     async def review_proposal_endpoint(
         request: Request, proposal_id: str
     ) -> JSONResponse:
-        prepared = await prepare(request, "review_proposal")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "review_proposal")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(proposal_id)
             body = await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "review_proposal")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "review_proposal",
@@ -1075,15 +1154,17 @@ def create_owner_memory_router(
         )
 
     async def correct_claim_endpoint(request: Request, claim_id: str) -> JSONResponse:
-        prepared = await prepare(request, "correct_claim")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "correct_claim")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(claim_id)
             body = await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "correct_claim")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "correct_claim",
@@ -1093,15 +1174,17 @@ def create_owner_memory_router(
         )
 
     async def retract_claim_endpoint(request: Request, claim_id: str) -> JSONResponse:
-        prepared = await prepare(request, "retract_claim")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "retract_claim")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(claim_id)
             body = await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "retract_claim")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "retract_claim",
@@ -1111,15 +1194,17 @@ def create_owner_memory_router(
         )
 
     async def delete_claim_endpoint(request: Request, claim_id: str) -> JSONResponse:
-        prepared = await prepare(request, "delete_claim")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "delete_claim")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(claim_id)
             body = await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "delete_claim")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "delete_claim",
@@ -1131,15 +1216,17 @@ def create_owner_memory_router(
     async def get_operation_endpoint(
         request: Request, operation_id: str
     ) -> JSONResponse:
-        prepared = await prepare(request, "get_operation")
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        actor, specification = prepared
+        specification = prepare_input(request, "get_operation")
+        if isinstance(specification, JSONResponse):
+            return specification
         try:
             resource_id = _canonical_uuid(operation_id)
             await _read_closed_body(request, specification)
         except MemoryHttpError as exc:
             return _failure_response(exc.failure)
+        actor = await authenticate_for_store(request, "get_operation")
+        if isinstance(actor, JSONResponse):
+            return actor
         assert facade is not None
         return await call_service(
             "get_operation",

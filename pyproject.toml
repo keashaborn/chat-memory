@@ -21,3 +21,6 @@ governed-memory-http = "rag_engine.governed_memory.runtime.application:main"
 [tool.setuptools.packages.find]
 include = ["rag_engine.governed_memory", "rag_engine.governed_memory.*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+"rag_engine.governed_memory.provider_assets" = ["*.json", "*.txt"]

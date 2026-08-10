@@ -1,135 +1,103 @@
-# Governed Memory clean successor — current candidate
+# Governed Memory clean successor — Phase 5 inactive candidate
 
-This is the single current governed-Memory candidate. It is uninstalled and
-not production activated. Validation runs only against fresh, empty,
-disposable PostgreSQL and Qdrant stores on an internal Docker network plus
-invocation-owned loopback JWKS and HTTP processes on the seebx backend. It does
-not apply schema to production, read production application rows, call a
-provider, change a service, or change the frontend.
+This repository contains the single current governed-Memory source candidate.
+It is not production activated: no successor service is installed, enabled,
+started, routed, or connected to a production successor store. No production
+PostgreSQL or Qdrant resource has been created, and no real provider call has
+been authorized or made.
 
-The current implementation is limited to these roots:
+The successor requires CPython 3.12.x; the final Phase 5 source-bound runtime
+is built with CPython 3.12.3 and 19
+hash-locked runtime packages. The checked receipt binds source SHA-256
+`af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
+and wheel SHA-256
+`58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
+The runtime is inactive and is not activation evidence; the full Phase 5
+disposable harness passed against fresh disposable PostgreSQL and Qdrant with
+zero external provider calls. That proof is not production activation.
 
-```text
-governed-memory-migrations/
-rag_engine/governed_memory/
-tests/memory/
-tests/memory_integration/
-tools/governed_memory_validation/
-ops/governed_memory/runtime_manifest.json
-```
+PostgreSQL is canonical. Qdrant is a disposable, derived index rebuilt only
+from current PostgreSQL claims and applied projection receipts. Supabase remains
+the account authority; accounts are not copied. Legacy claims, cards, vectors,
+jobs, reviews, preferences, compatibility state, and attachment content are not
+imported.
 
-The successor requires CPython 3.12.x. Disposable validation uses CPython 3.12.3
-and the exact installed package versions recorded in
-`tools/governed_memory_validation/runtime_packages.json`. That artifact records
-the environment actually exercised; it is not a candidate-built install lock.
-PostgreSQL is canonical. Qdrant is a derived index rebuilt only from current
-PostgreSQL claims, revisions, and applied projection receipts. Supabase remains
-the account authority; accounts are neither copied nor reset. Legacy claims,
-cards, vectors, jobs, reviews, preferences, compatibility state, and attachment
-content are not imported. The attachment interface remains required, but
-attachment content is not eligible for release-1 Memory ingestion.
+## Implemented source surfaces
 
-## One current path
+- Owner authority comes only from the verified Supabase JWT `sub`. A signed
+  `session_id` is mandatory. The exact `auth.sessions` RPC contract is staged,
+  but it is not installed or live verified.
+- The owner-scoped claim-list and claim-detail routes are implemented and
+  candidate-tested. Their disposable migration and HTTP lifecycle proof passed.
+- Strict provider and 3072-dimension embedding adapters are fake-tested. They
+  have made zero external provider calls and have no production authorization.
+- The exact Qdrant adapter is fake-tested for configured alias/physical target,
+  3072-dimensional `Dot`, six payload indexes, owner-filtered bounded search,
+  ambiguous-write readback, and verified deletion. Qdrant v1.19.0 is pinned at
+  digest `057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc`;
+  real disposable compatibility passed. Persistent Qdrant remains unapproved.
+- The content-free monotonic pilot marker exists as migration candidate 0004.
+  Insert, replay, conflict refusal, readback, and guarded rollback passed on
+  disposable PostgreSQL; it is not production-applied.
+- The concurrency-one worker algorithm is fake-tested in one process. Its CLI
+  composition, repository, transport, configuration, and cross-process
+  singleton are activation blockers.
+- Calibration requires independently expected artifact and approval-receipt
+  SHA-256 values. The checked-in artifact is unapproved, so semantic retrieval
+  remains off and no semantic retrieval-score threshold is activated.
+- Verbal Sage frontend candidate `35a684` was built but is undeployed;
+  authenticated visual QA is pending.
+
+## Current path
 
 ```text
 post-cutover user message
-  -> content-free conversation bridge
-  -> five-outcome deterministic eligibility
+  -> content-free conversation outbox
+  -> deterministic eligibility
   -> one durable extraction attempt
-  -> explicit owner review over authenticated HTTP
+  -> explicit owner review
   -> PostgreSQL claim and immutable revision
   -> projection outbox
-  -> derived Qdrant candidate
+  -> derived Qdrant candidates
   -> PostgreSQL revalidation
   -> answer binding
 ```
 
-No legacy table, route, worker, versioned Python module, filesystem review
-artifact, old vector, or old Memory row is an input. Release 1 has no
-administrator or automatic admission path.
+Qdrant cannot supply owner identity, fact content, policy, lifecycle, current
+revision, or rebuild truth. PostgreSQL reloads and revalidates every candidate
+before rendering. Attachment storage remains available, but attachment content
+is not release-1 Memory input.
 
-The owner HTTP boundary accepts an infrastructure service token and an
-asymmetrically signed Supabase-style user access token. It derives owner and
-actor only from the verified UUID `sub`; caller headers, paths, queries, bodies,
-`user_metadata`, and `app_metadata` cannot set authority. Each request binds the
-verified owner with `SET LOCAL` inside one short PostgreSQL transaction. Forced
-RLS and owner-scoped stored procedures remain the database authority.
+Terminal proposal replay is bounded to the 30 days before terminal proposal
+retention purge. After the content-bearing proposal is
+removed, exact replay is unavailable and the API returns
+`proposal_retention_purged` using content-free audit evidence rather than
+reconstructing deleted proposal content.
 
-Selected-span SHA-256 and UTF-8 offsets are distinct from the whole-message
-hash. One checked-in predicate catalog governs extraction, review, correction,
-admission, projection, and retrieval. A provider call must be durably marked
-dispatched before invocation; an unknown post-dispatch outcome is terminal and
-cannot authorize an automatic second call.
+## Proof boundary
 
-Qdrant returns bounded candidate identifiers and hashes only. It cannot supply
-owner identity, fact content, policy, lifecycle, current revision, or rebuild
-truth. PostgreSQL reloads candidate claims and revisions, recomputes their
-hashes, and enforces retrieval policy before model-visible rendering.
+The full harness exercised disposable PostgreSQL and Qdrant with synthetic
+identities, exact owner isolation, migration rollback/reapply, Qdrant 1.19.0,
+pilot-marker semantics, all owner HTTP routes, zero external provider calls,
+and complete invocation-resource cleanup. The attested pre-promotion candidate
+was HEAD `699c80761065d19832d2c0f3b2b50342a5a8350c`, tree
+`c5c13579ffa54da4f30fc198254c98b662c7029b`, and migration manifest
+`2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45`.
+Metadata promotion changes the tree without rewriting those receipt facts.
 
-The model-visible record contains only predicate, subject display, object, and
-epistemic state. Answer binding has two terminal outcomes: `exposed` and
-`no_memory_selected`. The current owner claim-list and claim-detail responses do
-not expose the subject and object fact fields needed to render an admitted
-Memory or prefill an exact correction. Persistent pilot activation is therefore
-blocked on an exact, owner-scoped claim fact-detail API contract; the generic
-authenticated-frontend blocker does not substitute for that missing surface.
-It persists content-free hashes, identifiers, policy
-metadata, and offsets for 90 days. Pending proposals expire.
-Terminal proposal replay is bounded to 30 days; after that, exact replay is
-unavailable and
-returns `proposal_retention_purged` from content-free audit evidence. Verified
-claim-deletion receipts and audit records remain content-free after claim
-content is purged.
+This evidence does not prove live Supabase session revocation, real provider
+behavior, installed production routes, authenticated frontend behavior,
+cross-process worker concurrency, persistent Qdrant suitability, or production
+readiness.
 
-## Disposable validation
+## Activation and retirement
 
-The fail-closed harness proves the following against disposable resources and
-then removes those exact resources:
+Production remains unchanged. Any authorized pilot must use a new empty
+PostgreSQL database and new empty Qdrant collection with no old or unprocessed
+data. Both checked-in systemd templates default off, have no install target,
+and are not installed.
 
-- migration forward, empty-only rollback, absence, reapply, and normalized
-  catalog equivalence;
-- forced RLS, cross-owner denial, exact grants, and direct table-DML denial;
-- locally signed ES256 tokens resolved through a bounded loopback JWKS cache,
-  exact issuer/audience checks, forged-metadata denial, and a negative JWT
-  matrix;
-- owner A and owner B alternating through one connection pool fixed at
-  `max_size=1`, without owner-context leakage;
-- all nine owner HTTP routes: status, claim and proposal lists, claim read,
-  proposal review, correction, retraction, deletion, and operation read;
-- pre-dispatch retry and post-dispatch single-call behavior with zero external
-  provider calls;
-- synthetic Chat A through review, claim, projection, Qdrant retrieval,
-  PostgreSQL revalidation, and a distinct Chat B answer binding;
-- cold worker reconstruction, correction, retention purge, PostgreSQL-driven
-  vector rebuild, alias swap, retraction, verified Qdrant deletion, and
-  structured hard deletion; and
-- no published container ports: the integration process owns invocation-local
-  loopback relays, and the connection trace admits only the four declared
-  loopback endpoints plus the exact two internal container endpoints; and
-- `production_data_read=false`, `production_endpoint_calls=0`, and removal of
-  every invocation-owned container, network, relay, and process.
-
-This proves the candidate boundary with synthetic identities. It does not prove
-live Supabase session freshness/revocation, a decided durable policy for
-session/key-bound authentication provenance, a candidate-owned runtime
-environment, production route mounting, authenticated frontend behavior, real
-provider/embedding adapters, or a calibrated semantic retrieval-score
-threshold.
-
-## Activation and retirement boundary
-
-Production remains unchanged. Authorized cutover should use a new empty
-PostgreSQL database and a new empty Qdrant collection; neither should be
-prefilled with old or unprocessed Memory data.
-
-Activation remains blocked on semantic-threshold calibration, live Supabase
-signing-key and session-freshness wiring, a durable authentication-provenance
-policy, a candidate-owned runtime environment, production service mounting,
-real provider/embedding adapters, an exact owner claim fact-detail API, and
-authenticated frontend validation.
-
-Old services, timers, SQL objects, vectors, source, tests, branches, worktrees,
-and compatibility routes are not deleted by this candidate. After activation,
-retire them in bounded waves: prove no caller or nonterminal work, revoke or
-disable first, observe, preserve one immutable recovery manifest, then delete
-only the exact approved batch with a receipt.
+Old services, stores, source, tests, and compatibility routes are not deleted
+by this candidate. After a proved pilot, retire them in explicit batches:
+disable exact owner paths, observe, preserve one recovery manifest, and delete
+only approved targets with a content-free receipt.

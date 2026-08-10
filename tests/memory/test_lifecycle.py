@@ -51,6 +51,7 @@ def actor(
     return VerifiedActor(
         owner_user_id=owner,
         actor_id=owner if actor_id is None else actor_id,
+        session_id=owner,
         role=role,
         scopes=scopes,
         authentication_manifest_sha256="a" * 64,

@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-schema-contract-v4",
+  "schema_version": "governed-memory-schema-contract-v5",
   "status": "isolated_candidate_disposable_validated_not_production_applied",
   "database": "governed_memory",
   "schemas": [
@@ -44,7 +44,8 @@
     }
   },
   "authority": {
-    "account_identity": "verified_supabase_user_uuid_supplied_by_backend",
+    "account_identity": "verified_supabase_user_and_session_uuid_supplied_by_backend",
+    "session_authority": "staged_auth_sessions_rpc_not_installed_or_live_verified",
     "claim_truth": "postgresql",
     "vector_index": "derived_qdrant_only",
     "source_sha256_authority": "evidence_only_not_projection",
@@ -81,7 +82,8 @@
     "projection_outbox",
     "answer_binding",
     "audit_event",
-    "claim_deletion_receipt"
+    "claim_deletion_receipt",
+    "pilot_marker"
   ],
   "owner_bearing_tables": [
     "evidence",
@@ -113,6 +115,7 @@
     "memory_private.read_claim_candidates(uuid[])",
     "memory_private.read_projection_rebuild_batch(uuid,uuid,integer)",
     "memory_private.list_claims(uuid,integer,timestamptz,uuid)",
+    "memory_private.read_claim(uuid)",
     "memory_private.correct_claim(uuid,uuid,text,text,text,jsonb)",
     "memory_private.retract_claim(uuid,uuid,text,text)",
     "memory_private.request_claim_deletion(uuid,uuid,text,text)",
@@ -121,7 +124,8 @@
     "memory_private.finalize_claim_deletion(uuid,uuid,uuid,text,uuid,uuid,text,integer,text,text,timestamptz,timestamptz,text,text)",
         "memory_private.record_answer_binding(uuid,uuid,uuid,text,text,text[],text[],text[],integer,integer,text,text,boolean,uuid[],uuid[],text,text,text,text,text)",
     "memory_private.read_operation(uuid)",
-    "memory_private.read_status()"
+    "memory_private.read_status()",
+    "memory_private.read_pilot_marker()"
   ],
   "internal_functions": [
         "memory_private.is_sorted_unique_allowlist(text[],text[])",
@@ -157,6 +161,9 @@
         "memory_private.guard_immutable_fact()",
         "memory_private.guard_answer_binding_mutation()",
         "memory_private.guard_append_only_audit()",
+        "memory_private.pilot_marker_receipt_sha256(text,uuid,text,text,timestamptz)",
+        "memory_private.guard_pilot_marker_append_only()",
+        "memory_private.mark_pilot_started(text,uuid,text,text,timestamptz)",
     "memory_private.guard_evidence_mutation()",
     "memory_private.guard_provider_call_mutation()",
     "memory_private.guard_proposal_mutation()",
@@ -183,7 +190,40 @@
     "retrieval_score_gate": "Candidate scores are validated only to the closed normalized-dot interval and sorted deterministically. Production activation is blocked until a minimum semantic score is calibrated on an authorized holdout and bound into the retrieval policy.",
         "answer_binding": "The caller supplies claim ids, not revision ids. PostgreSQL derives exact current revision ids and hashes, reloads and renders the authorized records, persists the content-free retrieval policy envelope beside its recomputable hash, proves selection and injection manifests, rejects internal ids or hashes in provider-visible content, and persists only hashes and byte offsets after dispatch.",
         "answer_binding_retention": "Each terminal answer binding expires exactly 90 days after its one server-owned creation timestamp. A bounded worker purge first appends an exact content-free retention receipt, then deletes only that locked expired binding under a binding-specific local purge context. Exact answer replay is unavailable after retention purge.",
-    "hard_delete": "A verified applied Qdrant delete is required before content purge. Reciprocal proposal and revision foreign keys use deferred NO ACTION so the closed graph is checked at commit. The immutable claim_deletion_receipt remains content-free and is not part of retention purge."
+    "hard_delete": "A verified applied Qdrant delete is required before content purge. Reciprocal proposal and revision foreign keys use deferred NO ACTION so the closed graph is checked at commit. The immutable claim_deletion_receipt remains content-free and is not part of retention purge.",
+    "owner_claim_detail": "The owner-scoped detail function returns only the requested current claim revision after deriving authority from current_owner_id. The list surface remains content-free, direct runtime table access remains denied, and a literal is capped at 2000 UTF-8 bytes by the HTTP contract.",
+    "pilot_marker": "The global marker is content-free, not owner-bearing, monotonic, append-only, and absent until an authorized pilot start. The worker may read it; only the governed database owner can execute the start transition."
+  },
+  "claim_detail": {
+    "database": "governed_memory",
+    "function": "memory_private.read_claim(uuid)",
+    "runtime_role": "governed_memory_api",
+    "authority": "memory_private.current_owner_id()",
+    "owner_scoped": true,
+    "list_claims_content_free": true,
+    "detail_literal_max_utf8_bytes": 2000,
+    "direct_runtime_table_access": false,
+    "migration": "0003_owner_claim_detail/forward.pgsql",
+    "disposable_validated": true,
+    "production_applied": false
+  },
+  "pilot_marker": {
+    "database": "governed_memory",
+    "table": "memory.pilot_marker",
+    "owner_scope": "global_content_free_not_owner_bearing",
+    "owner_bearing": false,
+    "contains_owner_user_id": false,
+    "content_free": true,
+    "append_only": true,
+    "monotonic_false_to_true_only": true,
+    "writer_role": "governed_memory_owner",
+    "reader_role": "governed_memory_worker",
+    "read_function": "memory_private.read_pilot_marker()",
+    "start_function": "memory_private.mark_pilot_started(text,uuid,text,text,timestamptz)",
+    "migration": "0004_pilot_marker/forward.pgsql",
+    "disposable_validated": true,
+    "production_applied": false,
+    "pilot_ever_started": false
   },
   "bridge": {
     "database": "memory",
@@ -441,24 +481,27 @@
     "production_schema_applied": false,
     "production_service_activation_authorized": false,
     "disposable_successor_validation_only": true,
+    "pilot_marker_content_free": true,
+    "pilot_marker_global_not_owner_bearing": true,
+    "pilot_marker_append_only": true,
     "production_activation_blockers": [
-      "semantic_score_threshold_not_calibrated",
-      "live_supabase_keys_and_session_freshness_not_mounted",
-      "strict_session_id_auth_sessions_revocation_policy_not_decided",
+      "production_activation_not_authorized",
+      "semantic_calibration_artifact_unapproved_retrieval_off",
+      "live_supabase_runtime_credentials_not_mounted_or_verified",
+      "supabase_auth_sessions_rpc_not_installed_or_live_verified",
       "fresh_isolated_persistent_postgresql_not_created",
-      "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
       "private_frontend_source_firewall_not_proved",
       "tls_termination_or_private_transport_not_decided",
       "production_store_role_bootstrap_not_implemented_or_authorized",
       "successor_http_service_not_installed",
+      "successor_worker_service_not_installed",
       "successor_conversation_capture_not_activated",
-      "real_provider_adapter_not_implemented",
-      "real_embedding_adapter_not_implemented",
-      "real_qdrant_worker_adapter_not_implemented",
-      "authenticated_frontend_not_validated",
-      "owner_claim_fact_detail_api_not_implemented",
+      "provider_adapter_real_call_validation_not_authorized_or_completed",
+      "embedding_adapter_real_call_validation_not_authorized_or_completed",
+      "worker_cli_repository_transport_config_unwired",
+      "worker_cross_process_singleton_not_implemented",
+      "frontend_candidate_35a684_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
-      "durable_pilot_ever_started_marker_not_implemented",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
     ]
   }

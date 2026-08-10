@@ -1,7 +1,7 @@
 {
   "build_lock": "ops/governed_memory/build-requirements.lock",
   "build_lock_sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
-  "candidate_python": "/tmp/governed-memory-phase4-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b/bin/python",
+  "candidate_python": "/tmp/governed-memory-phase5-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b/bin/python",
   "candidate_python_is_symlink": false,
   "candidate_python_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
   "legacy_environment_imported": false,
@@ -14,8 +14,8 @@
     "name": "governed-memory-successor",
     "version": "0.0.0"
   },
-  "project_wheel": "/tmp/governed-memory-phase4-build-138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc-9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b/dist/governed_memory_successor-0.0.0-py3-none-any.whl",
-  "project_wheel_sha256": "7d36b58d01a1ea26ced925a43dddc818e63508caa8b541bf002c71ee605fa306",
+  "project_wheel": "/tmp/governed-memory-phase5-build-138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc-af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b/dist/governed_memory_successor-0.0.0-py3-none-any.whl",
+  "project_wheel_sha256": "58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4",
   "provider_calls": 0,
   "python_version": "3.12.3",
   "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
@@ -44,7 +44,7 @@
   },
   "schema_version": "governed-memory-runtime-build-receipt-v1",
   "setuptools_present": false,
-  "source_tree_sha256": "9225cb61154b7b054fa973ac025a1f41e83a5fc9d8d7bc86069b85e8af3ee57b",
+  "source_tree_sha256": "af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b",
   "user_site_enabled": false,
   "wheel_present": false
 }

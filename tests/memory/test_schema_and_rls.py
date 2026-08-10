@@ -71,6 +71,16 @@ PACKAGE_DIRS = (
     MIGRATIONS / "0001_foundation",
     MIGRATIONS / "0002_conversation_bridge",
 )
+ADDITIVE_PACKAGE_DIRS = (
+    MIGRATIONS / "0003_owner_claim_detail",
+    MIGRATIONS / "0004_pilot_marker",
+)
+ALL_PACKAGE_DIRS = (
+    PACKAGE_DIRS[0],
+    ADDITIVE_PACKAGE_DIRS[0],
+    ADDITIVE_PACKAGE_DIRS[1],
+    PACKAGE_DIRS[1],
+)
 FOUNDATION_TABLES = (
     "predicate_catalog",
     "evidence",
@@ -1060,7 +1070,7 @@ class SchemaContractTests(unittest.TestCase):
     def test_contract_declares_a_new_empty_authority(self) -> None:
         self.assertEqual(
             self.contract["schema_version"],
-            "governed-memory-schema-contract-v4",
+            "governed-memory-schema-contract-v5",
         )
         self.assertEqual(
             self.contract["status"],
@@ -1071,7 +1081,8 @@ class SchemaContractTests(unittest.TestCase):
         self.assertEqual(
             self.contract["authority"],
             {
-                "account_identity": "verified_supabase_user_uuid_supplied_by_backend",
+                "account_identity": "verified_supabase_user_and_session_uuid_supplied_by_backend",
+                "session_authority": "staged_auth_sessions_rpc_not_installed_or_live_verified",
                 "claim_truth": "postgresql",
                 "vector_index": "derived_qdrant_only",
                 "source_sha256_authority": "evidence_only_not_projection",
@@ -1102,8 +1113,15 @@ class SchemaContractTests(unittest.TestCase):
             self.assertEqual(len(values), len(set(values)), key)
         self.assertEqual(
             set(self.contract["owner_bearing_tables"]),
-            set(self.contract["tables"]) - {"predicate_catalog"},
+            set(self.contract["tables"]) - {"predicate_catalog", "pilot_marker"},
         )
+        marker = self.contract["pilot_marker"]
+        self.assertEqual(marker["table"], "memory.pilot_marker")
+        self.assertEqual(marker["owner_scope"], "global_content_free_not_owner_bearing")
+        self.assertFalse(marker["owner_bearing"])
+        self.assertFalse(marker["contains_owner_user_id"])
+        self.assertTrue(marker["content_free"])
+        self.assertTrue(marker["append_only"])
         bridge = self.contract["bridge"]
         self.assertEqual(bridge["table"], "memory_ingest_private.memory_ingest_outbox")
         self.assertEqual(bridge["private_schema"], "memory_ingest_private")
@@ -1214,6 +1232,12 @@ class PackageIntegrityTests(unittest.TestCase):
             "0002_conversation_bridge/forward.pgsql",
             "0002_conversation_bridge/package.json",
             "0002_conversation_bridge/rollback.pgsql",
+            "0003_owner_claim_detail/forward.pgsql",
+            "0003_owner_claim_detail/package.json",
+            "0003_owner_claim_detail/rollback.pgsql",
+            "0004_pilot_marker/forward.pgsql",
+            "0004_pilot_marker/package.json",
+            "0004_pilot_marker/rollback.pgsql",
         }
         observed = {
             path.relative_to(MIGRATIONS).as_posix()
@@ -1223,7 +1247,7 @@ class PackageIntegrityTests(unittest.TestCase):
         self.assertEqual(observed, expected)
 
     def test_package_hashes_bind_exact_forward_and_rollback_bytes(self) -> None:
-        for directory in PACKAGE_DIRS:
+        for directory in ALL_PACKAGE_DIRS:
             package = _load_json(directory / "package.json")
             self.assertEqual(
                 package["schema_version"],
@@ -1265,16 +1289,30 @@ class PackageIntegrityTests(unittest.TestCase):
                 relative,
             )
 
-    def test_fail_closed_manifest_verifier_accepts_only_unique_v3_json(self) -> None:
+    def test_fail_closed_manifest_verifier_accepts_only_exact_state_v4_json(self) -> None:
         verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
-        receipt = verifier["verify"](MIGRATIONS)
+        manifest = _load_json(ROOT_MANIFEST_PATH)
+        preliminary = manifest["status"] == (
+            "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+        )
+        receipt = verifier["verify"](MIGRATIONS, preliminary=preliminary)
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v3",
+            "governed-memory-migration-verification-v4",
         )
+        self.assertEqual(
+            receipt["validation_state"],
+            (
+                "preliminary_disposable_proof_candidate"
+                if preliminary
+                else "disposable_validated"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "unexpected migration candidate status"):
+            verifier["verify"](MIGRATIONS, preliminary=not preliminary)
 
 
 class StaticSQLPolicyTests(unittest.TestCase):
@@ -1285,6 +1323,12 @@ class StaticSQLPolicyTests(unittest.TestCase):
         cls.foundation_rollback = _without_comments(_sql(PACKAGE_DIRS[0] / "rollback.pgsql"))
         cls.bridge = _without_comments(_sql(PACKAGE_DIRS[1] / "forward.pgsql"))
         cls.bridge_rollback = _without_comments(_sql(PACKAGE_DIRS[1] / "rollback.pgsql"))
+        cls.claim_detail = _without_comments(
+            _sql(ADDITIVE_PACKAGE_DIRS[0] / "forward.pgsql")
+        )
+        cls.pilot_marker = _without_comments(
+            _sql(ADDITIVE_PACKAGE_DIRS[1] / "forward.pgsql")
+        )
         cls.roles = _without_comments(_sql(ROLES_PATH))
 
     def test_foundation_creates_exact_declared_tables(self) -> None:
@@ -1295,8 +1339,10 @@ class StaticSQLPolicyTests(unittest.TestCase):
                 flags=re.IGNORECASE,
             )
         )
-        self.assertEqual(len(self.contract["tables"]), len(FOUNDATION_TABLES))
-        self.assertEqual(set(self.contract["tables"]), set(FOUNDATION_TABLES))
+        self.assertEqual(
+            set(self.contract["tables"]),
+            set(FOUNDATION_TABLES) | {"pilot_marker"},
+        )
         self.assertEqual(observed, set(FOUNDATION_TABLES))
 
     def test_durable_error_and_reason_fields_accept_only_ascii_codes(self) -> None:
@@ -2763,7 +2809,9 @@ class StaticSQLPolicyTests(unittest.TestCase):
                 )
 
     def test_declared_function_names_are_exactly_created(self) -> None:
-        combined = self.foundation + "\n" + self.bridge
+        combined = "\n".join(
+            (self.foundation, self.claim_detail, self.pilot_marker, self.bridge)
+        )
         declared = {
             signature.split("(", 1)[0]
             for signature in (
@@ -2777,7 +2825,9 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertEqual(observed, declared)
 
     def test_function_security_modes_and_search_paths_are_explicit(self) -> None:
-        combined = self.foundation + "\n" + self.bridge
+        combined = "\n".join(
+            (self.foundation, self.claim_detail, self.pilot_marker, self.bridge)
+        )
         definitions = _function_definitions(combined)
         self.assertTrue(definitions)
         for name, definition in definitions.items():
@@ -2814,7 +2864,15 @@ class StaticSQLPolicyTests(unittest.TestCase):
                 self.assertFalse(role_contract["inherit"])
                 self.assertFalse(role_contract["superuser"])
                 self.assertFalse(role_contract["bypassrls"])
-        combined = self.roles + "\n" + self.foundation + "\n" + self.bridge
+        combined = "\n".join(
+            (
+                self.roles,
+                self.foundation,
+                self.claim_detail,
+                self.pilot_marker,
+                self.bridge,
+            )
+        )
         self.assertRegex(
             self.roles,
             r"role\.rolcanlogin\s*=\s*role_record\.must_login",

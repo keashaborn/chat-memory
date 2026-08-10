@@ -130,6 +130,7 @@ class SupabaseHttpAuthTests(unittest.TestCase):
 
         self.assertEqual(actor.owner_user_id, OWNER_A)
         self.assertEqual(actor.actor_id, OWNER_A)
+        self.assertEqual(actor.session_id, SESSION_ID)
         self.assertIs(actor.role, ActorRole.OWNER)
         self.assertEqual(actor.scopes, (ActorScope.READ_CLAIMS,))
         self.assertEqual(actor.authenticated_at, NOW)

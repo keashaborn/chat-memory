@@ -5,7 +5,7 @@ from __future__ import annotations
 The service deliberately does not import the legacy Brains application.  Off
 mode mounts the closed owner route manifest without constructing authentication
 or database dependencies.  On mode remains fail-closed until a caller injects
-a live Supabase session-freshness verifier.
+a live Supabase account-and-session authority verifier.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -106,13 +106,13 @@ PoolFactory = Callable[..., Awaitable[Any]]
 ActorResolverFactory = Callable[..., ActorResolver]
 
 
-class LiveSessionFreshnessVerifier(Protocol):
-    """Verify the request's signed Supabase session against live authority.
+class LiveAuthorityVerifier(Protocol):
+    """Verify the request's account and JWT session against live authority.
 
-    An implementation must make a bounded live authority request and require
-    its authoritative user UUID to equal ``actor.owner_user_id``.  Immediate
-    sign-out revocation remains a separate session-ledger activation gate.
-    The verifier must fail closed on ambiguity or authority unavailability.
+    An implementation must make bounded uncached authority requests, require
+    the authoritative user UUID to equal ``actor.owner_user_id``, and require
+    ``actor.session_id`` to be present in the Supabase session ledger.  The
+    verifier must fail closed on ambiguity or authority unavailability.
     """
 
     async def __call__(self, request: Request, actor: VerifiedActor) -> None: ...
@@ -319,9 +319,9 @@ async def _reset_connection(connection: Any) -> None:
     await connection.reset()
 
 
-def _compose_fresh_actor_resolver(
+def _compose_authoritative_actor_resolver(
     resolver: ActorResolver,
-    freshness_verifier: LiveSessionFreshnessVerifier,
+    authority_verifier: LiveAuthorityVerifier,
 ) -> ActorResolver:
     async def resolve(
         request: Request,
@@ -330,7 +330,7 @@ def _compose_fresh_actor_resolver(
         actor = await resolver(request, scopes)
         if not isinstance(actor, VerifiedActor):
             raise HttpAuthError("auth_token_invalid")
-        outcome = freshness_verifier(request, actor)
+        outcome = authority_verifier(request, actor)
         if not inspect.isawaitable(outcome):
             raise HttpAuthError("auth_configuration_invalid")
         await outcome
@@ -356,7 +356,7 @@ def create_governed_memory_http_service(
     environment: Mapping[str, str] | None = None,
     pool_factory: PoolFactory = asyncpg.create_pool,
     actor_resolver_factory: ActorResolverFactory = create_supabase_actor_resolver,
-    freshness_verifier: LiveSessionFreshnessVerifier | None = None,
+    authority_verifier: LiveAuthorityVerifier | None = None,
     token_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     jwks_fetcher: JwksFetcher | None = None,
 ) -> FastAPI:
@@ -378,9 +378,9 @@ def create_governed_memory_http_service(
             raise HttpServiceConfigurationError(
                 "governed_memory_runtime_factory_invalid"
             )
-        if freshness_verifier is None or not callable(freshness_verifier):
+        if authority_verifier is None or not callable(authority_verifier):
             raise HttpServiceConfigurationError(
-                "governed_memory_live_session_freshness_verifier_required"
+                "governed_memory_live_authority_verifier_required"
             )
         auth_kwargs: dict[str, object] = {"token_clock": token_clock}
         if jwks_fetcher is not None:
@@ -393,9 +393,9 @@ def create_governed_memory_http_service(
             raise HttpServiceConfigurationError(
                 "governed_memory_actor_resolver_invalid"
             )
-        actor_resolver = _compose_fresh_actor_resolver(
+        actor_resolver = _compose_authoritative_actor_resolver(
             base_resolver,
-            freshness_verifier,
+            authority_verifier,
         )
         facade = PostgresOwnerStore(runtime.pool_handle)
 
@@ -526,7 +526,7 @@ __all__ = [
     "GovernedMemoryHttpServiceSettings",
     "HttpServiceConfigurationError",
     "HttpServicePreflightError",
-    "LiveSessionFreshnessVerifier",
+    "LiveAuthorityVerifier",
     "SERVICE_TOKEN_HEADER",
     "create_governed_memory_http_service",
 ]

@@ -13,6 +13,8 @@ set -Eeuo pipefail
 #   GM_VALIDATION_EXPECTED_BRANCH='<exact candidate branch>'
 #   GM_VALIDATION_EXPECTED_HEAD='<exact 40-character candidate commit>'
 #   GM_VALIDATION_EXPECTED_TREE='<exact 40-character candidate tree>'
+# Preliminary migration proof only, before validation metadata is promoted:
+#   GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 #
 # The EXIT trap is installed before Docker creation. It removes only resources
 # whose captured ID, exact name, and three ownership labels still agree.
@@ -25,10 +27,11 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='60e6749c7b94a9eb057b07bfe97818990743cb6d'
+readonly EXPECTED_BASE='43ba1839233781f231195c4ff5051794494148c6'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='90387f5f6420f6586fc2faf12a1374c6c7f505d69f097f185091291763829ad4'
+readonly PRELIMINARY_PROOF_AUTHORIZATION_VALUE='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
+readonly EXPECTED_MANIFEST_SHA256='baa817cc5f52a1237c5b168001bfd0c00fd7e0ea6cba5107505e25673aec8caa'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
@@ -38,9 +41,9 @@ readonly LABEL_INVOCATION_KEY='com.verbalsage.governed-memory.invocation-id'
 
 readonly POSTGRES_IMAGE='postgres:16-alpine'
 readonly POSTGRES_IMAGE_ID='sha256:de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28'
-readonly QDRANT_IMAGE='qdrant/qdrant:v1.11.0'
-readonly QDRANT_IMAGE_ID='sha256:dc764734fcd6f947f2c626d3731fbfafd17d098a702dda8aab5b645c51b6c408'
-readonly QDRANT_IMAGE_DIGEST='qdrant/qdrant@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170'
+readonly QDRANT_IMAGE='qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc'
+readonly QDRANT_IMAGE_ID='sha256:92c4050629efe895f87dafd2830f1cd4d0532bc9967b777cab979ebda71612b3'
+readonly QDRANT_IMAGE_DIGEST='qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc'
 readonly POSTGRES_PORT='55443'
 readonly QDRANT_PORT='6339'
 readonly JWKS_PORT='18091'
@@ -55,10 +58,12 @@ RUNTIME_LOCK="${ROOT}/ops/governed_memory/runtime-requirements.lock"
 BUILD_LOCK="${ROOT}/ops/governed_memory/build-requirements.lock"
 RUNTIME_BUILD_RECEIPT="${ROOT}/ops/governed_memory/runtime_build_receipt.json"
 VALIDATION_RUNTIME_PYTHON="${GM_VALIDATION_RUNTIME_PYTHON:-}"
+PRELIMINARY_PROOF_AUTHORIZATION="${GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF:-}"
 TEST_PYTHON=''
 readonly SCRIPT_DIR ROOT MIGRATIONS RUNTIME_PACKAGES RUNTIME_LOCK BUILD_LOCK
 readonly RUNTIME_BUILD_RECEIPT
 readonly VALIDATION_RUNTIME_PYTHON
+readonly PRELIMINARY_PROOF_AUTHORIZATION
 
 EXPECTED_ROOT="${GM_VALIDATION_EXPECTED_ROOT:-}"
 EXPECTED_BRANCH="${GM_VALIDATION_EXPECTED_BRANCH:-}"
@@ -121,7 +126,7 @@ bind_validation_runtime_python() {
   lock_sha="$(sha256sum "${RUNTIME_LOCK}")" || die 'runtime_lock_sha256_failed'
   lock_sha="${lock_sha%% *}"
   [[ "${lock_sha}" =~ ^[0-9a-f]{64}$ ]] || die 'runtime_lock_sha256_invalid'
-  [[ "${canonical}" =~ ^/tmp/governed-memory-phase4-runtime-([0-9a-f]{64})-([0-9a-f]{64})/bin/python$ ]] \
+  [[ "${canonical}" =~ ^/tmp/governed-memory-phase5-runtime-([0-9a-f]{64})-([0-9a-f]{64})/bin/python$ ]] \
     || die 'validation_runtime_python_not_invocation_owned'
   runtime_sha="${BASH_REMATCH[1]}"
   source_sha="${BASH_REMATCH[2]}"
@@ -170,13 +175,20 @@ PY
   [[ "${receipt}" == $'CPython\n3.12.3' ]] \
     || die 'validation_runtime_python_receipt_invalid'
   source_receipt="$(
-    "${canonical}" -I -B - "${ROOT}/rag_engine/governed_memory" <<'PY'
+    "${canonical}" -I -B - "${ROOT}" <<'PY'
 from __future__ import annotations
 
 import hashlib
 import json
 from pathlib import Path
+import stat
 import sys
+
+
+ALLOWED_NON_PYTHON_SOURCE_PATHS = {
+    "provider_assets/extraction_instructions.txt",
+    "provider_assets/extraction_output.schema.json",
+}
 
 
 def sha256(path: Path) -> str:
@@ -187,27 +199,55 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-package_root = Path(sys.argv[1])
+source_root = Path(sys.argv[1])
 if (
-    not package_root.is_absolute()
-    or not package_root.is_dir()
-    or package_root.is_symlink()
+    not source_root.is_absolute()
+    or not source_root.is_dir()
+    or source_root.is_symlink()
 ):
-    raise SystemExit("source package root invalid")
+    raise SystemExit("source root invalid")
+package_root = source_root / "rag_engine" / "governed_memory"
+required = (
+    ("pyproject.toml", source_root / "pyproject.toml"),
+    ("rag_engine/__init__.py", source_root / "rag_engine" / "__init__.py"),
+)
 material: list[tuple[str, str]] = []
+for relative_text, path in required:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise SystemExit("source packaging file invalid") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or not 0 <= metadata.st_size <= 128 * 1024
+    ):
+        raise SystemExit("source packaging file invalid")
+    material.append((relative_text, sha256(path)))
+observed_assets: set[str] = set()
 for path in sorted(package_root.rglob("*")):
     relative = path.relative_to(package_root)
+    relative_text = relative.as_posix()
     if "__pycache__" in relative.parts:
         continue
     if path.is_symlink():
         raise SystemExit("source package symlink")
     if path.is_dir():
         continue
-    if not path.is_file() or path.suffix != ".py":
+    if not path.is_file():
         raise SystemExit("source package inventory invalid")
-    material.append((relative.as_posix(), sha256(path)))
+    if path.suffix != ".py":
+        if relative_text not in ALLOWED_NON_PYTHON_SOURCE_PATHS:
+            raise SystemExit("source package inventory invalid")
+        observed_assets.add(relative_text)
+    material.append(
+        (f"rag_engine/governed_memory/{relative_text}", sha256(path))
+    )
+material.sort()
 if not material:
     raise SystemExit("source package inventory empty")
+if observed_assets != ALLOWED_NON_PYTHON_SOURCE_PATHS:
+    raise SystemExit("source package inventory invalid")
 encoded = json.dumps(
     material,
     ensure_ascii=True,
@@ -326,7 +366,7 @@ if (
     raise ValueError("runtime build receipt differs")
 project_wheel = Path(receipt["project_wheel"])
 expected_build_root = Path(
-    "/tmp/governed-memory-phase4-build-"
+    "/tmp/governed-memory-phase5-build-"
     f"{receipt['build_lock_sha256']}-{source_tree_sha256}"
 )
 if (
@@ -360,7 +400,7 @@ verify_installed_successor_source() {
 
   observed="$(
     "${TEST_PYTHON}" -I -B - \
-      "${ROOT}/rag_engine/governed_memory" "${SOURCE_TREE_SHA256}" <<'PY'
+      "${ROOT}/rag_engine/governed_memory" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -368,6 +408,12 @@ from importlib import metadata
 import json
 from pathlib import Path
 import sys
+
+
+ALLOWED_NON_PYTHON_SOURCE_PATHS = {
+    "provider_assets/extraction_instructions.txt",
+    "provider_assets/extraction_output.schema.json",
+}
 
 
 def sha256(path: Path) -> str:
@@ -386,19 +432,27 @@ def material(package_root: Path) -> list[tuple[str, str]]:
     ):
         raise ValueError("package root invalid")
     result: list[tuple[str, str]] = []
+    observed_assets: set[str] = set()
     for path in sorted(package_root.rglob("*")):
         relative = path.relative_to(package_root)
+        relative_text = relative.as_posix()
         if "__pycache__" in relative.parts:
             continue
         if path.is_symlink():
             raise ValueError("package symlink invalid")
         if path.is_dir():
             continue
-        if not path.is_file() or path.suffix != ".py":
+        if not path.is_file():
             raise ValueError("package inventory invalid")
-        result.append((relative.as_posix(), sha256(path)))
+        if path.suffix != ".py":
+            if relative_text not in ALLOWED_NON_PYTHON_SOURCE_PATHS:
+                raise ValueError("package inventory invalid")
+            observed_assets.add(relative_text)
+        result.append((relative_text, sha256(path)))
     if not result:
         raise ValueError("package inventory empty")
+    if observed_assets != ALLOWED_NON_PYTHON_SOURCE_PATHS:
+        raise ValueError("package inventory invalid")
     return result
 
 
@@ -412,7 +466,6 @@ def tree_sha256(value: list[tuple[str, str]]) -> str:
 
 
 source_root = Path(sys.argv[1])
-expected_sha256 = sys.argv[2]
 distribution = metadata.distribution("governed-memory-successor")
 installed_root = Path(
     distribution.locate_file("rag_engine/governed_memory")
@@ -424,14 +477,13 @@ source_material = material(source_root)
 installed_material = material(installed_root)
 if source_material != installed_material:
     raise ValueError("installed successor source differs")
-if tree_sha256(source_material) != expected_sha256:
-    raise ValueError("current successor source hash differs")
-if tree_sha256(installed_material) != expected_sha256:
+source_hash = tree_sha256(source_material)
+if tree_sha256(installed_material) != source_hash:
     raise ValueError("installed successor source hash differs")
-print(expected_sha256)
+print(source_hash)
 PY
   )" || die 'installed_successor_source_verification_failed'
-  [[ "${observed}" == "${SOURCE_TREE_SHA256}" ]] \
+  [[ "${observed}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'installed_successor_source_receipt_invalid'
 }
 
@@ -658,12 +710,23 @@ acquire_lock() {
 }
 
 verify_migration_manifest() {
-  local receipt
+  local expected_validation_state receipt
   local -a fields
+  local -a verifier_arguments
+
+  verifier_arguments=("${MIGRATIONS}")
+  expected_validation_state='disposable_validated'
+  if [[ -n "${PRELIMINARY_PROOF_AUTHORIZATION}" ]]; then
+    [[ "${PRELIMINARY_PROOF_AUTHORIZATION}" == \
+       "${PRELIMINARY_PROOF_AUTHORIZATION_VALUE}" ]] \
+      || die 'preliminary_migration_proof_authorization_invalid'
+    verifier_arguments=(--preliminary-disposable-proof "${MIGRATIONS}")
+    expected_validation_state='preliminary_disposable_proof_candidate'
+  fi
 
   receipt="$(
     "${TEST_PYTHON}" -I -B \
-      "${SCRIPT_DIR}/verify_migration_manifest.py" "${MIGRATIONS}"
+      "${SCRIPT_DIR}/verify_migration_manifest.py" "${verifier_arguments[@]}"
   )" || die 'migration_manifest_verification_failed'
 
   mapfile -t fields < <(
@@ -677,19 +740,22 @@ print(value.get("result", ""))
 print(value.get("migration_package_id_sha256", ""))
 print(value.get("file_count", ""))
 print(value.get("manifest_sha256", ""))
+print(value.get("validation_state", ""))
 PY
   )
-  [[ "${#fields[@]}" -eq 5 ]] || die 'migration_verification_receipt_invalid'
-  [[ "${fields[0]}" == 'governed-memory-migration-verification-v3' ]] \
+  [[ "${#fields[@]}" -eq 6 ]] || die 'migration_verification_receipt_invalid'
+  [[ "${fields[0]}" == 'governed-memory-migration-verification-v4' ]] \
     || die 'migration_verification_schema_invalid'
   [[ "${fields[1]}" == 'verified' ]] || die 'migration_verification_not_verified'
   [[ "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'migration_package_id_sha256_invalid'
-  [[ "${fields[3]}" == '9' ]] || die 'migration_file_count_mismatch'
+  [[ "${fields[3]}" == '15' ]] || die 'migration_file_count_mismatch'
   [[ "${fields[4]}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'migration_manifest_sha256_invalid'
   [[ "${fields[4]}" == "${EXPECTED_MANIFEST_SHA256}" ]] \
     || die 'migration_manifest_sha256_mismatch'
+  [[ "${fields[5]}" == "${expected_validation_state}" ]] \
+    || die 'migration_validation_state_mismatch'
   MIGRATION_MANIFEST_SHA256="${fields[4]}"
 }
 
@@ -1127,7 +1193,7 @@ value = json.loads(sys.argv[1], object_pairs_hook=unique_object)
 print(value.get("version", ""))
 PY
   )" || die 'qdrant_version_invalid'
-  [[ "${QDRANT_SERVER_VERSION}" == '1.11.0' ]] \
+  [[ "${QDRANT_SERVER_VERSION}" == '1.19.0' ]] \
     || die 'qdrant_version_unexpected'
 }
 
@@ -1246,6 +1312,12 @@ apply_migrations() {
   run_migration governed_memory governed_memory_owner \
     governed_memory_foundation_0001 \
     "${MIGRATIONS}/0001_foundation/forward.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_owner_claim_detail_0003 \
+    "${MIGRATIONS}/0003_owner_claim_detail/forward.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_pilot_marker_0004 \
+    "${MIGRATIONS}/0004_pilot_marker/forward.pgsql"
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
@@ -1256,6 +1328,8 @@ apply_migrations() {
 }
 
 rollback_migrations() {
+  local marker_rows
+
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
     -c 'REVOKE memory_ingest_writer FROM brains_app' >/dev/null \
@@ -1263,6 +1337,18 @@ rollback_migrations() {
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql"
+  marker_rows="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c 'SELECT pg_catalog.count(*) FROM memory.pilot_marker'
+  )" || die 'pilot_marker_empty_rollback_query_failed'
+  [[ "${marker_rows}" == '0' ]] || die 'pilot_marker_not_empty_before_rollback'
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_pilot_marker_0004 \
+    "${MIGRATIONS}/0004_pilot_marker/rollback.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_owner_claim_detail_0003 \
+    "${MIGRATIONS}/0003_owner_claim_detail/rollback.pgsql"
   run_migration governed_memory governed_memory_owner \
     governed_memory_foundation_0001 \
     "${MIGRATIONS}/0001_foundation/rollback.pgsql"
@@ -1510,10 +1596,95 @@ assert_rollback_absence() {
 
   result="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c "SELECT CASE WHEN pg_catalog.to_regprocedure('memory_private.read_claim(uuid)') IS NULL AND pg_catalog.to_regclass('memory.pilot_marker') IS NULL AND pg_catalog.to_regprocedure('memory_private.pilot_marker_receipt_sha256(text,uuid,text,text,timestamp with time zone)') IS NULL AND pg_catalog.to_regprocedure('memory_private.guard_pilot_marker_append_only()') IS NULL AND pg_catalog.to_regprocedure('memory_private.mark_pilot_started(text,uuid,text,text,timestamp with time zone)') IS NULL AND pg_catalog.to_regprocedure('memory_private.read_pilot_marker()') IS NULL THEN 'absent' ELSE 'present' END"
+  )" || die 'phase5_additive_absence_query_failed'
+  [[ "${result}" == 'absent' ]] || die 'phase5_additive_rollback_objects_remain'
+
+  result="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
       -c "SELECT CASE WHEN pg_catalog.to_regnamespace('memory_ingest_private') IS NULL AND pg_catalog.to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL THEN 'absent' ELSE 'present' END"
   )" || die 'bridge_absence_query_failed'
   [[ "${result}" == 'absent' ]] || die 'bridge_rollback_objects_remain'
+}
+
+verify_disposable_pilot_marker_semantics() {
+  local conflict_output first_insert marker_rows read_result read_rows replay
+  local -r pilot_id='governed_memory_disposable_019fe927'
+  local -r operation_id='14444444-4444-4444-8444-444444444444'
+  local -r pilot_contract_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  local -r authorization_receipt_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  local -r started_at='2026-08-10T20:00:00Z'
+  local -r marker_receipt_sha256='5aa7051078f7f619c4f705fd79d6817d9d6fc45005b6f8c1271d826b77227e91'
+
+  marker_rows="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_owner' \
+      -c 'SELECT pg_catalog.count(*) FROM memory.pilot_marker'
+  )" || die 'pilot_marker_initial_row_count_failed'
+  [[ "${marker_rows}" == '0' ]] || die 'pilot_marker_initial_row_count_not_zero'
+
+  read_rows="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_worker' \
+      -c 'SELECT pg_catalog.count(*) FROM memory_private.read_pilot_marker()'
+  )" || die 'pilot_marker_initial_read_failed'
+  [[ "${read_rows}" == '0' ]] || die 'pilot_marker_absence_did_not_read_false'
+  printf 'SUCCESSOR_PILOT_MARKER_ABSENCE=false rows=0\n'
+
+  first_insert="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
+      -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_owner' \
+      -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.marker_receipt_sha256, CASE WHEN value.replayed THEN 'true' ELSE 'false' END FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '${started_at}'::timestamptz) AS value"
+  )" || die 'pilot_marker_first_insert_failed'
+  [[ "${first_insert}" == "true|${marker_receipt_sha256}|false" ]] \
+    || die 'pilot_marker_first_insert_result_mismatch'
+
+  replay="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
+      -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_owner' \
+      -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.marker_receipt_sha256, CASE WHEN value.replayed THEN 'true' ELSE 'false' END FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '${started_at}'::timestamptz) AS value"
+  )" || die 'pilot_marker_exact_replay_failed'
+  [[ "${replay}" == "true|${marker_receipt_sha256}|true" ]] \
+    || die 'pilot_marker_exact_replay_result_mismatch'
+
+  if conflict_output="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_owner' \
+      -c "SELECT * FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '2026-08-10T20:00:01Z'::timestamptz)" \
+      2>&1
+  )"; then
+    die 'pilot_marker_conflicting_replay_unexpectedly_succeeded'
+  fi
+  [[ "${conflict_output}" == *'pilot marker conflicting replay'* ]] \
+    || die 'pilot_marker_conflicting_replay_refusal_missing'
+
+  marker_rows="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_owner' \
+      -c 'SELECT pg_catalog.count(*) FROM memory.pilot_marker'
+  )" || die 'pilot_marker_final_row_count_failed'
+  [[ "${marker_rows}" == '1' ]] || die 'pilot_marker_final_row_count_not_one'
+
+  read_result="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
+      -U postgres -d governed_memory \
+      -c 'SET ROLE governed_memory_worker' \
+      -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.pilot_id, value.operation_id, value.pilot_contract_sha256, value.authorization_receipt_sha256, pg_catalog.to_char(value.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), value.marker_receipt_sha256 FROM memory_private.read_pilot_marker() AS value"
+  )" || die 'pilot_marker_final_read_failed'
+  [[ "${read_result}" == "true|${pilot_id}|${operation_id}|${pilot_contract_sha256}|${authorization_receipt_sha256}|${started_at}|${marker_receipt_sha256}" ]] \
+    || die 'pilot_marker_final_read_result_mismatch'
+  printf 'SUCCESSOR_PILOT_MARKER_SEMANTICS=insert-replay-conflict-refusal-read-true\n'
 }
 
 verify_apply_rollback_reapply() {
@@ -1540,6 +1711,7 @@ verify_apply_rollback_reapply() {
     || die 'bridge_reapply_logical_dump_mismatch'
   FOUNDATION_DUMP_SHA256="$(sha256_file "${foundation_second}")"
   BRIDGE_DUMP_SHA256="$(sha256_file "${bridge_second}")"
+  verify_disposable_pilot_marker_semantics
   printf 'SUCCESSOR_MIGRATION_CYCLE=apply-rollback-absence-reapply-equivalent\n'
 }
 

@@ -59,6 +59,7 @@ def owner_actor(scope: ActorScope) -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER_A,
         actor_id=OWNER_A,
+        session_id=OWNER_A,
         role=ActorRole.OWNER,
         scopes=(scope,),
         authentication_manifest_sha256="a" * 64,

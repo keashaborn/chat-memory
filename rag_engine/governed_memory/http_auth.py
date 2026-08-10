@@ -288,6 +288,7 @@ class SupabaseJwtVerifier:
             return VerifiedActor(
                 owner_user_id=subject,
                 actor_id=subject,
+                session_id=session_id,
                 role=ActorRole.OWNER,
                 scopes=checked_scopes,
                 authentication_manifest_sha256=authentication_manifest_sha256,

@@ -50,6 +50,7 @@ def owner_actor(
     return VerifiedActor(
         owner_user_id=OWNER,
         actor_id=OWNER,
+        session_id=OWNER,
         role=ActorRole.OWNER,
         scopes=scopes,
         authentication_manifest_sha256=HASH_A,
@@ -61,6 +62,7 @@ def worker_actor() -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER,
         actor_id=OTHER_OWNER,
+        session_id=OWNER,
         role=ActorRole.WORKER,
         scopes=(ActorScope.READ_CLAIMS,),
         authentication_manifest_sha256=HASH_A,
@@ -133,6 +135,19 @@ def claim_result(claim_id: UUID = CLAIM) -> dict[str, Any]:
         "epistemic_state": "supported",
         "sensitivity": "ordinary",
         "updated_at": NOW,
+    }
+
+
+def claim_detail_result(claim_id: UUID = CLAIM) -> dict[str, Any]:
+    return {
+        **claim_result(claim_id),
+        "subject_entity_type": "self",
+        "subject_entity_key": "self",
+        "subject_display_name": None,
+        "object_entity_type": None,
+        "object_entity_key": None,
+        "object_display_name": None,
+        "object_literal": "synthetic literal",
     }
 
 
@@ -314,7 +329,7 @@ class FakeFacade:
         if name == "list_claims":
             return [claim_result()]
         if name == "get_claim":
-            return claim_result(args[1])
+            return claim_detail_result(args[1])
         if name == "list_proposals":
             return [proposal_result()]
         if name == "review_proposal":
@@ -582,6 +597,112 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body, {"error": {"code": "memory_route_not_found"}})
         self.assertEqual(resolver.calls, [])
 
+    async def test_claim_list_is_content_free_and_detail_shape_is_exact(self) -> None:
+        app = create_owner_memory_app(
+            actor_resolver=FakeResolver(),
+            facade=FakeFacade(),
+            feature_enabled=True,
+        )
+        list_status, _, claims = await asgi_request(
+            app,
+            "GET",
+            "/memory/claims",
+        )
+        detail_status, _, detail = await asgi_request(
+            app,
+            "GET",
+            f"/memory/claims/{CLAIM}",
+        )
+        self.assertEqual(list_status, 200)
+        self.assertEqual(detail_status, 200)
+        fact_fields = {
+            "subject_entity_type",
+            "subject_entity_key",
+            "subject_display_name",
+            "object_entity_type",
+            "object_entity_key",
+            "object_display_name",
+            "object_literal",
+        }
+        self.assertTrue(fact_fields.isdisjoint(claims[0]))
+        self.assertEqual(set(detail), set(claim_result()) | fact_fields)
+        self.assertEqual(detail["subject_entity_key"], "self")
+        self.assertEqual(detail["object_literal"], "synthetic literal")
+
+        entity_detail = claim_detail_result()
+        entity_detail.update(
+            {
+                "object_kind": "entity",
+                "object_entity_type": "person",
+                "object_entity_key": "person:synthetic",
+                "object_display_name": "Synthetic Person",
+                "object_literal": None,
+            }
+        )
+        entity_facade = FakeFacade()
+        entity_facade.results["get_claim"] = entity_detail
+        entity_app = create_owner_memory_app(
+            actor_resolver=FakeResolver(),
+            facade=entity_facade,
+            feature_enabled=True,
+        )
+        entity_status, _, entity_body = await asgi_request(
+            entity_app,
+            "GET",
+            f"/memory/claims/{CLAIM}",
+        )
+        self.assertEqual(entity_status, 200)
+        self.assertEqual(entity_body["object_entity_key"], "person:synthetic")
+
+        leaking_facade = FakeFacade()
+        leaking_facade.results["list_claims"] = [claim_detail_result()]
+        leaking_app = create_owner_memory_app(
+            actor_resolver=FakeResolver(),
+            facade=leaking_facade,
+            feature_enabled=True,
+        )
+        leaking_status, _, leaking_body = await asgi_request(
+            leaking_app,
+            "GET",
+            "/memory/claims",
+        )
+        self.assertEqual(leaking_status, 500)
+        self.assertEqual(
+            leaking_body,
+            {"error": {"code": "memory_internal_error"}},
+        )
+
+    async def test_claim_detail_conditional_shape_fails_closed(self) -> None:
+        invalid_values: list[dict[str, Any]] = []
+        literal_with_entity = claim_detail_result()
+        literal_with_entity["object_entity_type"] = "person"
+        invalid_values.append(literal_with_entity)
+        self_with_display = claim_detail_result()
+        self_with_display["subject_display_name"] = "Synthetic owner"
+        invalid_values.append(self_with_display)
+        missing_literal = claim_detail_result()
+        missing_literal["object_literal"] = None
+        invalid_values.append(missing_literal)
+        extra_field = claim_detail_result()
+        extra_field["source_excerpt"] = "must not escape detail contract"
+        invalid_values.append(extra_field)
+
+        for value in invalid_values:
+            facade = FakeFacade()
+            facade.results["get_claim"] = value
+            app = create_owner_memory_app(
+                actor_resolver=FakeResolver(),
+                facade=facade,
+                feature_enabled=True,
+            )
+            status, _, body = await asgi_request(
+                app,
+                "GET",
+                f"/memory/claims/{CLAIM}",
+            )
+            self.assertEqual(status, 500)
+            self.assertEqual(body, {"error": {"code": "memory_internal_error"}})
+
     async def test_mutation_body_parser_is_closed_and_duplicate_safe(self) -> None:
         valid = review_body()
         duplicate = (
@@ -654,6 +775,7 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
                     body, {"error": {"code": "memory_request_invalid"}}
                 )
                 self.assertEqual(facade.calls, [])
+                self.assertEqual(resolver.calls, [])
 
     async def test_read_route_accepts_only_absent_or_empty_object_body(self) -> None:
         resolver = FakeResolver()
@@ -687,6 +809,41 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
                     body, {"error": {"code": "memory_request_invalid"}}
                 )
         self.assertEqual(facade.calls, [])
+        self.assertEqual(resolver.calls, [])
+
+    async def test_authority_resolution_is_the_last_step_before_store(self) -> None:
+        events: list[str] = []
+
+        class OrderedResolver(FakeResolver):
+            async def __call__(
+                self,
+                request: Request,
+                scopes: tuple[ActorScope, ...],
+            ) -> VerifiedActor:
+                events.append("authority")
+                return await super().__call__(request, scopes)
+
+        class OrderedFacade(FakeFacade):
+            async def get_claim(
+                self,
+                actor: VerifiedActor,
+                claim_id: UUID,
+            ) -> Mapping[str, Any] | None:
+                events.append("store")
+                return await super().get_claim(actor, claim_id)
+
+        app = create_owner_memory_app(
+            actor_resolver=OrderedResolver(),
+            facade=OrderedFacade(),
+            feature_enabled=True,
+        )
+        status, _, _ = await asgi_request(
+            app,
+            "GET",
+            f"/memory/claims/{CLAIM}",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(events, ["authority", "store"])
 
     async def test_resolver_error_mapping_and_actor_defense_in_depth(self) -> None:
         cases = (
@@ -798,7 +955,7 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("sensitive", json.dumps(body))
 
     async def test_all_success_contracts_fail_closed_on_backend_drift(self) -> None:
-        invalid_claim = claim_result(OTHER_OWNER)
+        invalid_claim = claim_detail_result(OTHER_OWNER)
         invalid_proposal = proposal_result()
         invalid_proposal["object_literal"] = {"unexpected": "json-object"}
         invalid_operation = operation_result()

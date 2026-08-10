@@ -25,7 +25,8 @@ BOOTSTRAP = OPS / "bootstrap_contract.json"
 PILOT = OPS / "pilot_contract.json"
 RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 COMPOSE = OPS / "compose.candidate.yaml"
-SYSTEMD_TEMPLATE = OPS / "systemd" / "governed-memory-http.service.in"
+SYSTEMD_HTTP_TEMPLATE = OPS / "systemd" / "governed-memory-http.service.in"
+SYSTEMD_WORKER_TEMPLATE = OPS / "systemd" / "governed-memory-worker.service.in"
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 
@@ -55,6 +56,15 @@ OBSERVATION_KEYS = {
     "qdrant_point_count",
     "active_client_count",
 }
+EXPECTED_CREATE_BLOCKERS = [
+    "production_activation_not_authorized",
+    "supabase_auth_sessions_rpc_not_installed_or_live_verified",
+    "worker_cli_repository_transport_config_unwired",
+    "worker_cross_process_singleton_not_implemented",
+    "calibration_artifact_unapproved_retrieval_off",
+    "frontend_candidate_35a684_undeployed_visual_qa_pending",
+]
+EXPECTED_CLEANUP_BLOCKERS: list[str] = []
 
 
 class ReleaseGuardError(RuntimeError):
@@ -113,21 +123,29 @@ def verify_candidate_artifacts() -> dict[str, object]:
         raise ReleaseGuardError("release_bootstrap_contract_invalid")
     cleanup = bootstrap.get("cleanup_policy")
     create_policy = bootstrap.get("create_policy")
+    implementation = bootstrap.get("candidate_implementation_status")
     if (
         not isinstance(create_policy, dict)
         or create_policy.get("current_create_authorized") is not False
         or create_policy.get("unresolved_activation_blockers")
-        != [
-            "current_qdrant_immutable_digest_security_review_and_compatibility_validation_required",
-            "owner_claim_fact_detail_api_not_implemented",
-        ]
+        != EXPECTED_CREATE_BLOCKERS
+        or not isinstance(implementation, dict)
+        or implementation.get("session_id_required") is not True
+        or implementation.get("owner_claim_fact_detail")
+        != "implemented_candidate_disposable_proof_passed_not_production_applied"
+        or implementation.get("qdrant_adapter")
+        != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
+        or implementation.get("pilot_marker")
+        != "implemented_disposable_proof_passed_not_production_applied"
+        or implementation.get("calibration")
+        != "independently_bound_unapproved_retrieval_off"
     ):
         raise ReleaseGuardError("release_create_contract_invalid")
     if (
         not isinstance(cleanup, dict)
         or cleanup.get("current_cleanup_authorized") is not False
         or cleanup.get("unresolved_activation_blockers")
-        != ["durable_pilot_ever_started_marker_not_implemented"]
+        != EXPECTED_CLEANUP_BLOCKERS
         or cleanup.get("requires_pilot_ever_started_false") is not True
         or cleanup.get("refuse_after_any_pilot_row") is not True
         or cleanup.get("sql_cascade_allowed") is not False
@@ -145,7 +163,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
         raise ReleaseGuardError("release_cleanup_contract_invalid")
     if (
         pilot.get("schema_version") != "governed-memory-pilot-contract-v1"
-        or pilot.get("state") != "blocked_not_authorized"
+        or pilot.get("state") != "inactive_candidate_blocked_not_authorized"
         or pilot.get("production_state_changed") is not False
         or pilot.get("required_start_state", {}).get("legacy_import_count") != 0
         or pilot.get("eligible_input", {}).get("attachment_content") is not False
@@ -153,6 +171,23 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "fresh_user_check_claimed_as_immediate_signout_revocation"
         )
         is not False
+        or pilot.get("authentication", {}).get("session_id_required") is not True
+        or pilot.get("authentication", {}).get(
+            "supabase_auth_sessions_rpc_live_verified"
+        )
+        is not False
+        or pilot.get("provider_policy", {}).get("provider_adapter_status")
+        != "strict_fake_tested_zero_real_calls"
+        or pilot.get("provider_policy", {}).get("embedding_adapter_status")
+        != "strict_3072_fake_tested_zero_real_calls"
+        or pilot.get("provider_policy", {}).get("calibration_status")
+        != "independently_bound_unapproved_retrieval_off"
+        or pilot.get("candidate_surfaces", {}).get("owner_claim_fact_detail")
+        != "implemented_candidate_disposable_proof_passed_not_production_applied"
+        or pilot.get("candidate_surfaces", {}).get("pilot_marker")
+        != "implemented_disposable_proof_passed_not_production_applied"
+        or pilot.get("provider_policy", {}).get("qdrant_adapter_status")
+        != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
     ):
         raise ReleaseGuardError("release_pilot_contract_invalid")
     if (
@@ -164,7 +199,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
     compose = COMPOSE.read_text(encoding="utf-8")
     required_compose = (
         "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
-        "qdrant/qdrant:v1.11.0@sha256:cc802bd2841ec2026725e19619075982311ce4d7182dc8c03a0c8e6817bb9170",
+        "qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc",
         '"127.0.0.1:55432:5432"',
         '"127.0.0.1:6343:6333"',
         "log_parameter_max_length=0",
@@ -175,21 +210,39 @@ def verify_candidate_artifacts() -> dict[str, object]:
     )
     if any(value not in compose for value in required_compose) or ":latest" in compose:
         raise ReleaseGuardError("release_compose_contract_invalid")
-    unit = SYSTEMD_TEMPLATE.read_text(encoding="utf-8")
+    http_unit = SYSTEMD_HTTP_TEMPLATE.read_text(encoding="utf-8")
+    worker_unit = SYSTEMD_WORKER_TEMPLATE.read_text(encoding="utf-8")
     if (
-        "[Install]" in unit
-        or "WantedBy=" in unit
-        or "Restart=no" not in unit
-        or "GOVERNED_MEMORY_HTTP_MODE=off" not in unit
-        or "SocketBindAllow=tcp:8091" not in unit
-        or "/opt/chat-memory" in unit
+        "[Install]" in http_unit
+        or "WantedBy=" in http_unit
+        or "Restart=no" not in http_unit
+        or "GOVERNED_MEMORY_HTTP_MODE=off" not in http_unit
+        or "SocketBindAllow=tcp:8091" not in http_unit
+        or "/opt/chat-memory" in http_unit
+        or "[Install]" in worker_unit
+        or "WantedBy=" in worker_unit
+        or "Restart=no" not in worker_unit
+        or "Type=oneshot" not in worker_unit
+        or "GOVERNED_MEMORY_WORKER_MODE=off" not in worker_unit
+        or "ConditionPathExists=/etc/governed-memory/worker.env" not in worker_unit
+        or "ConditionPathExists=/etc/governed-memory/pilot.env" not in worker_unit
+        or "EnvironmentFile=/etc/governed-memory/worker.env" not in worker_unit
+        or "EnvironmentFile=/etc/governed-memory/pilot.env" not in worker_unit
+        or "/opt/chat-memory" in worker_unit
         or "DISPOSABLE VALIDATION ONLY" not in compose
         or "x-governed-memory-scope: disposable-validation-only" not in compose
     ):
         raise ReleaseGuardError("release_systemd_contract_invalid")
     hashes = {
         path.relative_to(ROOT).as_posix(): _sha256(path)
-        for path in (BOOTSTRAP, PILOT, RECEIPT_SCHEMA, COMPOSE, SYSTEMD_TEMPLATE)
+        for path in (
+            BOOTSTRAP,
+            PILOT,
+            RECEIPT_SCHEMA,
+            COMPOSE,
+            SYSTEMD_HTTP_TEMPLATE,
+            SYSTEMD_WORKER_TEMPLATE,
+        )
     }
     return {
         "schema_version": "governed-memory-release-artifact-verification-v1",
@@ -255,7 +308,7 @@ def evaluate_release_observation(document: object) -> dict[str, object]:
         allowed = False
         actions: list[list[str]] = []
     else:
-        reason = "durable_pilot_marker_unavailable"
+        reason = "authorization_missing"
         allowed = False
         actions = []
     return {
