@@ -13,11 +13,15 @@ from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_ENV,
     EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
+    InactiveSuccessorMemoryProviderV1,
     SuccessorGovernedMemoryAssemblyProviderV1,
     SuccessorResponseActorBinding,
     SuccessorResponseConfigurationError,
     choose_response_memory_provider,
     response_mode_from_environment,
+)
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryNotApplicableReason,
 )
 from rag_engine.governed_memory.exclusive_cutover import (
     ExclusiveMemoryMode,
@@ -221,7 +225,7 @@ class SuccessorResponseModeTests(unittest.TestCase):
 
 
 class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_ineligible_request_performs_zero_successor_io(self) -> None:
+    async def test_ineligible_real_provider_refuses_with_zero_successor_io(self) -> None:
         selected = SuccessorGovernedMemoryAssemblyProviderV1(
             actor=actor(eligible=False),
             repository=ResourceTrap(),
@@ -231,12 +235,15 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             calibration=calibration(),
             clock=lambda: NOW,
         )
-        assembly = await selected.prepare(
-            authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=snapshot(),
-            trusted_policy_signals=ResponsePolicySignalsV0_2(),
-        )
-        self.assertIsNone(assembly.successor_memory_context_block)
+        with self.assertRaisesRegex(
+            ContractViolation,
+            "ineligible_successor_response_provider",
+        ):
+            await selected.prepare(
+                authenticated_actor_user_id=OWNER_A,
+                conversation_snapshot=snapshot(),
+                trusted_policy_signals=ResponsePolicySignalsV0_2(),
+            )
         self.assertFalse(selected.has_selected_claims)
         with self.assertRaisesRegex(ContractViolation, "provider_reused"):
             await selected.prepare(
@@ -244,6 +251,30 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
                 conversation_snapshot=snapshot(),
                 trusted_policy_signals=ResponsePolicySignalsV0_2(),
             )
+
+    async def test_inactive_exclusion_emits_not_applicable_without_resources(
+        self,
+    ) -> None:
+        selected = InactiveSuccessorMemoryProviderV1(
+            SuccessorMemoryNotApplicableReason.ATTACHMENT
+        )
+        assembly = selected.prepare(
+            authenticated_actor_user_id=OWNER_A,
+            conversation_snapshot=snapshot(),
+            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+        )
+        self.assertIsNone(assembly.successor_memory_context_block)
+        receipt = await selected.persist_dispatched_answer_binding(
+            answer_id=RESPONSE_A,
+            prompt_sha256="c" * 64,
+            outbound_request_bytes=b'{"messages":[]}',
+        )
+        self.assertEqual(receipt.binding_outcome, "not_applicable")
+        self.assertIs(
+            receipt.not_applicable_reason,
+            SuccessorMemoryNotApplicableReason.ATTACHMENT,
+        )
+        self.assertEqual(receipt.references, ())
 
     async def test_qdrant_candidates_are_postgres_revalidated_before_prompt(self) -> None:
         repository = RecordingRepository()
@@ -282,7 +313,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertEqual(outbound.count(escaped_memory), 1)
-        await selected.persist_dispatched_answer_binding(
+        provenance = await selected.persist_dispatched_answer_binding(
             answer_id=RESPONSE_A,
             prompt_sha256="c" * 64,
             outbound_request_bytes=outbound,
@@ -302,12 +333,39 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(persisted["binding"]["dispatch_state"], "dispatched")
         self.assertEqual(persisted["binding"]["outcome"], "exposed")
-        with self.assertRaisesRegex(ContractViolation, "selection_missing"):
+        self.assertEqual(provenance.binding_outcome, "exposed")
+        self.assertEqual(
+            provenance.binding_manifest_sha256,
+            persisted["binding"]["binding_sha256"],
+        )
+        self.assertEqual(provenance.references[0].claim_id, CLAIM_A)
+        with self.assertRaisesRegex(ContractViolation, "binding_terminal"):
             await selected.persist_dispatched_answer_binding(
                 answer_id=RESPONSE_A,
                 prompt_sha256="c" * 64,
                 outbound_request_bytes=outbound,
             )
+
+    async def test_no_selection_returns_typed_receipt_without_persistence(self) -> None:
+        repository = RecordingRepository()
+        selected = provider(
+            repository=repository,
+            vector_index=RecordingVectorIndex(candidates=()),
+        )
+        assembly = await selected.prepare(
+            authenticated_actor_user_id=OWNER_A,
+            conversation_snapshot=snapshot(),
+            trusted_policy_signals=ResponsePolicySignalsV0_2(),
+        )
+        self.assertIsNone(assembly.successor_memory_context_block)
+        provenance = await selected.persist_dispatched_answer_binding(
+            answer_id=RESPONSE_A,
+            prompt_sha256="c" * 64,
+            outbound_request_bytes=b'{"messages":[]}',
+        )
+        self.assertEqual(provenance.binding_outcome, "no_memory_selected")
+        self.assertEqual(provenance.references, ())
+        self.assertEqual(repository.persisted, [])
 
     async def test_stale_postgres_row_is_never_injected(self) -> None:
         repository = RecordingRepository(

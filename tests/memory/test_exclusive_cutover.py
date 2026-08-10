@@ -10,6 +10,7 @@ import textwrap
 import unittest
 
 from rag_engine.governed_memory.exclusive_cutover import (
+    EXCLUSIVE_MEMORY_MODE,
     EXCLUSIVE_MODE_ENV,
     ExclusiveMemoryConfigurationError,
     ExclusiveMemoryMode,
@@ -40,6 +41,9 @@ def _async_function_source(name: str) -> str:
 
 
 class ExclusiveCutoverContractTests(unittest.TestCase):
+    def test_process_mode_is_frozen_once_at_import(self) -> None:
+        self.assertIs(EXCLUSIVE_MEMORY_MODE, exclusive_memory_mode())
+
     def test_default_is_exact_legacy_mode(self) -> None:
         self.assertIs(exclusive_memory_mode({}), ExclusiveMemoryMode.LEGACY)
         self.assertTrue(legacy_memory_surfaces_enabled({}))

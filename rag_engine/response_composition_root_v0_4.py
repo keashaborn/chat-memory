@@ -18,6 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
 )
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+)
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
 )
@@ -106,6 +109,11 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
     trusted_plan: TrustedLifeSwitchResponsePlanV2 = Field(repr=False)
     provider_response: OpenAIChatResponseV3 = Field(repr=False)
     finalized: FinalizedTrustedResponseV3 = Field(repr=False)
+    successor_memory_provenance: SuccessorMemoryAnswerProvenanceV1 | None = Field(
+        default=None,
+        repr=False,
+        exclude_if=lambda value: value is None,
+    )
     stage_timings: IntegratedLifeSwitchResponseStageTimingsV2
 
     @model_validator(mode="after")
@@ -117,6 +125,11 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
             != self.provider_response.response_sha256
         ):
             raise ValueError("finalization differs from provider response")
+        if self.successor_memory_provenance is not None:
+            if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
+                raise ValueError("successor provenance differs from finalized answer")
+            if self.finalized.memory_binding is not None:
+                raise ValueError("successor and legacy Memory bindings cannot coexist")
         return self
 
 
@@ -305,12 +318,13 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
     ) -> IntegratedTrustedLifeSwitchResponseExecutionV2:
         pipeline_started_ns = time.monotonic_ns()
         prepared = await self._base_root.prepare_detailed(conn, command)
+        successor_memory_provenance = None
         try:
             downstream = await self._downstream.execute(
                 base_response_plan=prepared.trusted_plan,
                 conversation_snapshot=prepared.conversation_snapshot,
             )
-            if self._base_root.has_selected_successor_memory:
+            if self._base_root.has_successor_memory_lifecycle:
                 exact_request = OpenAIChatRequestV4.create(
                     source_plan=downstream.trusted_plan,
                     generation_config=self._generation_config,
@@ -322,14 +336,16 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
                     raise LifeSwitchCompositionError(
                         "successor_memory_answer_binding"
                     )
-                await self._base_root.persist_successor_memory_answer_binding(
-                    answer_id=downstream.finalized.answer_id,
-                    prompt_sha256=(
-                        downstream.trusted_plan.assembled_prompt.manifest.assembly_sha256
-                    ),
-                    outbound_request_bytes=(
-                        exact_request.provider_kwargs_json_bytes()
-                    ),
+                successor_memory_provenance = (
+                    await self._base_root.persist_successor_memory_answer_binding(
+                        answer_id=downstream.finalized.answer_id,
+                        prompt_sha256=(
+                            downstream.trusted_plan.assembled_prompt.manifest.assembly_sha256
+                        ),
+                        outbound_request_bytes=(
+                            exact_request.provider_kwargs_json_bytes()
+                        ),
+                    )
                 )
         except Exception:
             self._base_root.discard_successor_memory_selection()
@@ -340,6 +356,7 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
             trusted_plan=downstream.trusted_plan,
             provider_response=downstream.provider_response,
             finalized=downstream.finalized,
+            successor_memory_provenance=successor_memory_provenance,
             stage_timings=IntegratedLifeSwitchResponseStageTimingsV2(
                 command_validation_ms=base.command_validation_ms,
                 conversation_snapshot_ms=base.conversation_snapshot_ms,

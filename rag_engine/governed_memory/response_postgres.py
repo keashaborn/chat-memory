@@ -165,10 +165,35 @@ class PostgresSuccessorResponseRepository:
         )
         async with self._transaction(actor) as connection:
             row = await connection.fetchrow(_PERSIST_BINDING_SQL, *arguments)
-        if row is None:
-            raise SuccessorResponsePostgresError(
-                "response_memory_binding_receipt_missing"
-            )
+            if row is None:
+                raise SuccessorResponsePostgresError(
+                    "response_memory_binding_receipt_missing"
+                )
+            receipt = dict(row)
+            try:
+                require_uuid(
+                    receipt.get("binding_id"),
+                    "invalid_response_memory_binding_receipt",
+                )
+                receipt_selection = require_sha256(
+                    receipt.get("selection_manifest_sha256"),
+                    "invalid_response_memory_binding_receipt",
+                )
+                receipt_injection = require_sha256(
+                    receipt.get("injection_manifest_sha256"),
+                    "invalid_response_memory_binding_receipt",
+                )
+            except ContractViolation as exc:
+                raise SuccessorResponsePostgresError(
+                    "response_memory_binding_receipt_invalid"
+                ) from exc
+            if (
+                receipt_selection != binding["selection_manifest_sha256"]
+                or receipt_injection != binding["injection_manifest_sha256"]
+            ):
+                raise SuccessorResponsePostgresError(
+                    "response_memory_binding_receipt_mismatch"
+                )
 
 
 __all__ = [

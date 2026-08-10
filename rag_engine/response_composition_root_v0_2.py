@@ -20,6 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from rag_engine.assistant_response_preferences_v1 import (
     AssistantResponsePreferencesV1,
 )
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+)
 from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
 from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
@@ -245,6 +248,11 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
     trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
     provider_response: OpenAIChatResponseV1 = Field(repr=False)
     finalized: FinalizedTrustedResponseV1 = Field(repr=False)
+    successor_memory_provenance: SuccessorMemoryAnswerProvenanceV1 | None = Field(
+        default=None,
+        repr=False,
+        exclude_if=lambda value: value is None,
+    )
     stage_timings: ResponseStageTimingsV1
 
     @model_validator(mode="after")
@@ -257,6 +265,11 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
             != self.provider_response.response_sha256
         ):
             raise ValueError("execution finalization differs from its provider response")
+        if self.successor_memory_provenance is not None:
+            if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
+                raise ValueError("successor provenance differs from finalized answer")
+            if self.finalized.memory_binding is not None:
+                raise ValueError("successor and legacy Memory bindings cannot coexist")
         return self
 
 
@@ -290,7 +303,7 @@ class SuccessorMemoryAnswerLifecycleV1(Protocol):
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> None: ...
+    ) -> SuccessorMemoryAnswerProvenanceV1: ...
 
 
 class NoGovernedMemoryAssemblyProviderV1:
@@ -397,14 +410,19 @@ class InactiveResponseCompositionRootV0_2:
                     stage="answer_generation",
                 )
             stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
-            if self.has_selected_successor_memory:
+            successor_memory_provenance = None
+            if self.has_successor_memory_lifecycle:
                 stage = "successor_memory_answer_binding"
-                await self.persist_successor_memory_answer_binding(
-                    answer_id=answer_id,
-                    prompt_sha256=plan.assembled_prompt.manifest.assembly_sha256,
-                    outbound_request_bytes=(
-                        exact_request.provider_kwargs_json_bytes()
-                    ),
+                successor_memory_provenance = (
+                    await self.persist_successor_memory_answer_binding(
+                        answer_id=answer_id,
+                        prompt_sha256=(
+                            plan.assembled_prompt.manifest.assembly_sha256
+                        ),
+                        outbound_request_bytes=(
+                            exact_request.provider_kwargs_json_bytes()
+                        ),
+                    )
                 )
             stage = "finalization"
             stage_started_ns = time.monotonic_ns()
@@ -421,6 +439,7 @@ class InactiveResponseCompositionRootV0_2:
                 trusted_plan=plan,
                 provider_response=response,
                 finalized=finalized,
+                successor_memory_provenance=successor_memory_provenance,
                 stage_timings=ResponseStageTimingsV1(
                     **stage_timings,
                     pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
@@ -445,20 +464,33 @@ class InactiveResponseCompositionRootV0_2:
             and self._successor_memory_lifecycle.has_selected_claims
         )
 
+    @property
+    def has_successor_memory_lifecycle(self) -> bool:
+        return self._successor_memory_lifecycle is not None
+
     async def persist_successor_memory_answer_binding(
         self,
         *,
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> None:
+    ) -> SuccessorMemoryAnswerProvenanceV1:
         lifecycle = self._successor_memory_lifecycle
-        if lifecycle is None or not lifecycle.has_selected_claims:
-            return
-        await lifecycle.persist_dispatched_answer_binding(
+        if lifecycle is None:
+            raise ResponseCompositionError(
+                "successor Memory lifecycle is unavailable"
+            )
+        provenance = await lifecycle.persist_dispatched_answer_binding(
             answer_id=answer_id,
             prompt_sha256=prompt_sha256,
             outbound_request_bytes=outbound_request_bytes,
+        )
+        if not isinstance(provenance, SuccessorMemoryAnswerProvenanceV1):
+            raise ResponseCompositionError(
+                "successor Memory lifecycle returned invalid provenance"
+            )
+        return SuccessorMemoryAnswerProvenanceV1.model_validate_json(
+            provenance.model_dump_json()
         )
 
     def discard_successor_memory_selection(self) -> None:

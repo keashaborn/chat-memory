@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 from rag_engine.governed_memory.contracts import ContractViolation
 from rag_engine.governed_memory.http_service import POSTGRES_DSN_ENV
 from rag_engine.governed_memory.response_provider import (
+    SuccessorResponseActorBinding,
     SuccessorGovernedMemoryAssemblyProviderV1,
     SuccessorResponseConfigurationError,
+)
+from rag_engine.governed_memory.response_postgres import (
+    PostgresSuccessorResponseRepository,
+    SuccessorResponsePostgresError,
 )
 from rag_engine.governed_memory.response_runtime import (
     EXPECTED_POSTGRES_HOST,
@@ -38,6 +45,7 @@ from rag_engine.governed_memory.runtime.qdrant_adapter import (
     QDRANT_PHYSICAL_COLLECTION,
 )
 from tests.memory.test_response_provider import actor
+from tests.memory._fixtures import CLAIM_A, OWNER_A, RESPONSE_A, THREAD_A
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -145,6 +153,122 @@ class FakePreflightConnection:
             "can_read": True,
             "can_bind": True,
         }
+
+
+class FakeBindingConnection:
+    def __init__(self, receipt: dict[str, object]) -> None:
+        self.receipt = receipt
+
+    async def fetchrow(self, _query: str, *_arguments: object) -> dict[str, object]:
+        return self.receipt
+
+
+class _TestablePostgresSuccessorResponseRepository(
+    PostgresSuccessorResponseRepository
+):
+    def __init__(self, connection: FakeBindingConnection) -> None:
+        super().__init__(object())
+        self.connection = connection
+        self.rolled_back = False
+
+    @asynccontextmanager
+    async def _transaction(self, _actor: SuccessorResponseActorBinding):
+        try:
+            yield self.connection
+        except Exception:
+            self.rolled_back = True
+            raise
+
+
+def dispatched_binding() -> dict[str, object]:
+    return {
+        "owner_user_id": str(OWNER_A),
+        "dispatch_state": "dispatched",
+        "outcome": "exposed",
+        "response_id": RESPONSE_A,
+        "query_sha256": "1" * 64,
+        "policy_sha256": "2" * 64,
+        "allowed_predicates": ["preference"],
+        "domains": [],
+        "intents": [],
+        "max_records": 8,
+        "policy_revision": 1,
+        "renderer_sha256": "3" * 64,
+        "prompt_sha256": "4" * 64,
+        "explicit_recall": False,
+        "selected_claim_ids": [CLAIM_A],
+        "injected_claim_ids": [CLAIM_A],
+        "selection_manifest_sha256": "5" * 64,
+        "injection_manifest_sha256": "6" * 64,
+    }
+
+
+class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_database_receipt_is_accepted(self) -> None:
+        binding = dispatched_binding()
+        repository = _TestablePostgresSuccessorResponseRepository(
+            FakeBindingConnection(
+                {
+                    "binding_id": UUID(
+                        "77777777-7777-4777-8777-777777777777"
+                    ),
+                    "selection_manifest_sha256": binding[
+                        "selection_manifest_sha256"
+                    ],
+                    "injection_manifest_sha256": binding[
+                        "injection_manifest_sha256"
+                    ],
+                }
+            )
+        )
+        await repository.persist_answer_binding(
+            actor=actor(),
+            operation_id=UUID("34343434-3434-4434-8434-343434343434"),
+            thread_id=THREAD_A,
+            binding=binding,
+            memory_block="bounded synthetic memory block",
+            outbound_request='{"messages":[]}',
+        )
+        self.assertFalse(repository.rolled_back)
+
+    async def test_conflicting_database_receipt_fails_closed(self) -> None:
+        binding = dispatched_binding()
+        for receipt in (
+            {
+                "binding_id": UUID(
+                    "77777777-7777-4777-8777-777777777777"
+                ),
+                "selection_manifest_sha256": "9" * 64,
+                "injection_manifest_sha256": binding[
+                    "injection_manifest_sha256"
+                ],
+            },
+            {
+                "binding_id": "not-a-uuid",
+                "selection_manifest_sha256": binding[
+                    "selection_manifest_sha256"
+                ],
+                "injection_manifest_sha256": binding[
+                    "injection_manifest_sha256"
+                ],
+            },
+        ):
+            with self.subTest(receipt=receipt):
+                repository = _TestablePostgresSuccessorResponseRepository(
+                    FakeBindingConnection(receipt)
+                )
+                with self.assertRaises(SuccessorResponsePostgresError):
+                    await repository.persist_answer_binding(
+                        actor=actor(),
+                        operation_id=UUID(
+                            "34343434-3434-4434-8434-343434343434"
+                        ),
+                        thread_id=THREAD_A,
+                        binding=binding,
+                        memory_block="bounded synthetic memory block",
+                        outbound_request='{"messages":[]}',
+                    )
+                self.assertTrue(repository.rolled_back)
 
 
 class SuccessorResponseRuntimeSettingsTests(unittest.TestCase):

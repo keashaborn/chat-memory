@@ -92,6 +92,8 @@ def _utc(value: datetime) -> datetime:
 
 
 class AssistantTranscriptAttestationV1(_StrictFrozenModel):
+    """Retained transcript/audit provenance; this is not claim Memory."""
+
     contract_version: Literal[ASSISTANT_ATTESTATION_VERSION] = (
         ASSISTANT_ATTESTATION_VERSION
     )

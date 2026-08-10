@@ -36,6 +36,13 @@ from rag_engine.governed_memory.retrieval import (
     render_memory_context,
     revalidate_candidates,
 )
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+    SuccessorMemoryNotApplicableReason,
+    build_successor_exposed_provenance_v1,
+    build_successor_no_memory_selected_provenance_v1,
+    build_successor_not_applicable_provenance_v1,
+)
 from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
 from rag_engine.prompt_assembler_v1 import (
     ContextKind,
@@ -122,12 +129,20 @@ class SuccessorResponseEmbedder(Protocol):
 class InactiveSuccessorMemoryProviderV1:
     """No-resource successor provider for explicitly excluded chat surfaces."""
 
+    def __init__(self, reason: SuccessorMemoryNotApplicableReason) -> None:
+        if not isinstance(reason, SuccessorMemoryNotApplicableReason):
+            raise ContractViolation("invalid_successor_not_applicable_reason")
+        self._reason = reason
+        self._prepared = False
+        self._terminal = False
+
     @property
     def has_selected_claims(self) -> bool:
         return False
 
     def discard_selected_state(self) -> None:
-        return None
+        if self._prepared:
+            self._terminal = True
 
     def prepare(
         self,
@@ -137,6 +152,9 @@ class InactiveSuccessorMemoryProviderV1:
         trusted_policy_signals: ResponsePolicySignalsV0_2,
     ) -> GovernedMemoryAssemblyV1:
         del authenticated_actor_user_id, conversation_snapshot, trusted_policy_signals
+        if self._prepared:
+            raise ContractViolation("response_memory_provider_reused")
+        self._prepared = True
         return GovernedMemoryAssemblyV1()
 
     async def persist_dispatched_answer_binding(
@@ -145,9 +163,18 @@ class InactiveSuccessorMemoryProviderV1:
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> None:
-        del answer_id, prompt_sha256, outbound_request_bytes
-        raise ContractViolation("inactive_successor_memory_has_no_binding")
+    ) -> SuccessorMemoryAnswerProvenanceV1:
+        if not self._prepared:
+            raise ContractViolation("response_memory_selection_missing")
+        if self._terminal:
+            raise ContractViolation("response_memory_binding_terminal")
+        self._terminal = True
+        return build_successor_not_applicable_provenance_v1(
+            reason=self._reason,
+            answer_id=answer_id,
+            prompt_sha256=prompt_sha256,
+            outbound_request_bytes=outbound_request_bytes,
+        )
 
 
 def response_mode_from_environment(environment: Mapping[str, str]) -> str:
@@ -244,6 +271,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         require_uuid(self._operation_id, "invalid_response_memory_operation")
         self._prepared = False
         self._terminal = False
+        self._no_selection_pending = False
         self._policy: RetrievalPolicy | None = None
         self._selected_claims: tuple[dict[str, object], ...] = ()
         self._rendered_context: dict[str, object] | None = None
@@ -254,7 +282,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         return bool(self._selected_claims) and not self._terminal
 
     def _finish_without_selection(self) -> GovernedMemoryAssemblyV1:
-        self._terminal = True
+        self._no_selection_pending = True
         self._policy = None
         self._selected_claims = ()
         self._rendered_context = None
@@ -263,6 +291,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
 
     def _clear_selected_state(self) -> None:
         self._terminal = True
+        self._no_selection_pending = False
         self._policy = None
         self._selected_claims = ()
         self._rendered_context = None
@@ -338,8 +367,10 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         )
         query = snapshot.messages[-1].content
         self._query_sha256 = _sha256_text(query)
-        if not self._actor.eligible or not self._calibration.retrieval_enabled:
-            return self._finish_without_selection()
+        if not self._actor.eligible:
+            raise ContractViolation("ineligible_successor_response_provider")
+        if not self._calibration.retrieval_enabled:
+            raise ContractViolation("successor_response_calibration_disabled")
 
         policy = self._policy_factory(self._predicate_catalog)
         if not isinstance(policy, RetrievalPolicy):
@@ -420,11 +451,22 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> None:
-        if not self._prepared or not self._selected_claims:
+    ) -> SuccessorMemoryAnswerProvenanceV1:
+        if not self._prepared:
             raise ContractViolation("response_memory_selection_missing")
         if self._terminal:
             raise ContractViolation("response_memory_binding_terminal")
+        if self._no_selection_pending:
+            try:
+                return build_successor_no_memory_selected_provenance_v1(
+                    answer_id=answer_id,
+                    prompt_sha256=prompt_sha256,
+                    outbound_request_bytes=outbound_request_bytes,
+                )
+            finally:
+                self._clear_selected_state()
+        if not self._selected_claims:
+            raise ContractViolation("response_memory_selection_missing")
         if self._policy is None or self._rendered_context is None:
             raise ContractViolation("response_memory_selection_incomplete")
         answer = require_uuid(answer_id, "invalid_response_memory_answer")
@@ -458,6 +500,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
                 escaped_segment_start_utf8=start,
                 escaped_segment_end_utf8=start + len(escaped),
             )
+            provenance = build_successor_exposed_provenance_v1(dispatched)
             await self._repository.persist_answer_binding(
                 actor=self._actor,
                 operation_id=self._operation_id,
@@ -466,6 +509,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
                 memory_block=str(self._rendered_context["content"]),
                 outbound_request=outbound_request,
             )
+            return provenance
         finally:
             self._clear_selected_state()
 

@@ -13,26 +13,27 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from rag_engine.assistant_response_preferences_store_v1 import (
-    load_assistant_response_preferences_v1,
-    set_preference_actor_v1,
-)
 from rag_engine.chat_attachment_context_v1 import (
     MAX_ATTACHMENT_COUNT,
     build_attachment_context_block_v1,
 )
-from rag_engine.assistant_response_preferences_v1 import (
-    default_assistant_response_preferences_v1,
+from rag_engine.governed_memory.exclusive_cutover import (
+    EXCLUSIVE_MEMORY_MODE,
 )
 from rag_engine.governed_memory.response_provider import (
+    EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
     SuccessorGovernedMemoryAssemblyProviderV1,
     SuccessorResponseActorBinding,
     SuccessorResponseConfigurationError,
     choose_response_memory_provider,
-    response_mode_from_environment,
 )
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+    SuccessorMemoryNotApplicableReason,
+)
+from rag_engine.governed_memory.response_defaults import SUCCESSOR_RESPONSE_DEFAULTS
 from rag_engine.governed_memory.response_runtime import SuccessorResponseRuntime
 from rag_engine.governed_memory.successor_live_authority import (
     SuccessorLiveAuthorityConfigurationError,
@@ -55,9 +56,6 @@ from rag_engine.memory_actor_auth_v1 import (
     MemoryLiveAuthorityVerifierV1,
     require_memory_actor_context_v1,
     require_memory_actor_v1,
-)
-from rag_engine.memory_v1_answer_provenance_v1 import (
-    build_governed_memory_answer_provenance_v1,
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
@@ -121,6 +119,68 @@ SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
 
 
 SUCCESSOR_RESPONSE_RUNTIME = SuccessorResponseRuntime()
+RESPONSE_MEMORY_MODE = EXCLUSIVE_MEMORY_MODE.value
+
+
+def response_memory_provenance_for_mode(
+    *,
+    mode: str,
+    legacy_binding: object | None,
+    successor_provenance: SuccessorMemoryAnswerProvenanceV1 | None,
+) -> dict[str, object]:
+    """Serialize exactly one mode-owned provenance contract; never fall back."""
+
+    if mode == EXCLUSIVE_MODE_LEGACY:
+        if successor_provenance is not None:
+            raise SuccessorResponseConfigurationError(
+                "response_memory_provenance_mode_mismatch"
+            )
+        from rag_engine.memory_v1_answer_provenance_v1 import (
+            build_governed_memory_answer_provenance_v1,
+        )
+
+        return build_governed_memory_answer_provenance_v1(
+            legacy_binding
+        ).model_dump(mode="json")
+    if mode == EXCLUSIVE_MODE_SUCCESSOR:
+        if legacy_binding is not None or successor_provenance is None:
+            raise SuccessorResponseConfigurationError(
+                "response_memory_provenance_mode_mismatch"
+            )
+        value = SuccessorMemoryAnswerProvenanceV1.model_validate_json(
+            successor_provenance.model_dump_json()
+        )
+        return value.model_dump(mode="json")
+    raise SuccessorResponseConfigurationError("response_memory_mode_invalid")
+
+
+def successor_not_applicable_reason(
+    *,
+    no_store: bool,
+    has_attachments: bool,
+    is_voice: bool,
+    has_web_search: bool,
+) -> SuccessorMemoryNotApplicableReason | None:
+    """Choose one deterministic server-owned exclusion reason."""
+
+    if any(type(value) is not bool for value in (
+        no_store,
+        has_attachments,
+        is_voice,
+        has_web_search,
+    )):
+        raise SuccessorResponseConfigurationError(
+            "successor_response_exclusion_state_invalid"
+        )
+    if no_store:
+        return SuccessorMemoryNotApplicableReason.NO_STORE
+    if has_attachments:
+        return SuccessorMemoryNotApplicableReason.ATTACHMENT
+    if is_voice:
+        return SuccessorMemoryNotApplicableReason.VOICE
+    if has_web_search:
+        return SuccessorMemoryNotApplicableReason.WEB_SEARCH
+    return None
 
 
 def _production_successor_response_provider(
@@ -141,6 +201,44 @@ def _legacy_response_memory_provider(conn: object) -> object:
     )
 
     return LiveGovernedMemoryAssemblyProviderV1(conn)
+
+
+async def _legacy_assistant_response_preferences(
+    conn: object,
+    owner: UUID,
+    request_id: str,
+) -> object:
+    from rag_engine.assistant_response_preferences_store_v1 import (
+        load_assistant_response_preferences_v1,
+        set_preference_actor_v1,
+    )
+    from rag_engine.assistant_response_preferences_v1 import (
+        default_assistant_response_preferences_v1,
+    )
+
+    try:
+        async with conn.transaction():  # type: ignore[attr-defined]
+            await set_preference_actor_v1(conn, owner)  # type: ignore[arg-type]
+            return await load_assistant_response_preferences_v1(  # type: ignore[arg-type]
+                conn,
+                owner,
+            )
+    except Exception:
+        logger.warning(
+            "assistant response preferences unavailable request_id=%s",
+            request_id,
+        )
+        return default_assistant_response_preferences_v1(owner)
+
+
+def _inactive_successor_response_provider(
+    reason: SuccessorMemoryNotApplicableReason | None,
+) -> InactiveSuccessorMemoryProviderV1:
+    if reason is None:
+        raise SuccessorResponseConfigurationError(
+            "successor_response_exclusion_reason_missing"
+        )
+    return InactiveSuccessorMemoryProviderV1(reason)
 
 
 SUCCESSOR_LIVE_AUTHORITY_FACTORY: SuccessorLiveAuthorityFactory = (
@@ -237,24 +335,23 @@ async def resse_response_query(
     payload: ResseResponseRequestV1, req: Request, response: Response
 ):
     request_started_ns = time.monotonic_ns()
-    try:
-        response_memory_mode = response_mode_from_environment(os.environ)
-    except SuccessorResponseConfigurationError:
-        raise _no_store_http_exception(
-            503,
-            "response_memory_mode_invalid",
-        ) from None
+    response_memory_mode = RESPONSE_MEMORY_MODE
     if not DSN:
         raise _no_store_http_exception(503, "response_runtime_unconfigured")
     actor_context: MemoryActorContextV1 | None = None
     voice_turn_id = voice_turn_id_from_request(req)
+    tentative_exclusion_reason = successor_not_applicable_reason(
+        no_store=payload.no_store,
+        has_attachments=bool(payload.attachment_ids),
+        is_voice=voice_turn_id is not None,
+        has_web_search=bool(
+            (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
+        ),
+    )
     tentative_successor_eligible = (
         response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
-        and not payload.no_store
         and payload.thread_id is not None
-        and not payload.attachment_ids
-        and not (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
-        and voice_turn_id is None
+        and tentative_exclusion_reason is None
     )
     if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
         try:
@@ -366,32 +463,28 @@ async def resse_response_query(
             )
         if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
             assistant_response_preferences = (
-                default_assistant_response_preferences_v1(owner)
+                SUCCESSOR_RESPONSE_DEFAULTS.response_policy_overlay
             )
         else:
-            try:
-                async with conn.transaction():
-                    await set_preference_actor_v1(conn, owner)
-                    assistant_response_preferences = (
-                        await load_assistant_response_preferences_v1(conn, owner)
-                    )
-            except Exception:
-                logger.warning(
-                    "assistant response preferences unavailable request_id=%s",
+            assistant_response_preferences = (
+                await _legacy_assistant_response_preferences(
+                    conn,
+                    owner,
                     request_id,
                 )
-                assistant_response_preferences = (
-                    default_assistant_response_preferences_v1(owner)
-                )
+            )
         openai_client = get_openai_client()
         generation_config = OpenAIChatGenerationConfigV1()
+        exclusion_reason = successor_not_applicable_reason(
+            no_store=payload.no_store,
+            has_attachments=bool(payload.attachment_ids),
+            is_voice=voice_turn_id is not None,
+            has_web_search=search_capability_manifest is not None,
+        )
         successor_eligible = (
             response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
-            and not payload.no_store
             and payload.thread_id is not None
-            and not payload.attachment_ids
-            and search_capability_manifest is None
-            and voice_turn_id is None
+            and exclusion_reason is None
         )
         assert (
             actor_context is not None
@@ -419,7 +512,9 @@ async def resse_response_query(
                             )
                         )
                         if successor_eligible and actor_context is not None
-                        else lambda: InactiveSuccessorMemoryProviderV1()
+                        else lambda: _inactive_successor_response_provider(
+                            exclusion_reason
+                        )
                     ),
                 )
             )
@@ -529,9 +624,11 @@ async def resse_response_query(
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
-            "memory_provenance": build_governed_memory_answer_provenance_v1(
-                finalized.memory_binding
-            ).model_dump(mode="json"),
+            "memory_provenance": response_memory_provenance_for_mode(
+                mode=response_memory_mode,
+                legacy_binding=finalized.memory_binding,
+                successor_provenance=execution.successor_memory_provenance,
+            ),
             "runtime": (
                 "resse_response_v0_4" if lifeswitch_enabled else "resse_response_v0_2"
             ),
@@ -594,4 +691,8 @@ async def resse_response_query(
         await conn.close()
 
 
-__all__ = ["router"]
+__all__ = [
+    "response_memory_provenance_for_mode",
+    "router",
+    "successor_not_applicable_reason",
+]

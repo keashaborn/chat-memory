@@ -144,8 +144,8 @@ from rag_engine.governed_memory.conversation_capture import (
 )
 from rag_engine.governed_memory.exclusive_cutover import (
     EXCLUSIVE_MODE_ENV,
+    EXCLUSIVE_MEMORY_MODE,
     ExclusiveMemoryMode,
-    exclusive_memory_mode,
 )
 from rag_engine.governed_memory.successor_live_authority import (
     SuccessorLiveAuthorityConfigurationError,
@@ -194,7 +194,6 @@ from rag_engine.governed_memory.runtime.qdrant_adapter import (
 )
 
 
-EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
 LEGACY_MEMORY_SURFACES_ENABLED = (
     EXCLUSIVE_MEMORY_MODE is ExclusiveMemoryMode.LEGACY
 )

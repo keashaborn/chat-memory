@@ -7,6 +7,14 @@ import unittest
 from uuid import UUID
 
 from rag_engine.governed_memory.contracts import canonical_json_bytes
+from rag_engine.governed_memory.response_provider import (
+    InactiveSuccessorMemoryProviderV1,
+)
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+    SuccessorMemoryNotApplicableReason,
+    build_successor_exposed_provenance_v1,
+)
 from rag_engine.openai_chat_provider_v1 import OpenAIChatRequestV1
 from rag_engine.openai_chat_request_v4 import OpenAIChatRequestV4
 from rag_engine.prompt_assembler_v1 import (
@@ -24,6 +32,7 @@ from rag_engine.response_composition_root_v0_4 import (
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
+from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
 from tests.test_response_composition_root_v0_4 import CurrentProvider, PriorProvider
 from tests.test_response_composition_root_v0_2 import (
@@ -33,6 +42,7 @@ from tests.test_response_composition_root_v0_2 import (
     SnapshotConn,
     command,
 )
+from tests.test_response_persistence_v1 import FakeConnection
 from tests.test_response_lifeswitch_integration_v1 import selected_context
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
@@ -118,11 +128,43 @@ class OneRequestSuccessorLifecycle:
             )
         )
 
-    async def persist_dispatched_answer_binding(self, **kwargs: object) -> None:
+    async def persist_dispatched_answer_binding(
+        self,
+        **kwargs: object,
+    ) -> SuccessorMemoryAnswerProvenanceV1:
         if not self.selected:
             raise AssertionError("successor selection already terminal")
         self.persisted.append(dict(kwargs))
         self.selected = False
+        answer_id = kwargs["answer_id"]
+        prompt_sha256 = kwargs["prompt_sha256"]
+        outbound_request_bytes = kwargs["outbound_request_bytes"]
+        assert isinstance(answer_id, UUID)
+        assert isinstance(prompt_sha256, str)
+        assert isinstance(outbound_request_bytes, bytes)
+        return build_successor_exposed_provenance_v1(
+            {
+                "dispatch_state": "dispatched",
+                "outcome": "exposed",
+                "response_id": str(answer_id),
+                "prompt_sha256": prompt_sha256,
+                "outbound_request_sha256": hashlib.sha256(
+                    outbound_request_bytes
+                ).hexdigest(),
+                "binding_sha256": "d" * 64,
+                "selection_manifest_sha256": "e" * 64,
+                "injection_manifest_sha256": "d" * 64,
+                "selected_count": 1,
+                "injected_count": 1,
+                "model_exposed_count": 1,
+                "injected_claim_ids": (
+                    "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                ),
+                "injected_revision_ids": (
+                    "12345678-1234-4234-8234-123456789abc",
+                ),
+            }
+        )
 
     def discard_selected_state(self) -> None:
         self.discards += 1
@@ -209,6 +251,70 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
             1,
         )
         self.assertFalse(lifecycle.has_selected_claims)
+        provenance = execution.successor_memory_provenance
+        self.assertIsNotNone(provenance)
+        assert provenance is not None
+        self.assertEqual(provenance.binding_outcome, "exposed")
+        self.assertEqual(provenance.binding_manifest_sha256, "d" * 64)
+        self.assertEqual(len(provenance.references), 1)
+        self.assertEqual(
+            str(provenance.references[0].claim_id),
+            "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        )
+        self.assertEqual(len(provenance.provenance_sha256), 64)
+        self.assertIsNone(execution.finalized.memory_binding)
+
+        persistence = FakeConnection()
+        await persist_finalized_response_v1(
+            persistence,
+            owner_user_id=ACTOR,
+            thread_id=execution.finalized.attestation.thread_id,
+            request_id="composition-request",
+            finalized=execution.finalized,
+        )
+        persistence_sql = "\n".join(
+            query for query, _args in persistence.execute_calls
+        )
+        self.assertIn(
+            "memory.assistant_transcript_attestation_v1",
+            persistence_sql,
+        )
+        self.assertNotIn(
+            "memory.final_answer_memory_binding_v1",
+            persistence_sql,
+        )
+
+    async def test_excluded_successor_surface_is_typed_not_applicable(
+        self,
+    ) -> None:
+        lifecycle = InactiveSuccessorMemoryProviderV1(
+            SuccessorMemoryNotApplicableReason.NO_STORE
+        )
+        root = InactiveResponseCompositionRootV0_2(
+            openai_client=CombinedOpenAIClient(),
+            classifier_model="gpt-5.1",
+            memory_provider=lifecycle,
+            successor_memory_lifecycle=lifecycle,
+            answer_id_factory=lambda: ANSWER,
+            correlation_id_factory=lambda: CORRELATION,
+        )
+
+        execution = await root.execute_detailed(
+            SnapshotConn(),
+            command("Which interface theme do I prefer?"),
+        )
+
+        provenance = execution.successor_memory_provenance
+        self.assertIsNotNone(provenance)
+        assert provenance is not None
+        self.assertEqual(provenance.binding_outcome, "not_applicable")
+        self.assertIs(
+            provenance.not_applicable_reason,
+            SuccessorMemoryNotApplicableReason.NO_STORE,
+        )
+        self.assertEqual(provenance.references, ())
+        self.assertIsNone(provenance.binding_manifest_sha256)
+        self.assertIsNone(execution.finalized.memory_binding)
 
     async def test_lifeswitch_v4_dispatches_and_clears_successor_lifecycle(
         self,
@@ -253,6 +359,12 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
             1,
         )
         self.assertFalse(lifecycle.has_selected_claims)
+        provenance = execution.successor_memory_provenance
+        self.assertIsNotNone(provenance)
+        assert provenance is not None
+        self.assertEqual(provenance.binding_outcome, "exposed")
+        self.assertEqual(len(provenance.references), 1)
+        self.assertIsNone(execution.finalized.memory_binding)
 
 
 if __name__ == "__main__":

@@ -49,8 +49,14 @@ def legacy_memory_surfaces_enabled(
     return exclusive_memory_mode(environ) is ExclusiveMemoryMode.LEGACY
 
 
+# Process-lifetime authority. Import fails closed on an invalid startup value;
+# callers must not re-read mutable environment state per request.
+EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
+
+
 __all__ = [
     "EXCLUSIVE_MODE_ENV",
+    "EXCLUSIVE_MEMORY_MODE",
     "ExclusiveMemoryConfigurationError",
     "ExclusiveMemoryMode",
     "exclusive_memory_mode",
