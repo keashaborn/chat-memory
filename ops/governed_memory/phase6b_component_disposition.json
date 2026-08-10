@@ -1,0 +1,119 @@
+{
+  "authority": {
+    "accounts": "supabase_auth",
+    "derived_vector_store": "governed_memory_active",
+    "memory_database": "governed_memory",
+    "transcript_database": "memory"
+  },
+  "candidate_base": {
+    "backend_commit": "18090eb1e468f8b5279e33c4a37b67ca96071122",
+    "backend_tree": "e0a037b97402ec833a15d84158dc3747da0be35b",
+    "frontend_commit": "35a6848d9a875897e807c9cfa91bd235001c5a1f",
+    "frontend_tree": "5cb4a92c33f82f5f6481b05126ecd556fc2cb9a0"
+  },
+  "deletion_gates": [
+    "phase6b_full_candidate_tests_pass",
+    "exclusive_successor_mode_has_zero_legacy_provider_calls",
+    "legacy_memory_timers_cron_and_git_sync_are_quiesced_with_receipts",
+    "successor_chat_a_worker_chat_b_route_proof_passes",
+    "attachment_transcript_binding_regression_passes",
+    "legacy_postgresql_and_qdrant_have_zero_readers_and_zero_writers_for_the_approved_observation_window",
+    "rollback_reference_and_exact_target_retention_receipt_exist",
+    "separate_deletion_batch_is_explicitly_authorized"
+  ],
+  "inventory_at_candidate_base": {
+    "legacy_memory_runtime_files": 52,
+    "legacy_memory_systemd_files": 48,
+    "legacy_memory_test_files": 157,
+    "production_importers_of_legacy_answer_provider": [
+      "rag_engine/resse_response_router.py"
+    ],
+    "verbal_sage_rollback_build_directories": 72
+  },
+  "keep": [
+    {
+      "component": "supabase_account_authority",
+      "reason": "all active accounts remain authoritative without copying account rows"
+    },
+    {
+      "component": "conversation_transcript_and_attachment_binding",
+      "paths": [
+        "app.py:/log",
+        "public.chat_attachments",
+        "public.chat_log",
+        "public.threads"
+      ],
+      "reason": "chat history and attachment binding remain non-memory application capabilities"
+    },
+    {
+      "component": "clean_governed_memory_successor",
+      "paths": [
+        "governed-memory-migrations",
+        "ops/governed_memory",
+        "rag_engine/governed_memory",
+        "tests/memory",
+        "tests/memory_integration"
+      ],
+      "reason": "the successor is the only future memory authority"
+    }
+  ],
+  "production_state_changed": false,
+  "quarantine_then_delete": [
+    {
+      "component": "legacy_postgresql_memory_objects_and_test_databases",
+      "disposition": "retain_read_only_until_zero_reader_zero_writer_proof_then_delete_exact_named_targets"
+    },
+    {
+      "component": "legacy_qdrant_memory_raw_claim_and_shadow_collections",
+      "disposition": "retain_without_import_until_zero_reader_zero_writer_proof_then_delete_exact_named_targets"
+    },
+    {
+      "component": "legacy_memory_source_tests_scripts_and_unit_files",
+      "disposition": "delete_from_current_git_after_zero_import_and_replacement_test_proof; preserve only the archival git reference"
+    },
+    {
+      "component": "verbal_sage_rollback_build_directories",
+      "disposition": "delete as a separate exact-path cleanup batch after live build rollback authority is identified"
+    }
+  ],
+  "retire_at_exclusive_cutover": [
+    {
+      "component": "legacy_answer_provider",
+      "paths": [
+        "rag_engine/governed_memory_provider_v1.py"
+      ],
+      "required_proof": "successor mode cannot import instantiate or fall back to LiveGovernedMemoryAssemblyProviderV1"
+    },
+    {
+      "component": "legacy_identity_cards_preferences_and_memory_admin",
+      "paths": [
+        "/cards",
+        "/assistant-preferences",
+        "/memory/governed/claims",
+        "/vantage",
+        "frontend/identity"
+      ],
+      "required_proof": "single exclusive switch makes every surface unreachable before any datastore or provider call"
+    },
+    {
+      "component": "legacy_automatic_writers",
+      "paths": [
+        "memory-v1-*.timer",
+        "eval_all_users.sh",
+        "chat-memory-git-sync.timer"
+      ],
+      "required_proof": "exact prestate and poststate receipts plus no in-flight units or cron process"
+    },
+    {
+      "component": "partial_legacy_privacy_operations",
+      "paths": [
+        "/user/{user_id}/data",
+        "/user/{user_id}/recent",
+        "/user/{user_id}/export",
+        "/threads/{thread_id} DELETE"
+      ],
+      "required_proof": "block partial semantics until the successor operation is included atomically or reported explicitly"
+    }
+  ],
+  "schema_version": "governed-memory-phase6b-component-disposition-v1"
+}
