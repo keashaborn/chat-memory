@@ -82,12 +82,15 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
 
     def test_identity_compatibility_cannot_reach_embedding_in_successor_mode(self) -> None:
         source = _async_function_source("log_chat")
+        retirement = source.index("legacy_identity_memory_retired")
+        authentication = source.index("await require_memory_actor_v1")
         identity = source.index(
             'if source == "frontend/identity" and text.startswith("FULL_NAME:"):'
         )
-        retirement = source.index("legacy_identity_memory_retired", identity)
         embedding = source.index("client.embeddings.create", identity)
         transcript = source.index("# Stable transcript row id.")
+        self.assertLess(retirement, authentication)
+        self.assertLess(retirement, identity)
         self.assertLess(retirement, embedding)
         self.assertLess(embedding, transcript)
         self.assertIn("INSERT INTO chat_log(", source[transcript:])
@@ -148,6 +151,11 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         self.assertIn('"general_rag_declared"', source)
         self.assertIn('"governed_memory_successor"', source)
         self.assertIn('"identity_status": "declared_not_verified"', source)
+        self.assertIn('"conversation_bridge"', source)
+        self.assertIn('"capture"', source)
+        self.assertIn('"startup_validated": True', source)
+        self.assertIn("GOVERNED_MEMORY_CAPTURE_SETTINGS.mode", source)
+        self.assertIn("CONVERSATION_BRIDGE_IDENTITY", source)
         for field in (
             "EXCLUSIVE_MEMORY_MODE.value",
             "LEGACY_MEMORY_SURFACES_ENABLED",
@@ -206,7 +214,9 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         environment = dict(os.environ)
         environment.update(
             {
-                "POSTGRES_DSN": "postgresql://synthetic",
+                "POSTGRES_DSN": (
+                    "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
+                ),
                 EXCLUSIVE_MODE_ENV: "successor_pilot",
                 "GOVERNED_MEMORY_CAPTURE_MODE": "off",
             }
@@ -290,7 +300,9 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         environment = dict(os.environ)
         environment.update(
             {
-                "POSTGRES_DSN": "postgresql://synthetic",
+                "POSTGRES_DSN": (
+                    "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
+                ),
                 EXCLUSIVE_MODE_ENV: "successor_pilot",
                 "GOVERNED_MEMORY_CAPTURE_MODE": "off",
             }
@@ -309,6 +321,56 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
             0,
             msg=completed.stderr or completed.stdout,
         )
+
+    @unittest.skipUnless(
+        all(
+            importlib.util.find_spec(module) is not None
+            for module in ("asyncpg", "fastapi", "jwt", "openai", "qdrant_client")
+        ),
+        "full Brains runtime dependencies are unavailable",
+    )
+    def test_successor_startup_refuses_invalid_capture_or_bridge_identity(self) -> None:
+        valid_dsn = (
+            "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
+        )
+        cases = (
+            (
+                {
+                    "POSTGRES_DSN": valid_dsn,
+                    EXCLUSIVE_MODE_ENV: "successor_pilot",
+                    "GOVERNED_MEMORY_CAPTURE_MODE": "pilot",
+                    "GOVERNED_MEMORY_CAPTURE_OWNER_ALLOWLIST": "",
+                },
+                "invalid_capture_owner_allowlist",
+            ),
+            (
+                {
+                    "POSTGRES_DSN": "postgresql://brains_app:synthetic@127.0.0.1:5433/memory",
+                    EXCLUSIVE_MODE_ENV: "successor_pilot",
+                    "GOVERNED_MEMORY_CAPTURE_MODE": "off",
+                    "GOVERNED_MEMORY_CAPTURE_OWNER_ALLOWLIST": "",
+                },
+                "conversation_bridge_postgres_target_invalid",
+            ),
+        )
+        for updates, expected in cases:
+            with self.subTest(expected=expected):
+                environment = dict(os.environ)
+                environment.update(updates)
+                completed = subprocess.run(
+                    [sys.executable, "-c", "import app"],
+                    cwd=ROOT,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(
+                    expected,
+                    completed.stderr + completed.stdout,
+                )
 
 
 if __name__ == "__main__":

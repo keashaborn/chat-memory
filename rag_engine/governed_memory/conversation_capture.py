@@ -50,6 +50,25 @@ class CaptureDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptureSettings:
+    mode: str
+    owner_user_ids: tuple[UUID, ...]
+
+    def __post_init__(self) -> None:
+        if self.mode == CAPTURE_MODE_OFF:
+            valid = self.owner_user_ids == ()
+        elif self.mode == CAPTURE_MODE_PILOT:
+            valid = (
+                len(self.owner_user_ids) == 1
+                and isinstance(self.owner_user_ids[0], UUID)
+            )
+        else:
+            valid = False
+        if not valid:
+            raise CaptureConfigurationError("invalid_capture_configuration")
+
+
+@dataclass(frozen=True, slots=True)
 class CaptureReceipt:
     outcome: str
     outbox_id: UUID
@@ -68,24 +87,14 @@ def _canonical_uuid(value: object, code: str) -> UUID:
     return parsed
 
 
-def capture_decision_for_owner(
-    owner_user_id: str,
-    *,
-    authority: str,
-    source: str,
-    has_attachments: bool,
-    is_voice_turn: bool,
-    no_store: bool,
-    has_search_authorization: bool,
+def capture_settings_from_environment(
     environ: Mapping[str, str] | None = None,
-) -> CaptureDecision:
-    """Resolve the server-owned owner and eligible-input pilot gate."""
-
+) -> CaptureSettings:
+    """Parse and validate the immutable process-level capture settings."""
     settings = os.environ if environ is None else environ
     mode = settings.get(CAPTURE_MODE_ENV, CAPTURE_MODE_OFF)
-    owner = _canonical_uuid(owner_user_id, "invalid_capture_owner")
     if mode == CAPTURE_MODE_OFF:
-        return CaptureDecision(mode=mode, owner_user_id=owner, enabled=False)
+        return CaptureSettings(mode=mode, owner_user_ids=())
     if mode != CAPTURE_MODE_PILOT:
         raise CaptureConfigurationError("invalid_governed_memory_capture_mode")
     try:
@@ -113,6 +122,33 @@ def capture_decision_for_owner(
     )
     if len(set(owners)) != len(owners):
         raise CaptureConfigurationError("duplicate_capture_owner_allowlist")
+    return CaptureSettings(mode=mode, owner_user_ids=owners)
+
+
+def capture_decision_for_owner(
+    owner_user_id: str,
+    *,
+    authority: str,
+    source: str,
+    has_attachments: bool,
+    is_voice_turn: bool,
+    no_store: bool,
+    has_search_authorization: bool,
+    settings: CaptureSettings | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> CaptureDecision:
+    """Resolve the server-owned owner and eligible-input pilot gate."""
+
+    if settings is not None and environ is not None:
+        raise CaptureConfigurationError("duplicate_capture_configuration")
+    checked_settings = (
+        capture_settings_from_environment(environ)
+        if settings is None
+        else settings
+    )
+    if not isinstance(checked_settings, CaptureSettings):
+        raise CaptureConfigurationError("invalid_capture_configuration")
+    owner = _canonical_uuid(owner_user_id, "invalid_capture_owner")
     eligible_input = (
         authority == CAPTURE_TEXT_AUTHORITY
         and source == CAPTURE_USER_SOURCE
@@ -122,9 +158,9 @@ def capture_decision_for_owner(
         and has_search_authorization is False
     )
     return CaptureDecision(
-        mode=mode,
+        mode=checked_settings.mode,
         owner_user_id=owner,
-        enabled=owner in owners and eligible_input,
+        enabled=owner in checked_settings.owner_user_ids and eligible_input,
     )
 
 
@@ -224,10 +260,12 @@ __all__ = [
     "CAPTURE_TEXT_AUTHORITY",
     "CAPTURE_USER_SOURCE",
     "CaptureConfigurationError",
+    "CaptureSettings",
     "ConversationCaptureConnection",
     "CaptureDecision",
     "CaptureReceipt",
     "capture_decision_for_owner",
+    "capture_settings_from_environment",
     "normalize_capture_text",
     "capture_policy_sha256",
     "capture_auth_context_sha256",

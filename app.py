@@ -4,6 +4,7 @@ import asyncio
 import socket
 from datetime import datetime
 from types import MappingProxyType
+from urllib.parse import urlsplit
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
@@ -137,6 +138,7 @@ from rag_engine.governed_memory.conversation_capture import (
     CaptureConfigurationError,
     capture_auth_context_sha256,
     capture_decision_for_owner,
+    capture_settings_from_environment,
     enqueue_captured_chat_log_message,
     normalize_capture_text,
 )
@@ -206,6 +208,9 @@ GOVERNED_MEMORY_CAPTURE_ENVIRONMENT = MappingProxyType(
         ),
     }
 )
+GOVERNED_MEMORY_CAPTURE_SETTINGS = capture_settings_from_environment(
+    GOVERNED_MEMORY_CAPTURE_ENVIRONMENT
+)
 
 
 def _frozen_optional_hex_environment(name: str, length: int) -> str | None:
@@ -235,6 +240,51 @@ SUCCESSOR_DECLARED_CANDIDATE_COMMIT = _frozen_optional_hex_environment(
     "GOVERNED_MEMORY_CANDIDATE_COMMIT",
     40,
 )
+
+EXPECTED_CONVERSATION_POSTGRES_HOST = "127.0.0.1"
+EXPECTED_CONVERSATION_POSTGRES_PORT = 5_432
+EXPECTED_CONVERSATION_POSTGRES_DATABASE = "memory"
+EXPECTED_CONVERSATION_POSTGRES_ROLE = "brains_app"
+
+
+def _conversation_bridge_identity(dsn: str) -> dict[str, object]:
+    try:
+        parsed = urlsplit(dsn)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise CaptureConfigurationError(
+            "conversation_bridge_postgres_target_invalid"
+        ) from exc
+    database = parsed.path.removeprefix("/")
+    exact = (
+        parsed.scheme == "postgresql"
+        and parsed.hostname == EXPECTED_CONVERSATION_POSTGRES_HOST
+        and port == EXPECTED_CONVERSATION_POSTGRES_PORT
+        and parsed.username == EXPECTED_CONVERSATION_POSTGRES_ROLE
+        and isinstance(parsed.password, str)
+        and bool(parsed.password)
+        and database == EXPECTED_CONVERSATION_POSTGRES_DATABASE
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if EXCLUSIVE_MEMORY_MODE is ExclusiveMemoryMode.SUCCESSOR_PILOT and not exact:
+        raise CaptureConfigurationError(
+            "conversation_bridge_postgres_target_invalid"
+        )
+    return {
+        "identity_status": (
+            "configured_not_verified" if exact else "configured_mismatch"
+        ),
+        "host": parsed.hostname,
+        "port": port,
+        "database": database,
+        "application_login_role": parsed.username,
+        "migration_execution_role": "sage",
+        "schemas": ["public", "memory_ingest_private"],
+        "capture_function": (
+            "memory_ingest_private.enqueue_chat_log_message(uuid,text)"
+        ),
+    }
 
 if LEGACY_MEMORY_SURFACES_ENABLED:
     from rag_engine.vantage_router import router as vantage_router
@@ -557,6 +607,7 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
 qdrant_client = None
 
 DSN = os.environ["POSTGRES_DSN"]
+CONVERSATION_BRIDGE_IDENTITY = _conversation_bridge_identity(DSN)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -1476,6 +1527,19 @@ async def log_chat(req: Request):
             status_code=400,
         )
     text = body.get("text") or body.get("input") or ""
+    source = body.get("source") or "frontend"
+    if (
+        not LEGACY_MEMORY_SURFACES_ENABLED
+        and source == "frontend/identity"
+        and text.startswith("FULL_NAME:")
+    ):
+        return JSONResponse(
+            {
+                "status": "retired",
+                "detail": "legacy_identity_memory_retired",
+            },
+            status_code=410,
+        )
     user_id_alias = await require_memory_actor_v1(
         req, body.get("user_id") or ""
     )
@@ -1485,7 +1549,6 @@ async def log_chat(req: Request):
             "detail": "transcript_and_memory_not_stored",
         }
     voice_turn_id = voice_turn_id_from_request(req)
-    source = body.get("source") or "frontend"
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
     request_id = _sanitize_request_id(getattr(req.state, "request_id", None)) or str(uuid.uuid4())
@@ -1542,14 +1605,6 @@ async def log_chat(req: Request):
     # Explicit compatibility-only identity-card path. This route does not
     # create governed claim memory and returns before transcript capture.
     if source == "frontend/identity" and text.startswith("FULL_NAME:"):
-        if not LEGACY_MEMORY_SURFACES_ENABLED:
-            return JSONResponse(
-                {
-                    "status": "retired",
-                    "detail": "legacy_identity_memory_retired",
-                },
-                status_code=410,
-            )
         full_name = text.split("FULL_NAME:", 1)[1].strip()
 
         if not full_name:
@@ -1592,7 +1647,7 @@ async def log_chat(req: Request):
             has_search_authorization=bool(
                 (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
             ),
-            environ=GOVERNED_MEMORY_CAPTURE_ENVIRONMENT,
+            settings=GOVERNED_MEMORY_CAPTURE_SETTINGS,
         )
     except CaptureConfigurationError:
         return JSONResponse(
@@ -2505,6 +2560,22 @@ async def health():
                 "database": EXPECTED_POSTGRES_DATABASE,
                 "api_role": EXPECTED_POSTGRES_ROLE,
                 "schemas": ["memory", "memory_private"],
+            },
+            "conversation_bridge": CONVERSATION_BRIDGE_IDENTITY,
+            "capture": {
+                "startup_validated": True,
+                "mode": GOVERNED_MEMORY_CAPTURE_SETTINGS.mode,
+                "pilot_owner_count": len(
+                    GOVERNED_MEMORY_CAPTURE_SETTINGS.owner_user_ids
+                ),
+                "source": "frontend/chat:user",
+                "authority": "supabase_access_token_v1",
+                "excludes": [
+                    "attachments",
+                    "no_store",
+                    "voice",
+                    "web_search",
+                ],
             },
             "qdrant": {
                 "host": EXPECTED_QDRANT_HOST,

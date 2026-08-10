@@ -19,9 +19,11 @@ from rag_engine.governed_memory.conversation_capture import (
     CAPTURE_TEXT_AUTHORITY,
     CAPTURE_USER_SOURCE,
     CaptureConfigurationError,
+    CaptureSettings,
     capture_auth_context_sha256,
     capture_decision_for_owner,
     capture_policy_sha256,
+    capture_settings_from_environment,
     enqueue_captured_chat_log_message,
     normalize_capture_text,
 )
@@ -60,6 +62,34 @@ class _FakeConnection:
 
 
 class CaptureGateTests(unittest.TestCase):
+    def test_capture_settings_are_startup_validated_and_immutable(self) -> None:
+        off = capture_settings_from_environment({})
+        self.assertEqual(
+            off,
+            CaptureSettings(mode="off", owner_user_ids=()),
+        )
+        pilot = capture_settings_from_environment(
+            {
+                **PILOT_MODE,
+                CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+            }
+        )
+        self.assertEqual(pilot.mode, "pilot")
+        self.assertEqual(pilot.owner_user_ids, (OWNER_A,))
+        for invalid in (
+            ("off", (OWNER_A,)),
+            ("pilot", ()),
+            ("pilot", (OWNER_A, OWNER_B)),
+            ("unexpected", ()),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                CaptureConfigurationError
+            ):
+                CaptureSettings(
+                    mode=invalid[0],
+                    owner_user_ids=invalid[1],
+                )
+
     def test_default_off_ignores_unrelated_allowlist_and_disables_owner(self) -> None:
         decision = capture_decision_for_owner(
             str(OWNER_A),
@@ -275,7 +305,7 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn("is_voice_turn=voice_turn_id is not None", route)
         self.assertIn("no_store=no_store", route)
         self.assertIn("has_search_authorization=bool(", route)
-        self.assertIn("environ=GOVERNED_MEMORY_CAPTURE_ENVIRONMENT", route)
+        self.assertIn("settings=GOVERNED_MEMORY_CAPTURE_SETTINGS", route)
         self.assertIn("if governed_memory_capture.enabled:", route)
         self.assertIn("require_memory_actor_context_v1(", route)
         self.assertIn("require_live_authority=True", route)
@@ -451,7 +481,9 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(
             os.environ,
             {
-                "POSTGRES_DSN": "postgresql://synthetic",
+                "POSTGRES_DSN": (
+                    "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
+                ),
                 EXCLUSIVE_MODE_ENV: "successor_pilot",
                 CAPTURE_MODE_ENV: "pilot",
                 CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
@@ -484,15 +516,15 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
             authentication_manifest_sha256="a" * 64,
         )
         connect = AsyncMock()
-        pilot_environment = {
-            **PILOT_MODE,
-            CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
-        }
+        pilot_settings = CaptureSettings(
+            mode="pilot",
+            owner_user_ids=(OWNER_A,),
+        )
         with (
             patch.object(
                 self.backend_app,
-                "GOVERNED_MEMORY_CAPTURE_ENVIRONMENT",
-                pilot_environment,
+                "GOVERNED_MEMORY_CAPTURE_SETTINGS",
+                pilot_settings,
             ),
             patch.object(
                 self.backend_app,
@@ -541,15 +573,15 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unconfigured_authority_stops_before_transcript_io(self) -> None:
         connect = AsyncMock()
-        pilot_environment = {
-            **PILOT_MODE,
-            CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
-        }
+        pilot_settings = CaptureSettings(
+            mode="pilot",
+            owner_user_ids=(OWNER_A,),
+        )
         with (
             patch.object(
                 self.backend_app,
-                "GOVERNED_MEMORY_CAPTURE_ENVIRONMENT",
-                pilot_environment,
+                "GOVERNED_MEMORY_CAPTURE_SETTINGS",
+                pilot_settings,
             ),
             patch.object(
                 self.backend_app,
@@ -595,5 +627,40 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
         ):
             response = await self.backend_app.log_chat(_log_request(body))
         self.assertEqual(response["status"], "no_store")
+        factory.assert_not_called()
+        connect.assert_not_awaited()
+
+    async def test_retired_identity_refuses_before_auth_or_resource_io(self) -> None:
+        authenticate = AsyncMock()
+        connect = AsyncMock()
+        factory = Mock()
+        with (
+            patch.object(
+                self.backend_app,
+                "require_memory_actor_v1",
+                new=authenticate,
+            ),
+            patch.object(
+                self.backend_app,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                factory,
+            ),
+            patch.object(self.backend_app.asyncpg, "connect", connect),
+        ):
+            response = await self.backend_app.log_chat(
+                _log_request(
+                    {
+                        "user_id": str(OWNER_A),
+                        "source": "frontend/identity",
+                        "text": "FULL_NAME: Synthetic Name",
+                    }
+                )
+            )
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(
+            json.loads(response.body)["detail"],
+            "legacy_identity_memory_retired",
+        )
+        authenticate.assert_not_awaited()
         factory.assert_not_called()
         connect.assert_not_awaited()
