@@ -74,6 +74,9 @@ def capture_decision_for_owner(
     authority: str,
     source: str,
     has_attachments: bool,
+    is_voice_turn: bool,
+    no_store: bool,
+    has_search_authorization: bool,
     environ: Mapping[str, str] | None = None,
 ) -> CaptureDecision:
     """Resolve the server-owned owner and eligible-input pilot gate."""
@@ -114,6 +117,9 @@ def capture_decision_for_owner(
         authority == CAPTURE_TEXT_AUTHORITY
         and source == CAPTURE_USER_SOURCE
         and has_attachments is False
+        and is_voice_turn is False
+        and no_store is False
+        and has_search_authorization is False
     )
     return CaptureDecision(
         mode=mode,
@@ -138,6 +144,8 @@ def capture_policy_sha256(source_created_at: datetime) -> str:
 def capture_auth_context_sha256(
     *,
     owner_user_id: UUID,
+    session_id: UUID,
+    authentication_manifest_sha256: str,
     authority: str,
     request_id: str,
 ) -> str:
@@ -145,6 +153,12 @@ def capture_auth_context_sha256(
 
     if not isinstance(owner_user_id, UUID):
         raise ContractViolation("invalid_capture_auth_owner")
+    if not isinstance(session_id, UUID):
+        raise ContractViolation("invalid_capture_auth_session")
+    checked_manifest_sha256 = require_sha256(
+        authentication_manifest_sha256,
+        "invalid_capture_authentication_manifest_sha256",
+    )
     checked_authority = require_bounded_text(
         authority,
         code="invalid_capture_auth_authority",
@@ -158,9 +172,11 @@ def capture_auth_context_sha256(
     return canonical_sha256(
         "governed_memory.conversation_capture_auth_context",
         {
+            "authentication_manifest_sha256": checked_manifest_sha256,
             "authority": checked_authority,
             "owner_user_id": owner_user_id,
             "request_id_sha256": sha256_text(checked_request_id),
+            "session_id": session_id,
         },
     )
 

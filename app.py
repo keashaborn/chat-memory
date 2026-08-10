@@ -3,7 +3,8 @@ import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import socket
 from datetime import datetime
-from fastapi import FastAPI, Body, Request
+from types import MappingProxyType
+from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
 from qdrant_client import QdrantClient
@@ -19,11 +20,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from rag_engine.vantage_router import router as vantage_router
 from rag_engine.resse_response_router import router as resse_response_router
-from rag_engine.assistant_response_preferences_router_v1 import (
-    router as assistant_response_preferences_router_v1,
-)
 from rag_engine.lifeswitch_sage_router import router as lifeswitch_sage_router
 from rag_engine.trusted_web_router import router as trusted_web_router
 from rag_engine.current_news_router import router as current_news_router
@@ -130,9 +127,13 @@ from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from rag_engine.memory_actor_auth_v1 import (
     memory_actor_authority_v1,
+    require_memory_actor_context_v1,
     require_memory_actor_v1,
 )
 from rag_engine.governed_memory.conversation_capture import (
+    CAPTURE_MODE_ENV,
+    CAPTURE_MODE_OFF,
+    CAPTURE_OWNER_ALLOWLIST_ENV,
     CaptureConfigurationError,
     capture_auth_context_sha256,
     capture_decision_for_owner,
@@ -140,20 +141,13 @@ from rag_engine.governed_memory.conversation_capture import (
     normalize_capture_text,
 )
 from rag_engine.governed_memory.exclusive_cutover import (
-    legacy_memory_surfaces_enabled,
+    EXCLUSIVE_MODE_ENV,
+    ExclusiveMemoryMode,
+    exclusive_memory_mode,
 )
-from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
-    router as memory_v1_governed_claim_lifecycle_router_v1,
-)
-from rag_engine.raw_memory_ownership import (
-    RawMemoryOwnershipError,
-    assert_raw_payload_owner,
-    assert_raw_points_owner,
-    owned_raw_payload,
-)
-from rag_engine.thread_deletion_v1 import (
-    ThreadDeletionV1Error,
-    delete_thread_v1,
+from rag_engine.governed_memory.successor_live_authority import (
+    SuccessorLiveAuthorityConfigurationError,
+    successor_live_authority_from_environment,
 )
 from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,
@@ -166,12 +160,7 @@ from rag_engine.thread_title_v1 import (
     select_first_meaningful_exchange,
 )
 from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
-from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
-from rag_engine.admin_memory_workbench_v1 import (
-    MemoryWorkbenchError,
-    list_admin_memory_workbench_v1,
-    record_admin_memory_workbench_feedback_v2,
-)
+from rag_engine.web_search_actor_auth_v1 import VOICE_SEARCH_AUTHORIZATION_HEADER
 from rag_engine.admin_ai_operations_v1 import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
@@ -187,10 +176,98 @@ from rag_engine.usage_ledger_v1 import (
     build_admin_usage_user_detail_v1,
     build_admin_usage_users_v1,
 )
-from scripts.review_promotion_plan import build_personal_event_promotion_preview
+from rag_engine.governed_memory.response_runtime import (
+    EXPECTED_POSTGRES_DATABASE,
+    EXPECTED_POSTGRES_HOST,
+    EXPECTED_POSTGRES_PORT,
+    EXPECTED_POSTGRES_ROLE,
+    EXPECTED_QDRANT_HOST,
+    EXPECTED_QDRANT_PORT,
+    SUCCESSOR_CALIBRATION_APPROVAL_SHA256_ENV,
+    SUCCESSOR_CALIBRATION_ARTIFACT_SHA256_ENV,
+)
+from rag_engine.governed_memory.runtime.qdrant_adapter import (
+    QDRANT_ALIAS,
+    QDRANT_PHYSICAL_COLLECTION,
+)
 
 
-LEGACY_MEMORY_SURFACES_ENABLED = legacy_memory_surfaces_enabled()
+EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
+LEGACY_MEMORY_SURFACES_ENABLED = (
+    EXCLUSIVE_MEMORY_MODE is ExclusiveMemoryMode.LEGACY
+)
+GOVERNED_MEMORY_CAPTURE_ENVIRONMENT = MappingProxyType(
+    {
+        EXCLUSIVE_MODE_ENV: EXCLUSIVE_MEMORY_MODE.value,
+        CAPTURE_MODE_ENV: os.environ.get(CAPTURE_MODE_ENV, CAPTURE_MODE_OFF),
+        CAPTURE_OWNER_ALLOWLIST_ENV: os.environ.get(
+            CAPTURE_OWNER_ALLOWLIST_ENV,
+            "",
+        ),
+    }
+)
+
+
+def _frozen_optional_hex_environment(name: str, length: int) -> str | None:
+    value = os.environ.get(name)
+    if (
+        isinstance(value, str)
+        and len(value) == length
+        and all(character in "0123456789abcdef" for character in value)
+    ):
+        return value
+    return None
+
+
+SUCCESSOR_DECLARED_CALIBRATION_ARTIFACT_SHA256 = (
+    _frozen_optional_hex_environment(
+        SUCCESSOR_CALIBRATION_ARTIFACT_SHA256_ENV,
+        64,
+    )
+)
+SUCCESSOR_DECLARED_CALIBRATION_APPROVAL_SHA256 = (
+    _frozen_optional_hex_environment(
+        SUCCESSOR_CALIBRATION_APPROVAL_SHA256_ENV,
+        64,
+    )
+)
+SUCCESSOR_DECLARED_CANDIDATE_COMMIT = _frozen_optional_hex_environment(
+    "GOVERNED_MEMORY_CANDIDATE_COMMIT",
+    40,
+)
+
+if LEGACY_MEMORY_SURFACES_ENABLED:
+    from rag_engine.vantage_router import router as vantage_router
+    from rag_engine.assistant_response_preferences_router_v1 import (
+        router as assistant_response_preferences_router_v1,
+    )
+    from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
+        router as memory_v1_governed_claim_lifecycle_router_v1,
+    )
+    from rag_engine.raw_memory_ownership import (
+        RawMemoryOwnershipError,
+        assert_raw_payload_owner,
+        assert_raw_points_owner,
+        owned_raw_payload,
+    )
+    from rag_engine.thread_deletion_v1 import (
+        ThreadDeletionV1Error,
+        delete_thread_v1,
+    )
+    from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
+    from rag_engine.admin_memory_workbench_v1 import (
+        MemoryWorkbenchError,
+        list_admin_memory_workbench_v1,
+        record_admin_memory_workbench_feedback_v2,
+    )
+    from scripts.review_promotion_plan import build_personal_event_promotion_preview
+
+SUCCESSOR_LIVE_AUTHORITY_FACTORY = successor_live_authority_from_environment
+SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+}
 
 
 app = FastAPI(title="Brains API", version="1.0.0")
@@ -1392,10 +1469,21 @@ async def log_chat(req: Request):
     except Exception:
         return JSONResponse({"status":"bad_request","detail":"invalid json"}, status_code=400)
 
+    no_store = body.get("no_store", False)
+    if type(no_store) is not bool:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_no_store"},
+            status_code=400,
+        )
     text = body.get("text") or body.get("input") or ""
     user_id_alias = await require_memory_actor_v1(
         req, body.get("user_id") or ""
     )
+    if no_store:
+        return {
+            "status": "no_store",
+            "detail": "transcript_and_memory_not_stored",
+        }
     voice_turn_id = voice_turn_id_from_request(req)
     source = body.get("source") or "frontend"
     tags = body.get("tags") or []
@@ -1499,6 +1587,12 @@ async def log_chat(req: Request):
             authority=memory_actor_authority_v1(req),
             source=source,
             has_attachments=bool(attachment_ids),
+            is_voice_turn=voice_turn_id is not None,
+            no_store=no_store,
+            has_search_authorization=bool(
+                (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
+            ),
+            environ=GOVERNED_MEMORY_CAPTURE_ENVIRONMENT,
         )
     except CaptureConfigurationError:
         return JSONResponse(
@@ -1508,6 +1602,7 @@ async def log_chat(req: Request):
             },
             status_code=503,
         )
+    governed_memory_actor_context = None
     if governed_memory_capture.enabled:
         if thread_id is None:
             return JSONResponse(
@@ -1516,6 +1611,38 @@ async def log_chat(req: Request):
                     "detail": "governed_memory_capture_thread_required",
                 },
                 status_code=409,
+            )
+        try:
+            live_authority_verifier = SUCCESSOR_LIVE_AUTHORITY_FACTORY()
+        except SuccessorLiveAuthorityConfigurationError:
+            return JSONResponse(
+                {
+                    "status": "unavailable",
+                    "detail": "successor_live_authority_unconfigured",
+                },
+                status_code=503,
+                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+            )
+        try:
+            governed_memory_actor_context = await require_memory_actor_context_v1(
+                req,
+                user_id,
+                live_authority_verifier=live_authority_verifier,
+                require_live_authority=True,
+            )
+        except HTTPException as exc:
+            return JSONResponse(
+                {
+                    "status": (
+                        "unavailable" if exc.status_code == 503 else "unauthorized"
+                    ),
+                    "detail": str(exc.detail),
+                },
+                status_code=exc.status_code,
+                headers={
+                    **SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+                    **dict(exc.headers or {}),
+                },
             )
         text = normalize_capture_text(text)
 
@@ -1528,9 +1655,15 @@ async def log_chat(req: Request):
     capture_auth_context = None
     capture_source_created_at = None
     if governed_memory_capture.enabled:
+        if governed_memory_actor_context is None:
+            raise RuntimeError("governed_memory_capture_actor_context_missing")
         capture_auth_context = capture_auth_context_sha256(
-            owner_user_id=uuid.UUID(user_id),
-            authority=memory_actor_authority_v1(req),
+            owner_user_id=governed_memory_actor_context.owner_user_id,
+            session_id=governed_memory_actor_context.session_id,
+            authentication_manifest_sha256=(
+                governed_memory_actor_context.authentication_manifest_sha256
+            ),
+            authority=governed_memory_actor_context.authority,
             request_id=request_id,
         )
 
@@ -2292,6 +2425,8 @@ async def threads_archive(thread_id: str, req: Request):
 
 @app.delete("/threads/{thread_id}")
 async def threads_delete(thread_id: str, req: Request):
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("thread_delete")
     tid = parse_uuid(thread_id)
     if not tid:
         return JSONResponse(
@@ -2302,9 +2437,6 @@ async def threads_delete(thread_id: str, req: Request):
     actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("thread_delete")
-
     conn = await asyncpg.connect(DSN)
     try:
         result = await delete_thread_v1(
@@ -2356,10 +2488,38 @@ async def health():
     return {
         "status": "ok",
         "time": time.time(),
-        "default_collection": DEFAULT_COLLECTION,           # import-time default
-        "env_default": os.getenv("RETRIEVAL_COLLECTION"),   # live env value
-        "embed_model": EMBED_MODEL,
-        "qdrant_url": QDRANT_URL,
+        "general_rag_declared": {
+            "default_collection": DEFAULT_COLLECTION,
+            "embed_model": EMBED_MODEL,
+            "qdrant_url": QDRANT_URL,
+        },
+        "governed_memory_successor": {
+            "identity_status": "declared_not_verified",
+            "exclusive_mode": EXCLUSIVE_MEMORY_MODE.value,
+            "legacy_memory_surfaces_enabled": (
+                LEGACY_MEMORY_SURFACES_ENABLED
+            ),
+            "postgres": {
+                "host": EXPECTED_POSTGRES_HOST,
+                "port": EXPECTED_POSTGRES_PORT,
+                "database": EXPECTED_POSTGRES_DATABASE,
+                "api_role": EXPECTED_POSTGRES_ROLE,
+                "schemas": ["memory", "memory_private"],
+            },
+            "qdrant": {
+                "host": EXPECTED_QDRANT_HOST,
+                "port": EXPECTED_QDRANT_PORT,
+                "alias": QDRANT_ALIAS,
+                "physical_collection": QDRANT_PHYSICAL_COLLECTION,
+            },
+            "calibration_artifact_sha256": (
+                SUCCESSOR_DECLARED_CALIBRATION_ARTIFACT_SHA256
+            ),
+            "calibration_approval_receipt_sha256": (
+                SUCCESSOR_DECLARED_CALIBRATION_APPROVAL_SHA256
+            ),
+            "candidate_commit": SUCCESSOR_DECLARED_CANDIDATE_COMMIT,
+        },
     }
 
 # ---------- cards (artifact console) ----------
@@ -2381,11 +2541,11 @@ async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optiona
     governed response prompt path.
     kinds: comma-separated list. Defaults to CARD_KINDS_DEFAULT.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_list")
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_list")
     vid = (vantage_id or "default").strip() or "default"
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else CARD_KINDS_DEFAULT) if k.strip()]
@@ -2462,12 +2622,12 @@ async def vantage_cards_list(
     This is the newer Vantage-scoped card system, distinct from legacy Qdrant
     memory cards served by /cards/{user_id}.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("vantage_cards_list")
     vid = (vantage_id or "default").strip() or "default"
     actor_err, uid = await _require_actor_for_user(req, user_id, vid)
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("vantage_cards_list")
 
     klist = [k.strip() for k in (kinds.split(",") if kinds else []) if k.strip()]
     limit_n = max(1, min(int(limit or 100), 500))
@@ -2552,11 +2712,11 @@ async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vanta
 
     topic_key defaults to "__singleton__" for true singletons.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_upsert")
     actor_err, uid = await _require_actor_for_user(request, user_id, vantage_id)
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_upsert")
     kind = (req.kind or "").strip()
     if not kind:
         return JSONResponse({"status": "bad_request", "detail": "missing kind"}, status_code=400)
@@ -2639,11 +2799,11 @@ async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str
     This route is not a governed claim lifecycle operation.
     Safety: only delete if payload.user_id matches.
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("cards_delete")
     actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_delete")
     qdrant = get_qdrant()
 
     # verify ownership
@@ -2707,11 +2867,11 @@ async def _has_governed_memory(conn: asyncpg.Connection, owner_user_id: str) -> 
 # ---------- security/privacy: delete all user data ----------
 @app.delete("/user/{user_id}/data")
 async def delete_all_user_data(user_id: str, req: Request):
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("delete_all_user_data")
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("delete_all_user_data")
 
     # 1) Delete Postgres transcript + threads
     pg_chat = None
@@ -2773,11 +2933,11 @@ async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60)
     Soft-delete: remove recent chat_log rows for user_id and delete matching Qdrant points by id.
     minutes: how far back to delete (default 60).
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("delete_recent_user_data")
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("delete_recent_user_data")
     minutes = int(minutes or 60)
     if minutes < 1:
         return JSONResponse({"status":"bad_request","detail":"minutes must be >= 1"}, status_code=400)
@@ -2880,11 +3040,11 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
     Export: threads + chat_log transcript + latest cards.
     limit: max chat_log rows to include (default 20k).
     """
+    if not LEGACY_MEMORY_SURFACES_ENABLED:
+        return _legacy_memory_retired("export_user_data")
     actor_err, uid = await _require_actor_for_user(req, user_id, "default")
     if actor_err:
         return actor_err
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("export_user_data")
     limit = int(limit or 20000)
     if limit < 1:
         return JSONResponse({"status":"bad_request","detail":"limit must be >= 1"}, status_code=400)

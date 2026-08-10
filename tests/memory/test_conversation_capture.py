@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
+import importlib
+import importlib.util
+import json
+import os
 from pathlib import Path
 import unittest
 import unicodedata
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID
 
 from rag_engine.governed_memory.contracts import ContractViolation
@@ -26,6 +31,7 @@ from rag_engine.governed_memory.exclusive_cutover import EXCLUSIVE_MODE_ENV
 
 OWNER_A = UUID("11111111-1111-4111-8111-111111111111")
 OWNER_B = UUID("22222222-2222-4222-8222-222222222222")
+SESSION_A = UUID("33333333-3333-4333-8333-333333333333")
 MESSAGE_A = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 OUTBOX_A = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 CREATED_AT = datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
@@ -34,6 +40,9 @@ ELIGIBLE_INPUT = {
     "authority": CAPTURE_TEXT_AUTHORITY,
     "source": CAPTURE_USER_SOURCE,
     "has_attachments": False,
+    "is_voice_turn": False,
+    "no_store": False,
+    "has_search_authorization": False,
 }
 PILOT_MODE = {
     CAPTURE_MODE_ENV: "pilot",
@@ -57,6 +66,9 @@ class CaptureGateTests(unittest.TestCase):
             authority="active_voice_session_lease_v1",
             source="frontend/chat:assistant",
             has_attachments=True,
+            is_voice_turn=True,
+            no_store=True,
+            has_search_authorization=True,
             environ={CAPTURE_OWNER_ALLOWLIST_ENV: "not-a-uuid"},
         )
         self.assertEqual(decision.mode, "off")
@@ -125,31 +137,49 @@ class CaptureGateTests(unittest.TestCase):
                 "authority": "active_voice_session_lease_v1",
                 "source": CAPTURE_USER_SOURCE,
                 "has_attachments": False,
+                "is_voice_turn": True,
+                "no_store": False,
+                "has_search_authorization": False,
             },
             {
                 "authority": CAPTURE_TEXT_AUTHORITY,
                 "source": "frontend/chat:assistant",
                 "has_attachments": False,
+                "is_voice_turn": False,
+                "no_store": False,
+                "has_search_authorization": False,
             },
             {
                 "authority": CAPTURE_TEXT_AUTHORITY,
                 "source": "trusted-web",
                 "has_attachments": False,
+                "is_voice_turn": False,
+                "no_store": False,
+                "has_search_authorization": True,
             },
             {
                 "authority": CAPTURE_TEXT_AUTHORITY,
                 "source": "frontend/identity",
                 "has_attachments": False,
+                "is_voice_turn": False,
+                "no_store": False,
+                "has_search_authorization": False,
             },
             {
                 "authority": CAPTURE_TEXT_AUTHORITY,
                 "source": "no_store",
                 "has_attachments": False,
+                "is_voice_turn": False,
+                "no_store": True,
+                "has_search_authorization": False,
             },
             {
                 "authority": CAPTURE_TEXT_AUTHORITY,
                 "source": CAPTURE_USER_SOURCE,
                 "has_attachments": True,
+                "is_voice_turn": False,
+                "no_store": False,
+                "has_search_authorization": False,
             },
         )
         for excluded in excluded_inputs:
@@ -171,11 +201,15 @@ class CaptureGateTests(unittest.TestCase):
         self.assertEqual(
             capture_auth_context_sha256(
                 owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
                 authority="supabase_access_token_v1",
                 request_id="request-a",
             ),
             capture_auth_context_sha256(
                 owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
                 authority="supabase_access_token_v1",
                 request_id="request-a",
             ),
@@ -183,11 +217,47 @@ class CaptureGateTests(unittest.TestCase):
         self.assertNotEqual(
             capture_auth_context_sha256(
                 owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
                 authority="supabase_access_token_v1",
                 request_id="request-a",
             ),
             capture_auth_context_sha256(
                 owner_user_id=OWNER_B,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
+                authority="supabase_access_token_v1",
+                request_id="request-a",
+            ),
+        )
+        self.assertNotEqual(
+            capture_auth_context_sha256(
+                owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
+                authority="supabase_access_token_v1",
+                request_id="request-a",
+            ),
+            capture_auth_context_sha256(
+                owner_user_id=OWNER_A,
+                session_id=OWNER_B,
+                authentication_manifest_sha256="a" * 64,
+                authority="supabase_access_token_v1",
+                request_id="request-a",
+            ),
+        )
+        self.assertNotEqual(
+            capture_auth_context_sha256(
+                owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="a" * 64,
+                authority="supabase_access_token_v1",
+                request_id="request-a",
+            ),
+            capture_auth_context_sha256(
+                owner_user_id=OWNER_A,
+                session_id=SESSION_A,
+                authentication_manifest_sha256="b" * 64,
                 authority="supabase_access_token_v1",
                 request_id="request-a",
             ),
@@ -202,7 +272,14 @@ class CaptureGateTests(unittest.TestCase):
         self.assertIn("authority=memory_actor_authority_v1(req)", route)
         self.assertIn("source=source", route)
         self.assertIn("has_attachments=bool(attachment_ids)", route)
+        self.assertIn("is_voice_turn=voice_turn_id is not None", route)
+        self.assertIn("no_store=no_store", route)
+        self.assertIn("has_search_authorization=bool(", route)
+        self.assertIn("environ=GOVERNED_MEMORY_CAPTURE_ENVIRONMENT", route)
         self.assertIn("if governed_memory_capture.enabled:", route)
+        self.assertIn("require_memory_actor_context_v1(", route)
+        self.assertIn("require_live_authority=True", route)
+        self.assertIn("if no_store:", route)
         self.assertIn("capture_auth_context_sha256(", route)
         self.assertIn(
             '"SELECT set_config(\'app.auth_context_sha256\',$1,true)"',
@@ -283,3 +360,240 @@ class CaptureAdapterTests(unittest.IsolatedAsyncioTestCase):
                 source_created_at=CREATED_AT,
             )
         self.assertEqual(connection.calls, [])
+
+
+def _log_request(body: Mapping[str, object]) -> Request:
+    from starlette.requests import Request
+
+    encoded = json.dumps(body).encode("utf-8")
+    delivered = False
+
+    async def receive() -> Mapping[str, object]:
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.disconnect"}
+        delivered = True
+        return {
+            "type": "http.request",
+            "body": encoded,
+            "more_body": False,
+        }
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/log",
+            "headers": [(b"authorization", b"Bearer a.b.c")],
+        },
+        receive,
+    )
+
+
+def _live_authority(
+    *,
+    session_present: bool = True,
+    missing_session: bool = False,
+    unavailable: bool = False,
+) -> LiveSupabaseAuthorityVerifier:
+    from rag_engine.governed_memory.runtime.live_supabase import (
+        LiveSupabaseAuthorityConfig,
+        LiveSupabaseAuthorityVerifier,
+        LiveSupabaseSessionVerifier,
+        LiveSupabaseUserVerifier,
+    )
+
+    config = LiveSupabaseAuthorityConfig(
+        issuer="https://synthetic.supabase.co/auth/v1",
+        api_key="synthetic-publishable-key",
+    )
+
+    def fetch_user(*_args: object) -> bytes:
+        if unavailable:
+            raise OSError("synthetic live authority unavailable")
+        return json.dumps({"id": str(OWNER_A)}).encode("utf-8")
+
+    def fetch_session(*_args: object) -> bytes:
+        if missing_session:
+            return b"[]"
+        return json.dumps(
+            [
+                {
+                    "owner_user_id": str(OWNER_A),
+                    "session_id": str(SESSION_A),
+                    "session_present": session_present,
+                }
+            ]
+        ).encode("utf-8")
+
+    return LiveSupabaseAuthorityVerifier(
+        user_verifier=LiveSupabaseUserVerifier(config, fetcher=fetch_user),
+        session_verifier=LiveSupabaseSessionVerifier(
+            config,
+            fetcher=fetch_session,
+        ),
+    )
+
+
+_APP_RUNTIME_AVAILABLE = all(
+    importlib.util.find_spec(module) is not None
+    for module in ("asyncpg", "fastapi", "jwt", "openai", "qdrant_client")
+)
+
+
+@unittest.skipUnless(
+    _APP_RUNTIME_AVAILABLE,
+    "full Brains runtime dependencies are unavailable",
+)
+class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "POSTGRES_DSN": "postgresql://synthetic",
+                EXCLUSIVE_MODE_ENV: "successor_pilot",
+                CAPTURE_MODE_ENV: "pilot",
+                CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+            },
+            clear=False,
+        ):
+            cls.backend_app = importlib.import_module("app")
+
+    def pilot_body(self) -> dict[str, object]:
+        return {
+            "user_id": str(OWNER_A),
+            "thread_id": str(MESSAGE_A),
+            "source": "frontend/chat:user",
+            "text": "Synthetic durable fact.",
+            "tags": ["user", "chat"],
+        }
+
+    async def assert_live_refusal(
+        self,
+        verifier: LiveSupabaseAuthorityVerifier,
+        *,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        from rag_engine.supabase_actor_auth import VerifiedSupabaseIdentity
+
+        identity = VerifiedSupabaseIdentity(
+            actor_user_id=str(OWNER_A),
+            session_id=str(SESSION_A),
+            authentication_manifest_sha256="a" * 64,
+        )
+        connect = AsyncMock()
+        pilot_environment = {
+            **PILOT_MODE,
+            CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+        }
+        with (
+            patch.object(
+                self.backend_app,
+                "GOVERNED_MEMORY_CAPTURE_ENVIRONMENT",
+                pilot_environment,
+            ),
+            patch.object(
+                self.backend_app,
+                "require_memory_actor_v1",
+                new=AsyncMock(return_value=str(OWNER_A)),
+            ),
+            patch.object(
+                self.backend_app,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                return_value=verifier,
+            ),
+            patch(
+                "rag_engine.memory_actor_auth_v1.require_verified_supabase_identity",
+                new=AsyncMock(return_value=identity),
+            ),
+            patch.object(self.backend_app.asyncpg, "connect", connect),
+        ):
+            response = await self.backend_app.log_chat(
+                _log_request(self.pilot_body())
+            )
+        self.assertEqual(response.status_code, status_code)
+        self.assertEqual(json.loads(response.body)["detail"], detail)
+        self.assertIn("no-store", response.headers["cache-control"])
+        connect.assert_not_awaited()
+
+    async def test_missing_and_revoked_sessions_stop_before_transcript_io(
+        self,
+    ) -> None:
+        for verifier in (
+            _live_authority(missing_session=True),
+            _live_authority(session_present=False),
+        ):
+            with self.subTest(verifier=verifier):
+                await self.assert_live_refusal(
+                    verifier,
+                    status_code=401,
+                    detail="successor_live_authority_denied",
+                )
+
+    async def test_authority_outage_stops_before_transcript_io(self) -> None:
+        await self.assert_live_refusal(
+            _live_authority(unavailable=True),
+            status_code=503,
+            detail="successor_live_authority_unavailable",
+        )
+
+    async def test_unconfigured_authority_stops_before_transcript_io(self) -> None:
+        connect = AsyncMock()
+        pilot_environment = {
+            **PILOT_MODE,
+            CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+        }
+        with (
+            patch.object(
+                self.backend_app,
+                "GOVERNED_MEMORY_CAPTURE_ENVIRONMENT",
+                pilot_environment,
+            ),
+            patch.object(
+                self.backend_app,
+                "require_memory_actor_v1",
+                new=AsyncMock(return_value=str(OWNER_A)),
+            ),
+            patch.object(
+                self.backend_app,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                side_effect=self.backend_app.SuccessorLiveAuthorityConfigurationError,
+            ),
+            patch.object(self.backend_app.asyncpg, "connect", connect),
+        ):
+            response = await self.backend_app.log_chat(
+                _log_request(self.pilot_body())
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            json.loads(response.body)["detail"],
+            "successor_live_authority_unconfigured",
+        )
+        connect.assert_not_awaited()
+
+    async def test_explicit_no_store_constructs_no_successor_or_database_io(
+        self,
+    ) -> None:
+        factory = Mock()
+        connect = AsyncMock()
+        body = self.pilot_body()
+        body["no_store"] = True
+        with (
+            patch.object(
+                self.backend_app,
+                "require_memory_actor_v1",
+                new=AsyncMock(return_value=str(OWNER_A)),
+            ),
+            patch.object(
+                self.backend_app,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                factory,
+            ),
+            patch.object(self.backend_app.asyncpg, "connect", connect),
+        ):
+            response = await self.backend_app.log_chat(_log_request(body))
+        self.assertEqual(response["status"], "no_store")
+        factory.assert_not_called()
+        connect.assert_not_awaited()

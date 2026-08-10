@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
+import textwrap
 import unittest
 
 from rag_engine.governed_memory.exclusive_cutover import (
@@ -137,6 +142,89 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         )
         self.assertIn(guarded_write, source)
         self.assertEqual(source.count("memory.register_authenticated_owner_v1"), 1)
+
+    def test_health_separates_general_rag_from_declared_successor_identity(self) -> None:
+        source = _async_function_source("health")
+        self.assertIn('"general_rag_declared"', source)
+        self.assertIn('"governed_memory_successor"', source)
+        self.assertIn('"identity_status": "declared_not_verified"', source)
+        for field in (
+            "EXCLUSIVE_MEMORY_MODE.value",
+            "LEGACY_MEMORY_SURFACES_ENABLED",
+            "EXPECTED_POSTGRES_HOST",
+            "EXPECTED_POSTGRES_PORT",
+            "EXPECTED_POSTGRES_DATABASE",
+            "EXPECTED_POSTGRES_ROLE",
+            "EXPECTED_QDRANT_HOST",
+            "EXPECTED_QDRANT_PORT",
+            "QDRANT_ALIAS",
+            "QDRANT_PHYSICAL_COLLECTION",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, source)
+        self.assertNotIn("os.environ", source)
+        self.assertNotIn("os.getenv", source)
+
+    @unittest.skipUnless(
+        all(
+            importlib.util.find_spec(module) is not None
+            for module in ("asyncpg", "fastapi", "jwt", "openai", "qdrant_client")
+        ),
+        "full Brains runtime dependencies are unavailable",
+    )
+    def test_successor_clean_process_never_imports_legacy_memory_graph(self) -> None:
+        blocked = (
+            "rag_engine.vantage_router",
+            "rag_engine.assistant_response_preferences_router_v1",
+            "rag_engine.memory_v1_governed_claim_lifecycle_router_v1",
+            "rag_engine.raw_memory_ownership",
+            "rag_engine.thread_deletion_v1",
+            "rag_engine.admin_memory_health_v1",
+            "rag_engine.admin_memory_workbench_v1",
+            "scripts.review_promotion_plan",
+        )
+        script = textwrap.dedent(
+            f"""
+            import importlib.abc
+            import sys
+
+            blocked = {blocked!r}
+
+            class BlockLegacy(importlib.abc.MetaPathFinder):
+                def find_spec(self, fullname, path=None, target=None):
+                    if fullname in blocked:
+                        raise ImportError("blocked legacy memory import: " + fullname)
+                    return None
+
+            sys.meta_path.insert(0, BlockLegacy())
+            import app
+            assert app.EXCLUSIVE_MEMORY_MODE.value == "successor_pilot"
+            assert app.LEGACY_MEMORY_SURFACES_ENABLED is False
+            assert not [name for name in blocked if name in sys.modules]
+            """
+        )
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "POSTGRES_DSN": "postgresql://synthetic",
+                EXCLUSIVE_MODE_ENV: "successor_pilot",
+                "GOVERNED_MEMORY_CAPTURE_MODE": "off",
+            }
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=completed.stderr or completed.stdout,
+        )
 
 
 if __name__ == "__main__":
