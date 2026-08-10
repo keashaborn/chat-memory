@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-runtime-manifest",
+  "schema_version": "governed-memory-runtime-manifest-v2",
   "phase": "candidate_uninstalled",
   "python_runtime": {
     "minimum": "3.11",
@@ -15,7 +15,14 @@
     "enabled_services": [],
     "installed_timers": [],
     "enabled_timers": [],
-    "future_target_service": "governed-memory-worker.service"
+    "future_target_service": "governed-memory-worker.service",
+    "production_authorized": false,
+    "blockers": [
+      "semantic_score_threshold_not_calibrated",
+      "supabase_to_database_owner_context_not_integration_tested",
+      "service_http_routes_not_installed_or_invoked",
+      "real_provider_and_embedding_adapters_not_exercised"
+    ]
   },
   "ingestion": {
     "historical_import": false,
@@ -25,8 +32,26 @@
   },
   "provider_policy": {
     "import_time_calls": false,
-    "phase_1_calls": false,
+    "production_calls_authorized": false,
+    "disposable_phase_2_external_calls": 0,
     "generation_calls_per_exact_attempt": 1
+  },
+  "disposable_validation": {
+    "scope": "phase_2_disposable_only",
+    "validation_document": "docs/memory/clean_successor/PHASE2_VALIDATION.md",
+    "runner_receipt": "stdout:PHASE2_DISPOSABLE_RECEIPT",
+    "postgresql_fresh_empty": true,
+    "qdrant_fresh_empty": true,
+    "migration_forward_rollback_reapply": true,
+    "normalized_catalog_equivalent_after_reapply": true,
+    "forced_rls_owner_isolation_and_direct_dml_denial": true,
+    "distinct_chat_a_chat_b": true,
+    "cold_extraction_reconstruction": true,
+    "cold_postgresql_projection_rebuild": true,
+    "correction_retraction_hard_delete_and_retention": true,
+    "production_data_read": false,
+    "provider_external_calls": 0,
+    "final_resources_absent": true
   },
   "owner_routes": [
     "GET /memory/status",

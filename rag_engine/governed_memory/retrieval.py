@@ -416,6 +416,27 @@ def _candidate(raw: Mapping[str, Any], owner: UUID) -> dict[str, Any]:
     return result
 
 
+def validate_vector_candidates(
+    owner_user_id: UUID,
+    candidates: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Validate the bounded Qdrant envelope before any PostgreSQL lookup."""
+
+    owner = _uuid(owner_user_id, "invalid_retrieval_owner")
+    if not isinstance(candidates, (list, tuple)) or len(candidates) > 8:
+        raise ContractViolation("retrieval_candidate_limit_exceeded")
+    seen: set[str] = set()
+    validated: list[dict[str, Any]] = []
+    for raw in candidates:
+        candidate = _candidate(raw, owner)
+        claim_id = candidate["claim_id"]
+        if claim_id in seen:
+            raise ContractViolation("duplicate_vector_candidate")
+        seen.add(claim_id)
+        validated.append(candidate)
+    return tuple(validated)
+
+
 def revalidate_candidates(
     owner_user_id: UUID,
     candidates: Sequence[Mapping[str, Any]],
@@ -444,14 +465,9 @@ def revalidate_candidates(
         if row["claim_id"] in row_by_claim:
             raise ContractViolation("duplicate_authoritative_claim")
         row_by_claim[row["claim_id"]] = row
-    seen: set[str] = set()
     selected: list[dict[str, Any]] = []
-    for raw in candidates:
-        candidate = _candidate(raw, owner)
+    for candidate in validate_vector_candidates(owner, candidates):
         claim_id = candidate["claim_id"]
-        if claim_id in seen:
-            raise ContractViolation("duplicate_vector_candidate")
-        seen.add(claim_id)
         row = row_by_claim.get(claim_id)
         if row is None:
             continue
@@ -1426,4 +1442,5 @@ __all__ = [
     "retrieval_policy_material_bytes",
     "retrieval_policy_sha256",
     "revalidate_candidates",
+    "validate_vector_candidates",
 ]

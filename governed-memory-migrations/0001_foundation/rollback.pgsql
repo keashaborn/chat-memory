@@ -39,6 +39,9 @@ DROP FUNCTION memory_private.finish_projection_job(
   uuid,uuid,text,text,text,text,text,text
 );
 DROP FUNCTION memory_private.lease_projection_jobs(text,integer,integer);
+DROP FUNCTION memory_private.read_projection_rebuild_batch(
+  uuid,uuid,integer
+);
 DROP FUNCTION memory_private.request_claim_deletion(uuid,uuid,text,text);
 DROP FUNCTION memory_private.retract_claim(uuid,uuid,text,text);
 DROP FUNCTION memory_private.reject_pending_correction_for_lifecycle(

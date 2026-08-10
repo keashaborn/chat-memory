@@ -366,14 +366,19 @@ PROJECTION_OUTBOX_FIELDS = (
 _OUTBOX_FIELDS = frozenset(PROJECTION_OUTBOX_FIELDS)
 
 
-def build_projection_point(
+def _build_projection_point(
     claim: Mapping[str, Any],
     outbox_record: Mapping[str, Any],
     vector: Sequence[float | int],
+    *,
+    required_outbox_state: str,
 ) -> dict[str, object]:
     if not isinstance(claim, Mapping) or not isinstance(outbox_record, Mapping):
         raise ContractViolation("invalid_projection_input")
-    if set(outbox_record) != _OUTBOX_FIELDS or outbox_record["state"] != "claimed":
+    if (
+        set(outbox_record) != _OUTBOX_FIELDS
+        or outbox_record["state"] != required_outbox_state
+    ):
         raise ContractViolation("invalid_projection_outbox_record")
     if claim.get("state_sha256") != recompute_claim_state_sha256(claim):
         raise ContractViolation("projection_claim_state_sha256_mismatch")
@@ -510,6 +515,29 @@ def build_projection_point(
     }
 
 
+def build_projection_point(
+    claim: Mapping[str, Any],
+    outbox_record: Mapping[str, Any],
+    vector: Sequence[float | int],
+) -> dict[str, object]:
+    return _build_projection_point(
+        claim, outbox_record, vector, required_outbox_state="claimed"
+    )
+
+
+def build_rebuild_projection_point(
+    claim: Mapping[str, Any],
+    applied_outbox_record: Mapping[str, Any],
+    vector: Sequence[float | int],
+) -> dict[str, object]:
+    return _build_projection_point(
+        claim,
+        applied_outbox_record,
+        vector,
+        required_outbox_state="applied",
+    )
+
+
 PROJECTION_DELETE_COMMAND_FIELDS = (
     "claim_id",
     "collection_alias",
@@ -539,6 +567,60 @@ PROJECTION_DELETE_RECEIPT_FIELDS = tuple(
         }
     )
 )
+
+QDRANT_ABSENCE_VERIFICATION_DOMAIN = (
+    "governed_memory.qdrant_absence_verification.v1"
+)
+
+
+def qdrant_absence_verification_sha256(
+    *,
+    collection_alias: str,
+    physical_collection: str,
+    point_id: UUID,
+    projection_sequence: int,
+    alias_target_verified: bool,
+    alias_absent: bool,
+    physical_absent: bool,
+) -> str:
+    """Bind a delete receipt to exact alias and physical-point absence."""
+
+    if (
+        type(alias_target_verified) is not bool
+        or type(alias_absent) is not bool
+        or type(physical_absent) is not bool
+        or not alias_target_verified
+        or not alias_absent
+        or not physical_absent
+    ):
+        raise ContractViolation("qdrant_absence_not_verified")
+    point = _uuid(point_id, "invalid_absence_point_id")
+    sequence = require_exact_int(
+        projection_sequence,
+        code="invalid_absence_projection_sequence",
+        minimum=1,
+    )
+    return framed_sha256(
+        QDRANT_ABSENCE_VERIFICATION_DOMAIN,
+        (
+            (
+                "collection_alias",
+                require_key(collection_alias, "invalid_absence_collection_alias"),
+            ),
+            (
+                "physical_collection",
+                require_key(
+                    physical_collection,
+                    "invalid_absence_physical_collection",
+                ),
+            ),
+            ("point_id", str(point)),
+            ("projection_sequence", str(sequence)),
+            ("alias_target_verified", "true"),
+            ("alias_absent", "true"),
+            ("physical_absent", "true"),
+        ),
+    )
 
 
 def build_projection_delete(
@@ -761,6 +843,7 @@ __all__ = [
     "PROJECTION_CONTRACT_SHA256",
     "PROJECTION_DELETE_COMMAND_FIELDS",
     "PROJECTION_DELETE_RECEIPT_FIELDS",
+    "QDRANT_ABSENCE_VERIFICATION_DOMAIN",
     "PROJECTION_OUTBOX_FIELDS",
     "PROJECTION_TEST_VECTORS",
     "ProjectionOperation",
@@ -769,8 +852,10 @@ __all__ = [
     "build_projection_delete",
     "build_projection_delete_receipt",
     "build_projection_point",
+    "build_rebuild_projection_point",
     "normalize_embedding",
     "projection_manifest_sha256",
+    "qdrant_absence_verification_sha256",
     "recompute_projection_contract_sha256",
     "recompute_relational_renderer_sha256",
     "render_projection_surface",

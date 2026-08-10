@@ -151,6 +151,7 @@ NOT_EXECUTED_REASON_CODES = frozenset(
     {
         "adapter_rejected_before_send",
         "connection_failed_before_send",
+        "evidence_excerpt_expired_before_dispatch",
         "local_serialization_failed_before_send",
         "provider_proved_not_accepted",
         "lease_expired_before_dispatch",

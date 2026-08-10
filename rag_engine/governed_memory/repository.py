@@ -44,6 +44,9 @@ class ProviderFailureDisposition(str, Enum):
 class ProviderFailureReason(str, Enum):
     ADAPTER_REJECTED_BEFORE_SEND = "adapter_rejected_before_send"
     CONNECTION_FAILED_BEFORE_SEND = "connection_failed_before_send"
+    EVIDENCE_EXCERPT_EXPIRED_BEFORE_DISPATCH = (
+        "evidence_excerpt_expired_before_dispatch"
+    )
     LOCAL_SERIALIZATION_FAILED_BEFORE_SEND = "local_serialization_failed_before_send"
     PROVIDER_PROVED_NOT_ACCEPTED = "provider_proved_not_accepted"
     LEASE_EXPIRED_BEFORE_DISPATCH = "lease_expired_before_dispatch"
@@ -118,6 +121,7 @@ _PROVIDER_RETRYABLE_REASONS = frozenset(
     {
         ProviderFailureReason.ADAPTER_REJECTED_BEFORE_SEND,
         ProviderFailureReason.CONNECTION_FAILED_BEFORE_SEND,
+        ProviderFailureReason.EVIDENCE_EXCERPT_EXPIRED_BEFORE_DISPATCH,
         ProviderFailureReason.LOCAL_SERIALIZATION_FAILED_BEFORE_SEND,
         ProviderFailureReason.PROVIDER_PROVED_NOT_ACCEPTED,
         ProviderFailureReason.LEASE_EXPIRED_BEFORE_DISPATCH,

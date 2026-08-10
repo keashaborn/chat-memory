@@ -12,6 +12,7 @@ import inspect
 import json
 from pathlib import Path
 import re
+import runpy
 import unittest
 from uuid import UUID
 
@@ -61,8 +62,11 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "governed-memory-migrations"
 CONTRACT_PATH = MIGRATIONS / "schema_contract.json"
 ROOT_MANIFEST_PATH = MIGRATIONS / "manifest.json"
+MANIFEST_VERIFIER_PATH = (
+    ROOT / "tools" / "governed_memory_phase2" / "verify_migration_manifest.py"
+)
 ROLES_PATH = MIGRATIONS / "roles_preflight.pgsql"
-PHASE1_README_PATH = ROOT / "docs" / "memory" / "clean_successor_phase1" / "README.md"
+SUCCESSOR_README_PATH = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
 PACKAGE_DIRS = (
     MIGRATIONS / "0001_foundation",
     MIGRATIONS / "0002_conversation_bridge",
@@ -1053,9 +1057,12 @@ class SchemaContractTests(unittest.TestCase):
     def test_contract_declares_a_new_empty_authority(self) -> None:
         self.assertEqual(
             self.contract["schema_version"],
-            "governed-memory-schema-contract-v3",
+            "governed-memory-schema-contract-v4",
         )
-        self.assertEqual(self.contract["status"], "isolated_candidate_not_applied")
+        self.assertEqual(
+            self.contract["status"],
+            "isolated_candidate_disposable_validated_not_production_applied",
+        )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
         self.assertEqual(
@@ -1073,7 +1080,7 @@ class SchemaContractTests(unittest.TestCase):
             self.contract["initialization"],
             {
                 "postgresql": "new_empty_database",
-                "qdrant": "new_empty_collection",
+                "qdrant": "new_empty_versioned_collection_with_stable_alias",
                 "legacy_compatibility_state": False,
                 "old_claims_cards_vectors_jobs_reviews": "disposable_not_imported",
             },
@@ -1129,7 +1136,7 @@ class SchemaContractTests(unittest.TestCase):
             with self.subTest(contract_phrase=required):
                 self.assertIn(required, replay_contract)
 
-        documentation = PHASE1_README_PATH.read_text(encoding="utf-8")
+        documentation = SUCCESSOR_README_PATH.read_text(encoding="utf-8")
         self.assertRegex(
             documentation,
             r"(?is)terminal proposal replay.*?30 days.*?"
@@ -1197,6 +1204,10 @@ class PackageIntegrityTests(unittest.TestCase):
     def test_package_hashes_bind_exact_forward_and_rollback_bytes(self) -> None:
         for directory in PACKAGE_DIRS:
             package = _load_json(directory / "package.json")
+            self.assertEqual(
+                package["schema_version"],
+                "governed-memory-migration-package-v2",
+            )
             for kind in ("forward", "rollback"):
                 relative, expected = _file_binding(package, kind)
                 self.assertEqual(relative, f"{kind}.pgsql")
@@ -1205,6 +1216,10 @@ class PackageIntegrityTests(unittest.TestCase):
 
     def test_root_manifest_binds_every_non_manifest_artifact(self) -> None:
         manifest = _load_json(ROOT_MANIFEST_PATH)
+        self.assertEqual(
+            manifest["schema_version"],
+            "governed-memory-migration-manifest-v2",
+        )
         files = manifest.get("files")
         self.assertIsInstance(files, list)
         bound: dict[str, str] = {}
@@ -1228,6 +1243,17 @@ class PackageIntegrityTests(unittest.TestCase):
                 expected,
                 relative,
             )
+
+    def test_fail_closed_manifest_verifier_accepts_only_unique_v2_json(self) -> None:
+        verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
+        receipt = verifier["verify"](MIGRATIONS)
+        self.assertEqual(receipt["result"], "verified")
+        self.assertEqual(
+            receipt["schema_version"],
+            "governed-memory-migration-verification-v2",
+        )
 
 
 class StaticSQLPolicyTests(unittest.TestCase):
@@ -1704,6 +1730,12 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertRegex(
             combined,
+            r"(?s)NOT\s+EXISTS\s*\(.*?FROM\s+memory\.extraction_job.*?"
+            r"state\s+IN\s*\(\s*'pending',\s*'claimed',\s*'retryable'\s*\)",
+        )
+        self.assertIn("evidence_excerpt_expired_before_dispatch", combined)
+        self.assertRegex(
+            combined,
             r"excerpt_expires_at\s*<=\s*pg_catalog\.clock_timestamp\(\)",
         )
         self.assertRegex(
@@ -1715,6 +1747,36 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertRegex(combined, r"FOR\s+UPDATE\s+SKIP\s+LOCKED")
         self.assertRegex(combined, r"LIMIT\s+p_limit")
+
+    def test_review_surface_and_rebuild_reader_are_cold_start_complete(self) -> None:
+        definitions = _function_definitions(self.foundation)
+        proposals = definitions["memory_private.list_proposals"]
+        for field in (
+            "operation_id",
+            "source_excerpt",
+            "subject_entity_type",
+            "subject_entity_key",
+            "predicate",
+            "object_kind",
+            "object_literal",
+            "epistemic_state",
+            "sensitivity",
+        ):
+            with self.subTest(review_field=field):
+                self.assertIn(field, proposals)
+
+        rebuild = definitions["memory_private.read_projection_rebuild_batch"]
+        self.assertIn("session_user <> 'governed_memory_worker'", rebuild)
+        self.assertIn("outbox.state = 'applied'", rebuild)
+        self.assertIn("outbox.vector_sha256 IS NOT NULL", rebuild)
+        self.assertIn("memory_private.claim_state_sha256", rebuild)
+        self.assertIn("memory_private.projection_manifest_sha256", rebuild)
+        self.assertRegex(
+            self.foundation,
+            r"GRANT\s+EXECUTE\s+ON\s+FUNCTION(?s:.*?)"
+            r"memory_private\.read_projection_rebuild_batch\(uuid,uuid,integer\)"
+            r"(?s:.*?)TO\s+governed_memory_worker",
+        )
 
     def test_complete_extraction_exact_replay_precedes_mutation_and_cannot_duplicate(self) -> None:
         complete = _function_definitions(self.foundation)[
@@ -3707,8 +3769,8 @@ class StaticSQLPolicyTests(unittest.TestCase):
             "answer_binding",
             "claim_evidence",
             "projection_outbox",
-            "claim_revision",
             "proposal",
+            "claim_revision",
             "claim",
             "provider_call",
             "extraction_job",
@@ -3731,6 +3793,22 @@ class StaticSQLPolicyTests(unittest.TestCase):
             r"memory_private\.finalize_claim_deletion\([^;]+\)\s+"
             r"TO\s+governed_memory_api\s*;",
         )
+
+    def test_hard_delete_cycle_uses_deferrable_no_action_constraints(self) -> None:
+        for constraint_name in (
+            "claim_revision_proposal_fk",
+            "proposal_correction_revision_fk",
+        ):
+            with self.subTest(constraint=constraint_name):
+                self.assertRegex(
+                    self.foundation,
+                    rf"(?s)CONSTRAINT\s+{constraint_name}\s+FOREIGN KEY\s*\(.*?"
+                    r"\)\s+REFERENCES\s+memory\.[a-z_]+\s*\(.*?\)\s+"
+                    r"ON\s+DELETE\s+NO\s+ACTION\s+DEFERRABLE\s+"
+                    r"INITIALLY\s+DEFERRED",
+                    "the reciprocal proposal/revision delete cycle must use "
+                    "deferrable NO ACTION; RESTRICT is checked immediately",
+                )
 
     def test_sql_has_no_legacy_names_cascade_or_public_execute(self) -> None:
         combined = "\n".join(

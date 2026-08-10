@@ -751,13 +751,17 @@ def build_provider_request(
                 "context_message_id",
                 "context_sha256",
                 "selection_binding_sha256",
-                "category",
-                "assertion_mode",
-                "subject_hint",
-                "sensitivity",
             }
         ),
-        optional=frozenset({"fixture_provenance"}),
+        optional=frozenset(
+            {
+                "assertion_mode",
+                "category",
+                "fixture_provenance",
+                "sensitivity",
+                "subject_hint",
+            }
+        ),
         code="invalid_selected_evidence",
     )
     catalog = parse_predicate_catalog(predicate_catalog)

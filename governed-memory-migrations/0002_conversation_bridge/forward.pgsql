@@ -540,27 +540,30 @@ BEGIN
     RAISE EXCEPTION 'invalid bridge lease input' USING ERRCODE = '22023';
   END IF;
   captured_at := pg_catalog.transaction_timestamp();
-  UPDATE public.memory_ingest_outbox
+  UPDATE public.memory_ingest_outbox AS expired
   SET state = CASE
-        WHEN attempt_count >= max_attempts THEN 'failed_terminal'
+        WHEN expired.attempt_count >= expired.max_attempts THEN 'failed_terminal'
         ELSE 'retryable'
       END,
       available_at = pg_catalog.clock_timestamp(),
       lease_token = NULL, claimed_by = NULL, claimed_at = NULL,
       lease_expires_at = NULL,
       last_error_code = 'lease_expired',
-      content_sha256 = CASE WHEN attempt_count >= max_attempts
-        THEN NULL ELSE content_sha256 END,
-      completed_at = CASE WHEN attempt_count >= max_attempts
+      content_sha256 = CASE WHEN expired.attempt_count >= expired.max_attempts
+        THEN NULL ELSE expired.content_sha256 END,
+      completed_at = CASE WHEN expired.attempt_count >= expired.max_attempts
         THEN captured_at ELSE NULL END,
-      terminal_receipt_sha256 = CASE WHEN attempt_count >= max_attempts
+      terminal_receipt_sha256 = CASE
+        WHEN expired.attempt_count >= expired.max_attempts
         THEN memory_ingest_private.terminal_receipt_sha256(
-          source_binding_sha256, 'failed_terminal', eligibility_decision,
-          context_review_count, NULL::uuid, NULL::uuid,
+          expired.source_binding_sha256, 'failed_terminal',
+          expired.eligibility_decision,
+          expired.context_review_count, NULL::uuid, NULL::uuid,
           'lease_expired', captured_at
         ) ELSE NULL::text END,
       updated_at = pg_catalog.clock_timestamp()
-  WHERE state = 'claimed' AND lease_expires_at <= pg_catalog.clock_timestamp();
+  WHERE expired.state = 'claimed'
+    AND expired.lease_expires_at <= pg_catalog.clock_timestamp();
 
   FOR candidate IN
     SELECT value.*

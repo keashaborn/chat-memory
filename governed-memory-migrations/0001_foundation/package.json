@@ -1,7 +1,7 @@
 {
-  "schema_version": "governed-memory-migration-package-v1",
+  "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_foundation_0001",
-  "status": "isolated_candidate_not_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "governed_memory",
@@ -18,11 +18,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "52bea57492ff0dafea234c68bb189efa19bba2f807da4dc85fcfb385b95a25c7"
+    "sha256": "6818557e6cb885e06368922e79e9a382f37cab66b1ea9e24f2f441d8acde0adc"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "7f3fb9157b7afc7f712d198cb454e66569745e50af9d783713fd4943fad371fb",
+    "sha256": "816b679cbc08e9abe14007be046504fc543909ac65822a91abb1f0573a77639c",
     "empty_only": true
   },
   "data_policy": {
@@ -44,9 +44,11 @@
     "cascade_ddl": false
   },
   "activation": {
-    "authorized": false,
-    "services_changed": false,
-    "database_applied": false,
-    "qdrant_changed": false
+    "production_authorized": false,
+    "production_services_changed": false,
+    "production_database_applied": false,
+    "production_qdrant_changed": false,
+    "disposable_database_validated": true,
+    "disposable_qdrant_validated": true
   }
 }

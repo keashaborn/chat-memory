@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import timedelta
 from hashlib import sha256
 import inspect
 import json
@@ -27,12 +28,23 @@ from rag_engine.governed_memory.extraction import (
     recompute_proposal_sha256,
     validate_provider_result,
 )
+from rag_engine.governed_memory.postgres_adapter import (
+    EXTRACTION_LEASE_FIELDS,
+    extraction_lease_to_provider_inputs,
+)
 from tests.memory._fixtures import (
+    EVIDENCE_A,
     FIXTURE_PROVENANCE,
     JOB_A,
+    MESSAGE_A,
+    NOW,
+    OPERATION_A,
     OWNER_A,
     PREDICATE_CATALOG,
+    PROVIDER_CALL_A,
     SOURCE_TEXT,
+    THREAD_A,
+    WINDOW_A,
     make_extraction_job,
     make_provider_output,
     make_selected_evidence,
@@ -58,6 +70,54 @@ class ExtractionContractTests(unittest.TestCase):
             SCHEMA,
             PREDICATE_CATALOG,
         )
+
+    def test_postgres_lease_reconstructs_cold_provider_inputs(self) -> None:
+        selected = make_selected_evidence()
+        values = {
+            "owner_user_id": OWNER_A,
+            "job_id": JOB_A,
+            "evidence_id": EVIDENCE_A,
+            "source_kind": "conversation_message",
+            "source_message_id": MESSAGE_A,
+            "source_thread_id": THREAD_A,
+            "source_window_id": WINDOW_A,
+            "source_window_sha256": selected["window_sha256"],
+            "source_sha256": selected["source_sha256"],
+            "selected_sha256": selected["selected_sha256"],
+            "selection_binding_sha256": selected["selection_binding_sha256"],
+            "selected_start_utf8": selected["start_utf8"],
+            "selected_end_utf8": selected["end_utf8"],
+            "context_message_id": None,
+            "context_sha256": None,
+            "review_excerpt": selected["selected_text"],
+            "predicate_catalog_sha256": parse_predicate_catalog(
+                PREDICATE_CATALOG
+            ).catalog_sha256,
+            "attempt_number": 2,
+            "lease_token": UUID("12121212-1212-4212-8212-121212121212"),
+            "lease_expires_at": NOW + timedelta(minutes=1),
+            "provider_call_id": PROVIDER_CALL_A,
+            "provider_operation_id": OPERATION_A,
+        }
+        lease_row = {field: values[field] for field in EXTRACTION_LEASE_FIELDS}
+        inputs = extraction_lease_to_provider_inputs(lease_row)
+        request = build_provider_request(
+            inputs["job"],
+            inputs["evidence"],
+            MODEL,
+            SCHEMA,
+            PREDICATE_CATALOG,
+        )
+        self.assertEqual(request["source_sha256"], selected["source_sha256"])
+        self.assertEqual(request["attempt_number"], 2)
+        self.assertIsNone(inputs["context_lookup"])
+
+        missing = dict(lease_row)
+        del missing["source_sha256"]
+        with self.assertRaisesRegex(
+            ContractViolation, "invalid_extraction_lease_row"
+        ):
+            extraction_lease_to_provider_inputs(missing)
 
     def test_checked_in_catalog_parses_and_one_exact_hash_binds_schema_and_sql(self) -> None:
         raw = CATALOG_PATH.read_bytes()

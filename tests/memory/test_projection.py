@@ -20,6 +20,7 @@ from rag_engine.governed_memory.projection import (
     RELATIONAL_RENDERER_SHA256,
     build_projection_delete,
     build_projection_point,
+    build_rebuild_projection_point,
     normalize_embedding,
     projection_manifest_sha256,
     recompute_projection_contract_sha256,
@@ -70,6 +71,24 @@ def build(
 
 
 class ProjectionTests(unittest.TestCase):
+    def test_rebuild_requires_an_applied_canonical_outbox(self) -> None:
+        claim = make_claim_row()
+        claimed = make_projection_outbox(claim, state="claimed")
+        applied = make_projection_outbox(claim, state="applied")
+        rebuilt = build_rebuild_projection_point(
+            claim, applied, deterministic_vector()
+        )
+        projected = build_projection_point(claim, claimed, deterministic_vector())
+        self.assertEqual(rebuilt, projected)
+        with self.assertRaisesRegex(
+            ContractViolation, "invalid_projection_outbox_record"
+        ):
+            build_rebuild_projection_point(claim, claimed, deterministic_vector())
+        with self.assertRaisesRegex(
+            ContractViolation, "invalid_projection_outbox_record"
+        ):
+            build_projection_point(claim, applied, deterministic_vector())
+
     def test_projection_contract_and_manifest_fixed_vectors_are_exact(self) -> None:
         self.assertEqual(tuple(sorted(QDRANT_PAYLOAD_FIELDS)), QDRANT_PAYLOAD_FIELDS)
         self.assertEqual(

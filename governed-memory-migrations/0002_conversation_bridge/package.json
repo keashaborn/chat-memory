@@ -1,7 +1,7 @@
 {
-  "schema_version": "governed-memory-migration-package-v1",
+  "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "isolated_candidate_not_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "existing_conversation_database",
@@ -19,7 +19,7 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "f3e337acfa5963bda3d75504b45cf66b39ceade11abe37a08ce1786ff5c49ae9"
+    "sha256": "9b11a485713293fc98863a6e1a7ea324385bf7a099021899737b458d1c25feb1"
   },
   "rollback": {
     "path": "rollback.pgsql",
@@ -43,9 +43,11 @@
     "cascade_ddl": false
   },
   "activation": {
-    "authorized": false,
-    "writer_membership_granted": false,
-    "services_changed": false,
-    "database_applied": false
+    "production_authorized": false,
+    "production_writer_membership_granted": false,
+    "production_services_changed": false,
+    "production_database_applied": false,
+    "disposable_writer_membership_validated": true,
+    "disposable_database_validated": true
   }
 }

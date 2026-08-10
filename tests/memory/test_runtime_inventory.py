@@ -20,7 +20,7 @@ FIXTURE_PROVENANCE = "synthetic-governed-memory-phase1"
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "rag_engine" / "governed_memory"
 MANIFEST = ROOT / "ops" / "governed_memory" / "runtime_manifest.json"
-PHASE1_README = ROOT / "docs" / "memory" / "clean_successor_phase1" / "README.md"
+SUCCESSOR_README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
 
 EXPECTED_PACKAGE_FILES = {
     "__init__.py",
@@ -31,6 +31,7 @@ EXPECTED_PACKAGE_FILES = {
     "eligibility.py",
     "extraction.py",
     "lifecycle.py",
+    "postgres_adapter.py",
     "projection.py",
     "repository.py",
     "retrieval.py",
@@ -73,7 +74,9 @@ class RuntimeManifestTests(unittest.TestCase):
 
     def test_candidate_is_explicitly_uninstalled_and_content_free(self) -> None:
         manifest = self.load_manifest()
-        self.assertEqual(manifest["schema_version"], "governed-memory-runtime-manifest")
+        self.assertEqual(
+            manifest["schema_version"], "governed-memory-runtime-manifest-v2"
+        )
         self.assertEqual(manifest["phase"], "candidate_uninstalled")
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
@@ -109,11 +112,26 @@ class RuntimeManifestTests(unittest.TestCase):
             "Phase 1 must not ship a non-runnable systemd unit",
         )
 
-    def test_provider_policy_forbids_phase_1_calls(self) -> None:
+    def test_provider_policy_records_zero_disposable_external_calls(self) -> None:
         policy = self.load_manifest()["provider_policy"]
         self.assertFalse(policy["import_time_calls"])
-        self.assertFalse(policy["phase_1_calls"])
+        self.assertFalse(policy["production_calls_authorized"])
+        self.assertEqual(policy["disposable_phase_2_external_calls"], 0)
         self.assertEqual(policy["generation_calls_per_exact_attempt"], 1)
+
+    def test_phase_2_validation_is_disposable_and_not_activation_proof(self) -> None:
+        manifest = self.load_manifest()
+        validation = manifest["disposable_validation"]
+        self.assertEqual(validation["scope"], "phase_2_disposable_only")
+        self.assertFalse(validation["production_data_read"])
+        self.assertEqual(validation["provider_external_calls"], 0)
+        self.assertTrue(validation["migration_forward_rollback_reapply"])
+        self.assertTrue(validation["final_resources_absent"])
+        self.assertFalse(manifest["activation"]["production_authorized"])
+        self.assertIn(
+            "semantic_score_threshold_not_calibrated",
+            manifest["activation"]["blockers"],
+        )
 
     def test_python_runtime_floor_is_explicit_and_at_least_3_11(self) -> None:
         manifest = self.load_manifest()
@@ -125,7 +143,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertGreaterEqual(minimum, (3, 11))
         self.assertGreaterEqual(validated, minimum)
-        readme = PHASE1_README.read_text(encoding="utf-8")
+        readme = SUCCESSOR_README.read_text(encoding="utf-8")
         self.assertIn("requires Python 3.11 or newer", readme)
         self.assertIn("Python 3.12", readme)
 
@@ -399,14 +417,14 @@ class SourceInventoryTests(unittest.TestCase):
         self.assertEqual(definitions[0][0], "contracts.py")
         self.assertEqual(aliases, [])
 
-    def test_readme_does_not_claim_integration_or_activation(self) -> None:
-        readme = PHASE1_README.read_text(encoding="utf-8")
+    def test_readme_records_disposable_integration_without_activation(self) -> None:
+        readme = SUCCESSOR_README.read_text(encoding="utf-8")
         normalized = " ".join(readme.split())
         for required in (
-            "offline, uninstalled candidate",
-            "does not create a database or Qdrant collection",
-            "not database",
-            "Phase 2",
+            "disposable PostgreSQL and Qdrant",
+            "zero external provider calls",
+            "not production activated",
+            "semantic retrieval-score threshold",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, normalized)

@@ -120,7 +120,7 @@ SET search_path TO pg_catalog
 AS $function$
   SELECT CASE WHEN p_value IS NULL THEN NULL::text
     ELSE (
-      pg_catalog.extract(epoch FROM p_value) * 1000000
+      EXTRACT(epoch FROM p_value) * 1000000
     )::bigint::text END
 $function$;
 REVOKE ALL ON FUNCTION memory_private.timestamp_epoch_us(timestamptz)
@@ -201,7 +201,7 @@ AS $function$
     FROM raw
   ), digest AS (
     SELECT pg_catalog.encode(
-      pg_catalog.substring(value FROM 1 FOR 16), 'hex'
+      substring(value FROM 1 FOR 16), 'hex'
     ) AS value
     FROM versioned
   )
@@ -239,7 +239,7 @@ BEGIN
   digest := pg_catalog.set_byte(
     digest, 8, (pg_catalog.get_byte(digest, 8) & 63) | 128
   );
-  value := pg_catalog.encode(pg_catalog.substring(digest FROM 1 FOR 16), 'hex');
+  value := pg_catalog.encode(substring(digest FROM 1 FOR 16), 'hex');
   RETURN (
     pg_catalog.substr(value, 1, 8) || '-'
     || pg_catalog.substr(value, 9, 4) || '-'
@@ -1486,7 +1486,7 @@ $function$;
 REVOKE ALL ON FUNCTION memory_private.proposal_sha256(
   uuid,uuid,uuid,uuid,text,uuid,uuid,uuid,text,text,text,text,uuid,text,text,text,
   text,text,uuid,uuid,integer,text,text,text,integer,text,smallint,uuid,uuid,text,text,text,text,text,
-  text,text,text,text,jsonb,text,text,text,boolean,text[],text[],text,boolean,
+  text,text,text,jsonb,text,text,text,boolean,text[],text[],text,boolean,
   timestamptz,timestamptz
 ) FROM PUBLIC;
 
@@ -1899,6 +1899,7 @@ CREATE TABLE memory.extraction_job (
       AND last_error_code IN (
         'adapter_rejected_before_send',
         'connection_failed_before_send',
+        'evidence_excerpt_expired_before_dispatch',
         'lease_expired_before_dispatch',
         'local_serialization_failed_before_send',
         'provider_proved_not_accepted'
@@ -1910,6 +1911,7 @@ CREATE TABLE memory.extraction_job (
         'connection_failed_before_send',
         'connection_reset_after_dispatch',
         'dispatch_crash',
+        'evidence_excerpt_expired_before_dispatch',
         'invalid_provider_output',
         'lease_expired_after_dispatch',
         'lease_expired_before_dispatch',
@@ -2060,6 +2062,7 @@ CREATE TABLE memory.provider_call (
     OR error_code IN (
       'adapter_rejected_before_send',
       'connection_failed_before_send',
+      'evidence_excerpt_expired_before_dispatch',
       'local_serialization_failed_before_send',
       'provider_proved_not_accepted',
       'lease_expired_before_dispatch'
@@ -2472,7 +2475,7 @@ CREATE TABLE memory.claim_revision (
     REFERENCES memory.claim(owner_user_id, claim_id) ON DELETE RESTRICT,
   CONSTRAINT claim_revision_proposal_fk FOREIGN KEY (
     owner_user_id, source_proposal_id
-  ) REFERENCES memory.proposal(owner_user_id, proposal_id) ON DELETE RESTRICT
+  ) REFERENCES memory.proposal(owner_user_id, proposal_id) ON DELETE NO ACTION
     DEFERRABLE INITIALLY DEFERRED,
   CONSTRAINT claim_revision_subject_fk FOREIGN KEY (
     owner_user_id, subject_entity_id
@@ -2577,7 +2580,7 @@ ALTER TABLE memory.proposal
   ADD CONSTRAINT proposal_correction_revision_fk FOREIGN KEY (
     owner_user_id, correction_of_claim_id, correction_target_revision_id
   ) REFERENCES memory.claim_revision(owner_user_id, claim_id, revision_id)
-    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+    ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED;
 
 CREATE INDEX claim_revision_subject_idx
   ON memory.claim_revision(owner_user_id, subject_entity_id);
@@ -3620,10 +3623,8 @@ BEGIN
       NEW.owner_user_id, NEW.claim_id, NEW.revision_id, NEW.operation_id,
       NEW.operation, NEW.sequence_number, NEW.revision_sha256,
       NEW.selection_binding_sha256,
-      CASE WHEN NEW.operation = 'upsert'
-        THEN revision.retrieval_text_sha256 ELSE NULL::text END,
-      CASE WHEN NEW.operation = 'upsert'
-        THEN revision.retrieval_text_sha256 ELSE NULL::text END
+      revision.retrieval_text_sha256,
+      revision.retrieval_text_sha256
     );
     IF NEW.sequence_number <> target_claim.projection_sequence
        OR NEW.revision_id <> target_claim.current_revision_id
@@ -4163,7 +4164,7 @@ BEGIN
     p_policy_sha256, p_review_excerpt,
     pg_catalog.transaction_timestamp() + interval '7 days'
   )
-  ON CONFLICT (owner_user_id, operation_id) DO NOTHING
+  ON CONFLICT ON CONSTRAINT evidence_operation_id DO NOTHING
   RETURNING false INTO is_replay;
 
   IF NOT FOUND THEN
@@ -4205,7 +4206,7 @@ BEGIN
     selected_job_id, p_owner_user_id, selected_evidence_id,
     p_operation_id, job_key
   )
-  ON CONFLICT (owner_user_id, evidence_id) DO NOTHING
+  ON CONFLICT ON CONSTRAINT extraction_job_evidence_unique DO NOTHING
   RETURNING true INTO job_was_inserted;
   IF NOT FOUND THEN
     SELECT existing.* INTO STRICT existing_job
@@ -4332,20 +4333,25 @@ RETURNS TABLE(
   owner_user_id uuid,
   job_id uuid,
   evidence_id uuid,
+  source_kind text,
   source_message_id uuid,
   source_thread_id uuid,
   source_window_id uuid,
   source_window_sha256 text,
+  source_sha256 text,
   selected_sha256 text,
   selection_binding_sha256 text,
   selected_start_utf8 integer,
   selected_end_utf8 integer,
+  context_message_id uuid,
+  context_sha256 text,
   review_excerpt text,
   predicate_catalog_sha256 text,
   attempt_number integer,
   lease_token uuid,
   lease_expires_at timestamptz,
-  provider_call_id uuid
+  provider_call_id uuid,
+  provider_operation_id uuid
 )
 LANGUAGE plpgsql
 VOLATILE
@@ -4414,7 +4420,8 @@ BEGIN
             AND provider.job_id = expired_job.job_id
             AND provider.attempt_number = expired_job.attempt_count
             AND provider.state = 'outcome_unknown'
-        ) OR attempt_count >= max_attempts THEN 'failed_terminal'
+        ) OR expired_job.attempt_count >= expired_job.max_attempts
+          THEN 'failed_terminal'
         ELSE 'retryable'
       END,
       available_at = pg_catalog.clock_timestamp(),
@@ -4427,7 +4434,7 @@ BEGIN
             AND provider.job_id = expired_job.job_id
             AND provider.attempt_number = expired_job.attempt_count
             AND provider.state = 'outcome_unknown'
-        ) OR attempt_count >= max_attempts
+        ) OR expired_job.attempt_count >= expired_job.max_attempts
         THEN pg_catalog.clock_timestamp() ELSE NULL END,
       last_error_code = CASE WHEN EXISTS (
         SELECT 1 FROM memory.provider_call AS provider
@@ -4437,8 +4444,8 @@ BEGIN
           AND provider.state = 'outcome_unknown'
       ) THEN 'provider_outcome_unknown' ELSE 'lease_expired_before_dispatch' END,
       updated_at = pg_catalog.clock_timestamp()
-  WHERE state = 'claimed'
-    AND lease_expires_at <= pg_catalog.clock_timestamp();
+  WHERE expired_job.state = 'claimed'
+    AND expired_job.lease_expires_at <= pg_catalog.clock_timestamp();
 
   UPDATE memory.evidence AS evidence
   SET review_excerpt = NULL, excerpt_expires_at = NULL
@@ -4450,11 +4457,14 @@ BEGIN
 
   FOR candidate IN
     SELECT job.owner_user_id, job.job_id, job.evidence_id,
-           job.attempt_count, evidence.source_message_id,
+           job.attempt_count, evidence.source_kind,
+           evidence.source_message_id,
            evidence.source_thread_id, evidence.source_window_id,
-           evidence.source_window_sha256, evidence.selected_sha256,
+           evidence.source_window_sha256, evidence.source_sha256,
+           evidence.selected_sha256,
            evidence.selection_binding_sha256,
            evidence.selected_start_utf8, evidence.selected_end_utf8,
+           evidence.context_message_id, evidence.context_sha256,
            evidence.review_excerpt
     FROM memory.extraction_job AS job
     JOIN memory.evidence AS evidence
@@ -4463,6 +4473,8 @@ BEGIN
     WHERE job.state IN ('pending', 'retryable')
       AND job.available_at <= pg_catalog.clock_timestamp()
       AND job.attempt_count < job.max_attempts
+      AND evidence.source_kind = 'conversation_message'
+      AND evidence.review_excerpt IS NOT NULL
     ORDER BY job.available_at, job.created_at, job.job_id
     FOR UPDATE OF job SKIP LOCKED
     LIMIT p_limit
@@ -4507,15 +4519,18 @@ BEGIN
     );
 
     RETURN QUERY SELECT candidate.owner_user_id, candidate.job_id,
-      candidate.evidence_id, candidate.source_message_id,
+      candidate.evidence_id, candidate.source_kind,
+      candidate.source_message_id,
       candidate.source_thread_id, candidate.source_window_id,
-      candidate.source_window_sha256, candidate.selected_sha256,
+      candidate.source_window_sha256, candidate.source_sha256,
+      candidate.selected_sha256,
       candidate.selection_binding_sha256, candidate.selected_start_utf8,
-      candidate.selected_end_utf8, candidate.review_excerpt,
+      candidate.selected_end_utf8, candidate.context_message_id,
+      candidate.context_sha256, candidate.review_excerpt,
       p_predicate_catalog_sha256,
       candidate.attempt_count + 1, new_lease_token,
       new_lease_expires_at,
-      new_provider_call_id;
+      new_provider_call_id, new_operation_id;
   END LOOP;
 END;
 $function$;
@@ -4670,6 +4685,7 @@ BEGIN
        OR p_error_code NOT IN (
          'adapter_rejected_before_send',
          'connection_failed_before_send',
+         'evidence_excerpt_expired_before_dispatch',
          'local_serialization_failed_before_send',
          'provider_proved_not_accepted',
          'lease_expired_before_dispatch'
@@ -5254,10 +5270,10 @@ BEGIN
        p_outcome = 'retryable_failure'
        AND job.attempt_count >= job.max_attempts
      ) THEN
-    UPDATE memory.evidence
+    UPDATE memory.evidence AS stored_evidence
     SET review_excerpt = NULL, excerpt_expires_at = NULL
-    WHERE evidence.owner_user_id = job.owner_user_id
-      AND evidence.evidence_id = job.evidence_id;
+    WHERE stored_evidence.owner_user_id = evidence.owner_user_id
+      AND stored_evidence.evidence_id = evidence.evidence_id;
   END IF;
 
   RETURN QUERY SELECT p_outcome, item_count;
@@ -5271,14 +5287,32 @@ CREATE FUNCTION memory_private.list_proposals(
 )
 RETURNS TABLE(
   proposal_id uuid,
+  operation_id uuid,
   proposal_sha256 text,
   source_sha256 text,
   selected_sha256 text,
   selection_binding_sha256 text,
   predicate_catalog_sha256 text,
+  source_excerpt text,
+  subject_entity_type text,
+  subject_entity_key text,
+  subject_display_name text,
   predicate text,
+  object_kind text,
+  object_entity_type text,
+  object_entity_key text,
+  object_display_name text,
+  object_literal jsonb,
   epistemic_state text,
   sensitivity text,
+  projectable boolean,
+  domains text[],
+  intents text[],
+  surface text,
+  requires_explicit boolean,
+  valid_from timestamptz,
+  valid_to timestamptz,
+  correction_of_claim_id uuid,
   expires_at timestamptz,
   created_at timestamptz
 )
@@ -5299,12 +5333,22 @@ BEGIN
     RAISE EXCEPTION 'invalid proposal-list input' USING ERRCODE = '22023';
   END IF;
   RETURN QUERY
-  SELECT proposal.proposal_id, proposal.proposal_sha256,
+  SELECT proposal.proposal_id, proposal.operation_id,
+         proposal.proposal_sha256,
          evidence.source_sha256,
          proposal.selected_sha256, proposal.selection_binding_sha256,
          proposal.predicate_catalog_sha256,
-         proposal.predicate, proposal.epistemic_state,
-         proposal.sensitivity, proposal.expires_at, proposal.created_at
+         evidence.review_excerpt,
+         proposal.subject_entity_type, proposal.subject_entity_key,
+         proposal.subject_display_name, proposal.predicate,
+         proposal.object_kind, proposal.object_entity_type,
+         proposal.object_entity_key, proposal.object_display_name,
+         proposal.object_literal, proposal.epistemic_state,
+         proposal.sensitivity, proposal.projectable,
+         proposal.domains, proposal.intents, proposal.surface,
+         proposal.requires_explicit, proposal.valid_from,
+         proposal.valid_to, proposal.correction_of_claim_id,
+         proposal.expires_at, proposal.created_at
   FROM memory.proposal AS proposal
   JOIN memory.evidence AS evidence
     ON evidence.owner_user_id = proposal.owner_user_id
@@ -5328,16 +5372,15 @@ RETURNS TABLE(
   revision_id uuid,
   revision_number integer,
   revision_sha256 text,
-  revision_fact_policy_sha256 text,
+  projection_sequence integer,
   lifecycle_state text,
-  current_state_sha256 text,
+  state_sha256 text,
   semantic_key_sha256 text,
   claim_identity_sha256 text,
   source_sha256 text,
   is_current boolean,
   projectable boolean,
   predicate_catalog_sha256 text,
-  selected_sha256 text,
   selection_binding_sha256 text,
   subject_entity_key text,
   subject_entity_type text,
@@ -5385,12 +5428,12 @@ BEGIN
   RETURN QUERY
   SELECT claim.owner_user_id, claim.claim_id, revision.revision_id,
          revision.revision_number, revision.revision_sha256,
-         revision.fact_policy_sha256, claim.lifecycle_state,
+         claim.projection_sequence, claim.lifecycle_state,
          claim.current_state_sha256, claim.semantic_key_sha256,
          claim.claim_identity_sha256, revision.source_sha256,
          revision.revision_id = claim.current_revision_id,
          revision.projectable, revision.predicate_catalog_sha256,
-         revision.selected_sha256, revision.selection_binding_sha256,
+         revision.selection_binding_sha256,
          revision.subject_entity_key, revision.subject_entity_type,
          revision.subject_display_name,
          revision.retrieval_text, revision.retrieval_text_sha256,
@@ -5428,6 +5471,145 @@ BEGIN
     AND (revision.valid_from IS NULL OR revision.valid_from <= pg_catalog.clock_timestamp())
     AND (revision.valid_to IS NULL OR revision.valid_to > pg_catalog.clock_timestamp())
   ORDER BY pg_catalog.array_position(p_claim_ids, claim.claim_id);
+END;
+$function$;
+
+CREATE FUNCTION memory_private.read_projection_rebuild_batch(
+  p_after_owner_user_id uuid,
+  p_after_claim_id uuid,
+  p_limit integer
+)
+RETURNS TABLE(
+  owner_user_id uuid,
+  claim_id uuid,
+  revision_id uuid,
+  revision_number integer,
+  revision_sha256 text,
+  projection_sequence integer,
+  lifecycle_state text,
+  state_sha256 text,
+  semantic_key_sha256 text,
+  claim_identity_sha256 text,
+  source_sha256 text,
+  is_current boolean,
+  projectable boolean,
+  predicate_catalog_sha256 text,
+  selection_binding_sha256 text,
+  subject_entity_key text,
+  subject_entity_type text,
+  subject_display_name text,
+  retrieval_text text,
+  retrieval_text_sha256 text,
+  predicate text,
+  object_kind text,
+  object_entity_key text,
+  object_entity_type text,
+  object_display_name text,
+  object_literal jsonb,
+  epistemic_state text,
+  sensitivity text,
+  domains text[],
+  intents text[],
+  surface text,
+  requires_explicit boolean,
+  valid_from timestamptz,
+  valid_to timestamptz,
+  updated_at timestamptz,
+  outbox_id uuid,
+  projection_operation_id uuid,
+  projection_operation text,
+  outbox_sequence_number integer,
+  point_id uuid,
+  collection_alias text,
+  projection_contract_sha256 text,
+  dimensions integer,
+  embedding_model text,
+  renderer_sha256 text,
+  projection_manifest_sha256 text,
+  embedding_input_sha256 text,
+  applied_vector_sha256 text,
+  applied_physical_collection text,
+  applied_at timestamptz
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  IF session_user <> 'governed_memory_worker' THEN
+    RAISE EXCEPTION 'worker role required' USING ERRCODE = '42501';
+  END IF;
+  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100
+     OR (p_after_owner_user_id IS NULL) <> (p_after_claim_id IS NULL) THEN
+    RAISE EXCEPTION 'invalid projection rebuild cursor'
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN QUERY
+  SELECT claim.owner_user_id, claim.claim_id, revision.revision_id,
+         revision.revision_number, revision.revision_sha256,
+         claim.projection_sequence, claim.lifecycle_state,
+         claim.current_state_sha256, claim.semantic_key_sha256,
+         claim.claim_identity_sha256, revision.source_sha256,
+         true, revision.projectable, revision.predicate_catalog_sha256,
+         revision.selection_binding_sha256,
+         revision.subject_entity_key, revision.subject_entity_type,
+         revision.subject_display_name,
+         revision.retrieval_text, revision.retrieval_text_sha256,
+         revision.predicate, revision.object_kind,
+         revision.object_entity_key, revision.object_entity_type,
+         revision.object_display_name, revision.object_literal,
+         revision.epistemic_state, revision.sensitivity,
+         revision.domains, revision.intents, revision.surface,
+         revision.requires_explicit, revision.valid_from,
+         revision.valid_to, claim.updated_at,
+         outbox.outbox_id, outbox.operation_id, outbox.operation,
+         outbox.sequence_number, outbox.point_id, outbox.collection_alias,
+         memory_private.projection_contract_sha256(), 3072,
+         'text-embedding-3-large'::text,
+         'f77b782b3e549b30a46b4beb7e25b248018f6c0f3597b36d0020103570e66442',
+         outbox.projection_manifest_sha256,
+         revision.retrieval_text_sha256, outbox.vector_sha256,
+         outbox.physical_collection_name, outbox.applied_at
+  FROM memory.claim AS claim
+  JOIN memory.claim_revision AS revision
+    ON revision.owner_user_id = claim.owner_user_id
+   AND revision.claim_id = claim.claim_id
+   AND revision.revision_id = claim.current_revision_id
+   AND revision.revision_number = claim.current_revision_number
+  JOIN memory.projection_outbox AS outbox
+    ON outbox.owner_user_id = claim.owner_user_id
+   AND outbox.claim_id = claim.claim_id
+   AND outbox.revision_id = claim.current_revision_id
+   AND outbox.sequence_number = claim.projection_sequence
+  WHERE claim.lifecycle_state = 'active'
+    AND revision.projectable
+    AND outbox.operation = 'upsert'
+    AND outbox.state = 'applied'
+    AND outbox.vector_sha256 IS NOT NULL
+    AND outbox.physical_collection_name IS NOT NULL
+    AND claim.current_state_sha256 = memory_private.claim_state_sha256(
+      claim.owner_user_id, claim.claim_id, claim.semantic_key_sha256,
+      claim.claim_identity_sha256, claim.lifecycle_state, true,
+      claim.current_revision_id, claim.current_revision_number,
+      revision.revision_sha256, claim.projection_sequence
+    )
+    AND outbox.projection_manifest_sha256
+          = memory_private.projection_manifest_sha256(
+              outbox.owner_user_id, outbox.claim_id, outbox.revision_id,
+              outbox.operation_id, outbox.operation,
+              outbox.sequence_number, outbox.revision_sha256,
+              outbox.selection_binding_sha256,
+              revision.retrieval_text_sha256,
+              revision.retrieval_text_sha256
+            )
+    AND (
+      p_after_owner_user_id IS NULL
+      OR (claim.owner_user_id, claim.claim_id)
+           > (p_after_owner_user_id, p_after_claim_id)
+    )
+  ORDER BY claim.owner_user_id, claim.claim_id
+  LIMIT p_limit;
 END;
 $function$;
 
@@ -5792,8 +5974,10 @@ BEGIN
      OR pg_catalog.cardinality(proposal.intents) <> 0
      OR proposal.valid_from IS NOT NULL
      OR proposal.valid_to IS NOT NULL
-     OR proposal.surface <> CASE WHEN proposal.sensitivity = 'ordinary'
-          THEN 'normal' ELSE 'explicit_only' END
+     OR proposal.surface <> (
+       CASE WHEN proposal.sensitivity = 'ordinary'
+         THEN 'normal' ELSE 'explicit_only' END
+     )
      OR proposal.requires_explicit
           <> (proposal.sensitivity <> 'ordinary')
      OR NOT EXISTS (
@@ -5913,12 +6097,13 @@ BEGIN
   END IF;
 
   IF p_decision = 'rejected' THEN
-    UPDATE memory.proposal
+    UPDATE memory.proposal AS stored_proposal
     SET review_state = 'rejected', reviewer_kind = 'owner',
         reviewer_user_id = actor,
         review_reason_codes = p_reason_codes,
         reviewed_at = pg_catalog.transaction_timestamp()
-    WHERE owner_user_id = actor AND proposal_id = proposal.proposal_id;
+    WHERE stored_proposal.owner_user_id = actor
+      AND stored_proposal.proposal_id = proposal.proposal_id;
     INSERT INTO memory.audit_event(
       owner_user_id, operation_id, actor_kind, actor_user_id,
       object_type, object_id, transition_code, prior_state_sha256,
@@ -5998,12 +6183,13 @@ BEGIN
         current_revision.retrieval_text_sha256,
         current_revision.retrieval_text_sha256
       );
-      UPDATE memory.claim
+      UPDATE memory.claim AS target_row
       SET lifecycle_state = 'active', current_state_sha256 = new_state_hash,
           correction_pending_at = NULL,
           projection_sequence = resulting_sequence,
           updated_at = transition_at
-      WHERE owner_user_id = actor AND claim_id = target_claim.claim_id;
+      WHERE target_row.owner_user_id = actor
+        AND target_row.claim_id = target_claim.claim_id;
       INSERT INTO memory.projection_outbox(
         outbox_id, owner_user_id, claim_id, revision_id, operation_id,
         sequence_number, operation, point_id, revision_sha256,
@@ -6257,7 +6443,7 @@ BEGIN
       AND evidence.evidence_id = proposal.evidence_id;
 
   IF proposal.correction_of_claim_id IS NOT NULL THEN
-    UPDATE memory.claim
+    UPDATE memory.claim AS target_row
     SET semantic_key_sha256 = proposal.semantic_key_sha256,
         claim_identity_sha256 = claim_identity_hash,
         current_state_sha256 = new_state_hash,
@@ -6267,15 +6453,17 @@ BEGIN
         correction_pending_at = NULL, retracted_at = NULL,
         deletion_requested_at = NULL,
         updated_at = transition_at
-    WHERE owner_user_id = actor AND claim_id = resulting_claim_id;
+    WHERE target_row.owner_user_id = actor
+      AND target_row.claim_id = resulting_claim_id;
   END IF;
 
-  UPDATE memory.proposal
+  UPDATE memory.proposal AS stored_proposal
   SET review_state = 'admitted', reviewer_kind = 'owner',
       reviewer_user_id = actor,
       review_reason_codes = p_reason_codes,
       reviewed_at = pg_catalog.transaction_timestamp()
-  WHERE owner_user_id = actor AND proposal_id = proposal.proposal_id;
+  WHERE stored_proposal.owner_user_id = actor
+    AND stored_proposal.proposal_id = proposal.proposal_id;
 
   IF proposal.projectable THEN
     resulting_outbox_id := pg_catalog.gen_random_uuid();
@@ -6742,12 +6930,21 @@ BEGIN
     WHERE evidence.review_excerpt IS NOT NULL
       AND (
         evidence.excerpt_expires_at <= pg_catalog.clock_timestamp()
-        OR NOT EXISTS (
-          SELECT 1
-          FROM memory.proposal AS proposal
-          WHERE proposal.owner_user_id = evidence.owner_user_id
-            AND proposal.evidence_id = evidence.evidence_id
-            AND proposal.review_state = 'pending_review'
+        OR (
+          NOT EXISTS (
+            SELECT 1
+            FROM memory.extraction_job AS job
+            WHERE job.owner_user_id = evidence.owner_user_id
+              AND job.evidence_id = evidence.evidence_id
+              AND job.state IN ('pending', 'claimed', 'retryable')
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM memory.proposal AS proposal
+            WHERE proposal.owner_user_id = evidence.owner_user_id
+              AND proposal.evidence_id = evidence.evidence_id
+              AND proposal.review_state = 'pending_review'
+          )
         )
       )
     ORDER BY evidence.excerpt_expires_at, evidence.evidence_id
@@ -6755,6 +6952,42 @@ BEGIN
     LIMIT p_limit
   LOOP
     redaction_operation_id := pg_catalog.gen_random_uuid();
+    UPDATE memory.provider_call AS provider
+    SET state = 'retryable_failure',
+        completed_at = pg_catalog.clock_timestamp(),
+        error_code = 'evidence_excerpt_expired_before_dispatch'
+    FROM memory.extraction_job AS job
+    WHERE job.owner_user_id = candidate.owner_user_id
+      AND job.evidence_id = candidate.evidence_id
+      AND job.state = 'claimed'
+      AND provider.owner_user_id = job.owner_user_id
+      AND provider.job_id = job.job_id
+      AND provider.attempt_number = job.attempt_count
+      AND provider.state = 'reserved';
+    UPDATE memory.extraction_job AS job
+    SET state = 'failed_terminal',
+        lease_token = NULL, claimed_by = NULL, claimed_at = NULL,
+        lease_expires_at = NULL,
+        completed_at = pg_catalog.clock_timestamp(),
+        last_error_code = 'evidence_excerpt_expired_before_dispatch',
+        updated_at = pg_catalog.clock_timestamp()
+    WHERE job.owner_user_id = candidate.owner_user_id
+      AND job.evidence_id = candidate.evidence_id
+      AND (
+        job.state IN ('pending', 'retryable')
+        OR (
+          job.state = 'claimed'
+          AND EXISTS (
+            SELECT 1 FROM memory.provider_call AS provider
+            WHERE provider.owner_user_id = job.owner_user_id
+              AND provider.job_id = job.job_id
+              AND provider.attempt_number = job.attempt_count
+              AND provider.state = 'retryable_failure'
+              AND provider.error_code
+                    = 'evidence_excerpt_expired_before_dispatch'
+          )
+        )
+      );
     redacted_state_hash := pg_catalog.encode(pg_catalog.sha256(
       pg_catalog.convert_to(
         candidate.owner_user_id::text || '|' || candidate.evidence_id::text
@@ -6799,7 +7032,12 @@ CREATE FUNCTION memory_private.correct_claim(
   p_expected_predicate_catalog_sha256 text,
   p_replacement jsonb
 )
-RETURNS TABLE(outcome text, proposal_id uuid, proposal_sha256 text)
+RETURNS TABLE(
+  outcome text,
+  proposal_id uuid,
+  proposal_sha256 text,
+  review_operation_id uuid
+)
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
@@ -6946,9 +7184,10 @@ BEGIN
             NULLIF(p_replacement->>'object_entity_type', '')
        OR existing_proposal.object_display_name IS DISTINCT FROM
             NULLIF(p_replacement->>'object_display_name', '')
-       OR existing_proposal.object_literal IS DISTINCT FROM CASE
-            WHEN p_replacement->>'object_kind' = 'literal'
-            THEN p_replacement->'object_literal' ELSE NULL::jsonb END
+       OR existing_proposal.object_literal IS DISTINCT FROM (
+            CASE WHEN p_replacement->>'object_kind' = 'literal'
+              THEN p_replacement->'object_literal' ELSE NULL::jsonb END
+          )
        OR existing_proposal.epistemic_state
             <> p_replacement->>'epistemic_state'
        OR existing_proposal.sensitivity <> p_replacement->>'sensitivity' THEN
@@ -6956,7 +7195,7 @@ BEGIN
         USING ERRCODE = '23514';
     END IF;
     RETURN QUERY SELECT 'replayed'::text, existing_proposal.proposal_id,
-      existing_proposal.proposal_sha256;
+      existing_proposal.proposal_sha256, existing_proposal.operation_id;
     RETURN;
   END IF;
   IF memory_private.operation_id_conflicts(
@@ -7201,7 +7440,9 @@ BEGIN
     actor, target.claim_id, current_revision.revision_id,
     p_operation_id, 'delete', new_sequence,
     current_revision.revision_sha256,
-    current_revision.selection_binding_sha256, NULL::text, NULL::text
+    current_revision.selection_binding_sha256,
+    current_revision.retrieval_text_sha256,
+    current_revision.retrieval_text_sha256
   );
   UPDATE memory.claim
   SET lifecycle_state = 'correction_pending',
@@ -7237,7 +7478,7 @@ BEGIN
     pending_state_hash, 'explicit_owner_correction', event_hash
   );
   RETURN QUERY SELECT 'correction_pending'::text, new_proposal_id,
-    new_proposal_sha;
+    new_proposal_sha, correction_admission_operation_id;
 END;
 $function$;
 
@@ -7499,7 +7740,8 @@ BEGIN
   manifest_hash := memory_private.projection_manifest_sha256(
     actor, target.claim_id, revision.revision_id, p_operation_id,
     'delete', new_sequence, revision.revision_sha256,
-    revision.selection_binding_sha256, NULL::text, NULL::text
+    revision.selection_binding_sha256, revision.retrieval_text_sha256,
+    revision.retrieval_text_sha256
   );
   UPDATE memory.claim
   SET lifecycle_state = 'retracted', current_state_sha256 = new_state_hash,
@@ -7732,7 +7974,8 @@ BEGIN
   manifest_hash := memory_private.projection_manifest_sha256(
     actor, target.claim_id, revision.revision_id, p_operation_id,
     'delete', new_sequence, revision.revision_sha256,
-    revision.selection_binding_sha256, NULL::text, NULL::text
+    revision.selection_binding_sha256, revision.retrieval_text_sha256,
+    revision.retrieval_text_sha256
   );
   UPDATE memory.claim
   SET lifecycle_state = 'deletion_pending',
@@ -7833,9 +8076,10 @@ BEGIN
     RAISE EXCEPTION 'invalid projection lease input' USING ERRCODE = '22023';
   END IF;
 
-  UPDATE memory.projection_outbox
+  UPDATE memory.projection_outbox AS expired_outbox
   SET state = CASE
-        WHEN attempt_count >= max_attempts THEN 'failed_terminal'
+        WHEN expired_outbox.attempt_count >= expired_outbox.max_attempts
+          THEN 'failed_terminal'
         ELSE 'retryable'
       END,
       available_at = pg_catalog.clock_timestamp(),
@@ -7843,8 +8087,8 @@ BEGIN
       lease_expires_at = NULL, last_error_code = 'lease_expired',
       completion_lease_token = NULL, completion_outcome = NULL,
       updated_at = pg_catalog.clock_timestamp()
-  WHERE state = 'claimed'
-    AND lease_expires_at <= pg_catalog.clock_timestamp();
+  WHERE expired_outbox.state = 'claimed'
+    AND expired_outbox.lease_expires_at <= pg_catalog.clock_timestamp();
 
   WITH superseded AS (
     UPDATE memory.projection_outbox AS outbox
@@ -7880,10 +8124,12 @@ BEGIN
     transition_code, prior_state_sha256, new_state_sha256,
     reason_code, event_sha256
   )
-  SELECT owner_user_id, operation_id, 'system', 'projection_outbox',
-    outbox_id, 'projection_superseded', projection_manifest_sha256,
-    receipt_sha256, 'stale_projection_sequence', receipt_sha256
-  FROM receipts;
+  SELECT receipt.owner_user_id, receipt.operation_id,
+    'system', 'projection_outbox', receipt.outbox_id,
+    'projection_superseded', receipt.projection_manifest_sha256,
+    receipt.receipt_sha256, 'stale_projection_sequence',
+    receipt.receipt_sha256
+  FROM receipts AS receipt;
 
   FOR candidate IN
     SELECT outbox.*, revision.revision_number,
@@ -7909,6 +8155,21 @@ BEGIN
       AND outbox.attempt_count < outbox.max_attempts
       AND claim.projection_sequence = outbox.sequence_number
       AND claim.current_revision_id = outbox.revision_id
+      AND claim.current_state_sha256 = memory_private.claim_state_sha256(
+        claim.owner_user_id, claim.claim_id, claim.semantic_key_sha256,
+        claim.claim_identity_sha256, claim.lifecycle_state, true,
+        claim.current_revision_id, claim.current_revision_number,
+        revision.revision_sha256, claim.projection_sequence
+      )
+      AND outbox.projection_manifest_sha256
+            = memory_private.projection_manifest_sha256(
+                outbox.owner_user_id, outbox.claim_id, outbox.revision_id,
+                outbox.operation_id, outbox.operation,
+                outbox.sequence_number, outbox.revision_sha256,
+                outbox.selection_binding_sha256,
+                revision.retrieval_text_sha256,
+                revision.retrieval_text_sha256
+              )
       AND (
         (outbox.operation = 'upsert'
           AND claim.lifecycle_state = 'active'
@@ -7956,10 +8217,8 @@ BEGIN
       candidate.projection_manifest_sha256,
       CASE WHEN candidate.operation = 'upsert'
         THEN candidate.retrieval_text ELSE NULL::text END,
-      CASE WHEN candidate.operation = 'upsert'
-        THEN candidate.retrieval_text_sha256 ELSE NULL::text END,
-      CASE WHEN candidate.operation = 'upsert'
-        THEN candidate.retrieval_text_sha256 ELSE NULL::text END,
+      candidate.retrieval_text_sha256,
+      candidate.retrieval_text_sha256,
       candidate.source_sha256, candidate.lifecycle_state,
       candidate.current_revision_id = candidate.revision_id,
       CASE WHEN candidate.operation = 'upsert'
@@ -8142,10 +8401,8 @@ BEGIN
     outbox.owner_user_id, outbox.claim_id, outbox.revision_id,
     outbox.operation_id, outbox.operation, outbox.sequence_number,
     outbox.revision_sha256, outbox.selection_binding_sha256,
-    CASE WHEN outbox.operation = 'upsert'
-      THEN revision.retrieval_text_sha256 ELSE NULL::text END,
-    CASE WHEN outbox.operation = 'upsert'
-      THEN revision.retrieval_text_sha256 ELSE NULL::text END
+    revision.retrieval_text_sha256,
+    revision.retrieval_text_sha256
   );
   IF target.projection_sequence <> outbox.sequence_number
      OR target.current_revision_id <> outbox.revision_id
@@ -8404,7 +8661,9 @@ BEGIN
     target.owner_user_id, target.claim_id, current_revision.revision_id,
     delete_receipt.operation_id, 'delete', target.projection_sequence,
     current_revision.revision_sha256,
-    current_revision.selection_binding_sha256, NULL::text, NULL::text
+    current_revision.selection_binding_sha256,
+    current_revision.retrieval_text_sha256,
+    current_revision.retrieval_text_sha256
   );
   IF target.lifecycle_state <> 'deletion_pending'
      OR target.current_state_sha256 <> p_expected_state_sha256
@@ -8570,15 +8829,15 @@ BEGIN
   DELETE FROM memory.projection_outbox AS pending
   WHERE pending.owner_user_id = p_owner_user_id
     AND pending.claim_id = p_claim_id;
-  DELETE FROM memory.claim_revision AS revision
-  WHERE revision.owner_user_id = p_owner_user_id
-    AND revision.claim_id = p_claim_id;
   DELETE FROM memory.proposal AS proposal
   WHERE proposal.owner_user_id = p_owner_user_id
     AND (
       proposal.proposal_id = ANY(deleted_proposal_ids)
       OR proposal.correction_of_claim_id = p_claim_id
     );
+  DELETE FROM memory.claim_revision AS revision
+  WHERE revision.owner_user_id = p_owner_user_id
+    AND revision.claim_id = p_claim_id;
   DELETE FROM memory.claim AS claim
   WHERE claim.owner_user_id = p_owner_user_id
     AND claim.claim_id = p_claim_id;
@@ -8871,7 +9130,7 @@ BEGIN
       p_outbound_request, escaped_memory_segment
     );
     escaped_segment_start := pg_catalog.octet_length(pg_catalog.convert_to(
-      pg_catalog.substring(
+      substring(
         p_outbound_request FROM 1
         FOR escaped_segment_character_position - 1
       ),
@@ -9060,7 +9319,7 @@ BEGIN
       selected_row.object_entity_type, selected_row.object_literal_text
     );
     IF rendered_record IS NULL
-       OR rendered_record <> pg_catalog.normalize(rendered_record, NFC) THEN
+       OR rendered_record <> normalize(rendered_record, NFC) THEN
       RAISE EXCEPTION 'answer Memory rendering failed'
         USING ERRCODE = '23514';
     END IF;
@@ -9253,6 +9512,7 @@ GRANT EXECUTE ON FUNCTION
   memory_private.purge_terminal_proposals(integer),
   memory_private.purge_expired_answer_bindings(integer),
   memory_private.redact_expired_evidence_excerpts(integer),
+  memory_private.read_projection_rebuild_batch(uuid,uuid,integer),
   memory_private.lease_projection_jobs(text,integer,integer),
   memory_private.finish_projection_job(
     uuid,uuid,text,text,text,text,text,text

@@ -1,13 +1,14 @@
 {
-  "schema_version": "governed-memory-migration-manifest-v1",
-  "candidate_id": "clean-governed-memory-phase1-2026-08-10",
-  "status": "isolated_candidate_not_applied",
+  "schema_version": "governed-memory-migration-manifest-v2",
+  "candidate_id": "clean-governed-memory-phase2-2026-08-10",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
-    "service_change_authorized": false,
-    "provider_call_authorized": false,
-    "qdrant_change_authorized": false,
-    "legacy_import_authorized": false
+    "production_service_change_authorized": false,
+    "production_provider_call_authorized": false,
+    "production_qdrant_change_authorized": false,
+    "legacy_import_authorized": false,
+    "disposable_validation_authorized": true
   },
   "execution_order": [
     "roles_preflight.pgsql",
@@ -25,7 +26,7 @@
         },
     {
       "path": "schema_contract.json",
-            "sha256": "9a69dd514011e1bac8ccf06bc888613e1eb5eb6a2c6c8761dedb211e4e6fbdcd"
+            "sha256": "aa1420d52b3766606b745c258f8270bcde20dbb400a107ef13f5d4b9678e635e"
     },
     {
       "path": "predicate_catalog.json",
@@ -33,23 +34,23 @@
     },
     {
       "path": "0001_foundation/package.json",
-            "sha256": "b5021ea11524329c1a6f0493b947b0a0dcf7f08401f9d4e5d4d8a7b3963042dd"
+            "sha256": "3efc7de48b24441fe27fa030957570b1ac4dca08a262157a924450d560e293be"
     },
     {
       "path": "0001_foundation/forward.pgsql",
-            "sha256": "52bea57492ff0dafea234c68bb189efa19bba2f807da4dc85fcfb385b95a25c7"
+            "sha256": "6818557e6cb885e06368922e79e9a382f37cab66b1ea9e24f2f441d8acde0adc"
     },
     {
       "path": "0001_foundation/rollback.pgsql",
-            "sha256": "7f3fb9157b7afc7f712d198cb454e66569745e50af9d783713fd4943fad371fb"
+            "sha256": "816b679cbc08e9abe14007be046504fc543909ac65822a91abb1f0573a77639c"
     },
     {
       "path": "0002_conversation_bridge/package.json",
-            "sha256": "ad955be0f2595c170d53fa756659c1260e7063bfd1e298c04035ac89f1ccf34e"
+            "sha256": "113e7bc5217088a2a63950e1a3235de28551029ab0ee6cd31adc520940fd16ed"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-            "sha256": "f3e337acfa5963bda3d75504b45cf66b39ceade11abe37a08ce1786ff5c49ae9"
+            "sha256": "9b11a485713293fc98863a6e1a7ea324385bf7a099021899737b458d1c25feb1"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",
@@ -62,7 +63,10 @@
     "migration_runner_advisory_lock_required": true,
     "rollback_empty_only": true,
     "cascade_ddl_allowed": false,
-    "database_execution_performed": false,
-    "remote_files_changed": false
+    "disposable_database_execution_performed": true,
+    "production_database_execution_performed": false,
+    "production_checkout_files_changed": false,
+    "production_data_read": false,
+    "provider_external_calls": 0
   }
 }
