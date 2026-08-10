@@ -135,6 +135,7 @@ from rag_engine.governed_memory.conversation_capture import (
     CAPTURE_MODE_ENV,
     CAPTURE_MODE_OFF,
     CAPTURE_OWNER_ALLOWLIST_ENV,
+    CAPTURE_PILOT_ROLLING_24H_LIMIT,
     CaptureConfigurationError,
     capture_auth_context_sha256,
     capture_decision_for_owner,
@@ -1708,6 +1709,7 @@ async def log_chat(req: Request):
     created_dt = None if governed_memory_capture.enabled else datetime.utcnow()
     capture_auth_context = None
     capture_source_created_at = None
+    memory_capture_outcome = None
     if governed_memory_capture.enabled:
         if governed_memory_actor_context is None:
             raise RuntimeError("governed_memory_capture_actor_context_missing")
@@ -1864,12 +1866,13 @@ async def log_chat(req: Request):
         if governed_memory_capture.enabled:
             if capture_source_created_at is None:
                 raise RuntimeError("governed_memory_capture_timestamp_missing")
-            await enqueue_captured_chat_log_message(
+            capture_receipt = await enqueue_captured_chat_log_message(
                 conn,
                 decision=governed_memory_capture,
                 message_id=uuid.UUID(rec_id),
                 source_created_at=capture_source_created_at,
             )
+            memory_capture_outcome = capture_receipt.outcome
 
         # Touch thread timestamp so list ordering works
         if thread_id:
@@ -1899,7 +1902,14 @@ async def log_chat(req: Request):
         if conn:
             await conn.close()
 
-    return {"status": "ok", "id": rec_id, "request_id": request_id}
+    response_payload = {
+        "status": "ok",
+        "id": rec_id,
+        "request_id": request_id,
+    }
+    if memory_capture_outcome is not None:
+        response_payload["memory_capture_outcome"] = memory_capture_outcome
+    return response_payload
 
 @app.post("/threads/new")
 async def threads_new(body: NewThreadReq, req: Request):
@@ -2566,6 +2576,10 @@ async def health():
                 "mode": GOVERNED_MEMORY_CAPTURE_SETTINGS.mode,
                 "pilot_owner_count": len(
                     GOVERNED_MEMORY_CAPTURE_SETTINGS.owner_user_ids
+                ),
+                "rolling_24h_message_limit": CAPTURE_PILOT_ROLLING_24H_LIMIT,
+                "limit_enforcement": (
+                    "owner_locked_conversation_bridge_all_states"
                 ),
                 "source": "frontend/chat:user",
                 "authority": "supabase_access_token_v1",

@@ -30,6 +30,7 @@ CAPTURE_MODE_OFF = "off"
 CAPTURE_MODE_PILOT = "pilot"
 CAPTURE_TEXT_AUTHORITY = "supabase_access_token_v1"
 CAPTURE_USER_SOURCE = "frontend/chat:user"
+CAPTURE_PILOT_ROLLING_24H_LIMIT = 20
 _MAX_PILOT_OWNERS = 1
 
 
@@ -263,6 +264,7 @@ __all__ = [
     "CAPTURE_MODE_PILOT",
     "CAPTURE_TEXT_AUTHORITY",
     "CAPTURE_USER_SOURCE",
+    "CAPTURE_PILOT_ROLLING_24H_LIMIT",
     "CaptureConfigurationError",
     "CaptureSettings",
     "ConversationCaptureConnection",

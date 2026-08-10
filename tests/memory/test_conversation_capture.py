@@ -16,6 +16,7 @@ from rag_engine.governed_memory.contracts import ContractViolation
 from rag_engine.governed_memory.conversation_capture import (
     CAPTURE_MODE_ENV,
     CAPTURE_OWNER_ALLOWLIST_ENV,
+    CAPTURE_PILOT_ROLLING_24H_LIMIT,
     CAPTURE_TEXT_AUTHORITY,
     CAPTURE_USER_SOURCE,
     CaptureConfigurationError,
@@ -74,6 +75,7 @@ class _FakeConnection:
 
 class CaptureGateTests(unittest.TestCase):
     def test_capture_settings_are_startup_validated_and_immutable(self) -> None:
+        self.assertEqual(CAPTURE_PILOT_ROLLING_24H_LIMIT, 20)
         off = capture_settings_from_environment({})
         self.assertEqual(
             off,
@@ -344,6 +346,15 @@ class CaptureGateTests(unittest.TestCase):
         self.assertLess(attachment_replay_at, enqueue_at)
         self.assertLess(attachment_binding_at, enqueue_at)
         self.assertLess(enqueue_at, commit_at)
+        self.assertIn(
+            "memory_capture_outcome = capture_receipt.outcome",
+            route,
+        )
+        self.assertIn(
+            'response_payload["memory_capture_outcome"] = memory_capture_outcome',
+            route,
+        )
+        self.assertNotIn("capture_receipt.outbox_id", route)
         self.assertIn(
             "SELECT id,message_id,status,deleted_at",
             route,
