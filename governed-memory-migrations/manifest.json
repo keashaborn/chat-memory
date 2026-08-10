@@ -1,0 +1,68 @@
+{
+  "schema_version": "governed-memory-migration-manifest-v1",
+  "candidate_id": "clean-governed-memory-phase1-2026-08-10",
+  "status": "isolated_candidate_not_applied",
+  "authority": {
+    "production_apply_authorized": false,
+    "service_change_authorized": false,
+    "provider_call_authorized": false,
+    "qdrant_change_authorized": false,
+    "legacy_import_authorized": false
+  },
+  "execution_order": [
+    "roles_preflight.pgsql",
+    "0001_foundation/forward.pgsql",
+    "0002_conversation_bridge/forward.pgsql"
+  ],
+  "rollback_order": [
+    "0002_conversation_bridge/rollback.pgsql",
+    "0001_foundation/rollback.pgsql"
+  ],
+  "files": [
+        {
+            "path": "roles_preflight.pgsql",
+            "sha256": "8aac9a36c1b078282ea71195e1e81d2870f93ee1d84f02af2e7645fa70e1922c"
+        },
+    {
+      "path": "schema_contract.json",
+            "sha256": "9a69dd514011e1bac8ccf06bc888613e1eb5eb6a2c6c8761dedb211e4e6fbdcd"
+    },
+    {
+      "path": "predicate_catalog.json",
+            "sha256": "3e9e62b8281c31067c0416b33e7a2ccb12f2a6e7b5f6f88c090e9eb332c9fcdd"
+    },
+    {
+      "path": "0001_foundation/package.json",
+            "sha256": "b5021ea11524329c1a6f0493b947b0a0dcf7f08401f9d4e5d4d8a7b3963042dd"
+    },
+    {
+      "path": "0001_foundation/forward.pgsql",
+            "sha256": "52bea57492ff0dafea234c68bb189efa19bba2f807da4dc85fcfb385b95a25c7"
+    },
+    {
+      "path": "0001_foundation/rollback.pgsql",
+            "sha256": "7f3fb9157b7afc7f712d198cb454e66569745e50af9d783713fd4943fad371fb"
+    },
+    {
+      "path": "0002_conversation_bridge/package.json",
+            "sha256": "ad955be0f2595c170d53fa756659c1260e7063bfd1e298c04035ac89f1ccf34e"
+    },
+    {
+      "path": "0002_conversation_bridge/forward.pgsql",
+            "sha256": "f3e337acfa5963bda3d75504b45cf66b39ceade11abe37a08ce1786ff5c49ae9"
+    },
+    {
+      "path": "0002_conversation_bridge/rollback.pgsql",
+            "sha256": "b2fdac9c04b69ab45ac948675ec9424e73fc9a3b49d6757b3ad61a74972c4fb5"
+    }
+  ],
+  "safety": {
+    "migration_runner_transaction_required": true,
+    "migration_runner_timeouts_required": true,
+    "migration_runner_advisory_lock_required": true,
+    "rollback_empty_only": true,
+    "cascade_ddl_allowed": false,
+    "database_execution_performed": false,
+    "remote_files_changed": false
+  }
+}

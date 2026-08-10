@@ -1,0 +1,52 @@
+{
+  "schema_version": "governed-memory-migration-package-v1",
+  "migration_id": "governed_memory_foundation_0001",
+  "status": "isolated_candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "database": "governed_memory",
+    "execution_role": "governed_memory_owner"
+  },
+  "dependencies": [
+    "roles_preflight.pgsql"
+  ],
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true,
+    "runner_supplies_timeouts": true,
+    "runner_supplies_advisory_lock": true
+  },
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "52bea57492ff0dafea234c68bb189efa19bba2f807da4dc85fcfb385b95a25c7"
+  },
+  "rollback": {
+    "path": "rollback.pgsql",
+    "sha256": "7f3fb9157b7afc7f712d198cb454e66569745e50af9d783713fd4943fad371fb",
+    "empty_only": true
+  },
+  "data_policy": {
+    "requires_empty_database": true,
+    "legacy_imports": false,
+    "historical_backfill": false,
+    "seed_only": "predicate_catalog.json",
+    "owner_data_deleted_by_rollback": false
+  },
+  "object_contract": {
+    "schemas": [
+      "memory",
+      "memory_private"
+    ],
+    "table_count": 13,
+    "owner_bearing_table_count": 12,
+    "forced_rls": true,
+    "direct_runtime_table_access": false,
+    "cascade_ddl": false
+  },
+  "activation": {
+    "authorized": false,
+    "services_changed": false,
+    "database_applied": false,
+    "qdrant_changed": false
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "governed-memory-migration-package-v1",
+  "migration_id": "governed_memory_conversation_bridge_0002",
+  "status": "isolated_candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "database": "existing_conversation_database",
+    "execution_role": "sage"
+  },
+  "dependencies": [
+    "roles_preflight.pgsql",
+    "governed_memory_foundation_0001"
+  ],
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true,
+    "runner_supplies_timeouts": true,
+    "runner_supplies_advisory_lock": true
+  },
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "f3e337acfa5963bda3d75504b45cf66b39ceade11abe37a08ce1786ff5c49ae9"
+  },
+  "rollback": {
+    "path": "rollback.pgsql",
+    "sha256": "b2fdac9c04b69ab45ac948675ec9424e73fc9a3b49d6757b3ad61a74972c4fb5",
+    "empty_only": true
+  },
+  "data_policy": {
+    "stores_message_text": false,
+    "stores_attachment_text": false,
+    "content_hash_max_retention_hours": 24,
+    "terminal_row_retention_days": 7,
+    "historical_backfill": false,
+    "owner_data_deleted_by_rollback": false
+  },
+  "object_contract": {
+    "schema": "memory_ingest_private",
+    "table": "public.memory_ingest_outbox",
+    "forced_rls": true,
+    "direct_runtime_table_access": false,
+    "bounded_context_reviews": 1,
+    "cascade_ddl": false
+  },
+  "activation": {
+    "authorized": false,
+    "writer_membership_granted": false,
+    "services_changed": false,
+    "database_applied": false
+  }
+}

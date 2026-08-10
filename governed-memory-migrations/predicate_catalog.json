@@ -1,0 +1,171 @@
+{
+  "catalog_name": "personal-memory",
+  "schema_revision": 1,
+  "predicates": {
+    "commitment.active": {
+      "subject_kinds": [
+        "self"
+      ],
+      "object_kinds": [
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "entity.attribute": {
+      "subject_kinds": [
+        "organization",
+        "other",
+        "person",
+        "pet",
+        "place",
+        "self"
+      ],
+      "object_kinds": [
+        "entity",
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self",
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "event.occurred": {
+      "subject_kinds": [
+        "organization",
+        "other",
+        "person",
+        "pet",
+        "place",
+        "self"
+      ],
+      "object_kinds": [
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self",
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "identity.alias": {
+      "subject_kinds": [
+        "organization",
+        "other",
+        "person",
+        "pet",
+        "place",
+        "self"
+      ],
+      "object_kinds": [
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self",
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "identity.preferred_name": {
+      "subject_kinds": [
+        "person",
+        "self"
+      ],
+      "object_kinds": [
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self",
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "location.association": {
+      "subject_kinds": [
+        "organization",
+        "other",
+        "person",
+        "pet",
+        "place",
+        "self"
+      ],
+      "object_kinds": [
+        "entity",
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self",
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "preference.personal": {
+      "subject_kinds": [
+        "self"
+      ],
+      "object_kinds": [
+        "entity",
+        "literal"
+      ],
+      "sensitivities": [
+        "ordinary",
+        "sensitive_self"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    },
+    "relationship.kind": {
+      "subject_kinds": [
+        "person",
+        "self"
+      ],
+      "object_kinds": [
+        "entity"
+      ],
+      "sensitivities": [
+        "sensitive_third_party"
+      ],
+      "epistemic_statuses": [
+        "disputed",
+        "supported",
+        "uncertain"
+      ]
+    }
+  }
+}

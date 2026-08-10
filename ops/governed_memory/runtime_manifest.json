@@ -1,0 +1,50 @@
+{
+  "schema_version": "governed-memory-runtime-manifest",
+  "phase": "candidate_uninstalled",
+  "python_runtime": {
+    "minimum": "3.11",
+    "validated_candidate": "3.12"
+  },
+  "authority": {
+    "database": "governed_memory",
+    "conversation_bridge": "public.memory_ingest_outbox",
+    "qdrant_alias": "governed_memory_active"
+  },
+  "activation": {
+    "installed_services": [],
+    "enabled_services": [],
+    "installed_timers": [],
+    "enabled_timers": [],
+    "future_target_service": "governed-memory-worker.service"
+  },
+  "ingestion": {
+    "historical_import": false,
+    "historical_backfill": false,
+    "attachment_content_release_1": false,
+    "requires_post_cutover_message": true
+  },
+  "provider_policy": {
+    "import_time_calls": false,
+    "phase_1_calls": false,
+    "generation_calls_per_exact_attempt": 1
+  },
+  "owner_routes": [
+    "GET /memory/status",
+    "GET /memory/claims",
+    "GET /memory/claims/{claim_id}",
+    "GET /memory/proposals",
+    "POST /memory/proposals/{proposal_id}/review",
+    "POST /memory/claims/{claim_id}/correct",
+    "POST /memory/claims/{claim_id}/retract",
+    "DELETE /memory/claims/{claim_id}",
+    "GET /memory/operations/{operation_id}"
+  ],
+  "prohibited_routes": [
+    "/cards",
+    "/vantage",
+    "/memory/evidence",
+    "/memory/retrieve"
+  ],
+  "legacy_imports_allowed": false,
+  "production_state_changed": false
+}
