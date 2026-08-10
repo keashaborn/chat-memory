@@ -161,8 +161,73 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
             "source_row.source IS DISTINCT FROM 'frontend/chat:user'",
             reader,
         )
-        self.assertNotIn("chat_attachments", reader)
+        self.assertIn("FROM public.chat_attachments AS attachment", reader)
+        self.assertIn(
+            "attachment.message_id = target.message_id",
+            reader,
+        )
+        self.assertNotRegex(
+            reader,
+            r"attachment\.(?:content|filename|media_type|content_sha256)",
+        )
         self.assertNotRegex(reader, r"(?i)\bLIMIT\b|\bOFFSET\b")
+
+    def test_attachment_bound_message_is_excluded_at_enqueue_lease_and_read(self) -> None:
+        enqueue = self.forward.split(
+            "CREATE FUNCTION memory_ingest_private.enqueue_chat_log_message(",
+            1,
+        )[1].split("$function$;", 1)[0]
+        lease = self.forward.split(
+            "CREATE FUNCTION memory_ingest_private.lease_memory_ingest(",
+            1,
+        )[1].split("$function$;", 1)[0]
+        reader = self.forward.split(
+            "CREATE FUNCTION memory_ingest_private.read_leased_chat_log_message(",
+            1,
+        )[1].split("$function$;", 1)[0]
+        self.assertIn("attachment.message_id = p_message_id", enqueue)
+        self.assertIn("AND NOT EXISTS (", lease)
+        self.assertIn("attachment.message_id = value.message_id", lease)
+        self.assertIn("attachment.message_id = target.message_id", reader)
+        for definition in (enqueue, lease, reader):
+            self.assertNotRegex(
+                definition,
+                r"attachment\.(?:content|filename|media_type|content_sha256)",
+            )
+
+    def test_pilot_limit_is_owner_serialized_replay_first_and_all_state(self) -> None:
+        enqueue = self.forward.split(
+            "CREATE FUNCTION memory_ingest_private.enqueue_chat_log_message(",
+            1,
+        )[1].split("$function$;", 1)[0]
+        lock_at = enqueue.index("actor::text || '|memory_ingest|pilot_limit'")
+        replay_lookup_at = enqueue.index(
+            "FROM memory_ingest_private.memory_ingest_outbox AS value"
+        )
+        replay_return_at = enqueue.index(
+            "RETURN QUERY SELECT 'replayed'::text, existing.outbox_id"
+        )
+        count_at = enqueue.index("SELECT pg_catalog.count(*)", replay_return_at)
+        limit_return_at = enqueue.index(
+            "RETURN QUERY SELECT 'pilot_limit_reached'::text, NULL::uuid"
+        )
+        insert_at = enqueue.index(
+            "INSERT INTO memory_ingest_private.memory_ingest_outbox"
+        )
+        self.assertLess(lock_at, replay_lookup_at)
+        self.assertLess(replay_lookup_at, replay_return_at)
+        self.assertLess(replay_return_at, count_at)
+        self.assertLess(count_at, limit_return_at)
+        self.assertLess(limit_return_at, insert_at)
+        cap = enqueue[count_at:limit_return_at]
+        self.assertIn("value.owner_user_id = actor", cap)
+        self.assertIn(
+            "value.source_created_at >= captured_at - interval '24 hours'",
+            cap,
+        )
+        self.assertIn("value.source_created_at <= captured_at", cap)
+        self.assertIn(") >= 20 THEN", enqueue)
+        self.assertNotRegex(cap, r"\bstate\b")
 
     def test_enqueue_accepts_no_caller_owner_content_or_lineage(self) -> None:
         signature = self.forward.split(

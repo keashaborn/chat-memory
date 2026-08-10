@@ -1,8 +1,8 @@
-# Governed Memory Phase 5 disposable validation contract
+# Governed Memory Phase 6B disposable validation contract
 
 ## Current proof state
 
-The full Phase 5 disposable harness passed under the preliminary-metadata mode
+The full Phase 5 disposable harness previously passed under preliminary mode
 against candidate HEAD
 `699c80761065d19832d2c0f3b2b50342a5a8350c`, tree
 `c5c13579ffa54da4f30fc198254c98b662c7029b`, and pre-promotion migration
@@ -18,12 +18,14 @@ bridge dump SHA-256
 and integration receipt SHA-256
 `6479f3f0feb8f155754edd3467b8c80f043ae47a19f11ddc459f5c3896fe4c37`.
 All invocation-owned resources were removed and proof ports were released.
+This is historical evidence only: Phase 6B changed runtime and migration bytes,
+so none of these receipts validate the current candidate.
 
-The exact source-bound CPython 3.12.3 runtime is built and its checked receipt
-binds source SHA-256
+The prior source-bound CPython 3.12.3 runtime receipt binds source SHA-256
 `af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
 and wheel SHA-256
 `58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
+A fresh Phase 6B runtime build and receipt are pending.
 
 The proof-metadata promotion changes the Git tree, so the attested
 pre-promotion HEAD/tree remain immutable receipt facts rather than being
@@ -37,7 +39,7 @@ Reproduce on the seebx backend only, from the sealed candidate commit:
 
 ```bash
 GM_VALIDATION_DISPOSABLE_AUTHORIZATION='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
-GM_VALIDATION_RUNTIME_PYTHON='/tmp/governed-memory-phase5-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b/bin/python' \
+GM_VALIDATION_RUNTIME_PYTHON='<phase6b-candidate-python>' \
 GM_VALIDATION_EXPECTED_ROOT='<absolute-candidate-worktree>' \
 GM_VALIDATION_EXPECTED_BRANCH='<candidate-branch>' \
 GM_VALIDATION_EXPECTED_HEAD='<candidate-head>' \
@@ -60,7 +62,7 @@ The run must bind one unchanged candidate to:
 - cleanup of every invocation-owned container, volume, network, relay, and
   process.
 
-## Phase 5 proof coverage
+## Historical Phase 5 proof coverage
 
 The passing run proved:
 
@@ -76,7 +78,7 @@ The passing run proved:
 - Qdrant v1.19.0 compatibility for exact alias/physical target, size 3072,
   `Dot`, six required indexes, bounded owner search without vectors, ambiguous
   upsert readback, and alias-plus-physical deletion verification;
-- explicit activation blockers for the still-unwired worker repository,
+- explicit activation blockers for the then-unwired worker repository,
   transport, configuration, CLI composition, and cross-process singleton;
 - all owner HTTP lifecycle routes and alternating-owner isolation; and
 - final resource absence plus unchanged HEAD/tree at completion.
@@ -91,6 +93,17 @@ off throughout this run.
 
 Frontend candidate `35a684` is built but undeployed. Disposable backend proof
 does not substitute for authenticated visual QA.
+
+## Phase 6B proof still required
+
+The next full disposable run must bind the changed 0001 and 0002 migrations,
+the new two-database worker composition, exact pilot identity, persistent
+three-lane fairness, attachment exclusion, source-deletion receipt recovery,
+context terminalization, owner-serialized rolling capture limits, and
+concurrent advisory-lock behavior. Until that run
+passes, both changed migration packages and the root manifest remain explicitly
+not disposable-validated. Chat-deletion cancellation/erasure coordination is
+not implemented and remains an activation blocker.
 
 ## Corrections made before the passing run
 

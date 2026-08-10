@@ -301,6 +301,16 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertFalse(contract["conversation_bridge"]["historical_scan_allowed"])
         self.assertFalse(contract["conversation_bridge"]["base_table_select_for_worker_allowed"])
         self.assertEqual(
+            contract["conversation_bridge"][
+                "pilot_capture_limit_per_owner_rolling_24h"
+            ],
+            20,
+        )
+        self.assertEqual(
+            contract["conversation_bridge"]["pilot_capture_limit_result"],
+            "pilot_limit_reached_null_outbox_id",
+        )
+        self.assertEqual(
             contract["candidate_implementation_status"][
                 "owner_claim_fact_detail"
             ],
@@ -320,8 +330,8 @@ class ReleaseArtifactTests(unittest.TestCase):
             "owner_claim_fact_detail_api_not_implemented",
             contract["create_policy"]["unresolved_activation_blockers"],
         )
-        self.assertNotIn(
-            "final_phase5_runtime_rebuild_and_receipt_pending",
+        self.assertIn(
+            "final_phase6b_runtime_rebuild_and_receipt_pending",
             contract["create_policy"]["unresolved_activation_blockers"],
         )
         self.assertNotIn(
@@ -351,6 +361,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(pilot["limits"]["maximum_owner_accounts"], 1)
         self.assertEqual(pilot["limits"]["maximum_post_cutover_user_messages"], 20)
+        self.assertEqual(
+            pilot["limits"]["maximum_post_cutover_user_messages_enforcement"],
+            "owner_locked_all_state_outbox_count_rolling_24h_focused_static_and_adapter_tested_inactive_disposable_proof_pending",
+        )
         self.assertFalse(pilot["eligible_input"]["old_conversations"])
         self.assertFalse(pilot["eligible_input"]["historical_backfill"])
         self.assertFalse(pilot["eligible_input"]["attachment_content"])
@@ -382,8 +396,8 @@ class ReleaseArtifactTests(unittest.TestCase):
             "owner_claim_fact_detail_api_not_implemented",
             pilot["start_blockers"],
         )
-        self.assertNotIn(
-            "final_phase5_runtime_rebuild_and_receipt_pending",
+        self.assertIn(
+            "final_phase6b_runtime_rebuild_and_receipt_pending",
             pilot["start_blockers"],
         )
         self.assertEqual(

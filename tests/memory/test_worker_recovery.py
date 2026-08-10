@@ -299,6 +299,38 @@ class IntakeReplayTests(unittest.TestCase):
                     successor_ingest_receipt=malformed,
                 )
 
+    def test_count_zero_crash_replay_acks_without_duplicate_successor_work(self) -> None:
+        payload = make_ingest_payload()
+        lease = make_bridge_lease(
+            payload,
+            ingest_after=CUTOVER,
+            context_review_count=0,
+        )
+        receipt = {
+            "owner_user_id": payload["owner_user_id"],
+            "operation_id": payload["message_id"],
+            "bridge_source_binding_sha256": lease["source_binding_sha256"],
+            "decision": "send_external",
+            "evidence_id": str(EVIDENCE_A),
+            "extraction_job_id": str(JOB_A),
+        }
+        receipt["receipt_sha256"] = (
+            worker_core.ingest_successor_receipt_sha256(**receipt)
+        )
+        result = process_ingest_item(
+            payload,
+            context_review_count=0,
+            successor_ingest_receipt=receipt,
+        )
+        self.assertEqual(result["decision"], "send_external")
+        self.assertEqual(result["effects"], ["ack_existing_memory_ingest"])
+        self.assertEqual(result["context_review_count"], 0)
+        self.assertEqual(result["resolution"], "successor_receipt_replayed")
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+        self.assertNotIn("record_selected_evidence", result["effects"])
+        self.assertNotIn("create_extraction_job", result["effects"])
+
     def test_same_ingest_item_replays_to_the_same_exact_plan(self) -> None:
         payload = make_ingest_payload()
         first = process_ingest_item(payload, cutover=CUTOVER)

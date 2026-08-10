@@ -99,7 +99,10 @@
     "historical_scan_allowed": false,
     "historical_backfill_allowed": false,
     "base_table_select_for_worker_allowed": false,
-    "post_cutover_user_messages_only": true
+    "post_cutover_user_messages_only": true,
+    "pilot_capture_limit_per_owner_rolling_24h": 20,
+    "pilot_capture_limit_enforcement": "owner_scoped_transaction_advisory_lock_all_outbox_states",
+    "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id"
   },
   "isolation": {
     "reuse_existing_postgres_daemon": false,
@@ -121,8 +124,10 @@
     "qdrant_adapter": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
     "pilot_marker": "implemented_disposable_proof_passed_not_production_applied",
     "worker_algorithm": "implemented_fake_tested",
-    "worker_runtime_composition": "blocked_cli_repository_transport_config_unwired",
-    "worker_cross_process_singleton": "not_implemented_activation_blocker",
+    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_focused_unit_tested_real_two_database_disposable_proof_pending",
+    "worker_context_required_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_zero_successor_provider_embedding_vector_calls",
+    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_focused_unit_tested_disposable_proof_pending",
+    "worker_cross_process_singleton": "postgresql_session_advisory_lock_implemented_focused_unit_tested_inactive",
     "calibration": "independently_bound_unapproved_retrieval_off",
     "frontend_candidate": "35a684_built_undeployed_visual_qa_pending"
   },
@@ -137,8 +142,9 @@
       "unresolved_activation_blockers": [
       "production_activation_not_authorized",
       "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-      "worker_cli_repository_transport_config_unwired",
-      "worker_cross_process_singleton_not_implemented",
+      "final_phase6b_runtime_rebuild_and_receipt_pending",
+      "phase6b_migration_contract_disposable_proof_pending",
+      "chat_deletion_memory_cancellation_coordination_not_implemented",
       "calibration_artifact_unapproved_retrieval_off",
       "frontend_candidate_35a684_undeployed_visual_qa_pending"
     ]

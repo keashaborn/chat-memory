@@ -1074,7 +1074,7 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "isolated_candidate_disposable_validated_not_production_applied",
+            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
@@ -1143,9 +1143,28 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(bridge["worker_base_table_privileges"], [])
         self.assertEqual(bridge["writer_base_table_privileges"], [])
-        self.assertFalse(bridge["attachment_reads"])
+        self.assertEqual(
+            bridge["attachment_reads"],
+            "existence_only_owner_thread_message_no_columns_returned",
+        )
+        self.assertFalse(bridge["attachment_content_reads"])
+        self.assertTrue(bridge["attachment_presence_required_absent"])
         self.assertFalse(bridge["attachment_message_capture"])
         self.assertFalse(bridge["historical_scan_or_backfill"])
+        self.assertEqual(bridge["pilot_capture_limit_per_owner_rolling_24h"], 20)
+        self.assertEqual(
+            bridge["pilot_capture_limit_count_scope"],
+            "all_outbox_states_by_source_created_at",
+        )
+        self.assertEqual(
+            bridge["pilot_capture_limit_lock"],
+            "owner_scoped_transaction_advisory_lock",
+        )
+        self.assertEqual(
+            bridge["pilot_capture_limit_result"],
+            "pilot_limit_reached_null_outbox_id",
+        )
+        self.assertFalse(bridge["pilot_capture_replay_consumes_new_slot"])
         self.assertEqual(len(bridge["functions"]), len(set(bridge["functions"])))
 
     def test_lifecycle_and_epistemic_states_are_not_collapsed(self) -> None:
@@ -1345,6 +1364,46 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertEqual(observed, set(FOUNDATION_TABLES))
 
+    def test_worker_lane_scheduler_is_private_persistent_and_closed(self) -> None:
+        scheduler = self.contract["worker_scheduler"]
+        self.assertEqual(
+            scheduler["sequence"],
+            "memory_private.worker_lane_sequence",
+        )
+        self.assertEqual(
+            scheduler["function"],
+            "memory_private.next_worker_lane()",
+        )
+        self.assertEqual(
+            scheduler["lane_order"],
+            ["bridge", "extraction", "projection"],
+        )
+        self.assertTrue(scheduler["content_free"])
+        self.assertFalse(scheduler["direct_runtime_sequence_privileges"])
+        self.assertTrue(scheduler["advance_once_per_locked_invocation"])
+        self.assertRegex(
+            self.foundation,
+            r"CREATE\s+SEQUENCE\s+memory_private\.worker_lane_sequence\s+AS\s+bigint",
+        )
+        definition = _function_definitions(self.foundation)[
+            "memory_private.next_worker_lane"
+        ]
+        self.assertRegex(definition, r"SECURITY\s+DEFINER")
+        self.assertRegex(definition, r"SET\s+search_path\s+TO\s+pg_catalog")
+        self.assertEqual(definition.count("pg_catalog.nextval("), 1)
+        self.assertIn("'bridge', 'extraction', 'projection'", definition)
+        self.assertRegex(
+            self.foundation,
+            r"REVOKE\s+ALL\s+ON\s+SEQUENCE\s+memory_private\.worker_lane_sequence\s+FROM\s+PUBLIC,\s*governed_memory_api,\s*governed_memory_worker",
+        )
+        self.assertIn(
+            "DROP FUNCTION memory_private.next_worker_lane();",
+            self.foundation_rollback,
+        )
+        self.assertIn(
+            "DROP SEQUENCE memory_private.worker_lane_sequence;",
+            self.foundation_rollback,
+        )
     def test_durable_error_and_reason_fields_accept_only_ascii_codes(self) -> None:
         code_pattern = r"'\^\[a-z\]\[a-z0-9_\]\{0,127\}\$'"
         scalar_fields = (
@@ -3082,7 +3141,12 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertRegex(reader, r"target\.lease_token\s*<>\s*p_lease_token")
         self.assertIn("FROM public.chat_log AS source", reader)
         self.assertIn("observed_source_binding_sha256", reader)
-        self.assertNotIn("chat_attachments", reader)
+        self.assertIn("FROM public.chat_attachments AS attachment", reader)
+        self.assertIn("attachment.message_id = target.message_id", reader)
+        self.assertNotRegex(
+            reader,
+            r"attachment\.(?:content|filename|media_type|content_sha256)",
+        )
         self.assertRegex(
             self.bridge,
             r"state\s+IN\s*\(\s*'completed',\s*'skipped',\s*'expired',"

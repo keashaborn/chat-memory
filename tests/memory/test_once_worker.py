@@ -50,6 +50,7 @@ class FakeRepository:
         self.pilot_reads = 0
         self.claims = 0
         self.completions: list[tuple[object, object]] = []
+        self.failures: list[tuple[object, Exception]] = []
 
     async def pilot_ever_started(self) -> bool:
         self.pilot_reads += 1
@@ -61,6 +62,9 @@ class FakeRepository:
 
     async def complete(self, work: object, result: object) -> None:
         self.completions.append((work, result))
+
+    async def fail(self, work: object, error: Exception) -> None:
+        self.failures.append((work, error))
 
 
 class FakeProvider:
@@ -227,6 +231,25 @@ class OnceWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(provider.calls), 1)
         self.assertEqual(repository.claims, 1)
         self.assertEqual(repository.completions, [])
+        self.assertEqual(len(repository.failures), 1)
+        self.assertIs(repository.failures[0][0], repository.work)
+
+    async def test_typed_local_failure_never_calls_provider(self) -> None:
+        work = ExtractionWork(
+            local_failure_code="local_serialization_failed_before_send",
+            work_id=WORK_ID,
+        )
+        repository = FakeRepository(work)
+        instance, provider, embedder, qdrant = worker(repository)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "local_serialization_failed_before_send",
+        ):
+            await instance.run_once()
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(embedder.calls, [])
+        self.assertEqual(qdrant.preflights, 0)
+        self.assertEqual(len(repository.failures), 1)
 
     async def test_concurrent_invocation_is_refused_instead_of_queued(self) -> None:
         gate = asyncio.Event()
@@ -274,7 +297,10 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
                 ),
                 1,
             )
-        self.assertIn("governed_memory_worker_adapters_unconfigured", stderr.getvalue())
+        self.assertIn(
+            "governed_memory_worker_configuration_invalid",
+            stderr.getvalue(),
+        )
 
     def test_injected_once_runner_is_called_exactly_once(self) -> None:
         calls = 0

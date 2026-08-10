@@ -1,23 +1,22 @@
-# Governed Memory Phase 5 activation boundary
+# Governed Memory Phase 6B activation boundary
 
 ## Current state
 
-The Phase 5 source candidate is inactive and not authorized. Neither systemd
+The Phase 6B source candidate is inactive and not authorized. Neither systemd
 template is installed or enabled. No production successor database, collection,
 listener, route, firewall rule, capture membership, provider request, or pilot
 marker row exists. The release guard returns `activation_blockers_open` for
 create and `authorization_missing` for cleanup, with an empty action plan and
 zero executed commands.
 
-The final source-bound CPython 3.12.3 runtime is built and the checked receipt
-binds source SHA-256
+The prior Phase 5 CPython 3.12.3 runtime receipt binds historical source SHA-256
 `af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
 and wheel SHA-256
 `58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
-The full disposable harness passed against the exact source-bound runtime,
-fresh temporary stores, synthetic identities, and zero external provider calls.
-This closes only disposable-proof blockers; the runtime and proof receipts are
-not production activation evidence.
+The historical Phase 5 disposable harness passed against that older source.
+Phase 6B changed runtime and migration bytes; a fresh source-bound runtime and
+full disposable receipt are pending. The old receipt closes no current Phase
+6B proof blocker and is not production activation evidence.
 
 ## Exact candidate targets
 
@@ -53,9 +52,11 @@ that image also passed. The digest is not persistent-pilot approval.
   no real provider call has occurred.
 - Migration 0004 implements a content-free append-only pilot marker, but it is
   proved only on disposable PostgreSQL and is not production-applied.
-- The one-item worker algorithm is fake-tested. CLI composition, repository,
-  transport, configuration, and cross-process singleton enforcement remain
-  open.
+- The one-item worker has inactive exact two-database composition, RPC-only
+  repositories, loopback Qdrant transport, exact target configuration,
+  persistent three-lane fairness, and PostgreSQL session advisory locking.
+  These are focused-test results only; fresh disposable and concurrent proof
+  remain open.
 - Calibration requires independent artifact and approval-receipt hashes. Its
   artifact is unapproved and retrieval remains off.
 - Frontend candidate `35a684` is built, undeployed, and awaiting authenticated
@@ -63,8 +64,8 @@ that image also passed. The digest is not persistent-pilot approval.
 
 ## Activation blockers
 
-The machine-readable runtime manifest retains 18 production activation
-blockers. Before any persistent pilot, all of the following remain required:
+The machine-readable runtime manifest is authoritative for the current blocker
+list. Before any persistent pilot, all of the following remain required:
 
 1. Obtain explicit production activation and exact pilot-owner/scope authority.
 2. Install and live-verify the mandatory `session_id`/`auth.sessions` RPC path,
@@ -72,8 +73,9 @@ blockers. Before any persistent pilot, all of the following remain required:
 3. Mount and verify live Supabase runtime credentials without exposing them.
 4. Keep semantic retrieval off until an independently authorized calibration
    artifact is approved.
-5. Complete worker CLI composition, repository, transport, configuration, and
-   cross-process singleton enforcement.
+5. Build a fresh sealed runtime and prove the Phase 6B two-database worker,
+   persistent fairness cursor, attachment exclusion, exact pilot identity, and
+   cross-process singleton against fresh disposable stores.
 6. Authorize any real provider/embedding validation separately; unknown
    post-dispatch outcomes remain terminal and are never automatically retried.
 7. Create fresh isolated persistent PostgreSQL and Qdrant targets only after a
@@ -87,6 +89,7 @@ blockers. Before any persistent pilot, all of the following remain required:
 12. Prove owner-scoped legacy Memory read/write/shadow paths are quiesced.
 13. Authorize one owner, at most 20 post-cutover messages, at most 24 hours,
     and one generation call per exact attempt.
+14. Implement and prove chat-deletion cancellation/erasure coordination.
 
 ## Authorized sequence
 
@@ -94,8 +97,9 @@ Each step is a separate checkpoint:
 
 1. Capture seebx hostname, HEAD/tree, services, ports, store identities, and
    legacy flags in a content-free pre-state receipt.
-2. Verify the checked runtime receipt still binds the exact sealed source,
-   runtime/build locks, installed package, and wheel bytes.
+2. Build a new runtime receipt that binds the exact sealed Phase 6B source,
+   runtime/build locks, installed package, and wheel bytes; do not reuse the
+   Phase 5 receipt.
 3. Reproduce the full disposable proof if the sealed source, runtime, migration
    manifest, pinned images, or proof environment changes.
 4. Review and authorize exact persistent targets and credentials. Existing
@@ -104,7 +108,8 @@ Each step is a separate checkpoint:
    Qdrant alias/collection/indexes, and zero points.
 6. Install both dormant units, then prove firewall/private transport.
 7. Prove live Supabase user and session authority plus owner-negative cases.
-8. Prove worker composition and cross-process concurrency one.
+8. Prove two-database worker composition, persistent three-lane fairness, and
+   cross-process concurrency one.
 9. Deploy and visually validate the authenticated frontend.
 10. Quiesce legacy paths for the authorized owner.
 11. Record the monotonic pilot marker and start only within the approved bounds.

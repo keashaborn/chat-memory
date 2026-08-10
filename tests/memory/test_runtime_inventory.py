@@ -84,12 +84,17 @@ EXPECTED_RUNTIME_PACKAGE_FILES = {
     "live_supabase.py",
     "https_transport.py",
     "openai_adapters.py",
+    "qdrant_transport.py",
+    "worker_application.py",
+    "worker_bridge.py",
+    "worker_postgres.py",
 }
 
 EXPECTED_PROVIDER_ASSET_FILES = {
     "__init__.py",
     "extraction_instructions.txt",
     "extraction_output.schema.json",
+    "predicate_catalog.json",
 }
 
 EXPECTED_TEST_FILES = {
@@ -117,6 +122,7 @@ EXPECTED_TEST_FILES = {
     "test_projection.py",
     "test_prompt_and_binding.py",
     "test_qdrant_adapter.py",
+    "test_qdrant_transport.py",
     "test_release_contracts.py",
     "test_response_provider.py",
     "test_response_defaults.py",
@@ -129,6 +135,9 @@ EXPECTED_TEST_FILES = {
     "test_successor_live_authority.py",
     "test_schema_and_rls.py",
     "test_worker_recovery.py",
+    "test_worker_application.py",
+    "test_worker_bridge.py",
+    "test_worker_postgres.py",
 }
 
 EXPECTED_INTEGRATION_FILES = {
@@ -238,7 +247,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["phase"],
-            "phase5_disposable_validated_activation_blocked",
+            "phase6b_inactive_worker_composed_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
@@ -247,8 +256,15 @@ class RuntimeManifestTests(unittest.TestCase):
                 "database": "governed_memory",
                 "database_target": "127.0.0.1:55432",
                 "conversation_database": "memory",
+                "conversation_database_target": "127.0.0.1:5432",
                 "conversation_application_login": "brains_app",
+                "conversation_worker_login": "governed_memory_worker",
                 "conversation_bridge": "memory_ingest_private.memory_ingest_outbox",
+                "worker_pilot_identity_environment": [
+                    "GOVERNED_MEMORY_EXPECTED_PILOT_ID",
+                    "GOVERNED_MEMORY_EXPECTED_PILOT_CONTRACT_SHA256",
+                    "GOVERNED_MEMORY_EXPECTED_AUTHORIZATION_RECEIPT_SHA256",
+                ],
                 "qdrant_target": "127.0.0.1:6343",
                 "qdrant_collection": "governed_memory_9a54cf123493_000001",
                 "qdrant_alias": "governed_memory_active",
@@ -265,6 +281,25 @@ class RuntimeManifestTests(unittest.TestCase):
                 "attachment_content_release_1": False,
                 "requires_post_cutover_user_message": True,
                 "worker_base_conversation_table_select": False,
+                "phase6b_context_required_policy": (
+                    "fresh_count_zero_two_exact_marks_re_leased_count_one_one_"
+                    "exact_mark_then_terminal_unresolved_zero_successor_provider_"
+                    "embedding_vector_calls"
+                ),
+                "attachment_invariant": (
+                    "enqueue_lease_and_source_read_require_no_owner_thread_"
+                    "message_attachment_row"
+                ),
+                "pilot_capture_limit": (
+                    "owner_locked_twenty_rows_all_states_rolling_24h_exact_"
+                    "replay_no_new_slot_typed_limit_result_focused_static_and_"
+                    "adapter_tested_inactive_disposable_proof_pending"
+                ),
+                "qdrant_unavailable_policy": (
+                    "canonical_postgresql_intake_continues_under_persistent_"
+                    "fair_one_item_scheduler_and_twenty_message_pilot_cap_"
+                    "projection_backlog_retryable"
+                ),
             },
         )
         self.assertEqual(
@@ -309,6 +344,17 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertNotIn("[Install]", worker_unit)
         self.assertNotIn("WantedBy=", worker_unit)
 
+    def test_worker_identity_is_bound_to_three_explicit_environment_values(self) -> None:
+        authority = self.load_manifest()["authority"]
+        self.assertEqual(
+            authority["worker_pilot_identity_environment"],
+            [
+                "GOVERNED_MEMORY_EXPECTED_PILOT_ID",
+                "GOVERNED_MEMORY_EXPECTED_PILOT_CONTRACT_SHA256",
+                "GOVERNED_MEMORY_EXPECTED_AUTHORIZATION_RECEIPT_SHA256",
+            ],
+        )
+
     def test_provider_policy_records_zero_disposable_external_calls(self) -> None:
         policy = self.load_manifest()["provider_policy"]
         self.assertFalse(policy["import_time_calls"])
@@ -326,10 +372,21 @@ class RuntimeManifestTests(unittest.TestCase):
             "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
         )
         self.assertEqual(adapters["algorithm"], "implemented_fake_tested")
-        self.assertEqual(adapters["cli_composition"], "activation_blocker_unwired")
+        self.assertEqual(
+            adapters["cli_composition"],
+            "implemented_inactive_focused_unit_tested",
+        )
         self.assertEqual(
             adapters["cross_process_singleton"],
-            "activation_blocker_not_implemented",
+            "postgresql_session_advisory_lock_implemented_focused_unit_tested",
+        )
+        self.assertEqual(
+            adapters["conversation_bridge"],
+            "two_database_rpc_only_persistently_fair_one_item_context_terminal_zero_call_focused_unit_tested_inactive",
+        )
+        self.assertEqual(
+            adapters["scheduler"],
+            "private_content_free_postgresql_sequence_cyclic_three_lane_focused_unit_tested_disposable_proof_pending",
         )
 
     def test_successor_validation_is_disposable_and_not_activation_proof(self) -> None:
@@ -340,21 +397,29 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertEqual(
             validation["evidence_status"],
-            "current_phase5_disposable_proof_passed_not_production_activation",
+            "prior_phase5_disposable_proof_stale_after_phase6b_source_change",
         )
-        self.assertTrue(validation["current_phase5_full_proof_complete"])
+        self.assertFalse(validation["current_phase5_full_proof_complete"])
         self.assertFalse(validation["prior_receipt_reusable_for_current_source"])
         self.assertTrue(validation["final_resources_absent"])
         self.assertTrue(validation["resource_cleanup_complete"])
-        self.assertTrue(validation["all_owner_routes_invoked"])
-        self.assertTrue(validation["alternating_owner_pool_isolation"])
-        self.assertEqual(validation["owner_pool_max_size"], 1)
+        self.assertFalse(validation["all_owner_routes_invoked"])
+        self.assertFalse(validation["alternating_owner_pool_isolation"])
+        self.assertEqual(validation["owner_pool_max_size"], 0)
         self.assertTrue(
             validation["qdrant_v1_19_0_real_disposable_compatibility_verified"]
         )
-        self.assertTrue(validation["pilot_marker_disposable_proof_complete"])
+        self.assertFalse(validation["pilot_marker_disposable_proof_complete"])
         self.assertFalse(validation["worker_runtime_composition_validated"])
+        self.assertEqual(
+            validation["worker_runtime_composition_status"],
+            "implemented_inactive_persistently_fair_three_lane_focused_unit_tested_real_two_database_disposable_proof_pending",
+        )
         self.assertFalse(validation["worker_cross_process_singleton_validated"])
+        self.assertEqual(
+            validation["worker_cross_process_singleton_status"],
+            "implemented_inactive_focused_unit_tested_real_concurrent_lock_disposable_proof_pending",
+        )
         self.assertFalse(validation["semantic_threshold_calibrated"])
         self.assertFalse(validation["persistent_resources_created"])
         self.assertEqual(
@@ -443,6 +508,10 @@ class RuntimeManifestTests(unittest.TestCase):
             manifest["activation"]["blockers"],
         )
         self.assertIn(
+            "phase6b_migration_contract_disposable_proof_pending",
+            manifest["activation"]["blockers"],
+        )
+        self.assertNotIn(
             "worker_cross_process_singleton_not_implemented",
             manifest["activation"]["blockers"],
         )
@@ -511,7 +580,9 @@ class RuntimeManifestTests(unittest.TestCase):
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
                 "candidate_python": RECORDED_CANDIDATE_PYTHON,
-                "receipt_scope": "prior_phase5_source_bound_disposable_proof_historical_stale",
+                "receipt_scope": (
+                    "prior_phase5_source_not_reusable_after_phase6b_integration"
+                ),
                 "current_phase5_source_bound": False,
                 "final_phase6b_runtime_rebuild_pending": True,
                 "candidate_owned_environment": True,
@@ -533,8 +604,8 @@ class RuntimeManifestTests(unittest.TestCase):
             "candidate_owned_runtime_environment_not_built",
             manifest["activation"]["blockers"],
         )
-        self.assertNotIn(
-            "final_phase5_runtime_rebuild_and_receipt_pending",
+        self.assertIn(
+            "final_phase6b_runtime_rebuild_and_receipt_pending",
             manifest["activation"]["blockers"],
         )
         self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
@@ -1012,6 +1083,7 @@ import rag_engine.governed_memory as package
 ALLOWED_NON_PYTHON_SOURCE_PATHS = {
     'provider_assets/extraction_instructions.txt',
     'provider_assets/extraction_output.schema.json',
+    'provider_assets/predicate_catalog.json',
 }
 
 def sha256(path):

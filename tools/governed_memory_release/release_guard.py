@@ -59,8 +59,9 @@ OBSERVATION_KEYS = {
 EXPECTED_CREATE_BLOCKERS = [
     "production_activation_not_authorized",
     "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-    "worker_cli_repository_transport_config_unwired",
-    "worker_cross_process_singleton_not_implemented",
+    "final_phase6b_runtime_rebuild_and_receipt_pending",
+    "phase6b_migration_contract_disposable_proof_pending",
+    "chat_deletion_memory_cancellation_coordination_not_implemented",
     "calibration_artifact_unapproved_retrieval_off",
     "frontend_candidate_35a684_undeployed_visual_qa_pending",
 ]

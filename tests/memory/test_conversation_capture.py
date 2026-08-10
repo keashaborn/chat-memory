@@ -57,12 +57,19 @@ PILOT_MODE = {
 
 
 class _FakeConnection:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        outcome: str = "enqueued",
+        outbox_id: UUID | None = OUTBOX_A,
+    ) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.outcome = outcome
+        self.outbox_id = outbox_id
 
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object]:
         self.calls.append((query, args))
-        return {"outcome": "enqueued", "outbox_id": OUTBOX_A}
+        return {"outcome": self.outcome, "outbox_id": self.outbox_id}
 
 
 class CaptureGateTests(unittest.TestCase):
@@ -352,8 +359,9 @@ class CaptureGateTests(unittest.TestCase):
 
 
 class CaptureAdapterTests(unittest.IsolatedAsyncioTestCase):
-    async def test_enqueue_uses_only_message_id_and_server_policy_hash(self) -> None:
-        decision = capture_decision_for_owner(
+    @staticmethod
+    def decision():
+        return capture_decision_for_owner(
             str(OWNER_A),
             **ELIGIBLE_INPUT,
             environ={
@@ -361,6 +369,9 @@ class CaptureAdapterTests(unittest.IsolatedAsyncioTestCase):
                 CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
             },
         )
+
+    async def test_enqueue_uses_only_message_id_and_server_policy_hash(self) -> None:
+        decision = self.decision()
         connection = _FakeConnection()
         receipt = await enqueue_captured_chat_log_message(
             connection,
@@ -378,6 +389,39 @@ class CaptureAdapterTests(unittest.IsolatedAsyncioTestCase):
             "memory_ingest_private.enqueue_chat_log_message($1::uuid,$2::text)",
         )
         self.assertEqual(args, (MESSAGE_A, receipt.policy_sha256))
+
+    async def test_pilot_limit_is_typed_success_without_outbox_identifier(self) -> None:
+        receipt = await enqueue_captured_chat_log_message(
+            _FakeConnection(
+                outcome="pilot_limit_reached",
+                outbox_id=None,
+            ),
+            decision=self.decision(),
+            message_id=MESSAGE_A,
+            source_created_at=CREATED_AT,
+        )
+        self.assertEqual(receipt.outcome, "pilot_limit_reached")
+        self.assertIsNone(receipt.outbox_id)
+
+    async def test_capture_outcome_and_outbox_shape_must_match(self) -> None:
+        invalid = (
+            ("enqueued", None),
+            ("replayed", None),
+            ("pilot_limit_reached", OUTBOX_A),
+            ("unexpected", OUTBOX_A),
+        )
+        for outcome, outbox_id in invalid:
+            with self.subTest(outcome=outcome, outbox_id=outbox_id):
+                with self.assertRaises(ContractViolation):
+                    await enqueue_captured_chat_log_message(
+                        _FakeConnection(
+                            outcome=outcome,
+                            outbox_id=outbox_id,
+                        ),
+                        decision=self.decision(),
+                        message_id=MESSAGE_A,
+                        source_created_at=CREATED_AT,
+                    )
 
     async def test_disabled_owner_cannot_reach_enqueue_adapter(self) -> None:
         decision = capture_decision_for_owner(

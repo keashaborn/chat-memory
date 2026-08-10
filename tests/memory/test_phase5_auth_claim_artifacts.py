@@ -13,6 +13,9 @@ CLAIM_DETAIL = MIGRATIONS / "0003_owner_claim_detail"
 SESSION_AUTHORITY = ROOT / "ops/governed_memory/supabase_session_authority"
 RUNNER = ROOT / "tools/governed_memory_validation/run_disposable_successor.sh"
 VALIDATED_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
+PENDING_STATUS = (
+    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+)
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -52,8 +55,9 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertFalse(package["rollback"]["data_mutation"])
 
         manifest = _load_json(MIGRATIONS / "manifest.json")
-        self.assertEqual(manifest["status"], package["status"])
-        self.assertTrue(
+        self.assertEqual(manifest["status"], PENDING_STATUS)
+        self.assertEqual(package["status"], VALIDATED_STATUS)
+        self.assertFalse(
             manifest["safety"]["disposable_database_execution_performed"]
         )
         entries = {item["path"]: item["sha256"] for item in manifest["files"]}
@@ -111,7 +115,8 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         schema = _load_json(MIGRATIONS / "schema_contract.json")
         package = _load_json(CLAIM_DETAIL / "package.json")
         self.assertEqual(package["status"], VALIDATED_STATUS)
-        self.assertEqual(schema["status"], package["status"])
+        self.assertEqual(schema["status"], PENDING_STATUS)
+        self.assertEqual(package["status"], VALIDATED_STATUS)
         self.assertIn(
             "memory_private.read_claim(uuid)",
             schema["function_surface"],

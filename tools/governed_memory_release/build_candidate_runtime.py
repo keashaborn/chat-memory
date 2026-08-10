@@ -44,6 +44,7 @@ PROVIDER_ASSET_SOURCE_PATHS = frozenset(
     {
         "provider_assets/extraction_instructions.txt",
         "provider_assets/extraction_output.schema.json",
+        "provider_assets/predicate_catalog.json",
     }
 )
 SETUPTOOLS_WHEEL = "setuptools-84.0.0-py3-none-any.whl"

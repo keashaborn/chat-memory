@@ -1,4 +1,4 @@
-# Governed Memory clean successor — Phase 5 inactive candidate
+# Governed Memory clean successor — Phase 6B inactive candidate
 
 This repository contains the single current governed-Memory source candidate.
 It is not production activated: no successor service is installed, enabled,
@@ -6,15 +6,15 @@ started, routed, or connected to a production successor store. No production
 PostgreSQL or Qdrant resource has been created, and no real provider call has
 been authorized or made.
 
-The successor requires CPython 3.12.x; the final Phase 5 source-bound runtime
-is built with CPython 3.12.3 and 19
-hash-locked runtime packages. The checked receipt binds source SHA-256
+The successor requires CPython 3.12.x. A prior Phase 5 runtime was built with
+CPython 3.12.3 and 19 hash-locked runtime packages. Its checked receipt binds
+the historical source SHA-256
 `af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b`
 and wheel SHA-256
 `58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4`.
-The runtime is inactive and is not activation evidence; the full Phase 5
-disposable harness passed against fresh disposable PostgreSQL and Qdrant with
-zero external provider calls. That proof is not production activation.
+Phase 6B changed the source and migrations, so that runtime and disposable
+receipt are stale evidence and cannot validate this candidate. A new sealed
+runtime build and full disposable proof are pending. Nothing is activated.
 
 PostgreSQL is canonical. Qdrant is a disposable, derived index rebuilt only
 from current PostgreSQL claims and applied projection receipts. Supabase remains
@@ -39,9 +39,18 @@ imported.
 - The content-free monotonic pilot marker exists as migration candidate 0004.
   Insert, replay, conflict refusal, readback, and guarded rollback passed on
   disposable PostgreSQL; it is not production-applied.
-- The concurrency-one worker algorithm is fake-tested in one process. Its CLI
-  composition, repository, transport, configuration, and cross-process
-  singleton are activation blockers.
+- The one-shot worker now has inactive two-database composition, exact
+  PostgreSQL RPC repositories, exact loopback Qdrant transport, a PostgreSQL
+  session advisory lock, and a persistent content-free three-lane fairness
+  cursor. These surfaces have focused unit/static proof only; a fresh
+  disposable two-database runtime proof is pending.
+- Messages with an attachment row are excluded at enqueue, lease, and exact
+  source read. Context-required messages are terminalized by two exact marks
+  when fresh, or one after recovery from a completed first mark, with zero
+  successor, provider, embedding, or vector calls.
+- Capture is owner-serialized and limited to 20 outbox rows across all states
+  in a rolling 24-hour window. Exact replay consumes no additional slot; the
+  limit returns a typed content-free result so the chat transcript can commit.
 - Calibration requires independently expected artifact and approval-receipt
   SHA-256 values. The checked-in artifact is unapproved, so semantic retrieval
   remains off and no semantic retrieval-score threshold is activated.
@@ -76,19 +85,20 @@ reconstructing deleted proposal content.
 
 ## Proof boundary
 
-The full harness exercised disposable PostgreSQL and Qdrant with synthetic
+The historical Phase 5 harness exercised disposable PostgreSQL and Qdrant with synthetic
 identities, exact owner isolation, migration rollback/reapply, Qdrant 1.19.0,
 pilot-marker semantics, all owner HTTP routes, zero external provider calls,
 and complete invocation-resource cleanup. The attested pre-promotion candidate
 was HEAD `699c80761065d19832d2c0f3b2b50342a5a8350c`, tree
 `c5c13579ffa54da4f30fc198254c98b662c7029b`, and migration manifest
 `2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45`.
-Metadata promotion changes the tree without rewriting those receipt facts.
+Metadata promotion changed the tree without rewriting those receipt facts.
+Those facts do not bind the Phase 6B source or migrations.
 
-This evidence does not prove live Supabase session revocation, real provider
-behavior, installed production routes, authenticated frontend behavior,
-cross-process worker concurrency, persistent Qdrant suitability, or production
-readiness.
+Current focused tests do not prove disposable PostgreSQL execution, real
+two-database composition, concurrent advisory locking, live Supabase session
+revocation, real provider behavior, installed production routes, authenticated
+frontend behavior, persistent Qdrant suitability, or production readiness.
 
 ## Activation and retirement
 
