@@ -548,7 +548,7 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
         environment = dict(os.environ)
         environment[EXCLUSIVE_MODE_ENV] = EXCLUSIVE_MODE_SUCCESSOR
         environment["POSTGRES_DSN"] = (
-            "postgresql://synthetic:synthetic@127.0.0.1/synthetic"
+            "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
         )
         blocked = (
             "rag_engine.governed_memory_provider_v1",

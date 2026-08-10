@@ -252,6 +252,18 @@ class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
                     "injection_manifest_sha256"
                 ],
             },
+            {
+                "binding_id": UUID(
+                    "77777777-7777-4777-8777-777777777777"
+                ),
+                "selection_manifest_sha256": binding[
+                    "selection_manifest_sha256"
+                ],
+                "injection_manifest_sha256": binding[
+                    "injection_manifest_sha256"
+                ],
+                "unexpected_compatibility_field": "legacy",
+            },
         ):
             with self.subTest(receipt=receipt):
                 repository = _TestablePostgresSuccessorResponseRepository(

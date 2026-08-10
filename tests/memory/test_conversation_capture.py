@@ -28,7 +28,11 @@ from rag_engine.governed_memory.conversation_capture import (
     normalize_capture_text,
 )
 from rag_engine.governed_memory.eligibility import EligibilityPolicy
-from rag_engine.governed_memory.exclusive_cutover import EXCLUSIVE_MODE_ENV
+from rag_engine.governed_memory import exclusive_cutover
+from rag_engine.governed_memory.exclusive_cutover import (
+    EXCLUSIVE_MODE_ENV,
+    ExclusiveMemoryMode,
+)
 
 
 OWNER_A = UUID("11111111-1111-4111-8111-111111111111")
@@ -478,17 +482,24 @@ _APP_RUNTIME_AVAILABLE = all(
 class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "POSTGRES_DSN": (
-                    "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
-                ),
-                EXCLUSIVE_MODE_ENV: "successor_pilot",
-                CAPTURE_MODE_ENV: "pilot",
-                CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
-            },
-            clear=False,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "POSTGRES_DSN": (
+                        "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
+                    ),
+                    EXCLUSIVE_MODE_ENV: "successor_pilot",
+                    CAPTURE_MODE_ENV: "pilot",
+                    CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+                },
+                clear=False,
+            ),
+            patch.object(
+                exclusive_cutover,
+                "EXCLUSIVE_MEMORY_MODE",
+                ExclusiveMemoryMode.SUCCESSOR_PILOT,
+            ),
         ):
             cls.backend_app = importlib.import_module("app")
 

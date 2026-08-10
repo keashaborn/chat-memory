@@ -170,6 +170,14 @@ class PostgresSuccessorResponseRepository:
                     "response_memory_binding_receipt_missing"
                 )
             receipt = dict(row)
+            if set(receipt) != {
+                "binding_id",
+                "selection_manifest_sha256",
+                "injection_manifest_sha256",
+            }:
+                raise SuccessorResponsePostgresError(
+                    "response_memory_binding_receipt_invalid"
+                )
             try:
                 require_uuid(
                     receipt.get("binding_id"),
