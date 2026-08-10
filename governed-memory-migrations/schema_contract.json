@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-schema-contract-v5",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "database": "governed_memory",
   "schemas": [
     "memory",
@@ -99,8 +99,21 @@
     "audit_event",
     "claim_deletion_receipt"
   ],
+  "worker_scheduler": {
+    "sequence": "memory_private.worker_lane_sequence",
+    "function": "memory_private.next_worker_lane()",
+    "lane_order": [
+      "bridge",
+      "extraction",
+      "projection"
+    ],
+    "content_free": true,
+    "direct_runtime_sequence_privileges": false,
+    "advance_once_per_locked_invocation": true
+  },
   "function_surface": [
     "memory_private.current_owner_id()",
+    "memory_private.next_worker_lane()",
     "memory_private.record_selected_evidence(uuid,uuid,text,uuid,uuid,uuid,text,text,text,integer,integer,uuid,text,timestamptz,text,text,text)",
     "memory_private.read_ingest_receipt(uuid,uuid,text)",
     "memory_private.lease_extraction_jobs(text,integer,integer,text,text,text,text,text,text,integer,integer)",
@@ -186,7 +199,7 @@
         "proposal_review_cas": "Proposal hash, source hash, selected evidence hash, selection binding hash, predicate catalog semantic hash, exact decision, and canonical reason-code array must all match.",
     "semantic_identity": "SHA-256 of normalized subject key plus predicate plus structured object identity; correction may change object and therefore claim semantic key.",
     "read_claim_candidates": "Returns current owner-scoped authoritative claim and revision identity, lifecycle and policy state, catalog and evidence bindings, structured subject and object, deterministic retrieval text and retrieval_text_sha256, validity, and update time.",
-    "projection": "PostgreSQL is authoritative; Qdrant receives only the current admitted projectable revision and never source_sha256. Only a strictly lower projection sequence is superseded automatically. Cold rebuild rows require the current active projectable claim, its current revision, and the exact applied upsert outbox receipt and manifest; Qdrant cannot seed rebuild truth.",
+    "projection": "PostgreSQL is authoritative; Qdrant receives only the current admitted projectable revision and never source_sha256. The worker lease returns one exact closed authoritative claim, revision, outbox, structured subject/object, state hash, and projection identity contract. Only a strictly lower projection sequence is superseded automatically. Cold rebuild rows require the current active projectable claim, its current revision, and the exact applied upsert outbox receipt and manifest; Qdrant cannot seed rebuild truth.",
     "retrieval_score_gate": "Candidate scores are validated only to the closed normalized-dot interval and sorted deterministically. Production activation is blocked until a minimum semantic score is calibrated on an authorized holdout and bound into the retrieval policy.",
         "answer_binding": "The caller supplies claim ids, not revision ids. PostgreSQL derives exact current revision ids and hashes, reloads and renders the authorized records, persists the content-free retrieval policy envelope beside its recomputable hash, proves selection and injection manifests, rejects internal ids or hashes in provider-visible content, and persists only hashes and byte offsets after dispatch.",
         "answer_binding_retention": "Each terminal answer binding expires exactly 90 days after its one server-owned creation timestamp. A bounded worker purge first appends an exact content-free retention receipt, then deletes only that locked expired binding under a binding-specific local purge context. Exact answer replay is unavailable after retention purge.",
@@ -241,10 +254,17 @@
     "application_capture_authority": "supabase_access_token_v1",
     "worker_base_table_privileges": [],
     "writer_base_table_privileges": [],
-    "attachment_reads": false,
+    "attachment_reads": "existence_only_owner_thread_message_no_columns_returned",
+    "attachment_content_reads": false,
+    "attachment_presence_required_absent": true,
     "attachment_message_capture": false,
     "historical_scan_or_backfill": false,
     "operation_id_is_message_id": true,
+    "pilot_capture_limit_per_owner_rolling_24h": 20,
+    "pilot_capture_limit_count_scope": "all_outbox_states_by_source_created_at",
+    "pilot_capture_limit_lock": "owner_scoped_transaction_advisory_lock",
+    "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
+    "pilot_capture_replay_consumes_new_slot": false,
     "cutover": "The chat_log row source must be exactly frontend/chat:user, xmin must equal the enqueue transaction id, and created_at must exactly equal the enqueue transaction timestamp. Replay is possible only in that same transaction; committed, alternate-source, and historical rows cannot enqueue. ingest_after is database-owned and is not hash material.",
     "source_binding_domain": "governed_memory.bridge_source.v1",
     "source_binding_fields": [
@@ -285,6 +305,7 @@
     "content_hash_max_retention_hours": 24,
     "terminal_row_retention_days": 7,
     "review_context_behavior": "The first context-review mark changes count zero to one without releasing the lease. A second mark on count one terminalizes a content-free skipped row with context_review_unresolved.",
+    "phase6b_runtime_context_policy": "The inactive narrow pilot invokes two exact marks for a fresh count-zero item or one exact mark for a re-leased count-one item, then terminalizes review_context with zero successor, provider, embedding, or vector calls. No bounded assistant-context reader exists in Phase 6B.",
     "functions": [
       "memory_ingest_private.enqueue_chat_log_message(uuid,text)",
       "memory_ingest_private.lease_memory_ingest(text,integer,integer)",
@@ -498,8 +519,9 @@
       "successor_conversation_capture_not_activated",
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
-      "worker_cli_repository_transport_config_unwired",
-      "worker_cross_process_singleton_not_implemented",
+      "final_phase6b_runtime_rebuild_and_receipt_pending",
+      "phase6b_migration_contract_disposable_proof_pending",
+      "chat_deletion_memory_cancellation_coordination_not_implemented",
       "frontend_candidate_35a684_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"

@@ -81,7 +81,10 @@ BEGIN
       ('chat_log', 'text', 'text'),
       ('chat_log', 'created_at', 'timestamp with time zone'),
       ('threads', 'id', 'uuid'),
-      ('threads', 'owner_user_id', 'uuid')
+      ('threads', 'owner_user_id', 'uuid'),
+      ('chat_attachments', 'owner_user_id', 'uuid'),
+      ('chat_attachments', 'thread_id', 'uuid'),
+      ('chat_attachments', 'message_id', 'uuid')
     ) AS required(relation_name, column_name, type_name)
   LOOP
     IF NOT EXISTS (
@@ -628,7 +631,7 @@ BEGIN
   )::xid;
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(
-      actor::text || '|memory_ingest|' || p_message_id::text, 0
+      actor::text || '|memory_ingest|pilot_limit', 0
     )
   );
 
@@ -644,6 +647,13 @@ BEGIN
      OR source_row.created_at IS NULL
      OR source_row.source_xmin <> current_xid
      OR source_row.created_at <> captured_at
+     OR EXISTS (
+       SELECT 1
+       FROM public.chat_attachments AS attachment
+       WHERE attachment.owner_user_id = actor
+         AND attachment.thread_id = source_row.thread_id
+         AND attachment.message_id = p_message_id
+     )
      OR normalize(source_row.text, NFC) <> source_row.text THEN
     RAISE EXCEPTION 'message is not an NFC current-transaction chat row'
       USING ERRCODE = '22023';
@@ -677,6 +687,16 @@ BEGIN
         USING ERRCODE = '23514';
     END IF;
     RETURN QUERY SELECT 'replayed'::text, existing.outbox_id;
+    RETURN;
+  END IF;
+  IF (
+    SELECT pg_catalog.count(*)
+    FROM memory_ingest_private.memory_ingest_outbox AS value
+    WHERE value.owner_user_id = actor
+      AND value.source_created_at >= captured_at - interval '24 hours'
+      AND value.source_created_at <= captured_at
+  ) >= 20 THEN
+    RETURN QUERY SELECT 'pilot_limit_reached'::text, NULL::uuid;
     RETURN;
   END IF;
   new_outbox_id := pg_catalog.gen_random_uuid();
@@ -775,6 +795,13 @@ BEGIN
       AND value.available_at <= pg_catalog.clock_timestamp()
       AND value.content_hash_expires_at > pg_catalog.clock_timestamp()
       AND value.attempt_count < value.max_attempts
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.chat_attachments AS attachment
+        WHERE attachment.owner_user_id = value.owner_user_id
+          AND attachment.thread_id = value.thread_id
+          AND attachment.message_id = value.message_id
+      )
     ORDER BY value.available_at, value.source_created_at, value.outbox_id
     FOR UPDATE SKIP LOCKED
     LIMIT p_limit
@@ -866,6 +893,13 @@ BEGIN
      OR source_row.created_at IS NULL
      OR source_row.created_at <> target.source_created_at
      OR source_row.created_at < target.ingest_after
+     OR EXISTS (
+       SELECT 1
+       FROM public.chat_attachments AS attachment
+       WHERE attachment.owner_user_id = target.owner_user_id
+         AND attachment.thread_id = target.thread_id
+         AND attachment.message_id = target.message_id
+     )
      OR normalize(source_row.text, NFC) <> source_row.text
      OR target.exchange_id <> target.message_id
      OR target.window_id <> target.message_id

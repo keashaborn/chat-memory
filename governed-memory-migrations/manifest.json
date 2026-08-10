@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
   "candidate_id": "clean-governed-memory-successor-2026-08-10",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
     "production_service_change_authorized": false,
@@ -30,7 +30,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "ce42f4c466da533c3b5ba0e1ad1c585cb4835d5ac9ddb095b942a1f04f97bff2"
+      "sha256": "e2ef206c9d7e99c7d4800ed860c340a0f16b3dd3efe6671fda6093119217f85f"
     },
     {
       "path": "predicate_catalog.json",
@@ -38,15 +38,15 @@
     },
     {
       "path": "0001_foundation/package.json",
-      "sha256": "3efc7de48b24441fe27fa030957570b1ac4dca08a262157a924450d560e293be"
+      "sha256": "6744188b343ef446a805298e1e40bad8c72f0676097c476fc139764e12c5daff"
     },
     {
       "path": "0001_foundation/forward.pgsql",
-      "sha256": "6818557e6cb885e06368922e79e9a382f37cab66b1ea9e24f2f441d8acde0adc"
+      "sha256": "cd2cd27461b68bc3b0d6a3d131bc212ca19a258b0b7fcdc7cff70cb748858e60"
     },
     {
       "path": "0001_foundation/rollback.pgsql",
-      "sha256": "816b679cbc08e9abe14007be046504fc543909ac65822a91abb1f0573a77639c"
+      "sha256": "4fa80b952efe7ce6d41e2e675bba05c01e89639a46e85b7d2716652325e55446"
     },
     {
       "path": "0003_owner_claim_detail/package.json",
@@ -74,11 +74,11 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "3d9fd1947eda36f4620983bf9d188dcf2320291b055f9b67edb2b93631998984"
+      "sha256": "44eda0e1e93e7e2baa5e34f3bb760779b32b0d1d2913e229a810870e1e8da323"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-      "sha256": "2e3642977b5fdba40f161e67f775d4a504e01e347de51ac2ae7d5121513188cb"
+      "sha256": "d7fa0c4645de2b8c317e1035c70548ad78519d98d4176ecafcf5e2d30a966b30"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",
@@ -93,7 +93,7 @@
     "claim_detail_rollback_data_mutation": false,
     "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
-    "disposable_database_execution_performed": true,
+    "disposable_database_execution_performed": false,
     "production_database_execution_performed": false,
     "production_checkout_files_changed": false,
     "production_data_read": false,

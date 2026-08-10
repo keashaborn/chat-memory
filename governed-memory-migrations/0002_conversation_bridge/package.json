@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "memory",
@@ -20,7 +20,7 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "2e3642977b5fdba40f161e67f775d4a504e01e347de51ac2ae7d5121513188cb"
+    "sha256": "d7fa0c4645de2b8c317e1035c70548ad78519d98d4176ecafcf5e2d30a966b30"
   },
   "rollback": {
     "path": "rollback.pgsql",
@@ -41,6 +41,10 @@
     "forced_rls": true,
     "direct_runtime_table_access": false,
     "bounded_context_reviews": 1,
+    "pilot_capture_limit_per_owner_rolling_24h": 20,
+    "pilot_capture_limit_lock": "owner_scoped_transaction_advisory_lock",
+    "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
+    "pilot_capture_replay_consumes_new_slot": false,
     "cascade_ddl": false,
     "source_table": "public.chat_log",
     "source_row_capture": "same_transaction_only",
@@ -48,7 +52,9 @@
     "source_role": "literal_user",
     "source_value": "frontend/chat:user",
     "application_capture_authority": "supabase_access_token_v1",
-    "attachment_reads": false,
+    "attachment_reads": "existence_only_owner_thread_message_no_columns_returned",
+    "attachment_content_reads": false,
+    "attachment_presence_required_absent": true,
     "attachment_message_capture": false,
     "history_or_backfill_surface": false
   },
@@ -57,7 +63,7 @@
     "production_writer_membership_granted": false,
     "production_services_changed": false,
     "production_database_applied": false,
-    "disposable_writer_membership_validated": true,
-    "disposable_database_validated": true
+    "disposable_writer_membership_validated": false,
+    "disposable_database_validated": false
   }
 }

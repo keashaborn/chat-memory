@@ -27,6 +27,9 @@ BEGIN
 END;
 $preflight$;
 
+DROP FUNCTION memory_private.next_worker_lane();
+DROP SEQUENCE memory_private.worker_lane_sequence;
+
 DROP FUNCTION memory_private.record_answer_binding(
   uuid,uuid,uuid,text,text,text[],text[],text[],integer,integer,text,text,
   boolean,uuid[],uuid[],text,text,text,text,text

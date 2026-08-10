@@ -110,11 +110,19 @@ def expected_package_contracts(*, preliminary: bool) -> dict[str, dict[str, obje
     }
     if preliminary:
         for relative in (
-            "0003_owner_claim_detail/package.json",
-            "0004_pilot_marker/package.json",
+            "0001_foundation/package.json",
+            "0002_conversation_bridge/package.json",
         ):
             contracts[relative]["status"] = NOT_VALIDATED_STATUS
-            contracts[relative]["activation"]["disposable_database_validated"] = False
+            contracts[relative]["activation"][
+                "disposable_database_validated"
+            ] = False
+        contracts["0001_foundation/package.json"]["activation"][
+            "disposable_qdrant_validated"
+        ] = False
+        contracts["0002_conversation_bridge/package.json"]["activation"][
+            "disposable_writer_membership_validated"
+        ] = False
     return contracts
 
 

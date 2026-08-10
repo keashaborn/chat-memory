@@ -18,6 +18,41 @@ ALTER DEFAULT PRIVILEGES FOR ROLE governed_memory_owner IN SCHEMA memory
   REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE governed_memory_owner IN SCHEMA memory_private
   REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE governed_memory_owner IN SCHEMA memory_private
+  REVOKE ALL ON SEQUENCES FROM PUBLIC;
+
+CREATE SEQUENCE memory_private.worker_lane_sequence AS bigint
+  START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
+ALTER SEQUENCE memory_private.worker_lane_sequence
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON SEQUENCE memory_private.worker_lane_sequence
+  FROM PUBLIC, governed_memory_api, governed_memory_worker;
+
+CREATE FUNCTION memory_private.next_worker_lane()
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  cursor_value bigint;
+BEGIN
+  IF session_user <> 'governed_memory_worker' THEN
+    RAISE EXCEPTION 'worker role required' USING ERRCODE = '42501';
+  END IF;
+  cursor_value := pg_catalog.nextval(
+    'memory_private.worker_lane_sequence'::pg_catalog.regclass
+  );
+  RETURN (ARRAY['bridge', 'extraction', 'projection']::text[])[
+    (((cursor_value - 1) % 3) + 1)::integer
+  ];
+END;
+$function$;
+ALTER FUNCTION memory_private.next_worker_lane()
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION memory_private.next_worker_lane()
+  FROM PUBLIC, governed_memory_api, governed_memory_worker;
 
 CREATE FUNCTION memory_private.is_sorted_unique_allowlist(
   p_values text[],
@@ -8054,6 +8089,17 @@ RETURNS TABLE(
   valid_from timestamptz,
   valid_to timestamptz,
   claim_updated_at timestamptz,
+  state_sha256 text,
+  semantic_key_sha256 text,
+  claim_identity_sha256 text,
+  subject_entity_key text,
+  subject_entity_type text,
+  subject_display_name text,
+  object_kind text,
+  object_entity_key text,
+  object_entity_type text,
+  object_display_name text,
+  object_literal jsonb,
   lease_token uuid,
   lease_expires_at timestamptz
 )
@@ -8141,7 +8187,14 @@ BEGIN
            revision.requires_explicit, revision.projectable,
            revision.valid_from, revision.valid_to,
            claim.lifecycle_state, claim.current_revision_id,
-           claim.current_state_sha256, claim.updated_at AS claim_updated_at
+           claim.current_state_sha256, claim.semantic_key_sha256,
+           claim.claim_identity_sha256,
+           revision.subject_entity_key, revision.subject_entity_type,
+           revision.subject_display_name,
+           revision.object_kind, revision.object_entity_key,
+           revision.object_entity_type, revision.object_display_name,
+           revision.object_literal,
+           claim.updated_at AS claim_updated_at
     FROM memory.projection_outbox AS outbox
     JOIN memory.claim_revision AS revision
       ON revision.owner_user_id = outbox.owner_user_id
@@ -8238,6 +8291,13 @@ BEGIN
       CASE WHEN candidate.operation = 'upsert'
         THEN candidate.projectable ELSE false END,
       candidate.valid_from, candidate.valid_to, candidate.claim_updated_at,
+      candidate.current_state_sha256, candidate.semantic_key_sha256,
+      candidate.claim_identity_sha256,
+      candidate.subject_entity_key, candidate.subject_entity_type,
+      candidate.subject_display_name,
+      candidate.object_kind, candidate.object_entity_key,
+      candidate.object_entity_type, candidate.object_display_name,
+      candidate.object_literal,
       new_lease_token, new_lease_expires_at;
   END LOOP;
 END;
@@ -9494,6 +9554,7 @@ GRANT EXECUTE ON FUNCTION
 TO governed_memory_api;
 
 GRANT EXECUTE ON FUNCTION
+  memory_private.next_worker_lane(),
   memory_private.record_selected_evidence(
     uuid,uuid,text,uuid,uuid,uuid,text,text,text,integer,integer,uuid,text,
     timestamptz,text,text,text
@@ -9578,6 +9639,35 @@ BEGIN
         relation_name;
     END IF;
   END LOOP;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'memory_private'
+      AND relation.relname = 'worker_lane_sequence'
+      AND relation.relkind = 'S'
+      AND relation.relowner = 'governed_memory_owner'::regrole
+  ) OR pg_catalog.has_sequence_privilege(
+    'governed_memory_api',
+    'memory_private.worker_lane_sequence',
+    'USAGE'
+  ) OR pg_catalog.has_sequence_privilege(
+    'governed_memory_worker',
+    'memory_private.worker_lane_sequence',
+    'USAGE'
+  ) OR NOT pg_catalog.has_function_privilege(
+    'governed_memory_worker',
+    'memory_private.next_worker_lane()',
+    'EXECUTE'
+  ) OR pg_catalog.has_function_privilege(
+    'governed_memory_api',
+    'memory_private.next_worker_lane()',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'worker lane scheduler authority differs';
+  END IF;
 
   FOREACH forbidden_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
     IF pg_catalog.to_regrole(forbidden_role) IS NOT NULL AND EXISTS (

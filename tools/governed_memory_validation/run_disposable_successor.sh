@@ -31,7 +31,7 @@ readonly EXPECTED_BASE='43ba1839233781f231195c4ff5051794494148c6'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PRELIMINARY_PROOF_AUTHORIZATION_VALUE='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='baa817cc5f52a1237c5b168001bfd0c00fd7e0ea6cba5107505e25673aec8caa'
+readonly EXPECTED_MANIFEST_SHA256='ddf7e3e6c811c3736cbf7d02b2e6b79e1bc5f114d3ef33c631d6ce2ed8d582a3'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
@@ -188,6 +188,7 @@ import sys
 ALLOWED_NON_PYTHON_SOURCE_PATHS = {
     "provider_assets/extraction_instructions.txt",
     "provider_assets/extraction_output.schema.json",
+    "provider_assets/predicate_catalog.json",
 }
 
 
@@ -413,6 +414,7 @@ import sys
 ALLOWED_NON_PYTHON_SOURCE_PATHS = {
     "provider_assets/extraction_instructions.txt",
     "provider_assets/extraction_output.schema.json",
+    "provider_assets/predicate_catalog.json",
 }
 
 
