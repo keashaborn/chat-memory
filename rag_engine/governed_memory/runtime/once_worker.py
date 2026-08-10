@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 from uuid import UUID
 
 from ..contracts import ContractViolation, canonical_sha256, require_uuid
+from ..exclusive_cutover import EXCLUSIVE_MEMORY_MODE, ExclusiveMemoryMode
 from ..projection import build_projection_point, render_projection_surface
 from .qdrant_adapter import (
     QdrantDeleteReceipt,
@@ -108,7 +109,11 @@ class ExtractionProvider(Protocol):
 
 
 class EmbeddingProvider(Protocol):
-    async def embed(self, text: str) -> Sequence[float | int]: ...
+    async def embed(
+        self,
+        work: ProjectionUpsertWork,
+        text: str,
+    ) -> Sequence[float | int]: ...
 
 
 class WorkerQdrant(Protocol):
@@ -195,7 +200,7 @@ class OnceWorker:
                     preflight = await self._qdrant.preflight()
                     preflight_sha256 = preflight.receipt_sha256
                     embedding_input = render_projection_surface(work.claim)
-                    vector = await self._embedder.embed(embedding_input)
+                    vector = await self._embedder.embed(work, embedding_input)
                     point = build_projection_point(
                         work.claim,
                         work.outbox_record,
@@ -273,6 +278,9 @@ def main(
     values = environment if environment is not None else os.environ
     if values.get(WORKER_MODE_ENV, "off") != "on":
         _refusal("governed_memory_worker_disabled")
+        return 1
+    if EXCLUSIVE_MEMORY_MODE is not ExclusiveMemoryMode.SUCCESSOR_PILOT:
+        _refusal("governed_memory_worker_exclusive_mode_required")
         return 1
     runtime_refusal_type: type[Exception] | None = None
     if once_runner is None:

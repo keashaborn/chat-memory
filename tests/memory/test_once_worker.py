@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 from contextlib import redirect_stderr
 from io import StringIO
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import textwrap
 import unittest
 from uuid import UUID
 
@@ -81,10 +86,10 @@ class FakeProvider:
 
 class FakeEmbedder:
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[tuple[ProjectionUpsertWork, str]] = []
 
-    async def embed(self, text: str) -> object:
-        self.calls.append(text)
+    async def embed(self, work: ProjectionUpsertWork, text: str) -> object:
+        self.calls.append((work, text))
         return deterministic_vector()
 
 
@@ -298,33 +303,92 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
                 1,
             )
         self.assertIn(
-            "governed_memory_worker_configuration_invalid",
+            "governed_memory_worker_exclusive_mode_required",
             stderr.getvalue(),
         )
 
-    def test_injected_once_runner_is_called_exactly_once(self) -> None:
-        calls = 0
+    def _run_in_fresh_process(
+        self,
+        *,
+        exclusive_mode: str | None,
+    ) -> subprocess.CompletedProcess[str]:
+        script = textwrap.dedent(
+            """
+            from rag_engine.governed_memory.runtime.once_worker import main
 
-        async def run() -> object:
-            nonlocal calls
-            calls += 1
-            return object()
+            calls = 0
 
-        self.assertEqual(
-            main(
+            async def run():
+                global calls
+                calls += 1
+                return object()
+
+            result = main(
                 ["--once"],
-                environment={"GOVERNED_MEMORY_WORKER_MODE": "on"},
-                once_runner=run,  # type: ignore[arg-type]
-            ),
-            0,
+                environment={
+                    "GOVERNED_MEMORY_WORKER_MODE": "on",
+                    "GOVERNED_MEMORY_EXCLUSIVE_MODE": "successor_pilot",
+                },
+                once_runner=run,
+            )
+            expected_calls = 1 if result == 0 else 0
+            assert calls == expected_calls, (result, calls)
+            raise SystemExit(result)
+            """
         )
-        self.assertEqual(calls, 1)
+        environment = dict(os.environ)
+        if exclusive_mode is None:
+            environment.pop("GOVERNED_MEMORY_EXCLUSIVE_MODE", None)
+        else:
+            environment["GOVERNED_MEMORY_EXCLUSIVE_MODE"] = exclusive_mode
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def test_missing_or_legacy_process_mode_refuses_before_injected_runner(self) -> None:
+        expected = json.dumps(
+            {
+                "error": {
+                    "code": "governed_memory_worker_exclusive_mode_required"
+                },
+                "schema_version": "governed-memory-worker-refusal-v1",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for exclusive_mode in (None, "legacy"):
+            with self.subTest(exclusive_mode=exclusive_mode):
+                completed = self._run_in_fresh_process(
+                    exclusive_mode=exclusive_mode
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertEqual(completed.stdout, "")
+                self.assertEqual(completed.stderr, expected + "\n")
+
+    def test_exact_successor_process_mode_calls_injected_runner_once(self) -> None:
+        completed = self._run_in_fresh_process(
+            exclusive_mode="successor_pilot"
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=completed.stderr or completed.stdout,
+        )
+        self.assertEqual(completed.stdout, "")
+        self.assertEqual(completed.stderr, "")
 
     def test_systemd_artifact_is_dormant_one_shot_and_not_installable(self) -> None:
         unit = UNIT.read_text(encoding="utf-8")
         self.assertIn("Type=oneshot", unit)
         self.assertIn("Restart=no", unit)
         self.assertIn("GOVERNED_MEMORY_WORKER_MODE=off", unit)
+        self.assertIn("GOVERNED_MEMORY_EXCLUSIVE_MODE=legacy", unit)
         self.assertIn("runtime.once_worker --once", unit)
         self.assertEqual(
             tuple(

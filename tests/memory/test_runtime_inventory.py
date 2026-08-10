@@ -41,6 +41,11 @@ RELEASE_TOOLS = ROOT / "tools" / "governed_memory_release"
 CLEAN_SUCCESSOR_DOCS = ROOT / "docs" / "memory" / "clean_successor"
 RUNTIME_PACKAGES = VALIDATION_TOOLS / "runtime_packages.json"
 RUNTIME_BUILD_RECEIPT = ROOT / "ops" / "governed_memory" / "runtime_build_receipt.json"
+HISTORICAL_PHASE5 = ROOT / "ops" / "governed_memory" / "history" / "phase5"
+HISTORICAL_RUNTIME_BUILD_RECEIPT = HISTORICAL_PHASE5 / "runtime_build_receipt.json"
+HISTORICAL_DISPOSABLE_PROOF_RECEIPT = (
+    HISTORICAL_PHASE5 / "disposable_proof_receipt.json"
+)
 
 EXPECTED_PACKAGE_FILES = {
     "__init__.py",
@@ -116,8 +121,8 @@ EXPECTED_TEST_FILES = {
     "test_lifecycle.py",
     "test_openai_adapters.py",
     "test_once_worker.py",
-    "test_phase5_auth_claim_artifacts.py",
-    "test_phase5_build_provenance.py",
+    "test_auth_claim_artifacts.py",
+    "test_build_provenance.py",
     "test_pilot_marker.py",
     "test_projection.py",
     "test_prompt_and_binding.py",
@@ -207,7 +212,7 @@ EXPECTED_BUILD_LOCK_SHA256 = (
 EXPECTED_PACKAGE_SOURCE_TREE_SHA256 = _package_source_tree_sha256(PACKAGE)
 EXPECTED_SOURCE_TREE_SHA256 = _source_tree_sha256()
 EXPECTED_CANDIDATE_PYTHON = (
-    "/tmp/governed-memory-phase5-runtime-"
+    "/tmp/governed-memory-successor-runtime-"
     f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_SOURCE_TREE_SHA256}/bin/python"
 )
 RECORDED_SOURCE_TREE_SHA256 = (
@@ -243,7 +248,8 @@ class RuntimeManifestTests(unittest.TestCase):
     def test_candidate_is_explicitly_uninstalled_and_content_free(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
-            manifest["schema_version"], "governed-memory-runtime-manifest-v5"
+            manifest["schema_version"],
+            "governed-memory-successor-runtime-manifest-v1",
         )
         self.assertEqual(
             manifest["phase"],
@@ -283,8 +289,9 @@ class RuntimeManifestTests(unittest.TestCase):
                 "worker_base_conversation_table_select": False,
                 "phase6b_context_required_policy": (
                     "fresh_count_zero_two_exact_marks_re_leased_count_one_one_"
-                    "exact_mark_then_terminal_unresolved_zero_successor_provider_"
-                    "embedding_vector_calls"
+                    "exact_mark_then_terminal_unresolved_one_receipt_only_"
+                    "successor_read_zero_successor_writes_provider_embedding_"
+                    "vector_calls"
                 ),
                 "attachment_invariant": (
                     "enqueue_lease_and_source_read_require_no_owner_thread_"
@@ -296,9 +303,11 @@ class RuntimeManifestTests(unittest.TestCase):
                     "adapter_tested_inactive_disposable_proof_pending"
                 ),
                 "qdrant_unavailable_policy": (
-                    "canonical_postgresql_intake_continues_under_persistent_"
-                    "fair_one_item_scheduler_and_twenty_message_pilot_cap_"
-                    "projection_backlog_retryable"
+                    "predispatch_qdrant_unavailability_retryable_post_embedding_"
+                    "dispatch_failure_terminal_without_embedding_resend_"
+                    "canonical_postgresql_claim_retained_later_same_claim_"
+                    "projection_blocked_explicit_projection_reconciliation_"
+                    "required"
                 ),
             },
         )
@@ -309,8 +318,8 @@ class RuntimeManifestTests(unittest.TestCase):
                 "authority", "infrastructure", "http_runtime", "activation",
                 "release_guard", "ingestion", "worker_adapters", "provider_policy",
                 "disposable_validation", "owner_routes", "prohibited_routes",
-                "calibration", "frontend_candidate", "legacy_imports_allowed",
-                "production_state_changed",
+                "calibration", "frontend_candidate", "historical_evidence",
+                "legacy_imports_allowed", "production_state_changed",
             },
         )
 
@@ -365,7 +374,8 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(adapters["provider"], "strict_fake_tested_zero_real_calls")
         self.assertEqual(
             adapters["embedding"],
-            "strict_3072_fake_tested_zero_real_calls",
+            "strict_3072_fake_tested_durable_request_dispatch_marker_"
+            "implemented_disposable_proof_pending_zero_real_calls",
         )
         self.assertEqual(
             adapters["qdrant"],
@@ -382,7 +392,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             adapters["conversation_bridge"],
-            "two_database_rpc_only_persistently_fair_one_item_context_terminal_zero_call_focused_unit_tested_inactive",
+            "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_focused_unit_tested_inactive",
         )
         self.assertEqual(
             adapters["scheduler"],
@@ -397,10 +407,11 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertEqual(
             validation["evidence_status"],
-            "prior_phase5_disposable_proof_stale_after_phase6b_source_change",
+            "phase6b_disposable_proof_pending",
         )
-        self.assertFalse(validation["current_phase5_full_proof_complete"])
-        self.assertFalse(validation["prior_receipt_reusable_for_current_source"])
+        self.assertFalse(validation["current_full_proof_complete"])
+        self.assertIsNone(validation["current_candidate_python"])
+        self.assertIsNone(validation["current_proof_receipt"])
         self.assertTrue(validation["final_resources_absent"])
         self.assertTrue(validation["resource_cleanup_complete"])
         self.assertFalse(validation["all_owner_routes_invoked"])
@@ -423,46 +434,16 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertFalse(validation["semantic_threshold_calibrated"])
         self.assertFalse(validation["persistent_resources_created"])
         self.assertEqual(
-            validation["proof_receipt"],
+            manifest["historical_evidence"],
             {
-                "schema_version": "governed-memory-successor-disposable-run-v4",
-                "result": "passed",
-                "attested_candidate_head": (
-                    "699c80761065d19832d2c0f3b2b50342a5a8350c"
+                "phase5_runtime_build_receipt": (
+                    "ops/governed_memory/history/phase5/runtime_build_receipt.json"
                 ),
-                "attested_candidate_tree": (
-                    "c5c13579ffa54da4f30fc198254c98b662c7029b"
+                "phase5_disposable_proof_receipt": (
+                    "ops/governed_memory/history/phase5/disposable_proof_receipt.json"
                 ),
-                "attested_pre_promotion_manifest_sha256": (
-                    "2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45"
-                ),
-                "invocation_id": "ac6e240b-1b9e-4442-a592-2b4d1c2e8492",
-                "postgres_server_version": "16.14",
-                "qdrant_server_version": "1.19.0",
-                "connect_trace_sha256": (
-                    "b054ede64b1f16ce694d110e5d69e4635db41d0f6f2348102d880df8f54338c3"
-                ),
-                "foundation_logical_dump_sha256": (
-                    "852c37925e3a4fc424d4f06456d053bafff3ba8461261303da66b312111c6923"
-                ),
-                "bridge_logical_dump_sha256": (
-                    "c4f802917f69244d6d27cf9bd9e55947e312f22aa9e34fcffe52d4486f09539d"
-                ),
-                "integration_receipt_sha256": (
-                    "6479f3f0feb8f155754edd3467b8c80f043ae47a19f11ddc459f5c3896fe4c37"
-                ),
-                "provider_external_calls": 0,
-                "semantic_threshold_calibrated": False,
-                "resources_removed": True,
+                "reusable_for_current_candidate": False,
             },
-        )
-        self.assertEqual(
-            validation["preproof_corrections"],
-            [
-                "pilot_marker_on_conflict_out_variable_ambiguity_fixed_with_named_constraint",
-                "validation_schema_inventory_staleness_fixed_before_passing_run",
-                "qdrant_invalid_alias_endpoint_fixed_and_disposable_v1_19_0_verified_only",
-            ],
         )
         self.assertFalse(manifest["activation"]["production_authorized"])
         self.assertTrue(
@@ -484,7 +465,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertFalse(http_runtime["supabase_auth_sessions_rpc_live_verified"])
         self.assertTrue(http_runtime["owner_claim_fact_detail_implemented"])
-        self.assertTrue(
+        self.assertFalse(
             http_runtime["owner_claim_fact_detail_disposable_proof_complete"]
         )
         self.assertIn(
@@ -528,7 +509,7 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             manifest["frontend_candidate"],
             {
-                "git_commit_short": "35a684",
+                "git_commit_short": "6d80ba",
                 "built": True,
                 "deployed": False,
                 "authenticated_visual_qa_complete": False,
@@ -576,28 +557,16 @@ class RuntimeManifestTests(unittest.TestCase):
                 "manifest": "tools/governed_memory_validation/runtime_packages.json",
                 "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
                 "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
-                "source_tree_sha256": RECORDED_SOURCE_TREE_SHA256,
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-                "candidate_python": RECORDED_CANDIDATE_PYTHON,
-                "receipt_scope": (
-                    "prior_phase5_source_not_reusable_after_phase6b_integration"
-                ),
-                "current_phase5_source_bound": False,
+                "current_source_tree_sha256": None,
+                "current_candidate_python": None,
+                "current_source_bound": False,
                 "final_phase6b_runtime_rebuild_pending": True,
-                "candidate_owned_environment": True,
-                "install_lock": True,
-                "build_lock_verified": True,
-                "isolated_wheel_build_verified": True,
-                "isolated_project_install_verified": True,
-                "runtime_package_count": 19,
-                "candidate_python_is_symlink": False,
-                "pip_present": False,
-                "setuptools_present": False,
-                "wheel_present": False,
-                "user_site_enabled": False,
-                "legacy_environment_imported": False,
-                "final_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
+                "current_build_receipt": (
+                    "ops/governed_memory/runtime_build_receipt.json"
+                ),
+                "current_build_receipt_present": False,
             },
         )
         self.assertNotIn(
@@ -610,9 +579,12 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
         self.assertEqual(hashlib.sha256(BUILD_LOCK.read_bytes()).hexdigest(), EXPECTED_BUILD_LOCK_SHA256)
-        self.assertTrue(RUNTIME_BUILD_RECEIPT.is_file())
-        self.assertFalse(RUNTIME_BUILD_RECEIPT.is_symlink())
-        build_receipt = json.loads(RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii"))
+        self.assertFalse(RUNTIME_BUILD_RECEIPT.exists())
+        self.assertTrue(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_file())
+        self.assertFalse(HISTORICAL_RUNTIME_BUILD_RECEIPT.is_symlink())
+        build_receipt = json.loads(
+            HISTORICAL_RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
+        )
         self.assertEqual(
             build_receipt["candidate_python"],
             RECORDED_CANDIDATE_PYTHON,
@@ -628,6 +600,16 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertNotEqual(
             RECORDED_SOURCE_TREE_SHA256,
             EXPECTED_SOURCE_TREE_SHA256,
+        )
+        historical_proof = json.loads(
+            HISTORICAL_DISPOSABLE_PROOF_RECEIPT.read_text(encoding="ascii")
+        )
+        self.assertEqual(historical_proof["phase"], "phase5")
+        self.assertFalse(historical_proof["reusable_for_current_candidate"])
+        self.assertEqual(historical_proof["proof_receipt"]["result"], "passed")
+        self.assertEqual(
+            historical_proof["proof_receipt"]["provider_external_calls"],
+            0,
         )
 
     def test_schema_validation_scope_is_versionless_and_exact(self) -> None:
@@ -881,13 +863,15 @@ class SourceInventoryTests(unittest.TestCase):
         self.assertEqual(runner.count("readonly EXPECTED_MANIFEST_SHA256="), 1)
         self.assertIn(binding, runner)
 
-    def test_disposable_runner_uses_phase5_and_exact_provider_asset_allowlist(self) -> None:
+    def test_disposable_runner_uses_successor_runtime_and_exact_provider_asset_allowlist(self) -> None:
         runner = (VALIDATION_TOOLS / "run_disposable_successor.sh").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("governed-memory-phase4-", runner)
-        self.assertIn("governed-memory-phase5-runtime-", runner)
-        self.assertIn("governed-memory-phase5-build-", runner)
+        self.assertNotIn("governed-memory-phase5-runtime-", runner)
+        self.assertNotIn("governed-memory-phase5-build-", runner)
+        self.assertIn("governed-memory-successor-runtime-", runner)
+        self.assertIn("governed-memory-successor-build-", runner)
         for relative in sorted(PROVIDER_ASSET_SOURCE_PATHS):
             with self.subTest(relative=relative):
                 self.assertEqual(runner.count(f'"{relative}"'), 2)
@@ -902,7 +886,7 @@ class SourceInventoryTests(unittest.TestCase):
         }
         self.assertEqual(observed, EXPECTED_CLEAN_SUCCESSOR_DOC_FILES)
 
-    def test_phase5_release_docs_and_contracts_have_no_stale_phase4_claims(
+    def test_successor_release_docs_and_contracts_have_no_stale_active_claims(
         self,
     ) -> None:
         paths = [
@@ -918,6 +902,7 @@ class SourceInventoryTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertNotIn("Phase 4", text)
                 self.assertNotIn("phase4", text)
+                self.assertNotIn("current_phase5", text)
                 self.assertNotIn("v1.11.0", text)
                 self.assertNotIn("owner_claim_fact_detail_api_not_implemented", text)
                 self.assertNotIn(
@@ -1064,15 +1049,9 @@ class SourceInventoryTests(unittest.TestCase):
             "validation_runtime"
         ]
         if runtime["final_phase6b_runtime_rebuild_pending"]:
-            self.assertFalse(runtime["current_phase5_source_bound"])
-            self.assertEqual(
-                runtime["source_tree_sha256"],
-                RECORDED_SOURCE_TREE_SHA256,
-            )
-            self.assertNotEqual(
-                runtime["source_tree_sha256"],
-                EXPECTED_SOURCE_TREE_SHA256,
-            )
+            self.assertFalse(runtime["current_source_bound"])
+            self.assertIsNone(runtime["current_source_tree_sha256"])
+            self.assertIsNone(runtime["current_candidate_python"])
             return
         probe = """
 import hashlib

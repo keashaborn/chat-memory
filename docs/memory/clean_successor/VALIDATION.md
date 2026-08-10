@@ -84,6 +84,9 @@ The passing run proved:
 - final resource absence plus unchanged HEAD/tree at completion.
 
 Strict provider and 3072 embedding adapters are currently fake-tested only.
+The embedding path now requires a durable content-free request marker before
+HTTP dispatch and terminalizes marked lease expiry or unresolved post-dispatch
+Qdrant failure rather than resending the embedding request.
 The disposable run must continue to make zero real provider calls unless a
 separate scoped authorization explicitly changes that boundary.
 
@@ -91,7 +94,7 @@ Calibration is independently bound by expected artifact and approval-receipt
 SHA-256 values. The checked-in artifact remains unapproved; retrieval must stay
 off throughout this run.
 
-Frontend candidate `35a684` is built but undeployed. Disposable backend proof
+Frontend candidate `6d80ba` is built but undeployed. Disposable backend proof
 does not substitute for authenticated visual QA.
 
 ## Phase 6B proof still required

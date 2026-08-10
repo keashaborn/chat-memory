@@ -117,7 +117,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertNotEqual(first_root, second_root)
             self.assertEqual(
                 str(second_root),
-                f"/tmp/governed-memory-phase5-runtime-{'a' * 64}-{second}",
+                f"/tmp/governed-memory-successor-runtime-{'a' * 64}-{second}",
             )
 
             first_asset = package / sorted(PROVIDER_ASSET_SOURCE_PATHS)[0]
@@ -314,7 +314,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             contract["candidate_implementation_status"][
                 "owner_claim_fact_detail"
             ],
-            "implemented_candidate_disposable_proof_passed_not_production_applied",
+            "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["qdrant_adapter"],
@@ -322,28 +322,28 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["pilot_marker"],
-            "implemented_disposable_proof_passed_not_production_applied",
+            "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
         )
         self.assertTrue(contract["qdrant"]["real_disposable_compatibility_verified"])
         self.assertFalse(contract["qdrant"]["persistent_pilot_approved"])
         self.assertNotIn(
             "owner_claim_fact_detail_api_not_implemented",
-            contract["create_policy"]["unresolved_activation_blockers"],
+            contract["create_policy"]["unresolved_creation_prerequisites"],
         )
         self.assertIn(
             "final_phase6b_runtime_rebuild_and_receipt_pending",
-            contract["create_policy"]["unresolved_activation_blockers"],
+            contract["create_policy"]["unresolved_creation_prerequisites"],
         )
         self.assertNotIn(
             "qdrant_v1_19_0_real_disposable_compatibility_pending",
-            contract["create_policy"]["unresolved_activation_blockers"],
+            contract["create_policy"]["unresolved_creation_prerequisites"],
         )
         self.assertNotIn(
             "pilot_marker_disposable_proof_pending",
-            contract["create_policy"]["unresolved_activation_blockers"],
+            contract["create_policy"]["unresolved_creation_prerequisites"],
         )
         self.assertEqual(
-            contract["cleanup_policy"]["unresolved_activation_blockers"],
+            contract["cleanup_policy"]["unresolved_cleanup_prerequisites"],
             [],
         )
         self.assertFalse(
@@ -400,13 +400,17 @@ class ReleaseArtifactTests(unittest.TestCase):
             "final_phase6b_runtime_rebuild_and_receipt_pending",
             pilot["start_blockers"],
         )
+        self.assertIn(
+            "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
+            pilot["start_blockers"],
+        )
         self.assertEqual(
             pilot["provider_policy"]["provider_adapter_status"],
             "strict_fake_tested_zero_real_calls",
         )
         self.assertEqual(
             pilot["provider_policy"]["embedding_adapter_status"],
-            "strict_3072_fake_tested_zero_real_calls",
+            "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls",
         )
         self.assertEqual(
             pilot["provider_policy"]["qdrant_adapter_status"],
@@ -414,15 +418,15 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["owner_claim_fact_detail"],
-            "implemented_candidate_disposable_proof_passed_not_production_applied",
+            "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["pilot_marker"],
-            "implemented_disposable_proof_passed_not_production_applied",
+            "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["frontend"],
-            "35a684_built_undeployed_visual_qa_pending",
+            "6d80ba_built_undeployed_visual_qa_pending",
         )
 
     def test_receipt_schema_is_closed_and_content_free(self) -> None:

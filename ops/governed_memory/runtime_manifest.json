@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-runtime-manifest-v5",
+  "schema_version": "governed-memory-successor-runtime-manifest-v1",
   "phase": "phase6b_inactive_worker_composed_activation_blocked",
   "python_runtime": {
     "implementation": "CPython",
@@ -11,26 +11,14 @@
     "manifest": "tools/governed_memory_validation/runtime_packages.json",
     "runtime_lock": "ops/governed_memory/runtime-requirements.lock",
     "runtime_lock_sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
-    "source_tree_sha256": "af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b",
     "build_lock": "ops/governed_memory/build-requirements.lock",
     "build_lock_sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
-    "candidate_python": "/tmp/governed-memory-phase5-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b/bin/python",
-    "receipt_scope": "prior_phase5_source_not_reusable_after_phase6b_integration",
-    "current_phase5_source_bound": false,
+    "current_source_tree_sha256": null,
+    "current_candidate_python": null,
+    "current_source_bound": false,
     "final_phase6b_runtime_rebuild_pending": true,
-    "candidate_owned_environment": true,
-    "install_lock": true,
-    "build_lock_verified": true,
-    "isolated_wheel_build_verified": true,
-    "isolated_project_install_verified": true,
-    "runtime_package_count": 19,
-    "candidate_python_is_symlink": false,
-    "pip_present": false,
-    "setuptools_present": false,
-    "wheel_present": false,
-    "user_site_enabled": false,
-    "legacy_environment_imported": false,
-    "final_build_receipt": "ops/governed_memory/runtime_build_receipt.json"
+    "current_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
+    "current_build_receipt_present": false
   },
   "authority": {
     "database": "governed_memory",
@@ -78,7 +66,7 @@
     "strict_session_id_auth_sessions_policy_decided": true,
     "owner_claim_fact_detail_implemented": true,
     "owner_claim_fact_detail_candidate_tests_passed": true,
-    "owner_claim_fact_detail_disposable_proof_complete": true,
+    "owner_claim_fact_detail_disposable_proof_complete": false,
     "profile_metadata_authority": false
   },
   "activation": {
@@ -110,10 +98,11 @@
       "successor_conversation_capture_not_activated",
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
+      "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
       "final_phase6b_runtime_rebuild_and_receipt_pending",
       "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
-      "frontend_candidate_35a684_undeployed_visual_qa_pending",
+      "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
     ]
@@ -134,21 +123,21 @@
     "attachment_content_release_1": false,
     "requires_post_cutover_user_message": true,
     "worker_base_conversation_table_select": false,
-    "phase6b_context_required_policy": "fresh_count_zero_two_exact_marks_re_leased_count_one_one_exact_mark_then_terminal_unresolved_zero_successor_provider_embedding_vector_calls",
+    "phase6b_context_required_policy": "fresh_count_zero_two_exact_marks_re_leased_count_one_one_exact_mark_then_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
     "attachment_invariant": "enqueue_lease_and_source_read_require_no_owner_thread_message_attachment_row",
     "pilot_capture_limit": "owner_locked_twenty_rows_all_states_rolling_24h_exact_replay_no_new_slot_typed_limit_result_focused_static_and_adapter_tested_inactive_disposable_proof_pending",
-    "qdrant_unavailable_policy": "canonical_postgresql_intake_continues_under_persistent_fair_one_item_scheduler_and_twenty_message_pilot_cap_projection_backlog_retryable"
+    "qdrant_unavailable_policy": "predispatch_qdrant_unavailability_retryable_post_embedding_dispatch_failure_terminal_without_embedding_resend_canonical_postgresql_claim_retained_later_same_claim_projection_blocked_explicit_projection_reconciliation_required"
   },
   "worker_adapters": {
     "provider": "strict_fake_tested_zero_real_calls",
-    "embedding": "strict_3072_fake_tested_zero_real_calls",
+    "embedding": "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls",
     "qdrant": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
     "algorithm": "implemented_fake_tested",
     "cli_composition": "implemented_inactive_focused_unit_tested",
     "repository": "implemented_static_sql_focused_unit_tested_disposable_proof_pending",
     "transport": "implemented_exact_target_focused_unit_tested_zero_live_calls",
     "configuration": "implemented_fail_closed_exact_two_dsn_and_expected_pilot_identity_focused_unit_tested",
-    "conversation_bridge": "two_database_rpc_only_persistently_fair_one_item_context_terminal_zero_call_focused_unit_tested_inactive",
+    "conversation_bridge": "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_focused_unit_tested_inactive",
     "scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_focused_unit_tested_disposable_proof_pending",
     "cross_process_singleton": "postgresql_session_advisory_lock_implemented_focused_unit_tested"
   },
@@ -160,12 +149,11 @@
   },
   "disposable_validation": {
     "scope": "successor_disposable_only",
-    "evidence_status": "prior_phase5_disposable_proof_stale_after_phase6b_source_change",
-    "current_phase5_full_proof_complete": false,
-    "prior_receipt_reusable_for_current_source": false,
+    "evidence_status": "phase6b_disposable_proof_pending",
+    "current_full_proof_complete": false,
     "validation_document": "docs/memory/clean_successor/VALIDATION.md",
     "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
-    "candidate_python": "/tmp/governed-memory-phase5-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b/bin/python",
+    "current_candidate_python": null,
     "postgresql_fresh_empty": false,
     "qdrant_fresh_empty": false,
     "migration_forward_rollback_reapply": false,
@@ -197,28 +185,7 @@
     "persistent_resources_created": false,
     "final_resources_absent": true,
     "resource_cleanup_complete": true,
-    "proof_receipt": {
-      "schema_version": "governed-memory-successor-disposable-run-v4",
-      "result": "passed",
-      "attested_candidate_head": "699c80761065d19832d2c0f3b2b50342a5a8350c",
-      "attested_candidate_tree": "c5c13579ffa54da4f30fc198254c98b662c7029b",
-      "attested_pre_promotion_manifest_sha256": "2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45",
-      "invocation_id": "ac6e240b-1b9e-4442-a592-2b4d1c2e8492",
-      "postgres_server_version": "16.14",
-      "qdrant_server_version": "1.19.0",
-      "connect_trace_sha256": "b054ede64b1f16ce694d110e5d69e4635db41d0f6f2348102d880df8f54338c3",
-      "foundation_logical_dump_sha256": "852c37925e3a4fc424d4f06456d053bafff3ba8461261303da66b312111c6923",
-      "bridge_logical_dump_sha256": "c4f802917f69244d6d27cf9bd9e55947e312f22aa9e34fcffe52d4486f09539d",
-      "integration_receipt_sha256": "6479f3f0feb8f155754edd3467b8c80f043ae47a19f11ddc459f5c3896fe4c37",
-      "provider_external_calls": 0,
-      "semantic_threshold_calibrated": false,
-      "resources_removed": true
-    },
-    "preproof_corrections": [
-      "pilot_marker_on_conflict_out_variable_ambiguity_fixed_with_named_constraint",
-      "validation_schema_inventory_staleness_fixed_before_passing_run",
-      "qdrant_invalid_alias_endpoint_fixed_and_disposable_v1_19_0_verified_only"
-    ]
+    "current_proof_receipt": null
   },
   "calibration": {
     "approval_binding": "independent_expected_artifact_and_approval_receipt_sha256",
@@ -226,10 +193,15 @@
     "retrieval_enabled": false
   },
   "frontend_candidate": {
-    "git_commit_short": "35a684",
+    "git_commit_short": "6d80ba",
     "built": true,
     "deployed": false,
     "authenticated_visual_qa_complete": false
+  },
+  "historical_evidence": {
+    "phase5_runtime_build_receipt": "ops/governed_memory/history/phase5/runtime_build_receipt.json",
+    "phase5_disposable_proof_receipt": "ops/governed_memory/history/phase5/disposable_proof_receipt.json",
+    "reusable_for_current_candidate": false
   },
   "owner_routes": [
     "GET /memory/status",

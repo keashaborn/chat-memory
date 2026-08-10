@@ -146,6 +146,67 @@ $function$;
 REVOKE ALL ON FUNCTION memory_private.framed_utf8_field(text,text)
   FROM PUBLIC;
 
+CREATE FUNCTION memory_private.embedding_request_body_sha256(p_input text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SECURITY INVOKER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    '{"dimensions":3072,"encoding_format":"float","input":['
+      || pg_catalog.to_json(p_input)::text
+      || '],"model":"text-embedding-3-large"}',
+    'UTF8'
+  )), 'hex')
+$function$;
+REVOKE ALL ON FUNCTION memory_private.embedding_request_body_sha256(text)
+  FROM PUBLIC;
+
+DO $embedding_request_body_hash_self_check$
+BEGIN
+  IF memory_private.embedding_request_body_sha256(
+       'synthetic canonical relational fact'
+     ) <> 'acfdbf52a9201f941fcd897bc6b6a303e2c7e4f6820e9aa0465b01cc8a06ca54'
+  THEN
+    RAISE EXCEPTION 'embedding request body hash self-check failed';
+  END IF;
+END;
+$embedding_request_body_hash_self_check$;
+
+CREATE FUNCTION memory_private.embedding_request_sha256(
+  p_operation text,
+  p_model text,
+  p_endpoint_sha256 text,
+  p_input_sha256 text,
+  p_request_body_sha256 text
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SECURITY INVOKER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.embedding_request.v1' || E'\n'
+      || memory_private.framed_utf8_field('operation', p_operation)
+      || memory_private.framed_utf8_field('model', p_model)
+      || memory_private.framed_utf8_field(
+           'endpoint_sha256', p_endpoint_sha256
+         )
+      || memory_private.framed_utf8_field('input_sha256', p_input_sha256)
+      || memory_private.framed_utf8_field(
+           'request_body_sha256', p_request_body_sha256
+         ),
+    'UTF8'
+  )), 'hex')
+$function$;
+REVOKE ALL ON FUNCTION memory_private.embedding_request_sha256(
+  text,text,text,text,text
+) FROM PUBLIC;
+
 CREATE FUNCTION memory_private.timestamp_epoch_us(p_value timestamptz)
 RETURNS text
 LANGUAGE sql
@@ -2689,6 +2750,9 @@ CREATE TABLE memory.projection_outbox (
   claimed_by text,
   claimed_at timestamptz,
   lease_expires_at timestamptz,
+  embedding_request_sha256 text,
+  embedding_dispatch_lease_token uuid,
+  embedding_dispatched_at timestamptz,
   physical_collection_name text,
   vector_sha256 text,
   verification_sha256 text,
@@ -2722,6 +2786,10 @@ CREATE TABLE memory.projection_outbox (
     revision_sha256 ~ '^[0-9a-f]{64}$'
     AND selection_binding_sha256 ~ '^[0-9a-f]{64}$'
     AND projection_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND (
+      embedding_request_sha256 IS NULL
+      OR embedding_request_sha256 ~ '^[0-9a-f]{64}$'
+    )
     AND (vector_sha256 IS NULL OR vector_sha256 ~ '^[0-9a-f]{64}$')
     AND (
       verification_sha256 IS NULL
@@ -2763,11 +2831,27 @@ CREATE TABLE memory.projection_outbox (
       AND claimed_at IS NULL
       AND lease_expires_at IS NULL)
   ),
+  CONSTRAINT projection_outbox_embedding_dispatch_shape CHECK (
+    (
+      embedding_request_sha256 IS NULL
+      AND embedding_dispatch_lease_token IS NULL
+      AND embedding_dispatched_at IS NULL
+    )
+    OR
+    (
+      operation = 'upsert'
+      AND state IN ('claimed', 'applied', 'failed_terminal')
+      AND embedding_request_sha256 IS NOT NULL
+      AND embedding_dispatch_lease_token IS NOT NULL
+      AND embedding_dispatched_at IS NOT NULL
+    )
+  ),
   CONSTRAINT projection_outbox_applied_shape CHECK (
     (state = 'applied'
       AND applied_at IS NOT NULL
       AND (
         (operation = 'upsert'
+          AND embedding_request_sha256 IS NOT NULL
           AND verification_sha256 IS NULL
           AND verification_receipt_sha256 IS NULL
           AND verified_at IS NULL
@@ -2823,15 +2907,14 @@ CREATE TABLE memory.projection_outbox (
     OR
     (state = 'retryable'
       AND last_error_code IN (
-        'embedding_provider_unavailable', 'embedding_timeout',
         'lease_expired', 'qdrant_rate_limited', 'qdrant_timeout',
         'qdrant_unavailable', 'qdrant_verification_inconclusive'
       ))
     OR
     (state = 'failed_terminal'
       AND last_error_code IN (
-        'embedding_contract_violation', 'embedding_provider_unavailable',
-        'embedding_timeout', 'lease_expired',
+        'embedding_contract_violation',
+        'embedding_dispatch_outcome_unknown', 'lease_expired',
         'projection_contract_violation', 'qdrant_collection_mismatch',
         'qdrant_dimension_mismatch', 'qdrant_rate_limited',
         'qdrant_receipt_contract_violation', 'qdrant_timeout',
@@ -3683,6 +3766,31 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
+  IF OLD.state = 'claimed' AND NEW.state = 'claimed' THEN
+    IF session_user <> 'governed_memory_worker'
+       OR OLD.embedding_request_sha256 IS NOT NULL
+       OR OLD.embedding_dispatch_lease_token IS NOT NULL
+       OR OLD.embedding_dispatched_at IS NOT NULL
+       OR NEW.operation <> 'upsert'
+       OR NEW.embedding_request_sha256 IS NULL
+       OR NEW.embedding_dispatch_lease_token IS DISTINCT FROM OLD.lease_token
+       OR NEW.embedding_dispatched_at IS NULL
+       OR (
+         pg_catalog.to_jsonb(OLD)
+           - 'embedding_request_sha256'
+           - 'embedding_dispatch_lease_token'
+           - 'embedding_dispatched_at'
+       ) IS DISTINCT FROM (
+         pg_catalog.to_jsonb(NEW)
+           - 'embedding_request_sha256'
+           - 'embedding_dispatch_lease_token'
+           - 'embedding_dispatched_at'
+       ) THEN
+      RAISE EXCEPTION 'projection embedding dispatch mutation is invalid'
+        USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF session_user <> 'governed_memory_worker'
      OR OLD.outbox_id IS DISTINCT FROM NEW.outbox_id
      OR OLD.owner_user_id IS DISTINCT FROM NEW.owner_user_id
@@ -3698,6 +3806,12 @@ BEGIN
      OR OLD.projection_manifest_sha256
           IS DISTINCT FROM NEW.projection_manifest_sha256
      OR OLD.collection_alias IS DISTINCT FROM NEW.collection_alias
+     OR OLD.embedding_request_sha256
+          IS DISTINCT FROM NEW.embedding_request_sha256
+     OR OLD.embedding_dispatch_lease_token
+          IS DISTINCT FROM NEW.embedding_dispatch_lease_token
+     OR OLD.embedding_dispatched_at
+          IS DISTINCT FROM NEW.embedding_dispatched_at
      OR OLD.max_attempts IS DISTINCT FROM NEW.max_attempts
      OR OLD.created_at IS DISTINCT FROM NEW.created_at
      OR NOT (
@@ -8051,7 +8165,8 @@ $function$;
 CREATE FUNCTION memory_private.lease_projection_jobs(
   p_worker_id text,
   p_limit integer,
-  p_lease_seconds integer
+  p_lease_seconds integer,
+  p_runtime_contract_sha256 text
 )
 RETURNS TABLE(
   owner_user_id uuid,
@@ -8118,20 +8233,39 @@ BEGIN
   END IF;
   IF COALESCE(p_worker_id, '') !~ '^[a-z][a-z0-9_:/.-]{0,127}$'
      OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100
-     OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300 THEN
+     OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300
+     OR p_runtime_contract_sha256 IS DISTINCT FROM
+          'd5ef651ccf1607f00c93da9f2e88219a366c178dbc2d5a015e7911af3cb05ba8'
+  THEN
     RAISE EXCEPTION 'invalid projection lease input' USING ERRCODE = '22023';
   END IF;
 
   UPDATE memory.projection_outbox AS expired_outbox
   SET state = CASE
+        WHEN expired_outbox.embedding_request_sha256 IS NOT NULL
+          THEN 'failed_terminal'
         WHEN expired_outbox.attempt_count >= expired_outbox.max_attempts
           THEN 'failed_terminal'
         ELSE 'retryable'
       END,
       available_at = pg_catalog.clock_timestamp(),
       lease_token = NULL, claimed_by = NULL, claimed_at = NULL,
-      lease_expires_at = NULL, last_error_code = 'lease_expired',
-      completion_lease_token = NULL, completion_outcome = NULL,
+      lease_expires_at = NULL,
+      last_error_code = CASE
+        WHEN expired_outbox.embedding_request_sha256 IS NOT NULL
+          THEN 'embedding_dispatch_outcome_unknown'
+        ELSE 'lease_expired'
+      END,
+      completion_lease_token = CASE
+        WHEN expired_outbox.embedding_request_sha256 IS NOT NULL
+          THEN expired_outbox.lease_token
+        ELSE NULL::uuid
+      END,
+      completion_outcome = CASE
+        WHEN expired_outbox.embedding_request_sha256 IS NOT NULL
+          THEN 'failed_terminal'
+        ELSE NULL::text
+      END,
       updated_at = pg_catalog.clock_timestamp()
   WHERE expired_outbox.state = 'claimed'
     AND expired_outbox.lease_expires_at <= pg_catalog.clock_timestamp();
@@ -8143,6 +8277,7 @@ BEGIN
         completion_lease_token = NULL, completion_outcome = NULL,
         updated_at = pg_catalog.transaction_timestamp()
     WHERE outbox.state IN ('pending', 'retryable')
+      AND outbox.embedding_request_sha256 IS NULL
       AND EXISTS (
         SELECT 1
         FROM memory.claim AS claim
@@ -8238,7 +8373,13 @@ BEGIN
         WHERE earlier.owner_user_id = outbox.owner_user_id
           AND earlier.claim_id = outbox.claim_id
           AND earlier.sequence_number < outbox.sequence_number
-          AND earlier.state IN ('pending', 'retryable', 'claimed')
+          AND (
+            earlier.state IN ('pending', 'retryable', 'claimed')
+            OR (
+              earlier.state = 'failed_terminal'
+              AND earlier.embedding_request_sha256 IS NOT NULL
+            )
+          )
       )
     ORDER BY outbox.available_at, outbox.created_at, outbox.outbox_id
     FOR UPDATE OF outbox SKIP LOCKED
@@ -8303,6 +8444,135 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION memory_private.mark_projection_embedding_dispatched(
+  p_outbox_id uuid,
+  p_lease_token uuid,
+  p_operation text,
+  p_model text,
+  p_endpoint_sha256 text,
+  p_input_sha256 text,
+  p_request_body_sha256 text,
+  p_request_sha256 text
+)
+RETURNS TABLE(outcome text, dispatched_at timestamptz)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  outbox memory.projection_outbox%ROWTYPE;
+  target memory.claim%ROWTYPE;
+  revision memory.claim_revision%ROWTYPE;
+  captured_at timestamptz;
+  expected_request_sha256 text;
+BEGIN
+  IF session_user <> 'governed_memory_worker' THEN
+    RAISE EXCEPTION 'worker role required' USING ERRCODE = '42501';
+  END IF;
+  IF p_outbox_id IS NULL OR p_lease_token IS NULL
+     OR p_operation IS DISTINCT FROM 'embeddings.create'
+     OR p_model IS DISTINCT FROM 'text-embedding-3-large'
+     OR p_endpoint_sha256 IS DISTINCT FROM
+          'ec5de0ef28028972039d3cfa1949e5a468b7e69009720b1353e44228fa11b4f1'
+     OR COALESCE(p_input_sha256, '') !~ '^[0-9a-f]{64}$'
+     OR COALESCE(p_request_body_sha256, '') !~ '^[0-9a-f]{64}$'
+     OR COALESCE(p_request_sha256, '') !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid projection embedding dispatch input'
+      USING ERRCODE = '22023';
+  END IF;
+  expected_request_sha256 := memory_private.embedding_request_sha256(
+    p_operation, p_model, p_endpoint_sha256, p_input_sha256,
+    p_request_body_sha256
+  );
+  IF p_request_sha256 <> expected_request_sha256 THEN
+    RAISE EXCEPTION 'projection embedding request binding mismatch'
+      USING ERRCODE = '23514';
+  END IF;
+  SELECT value.* INTO STRICT outbox
+  FROM memory.projection_outbox AS value
+  WHERE value.outbox_id = p_outbox_id
+  FOR UPDATE;
+  IF outbox.embedding_request_sha256 IS NOT NULL THEN
+    IF outbox.embedding_dispatch_lease_token = p_lease_token
+       AND outbox.embedding_request_sha256 = p_request_sha256 THEN
+      RAISE EXCEPTION 'projection embedding dispatch replay forbidden'
+        USING ERRCODE = '55000';
+    END IF;
+    RAISE EXCEPTION 'projection embedding dispatch drifted'
+      USING ERRCODE = '23514';
+  END IF;
+  IF outbox.state <> 'claimed' OR outbox.operation <> 'upsert'
+     OR outbox.lease_token <> p_lease_token
+     OR outbox.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'stale projection embedding lease'
+      USING ERRCODE = '40001';
+  END IF;
+  captured_at := pg_catalog.clock_timestamp();
+  IF captured_at < outbox.claimed_at
+     OR captured_at >= outbox.lease_expires_at THEN
+    RAISE EXCEPTION 'stale projection embedding lease'
+      USING ERRCODE = '40001';
+  END IF;
+  SELECT value.* INTO STRICT target
+  FROM memory.claim AS value
+  WHERE value.owner_user_id = outbox.owner_user_id
+    AND value.claim_id = outbox.claim_id
+  FOR SHARE;
+  SELECT value.* INTO STRICT revision
+  FROM memory.claim_revision AS value
+  WHERE value.owner_user_id = outbox.owner_user_id
+    AND value.claim_id = outbox.claim_id
+    AND value.revision_id = outbox.revision_id;
+  IF target.projection_sequence <> outbox.sequence_number
+     OR target.current_revision_id <> outbox.revision_id
+     OR target.lifecycle_state <> 'active'
+     OR NOT revision.projectable
+     OR target.current_state_sha256
+          <> memory_private.claim_state_sha256(
+               target.owner_user_id, target.claim_id,
+               target.semantic_key_sha256, target.claim_identity_sha256,
+               target.lifecycle_state, true, target.current_revision_id,
+               target.current_revision_number, revision.revision_sha256,
+               target.projection_sequence
+             )
+     OR outbox.revision_sha256 <> revision.revision_sha256
+     OR outbox.selection_binding_sha256
+          <> revision.selection_binding_sha256
+     OR outbox.projection_manifest_sha256
+          <> memory_private.projection_manifest_sha256(
+               outbox.owner_user_id, outbox.claim_id, outbox.revision_id,
+               outbox.operation_id, outbox.operation,
+               outbox.sequence_number, outbox.revision_sha256,
+               outbox.selection_binding_sha256,
+               revision.retrieval_text_sha256,
+               revision.retrieval_text_sha256
+             )
+     OR revision.retrieval_text_sha256 <> p_input_sha256
+     OR p_request_body_sha256
+          <> memory_private.embedding_request_body_sha256(
+               revision.retrieval_text
+             ) THEN
+    RAISE EXCEPTION 'projection embedding authority binding mismatch'
+      USING ERRCODE = '23514';
+  END IF;
+  UPDATE memory.projection_outbox
+  SET embedding_request_sha256 = p_request_sha256,
+      embedding_dispatch_lease_token = p_lease_token,
+      embedding_dispatched_at = captured_at
+  WHERE projection_outbox.owner_user_id = outbox.owner_user_id
+    AND projection_outbox.outbox_id = outbox.outbox_id
+    AND projection_outbox.state = 'claimed'
+    AND projection_outbox.lease_token = p_lease_token
+    AND projection_outbox.embedding_request_sha256 IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'projection embedding dispatch CAS failed'
+      USING ERRCODE = '40001';
+  END IF;
+  RETURN QUERY SELECT 'dispatched'::text, captured_at;
+END;
+$function$;
+
 CREATE FUNCTION memory_private.finish_projection_job(
   p_outbox_id uuid,
   p_lease_token uuid,
@@ -8350,7 +8620,6 @@ BEGIN
      OR (
        p_outcome = 'retryable'
        AND p_error_code NOT IN (
-         'embedding_provider_unavailable', 'embedding_timeout',
          'qdrant_rate_limited', 'qdrant_timeout', 'qdrant_unavailable',
          'qdrant_verification_inconclusive'
        )
@@ -8358,7 +8627,9 @@ BEGIN
      OR (
        p_outcome = 'failed_terminal'
        AND p_error_code NOT IN (
-         'embedding_contract_violation', 'projection_contract_violation',
+         'embedding_contract_violation',
+         'embedding_dispatch_outcome_unknown',
+         'projection_contract_violation',
          'qdrant_collection_mismatch', 'qdrant_dimension_mismatch',
          'qdrant_receipt_contract_violation'
        )
@@ -8372,6 +8643,9 @@ BEGIN
   FOR UPDATE;
   resulting_state := CASE
     WHEN p_outcome = 'applied' THEN 'applied'
+    WHEN p_outcome = 'retryable'
+      AND outbox.embedding_request_sha256 IS NOT NULL
+      THEN 'failed_terminal'
     WHEN p_outcome = 'retryable' AND outbox.attempt_count < outbox.max_attempts
       THEN 'retryable'
     ELSE 'failed_terminal'
@@ -8402,6 +8676,10 @@ BEGIN
   END IF;
   IF p_outcome = 'applied' AND (
     (outbox.operation = 'upsert' AND (
+      outbox.embedding_request_sha256 IS NULL
+      OR outbox.embedding_dispatch_lease_token IS DISTINCT FROM p_lease_token
+      OR outbox.embedding_dispatched_at IS NULL
+      OR
       p_physical_collection_name IS NULL
       OR p_vector_sha256 IS NULL
       OR p_verification_sha256 IS NOT NULL
@@ -9574,7 +9852,10 @@ GRANT EXECUTE ON FUNCTION
   memory_private.purge_expired_answer_bindings(integer),
   memory_private.redact_expired_evidence_excerpts(integer),
   memory_private.read_projection_rebuild_batch(uuid,uuid,integer),
-  memory_private.lease_projection_jobs(text,integer,integer),
+  memory_private.lease_projection_jobs(text,integer,integer,text),
+  memory_private.mark_projection_embedding_dispatched(
+    uuid,uuid,text,text,text,text,text,text
+  ),
   memory_private.finish_projection_job(
     uuid,uuid,text,text,text,text,text,text
   )

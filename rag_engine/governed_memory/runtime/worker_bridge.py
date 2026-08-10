@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from ..auth import ActorRole, ActorScope, VerifiedActor
@@ -63,6 +63,7 @@ _READ_RECEIPT_SQL = (
 )
 
 BRIDGE_MESSAGE_FIELDS = BRIDGE_LEASE_FIELDS + ("role", "content")
+ContextReviewOutcome = Literal["marked", "terminal_unresolved"]
 
 
 def _uuid(value: object, code: str) -> UUID:
@@ -123,7 +124,12 @@ class ConversationBridge(Protocol):
         lease: Mapping[str, Any],
     ) -> tuple[Mapping[str, Any], datetime]: ...
 
-    async def mark_context_review(self, lease: Mapping[str, Any]) -> None: ...
+    async def mark_context_review(
+        self,
+        lease: Mapping[str, Any],
+        *,
+        expected_outcome: ContextReviewOutcome,
+    ) -> None: ...
 
     async def acknowledge(
         self,
@@ -230,7 +236,12 @@ class PostgresConversationBridge:
             "invalid_bridge_transaction_time",
         )
 
-    async def mark_context_review(self, lease: Mapping[str, Any]) -> None:
+    async def mark_context_review(
+        self,
+        lease: Mapping[str, Any],
+        *,
+        expected_outcome: ContextReviewOutcome,
+    ) -> None:
         row = await self._connection.fetchrow(
             _MARK_CONTEXT_SQL,
             _uuid(lease["outbox_id"], "invalid_bridge_outbox_id"),
@@ -238,7 +249,7 @@ class PostgresConversationBridge:
         )
         value = dict(row) if row is not None else {}
         if tuple(value) != ("outcome", "context_review_count") or (
-            value["outcome"] not in {"marked", "terminal_unresolved"}
+            value["outcome"] != expected_outcome
             or value["context_review_count"] != 1
         ):
             raise ContractViolation("invalid_bridge_context_review_receipt")
@@ -538,11 +549,18 @@ class BridgeIngestWorker:
             # The Phase 6B pilot has no bounded assistant-context RPC.  The
             # bridge terminalizes at count one.  A fresh item needs two marks;
             # a re-leased item recovered after the first mark needs one.
-            # Both paths use the current exact lease and perform zero successor,
+            # Both paths use the current exact lease after one content-free
+            # successor receipt lookup. They perform zero successor writes,
             # provider, embedding, or vector I/O.
             if lease["context_review_count"] == 0:
-                await self._bridge.mark_context_review(lease)
-            await self._bridge.mark_context_review(lease)
+                await self._bridge.mark_context_review(
+                    lease,
+                    expected_outcome="marked",
+                )
+            await self._bridge.mark_context_review(
+                lease,
+                expected_outcome="terminal_unresolved",
+            )
             return _receipt(work_id)
 
         try:

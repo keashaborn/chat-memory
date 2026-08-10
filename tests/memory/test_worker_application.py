@@ -3,11 +3,24 @@ from __future__ import annotations
 from contextlib import redirect_stderr
 from io import StringIO
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
 import unittest
 
 from rag_engine.governed_memory.extraction import parse_predicate_catalog
-from rag_engine.governed_memory.runtime.once_worker import WorkerLocalFailure, main
+from rag_engine.governed_memory.contracts import sha256_text
+from rag_engine.governed_memory.runtime.once_worker import (
+    ProjectionUpsertWork,
+    WorkerLocalFailure,
+    main,
+)
+from rag_engine.governed_memory.runtime.openai_adapters import (
+    DispatchReceipt,
+    EMBEDDING_ENDPOINT_SHA256,
+)
 from rag_engine.governed_memory.runtime.worker_application import (
     CONVERSATION_POSTGRES_DSN_ENV,
     EXPECTED_AUTHORIZATION_RECEIPT_SHA256_ENV,
@@ -20,6 +33,7 @@ from rag_engine.governed_memory.runtime.worker_application import (
     OPENAI_API_KEY_ENV,
     OPENAI_EXTRACTION_MODEL_ENV,
     RuntimeExtractionProvider,
+    RuntimeEmbeddingProvider,
     PostgresAdvisoryGuard,
     WORKER_ADVISORY_LOCK_KEY,
     WorkerRuntimeConfig,
@@ -29,6 +43,7 @@ from rag_engine.governed_memory.runtime.worker_application import (
     create_runtime_once_runner,
 )
 from rag_engine.governed_memory.runtime.qdrant_transport import QDRANT_RUNTIME_URL
+from tests.memory._fixtures import PROJECTION_A, make_claim_row, make_projection_outbox
 
 
 class FakeGuard:
@@ -107,17 +122,31 @@ class WorkerEntrypointRefusalTests(unittest.TestCase):
         self.assertNotIn("configuration", stderr.getvalue())
 
     def test_mode_on_missing_configuration_refuses_without_io(self) -> None:
-        stderr = StringIO()
-        with redirect_stderr(stderr):
-            result = main(
-                ["--once"],
-                environment={"GOVERNED_MEMORY_WORKER_MODE": "on"},
-            )
-        self.assertEqual(result, 1)
+        environment = dict(os.environ)
+        environment["GOVERNED_MEMORY_EXCLUSIVE_MODE"] = "successor_pilot"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from rag_engine.governed_memory.runtime.once_worker "
+                    "import main; raise SystemExit(main(['--once'], "
+                    "environment={'GOVERNED_MEMORY_WORKER_MODE': 'on'}))"
+                ),
+            ],
+            cwd=Path(__file__).resolve().parents[2],
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 1)
         self.assertIn(
             "governed_memory_worker_configuration_invalid",
-            stderr.getvalue(),
+            completed.stderr,
         )
+        self.assertEqual(completed.stdout, "")
 
     def test_exact_configuration_builds_lazy_runner_and_hides_secrets(self) -> None:
         environment = valid_environment()
@@ -305,6 +334,52 @@ class RuntimeExtractionProviderTests(unittest.IsolatedAsyncioTestCase):
             "local_serialization_failed_before_send",
         ):
             await provider.extract({})
+
+
+class RuntimeEmbeddingProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_durable_marker_completes_before_transport(self) -> None:
+        events: list[str] = []
+        observed: list[tuple[object, DispatchReceipt]] = []
+        text = "synthetic canonical relational fact"
+        receipt = DispatchReceipt(
+            operation="embeddings.create",
+            model="text-embedding-3-large",
+            endpoint_sha256=EMBEDDING_ENDPOINT_SHA256,
+            input_sha256=sha256_text(text),
+            request_body_sha256="d" * 64,
+        )
+
+        class FakeRepository:
+            async def mark_projection_embedding_dispatched(
+                self,
+                work: object,
+                supplied: DispatchReceipt,
+            ) -> None:
+                events.append("marker_committed")
+                observed.append((work, supplied))
+
+        class FakeAdapter:
+            def invoke(self, supplied_text: str, *, mark_dispatched: object) -> object:
+                self.text = supplied_text
+                mark_dispatched(receipt)  # type: ignore[operator]
+                events.append("transport_called")
+                return SimpleNamespace(vector=(0.25,))
+
+        claim = make_claim_row()
+        work = ProjectionUpsertWork(
+            work_id=PROJECTION_A,
+            claim=claim,
+            outbox_record=make_projection_outbox(claim),
+        )
+        adapter = FakeAdapter()
+        provider = RuntimeEmbeddingProvider(
+            repository=FakeRepository(),  # type: ignore[arg-type]
+            adapter=adapter,  # type: ignore[arg-type]
+        )
+        self.assertEqual(await provider.embed(work, text), (0.25,))
+        self.assertEqual(events, ["marker_committed", "transport_called"])
+        self.assertEqual(observed, [(work, receipt)])
+        self.assertEqual(adapter.text, text)
 
 if __name__ == "__main__":
     unittest.main()

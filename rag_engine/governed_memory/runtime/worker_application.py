@@ -16,8 +16,14 @@ from ..contracts import ContractViolation, require_key, require_sha256
 from ..extraction import parse_predicate_catalog
 from .environment import QDRANT_API_KEY_ENV
 from .https_transport import RetryFreeBoundedHttpsTransport
-from .once_worker import OnceWorker, OnceWorkerReceipt, WorkerLocalFailure
+from .once_worker import (
+    OnceWorker,
+    OnceWorkerReceipt,
+    ProjectionUpsertWork,
+    WorkerLocalFailure,
+)
 from .openai_adapters import (
+    DispatchReceipt,
     OpenAIEmbeddingAdapter,
     OpenAIEndpointConfig,
     OpenAIResponsesAdapter,
@@ -327,14 +333,36 @@ class RuntimeExtractionProvider:
 
 
 class RuntimeEmbeddingProvider:
-    def __init__(self, adapter: OpenAIEmbeddingAdapter) -> None:
+    def __init__(
+        self,
+        *,
+        repository: PostgresOnceWorkerRepository,
+        adapter: OpenAIEmbeddingAdapter,
+    ) -> None:
+        self._repository = repository
         self._adapter = adapter
 
-    async def embed(self, text: str) -> object:
+    async def embed(self, work: ProjectionUpsertWork, text: str) -> object:
+        if not isinstance(work, ProjectionUpsertWork):
+            raise WorkerLocalFailure(
+                "local_serialization_failed_before_send"
+            )
+        loop = asyncio.get_running_loop()
+
+        def mark_dispatched(receipt: DispatchReceipt) -> None:
+            future = asyncio.run_coroutine_threadsafe(
+                self._repository.mark_projection_embedding_dispatched(
+                    work,
+                    receipt,
+                ),
+                loop,
+            )
+            future.result()
+
         completion = await asyncio.to_thread(
             self._adapter.invoke,
             text,
-            mark_dispatched=lambda _receipt: None,
+            mark_dispatched=mark_dispatched,
         )
         return completion.vector
 
@@ -470,10 +498,11 @@ async def run_runtime_once(
             ),
         )
         embedding_provider = RuntimeEmbeddingProvider(
-            OpenAIEmbeddingAdapter(
+            repository=repository,
+            adapter=OpenAIEmbeddingAdapter(
                 config=provider_config,
                 transport=https_transport,
-            )
+            ),
         )
         qdrant = ExactQdrantAdapter(
             LoopbackQdrantTransport(

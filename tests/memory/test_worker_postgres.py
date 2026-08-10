@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 import re
@@ -23,6 +23,12 @@ from rag_engine.governed_memory.runtime.once_worker import (
     ProjectionDeleteWork,
     ProjectionUpsertWork,
 )
+from rag_engine.governed_memory.runtime.openai_adapters import (
+    DispatchReceipt,
+    EMBEDDING_ENDPOINT_SHA256,
+    OpenAIOutcomeUnknownFailure,
+    embedding_request_sha256,
+)
 from rag_engine.governed_memory.runtime.qdrant_adapter import (
     QDRANT_ALIAS,
     QDRANT_PHYSICAL_COLLECTION,
@@ -33,6 +39,7 @@ from rag_engine.governed_memory.runtime.pilot_marker import (
 )
 from rag_engine.governed_memory.runtime.worker_postgres import (
     PROJECTION_LEASE_FIELDS,
+    WORKER_RUNTIME_CONTRACT_SHA256,
     PostgresOnceWorkerRepository,
 )
 from tests.memory._fixtures import (
@@ -238,6 +245,7 @@ def pilot_marker_row(
     pilot_id: str = PILOT_ID,
     pilot_contract_sha256: str = PILOT_CONTRACT_SHA256,
     authorization_receipt_sha256: str = AUTHORIZATION_RECEIPT_SHA256,
+    started_at: datetime = NOW,
 ) -> dict[str, object]:
     operation_id = UUID("30303030-3030-4030-8030-303030303030")
     return {
@@ -246,18 +254,61 @@ def pilot_marker_row(
         "operation_id": operation_id,
         "pilot_contract_sha256": pilot_contract_sha256,
         "authorization_receipt_sha256": authorization_receipt_sha256,
-        "started_at": NOW,
+        "started_at": started_at,
         "marker_receipt_sha256": pilot_marker_receipt_sha256(
             pilot_id=pilot_id,
             operation_id=operation_id,
             pilot_contract_sha256=pilot_contract_sha256,
             authorization_receipt_sha256=authorization_receipt_sha256,
-            started_at=NOW,
+            started_at=started_at,
         ),
     }
 
 
 class ProjectionLeaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_dispatch_is_durable_and_exactly_bound(self) -> None:
+        lease = projection_lease(operation="upsert")
+        connection = FakeConnection(
+            fetch_results=[[], [lease]],
+            fetchrow_results=[{"outcome": "dispatched", "dispatched_at": NOW}],
+        )
+        store = repository(connection)
+        work = await store.claim_one()
+        assert isinstance(work, ProjectionUpsertWork)
+        receipt = DispatchReceipt(
+            operation="embeddings.create",
+            model=EMBEDDING_MODEL,
+            endpoint_sha256=EMBEDDING_ENDPOINT_SHA256,
+            input_sha256=str(lease["embedding_input_sha256"]),
+            request_body_sha256="d" * 64,
+        )
+        await store.mark_projection_embedding_dispatched(work, receipt)
+        sql, arguments = connection.fetchrow_calls[0]
+        self.assertIn("mark_projection_embedding_dispatched", sql)
+        self.assertEqual(
+            arguments,
+            (
+                lease["outbox_id"],
+                lease["lease_token"],
+                "embeddings.create",
+                EMBEDDING_MODEL,
+                EMBEDDING_ENDPOINT_SHA256,
+                lease["embedding_input_sha256"],
+                "d" * 64,
+                embedding_request_sha256(receipt),
+            ),
+        )
+
+    def test_unknown_embedding_dispatch_is_terminal_not_retryable(self) -> None:
+        self.assertEqual(
+            PostgresOnceWorkerRepository._projection_failure(
+                OpenAIOutcomeUnknownFailure(
+                    "provider_timeout_after_dispatch"
+                )
+            ),
+            ("failed_terminal", "embedding_dispatch_outcome_unknown"),
+        )
+
     async def test_upsert_normalizes_closed_authoritative_contract(self) -> None:
         connection = FakeConnection(fetch_results=[[], [projection_lease(operation="upsert")]])
         work = await repository(connection).claim_one()
@@ -269,6 +320,14 @@ class ProjectionLeaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(connection.fetch_calls), 2)
         self.assertIn("lease_extraction_jobs", connection.fetch_calls[0][0])
         self.assertIn("lease_projection_jobs", connection.fetch_calls[1][0])
+        self.assertEqual(
+            connection.fetch_calls[1][1],
+            (
+                "governed-memory-pilot-worker-1",
+                120,
+                WORKER_RUNTIME_CONTRACT_SHA256,
+            ),
+        )
 
     async def test_delete_does_not_normalize_null_upsert_surface(self) -> None:
         connection = FakeConnection(fetch_results=[[], [projection_lease(operation="delete")]])
@@ -364,6 +423,37 @@ class PersistentLaneSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PilotIdentityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_marker_is_accepted_only_inside_authorized_window(self) -> None:
+        connection = FakeConnection(
+            fetch_results=[[pilot_marker_row()]],
+            fetchval_results=[NOW + timedelta(hours=23, minutes=59)],
+        )
+        self.assertTrue(await repository(connection).pilot_ever_started())
+        self.assertEqual(len(connection.fetch_calls), 2)
+        self.assertIn("read_pilot_marker", connection.fetch_calls[0][0])
+        self.assertEqual(
+            connection.fetch_calls[1][0],
+            "SELECT pg_catalog.transaction_timestamp()",
+        )
+
+    async def test_stale_or_future_marker_refuses_before_claim(self) -> None:
+        cases = (
+            (NOW - timedelta(days=365), NOW, "stale"),
+            (NOW, NOW + timedelta(hours=24), "boundary"),
+            (NOW + timedelta(microseconds=1), NOW, "future"),
+        )
+        for started_at, transaction_time, label in cases:
+            connection = FakeConnection(
+                fetch_results=[[pilot_marker_row(started_at=started_at)]],
+                fetchval_results=[transaction_time],
+            )
+            with self.subTest(label=label), self.assertRaisesRegex(
+                ContractViolation,
+                "pilot_marker_outside_authorized_window",
+            ):
+                await repository(connection).pilot_ever_started()
+            self.assertEqual(len(connection.fetch_calls), 2)
+
     async def test_self_consistent_wrong_marker_identity_refuses_before_claim(self) -> None:
         mutations = (
             {"pilot_id": "governed_memory_pilot_stale"},

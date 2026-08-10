@@ -28,9 +28,12 @@ imported.
   `session_id` is mandatory. The exact `auth.sessions` RPC contract is staged,
   but it is not installed or live verified.
 - The owner-scoped claim-list and claim-detail routes are implemented and
-  candidate-tested. Their disposable migration and HTTP lifecycle proof passed.
-- Strict provider and 3072-dimension embedding adapters are fake-tested. They
-  have made zero external provider calls and have no production authorization.
+  candidate-tested. Their older Phase 5 proof is historical; fresh Phase 6B
+  disposable migration and HTTP lifecycle revalidation is pending.
+- Strict provider and 3072-dimension embedding adapters are fake-tested. A
+  content-free durable request marker must commit before an embedding HTTP
+  call; a marked request is never automatically resent. They have made zero
+  external provider calls and have no production authorization.
 - The exact Qdrant adapter is fake-tested for configured alias/physical target,
   3072-dimensional `Dot`, six payload indexes, owner-filtered bounded search,
   ambiguous-write readback, and verified deletion. Qdrant v1.19.0 is pinned at
@@ -45,16 +48,21 @@ imported.
   cursor. These surfaces have focused unit/static proof only; a fresh
   disposable two-database runtime proof is pending.
 - Messages with an attachment row are excluded at enqueue, lease, and exact
-  source read. Context-required messages are terminalized by two exact marks
-  when fresh, or one after recovery from a completed first mark, with zero
-  successor, provider, embedding, or vector calls.
+  source read. Context-required messages perform one content-free successor
+  receipt lookup for crash recovery, then terminalize by two exact marks when
+  fresh or one after recovery from a completed first mark. They perform zero
+  successor writes, provider, embedding, or vector calls.
 - Capture is owner-serialized and limited to 20 outbox rows across all states
   in a rolling 24-hour window. Exact replay consumes no additional slot; the
   limit returns a typed content-free result so the chat transcript can commit.
+- Qdrant failure before embedding dispatch remains retryable. Failure after a
+  durable embedding marker is terminal without a second embedding call; the
+  canonical PostgreSQL claim remains, and later projection for that claim is
+  blocked until an explicit reconciliation workflow safely repairs it.
 - Calibration requires independently expected artifact and approval-receipt
   SHA-256 values. The checked-in artifact is unapproved, so semantic retrieval
   remains off and no semantic retrieval-score threshold is activated.
-- Verbal Sage frontend candidate `35a684` was built but is undeployed;
+- Verbal Sage frontend candidate `6d80ba` was built but is undeployed;
   authenticated visual QA is pending.
 
 ## Current path

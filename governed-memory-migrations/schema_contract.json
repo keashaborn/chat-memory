@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-schema-contract-v5",
+  "schema_version": "governed-memory-successor-schema-contract-v1",
   "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "database": "governed_memory",
   "schemas": [
@@ -132,7 +132,8 @@
     "memory_private.correct_claim(uuid,uuid,text,text,text,jsonb)",
     "memory_private.retract_claim(uuid,uuid,text,text)",
     "memory_private.request_claim_deletion(uuid,uuid,text,text)",
-    "memory_private.lease_projection_jobs(text,integer,integer)",
+    "memory_private.lease_projection_jobs(text,integer,integer,text)",
+    "memory_private.mark_projection_embedding_dispatched(uuid,uuid,text,text,text,text,text,text)",
     "memory_private.finish_projection_job(uuid,uuid,text,text,text,text,text,text)",
     "memory_private.finalize_claim_deletion(uuid,uuid,uuid,text,uuid,uuid,text,integer,text,text,timestamptz,timestamptz,text,text)",
         "memory_private.record_answer_binding(uuid,uuid,uuid,text,text,text[],text[],text[],integer,integer,text,text,boolean,uuid[],uuid[],text,text,text,text,text)",
@@ -145,6 +146,8 @@
         "memory_private.is_ascii_key_array(text[])",
         "memory_private.is_sorted_unique_key_array(text[],integer,integer)",
         "memory_private.framed_utf8_field(text,text)",
+        "memory_private.embedding_request_body_sha256(text)",
+        "memory_private.embedding_request_sha256(text,text,text,text,text)",
         "memory_private.timestamp_epoch_us(timestamptz)",
         "memory_private.timestamp_utc_text(timestamptz)",
         "memory_private.answer_binding_retention_receipt_sha256(uuid,uuid,uuid,timestamptz)",
@@ -305,7 +308,7 @@
     "content_hash_max_retention_hours": 24,
     "terminal_row_retention_days": 7,
     "review_context_behavior": "The first context-review mark changes count zero to one without releasing the lease. A second mark on count one terminalizes a content-free skipped row with context_review_unresolved.",
-    "phase6b_runtime_context_policy": "The inactive narrow pilot invokes two exact marks for a fresh count-zero item or one exact mark for a re-leased count-one item, then terminalizes review_context with zero successor, provider, embedding, or vector calls. No bounded assistant-context reader exists in Phase 6B.",
+    "phase6b_runtime_context_policy": "The inactive narrow pilot performs one content-free successor receipt read, invokes two exact marks for a fresh count-zero item or one exact mark for a re-leased count-one item, then terminalizes review_context with zero successor writes, provider, embedding, or vector calls. No bounded assistant-context reader exists in Phase 6B.",
     "functions": [
       "memory_ingest_private.enqueue_chat_log_message(uuid,text)",
       "memory_ingest_private.lease_memory_ingest(text,integer,integer)",
@@ -519,10 +522,11 @@
       "successor_conversation_capture_not_activated",
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
+      "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
       "final_phase6b_runtime_rebuild_and_receipt_pending",
       "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
-      "frontend_candidate_35a684_undeployed_visual_qa_pending",
+      "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
     ]

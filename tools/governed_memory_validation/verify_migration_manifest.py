@@ -111,6 +111,8 @@ def expected_package_contracts(*, preliminary: bool) -> dict[str, dict[str, obje
     if preliminary:
         for relative in (
             "0001_foundation/package.json",
+            "0003_owner_claim_detail/package.json",
+            "0004_pilot_marker/package.json",
             "0002_conversation_bridge/package.json",
         ):
             contracts[relative]["status"] = NOT_VALIDATED_STATUS

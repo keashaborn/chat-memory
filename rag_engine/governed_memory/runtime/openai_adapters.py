@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 from ..contracts import (
     ContractViolation,
     canonical_json_bytes,
+    framed_sha256,
     require_bounded_text,
     require_exact_int,
     require_sha256,
@@ -44,6 +45,8 @@ EXTRACTION_SCHEMA_KEY = "governed-memory-extraction"
 EXTRACTION_FORMAT_NAME = "governed_memory_extraction_v1"
 MAX_PROVIDER_OUTPUT_BYTES = 131_072
 MAX_EMBEDDING_INPUT_BYTES = 32_000
+EMBEDDING_REQUEST_DOMAIN = "governed_memory.embedding_request.v1"
+EMBEDDING_ENDPOINT_SHA256 = sha256_text(EMBEDDINGS_URL)
 
 
 class OpenAIAdapterFailure(RuntimeError):
@@ -269,6 +272,71 @@ class EmbeddingCompletion:
 
 
 DispatchMarker = Callable[[DispatchReceipt], None]
+
+
+def embedding_request_sha256(receipt: DispatchReceipt) -> str:
+    """Bind the exact content-free embedding request before HTTP dispatch."""
+
+    if (
+        not isinstance(receipt, DispatchReceipt)
+        or receipt.operation != "embeddings.create"
+        or receipt.model != EMBEDDING_MODEL
+        or require_sha256(
+            receipt.endpoint_sha256,
+            "invalid_embedding_endpoint_sha256",
+        )
+        != EMBEDDING_ENDPOINT_SHA256
+        or receipt.instructions_asset_sha256 is not None
+        or receipt.output_schema_asset_sha256 is not None
+        or receipt.output_schema_material_sha256 is not None
+    ):
+        raise ContractViolation("invalid_embedding_dispatch_receipt")
+    return framed_sha256(
+        EMBEDDING_REQUEST_DOMAIN,
+        (
+            ("operation", receipt.operation),
+            ("model", receipt.model),
+            ("endpoint_sha256", receipt.endpoint_sha256),
+            (
+                "input_sha256",
+                require_sha256(
+                    receipt.input_sha256,
+                    "invalid_embedding_input_sha256",
+                ),
+            ),
+            (
+                "request_body_sha256",
+                require_sha256(
+                    receipt.request_body_sha256,
+                    "invalid_embedding_request_body_sha256",
+                ),
+            ),
+        ),
+    )
+
+
+def _embedding_request_body(text: str) -> tuple[str, bytes]:
+    bounded = require_bounded_text(
+        text,
+        code="invalid_embedding_input",
+        maximum_bytes=MAX_EMBEDDING_INPUT_BYTES,
+    )
+    body = canonical_json_request_bytes(
+        {
+            "dimensions": DEFAULT_DIMENSIONS,
+            "encoding_format": "float",
+            "input": [bounded],
+            "model": EMBEDDING_MODEL,
+        }
+    )
+    return bounded, body
+
+
+def embedding_request_body_sha256(text: str) -> str:
+    """Hash the one canonical embedding request body authorized by PostgreSQL."""
+
+    _bounded, body = _embedding_request_body(text)
+    return sha256_hex(body)
 
 
 @lru_cache(maxsize=1)
@@ -576,19 +644,7 @@ class OpenAIEmbeddingAdapter:
 
     def prepare(self, text: str) -> PreparedOpenAICall:
         try:
-            bounded = require_bounded_text(
-                text,
-                code="invalid_embedding_input",
-                maximum_bytes=MAX_EMBEDDING_INPUT_BYTES,
-            )
-            body = canonical_json_request_bytes(
-                {
-                    "dimensions": DEFAULT_DIMENSIONS,
-                    "encoding_format": "float",
-                    "input": [bounded],
-                    "model": EMBEDDING_MODEL,
-                }
-            )
+            bounded, body = _embedding_request_body(text)
             request = HttpsRequest(
                 url=self._config.embeddings_url,
                 headers=json_headers(bearer_token=self._config.api_key),
@@ -679,10 +735,14 @@ class OpenAIEmbeddingAdapter:
 __all__ = [
     "DispatchReceipt",
     "EmbeddingCompletion",
+    "EMBEDDING_ENDPOINT_SHA256",
+    "EMBEDDING_REQUEST_DOMAIN",
     "EMBEDDINGS_URL",
     "ExtractionCompletion",
     "EXTRACTION_FORMAT_NAME",
     "EXTRACTION_SCHEMA_KEY",
+    "embedding_request_sha256",
+    "embedding_request_body_sha256",
     "load_provider_assets",
     "OpenAIAdapterFailure",
     "OpenAIBeforeSendFailure",

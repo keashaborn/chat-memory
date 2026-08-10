@@ -12,6 +12,7 @@ Type=oneshot
 User=governed-memory
 Group=governed-memory
 Environment=GOVERNED_MEMORY_WORKER_MODE=off
+Environment=GOVERNED_MEMORY_EXCLUSIVE_MODE=legacy
 EnvironmentFile=/etc/governed-memory/worker.env
 EnvironmentFile=/etc/governed-memory/pilot.env
 ExecStart=/opt/governed-memory/current/venv/bin/python -m rag_engine.governed_memory.runtime.once_worker --once

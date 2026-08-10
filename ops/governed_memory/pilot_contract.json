@@ -52,12 +52,12 @@
   "provider_policy": {
     "provider_calls_before_pilot_authorization": 0,
     "provider_adapter_status": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter_status": "strict_3072_fake_tested_zero_real_calls",
+    "embedding_adapter_status": "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls",
     "qdrant_adapter_status": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
     "worker_algorithm_status": "implemented_fake_tested",
     "worker_runtime_composition_status": "implemented_inactive_persistently_fair_three_lane_focused_unit_tested_real_two_database_disposable_proof_pending",
-    "context_required_runtime_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_zero_successor_provider_embedding_vector_calls",
-    "qdrant_unavailable_policy": "canonical_postgresql_intake_continues_under_persistent_fair_one_item_scheduler_and_twenty_message_pilot_cap_projection_backlog_retryable",
+    "context_required_runtime_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
+    "qdrant_unavailable_policy": "predispatch_qdrant_unavailability_retryable_post_embedding_dispatch_failure_terminal_without_embedding_resend_canonical_postgresql_claim_retained_later_same_claim_projection_blocked_explicit_projection_reconciliation_required",
     "calibration_status": "independently_bound_unapproved_retrieval_off",
     "automatic_retry_after_unknown_dispatch": false
   },
@@ -74,9 +74,9 @@
     "profile_metadata_authority": false
   },
   "candidate_surfaces": {
-    "owner_claim_fact_detail": "implemented_candidate_disposable_proof_passed_not_production_applied",
-    "pilot_marker": "implemented_disposable_proof_passed_not_production_applied",
-    "frontend": "35a684_built_undeployed_visual_qa_pending"
+    "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
+    "pilot_marker": "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
+    "frontend": "6d80ba_built_undeployed_visual_qa_pending"
   },
   "start_blockers": [
     "production_activation_not_authorized",
@@ -88,10 +88,11 @@
     "calibration_artifact_unapproved_retrieval_off",
     "provider_adapter_real_call_validation_not_authorized_or_completed",
     "embedding_adapter_real_call_validation_not_authorized_or_completed",
+    "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
     "final_phase6b_runtime_rebuild_and_receipt_pending",
     "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
-    "frontend_candidate_35a684_undeployed_visual_qa_pending",
+    "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
     "pilot_owner_not_authorized",
     "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
   ],

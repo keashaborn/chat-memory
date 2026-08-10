@@ -45,13 +45,15 @@ that image also passed. The digest is not persistent-pilot approval.
 
 - JWT `sub` is owner authority and signed `session_id` is mandatory. The staged
   Supabase `auth.sessions` RPC is not installed or live verified.
-- Owner-scoped claim detail is implemented, candidate-tested, and proved on
-  disposable PostgreSQL.
-- Strict provider and 3072 embedding adapters are fake-tested. The exact
+- Owner-scoped claim detail is implemented and candidate-tested; its older
+  proof is historical and fresh Phase 6B disposable revalidation is pending.
+- Strict provider and 3072 embedding adapters are fake-tested. Embedding HTTP
+  dispatch requires a durable content-free request marker; marked requests are
+  never automatically resent. The exact
   Qdrant adapter is fake-tested and proved against disposable Qdrant 1.19.0;
   no real provider call has occurred.
-- Migration 0004 implements a content-free append-only pilot marker, but it is
-  proved only on disposable PostgreSQL and is not production-applied.
+- Migration 0004 implements a content-free append-only pilot marker; its older
+  proof is historical and fresh Phase 6B disposable revalidation is pending.
 - The one-item worker has inactive exact two-database composition, RPC-only
   repositories, loopback Qdrant transport, exact target configuration,
   persistent three-lane fairness, and PostgreSQL session advisory locking.
@@ -59,7 +61,7 @@ that image also passed. The digest is not persistent-pilot approval.
   remain open.
 - Calibration requires independent artifact and approval-receipt hashes. Its
   artifact is unapproved and retrieval remains off.
-- Frontend candidate `35a684` is built, undeployed, and awaiting authenticated
+- Frontend candidate `6d80ba` is built, undeployed, and awaiting authenticated
   visual QA.
 
 ## Activation blockers
@@ -78,6 +80,9 @@ list. Before any persistent pilot, all of the following remain required:
    cross-process singleton against fresh disposable stores.
 6. Authorize any real provider/embedding validation separately; unknown
    post-dispatch outcomes remain terminal and are never automatically retried.
+   Implement and authorize projection reconciliation with a sequence-safe
+   Qdrant repair fence; unresolved marked work blocks later same-claim
+   projection until then.
 7. Create fresh isolated persistent PostgreSQL and Qdrant targets only after a
    scoped creation authorization and implement the production store-role
    bootstrap.
@@ -85,7 +90,7 @@ list. Before any persistent pilot, all of the following remain required:
 9. Install the HTTP and worker units in mode `off`, then prove their exact
     source, configuration, disabled state, and zero listeners.
 10. Authorize and activate capture for one exact owner only.
-11. Deploy frontend candidate `35a684` and complete authenticated visual QA.
+11. Deploy frontend candidate `6d80ba` and complete authenticated visual QA.
 12. Prove owner-scoped legacy Memory read/write/shadow paths are quiesced.
 13. Authorize one owner, at most 20 post-cutover messages, at most 24 hours,
     and one generation call per exact attempt.

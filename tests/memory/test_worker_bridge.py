@@ -16,6 +16,7 @@ from rag_engine.governed_memory.runtime.once_worker import (
 from rag_engine.governed_memory.runtime.worker_bridge import (
     BridgeIngestWorker,
     FairOnceRunner,
+    PostgresConversationBridge,
 )
 from rag_engine.governed_memory.worker import ingest_successor_receipt_sha256
 from tests.memory._fixtures import (
@@ -41,6 +42,7 @@ class FakeBridge:
         self.claim_calls = 0
         self.read_calls = 0
         self.mark_calls = 0
+        self.mark_expectations: list[str] = []
         self.ack_calls: list[dict[str, object]] = []
         self.fail_calls: list[dict[str, object]] = []
 
@@ -60,9 +62,15 @@ class FakeBridge:
         if lease != self.lease:
             raise AssertionError("unexpected lease")
 
-    async def mark_context_review(self, lease: dict[str, object]) -> None:
+    async def mark_context_review(
+        self,
+        lease: dict[str, object],
+        *,
+        expected_outcome: str,
+    ) -> None:
         self.assert_same_lease(lease)
         self.mark_calls += 1
+        self.mark_expectations.append(expected_outcome)
 
     async def acknowledge(
         self,
@@ -169,6 +177,10 @@ class BridgeIngestWorkerTests(unittest.IsolatedAsyncioTestCase):
         assert result is not None
         self.assertEqual(result.work_kind, WorkKind.INGEST)
         self.assertEqual(bridge.mark_calls, 2)
+        self.assertEqual(
+            bridge.mark_expectations,
+            ["marked", "terminal_unresolved"],
+        )
         self.assertEqual(bridge.ack_calls, [])
         self.assertEqual(bridge.fail_calls, [])
         self.assertEqual(successor.persist_calls, 0)
@@ -189,6 +201,7 @@ class BridgeIngestWorkerTests(unittest.IsolatedAsyncioTestCase):
         ).run_one()
         self.assertIsNotNone(result)
         self.assertEqual(bridge.mark_calls, 1)
+        self.assertEqual(bridge.mark_expectations, ["terminal_unresolved"])
         self.assertEqual(successor.read_calls, 1)
         self.assertEqual(successor.persist_calls, 0)
         self.assertEqual(bridge.ack_calls, [])
@@ -237,6 +250,42 @@ class BridgeIngestWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(successor.read_calls, 2)
         self.assertEqual(len(bridge.ack_calls), 1)
         self.assertEqual(bridge.fail_calls, [])
+
+
+class PostgresConversationBridgeTests(unittest.IsolatedAsyncioTestCase):
+    class Connection:
+        def __init__(self, row: dict[str, object]) -> None:
+            self.row = row
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def fetchrow(self, sql: str, *args: object) -> dict[str, object]:
+            self.calls.append((sql, args))
+            return self.row
+
+    async def test_terminal_call_rejects_nonterminal_marked_receipt(self) -> None:
+        payload = make_ingest_payload(
+            text="Yes, that synthetic preference is still current."
+        )
+        lease = make_bridge_lease(payload, ingest_after=CUTOVER)
+        lease["context_review_count"] = 1
+        connection = self.Connection(
+            {"outcome": "marked", "context_review_count": 1}
+        )
+        bridge = PostgresConversationBridge(
+            connection,
+            worker_id="governed-memory-pilot-worker-1",
+        )
+
+        with self.assertRaisesRegex(
+            ContractViolation,
+            "invalid_bridge_context_review_receipt",
+        ):
+            await bridge.mark_context_review(
+                lease,
+                expected_outcome="terminal_unresolved",
+            )
+
+        self.assertEqual(len(connection.calls), 1)
 
 
 class BridgePriorityTests(unittest.IsolatedAsyncioTestCase):

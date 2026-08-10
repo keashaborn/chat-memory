@@ -3,13 +3,19 @@ from __future__ import annotations
 """PostgreSQL-authoritative repository for the one-shot successor worker."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any, Mapping
 from uuid import UUID
 
 from ..admission import recompute_claim_state_sha256
-from ..contracts import ContractViolation, require_key, require_sha256, require_uuid
+from ..contracts import (
+    ContractViolation,
+    require_key,
+    require_sha256,
+    require_utc,
+    require_uuid,
+)
 from ..extraction import (
     CANONICAL_PREDICATE_CATALOG_SHA256,
     build_provider_request,
@@ -35,11 +41,14 @@ from .once_worker import (
     WorkerWork,
 )
 from .openai_adapters import (
+    DispatchReceipt,
+    EMBEDDING_ENDPOINT_SHA256,
     EXTRACTION_SCHEMA_KEY,
     ExtractionCompletion,
     OpenAIBeforeSendFailure,
     OpenAIOutcomeUnknownFailure,
     OpenAITerminalFailure,
+    embedding_request_sha256,
 )
 from .pilot_marker import pilot_marker_from_row
 from .qdrant_adapter import (
@@ -56,8 +65,13 @@ EXTRACTION_SCHEMA_SHA256 = sha256(EXTRACTION_SCHEMA_KEY.encode("utf-8")).hexdige
 PRIVACY_MANIFEST_SHA256 = sha256(
     b"governed-memory-successor-pilot-privacy-v1"
 ).hexdigest()
+WORKER_RUNTIME_CONTRACT_SHA256 = sha256(
+    b"governed-memory-successor-worker-runtime-v1"
+).hexdigest()
 
 _READ_PILOT_MARKER_SQL = "SELECT * FROM memory_private.read_pilot_marker()"
+_READ_PILOT_CLOCK_SQL = "SELECT pg_catalog.transaction_timestamp()"
+PILOT_MAXIMUM_DURATION = timedelta(hours=24)
 _NEXT_WORKER_LANE_SQL = "SELECT memory_private.next_worker_lane()"
 _LEASE_EXTRACTION_SQL = (
     "SELECT * FROM memory_private.lease_extraction_jobs("
@@ -66,11 +80,16 @@ _LEASE_EXTRACTION_SQL = (
 )
 _LEASE_PROJECTION_SQL = (
     "SELECT * FROM memory_private.lease_projection_jobs("
-    "$1::text,1,$2::integer)"
+    "$1::text,1,$2::integer,$3::text)"
 )
 _MARK_PROVIDER_DISPATCHED_SQL = (
     "SELECT * FROM memory_private.mark_provider_call_dispatched("
     "$1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::text,$7::text)"
+)
+_MARK_PROJECTION_EMBEDDING_DISPATCHED_SQL = (
+    "SELECT * FROM memory_private.mark_projection_embedding_dispatched("
+    "$1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::text,"
+    "$8::text)"
 )
 _COMPLETE_EXTRACTION_SQL = (
     "SELECT * FROM memory_private.complete_extraction("
@@ -246,6 +265,13 @@ class PostgresOnceWorkerRepository:
             != self._expected_authorization_receipt_sha256
         ):
             raise ContractViolation("pilot_marker_identity_mismatch")
+        transaction_time = require_utc(
+            await self._connection.fetchval(_READ_PILOT_CLOCK_SQL),
+            "invalid_pilot_clock",
+        )
+        pilot_age = transaction_time - marker.started_at
+        if pilot_age < timedelta(0) or pilot_age >= PILOT_MAXIMUM_DURATION:
+            raise ContractViolation("pilot_marker_outside_authorized_window")
         return True
 
     async def next_worker_lane(self) -> str:
@@ -356,6 +382,7 @@ class PostgresOnceWorkerRepository:
                 _LEASE_PROJECTION_SQL,
                 self._worker_id,
                 self._lease_seconds,
+                WORKER_RUNTIME_CONTRACT_SHA256,
             ),
             "projection_claim_cardinality_violation",
         )
@@ -489,6 +516,44 @@ class PostgresOnceWorkerRepository:
         if row is None or dict(row).get("outcome") != "dispatched":
             raise ContractViolation("provider_dispatch_receipt_invalid")
 
+    async def mark_projection_embedding_dispatched(
+        self,
+        work: ProjectionUpsertWork,
+        receipt: DispatchReceipt,
+    ) -> None:
+        metadata = self._metadata(work)
+        if not isinstance(metadata, _ProjectionMetadata):
+            raise ContractViolation("embedding_dispatch_without_projection_claim")
+        expected_input_sha256 = require_sha256(
+            work.outbox_record.get("embedding_input_sha256"),
+            "invalid_projection_embedding_input_sha256",
+        )
+        if (
+            not isinstance(receipt, DispatchReceipt)
+            or receipt.input_sha256 != expected_input_sha256
+            or receipt.endpoint_sha256 != EMBEDDING_ENDPOINT_SHA256
+        ):
+            raise ContractViolation("embedding_dispatch_receipt_mismatch")
+        request_sha256 = embedding_request_sha256(receipt)
+        row = await self._connection.fetchrow(
+            _MARK_PROJECTION_EMBEDDING_DISPATCHED_SQL,
+            metadata.outbox_id,
+            metadata.lease_token,
+            receipt.operation,
+            receipt.model,
+            receipt.endpoint_sha256,
+            receipt.input_sha256,
+            receipt.request_body_sha256,
+            request_sha256,
+        )
+        value = dict(row) if row is not None else {}
+        if (
+            tuple(value) != ("outcome", "dispatched_at")
+            or value["outcome"] != "dispatched"
+            or not isinstance(value["dispatched_at"], datetime)
+        ):
+            raise ContractViolation("embedding_dispatch_receipt_invalid")
+
     async def _complete_extraction(
         self,
         work: ExtractionWork,
@@ -607,7 +672,7 @@ class PostgresOnceWorkerRepository:
         if isinstance(error, QdrantWriteOutcomeUnknown):
             return "retryable", "qdrant_verification_inconclusive"
         if isinstance(error, OpenAIOutcomeUnknownFailure):
-            return "retryable", "embedding_timeout"
+            return "failed_terminal", "embedding_dispatch_outcome_unknown"
         if isinstance(error, (OpenAIBeforeSendFailure, OpenAITerminalFailure)):
             return "failed_terminal", "embedding_contract_violation"
         if isinstance(error, ContractViolation):
@@ -722,6 +787,7 @@ __all__ = [
     "EXTRACTION_SCHEMA_SHA256",
     "PRIVACY_MANIFEST_SHA256",
     "PROJECTION_LEASE_FIELDS",
+    "WORKER_RUNTIME_CONTRACT_SHA256",
     "PostgresOnceWorkerRepository",
     "PostgresWorkerLaneRepository",
 ]

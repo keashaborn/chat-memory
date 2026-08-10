@@ -127,7 +127,7 @@ def _write_wheel(
             archive.writestr(name, members[name])
 
 
-class Phase5BuildProvenanceTests(unittest.TestCase):
+class BuildProvenanceTests(unittest.TestCase):
     def test_full_source_tree_binds_packaging_files_and_copied_tree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = _make_source_root(Path(directory).resolve() / "project")

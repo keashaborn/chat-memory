@@ -23,6 +23,8 @@ from rag_engine.governed_memory.runtime.https_transport import (
     HttpsResponse,
 )
 from rag_engine.governed_memory.runtime.openai_adapters import (
+    DispatchReceipt,
+    EMBEDDING_ENDPOINT_SHA256,
     EXTRACTION_SCHEMA_KEY,
     OpenAIBeforeSendFailure,
     OpenAIEmbeddingAdapter,
@@ -31,6 +33,8 @@ from rag_engine.governed_memory.runtime.openai_adapters import (
     OpenAIResponsesAdapter,
     OpenAITerminalFailure,
     ProviderAssets,
+    embedding_request_body_sha256,
+    embedding_request_sha256,
     load_provider_assets,
 )
 from tests.memory._fixtures import (
@@ -418,6 +422,27 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
 
 
 class OpenAIEmbeddingAdapterTests(unittest.TestCase):
+    def test_embedding_body_hash_is_exact_canonical_request(self) -> None:
+        self.assertEqual(
+            embedding_request_body_sha256(
+                "synthetic canonical relational fact"
+            ),
+            "acfdbf52a9201f941fcd897bc6b6a303e2c7e4f6820e9aa0465b01cc8a06ca54",
+        )
+
+    def test_embedding_request_hash_is_exact_content_free_contract(self) -> None:
+        receipt = DispatchReceipt(
+            operation="embeddings.create",
+            model=EMBEDDING_MODEL,
+            endpoint_sha256=EMBEDDING_ENDPOINT_SHA256,
+            input_sha256="a" * 64,
+            request_body_sha256="b" * 64,
+        )
+        self.assertEqual(
+            embedding_request_sha256(receipt),
+            "4b859f4be3de2906f3555f17af32f3d60559a95c66f2efb1d6ff2d622b89af1c",
+        )
+
     def config(self) -> OpenAIEndpointConfig:
         return OpenAIEndpointConfig(
             api_key=SYNTHETIC_TOKEN,

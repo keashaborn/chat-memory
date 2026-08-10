@@ -18,11 +18,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "cd2cd27461b68bc3b0d6a3d131bc212ca19a258b0b7fcdc7cff70cb748858e60"
+    "sha256": "521051825dca7db0b94362a7c33b2bbc342db236cc403e876b842d3a53297dbb"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "4fa80b952efe7ce6d41e2e675bba05c01e89639a46e85b7d2716652325e55446",
+    "sha256": "cdca4dfbe63b681c960221c0ae1ddcb222c78e1bdeddef1dfe6a463350a0bb0d",
     "empty_only": true
   },
   "data_policy": {

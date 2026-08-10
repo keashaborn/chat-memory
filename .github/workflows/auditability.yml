@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate governed-memory schema ledger
+      - name: Legacy quarantine - validate governed-memory schema ledger
         run: |
           PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=schema-ledger/tools python3 -B -W error::ResourceWarning -m unittest discover -s schema-ledger/tests -p test_*.py
           python3 -B schema-ledger/tools/verify_manifest.py --root schema-ledger
@@ -50,7 +50,17 @@ jobs:
           docker compose -f docker-compose.ci.yml exec -T brains \
             bash -lc 'VS_SERVICE_TOKEN=ci_only_service_token HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
 
-      - name: Run focused Memory V1 Python tests
+      - name: Validate inactive clean successor contracts
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app \
+            brains python -m unittest discover -s tests/memory -p 'test_*.py'
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app \
+            brains python tools/governed_memory_validation/verify_migration_manifest.py \
+              --preliminary-disposable-proof governed-memory-migrations
+
+      - name: Legacy quarantine - run focused Memory V1 Python tests
         run: |
           docker compose -f docker-compose.ci.yml exec -T \
             -e PYTHONPATH=/app:/app/scripts \
@@ -60,7 +70,7 @@ jobs:
               tests/test_memory_v1_contextual_chat_capture_bridge_v1.py \
               tests/test_memory_v1_v5_2_local_packet_router.py
 
-      - name: Validate memory V1 schema firewall
+      - name: Legacy quarantine - validate memory V1 schema firewall
         run: ./tools/memory_v1_schema_ci.sh
 
       - name: Dump logs on failure

@@ -41,7 +41,10 @@ DROP FUNCTION memory_private.finalize_claim_deletion(
 DROP FUNCTION memory_private.finish_projection_job(
   uuid,uuid,text,text,text,text,text,text
 );
-DROP FUNCTION memory_private.lease_projection_jobs(text,integer,integer);
+DROP FUNCTION memory_private.mark_projection_embedding_dispatched(
+  uuid,uuid,text,text,text,text,text,text
+);
+DROP FUNCTION memory_private.lease_projection_jobs(text,integer,integer,text);
 DROP FUNCTION memory_private.read_projection_rebuild_batch(
   uuid,uuid,integer
 );
@@ -188,6 +191,10 @@ DROP FUNCTION memory_private.answer_binding_retention_receipt_sha256(
 );
 DROP FUNCTION memory_private.timestamp_utc_text(timestamptz);
 DROP FUNCTION memory_private.timestamp_epoch_us(timestamptz);
+DROP FUNCTION memory_private.embedding_request_sha256(
+  text,text,text,text,text
+);
+DROP FUNCTION memory_private.embedding_request_body_sha256(text);
 DROP FUNCTION memory_private.framed_utf8_field(text,text);
 DROP FUNCTION memory_private.is_ascii_key_array(text[]);
 DROP FUNCTION memory_private.is_sorted_unique_key_array(

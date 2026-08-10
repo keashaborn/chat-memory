@@ -27,11 +27,11 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='43ba1839233781f231195c4ff5051794494148c6'
+readonly EXPECTED_BASE='ca03e57974778319cd9ee514ab47ef1cecdc3b52'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PRELIMINARY_PROOF_AUTHORIZATION_VALUE='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='ddf7e3e6c811c3736cbf7d02b2e6b79e1bc5f114d3ef33c631d6ce2ed8d582a3'
+readonly EXPECTED_MANIFEST_SHA256='719b34f82b41722db4ed6f7aae737a2e6370ecd346a0a4d29b28fe3dbfb4bb91'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
@@ -126,7 +126,7 @@ bind_validation_runtime_python() {
   lock_sha="$(sha256sum "${RUNTIME_LOCK}")" || die 'runtime_lock_sha256_failed'
   lock_sha="${lock_sha%% *}"
   [[ "${lock_sha}" =~ ^[0-9a-f]{64}$ ]] || die 'runtime_lock_sha256_invalid'
-  [[ "${canonical}" =~ ^/tmp/governed-memory-phase5-runtime-([0-9a-f]{64})-([0-9a-f]{64})/bin/python$ ]] \
+  [[ "${canonical}" =~ ^/tmp/governed-memory-successor-runtime-([0-9a-f]{64})-([0-9a-f]{64})/bin/python$ ]] \
     || die 'validation_runtime_python_not_invocation_owned'
   runtime_sha="${BASH_REMATCH[1]}"
   source_sha="${BASH_REMATCH[2]}"
@@ -367,7 +367,7 @@ if (
     raise ValueError("runtime build receipt differs")
 project_wheel = Path(receipt["project_wheel"])
 expected_build_root = Path(
-    "/tmp/governed-memory-phase5-build-"
+    "/tmp/governed-memory-successor-build-"
     f"{receipt['build_lock_sha256']}-{source_tree_sha256}"
 )
 if (
@@ -1600,8 +1600,8 @@ assert_rollback_absence() {
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
       -c "SELECT CASE WHEN pg_catalog.to_regprocedure('memory_private.read_claim(uuid)') IS NULL AND pg_catalog.to_regclass('memory.pilot_marker') IS NULL AND pg_catalog.to_regprocedure('memory_private.pilot_marker_receipt_sha256(text,uuid,text,text,timestamp with time zone)') IS NULL AND pg_catalog.to_regprocedure('memory_private.guard_pilot_marker_append_only()') IS NULL AND pg_catalog.to_regprocedure('memory_private.mark_pilot_started(text,uuid,text,text,timestamp with time zone)') IS NULL AND pg_catalog.to_regprocedure('memory_private.read_pilot_marker()') IS NULL THEN 'absent' ELSE 'present' END"
-  )" || die 'phase5_additive_absence_query_failed'
-  [[ "${result}" == 'absent' ]] || die 'phase5_additive_rollback_objects_remain'
+  )" || die 'successor_additive_absence_query_failed'
+  [[ "${result}" == 'absent' ]] || die 'successor_additive_rollback_objects_remain'
 
   result="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
@@ -1612,13 +1612,12 @@ assert_rollback_absence() {
 }
 
 verify_disposable_pilot_marker_semantics() {
-  local conflict_output first_insert marker_rows read_result read_rows replay
+  local conflict_output first_insert first_replayed first_state marker_rows
+  local marker_receipt_sha256 read_result read_rows replay started_at
   local -r pilot_id='governed_memory_disposable_019fe927'
   local -r operation_id='14444444-4444-4444-8444-444444444444'
   local -r pilot_contract_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   local -r authorization_receipt_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-  local -r started_at='2026-08-10T20:00:00Z'
-  local -r marker_receipt_sha256='5aa7051078f7f619c4f705fd79d6817d9d6fc45005b6f8c1271d826b77227e91'
 
   marker_rows="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
@@ -1637,6 +1636,14 @@ verify_disposable_pilot_marker_semantics() {
   [[ "${read_rows}" == '0' ]] || die 'pilot_marker_absence_did_not_read_false'
   printf 'SUCCESSOR_PILOT_MARKER_ABSENCE=false rows=0\n'
 
+  started_at="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
+      -c "SELECT pg_catalog.to_char(pg_catalog.clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
+  )" || die 'pilot_marker_database_time_failed'
+  [[ "${started_at}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] \
+    || die 'pilot_marker_database_time_invalid'
+
   first_insert="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
@@ -1644,7 +1651,11 @@ verify_disposable_pilot_marker_semantics() {
       -c 'SET ROLE governed_memory_owner' \
       -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.marker_receipt_sha256, CASE WHEN value.replayed THEN 'true' ELSE 'false' END FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '${started_at}'::timestamptz) AS value"
   )" || die 'pilot_marker_first_insert_failed'
-  [[ "${first_insert}" == "true|${marker_receipt_sha256}|false" ]] \
+  IFS='|' read -r first_state marker_receipt_sha256 first_replayed \
+    <<< "${first_insert}"
+  [[ "${first_state}" == 'true' \
+     && "${marker_receipt_sha256}" =~ ^[0-9a-f]{64}$ \
+     && "${first_replayed}" == 'false' ]] \
     || die 'pilot_marker_first_insert_result_mismatch'
 
   replay="$(
@@ -1661,7 +1672,7 @@ verify_disposable_pilot_marker_semantics() {
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -q -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \
       -c 'SET ROLE governed_memory_owner' \
-      -c "SELECT * FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '2026-08-10T20:00:01Z'::timestamptz)" \
+      -c "SELECT * FROM memory_private.mark_pilot_started('${pilot_id}', '${operation_id}'::uuid, '${pilot_contract_sha256}', '${authorization_receipt_sha256}', '${started_at}'::timestamptz + interval '1 microsecond')" \
       2>&1
   )"; then
     die 'pilot_marker_conflicting_replay_unexpectedly_succeeded'
@@ -1682,7 +1693,7 @@ verify_disposable_pilot_marker_semantics() {
       -X -q -A -t -F '|' -v ON_ERROR_STOP=1 \
       -U postgres -d governed_memory \
       -c 'SET ROLE governed_memory_worker' \
-      -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.pilot_id, value.operation_id, value.pilot_contract_sha256, value.authorization_receipt_sha256, pg_catalog.to_char(value.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), value.marker_receipt_sha256 FROM memory_private.read_pilot_marker() AS value"
+      -c "SELECT CASE WHEN value.pilot_ever_started THEN 'true' ELSE 'false' END, value.pilot_id, value.operation_id, value.pilot_contract_sha256, value.authorization_receipt_sha256, pg_catalog.to_char(value.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), value.marker_receipt_sha256 FROM memory_private.read_pilot_marker() AS value"
   )" || die 'pilot_marker_final_read_failed'
   [[ "${read_result}" == "true|${pilot_id}|${operation_id}|${pilot_contract_sha256}|${authorization_receipt_sha256}|${started_at}|${marker_receipt_sha256}" ]] \
     || die 'pilot_marker_final_read_result_mismatch'
@@ -1751,8 +1762,12 @@ expected_keys = {
     "cold_projection_rebuild",
     "corrected_revision_id",
     "deletion_receipt_sha256",
+    "embedding_dispatch_adversarial",
+    "embedding_dispatch_marker_count",
+    "embedding_dispatch_marker_sha256",
     "http_lifecycle_sha256",
     "http_owner_lifecycle",
+    "inactive_worker_runtime_sha256",
     "initial_revision_id",
     "jwks_fetch_count",
     "jwks_manifest_sha256",
@@ -1760,6 +1775,7 @@ expected_keys = {
     "production_data_read",
     "production_endpoint_calls",
     "production_service_invoked",
+    "projection_lease_version_fenced",
     "provider_external_calls",
     "rebuild_manifest_sha256",
     "review_surface_sha256",
@@ -1770,7 +1786,7 @@ expected_keys = {
 }
 if set(receipt) != expected_keys:
     raise ValueError("integration receipt key set is not closed")
-if receipt.get("schema") != "governed-memory-successor-http-integration-receipt-v1":
+if receipt.get("schema") != "governed-memory-successor-http-integration-receipt-v2":
     raise ValueError("unexpected integration receipt schema")
 if receipt.get("cold_extraction_lease") is not True:
     raise ValueError("integration receipt lacks cold extraction proof")
@@ -1778,6 +1794,12 @@ if receipt.get("cold_projection_rebuild") is not True:
     raise ValueError("integration receipt lacks cold rebuild proof")
 if receipt.get("provider_external_calls") != 0:
     raise ValueError("integration receipt reports an external provider call")
+if receipt.get("embedding_dispatch_adversarial") is not True:
+    raise ValueError("integration receipt lacks embedding dispatch adversarial proof")
+if receipt.get("embedding_dispatch_marker_count") != 2:
+    raise ValueError("integration receipt has wrong embedding marker count")
+if receipt.get("projection_lease_version_fenced") is not True:
+    raise ValueError("integration receipt lacks projection lease version fence")
 if receipt.get("production_data_read") is not False:
     raise ValueError("integration receipt does not deny production reads")
 if receipt.get("production_endpoint_calls") != 0:
@@ -1796,12 +1818,14 @@ if type(receipt.get("jwks_fetch_count")) is not int or receipt["jwks_fetch_count
 required_hashes = (
     "auth_negative_matrix_sha256",
     "http_lifecycle_sha256",
+    "inactive_worker_runtime_sha256",
     "jwks_manifest_sha256",
     "owner_isolation_sha256",
     "rebuild_manifest_sha256",
     "review_surface_sha256",
     "answer_binding_sha256",
     "deletion_receipt_sha256",
+    "embedding_dispatch_marker_sha256",
     "route_manifest_sha256",
 )
 for key in required_hashes:
@@ -1862,6 +1886,7 @@ run_integration() {
       PYTHONNOUSERSITE=1 \
       PYTHONDONTWRITEBYTECODE=1 \
       PYTHONPATH="${ROOT}" \
+      GOVERNED_MEMORY_EXCLUSIVE_MODE=successor_pilot \
       GM_VALIDATION_RUN=1 \
       GM_VALIDATION_POSTGRES_HOST=127.0.0.1 \
       GM_VALIDATION_POSTGRES_PORT="${POSTGRES_PORT}" \

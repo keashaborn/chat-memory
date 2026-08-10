@@ -1,0 +1,27 @@
+{
+  "schema_version": "governed-memory-historical-disposable-proof-v1",
+  "phase": "phase5",
+  "reusable_for_current_candidate": false,
+  "proof_receipt": {
+    "schema_version": "governed-memory-successor-disposable-run-v4",
+    "result": "passed",
+    "attested_candidate_head": "699c80761065d19832d2c0f3b2b50342a5a8350c",
+    "attested_candidate_tree": "c5c13579ffa54da4f30fc198254c98b662c7029b",
+    "attested_pre_promotion_manifest_sha256": "2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45",
+    "invocation_id": "ac6e240b-1b9e-4442-a592-2b4d1c2e8492",
+    "postgres_server_version": "16.14",
+    "qdrant_server_version": "1.19.0",
+    "connect_trace_sha256": "b054ede64b1f16ce694d110e5d69e4635db41d0f6f2348102d880df8f54338c3",
+    "foundation_logical_dump_sha256": "852c37925e3a4fc424d4f06456d053bafff3ba8461261303da66b312111c6923",
+    "bridge_logical_dump_sha256": "c4f802917f69244d6d27cf9bd9e55947e312f22aa9e34fcffe52d4486f09539d",
+    "integration_receipt_sha256": "6479f3f0feb8f155754edd3467b8c80f043ae47a19f11ddc459f5c3896fe4c37",
+    "provider_external_calls": 0,
+    "semantic_threshold_calibrated": false,
+    "resources_removed": true
+  },
+  "preproof_corrections": [
+    "pilot_marker_on_conflict_out_variable_ambiguity_fixed_with_named_constraint",
+    "validation_schema_inventory_staleness_fixed_before_passing_run",
+    "qdrant_invalid_alias_endpoint_fixed_and_disposable_v1_19_0_verified_only"
+  ]
+}

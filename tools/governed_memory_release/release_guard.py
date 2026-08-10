@@ -63,7 +63,7 @@ EXPECTED_CREATE_BLOCKERS = [
     "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
     "calibration_artifact_unapproved_retrieval_off",
-    "frontend_candidate_35a684_undeployed_visual_qa_pending",
+    "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
 ]
 EXPECTED_CLEANUP_BLOCKERS: list[str] = []
 
@@ -128,16 +128,18 @@ def verify_candidate_artifacts() -> dict[str, object]:
     if (
         not isinstance(create_policy, dict)
         or create_policy.get("current_create_authorized") is not False
-        or create_policy.get("unresolved_activation_blockers")
+        or create_policy.get("requires_all_creation_prerequisites_closed")
+        is not True
+        or create_policy.get("unresolved_creation_prerequisites")
         != EXPECTED_CREATE_BLOCKERS
         or not isinstance(implementation, dict)
         or implementation.get("session_id_required") is not True
         or implementation.get("owner_claim_fact_detail")
-        != "implemented_candidate_disposable_proof_passed_not_production_applied"
+        != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
         or implementation.get("qdrant_adapter")
         != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
         or implementation.get("pilot_marker")
-        != "implemented_disposable_proof_passed_not_production_applied"
+        != "implemented_phase6b_disposable_revalidation_pending_not_production_applied"
         or implementation.get("calibration")
         != "independently_bound_unapproved_retrieval_off"
     ):
@@ -145,7 +147,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
     if (
         not isinstance(cleanup, dict)
         or cleanup.get("current_cleanup_authorized") is not False
-        or cleanup.get("unresolved_activation_blockers")
+        or cleanup.get("unresolved_cleanup_prerequisites")
         != EXPECTED_CLEANUP_BLOCKERS
         or cleanup.get("requires_pilot_ever_started_false") is not True
         or cleanup.get("refuse_after_any_pilot_row") is not True
@@ -180,13 +182,13 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or pilot.get("provider_policy", {}).get("provider_adapter_status")
         != "strict_fake_tested_zero_real_calls"
         or pilot.get("provider_policy", {}).get("embedding_adapter_status")
-        != "strict_3072_fake_tested_zero_real_calls"
+        != "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls"
         or pilot.get("provider_policy", {}).get("calibration_status")
         != "independently_bound_unapproved_retrieval_off"
         or pilot.get("candidate_surfaces", {}).get("owner_claim_fact_detail")
-        != "implemented_candidate_disposable_proof_passed_not_production_applied"
+        != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
         or pilot.get("candidate_surfaces", {}).get("pilot_marker")
-        != "implemented_disposable_proof_passed_not_production_applied"
+        != "implemented_phase6b_disposable_revalidation_pending_not_production_applied"
         or pilot.get("provider_policy", {}).get("qdrant_adapter_status")
         != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
     ):

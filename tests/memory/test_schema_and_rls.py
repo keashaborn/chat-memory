@@ -1070,7 +1070,7 @@ class SchemaContractTests(unittest.TestCase):
     def test_contract_declares_a_new_empty_authority(self) -> None:
         self.assertEqual(
             self.contract["schema_version"],
-            "governed-memory-schema-contract-v5",
+            "governed-memory-successor-schema-contract-v1",
         )
         self.assertEqual(
             self.contract["status"],
@@ -3868,6 +3868,94 @@ class StaticSQLPolicyTests(unittest.TestCase):
             finish,
             r"(?s)SET\s+state\s*=\s*resulting_state.*?"
             r"RETURN\s+QUERY\s+SELECT\s+resulting_state,\s*false",
+        )
+
+    def test_projection_embedding_dispatch_is_durable_and_never_released_twice(self) -> None:
+        definitions = _function_definitions(self.foundation)
+        table = _table_definition(self.foundation, "memory.projection_outbox")
+        for column in (
+            "embedding_request_sha256 text",
+            "embedding_dispatch_lease_token uuid",
+            "embedding_dispatched_at timestamptz",
+        ):
+            with self.subTest(column=column):
+                self.assertIn(column, table)
+        self.assertIn("projection_outbox_embedding_dispatch_shape", table)
+        self.assertIn(
+            "acfdbf52a9201f941fcd897bc6b6a303e2c7e4f6820e9aa0465b01cc8a06ca54",
+            self.foundation,
+        )
+
+        marker = definitions[
+            "memory_private.mark_projection_embedding_dispatched"
+        ]
+        self.assertIn("FOR UPDATE", marker)
+        self.assertIn("projection embedding dispatch replay forbidden", marker)
+        self.assertIn("ERRCODE = '55000'", marker)
+        self.assertIn("projection embedding dispatch drifted", marker)
+        self.assertIn("ERRCODE = '23514'", marker)
+        self.assertIn(
+            "ec5de0ef28028972039d3cfa1949e5a468b7e69009720b1353e44228fa11b4f1",
+            marker,
+        )
+        self.assertIn("memory_private.embedding_request_sha256", marker)
+        self.assertIn(
+            "memory_private.embedding_request_body_sha256",
+            marker,
+        )
+        self.assertIn("FROM memory.claim AS value", marker)
+        self.assertIn("FOR SHARE", marker)
+        self.assertIn("target.projection_sequence", marker)
+        self.assertIn("target.current_revision_id", marker)
+        self.assertIn("target.lifecycle_state", marker)
+        self.assertIn("pg_catalog.clock_timestamp()", marker)
+
+        guard = definitions[
+            "memory_private.guard_projection_outbox_mutation"
+        ]
+        self.assertRegex(
+            guard,
+            r"OLD\.state\s*=\s*'claimed'\s+AND\s+NEW\.state\s*=\s*'claimed'",
+        )
+        self.assertIn("pg_catalog.to_jsonb(OLD)", guard)
+        self.assertIn("NEW.embedding_dispatch_lease_token", guard)
+        self.assertIn("OLD.lease_token", guard)
+
+        lease = definitions["memory_private.lease_projection_jobs"]
+        self.assertRegex(
+            lease,
+            r"(?s)embedding_request_sha256\s+IS\s+NOT\s+NULL.*?"
+            r"THEN\s+'failed_terminal'",
+        )
+        self.assertIn("embedding_dispatch_outcome_unknown", lease)
+        self.assertIn(
+            "d5ef651ccf1607f00c93da9f2e88219a366c178dbc2d5a015e7911af3cb05ba8",
+            lease,
+        )
+        self.assertRegex(
+            lease,
+            r"outbox\.embedding_request_sha256\s+IS\s+NULL",
+        )
+        self.assertRegex(
+            lease,
+            r"(?s)earlier\.state\s*=\s*'failed_terminal'.*?"
+            r"earlier\.embedding_request_sha256\s+IS\s+NOT\s+NULL",
+        )
+
+        finish = definitions["memory_private.finish_projection_job"]
+        self.assertRegex(
+            finish,
+            r"(?s)p_outcome\s*=\s*'retryable'.*?"
+            r"outbox\.embedding_request_sha256\s+IS\s+NOT\s+NULL.*?"
+            r"THEN\s+'failed_terminal'",
+        )
+        self.assertIn("embedding_dispatch_outcome_unknown", finish)
+        self.assertRegex(
+            self.foundation,
+            r"(?s)GRANT\s+EXECUTE\s+ON\s+FUNCTION.*?"
+            r"memory_private\.mark_projection_embedding_dispatched\("
+            r"\s*uuid,uuid,text,text,text,text,text,text\s*\).*?"
+            r"TO\s+governed_memory_worker",
         )
 
     def test_hard_delete_is_a_separate_worker_only_verified_purge(self) -> None:

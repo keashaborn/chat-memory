@@ -79,6 +79,26 @@ from rag_engine.governed_memory.retrieval import (
     validate_vector_candidates,
 )
 from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
+from rag_engine.governed_memory.runtime.once_worker import (
+    OnceWorkerOutcome,
+    WorkKind,
+    main as worker_main,
+)
+from rag_engine.governed_memory.runtime.openai_adapters import (
+    DispatchReceipt,
+    EMBEDDING_ENDPOINT_SHA256,
+    embedding_request_body_sha256,
+    embedding_request_sha256,
+)
+from rag_engine.governed_memory.runtime.worker_postgres import (
+    WORKER_RUNTIME_CONTRACT_SHA256,
+)
+from rag_engine.governed_memory.runtime.worker_application import (
+    WORKER_ADVISORY_LOCK_KEY,
+    WorkerRuntimeConfig,
+    WorkerRuntimeRefusal,
+    run_runtime_once,
+)
 from rag_engine.governed_memory.runtime.qdrant_adapter import (
     ExactQdrantAdapter,
     QDRANT_PHYSICAL_COLLECTION,
@@ -130,6 +150,8 @@ ALTERNATE_SOURCE_MESSAGE = UUID("99999999-9999-4999-8999-999999999999")
 THREAD_B = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")
 OWNER_B_CLAIM_ID = UUID("22222222-2222-4222-8222-222222222226")
 OWNER_B_REVISION_ID = UUID("22222222-2222-4222-8222-222222222227")
+CONTEXT_RUNTIME_THREAD = UUID("22222222-2222-4222-8222-222222222228")
+CONTEXT_RUNTIME_MESSAGE = UUID("22222222-2222-4222-8222-222222222229")
 ALIAS = "governed_memory_active"
 PHYSICAL_A = QDRANT_PHYSICAL_COLLECTION
 PHYSICAL_B = "governed_memory_successor_b_019fe927"
@@ -817,6 +839,224 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             )
             yield
 
+    async def prove_inactive_worker_runtime(self) -> str:
+        marker = await self.admin.fetchrow(
+            "SELECT pilot_id,pilot_contract_sha256,"
+            "authorization_receipt_sha256 FROM memory.pilot_marker"
+        )
+        self.assertIsNotNone(marker)
+        config = WorkerRuntimeConfig.from_environment(
+            {
+                "GOVERNED_MEMORY_POSTGRES_DSN": (
+                    "postgresql://governed_memory_worker:synthetic@"
+                    "127.0.0.1:55432/governed_memory"
+                ),
+                "GOVERNED_MEMORY_CONVERSATION_POSTGRES_DSN": (
+                    "postgresql://governed_memory_worker:synthetic@"
+                    "127.0.0.1:5432/memory"
+                ),
+                "GOVERNED_MEMORY_OPENAI_API_KEY": (
+                    "synthetic-disposable-no-provider-call"
+                ),
+                "GOVERNED_MEMORY_OPENAI_EXTRACTION_MODEL": MODEL,
+                "GOVERNED_MEMORY_EXPECTED_PILOT_ID": marker["pilot_id"],
+                "GOVERNED_MEMORY_EXPECTED_PILOT_CONTRACT_SHA256": marker[
+                    "pilot_contract_sha256"
+                ],
+                "GOVERNED_MEMORY_EXPECTED_AUTHORIZATION_RECEIPT_SHA256": marker[
+                    "authorization_receipt_sha256"
+                ],
+                "GOVERNED_MEMORY_QDRANT_URL": "http://127.0.0.1:6343",
+                "GOVERNED_MEMORY_QDRANT_API_KEY": (
+                    "synthetic-disposable-no-qdrant-call"
+                ),
+            }
+        )
+
+        async def runtime_connection(database: str) -> Any:
+            assert asyncpg is not None
+            return await asyncpg.connect(
+                user="governed_memory_worker",
+                password="successor_worker_disposable_only",
+                database=database,
+                host=self.host,
+                port=self.port,
+                command_timeout=30,
+            )
+
+        async def successor_factory(_config: WorkerRuntimeConfig) -> Any:
+            return await runtime_connection("governed_memory")
+
+        conversation_factory_calls = 0
+
+        async def conversation_factory(_config: WorkerRuntimeConfig) -> Any:
+            nonlocal conversation_factory_calls
+            conversation_factory_calls += 1
+            return await runtime_connection("memory")
+
+        self.assertTrue(
+            await self.worker_two.fetchval(
+                "SELECT pg_catalog.pg_try_advisory_lock($1::bigint)",
+                WORKER_ADVISORY_LOCK_KEY,
+            )
+        )
+        try:
+            with self.assertRaisesRegex(
+                WorkerRuntimeRefusal,
+                "governed_memory_worker_lock_contended",
+            ):
+                await run_runtime_once(
+                    config,
+                    successor_connection_factory=successor_factory,
+                    conversation_connection_factory=conversation_factory,
+                )
+        finally:
+            self.assertTrue(
+                await self.worker_two.fetchval(
+                    "SELECT pg_catalog.pg_advisory_unlock($1::bigint)",
+                    WORKER_ADVISORY_LOCK_KEY,
+                )
+            )
+        self.assertEqual(conversation_factory_calls, 0)
+
+        async with self.ingest_context(OWNER_A):
+            transaction_time = await self.ingest.fetchval(
+                "SELECT pg_catalog.transaction_timestamp()"
+            )
+            policy = EligibilityPolicy(ingest_after=transaction_time)
+            await self.ingest.execute(
+                "INSERT INTO public.threads("
+                "id,owner_user_id,user_id,title) "
+                "VALUES($1::uuid,$2::uuid,$2::text,'Runtime context thread')",
+                CONTEXT_RUNTIME_THREAD,
+                OWNER_A,
+            )
+            await self.ingest.execute(
+                "INSERT INTO public.chat_log("
+                "id,owner_user_id,user_id,source,text,thread_id,created_at) "
+                "VALUES($1::uuid,$2::uuid,$2::text,'frontend/chat:user',"
+                "$3::text,$4::uuid,pg_catalog.transaction_timestamp())",
+                CONTEXT_RUNTIME_MESSAGE,
+                OWNER_A,
+                "Yes, that synthetic preference is still current.",
+                CONTEXT_RUNTIME_THREAD,
+            )
+            enqueued = await self.ingest.fetchrow(
+                "SELECT * FROM "
+                "memory_ingest_private.enqueue_chat_log_message("
+                "$1::uuid,$2::text)",
+                CONTEXT_RUNTIME_MESSAGE,
+                policy.policy_sha256,
+            )
+        self.assertEqual(enqueued["outcome"], "enqueued")
+
+        sequence_before = await self.admin.fetchrow(
+            "SELECT last_value,is_called FROM "
+            "memory_private.worker_lane_sequence"
+        )
+        runtime_receipts: list[Any] = []
+
+        async def runtime_runner() -> Any:
+            receipt = await run_runtime_once(
+                config,
+                successor_connection_factory=successor_factory,
+                conversation_connection_factory=conversation_factory,
+            )
+            runtime_receipts.append(receipt)
+            return receipt
+
+        for _attempt in range(3):
+            exit_code = await asyncio.to_thread(
+                worker_main,
+                ["--once"],
+                environment={"GOVERNED_MEMORY_WORKER_MODE": "on"},
+                once_runner=runtime_runner,
+            )
+            self.assertEqual(exit_code, 0)
+        self.assertEqual(len(runtime_receipts), 3)
+        self.assertEqual(runtime_receipts[0].outcome, OnceWorkerOutcome.COMPLETED)
+        self.assertEqual(runtime_receipts[0].work_kind, WorkKind.INGEST)
+        self.assertEqual(
+            [receipt.outcome for receipt in runtime_receipts[1:]],
+            [OnceWorkerOutcome.NO_WORK, OnceWorkerOutcome.NO_WORK],
+        )
+        sequence_after = await self.admin.fetchrow(
+            "SELECT last_value,is_called FROM "
+            "memory_private.worker_lane_sequence"
+        )
+        before_value = (
+            int(sequence_before["last_value"])
+            if sequence_before["is_called"]
+            else 0
+        )
+        self.assertTrue(sequence_after["is_called"])
+        self.assertEqual(int(sequence_after["last_value"]), before_value + 3)
+        context_row = await self.bridge_admin.fetchrow(
+            "SELECT state,eligibility_decision,context_review_count,"
+            "successor_evidence_id,successor_job_id,last_error_code,"
+            "source_binding_sha256 FROM "
+            "memory_ingest_private.memory_ingest_outbox "
+            "WHERE message_id=$1::uuid",
+            CONTEXT_RUNTIME_MESSAGE,
+        )
+        self.assertEqual(
+            dict(context_row),
+            {
+                "state": "skipped",
+                "eligibility_decision": "review_context",
+                "context_review_count": 1,
+                "successor_evidence_id": None,
+                "successor_job_id": None,
+                "last_error_code": "context_review_unresolved",
+                "source_binding_sha256": context_row[
+                    "source_binding_sha256"
+                ],
+            },
+        )
+        self.assertIsNone(
+            await self.worker.fetchrow(
+                "SELECT * FROM memory_private.read_ingest_receipt("
+                "$1::uuid,$2::uuid,$3::text)",
+                OWNER_A,
+                CONTEXT_RUNTIME_MESSAGE,
+                context_row["source_binding_sha256"],
+            )
+        )
+        runtime_proof_sha256 = canonical_sha256(
+            "governed_memory.successor_inactive_worker_runtime",
+            {
+                "advisory_lock_contended_before_conversation": True,
+                "context_terminalized": True,
+                "exclusive_main_invocations": 3,
+                "lane_sequence_advance": 3,
+                "provider_calls": 0,
+                "successor_receipt_reads": 1,
+                "successor_writes": 0,
+            },
+        )
+        await self.bridge_admin.execute(
+            "UPDATE memory_ingest_private.memory_ingest_outbox "
+            "SET created_at=pg_catalog.transaction_timestamp()-interval '31 days',"
+            "content_hash_expires_at="
+            "pg_catalog.transaction_timestamp()-interval '30 days 1 hour',"
+            "purge_after=pg_catalog.transaction_timestamp()-interval '1 day' "
+            "WHERE message_id=$1::uuid",
+            CONTEXT_RUNTIME_MESSAGE,
+        )
+        self.assertEqual(
+            await self.bridge_worker.fetchval(
+                "SELECT memory_ingest_private.purge_terminal_memory_ingest(10)"
+            ),
+            1,
+        )
+        await self.bridge_admin.execute(
+            "DELETE FROM public.chat_log WHERE id=$1::uuid; "
+            "DELETE FROM public.threads WHERE id=$2::uuid",
+            CONTEXT_RUNTIME_MESSAGE,
+            CONTEXT_RUNTIME_THREAD,
+        )
+        return runtime_proof_sha256
+
     async def read_claims(self, owner: UUID, claim_ids: list[UUID]) -> list[dict[str, Any]]:
         async with self.owner_context(self.api, owner):
             rows = await self.api.fetch(
@@ -853,6 +1093,73 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         if tuple(result) != PROJECTION_OUTBOX_FIELDS:
             raise AssertionError("projection lease does not map to the closed outbox")
         return result
+
+    async def mark_embedding_dispatch(self, lease: Mapping[str, Any]) -> str:
+        receipt = DispatchReceipt(
+            operation="embeddings.create",
+            model="text-embedding-3-large",
+            endpoint_sha256=EMBEDDING_ENDPOINT_SHA256,
+            input_sha256=str(lease["embedding_input_sha256"]),
+            request_body_sha256=embedding_request_body_sha256(
+                str(lease["retrieval_text"])
+            ),
+        )
+        request_sha256 = embedding_request_sha256(receipt)
+        marker_sql = (
+            "SELECT * FROM memory_private.mark_projection_embedding_dispatched("
+            "$1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::text,"
+            "$8::text)"
+        )
+        marker_args = (
+            lease["outbox_id"],
+            lease["lease_token"],
+            receipt.operation,
+            receipt.model,
+            receipt.endpoint_sha256,
+            receipt.input_sha256,
+            receipt.request_body_sha256,
+            request_sha256,
+        )
+        with self.assertRaises(asyncpg.PostgresError) as unmarked_apply:
+            await self.worker.fetchrow(
+                "SELECT * FROM memory_private.finish_projection_job("
+                "$1::uuid,$2::uuid,'applied'::text,$3::text,$4::text,"
+                "NULL::text,NULL::text,NULL::text)",
+                lease["outbox_id"],
+                lease["lease_token"],
+                PHYSICAL_A,
+                "f" * 64,
+            )
+        self.assertEqual(unmarked_apply.exception.sqlstate, "22023")
+        result = await self.worker.fetchrow(marker_sql, *marker_args)
+        self.assertEqual(result["outcome"], "dispatched")
+        self.assertIsInstance(result["dispatched_at"], datetime)
+        stored = await self.admin.fetchrow(
+            "SELECT embedding_request_sha256,embedding_dispatch_lease_token,"
+            "embedding_dispatched_at,claimed_at,lease_expires_at "
+            "FROM memory.projection_outbox WHERE outbox_id=$1::uuid",
+            lease["outbox_id"],
+        )
+        self.assertEqual(stored["embedding_request_sha256"], request_sha256)
+        self.assertEqual(
+            stored["embedding_dispatch_lease_token"],
+            lease["lease_token"],
+        )
+        self.assertGreaterEqual(
+            stored["embedding_dispatched_at"], stored["claimed_at"]
+        )
+        self.assertLess(
+            stored["embedding_dispatched_at"], stored["lease_expires_at"]
+        )
+        with self.assertRaises(asyncpg.PostgresError) as exact_replay:
+            await self.worker.fetchrow(marker_sql, *marker_args)
+        self.assertEqual(exact_replay.exception.sqlstate, "55000")
+        drift_args = list(marker_args)
+        drift_args[1] = UUID("ffffffff-ffff-4fff-8fff-ffffffffffff")
+        with self.assertRaises(asyncpg.PostgresError) as drifted_replay:
+            await self.worker.fetchrow(marker_sql, *drift_args)
+        self.assertEqual(drifted_replay.exception.sqlstate, "23514")
+        return request_sha256
 
     @staticmethod
     def qdrant_candidate(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -1037,6 +1344,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             for statement in forbidden_dml:
                 with self.assertRaises(asyncpg.InsufficientPrivilegeError):
                     await connection.execute(statement)
+
+        runtime_proof_sha256 = await self.prove_inactive_worker_runtime()
 
         status_code, status_body = await self.http_request(
             "GET", "/memory/status", token=self.owner_a_token
@@ -1698,9 +2007,19 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             dict(preflight.payload_indexes),
             dict(QDRANT_REQUIRED_PAYLOAD_INDEXES),
         )
+        with self.assertRaises(asyncpg.PostgresError) as stale_worker_signature:
+            await self.worker.fetchrow(
+                "SELECT * FROM memory_private.lease_projection_jobs("
+                "'successor_projector',1,120)"
+            )
+        self.assertEqual(stale_worker_signature.exception.sqlstate, "42883")
         projection_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'successor_projector',1,120)"
+            "'successor_projector',1,120,$1::text)",
+            WORKER_RUNTIME_CONTRACT_SHA256,
+        )
+        initial_embedding_request_sha256 = await self.mark_embedding_dispatch(
+            projection_lease
         )
         point = build_projection_point(
             claims[0], self.projection_outbox(projection_lease), deterministic_vector()
@@ -1921,7 +2240,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         correction_delete_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'successor_projector',1,120)"
+            "'successor_projector',1,120,$1::text)",
+            WORKER_RUNTIME_CONTRACT_SHA256,
         )
         await self.finish_delete(
             correction_delete_lease, physical=PHYSICAL_A, finalize=False
@@ -1964,7 +2284,11 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(corrected_claim["revision_number"], 2)
         corrected_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'successor_projector',1,120)"
+            "'successor_projector',1,120,$1::text)",
+            WORKER_RUNTIME_CONTRACT_SHA256,
+        )
+        corrected_embedding_request_sha256 = await self.mark_embedding_dispatch(
+            corrected_lease
         )
         corrected_point = build_projection_point(
             corrected_claim,
@@ -2068,7 +2392,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.read_claims(OWNER_A, [claim_id]), [])
         retraction_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'successor_projector',1,120)"
+            "'successor_projector',1,120,$1::text)",
+            WORKER_RUNTIME_CONTRACT_SHA256,
         )
         await self.finish_delete(retraction_lease, physical=PHYSICAL_B, finalize=False)
 
@@ -2089,7 +2414,8 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         deletion_state = (await self.list_claims(OWNER_A))[0]
         deletion_lease = await self.worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
-            "'successor_projector',1,120)"
+            "'successor_projector',1,120,$1::text)",
+            WORKER_RUNTIME_CONTRACT_SHA256,
         )
         deletion_receipt = await self.finish_delete(
             deletion_lease,
@@ -2211,9 +2537,16 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 "vector_owner_filter": True,
             },
         )
+        embedding_dispatch_marker_sha256 = canonical_sha256(
+            "governed_memory.successor_embedding_dispatch_markers",
+            (
+                initial_embedding_request_sha256,
+                corrected_embedding_request_sha256,
+            ),
+        )
 
         receipt = {
-            "schema": "governed-memory-successor-http-integration-receipt-v1",
+            "schema": "governed-memory-successor-http-integration-receipt-v2",
             "auth_negative_matrix_sha256": auth_negative_matrix_sha256,
             "claim_id": str(claim_id),
             "initial_revision_id": str(claims[0]["revision_id"]),
@@ -2236,6 +2569,13 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             ),
             "answer_binding_sha256": binding["binding_sha256"],
             "deletion_receipt_sha256": deletion_receipt["receipt_sha256"],
+            "embedding_dispatch_adversarial": True,
+            "embedding_dispatch_marker_count": 2,
+            "embedding_dispatch_marker_sha256": (
+                embedding_dispatch_marker_sha256
+            ),
+            "projection_lease_version_fenced": True,
+            "inactive_worker_runtime_sha256": runtime_proof_sha256,
             "provider_external_calls": 0,
             "production_data_read": False,
             "production_endpoint_calls": 0,

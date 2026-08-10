@@ -402,7 +402,7 @@ def _source_bound_root(
     ):
         raise CandidateBuildError("candidate_source_binding_invalid")
     return Path(
-        f"/tmp/governed-memory-phase5-{kind}-{lock_sha256}-{source_tree_sha256}"
+        f"/tmp/governed-memory-successor-{kind}-{lock_sha256}-{source_tree_sha256}"
     )
 
 

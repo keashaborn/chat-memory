@@ -6,10 +6,10 @@
     "transcript_database": "memory"
   },
   "candidate_base": {
-    "backend_commit": "18090eb1e468f8b5279e33c4a37b67ca96071122",
-    "backend_tree": "e0a037b97402ec833a15d84158dc3747da0be35b",
-    "frontend_commit": "35a6848d9a875897e807c9cfa91bd235001c5a1f",
-    "frontend_tree": "5cb4a92c33f82f5f6481b05126ecd556fc2cb9a0"
+    "backend_commit": "ca03e57974778319cd9ee514ab47ef1cecdc3b52",
+    "backend_tree": "ae4520963a16895ea5ad68fba7cfb02e7a0558aa",
+    "frontend_commit": "6d80ba00c93bfa74c4e44604a41ac36e779e93a9",
+    "frontend_tree": "f5e72973cff3e9dc28ecb9555c974ae93672955b"
   },
   "deletion_gates": [
     "phase6b_full_candidate_tests_pass",
@@ -22,9 +22,23 @@
     "separate_deletion_batch_is_explicitly_authorized"
   ],
   "inventory_at_candidate_base": {
-    "legacy_memory_runtime_files": 52,
-    "legacy_memory_systemd_files": 48,
-    "legacy_memory_test_files": 157,
+    "deletion_authority": false,
+    "exact_path_hash_manifest_status": "pending_before_any_legacy_git_deletion",
+    "provisional_counts_removed": "prior_name_matched_counts_were_incomplete_and_are_not_deletion_evidence",
+    "required_inventory_surfaces": [
+      ".github/workflows",
+      "docs",
+      "governed-migration-ci",
+      "ops",
+      "schema-ledger",
+      "scripts",
+      "specs",
+      "sql",
+      "systemd",
+      "tests",
+      "tools"
+    ],
+    "legacy_ci_status": "retained_and_explicitly_labeled_quarantine_while_successor_ci_runs_separately",
     "production_importers_of_legacy_answer_provider": [
       "rag_engine/resse_response_router.py"
     ],
