@@ -6,6 +6,7 @@ import asyncio
 import os
 import logging
 import time
+from typing import Callable
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -24,6 +25,24 @@ from rag_engine.assistant_response_preferences_v1 import (
     default_assistant_response_preferences_v1,
 )
 from rag_engine.governed_memory_provider_v1 import LiveGovernedMemoryAssemblyProviderV1
+from rag_engine.governed_memory.response_provider import (
+    EXCLUSIVE_MODE_SUCCESSOR,
+    InactiveSuccessorMemoryProviderV1,
+    SuccessorGovernedMemoryAssemblyProviderV1,
+    SuccessorResponseActorBinding,
+    SuccessorResponseConfigurationError,
+    choose_response_memory_provider,
+    response_mode_from_environment,
+)
+from rag_engine.governed_memory.http_auth import HttpAuthError
+from rag_engine.governed_memory.http_service import SUPABASE_ISSUER_ENV
+from rag_engine.governed_memory.runtime.application import SUPABASE_API_KEY_ENV
+from rag_engine.governed_memory.runtime.live_supabase import (
+    LiveSupabaseAuthorityConfig,
+    LiveSupabaseAuthorityVerifier,
+    LiveSupabaseSessionVerifier,
+    LiveSupabaseUserVerifier,
+)
 from rag_engine.lifeswitch_chat_runtime_v1 import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
     LifeSwitchChatPoolManagerV1,
@@ -36,7 +55,12 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     LazyPostgresPriorLifeSwitchRestrictedReadSessionV1,
     PriorLifeSwitchProvenanceProviderV1,
 )
-from rag_engine.memory_actor_auth_v1 import require_memory_actor_v1
+from rag_engine.memory_actor_auth_v1 import (
+    MemoryActorContextV1,
+    MemoryLiveAuthorityVerifierV1,
+    require_memory_actor_context_v1,
+    require_memory_actor_v1,
+)
 from rag_engine.memory_v1_answer_provenance_v1 import (
     build_governed_memory_answer_provenance_v1,
 )
@@ -94,6 +118,48 @@ NO_STORE_HEADERS = {
 }
 
 
+SuccessorResponseProviderFactory = Callable[
+    [SuccessorResponseActorBinding],
+    SuccessorGovernedMemoryAssemblyProviderV1,
+]
+SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
+
+
+def _unconfigured_successor_response_provider(
+    binding: SuccessorResponseActorBinding,
+) -> SuccessorGovernedMemoryAssemblyProviderV1:
+    del binding
+    raise SuccessorResponseConfigurationError(
+        "successor_response_runtime_unconfigured"
+    )
+
+
+SUCCESSOR_RESPONSE_PROVIDER_FACTORY: SuccessorResponseProviderFactory = (
+    _unconfigured_successor_response_provider
+)
+
+
+def _live_successor_authority_from_environment() -> MemoryLiveAuthorityVerifierV1:
+    try:
+        config = LiveSupabaseAuthorityConfig(
+            issuer=os.environ.get(SUPABASE_ISSUER_ENV, ""),
+            api_key=os.environ.get(SUPABASE_API_KEY_ENV, ""),
+        )
+        return LiveSupabaseAuthorityVerifier(
+            user_verifier=LiveSupabaseUserVerifier(config),
+            session_verifier=LiveSupabaseSessionVerifier(config),
+        )
+    except HttpAuthError as exc:
+        raise SuccessorResponseConfigurationError(
+            "successor_live_authority_unconfigured"
+        ) from exc
+
+
+SUCCESSOR_LIVE_AUTHORITY_FACTORY: SuccessorLiveAuthorityFactory = (
+    _live_successor_authority_from_environment
+)
+
+
 @router.on_event("shutdown")
 async def close_lifeswitch_chat_pool_v1() -> None:
     await LIFESWITCH_CHAT_POOL.close()
@@ -102,6 +168,21 @@ async def close_lifeswitch_chat_pool_v1() -> None:
 def apply_no_store_headers(response: Response) -> None:
     for name, value in NO_STORE_HEADERS.items():
         response.headers[name] = value
+
+
+def _no_store_http_exception(
+    status_code: int,
+    detail: str,
+    *,
+    inherited_headers: dict[str, str] | None = None,
+) -> HTTPException:
+    headers = dict(inherited_headers or {})
+    headers.update(NO_STORE_HEADERS)
+    return HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers=headers,
+    )
 
 
 class ResseResponseRequestV1(BaseModel):
@@ -165,9 +246,53 @@ async def resse_response_query(
     payload: ResseResponseRequestV1, req: Request, response: Response
 ):
     request_started_ns = time.monotonic_ns()
+    try:
+        response_memory_mode = response_mode_from_environment(os.environ)
+    except SuccessorResponseConfigurationError:
+        raise _no_store_http_exception(
+            503,
+            "response_memory_mode_invalid",
+        ) from None
     if not DSN:
-        raise HTTPException(status_code=503, detail="response_runtime_unconfigured")
-    owner = UUID(await require_memory_actor_v1(req, str(payload.user_id)))
+        raise _no_store_http_exception(503, "response_runtime_unconfigured")
+    actor_context: MemoryActorContextV1 | None = None
+    voice_turn_id = voice_turn_id_from_request(req)
+    tentative_successor_eligible = (
+        response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
+        and not payload.no_store
+        and payload.thread_id is not None
+        and not payload.attachment_ids
+        and not (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
+        and voice_turn_id is None
+    )
+    if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
+        try:
+            live_authority_verifier = (
+                SUCCESSOR_LIVE_AUTHORITY_FACTORY()
+                if tentative_successor_eligible
+                else None
+            )
+        except SuccessorResponseConfigurationError:
+            raise _no_store_http_exception(
+                503,
+                "successor_live_authority_unconfigured",
+            ) from None
+        try:
+            actor_context = await require_memory_actor_context_v1(
+                req,
+                str(payload.user_id),
+                live_authority_verifier=live_authority_verifier,
+                require_live_authority=tentative_successor_eligible,
+            )
+        except HTTPException as exc:
+            raise _no_store_http_exception(
+                exc.status_code,
+                str(exc.detail),
+                inherited_headers=dict(exc.headers or {}),
+            ) from None
+        owner = actor_context.owner_user_id
+    else:
+        owner = UUID(await require_memory_actor_v1(req, str(payload.user_id)))
     search_capability_manifest = None
     search_authorization = (
         req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or ""
@@ -191,7 +316,6 @@ async def resse_response_query(
             authorization_basis=authorization_basis,
         )
     request_id = str(getattr(req.state, "request_id", "") or uuid4())
-    voice_turn_id = voice_turn_id_from_request(req)
     response_language = voice_language_from_request(
         req,
         default=AUTO_VOICE_LANGUAGE,
@@ -249,26 +373,77 @@ async def resse_response_query(
                 request_id=request_id,
                 current_message=payload.message,
             )
-        try:
-            async with conn.transaction():
-                await set_preference_actor_v1(conn, owner)
-                assistant_response_preferences = (
-                    await load_assistant_response_preferences_v1(conn, owner)
-                )
-        except Exception:
-            logger.warning(
-                "assistant response preferences unavailable request_id=%s",
-                request_id,
-            )
+        if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
             assistant_response_preferences = (
                 default_assistant_response_preferences_v1(owner)
             )
+        else:
+            try:
+                async with conn.transaction():
+                    await set_preference_actor_v1(conn, owner)
+                    assistant_response_preferences = (
+                        await load_assistant_response_preferences_v1(conn, owner)
+                    )
+            except Exception:
+                logger.warning(
+                    "assistant response preferences unavailable request_id=%s",
+                    request_id,
+                )
+                assistant_response_preferences = (
+                    default_assistant_response_preferences_v1(owner)
+                )
         openai_client = get_openai_client()
         generation_config = OpenAIChatGenerationConfigV1()
+        successor_eligible = (
+            response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
+            and not payload.no_store
+            and payload.thread_id is not None
+            and not payload.attachment_ids
+            and search_capability_manifest is None
+            and voice_turn_id is None
+        )
+        assert (
+            actor_context is not None
+            if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
+            else actor_context is None
+        )
+        try:
+            memory_provider, successor_memory_lifecycle = (
+                choose_response_memory_provider(
+                    mode=response_memory_mode,
+                    legacy_factory=lambda: LiveGovernedMemoryAssemblyProviderV1(
+                        conn
+                    ),
+                    successor_factory=(
+                        (
+                            lambda: SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
+                                SuccessorResponseActorBinding(
+                                    owner_user_id=owner,
+                                    session_id=actor_context.session_id,
+                                    authentication_manifest_sha256=(
+                                        actor_context.authentication_manifest_sha256
+                                    ),
+                                    request_id=request_id,
+                                    thread_id=thread_id,
+                                    eligible=True,
+                                )
+                            )
+                        )
+                        if successor_eligible and actor_context is not None
+                        else lambda: InactiveSuccessorMemoryProviderV1()
+                    ),
+                )
+            )
+        except SuccessorResponseConfigurationError:
+            raise _no_store_http_exception(
+                503,
+                "successor_response_runtime_unconfigured",
+            ) from None
         base_root = InactiveResponseCompositionRootV0_2(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
-            memory_provider=LiveGovernedMemoryAssemblyProviderV1(conn),
+            memory_provider=memory_provider,
+            successor_memory_lifecycle=successor_memory_lifecycle,
             generation_config=generation_config,
         )
         command = AuthenticatedResponseCommandV0_2(

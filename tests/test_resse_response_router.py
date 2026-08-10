@@ -1,19 +1,38 @@
 from __future__ import annotations
 
+import json
+import os
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import Response
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
+from starlette.requests import Request
 
+from rag_engine.governed_memory.response_provider import EXCLUSIVE_MODE_ENV
+from rag_engine.governed_memory.runtime.live_supabase import (
+    LiveSupabaseAuthorityConfig,
+    LiveSupabaseAuthorityVerifier,
+    LiveSupabaseSessionVerifier,
+    LiveSupabaseUserVerifier,
+)
+from rag_engine.supabase_actor_auth import VerifiedSupabaseIdentity
+from rag_engine import resse_response_router as response_router
 from rag_engine.resse_response_router import (
+    NO_STORE_HEADERS,
     ResseResponseRequestV1,
     apply_no_store_headers,
+    resse_response_query,
 )
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
+OTHER_ACTOR = UUID("2240822d-ac9a-4096-95aa-e2b24d36ef50")
+SESSION = UUID("3240822d-ac9a-4096-95aa-e2b24d36ef50")
+OTHER_SESSION = UUID("4240822d-ac9a-4096-95aa-e2b24d36ef50")
+THREAD = UUID("5240822d-ac9a-4096-95aa-e2b24d36ef50")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -140,6 +159,198 @@ class ResseResponseRouterTests(unittest.TestCase):
         )
         self.assertIn("finalized.memory_binding", source)
         self.assertNotIn('result["memory_provenance"] = inspection', source)
+
+
+def successor_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/query",
+            "headers": [
+                (b"authorization", b"Bearer a.b.c"),
+                (b"x-vs-actor-user-id", str(ACTOR).encode("ascii")),
+            ],
+        }
+    )
+
+
+def live_verifier(
+    *,
+    user_id: UUID = ACTOR,
+    session_id: UUID = SESSION,
+    session_present: bool = True,
+    missing_session: bool = False,
+    unavailable: bool = False,
+) -> LiveSupabaseAuthorityVerifier:
+    config = LiveSupabaseAuthorityConfig(
+        issuer="https://synthetic.supabase.co/auth/v1",
+        api_key="synthetic-publishable-key",
+    )
+
+    def fetch_user(*_args: object) -> bytes:
+        if unavailable:
+            raise OSError("synthetic authority unavailable")
+        return json.dumps({"id": str(user_id)}).encode("utf-8")
+
+    def fetch_session(*_args: object) -> bytes:
+        if missing_session:
+            return b"[]"
+        return json.dumps(
+            [
+                {
+                    "owner_user_id": str(ACTOR),
+                    "session_id": str(session_id),
+                    "session_present": session_present,
+                }
+            ]
+        ).encode("utf-8")
+
+    return LiveSupabaseAuthorityVerifier(
+        user_verifier=LiveSupabaseUserVerifier(config, fetcher=fetch_user),
+        session_verifier=LiveSupabaseSessionVerifier(
+            config,
+            fetcher=fetch_session,
+        ),
+    )
+
+
+class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
+    def payload(self) -> ResseResponseRequestV1:
+        return ResseResponseRequestV1(
+            user_id=ACTOR,
+            message="Which interface theme do I prefer?",
+            thread_id=THREAD,
+        )
+
+    async def assert_live_refusal(
+        self,
+        verifier: LiveSupabaseAuthorityVerifier,
+        *,
+        expected_status: int,
+        expected_detail: str,
+    ) -> None:
+        identity = VerifiedSupabaseIdentity(
+            actor_user_id=str(ACTOR),
+            session_id=str(SESSION),
+            authentication_manifest_sha256="a" * 64,
+        )
+        connect = AsyncMock()
+        with (
+            patch.dict(
+                os.environ,
+                {EXCLUSIVE_MODE_ENV: "successor_pilot"},
+                clear=False,
+            ),
+            patch.object(response_router, "DSN", "synthetic-configured-dsn"),
+            patch.object(
+                response_router,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                return_value=verifier,
+            ),
+            patch(
+                "rag_engine.memory_actor_auth_v1.require_verified_supabase_identity",
+                new=AsyncMock(return_value=identity),
+            ),
+            patch.object(response_router.asyncpg, "connect", connect),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await resse_response_query(
+                    self.payload(),
+                    successor_request(),
+                    Response(),
+                )
+        self.assertEqual(raised.exception.status_code, expected_status)
+        self.assertEqual(raised.exception.detail, expected_detail)
+        self.assertEqual(raised.exception.headers, NO_STORE_HEADERS)
+        connect.assert_not_awaited()
+
+    async def test_missing_and_signed_out_sessions_fail_closed_before_database(
+        self,
+    ) -> None:
+        for verifier in (
+            live_verifier(missing_session=True),
+            live_verifier(session_present=False),
+        ):
+            with self.subTest(verifier=verifier):
+                await self.assert_live_refusal(
+                    verifier,
+                    expected_status=401,
+                    expected_detail="successor_live_authority_denied",
+                )
+
+    async def test_live_user_and_session_mismatch_fail_closed(self) -> None:
+        for verifier in (
+            live_verifier(user_id=OTHER_ACTOR),
+            live_verifier(session_id=OTHER_SESSION),
+        ):
+            with self.subTest(verifier=verifier):
+                await self.assert_live_refusal(
+                    verifier,
+                    expected_status=401,
+                    expected_detail="successor_live_authority_denied",
+                )
+
+    async def test_live_authority_unavailable_is_no_store_503(self) -> None:
+        await self.assert_live_refusal(
+            live_verifier(unavailable=True),
+            expected_status=503,
+            expected_detail="successor_live_authority_unavailable",
+        )
+
+    async def test_invalid_mode_is_no_store_and_constructs_no_resources(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {EXCLUSIVE_MODE_ENV: " successor_pilot"},
+                clear=False,
+            ),
+            patch.object(response_router, "DSN", "synthetic-configured-dsn"),
+            patch.object(
+                response_router,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+            ) as factory,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await resse_response_query(
+                    self.payload(),
+                    successor_request(),
+                    Response(),
+                )
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail, "response_memory_mode_invalid")
+        self.assertEqual(raised.exception.headers, NO_STORE_HEADERS)
+        factory.assert_not_called()
+
+    async def test_default_legacy_mode_never_constructs_successor_resources(
+        self,
+    ) -> None:
+        legacy_stop = RuntimeError("stop after legacy authentication")
+        environment = dict(os.environ)
+        environment.pop(EXCLUSIVE_MODE_ENV, None)
+        successor_factory = Mock()
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(response_router, "DSN", "synthetic-configured-dsn"),
+            patch.object(
+                response_router,
+                "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
+                successor_factory,
+            ),
+            patch.object(
+                response_router,
+                "require_memory_actor_v1",
+                new=AsyncMock(side_effect=legacy_stop),
+            ) as legacy_auth,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "legacy authentication"):
+                await resse_response_query(
+                    self.payload(),
+                    successor_request(),
+                    Response(),
+                )
+        legacy_auth.assert_awaited_once()
+        successor_factory.assert_not_called()
 
 
 if __name__ == "__main__":

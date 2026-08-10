@@ -25,6 +25,7 @@ from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatCompletionsAdapterV1,
     OpenAIChatGenerationConfigV1,
+    OpenAIChatRequestV1,
     OpenAIChatResponseV1,
     safety_identifier_v1,
 )
@@ -159,11 +160,23 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
+        default=None,
+        repr=False,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def paired(self) -> "GovernedMemoryAssemblyV1":
         if (self.memory_input is None) != (self.memory_application is None):
             raise ValueError("Memory input and application must be paired")
+        if self.memory_input is not None and self.successor_memory_context_block is not None:
+            raise ValueError("legacy and successor Memory contexts are mutually exclusive")
+        if self.successor_memory_context_block is not None and (
+            self.successor_memory_context_block.block_id
+            != "governed_memory_successor_v1"
+        ):
+            raise ValueError("invalid successor Memory context")
         return self
 
 
@@ -263,6 +276,23 @@ class GovernedMemoryAssemblyProviderV1(Protocol):
     ) -> GovernedMemoryAssemblyV1 | Awaitable[GovernedMemoryAssemblyV1]: ...
 
 
+class SuccessorMemoryAnswerLifecycleV1(Protocol):
+    """Post-generation binding hook for the exact selected successor claims."""
+
+    @property
+    def has_selected_claims(self) -> bool: ...
+
+    def discard_selected_state(self) -> None: ...
+
+    async def persist_dispatched_answer_binding(
+        self,
+        *,
+        answer_id: UUID,
+        prompt_sha256: str,
+        outbound_request_bytes: bytes,
+    ) -> None: ...
+
+
 class NoGovernedMemoryAssemblyProviderV1:
     def prepare(
         self,
@@ -299,6 +329,7 @@ class InactiveResponseCompositionRootV0_2:
         openai_client: Any,
         classifier_model: str,
         memory_provider: GovernedMemoryAssemblyProviderV1 | None = None,
+        successor_memory_lifecycle: SuccessorMemoryAnswerLifecycleV1 | None = None,
         generation_config: OpenAIChatGenerationConfigV1 | None = None,
         clock: Callable[[], datetime] | None = None,
         answer_id_factory: Callable[[], UUID] | None = None,
@@ -309,6 +340,14 @@ class InactiveResponseCompositionRootV0_2:
         self._openai_client = openai_client
         self._classifier_model = classifier_model
         self._memory_provider = memory_provider or NoGovernedMemoryAssemblyProviderV1()
+        if (
+            successor_memory_lifecycle is not None
+            and successor_memory_lifecycle is not self._memory_provider
+        ):
+            raise ResponseCompositionError(
+                "successor Memory provider and lifecycle must be identical"
+            )
+        self._successor_memory_lifecycle = successor_memory_lifecycle
         self._generation_config = generation_config or OpenAIChatGenerationConfigV1()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._answer_id_factory = answer_id_factory or uuid4
@@ -341,20 +380,39 @@ class InactiveResponseCompositionRootV0_2:
             )
             stage = "answer_generation"
             stage_started_ns = time.monotonic_ns()
+            answer_id = self._answer_id_factory()
+            exact_request = OpenAIChatRequestV1.create(
+                trusted_plan=plan,
+                generation_config=self._generation_config,
+            )
             response = await OpenAIChatCompletionsAdapterV1(
                 self._openai_client
             ).complete_async(
                 plan,
                 generation_config=self._generation_config,
             )
+            if response.provider_request_sha256 != exact_request.request_sha256:
+                raise ResponseCompositionError(
+                    "provider response differs from prepared request",
+                    stage="answer_generation",
+                )
             stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
+            if self.has_selected_successor_memory:
+                stage = "successor_memory_answer_binding"
+                await self.persist_successor_memory_answer_binding(
+                    answer_id=answer_id,
+                    prompt_sha256=plan.assembled_prompt.manifest.assembly_sha256,
+                    outbound_request_bytes=(
+                        exact_request.provider_kwargs_json_bytes()
+                    ),
+                )
             stage = "finalization"
             stage_started_ns = time.monotonic_ns()
             finalized = finalize_trusted_response_v1(
                 trusted_plan=plan,
                 provider_response=response,
                 generation_config=self._generation_config,
-                answer_id=self._answer_id_factory(),
+                answer_id=answer_id,
                 created_at=self._clock(),
             )
             stage_timings["finalization_ms"] = _elapsed_ms(stage_started_ns)
@@ -369,14 +427,44 @@ class InactiveResponseCompositionRootV0_2:
                 ),
             )
         except ResponseCompositionError as exc:
+            self.discard_successor_memory_selection()
             if exc.stage == "not_applicable":
                 raise ResponseCompositionError(str(exc), stage=stage) from None
             raise
         except Exception:
+            self.discard_successor_memory_selection()
             raise ResponseCompositionError(
                 "inactive response composition failed",
                 stage=stage,
             ) from None
+
+    @property
+    def has_selected_successor_memory(self) -> bool:
+        return bool(
+            self._successor_memory_lifecycle is not None
+            and self._successor_memory_lifecycle.has_selected_claims
+        )
+
+    async def persist_successor_memory_answer_binding(
+        self,
+        *,
+        answer_id: UUID,
+        prompt_sha256: str,
+        outbound_request_bytes: bytes,
+    ) -> None:
+        lifecycle = self._successor_memory_lifecycle
+        if lifecycle is None or not lifecycle.has_selected_claims:
+            return
+        await lifecycle.persist_dispatched_answer_binding(
+            answer_id=answer_id,
+            prompt_sha256=prompt_sha256,
+            outbound_request_bytes=outbound_request_bytes,
+        )
+
+    def discard_successor_memory_selection(self) -> None:
+        lifecycle = self._successor_memory_lifecycle
+        if lifecycle is not None:
+            lifecycle.discard_selected_state()
 
     async def prepare_detailed(
         self,
@@ -474,6 +562,9 @@ class InactiveResponseCompositionRootV0_2:
                 trusted_policy_signals_envelope=signal_envelope,
                 memory_input=memory.memory_input,
                 memory_application=memory.memory_application,
+                successor_memory_context_block=(
+                    memory.successor_memory_context_block
+                ),
                 prior_web_provenance=prior_web_provenance,
                 attachment_context_block=command.attachment_context_block,
                 fm_token_budget=command.fm_token_budget,
@@ -521,6 +612,7 @@ __all__ = [
     "ResponseCompositionError",
     "ResponsePreparationTimingsV1",
     "ResponseStageTimingsV1",
+    "SuccessorMemoryAnswerLifecycleV1",
     "TrustedResponseExecutionV0_2",
     "TrustedResponsePreparationV0_2",
 ]

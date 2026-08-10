@@ -174,6 +174,11 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
     memory_application: MemoryPromptApplicationResultV1 | None = Field(
         default=None, repr=False
     )
+    successor_memory_context_block: "PromptReferenceContextBlockV1 | None" = Field(
+        default=None,
+        repr=False,
+        exclude_if=lambda value: value is None,
+    )
     fm_selection: FMSelectionEnvelopeV02 | None = Field(default=None, repr=False)
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
@@ -206,6 +211,8 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
             raise ValueError(
                 "Memory prompt input and application result must be supplied together"
             )
+        if self.memory_input is not None and self.successor_memory_context_block is not None:
+            raise ValueError("legacy and successor Memory contexts are mutually exclusive")
         return self
 
     def canonical_json_bytes(self) -> bytes:
@@ -237,6 +244,7 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
     contract_version: Literal[CONTEXT_BLOCK_VERSION] = CONTEXT_BLOCK_VERSION
     block_id: Literal[
         "governed_memory_v1",
+        "governed_memory_successor_v1",
         "chat_attachments_v1",
         "fractal_monism_v0_2",
         "prior_web_provenance_v1",
@@ -273,13 +281,20 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
             raise ValueError("context byte count mismatch")
         if self.estimated_tokens != _tokens(self.content):
             raise ValueError("context token count mismatch")
-        expected_block = {
-            ContextKind.MEMORY: "governed_memory_v1",
+        expected_blocks = {
+            ContextKind.MEMORY: {
+                "governed_memory_v1",
+                "governed_memory_successor_v1",
+            },
             ContextKind.ATTACHMENT: "chat_attachments_v1",
             ContextKind.FRACTAL_MONISM: "fractal_monism_v0_2",
             ContextKind.WEB_PROVENANCE: "prior_web_provenance_v1",
         }[self.kind]
-        if self.block_id != expected_block:
+        if isinstance(expected_blocks, set):
+            block_matches = self.block_id in expected_blocks
+        else:
+            block_matches = self.block_id == expected_blocks
+        if not block_matches:
             raise ValueError("context block id differs from kind")
         if self.kind is ContextKind.FRACTAL_MONISM and self.fragments:
             raise ValueError("FM context does not accept generic fragments")
@@ -314,6 +329,7 @@ PromptAssemblyRequestV1.model_rebuild()
 class PromptContextManifestEntryV1(_StrictFrozenModel):
     block_id: Literal[
         "governed_memory_v1",
+        "governed_memory_successor_v1",
         "chat_attachments_v1",
         "fractal_monism_v0_2",
         "prior_web_provenance_v1",
@@ -384,6 +400,10 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     )
     memory_assembly_input_sha256: str | None = None
     memory_application_manifest_sha256: str | None = None
+    successor_memory_context_manifest_sha256: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     fm_selection_sha256: str | None = None
     fm_bundle_sha256: str | None = None
     prior_web_provenance_manifest_sha256: str | None = None
@@ -406,6 +426,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "system_prompt_sha256",
         "memory_assembly_input_sha256",
         "memory_application_manifest_sha256",
+        "successor_memory_context_manifest_sha256",
         "fm_selection_sha256",
         "fm_bundle_sha256",
         "prior_web_provenance_manifest_sha256",
@@ -445,6 +466,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 prompt,
                 memory_input,
                 memory_application,
+                successor_memory_context_block,
                 fm_selection,
                 prior_web_provenance,
                 attachment_context_block,
@@ -459,6 +481,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 policy_prompt=prompt,
                 memory_input=memory_input,
                 memory_application=memory_application,
+                successor_memory_context_block=successor_memory_context_block,
                 fm_selection=fm_selection,
                 prior_web_provenance=prior_web_provenance,
                 attachment_context_block=attachment_context_block,
@@ -466,6 +489,7 @@ class AssembledPromptV1(_StrictFrozenModel):
             expected_conversation = _conversation_from_policy_input(policy_input)
             expected_context = _context_blocks_from_sources(
                 memory_application,
+                successor_memory_context_block,
                 fm_selection,
                 prior_web_provenance,
                 attachment_context_block,
@@ -910,6 +934,14 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         if source.memory_application is not None
         else None
     )
+    successor_memory_context_block = (
+        _revalidate(
+            PromptReferenceContextBlockV1,
+            source.successor_memory_context_block,
+        )
+        if source.successor_memory_context_block is not None
+        else None
+    )
     fm_selection = (
         FMSelectionEnvelopeV02.from_wire_json(source.fm_selection.canonical_json_bytes())
         if source.fm_selection is not None
@@ -950,6 +982,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         policy_prompt,
         memory_input,
         memory_application,
+        successor_memory_context_block,
         fm_selection,
         prior_web_provenance,
         attachment_context_block,
@@ -967,6 +1000,7 @@ def _validate_source_authority_chain(
     policy_prompt: ResponsePolicyPromptV0_2,
     memory_input: MemoryPromptAssemblyInputV1 | None,
     memory_application: MemoryPromptApplicationResultV1 | None,
+    successor_memory_context_block: PromptReferenceContextBlockV1 | None,
     fm_selection: FMSelectionEnvelopeV02 | None,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
     attachment_context_block: PromptReferenceContextBlockV1 | None,
@@ -976,6 +1010,21 @@ def _validate_source_authority_chain(
         raise PromptAssemblyError("Memory input and application must be paired")
     if memory_input is not None and memory_application is not None:
         _validate_memory_chain(policy_input, memory_input, memory_application)
+    if memory_input is not None and successor_memory_context_block is not None:
+        raise PromptAssemblyError("legacy and successor Memory contexts conflict")
+    if successor_memory_context_block is not None:
+        if (
+            successor_memory_context_block.kind is not ContextKind.MEMORY
+            or successor_memory_context_block.block_id
+            != "governed_memory_successor_v1"
+            or successor_memory_context_block.request_id_sha256
+            != _text_sha256(policy_input.request_id)
+            or successor_memory_context_block.query_sha256
+            != policy_input.current_message_sha256
+        ):
+            raise PromptAssemblyError(
+                "successor Memory context differs from the current request"
+            )
     _validate_fm_chain(policy_input, decision, fm_selection)
     if prior_web_provenance is not None:
         if (
@@ -1011,6 +1060,7 @@ def _conversation_from_policy_input(
 
 def _context_blocks_from_sources(
     memory_application: MemoryPromptApplicationResultV1 | None,
+    successor_memory_context_block: PromptReferenceContextBlockV1 | None,
     fm_selection: FMSelectionEnvelopeV02 | None,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
     attachment_context_block: PromptReferenceContextBlockV1 | None,
@@ -1020,6 +1070,8 @@ def _context_blocks_from_sources(
         memory_block = _memory_context_block(memory_application)
         if memory_block is not None:
             blocks.append(memory_block)
+    if successor_memory_context_block is not None:
+        blocks.append(successor_memory_context_block)
     if attachment_context_block is not None:
         blocks.append(attachment_context_block)
     if fm_selection is not None:
@@ -1043,13 +1095,27 @@ def _validate_context_shape(
     if kinds != expected_order or len(kinds) != len(set(kinds)):
         raise ValueError("context blocks must be unique and canonically ordered")
     has_memory = ContextKind.MEMORY in kinds
+    legacy_memory_block = any(
+        item.block_id == "governed_memory_v1" for item in blocks
+    )
+    successor_memory_block = any(
+        item.block_id == "governed_memory_successor_v1" for item in blocks
+    )
     has_attachment = ContextKind.ATTACHMENT in kinds
     has_fm = ContextKind.FRACTAL_MONISM in kinds
     has_web_provenance = ContextKind.WEB_PROVENANCE in kinds
-    if has_memory != (manifest.memory_application_manifest_sha256 is not None):
-        # A suppressed/no-content Memory result is audited without a context block.
-        if has_memory or manifest.memory_application_manifest_sha256 is None:
-            raise ValueError("Memory context and manifest state differ")
+    legacy_memory_manifest = manifest.memory_application_manifest_sha256 is not None
+    successor_memory_manifest = (
+        manifest.successor_memory_context_manifest_sha256 is not None
+    )
+    if legacy_memory_manifest and successor_memory_manifest:
+        raise ValueError("legacy and successor Memory manifests conflict")
+    if successor_memory_block != successor_memory_manifest:
+        raise ValueError("successor Memory context and manifest state differ")
+    if legacy_memory_block and not legacy_memory_manifest:
+        raise ValueError("legacy Memory context and manifest state differ")
+    if has_memory != (legacy_memory_block or successor_memory_block):
+        raise ValueError("Memory context identity is invalid")
     if has_attachment != (manifest.attachment_context_manifest_sha256 is not None):
         raise ValueError("Attachment context and manifest state differ")
     if has_fm != (manifest.fm_selection_sha256 is not None):
@@ -1126,6 +1192,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             policy_prompt,
             memory_input,
             memory_application,
+            successor_memory_context_block,
             fm_selection,
             prior_web_provenance,
             attachment_context_block,
@@ -1140,6 +1207,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             policy_prompt=policy_prompt,
             memory_input=memory_input,
             memory_application=memory_application,
+            successor_memory_context_block=successor_memory_context_block,
             fm_selection=fm_selection,
             prior_web_provenance=prior_web_provenance,
             attachment_context_block=attachment_context_block,
@@ -1150,6 +1218,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
     conversation = _conversation_from_policy_input(policy_input)
     context_blocks = _context_blocks_from_sources(
         memory_application,
+        successor_memory_context_block,
         fm_selection,
         prior_web_provenance,
         attachment_context_block,
@@ -1227,6 +1296,11 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
         "memory_application_manifest_sha256": (
             memory_application.application_manifest_sha256
             if memory_application is not None
+            else None
+        ),
+        "successor_memory_context_manifest_sha256": (
+            successor_memory_context_block.source_manifest_sha256
+            if successor_memory_context_block is not None
             else None
         ),
         "fm_selection_sha256": (

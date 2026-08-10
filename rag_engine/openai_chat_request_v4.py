@@ -96,6 +96,7 @@ class OpenAIChatMessageV2(_StrictFrozenModel):
             not in {
                 "chat_attachments_v1",
                 "governed_memory_v1",
+                "governed_memory_successor_v1",
                 "lifeswitch_domain_context_v1",
                 "prior_lifeswitch_provenance_v1",
                 "fractal_monism_v0_2",
@@ -119,24 +120,28 @@ def _messages(
         for item in conversation[:-1]
     )
     for block in assembly.context_blocks:
-        reference = {
-            "authority": "reference_data",
-            "block_id": block.block_id,
-            "block_manifest_sha256": block.block_manifest_sha256,
-            "content": block.content,
-            "content_sha256": block.content_sha256,
-            "contract_version": REFERENCE_DATA_MESSAGE_V3,
-            "kind": block.kind.value,
-            "query_sha256": block.query_sha256,
-            "request_id_sha256": block.request_id_sha256,
-            "source_contract_version": block.source_contract_version,
-            "source_manifest_sha256": block.source_manifest_sha256,
-        }
+        if block.block_id == "governed_memory_successor_v1":
+            content = block.content
+        else:
+            reference = {
+                "authority": "reference_data",
+                "block_id": block.block_id,
+                "block_manifest_sha256": block.block_manifest_sha256,
+                "content": block.content,
+                "content_sha256": block.content_sha256,
+                "contract_version": REFERENCE_DATA_MESSAGE_V3,
+                "kind": block.kind.value,
+                "query_sha256": block.query_sha256,
+                "request_id_sha256": block.request_id_sha256,
+                "source_contract_version": block.source_contract_version,
+                "source_manifest_sha256": block.source_manifest_sha256,
+            }
+            content = _canonical_json_bytes(reference).decode("utf-8")
         result.append(
             OpenAIChatMessageV2(
                 role="user",
                 name=block.block_id,
-                content=_canonical_json_bytes(reference).decode("utf-8"),
+                content=content,
             )
         )
     result.append(OpenAIChatMessageV2(role="user", content=conversation[-1].content))
@@ -253,6 +258,9 @@ class OpenAIChatRequestV4(_StrictFrozenModel):
             "store": False,
             "timeout": self.generation_config.timeout_seconds,
         }
+
+    def provider_kwargs_json_bytes(self) -> bytes:
+        return _canonical_json_bytes(self.provider_kwargs())
 
 
 class OpenAIChatResponseV3(_StrictFrozenModel):

@@ -220,6 +220,7 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
         if self.name is not None:
             if self.role != "user" or self.name not in {
                 "governed_memory_v1",
+                "governed_memory_successor_v1",
                 "fractal_monism_v0_2",
                 "chat_attachments_v1",
                 "prior_web_provenance_v1",
@@ -229,6 +230,12 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
 
 
 def _reference_message_content(block: PromptReferenceContextBlockV1) -> str:
+    if block.block_id == "governed_memory_successor_v1":
+        # The successor renderer already emits a typed, data-only JSON block.
+        # Keeping it as the exact message content lets the answer-binding
+        # contract prove that its canonical escaped bytes occur once in the
+        # exact provider kwargs payload.
+        return block.content
     payload = {
         "authority": "reference_data",
         "block_id": block.block_id,
@@ -434,6 +441,11 @@ class OpenAIChatRequestV1(_StrictFrozenModel):
             "store": False,
             "timeout": config.timeout_seconds,
         }
+
+    def provider_kwargs_json_bytes(self) -> bytes:
+        """Canonical bytes of the exact kwargs passed to the SDK boundary."""
+
+        return _canonical_json_bytes(self.provider_kwargs())
 
 
 class OpenAIChatResponseV1(_StrictFrozenModel):

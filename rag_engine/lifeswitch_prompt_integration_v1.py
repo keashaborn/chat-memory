@@ -119,6 +119,7 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
     )
     block_id: Literal[
         "governed_memory_v1",
+        "governed_memory_successor_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
         "fractal_monism_v0_2",
@@ -151,13 +152,20 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
     @model_validator(mode="after")
     def exact_block(self) -> "PromptReferenceContextBlockV2":
         expected_id = {
-            ContextKindV2.MEMORY: "governed_memory_v1",
+            ContextKindV2.MEMORY: {
+                "governed_memory_v1",
+                "governed_memory_successor_v1",
+            },
             ContextKindV2.ATTACHMENT: "chat_attachments_v1",
             ContextKindV2.LIFESWITCH: "lifeswitch_domain_context_v1",
             ContextKindV2.FRACTAL_MONISM: "fractal_monism_v0_2",
             ContextKindV2.WEB_PROVENANCE: "prior_web_provenance_v1",
         }[self.kind]
-        if self.block_id != expected_id:
+        if (
+            self.block_id not in expected_id
+            if isinstance(expected_id, set)
+            else self.block_id != expected_id
+        ):
             raise ValueError("context block id differs from kind")
         raw = self.content.encode("utf-8")
         if self.content_sha256 != _text_sha256(self.content):
@@ -410,6 +418,7 @@ def assemble_prompt_with_lifeswitch_v1(
         )
 
     ordered_ids = (
+        "governed_memory_successor_v1",
         "governed_memory_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",

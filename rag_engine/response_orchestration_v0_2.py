@@ -194,6 +194,11 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
+        default=None,
+        repr=False,
+        exclude_if=lambda value: value is None,
+    )
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
         repr=False,
@@ -245,6 +250,8 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             )
         if (self.memory_input is None) != (self.memory_application is None):
             raise ValueError("Memory input and application must be supplied together")
+        if self.memory_input is not None and self.successor_memory_context_block is not None:
+            raise ValueError("legacy and successor Memory contexts are mutually exclusive")
         if self.memory_input is not None:
             context = self.memory_input.context
             if context.authenticated_actor_user_id != self.authenticated_actor_user_id:
@@ -258,6 +265,18 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             current_message_sha256 = _text_sha256(self.conversation[-1].content)
             if context.query_sha256 != current_message_sha256:
                 raise ValueError("Memory query differs from the current user message")
+        if self.successor_memory_context_block is not None:
+            context_block = self.successor_memory_context_block
+            if (
+                context_block.kind is not ContextKind.MEMORY
+                or context_block.block_id != "governed_memory_successor_v1"
+                or context_block.request_id_sha256 != _text_sha256(self.request_id)
+                or context_block.query_sha256
+                != _text_sha256(self.conversation[-1].content)
+            ):
+                raise ValueError(
+                    "successor Memory context differs from trusted request"
+                )
         if self.prior_web_provenance is not None:
             provenance = self.prior_web_provenance
             if (
@@ -329,6 +348,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         ) = None,
         memory_input: MemoryPromptAssemblyInputV1 | None = None,
         memory_application: MemoryPromptApplicationResultV1 | None = None,
+        successor_memory_context_block: PromptReferenceContextBlockV1 | None = None,
         prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
         attachment_context_block: PromptReferenceContextBlockV1 | None = None,
         fm_token_budget: int | None = None,
@@ -379,6 +399,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             trusted_policy_signals_envelope=signal_envelope,
             memory_input=memory_input,
             memory_application=memory_application,
+            successor_memory_context_block=successor_memory_context_block,
             prior_web_provenance=prior_web_provenance,
             attachment_context_block=attachment_context_block,
             fm_token_budget=fm_token_budget,
@@ -589,7 +610,11 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             ),
             (
                 self.shadow_trace.memory_present,
-                self.assembled_prompt.source_request.memory_input is not None,
+                (
+                    self.assembled_prompt.source_request.memory_input is not None
+                    or self.assembled_prompt.source_request.successor_memory_context_block
+                    is not None
+                ),
             ),
             (
                 self.shadow_trace.context_block_count,
@@ -724,7 +749,10 @@ def _shadow_trace(
         "fm_gate_reason_codes": tuple(sorted(decision.fm_gate_reasons)),
         "fm_selection_status": fm.status,
         "fm_selected_record_count": len(fm.selected_record_ids),
-        "memory_present": request.memory_input is not None,
+        "memory_present": (
+            request.memory_input is not None
+            or request.successor_memory_context_block is not None
+        ),
         "context_block_count": manifest.context_block_count,
         "total_input_bytes": manifest.total_input_bytes,
         "total_input_tokens": manifest.total_input_tokens,
@@ -815,6 +843,9 @@ class TrustedResponseOrchestratorV0_2:
                     policy_prompt=prompt,
                     memory_input=request.memory_input,
                     memory_application=request.memory_application,
+                    successor_memory_context_block=(
+                        request.successor_memory_context_block
+                    ),
                     fm_selection=fm,
                     prior_web_provenance=request.prior_web_provenance,
                     attachment_context_block=request.attachment_context_block,

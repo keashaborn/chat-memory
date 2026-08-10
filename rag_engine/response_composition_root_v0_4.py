@@ -24,6 +24,7 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_chat_request_v4 import (
     OpenAIChatCompletionsAdapterV3,
+    OpenAIChatRequestV4,
     OpenAIChatResponseV3,
 )
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
@@ -287,11 +288,12 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
         answer_id_factory: Callable[[], UUID] | None = None,
     ) -> None:
         self._base_root = base_root
+        self._generation_config = generation_config or OpenAIChatGenerationConfigV1()
         self._downstream = InactiveLifeSwitchResponseCompositionRootV0_4(
             openai_client=openai_client,
             context_provider=context_provider,
             prior_provenance_provider=prior_provenance_provider,
-            generation_config=generation_config,
+            generation_config=self._generation_config,
             clock=clock,
             answer_id_factory=answer_id_factory,
         )
@@ -303,10 +305,35 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
     ) -> IntegratedTrustedLifeSwitchResponseExecutionV2:
         pipeline_started_ns = time.monotonic_ns()
         prepared = await self._base_root.prepare_detailed(conn, command)
-        downstream = await self._downstream.execute(
-            base_response_plan=prepared.trusted_plan,
-            conversation_snapshot=prepared.conversation_snapshot,
-        )
+        try:
+            downstream = await self._downstream.execute(
+                base_response_plan=prepared.trusted_plan,
+                conversation_snapshot=prepared.conversation_snapshot,
+            )
+            if self._base_root.has_selected_successor_memory:
+                exact_request = OpenAIChatRequestV4.create(
+                    source_plan=downstream.trusted_plan,
+                    generation_config=self._generation_config,
+                )
+                if (
+                    downstream.provider_response.provider_request_sha256
+                    != exact_request.request_sha256
+                ):
+                    raise LifeSwitchCompositionError(
+                        "successor_memory_answer_binding"
+                    )
+                await self._base_root.persist_successor_memory_answer_binding(
+                    answer_id=downstream.finalized.answer_id,
+                    prompt_sha256=(
+                        downstream.trusted_plan.assembled_prompt.manifest.assembly_sha256
+                    ),
+                    outbound_request_bytes=(
+                        exact_request.provider_kwargs_json_bytes()
+                    ),
+                )
+        except Exception:
+            self._base_root.discard_successor_memory_selection()
+            raise
         base = prepared.stage_timings
         life = downstream.stage_timings
         return IntegratedTrustedLifeSwitchResponseExecutionV2(
