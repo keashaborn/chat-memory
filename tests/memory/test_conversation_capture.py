@@ -21,6 +21,7 @@ from rag_engine.governed_memory.conversation_capture import (
     normalize_capture_text,
 )
 from rag_engine.governed_memory.eligibility import EligibilityPolicy
+from rag_engine.governed_memory.exclusive_cutover import EXCLUSIVE_MODE_ENV
 
 
 OWNER_A = UUID("11111111-1111-4111-8111-111111111111")
@@ -33,6 +34,10 @@ ELIGIBLE_INPUT = {
     "authority": CAPTURE_TEXT_AUTHORITY,
     "source": CAPTURE_USER_SOURCE,
     "has_attachments": False,
+}
+PILOT_MODE = {
+    CAPTURE_MODE_ENV: "pilot",
+    EXCLUSIVE_MODE_ENV: "successor_pilot",
 }
 
 
@@ -59,7 +64,7 @@ class CaptureGateTests(unittest.TestCase):
 
     def test_pilot_is_exact_owner_allowlist_only(self) -> None:
         environ = {
-            CAPTURE_MODE_ENV: "pilot",
+            **PILOT_MODE,
             CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
         }
         self.assertTrue(
@@ -75,6 +80,22 @@ class CaptureGateTests(unittest.TestCase):
             ).enabled
         )
 
+    def test_pilot_requires_the_exact_exclusive_successor_mode(self) -> None:
+        for exclusive_mode in (None, "legacy", "SUCCESSOR_PILOT", " successor_pilot"):
+            environ = {
+                CAPTURE_MODE_ENV: "pilot",
+                CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
+            }
+            if exclusive_mode is not None:
+                environ[EXCLUSIVE_MODE_ENV] = exclusive_mode
+            with self.subTest(exclusive_mode=exclusive_mode):
+                with self.assertRaises(CaptureConfigurationError):
+                    capture_decision_for_owner(
+                        str(OWNER_A),
+                        **ELIGIBLE_INPUT,
+                        environ=environ,
+                    )
+
     def test_pilot_rejects_empty_duplicate_or_noncanonical_allowlist(self) -> None:
         invalid = (
             "",
@@ -89,14 +110,14 @@ class CaptureGateTests(unittest.TestCase):
                         str(OWNER_A),
                         **ELIGIBLE_INPUT,
                         environ={
-                            CAPTURE_MODE_ENV: "pilot",
+                            **PILOT_MODE,
                             CAPTURE_OWNER_ALLOWLIST_ENV: allowlist,
                         },
                     )
 
     def test_pilot_excludes_voice_non_user_sources_and_attachments(self) -> None:
         environ = {
-            CAPTURE_MODE_ENV: "pilot",
+            **PILOT_MODE,
             CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
         }
         excluded_inputs = (
@@ -225,7 +246,7 @@ class CaptureAdapterTests(unittest.IsolatedAsyncioTestCase):
             str(OWNER_A),
             **ELIGIBLE_INPUT,
             environ={
-                CAPTURE_MODE_ENV: "pilot",
+                **PILOT_MODE,
                 CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
             },
         )

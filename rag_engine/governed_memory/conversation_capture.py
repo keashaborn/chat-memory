@@ -18,6 +18,10 @@ from .contracts import (
     sha256_text,
 )
 from .eligibility import EligibilityPolicy
+from .exclusive_cutover import (
+    ExclusiveMemoryConfigurationError,
+    successor_pilot_is_exclusive,
+)
 
 
 CAPTURE_MODE_ENV = "GOVERNED_MEMORY_CAPTURE_MODE"
@@ -81,6 +85,16 @@ def capture_decision_for_owner(
         return CaptureDecision(mode=mode, owner_user_id=owner, enabled=False)
     if mode != CAPTURE_MODE_PILOT:
         raise CaptureConfigurationError("invalid_governed_memory_capture_mode")
+    try:
+        successor_exclusive = successor_pilot_is_exclusive(settings)
+    except ExclusiveMemoryConfigurationError as exc:
+        raise CaptureConfigurationError(
+            "invalid_governed_memory_exclusive_mode"
+        ) from exc
+    if not successor_exclusive:
+        raise CaptureConfigurationError(
+            "governed_memory_capture_requires_exclusive_successor"
+        )
 
     raw_allowlist = settings.get(CAPTURE_OWNER_ALLOWLIST_ENV, "")
     raw_items = [item.strip() for item in raw_allowlist.split(",")]
