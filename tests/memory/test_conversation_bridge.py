@@ -131,7 +131,9 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
             "tgname = 'chat_log_enqueue_memory_v1_consolidation'",
             self.forward,
         )
-        self.assertIn("tgenabled = 'D'", self.forward)
+        self.assertIn("tgenabled <> 'D'", self.forward)
+        self.assertIn("tgtype <> 5", self.forward)
+        self.assertIn("memory.enqueue_chat_log_consolidation()", self.forward)
         self.assertNotRegex(
             self.forward,
             r"(?i)\b(?:COPY|dblink|postgres_fdw|CREATE\s+SUBSCRIPTION|"

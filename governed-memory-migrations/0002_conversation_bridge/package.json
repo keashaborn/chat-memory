@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "memory",
@@ -20,11 +20,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "d7fa0c4645de2b8c317e1035c70548ad78519d98d4176ecafcf5e2d30a966b30"
+    "sha256": "8e82b523740a31b3151ed71de321a9507d62c33027cdfcab564088fddaa68f3b"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "80fa1ecc78ededf2bda0147f2748b226b70ab4fc5a78a6d11a5c3bf6a89cfb71",
+    "sha256": "ce38c16fa2b367f0db1203aa0aa927325f05e023d2470cdb4c35a878ccc58599",
     "empty_only": true
   },
   "data_policy": {
@@ -38,6 +38,16 @@
   "object_contract": {
     "schema": "memory_ingest_private",
     "table": "memory_ingest_private.memory_ingest_outbox",
+    "tables": [
+      "memory_ingest_private.memory_ingest_outbox",
+      "memory_ingest_private.source_erasure_operation",
+      "memory_ingest_private.source_erasure_target",
+      "memory_ingest_private.source_erasure_thread_target",
+      "memory_ingest_private.source_erasure_message_tombstone",
+      "memory_ingest_private.source_erasure_thread_tombstone",
+      "memory_ingest_private.source_erasure_receipt"
+    ],
+    "table_count": 7,
     "forced_rls": true,
     "direct_runtime_table_access": false,
     "bounded_context_reviews": 1,
@@ -56,14 +66,59 @@
     "attachment_content_reads": false,
     "attachment_presence_required_absent": true,
     "attachment_message_capture": false,
-    "history_or_backfill_surface": false
+    "history_or_backfill_surface": false,
+    "source_erasure_selectors": [
+      "thread",
+      "message_tail",
+      "recent",
+      "all_conversations"
+    ],
+    "source_erasure_scope": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads",
+      "memory_ingest_private.memory_ingest_outbox"
+    ],
+    "source_erasure_transient_target_tables": [
+      "memory_ingest_private.source_erasure_target",
+      "memory_ingest_private.source_erasure_thread_target"
+    ],
+    "source_erasure_permanent_tombstone_tables": [
+      "memory_ingest_private.source_erasure_message_tombstone",
+      "memory_ingest_private.source_erasure_thread_tombstone"
+    ],
+    "source_erasure_tombstone_identity_scope": "global_message_and_thread_uuid",
+    "source_erasure_targets_retained_until": "conversation_deletion_final_receipt_acknowledged",
+    "source_erasure_tombstones_immutable": true,
+    "source_erasure_runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
+    "source_erasure_allowed_auxiliary_effects": [
+      "public.active_thread_selection",
+      "trusted_web.response_transcript_v1"
+    ],
+    "source_erasure_auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
+    "source_erasure_unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
+    "source_erasure_unclassified_side_effects_allowed": false,
+    "source_erasure_legacy_capture_trigger_required": false,
+    "source_erasure_legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "source_erasure_exact_materialized_targets_only": true,
+    "source_erasure_receipts_content_free": true,
+    "source_erasure_receipts_immutable": true,
+    "source_erasure_receipt_deleted_object_counts": [
+      "messages",
+      "threads",
+      "attachments",
+      "bridge_rows"
+    ],
+    "accounts_deleted": false,
+    "structured_lifeswitch_data_deleted": false,
+    "legacy_project_rows_deleted": false
   },
   "activation": {
     "production_authorized": false,
     "production_writer_membership_granted": false,
     "production_services_changed": false,
     "production_database_applied": false,
-    "disposable_writer_membership_validated": true,
-    "disposable_database_validated": true
+    "disposable_writer_membership_validated": false,
+    "disposable_database_validated": false
   }
 }

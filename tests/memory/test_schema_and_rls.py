@@ -94,7 +94,12 @@ FOUNDATION_TABLES = (
     "projection_outbox",
     "answer_binding",
     "audit_event",
+    "erased_chat_message_tombstone",
     "claim_deletion_receipt",
+    "source_erasure_operation",
+    "source_erasure_target",
+    "source_erasure_claim",
+    "source_erasure_receipt",
 )
 
 SELECTION_NO_CONTEXT_SHA256 = (
@@ -1074,7 +1079,7 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "isolated_candidate_disposable_validated_not_production_applied",
+            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
@@ -1166,6 +1171,62 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertFalse(bridge["pilot_capture_replay_consumes_new_slot"])
         self.assertEqual(len(bridge["functions"]), len(set(bridge["functions"])))
+        self.assertEqual(
+            bridge["source_erasure_selectors"],
+            ["thread", "message_tail", "recent", "all_conversations"],
+        )
+        self.assertTrue(bridge["source_erasure_exact_chat_targets_only"])
+        self.assertFalse(bridge["source_erasure_memory_only_selector_allowed"])
+        self.assertFalse(
+            bridge["source_erasure_account_wide_memory_selector_allowed"]
+        )
+        self.assertEqual(
+            bridge["source_erasure_chat_tables"],
+            ["public.chat_log", "public.chat_attachments", "public.threads"],
+        )
+        self.assertEqual(
+            bridge["source_erasure_transient_target_tables"],
+            [
+                "memory_ingest_private.source_erasure_target",
+                "memory_ingest_private.source_erasure_thread_target",
+            ],
+        )
+        self.assertEqual(
+            bridge["source_erasure_permanent_tombstone_tables"],
+            [
+                "memory_ingest_private.source_erasure_message_tombstone",
+                "memory_ingest_private.source_erasure_thread_tombstone",
+            ],
+        )
+        self.assertEqual(
+            bridge["source_erasure_tombstone_identity_scope"],
+            "global_message_and_thread_uuid",
+        )
+        self.assertEqual(
+            bridge["source_erasure_targets_retained_until"],
+            "conversation_deletion_final_receipt_acknowledged",
+        )
+        self.assertTrue(bridge["source_erasure_tombstones_immutable"])
+        self.assertEqual(
+            bridge["source_erasure_runtime_catalog_attestation"],
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_"
+            "and_inheritance_inventory",
+        )
+        self.assertFalse(
+            bridge["source_erasure_unclassified_side_effects_allowed"]
+        )
+        self.assertFalse(
+            bridge["source_erasure_legacy_capture_trigger_required"]
+        )
+        self.assertEqual(
+            bridge["source_erasure_legacy_capture_trigger_if_present"],
+            "exact_disabled_identity_only",
+        )
+        self.assertFalse(
+            bridge["source_erasure_structured_lifeswitch_tables_allowed"]
+        )
+        self.assertFalse(bridge["source_erasure_accounts_deleted"])
+        self.assertTrue(bridge["source_erasure_content_free_receipts_retained"])
 
     def test_lifecycle_and_epistemic_states_are_not_collapsed(self) -> None:
         states = self.contract["states"]
@@ -1239,6 +1300,44 @@ class SchemaContractTests(unittest.TestCase):
 
 
 class PackageIntegrityTests(unittest.TestCase):
+    def test_bridge_package_inventories_deletion_state_and_scope(self) -> None:
+        package = json.loads(
+            (MIGRATIONS / "0002_conversation_bridge" / "package.json")
+            .read_text(encoding="utf-8")
+        )
+        contract = package["object_contract"]
+        self.assertEqual(contract["table_count"], 7)
+        self.assertEqual(
+            contract["source_erasure_transient_target_tables"],
+            [
+                "memory_ingest_private.source_erasure_target",
+                "memory_ingest_private.source_erasure_thread_target",
+            ],
+        )
+        self.assertEqual(
+            contract["source_erasure_permanent_tombstone_tables"],
+            [
+                "memory_ingest_private.source_erasure_message_tombstone",
+                "memory_ingest_private.source_erasure_thread_tombstone",
+            ],
+        )
+        self.assertEqual(
+            contract["source_erasure_tombstone_identity_scope"],
+            "global_message_and_thread_uuid",
+        )
+        self.assertEqual(
+            contract["source_erasure_targets_retained_until"],
+            "conversation_deletion_final_receipt_acknowledged",
+        )
+        self.assertTrue(contract["source_erasure_tombstones_immutable"])
+        self.assertFalse(
+            contract["source_erasure_unclassified_side_effects_allowed"]
+        )
+        self.assertFalse(contract["source_erasure_legacy_capture_trigger_required"])
+        self.assertFalse(contract["accounts_deleted"])
+        self.assertFalse(contract["structured_lifeswitch_data_deleted"])
+        self.assertFalse(contract["legacy_project_rows_deleted"])
+
     def test_exact_migration_artifact_set_exists(self) -> None:
         expected = {
             "manifest.json",
@@ -1313,10 +1412,12 @@ class PackageIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
         manifest = _load_json(ROOT_MANIFEST_PATH)
-        preliminary = manifest["status"] == (
+        phase6e_proof = manifest["status"] == (
             "isolated_candidate_not_yet_disposable_validated_not_production_applied"
         )
-        receipt = verifier["verify"](MIGRATIONS, preliminary=preliminary)
+        receipt = verifier["verify"](
+            MIGRATIONS, phase6e_proof=phase6e_proof
+        )
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(
             receipt["schema_version"],
@@ -1325,13 +1426,15 @@ class PackageIntegrityTests(unittest.TestCase):
         self.assertEqual(
             receipt["validation_state"],
             (
-                "preliminary_disposable_proof_candidate"
-                if preliminary
+                "phase6e_disposable_deletion_proof_candidate"
+                if phase6e_proof
                 else "disposable_validated"
             ),
         )
         with self.assertRaisesRegex(ValueError, "unexpected migration candidate status"):
-            verifier["verify"](MIGRATIONS, preliminary=not preliminary)
+            verifier["verify"](
+                MIGRATIONS, phase6e_proof=not phase6e_proof
+            )
 
 
 class StaticSQLPolicyTests(unittest.TestCase):
@@ -1363,6 +1466,79 @@ class StaticSQLPolicyTests(unittest.TestCase):
             set(FOUNDATION_TABLES) | {"pilot_marker"},
         )
         self.assertEqual(observed, set(FOUNDATION_TABLES))
+
+    def test_governed_source_erasure_replay_tombstones_are_exact(self) -> None:
+        table = _table_definition(
+            self.foundation, "memory.erased_chat_message_tombstone"
+        )
+        observed_columns = tuple(
+            re.findall(
+                r"^\s{2}([a-z][a-z0-9_]*)\s+"
+                r"(?:uuid|timestamptz)\b",
+                table,
+                flags=re.IGNORECASE | re.MULTILINE,
+            )
+        )
+        self.assertEqual(
+            observed_columns,
+            (
+                "message_id",
+                "owner_user_id",
+                "erasure_operation_id",
+                "erased_at",
+            ),
+        )
+        self.assertRegex(table, r"message_id\s+uuid\s+PRIMARY\s+KEY")
+        self.assertRegex(
+            table,
+            r"REFERENCES\s+memory\.source_erasure_operation\(\s*"
+            r"owner_user_id,\s*operation_id\s*\)\s+ON\s+DELETE\s+RESTRICT",
+        )
+        definitions = _function_definitions(self.foundation)
+        for required_function in (
+            "memory_private.assert_chat_messages_not_erased",
+            "memory_private.guard_erased_chat_message_replay",
+            "memory_private.guard_erased_chat_message_tombstone_immutable",
+            "memory_private.assert_source_erasure_tombstones",
+            "memory_private.assert_source_erasure_deletion_catalog",
+        ):
+            self.assertIn(required_function, definitions)
+        tombstone_assertion = definitions[
+            "memory_private.assert_source_erasure_tombstones"
+        ]
+        for exact_binding in (
+            "tombstone.message_id = target.message_id",
+            "tombstone.owner_user_id <> p_owner_user_id",
+            "tombstone.erasure_operation_id <> p_operation_id",
+            "tombstone.erased_at IS DISTINCT FROM p_sealed_at",
+            "cross-owner chat message lineage appeared after seal",
+        ):
+            self.assertIn(exact_binding, tombstone_assertion)
+        for relation in ("memory.evidence", "memory.answer_binding"):
+            self.assertRegex(
+                self.foundation,
+                rf"(?s)CREATE\s+TRIGGER\s+erased_chat_message_replay\s+"
+                rf"BEFORE\s+INSERT\s+ON\s+{re.escape(relation)}\s+"
+                r"FOR\s+EACH\s+ROW\s+EXECUTE\s+FUNCTION\s+"
+                r"memory_private\.guard_erased_chat_message_replay\(\)",
+            )
+        self.assertRegex(
+            self.foundation,
+            r"(?s)CREATE\s+TRIGGER\s+"
+            r"erased_chat_message_tombstone_immutable\s+"
+            r"BEFORE\s+UPDATE\s+OR\s+DELETE\s+ON\s+"
+            r"memory\.erased_chat_message_tombstone\s+"
+            r"FOR\s+EACH\s+ROW\s+EXECUTE\s+FUNCTION\s+"
+            r"memory_private\.guard_erased_chat_message_tombstone_immutable\(\)",
+        )
+        for finalizer in (
+            "memory_private.finalize_source_erasure_memory",
+            "memory_private.ack_source_erasure_conversation_deleted",
+        ):
+            self.assertIn(
+                "assert_source_erasure_tombstones",
+                definitions[finalizer],
+            )
 
     def test_worker_lane_scheduler_is_private_persistent_and_closed(self) -> None:
         scheduler = self.contract["worker_scheduler"]
@@ -3150,7 +3326,8 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertRegex(
             self.bridge,
             r"state\s+IN\s*\(\s*'completed',\s*'skipped',\s*'expired',"
-            r"\s*'failed_terminal'\s*\)\s+AND\s+completed_at\s+IS\s+NOT\s+NULL"
+            r"\s*'failed_terminal',\s*'erasure_cancelled'\s*\)\s+AND\s+"
+            r"completed_at\s+IS\s+NOT\s+NULL"
             r"\s+AND\s+content_sha256\s+IS\s+NULL",
         )
         table_definition = self.bridge.split(
@@ -3184,6 +3361,124 @@ class StaticSQLPolicyTests(unittest.TestCase):
                     + privilege
                     + r"'\s*\)",
                 )
+
+    def test_source_erasure_is_exact_chat_only_and_preserves_structured_data(
+        self,
+    ) -> None:
+        bridge_contract = self.contract["bridge"]
+        self.assertEqual(
+            bridge_contract["source_erasure_selectors"],
+            ["thread", "message_tail", "recent", "all_conversations"],
+        )
+        combined = f"{self.foundation}\n{self.bridge}".lower()
+        for forbidden in (
+            "all_memory",
+            "all_governed_memory",
+            "public.accounts",
+            "public.libraries",
+            "public.workouts",
+            "public.weightlifting_sessions",
+            "public.daily_food_logs",
+            "public.food_logs",
+            "public.measurements",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, combined)
+
+        definitions = _function_definitions(self.bridge)
+        begin = definitions["memory_ingest_private.begin_source_erasure"]
+        for selector in bridge_contract["source_erasure_selectors"]:
+            self.assertIn(f"'{selector}'", begin)
+        finalize = definitions[
+            "memory_ingest_private.finalize_source_erasure"
+        ]
+        for exact_target in (
+            "memory_ingest_private.memory_ingest_outbox",
+            "public.chat_attachments",
+            "public.chat_log",
+            "public.threads",
+        ):
+            self.assertRegex(
+                finalize,
+                rf"DELETE\s+FROM\s+{re.escape(exact_target)}\b",
+            )
+        delete_target_pattern = re.compile(
+            r"\bDELETE\s+FROM\s+([a-z][a-z0-9_.]*)",
+            flags=re.IGNORECASE,
+        )
+        self.assertEqual(
+            {
+                target.lower()
+                for target in delete_target_pattern.findall(finalize)
+            },
+            {
+                "memory_ingest_private.memory_ingest_outbox",
+                "public.chat_attachments",
+                "public.chat_log",
+                "public.threads",
+            },
+            "conversation erasure executable SQL must remain a closed "
+            "chat-only allowlist",
+        )
+        ack = definitions[
+            "memory_ingest_private.ack_source_erasure_completion"
+        ]
+        self.assertEqual(
+            {
+                target.lower()
+                for target in delete_target_pattern.findall(ack)
+            },
+            {
+                "memory_ingest_private.source_erasure_target",
+                "memory_ingest_private.source_erasure_thread_target",
+            },
+            "completion acknowledgement may purge only transient target rows",
+        )
+
+        foundation_definitions = _function_definitions(self.foundation)
+        governed_delete_allowlists = {
+            "memory_private.finalize_claim_deletion": {
+                "memory.answer_binding",
+                "memory.claim",
+                "memory.claim_evidence",
+                "memory.claim_revision",
+                "memory.entity",
+                "memory.evidence",
+                "memory.extraction_job",
+                "memory.projection_outbox",
+                "memory.proposal",
+                "memory.provider_call",
+            },
+            "memory_private.finalize_source_erasure_memory": {
+                "memory.answer_binding",
+                "memory.evidence",
+                "memory.extraction_job",
+                "memory.proposal",
+                "memory.provider_call",
+            },
+            "memory_private.ack_source_erasure_conversation_deleted": {
+                "memory.source_erasure_claim",
+                "memory.source_erasure_target",
+            },
+        }
+        for function_name, allowed_targets in governed_delete_allowlists.items():
+            with self.subTest(function=function_name):
+                self.assertEqual(
+                    {
+                        target.lower()
+                        for target in delete_target_pattern.findall(
+                            foundation_definitions[function_name]
+                        )
+                    },
+                    allowed_targets,
+                    "source erasure may delete only chat-derived "
+                    "governed-memory rows and transient target rows",
+                )
+        self.assertIn("memory_erasure_requester", begin)
+        self.assertIn("memory_private.current_owner_id()", self.foundation)
+        self.assertTrue(
+            bridge_contract["source_erasure_content_free_receipts_retained"]
+        )
         for role in ("anon", "authenticated"):
             with self.subTest(role=role):
                 self.assertNotRegex(
@@ -3191,6 +3486,538 @@ class StaticSQLPolicyTests(unittest.TestCase):
                     rf"GRANT\s+(?:USAGE|EXECUTE|SELECT|INSERT|UPDATE|DELETE|ALL)"
                     rf"\b[^;]*\bTO\s+{role}\b",
                 )
+
+    def test_source_erasure_catalog_and_final_delete_are_fail_closed(
+        self,
+    ) -> None:
+        definitions = _function_definitions(self.bridge)
+        assertion_name = (
+            "memory_ingest_private.assert_chat_deletion_catalog"
+        )
+        self.assertIn(assertion_name, definitions)
+        self.assertIn(
+            f"{assertion_name}()",
+            self.contract["internal_functions"],
+        )
+        catalog = definitions[assertion_name]
+        for relation in (
+            "public.chat_log",
+            "public.threads",
+            "public.chat_attachments",
+            "public.active_thread_selection",
+            "trusted_web.response_transcript_v1",
+            "memory_ingest_private.memory_ingest_outbox",
+            "memory_ingest_private.source_erasure_operation",
+            "memory_ingest_private.source_erasure_target",
+            "memory_ingest_private.source_erasure_thread_target",
+            "memory_ingest_private.source_erasure_message_tombstone",
+            "memory_ingest_private.source_erasure_thread_tombstone",
+            "memory_ingest_private.source_erasure_receipt",
+        ):
+            with self.subTest(relation=relation):
+                self.assertIn(relation, catalog)
+        for constraint_name in (
+            "chat_log_owner_thread_fk",
+            "chat_attachments_thread_owner_fk",
+            "chat_attachments_message_owner_thread_fk",
+            "active_thread_selection_owner_thread_fk",
+            "response_transcript_v1_user_chat_log_id_fkey",
+            "response_transcript_v1_assistant_chat_log_id_fkey",
+            "source_erasure_target_operation_fk",
+            "source_erasure_thread_target_operation_fk",
+            "source_erasure_message_tombstone_operation_fk",
+            "source_erasure_thread_tombstone_operation_fk",
+        ):
+            with self.subTest(constraint=constraint_name):
+                self.assertIn(constraint_name, catalog)
+        for closed_catalog_surface in (
+            "pg_catalog.pg_constraint",
+            "constraint_row.confdeltype",
+            "constraint_row.convalidated",
+            "pg_catalog.pg_trigger",
+            "trigger_row.tgtype",
+            "pg_catalog.pg_rewrite",
+            "rewrite_row.ev_class = ANY(deletion_roots)",
+            "pg_catalog.pg_inherits",
+            "unclassified inbound chat deletion dependency",
+            "chat deletion mutation trigger inventory differs",
+            "chat deletion private constraint inventory differs",
+        ):
+            with self.subTest(surface=closed_catalog_surface):
+                self.assertIn(closed_catalog_surface, catalog)
+        self.assertIn("trigger_row.tgenabled = expected.enabled_state", catalog)
+        self.assertIn("trigger_row.tgfoid = expected.function_oid", catalog)
+        self.assertIn(
+            "response_transcript_serialize_source_erasure", catalog
+        )
+        self.assertIn("source_erasure_message_tombstone_immutable", catalog)
+        self.assertIn("source_erasure_thread_tombstone_immutable", catalog)
+        legacy_optional = catalog.index(
+            "trigger_row.tgname =\n"
+            "          'chat_log_enqueue_memory_v1_consolidation'"
+        )
+        mandatory_triggers = catalog[
+            catalog.index("AS expected("):legacy_optional
+        ]
+        self.assertNotIn(
+            "chat_log_enqueue_memory_v1_consolidation", mandatory_triggers
+        )
+        legacy_guard = catalog[legacy_optional:catalog.index(
+            ") OR EXISTS (", legacy_optional
+        )]
+        self.assertIn("trigger_row.tgenabled <> 'D'", legacy_guard)
+        self.assertIn("trigger_row.tgtype <> 5", legacy_guard)
+        self.assertIn("memory.enqueue_chat_log_consolidation()", legacy_guard)
+        for composite_lineage in (
+            r"ARRAY\[\s*'user_chat_log_id',\s*'owner_user_id',"
+            r"\s*'thread_id'\s*\]::text\[\]",
+            r"ARRAY\[\s*'assistant_chat_log_id',\s*'owner_user_id',"
+            r"\s*'thread_id'\s*\]::text\[\]",
+            r"ARRAY\[\s*'id',\s*'owner_user_id',\s*'thread_id'"
+            r"\s*\]::text\[\]",
+        ):
+            with self.subTest(composite_lineage=composite_lineage):
+                self.assertRegex(catalog, composite_lineage)
+        self.assertNotIn("project_thread", catalog)
+
+        begin = definitions["memory_ingest_private.begin_source_erasure"]
+        self.assertLess(
+            begin.index("assert_chat_deletion_catalog"),
+            begin.index(
+                "INSERT INTO memory_ingest_private.source_erasure_operation"
+            ),
+        )
+        self.assertIn("source erasure selector has future-dated chat rows", begin)
+        self.assertIn("source erasure attachment target limit exceeded", begin)
+        self.assertIn("observed_attachment_count > 1000000", begin)
+        attachment_limit = begin.index(
+            "IF observed_attachment_count > 1000000"
+        )
+        selective_attachment_bound = begin[
+            begin.rfind("  ELSE", 0, attachment_limit):attachment_limit
+        ]
+        for selective_bound_lineage in (
+            "attachment.owner_user_id = actor",
+            "target.owner_user_id = actor",
+            "target.operation_id = p_operation_id",
+            "target.thread_id = attachment.thread_id",
+            "target.message_id = attachment.message_id",
+            "target_thread.owner_user_id = actor",
+            "target_thread.operation_id = p_operation_id",
+            "target_thread.thread_id = attachment.thread_id",
+            "remaining.owner_user_id = actor",
+            "remaining.thread_id = target_thread.thread_id",
+            "remaining_target.owner_user_id = actor",
+            "remaining_target.operation_id = p_operation_id",
+            "remaining_target.thread_id = remaining.thread_id",
+            "remaining_target.message_id = remaining.id",
+        ):
+            with self.subTest(
+                selective_bound_lineage=selective_bound_lineage
+            ):
+                self.assertIn(
+                    selective_bound_lineage, selective_attachment_bound
+                )
+        self.assertGreaterEqual(
+            selective_attachment_bound.count("EXISTS ("), 4
+        )
+        self.assertRegex(
+            begin,
+            r"(?s)p_selector_kind\s*=\s*'message_tail'.*?"
+            r"source\.created_at\s+IS\s+NULL.*?"
+            r"message-tail erasure has invalid chat time",
+        )
+        self.assertRegex(
+            begin,
+            r"(?s)p_selector_kind\s*=\s*'recent'.*?"
+            r"source\.created_at\s+IS\s+NULL.*?"
+            r"recent erasure has invalid chat time",
+        )
+
+        finalize = definitions[
+            "memory_ingest_private.finalize_source_erasure"
+        ]
+        first_lock = finalize.index("LOCK TABLE public.threads")
+        catalog_assertion = finalize.index("assert_chat_deletion_catalog")
+        first_delete = finalize.index("DELETE FROM")
+        self.assertLess(first_lock, catalog_assertion)
+        self.assertLess(catalog_assertion, first_delete)
+        for locked_root in (
+            "LOCK TABLE public.threads IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE trusted_web.response_transcript_v1 IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory_ingest_private.memory_ingest_outbox",
+            "LOCK TABLE memory_ingest_private.source_erasure_operation",
+            "LOCK TABLE memory_ingest_private.source_erasure_target",
+            "LOCK TABLE memory_ingest_private.source_erasure_thread_target",
+            "LOCK TABLE memory_ingest_private.source_erasure_message_tombstone",
+            "LOCK TABLE memory_ingest_private.source_erasure_thread_tombstone",
+            "LOCK TABLE memory_ingest_private.source_erasure_receipt",
+        ):
+            with self.subTest(lock=locked_root):
+                self.assertIn(locked_root, finalize)
+        self.assertIn("remaining_transcript", finalize)
+        self.assertIn(
+            "target.message_id = transcript.user_chat_log_id", finalize
+        )
+        self.assertIn(
+            "target.message_id = transcript.assistant_chat_log_id", finalize
+        )
+        message_tombstone_insert = finalize.index(
+            "INSERT INTO memory_ingest_private."
+            "source_erasure_message_tombstone"
+        )
+        target_attachment_delete = finalize.index(
+            "DELETE FROM public.chat_attachments AS attachment\n"
+            "  USING memory_ingest_private.source_erasure_target AS target"
+        )
+        target_chat_delete = finalize.index(
+            "DELETE FROM public.chat_log AS source"
+        )
+        thread_tombstone_insert = finalize.index(
+            "INSERT INTO memory_ingest_private."
+            "source_erasure_thread_tombstone"
+        )
+        empty_thread_attachment_delete = finalize.index(
+            "DELETE FROM public.chat_attachments AS attachment",
+            thread_tombstone_insert,
+        )
+        empty_thread_delete = finalize.index(
+            "DELETE FROM public.threads AS thread",
+            empty_thread_attachment_delete,
+        )
+        bridge_delete = finalize.index(
+            "DELETE FROM memory_ingest_private.memory_ingest_outbox AS bridge"
+        )
+        self.assertLess(message_tombstone_insert, target_attachment_delete)
+        self.assertLess(target_attachment_delete, target_chat_delete)
+        self.assertLess(target_chat_delete, thread_tombstone_insert)
+        self.assertLess(thread_tombstone_insert, empty_thread_attachment_delete)
+        self.assertLess(empty_thread_attachment_delete, empty_thread_delete)
+        self.assertLess(empty_thread_delete, bridge_delete)
+        thread_tombstone_block = finalize[
+            thread_tombstone_insert:empty_thread_attachment_delete
+        ]
+        self.assertIn(
+            "FROM memory_ingest_private.source_erasure_thread_target AS target",
+            thread_tombstone_block,
+        )
+        self.assertIn(
+            "remaining.thread_id = target.thread_id",
+            thread_tombstone_block,
+        )
+        self.assertNotIn(
+            "remaining.owner_user_id", thread_tombstone_block
+        )
+        absence_proof = finalize[
+            finalize.index("IF remaining_transcript"):finalize.index(
+                "RAISE EXCEPTION 'conversation source absence verification failed'"
+            )
+        ]
+        self.assertIn(
+            "source.id = target.message_id", absence_proof
+        )
+        self.assertIn(
+            "attachment.message_id = target.message_id", absence_proof
+        )
+        self.assertIn("bridge.message_id = target.message_id", absence_proof)
+        self.assertIn("JOIN public.threads AS thread", absence_proof)
+        self.assertIn(
+            "JOIN public.chat_attachments AS attachment", absence_proof
+        )
+        self.assertIn("source_erasure_thread_tombstone AS tombstone", absence_proof)
+        self.assertIn("governed_memory.conversation_source_erasure_receipt.v2", finalize)
+        for receipt_binding in (
+            "thread_target_manifest_sha256",
+            "thread_target_count",
+            "message_tombstone_count",
+            "thread_tombstone_count",
+            "tombstone_manifest_sha256",
+        ):
+            self.assertIn(receipt_binding, finalize)
+        self.assertNotRegex(
+            finalize,
+            r"DELETE\s+FROM\s+memory_ingest_private\.source_erasure_(?:thread_)?target",
+        )
+
+        chat_fence = definitions[
+            "memory_ingest_private.serialize_chat_source_erasure"
+        ]
+        self.assertGreaterEqual(chat_fence.count("NEW.created_at IS NULL"), 3)
+
+        thread_fence = definitions[
+            "memory_ingest_private.serialize_thread_source_erasure"
+        ]
+        for lineage in (
+            "NEW.owner_user_id",
+            "NEW.id",
+            "NEW.created_at",
+            "OLD.owner_user_id",
+            "OLD.id",
+            "OLD.created_at",
+        ):
+            with self.subTest(thread_lineage=lineage):
+                self.assertIn(lineage, thread_fence)
+
+        transcript_fence = definitions[
+            "memory_ingest_private.serialize_response_transcript_source_erasure"
+        ]
+        for lineage in (
+            "NEW.owner_user_id",
+            "NEW.user_chat_log_id",
+            "NEW.assistant_chat_log_id",
+            "OLD.owner_user_id",
+            "OLD.user_chat_log_id",
+            "OLD.assistant_chat_log_id",
+            "target.message_id",
+            "operation.state <> 'completed'",
+        ):
+            with self.subTest(transcript_lineage=lineage):
+                self.assertIn(lineage, transcript_fence)
+
+        attachment_fence = definitions[
+            "memory_ingest_private.serialize_attachment_source_erasure"
+        ]
+        for lineage in (
+            "OLD.owner_user_id",
+            "OLD.thread_id",
+            "OLD.message_id",
+            "NEW.owner_user_id",
+            "NEW.thread_id",
+            "NEW.message_id",
+        ):
+            with self.subTest(lineage=lineage):
+                self.assertIn(lineage, attachment_fence)
+        for suppression_fence in (
+            "source_erasure_message_tombstone",
+            "source_erasure_thread_tombstone",
+            "source_erasure_target",
+            "source_erasure_thread_target",
+            "target.message_id = NEW.message_id",
+            "target.message_id = OLD.message_id",
+            "target.thread_id = NEW.thread_id",
+            "target.thread_id = OLD.thread_id",
+        ):
+            with self.subTest(suppression_fence=suppression_fence):
+                self.assertIn(suppression_fence, attachment_fence)
+
+        for thread_suppression_fence in (
+            "source_erasure_thread_tombstone",
+            "source_erasure_thread_target",
+            "target.thread_id = NEW.id",
+            "target.thread_id = OLD.id",
+            "tombstone.thread_id = NEW.id",
+            "tombstone.thread_id = OLD.id",
+        ):
+            with self.subTest(thread_fence=thread_suppression_fence):
+                self.assertIn(thread_suppression_fence, thread_fence)
+
+        lease = definitions[
+            "memory_ingest_private.lease_source_erasure"
+        ]
+        self.assertIn("coordinator_attempts_exhausted", lease)
+        self.assertRegex(
+            lease,
+            r"value\.attempt_count\s*<\s*1000\s*"
+            r"OR\s+value\.state\s*=\s*'conversation_deleted_pending_ack'",
+        )
+
+        self.assertRegex(
+            lease,
+            r"WHEN\s+value\.state\s*=\s*'conversation_deleted_pending_ack'"
+            r"\s+AND\s+value\.attempt_count\s*>=\s*1000\s+THEN\s+1000",
+        )
+
+        rollback_assertion = self.bridge_rollback.index(
+            "assert_chat_deletion_catalog"
+        )
+        rollback_drop = self.bridge_rollback.index(
+            "DROP FUNCTION memory_ingest_private.assert_chat_deletion_catalog"
+        )
+        self.assertLess(rollback_assertion, rollback_drop)
+        self.assertIn(
+            "DROP TRIGGER response_transcript_serialize_source_erasure",
+            self.bridge_rollback,
+        )
+        self.assertIn(
+            "DROP FUNCTION\n"
+            "  memory_ingest_private."
+            "serialize_response_transcript_source_erasure()",
+            self.bridge_rollback,
+        )
+        for rollback_object in (
+            "source_erasure_thread_target",
+            "source_erasure_message_tombstone",
+            "source_erasure_thread_tombstone",
+            "source_erasure_message_tombstone_immutable",
+            "source_erasure_thread_tombstone_immutable",
+        ):
+            self.assertIn(rollback_object, self.bridge_rollback)
+
+    def test_source_erasure_delete_reinsert_identity_is_fail_closed(
+        self,
+    ) -> None:
+        definitions = _function_definitions(self.bridge)
+        chat_fence = definitions[
+            "memory_ingest_private.serialize_chat_source_erasure"
+        ]
+        self.assertRegex(
+            chat_fence,
+            r"(?s)FROM memory_ingest_private\.source_erasure_target AS target"
+            r"\s+WHERE target\.owner_user_id = operation\.owner_user_id"
+            r"\s+AND target\.operation_id = operation\.operation_id"
+            r"\s+AND target\.message_id = NEW\.id",
+        )
+
+        finalize = definitions[
+            "memory_ingest_private.finalize_source_erasure"
+        ]
+        drift_error = finalize.index(
+            "conversation source target lineage drifted"
+        )
+        target_attachment_delete = finalize.index(
+            "DELETE FROM public.chat_attachments AS attachment"
+        )
+        self.assertLess(drift_error, target_attachment_delete)
+        drift_block = finalize[
+            finalize.rfind("IF EXISTS (", 0, drift_error):drift_error
+        ]
+        for drift_binding in (
+            "target.owner_user_id = operation.owner_user_id",
+            "target.operation_id = operation.operation_id",
+            "ON source.id = target.message_id",
+            "source.owner_user_id IS DISTINCT FROM target.owner_user_id",
+            "source.thread_id IS DISTINCT FROM target.thread_id",
+            "source.created_at IS DISTINCT FROM target.source_created_at",
+        ):
+            with self.subTest(drift_binding=drift_binding):
+                self.assertIn(drift_binding, drift_block)
+
+        target_chat_delete = finalize.index(
+            "DELETE FROM public.chat_log AS source"
+        )
+        target_chat_delete_block = finalize[
+            target_chat_delete:finalize.index(
+                "GET DIAGNOSTICS removed_messages = ROW_COUNT",
+                target_chat_delete,
+            )
+        ]
+        self.assertIn(
+            "target.owner_user_id = operation.owner_user_id",
+            target_chat_delete_block,
+        )
+        self.assertIn(
+            "target.operation_id = operation.operation_id",
+            target_chat_delete_block,
+        )
+        self.assertIn(
+            "source.owner_user_id = target.owner_user_id",
+            target_chat_delete_block,
+        )
+        self.assertIn("source.id = target.message_id", target_chat_delete_block)
+        self.assertNotIn("source.thread_id", target_chat_delete_block)
+
+        absence_start = finalize.index("IF remaining_transcript OR EXISTS (")
+        absence_proof = finalize[
+            absence_start:finalize.index(
+                "conversation source absence verification failed",
+                absence_start,
+            )
+        ]
+        self.assertRegex(
+            absence_proof,
+            r"JOIN public\.chat_log AS source\s+ON source\.id = target\.message_id",
+        )
+        self.assertRegex(
+            absence_proof,
+            r"JOIN public\.chat_attachments AS attachment\s+"
+            r"ON attachment\.message_id = target\.message_id",
+        )
+        for table_name, identity_column in (
+            ("source_erasure_message_tombstone", "message_id"),
+            ("source_erasure_thread_tombstone", "thread_id"),
+        ):
+            table = _table_definition(
+                self.bridge,
+                f"memory_ingest_private.{table_name}",
+            )
+            self.assertRegex(
+                table,
+                rf"^\s*{identity_column}\s+uuid\s+PRIMARY KEY,",
+            )
+            for required_column in (
+                "owner_user_id uuid NOT NULL",
+                "operation_id uuid NOT NULL",
+                "erased_at timestamptz NOT NULL",
+            ):
+                self.assertIn(required_column, table)
+            for forbidden_metadata in (
+                "text",
+                "request",
+                "selector",
+                "attachment",
+                "content",
+                "created_at",
+            ):
+                self.assertNotIn(forbidden_metadata, table.lower())
+
+        ack = definitions[
+            "memory_ingest_private.ack_source_erasure_completion"
+        ]
+        thread_target_delete = ack.index(
+            "DELETE FROM memory_ingest_private.source_erasure_thread_target"
+        )
+        message_target_delete = ack.index(
+            "DELETE FROM memory_ingest_private.source_erasure_target"
+        )
+        completed_update = ack.index("SET state = 'completed'")
+        self.assertLess(thread_target_delete, message_target_delete)
+        self.assertLess(message_target_delete, completed_update)
+        self.assertIn("pending-ack source erasure target inventory drifted", ack)
+        self.assertIn("pending-ack suppression tombstone receipt drifted", ack)
+
+    def test_source_erasure_registration_drains_pre_fence_writers(self) -> None:
+        register = _function_definitions(self.foundation)[
+            "memory_private.register_source_erasure"
+        ]
+        expected_locks = (
+            "LOCK TABLE memory.answer_binding IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.claim_evidence IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.projection_outbox IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.proposal IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.claim_revision IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.claim IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.provider_call IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.extraction_job IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.evidence IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.entity IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.source_erasure_claim IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE memory.source_erasure_target IN SHARE ROW EXCLUSIVE MODE",
+        )
+        lock_positions = tuple(register.index(lock) for lock in expected_locks)
+        self.assertEqual(lock_positions, tuple(sorted(lock_positions)))
+
+        replay_return = register.index("RETURN QUERY SELECT 'replayed'::text")
+        first_lock = lock_positions[0]
+        last_lock = lock_positions[-1]
+        catalog_assertion = register.index(
+            "assert_source_erasure_deletion_catalog", last_lock
+        )
+        recheck = register.index("IF EXISTS (", last_lock)
+        operation_insert = register.index(
+            "INSERT INTO memory.source_erasure_operation"
+        )
+        self.assertLess(replay_return, first_lock)
+        self.assertLess(last_lock, catalog_assertion)
+        self.assertLess(catalog_assertion, recheck)
+        self.assertLess(last_lock, recheck)
+        self.assertLess(recheck, operation_insert)
+        self.assertEqual(
+            register.count("owner memory source erasure already active"),
+            2,
+        )
 
     def test_terminal_bridge_purge_is_worker_only_and_bounded(self) -> None:
         expected_signature = (
@@ -3222,6 +4049,37 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertRegex(
             purge,
             r"DELETE\s+FROM\s+memory_ingest_private\.memory_ingest_outbox",
+        )
+
+    def test_legacy_chat_capture_is_optional_but_if_present_exact_disabled(
+        self,
+    ) -> None:
+        combined = f"{self.bridge}\n{self.bridge_rollback}"
+        self.assertNotRegex(
+            combined,
+            r"(?s)(?:IF|OR)\s+NOT\s+EXISTS\s*\(\s*SELECT\s+1\s+"
+            r"FROM\s+pg_catalog\.pg_trigger(?:\s+AS\s+trigger_row)?\s+"
+            r"WHERE\s+(?:trigger_row\.)?tgrelid\s*=\s*"
+            r"'public\.chat_log'::regclass[^)]*?"
+            r"(?:trigger_row\.)?tgname\s*=\s*"
+            r"'chat_log_enqueue_memory_v1_consolidation'",
+        )
+        optional_guards = re.findall(
+            r"(?s)(?:IF|OR)\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+"
+            r"pg_catalog\.pg_trigger(?:\s+AS\s+trigger_row)?\s+WHERE\s+"
+            r"(?:trigger_row\.)?tgrelid\s*=\s*'public\.chat_log'::regclass"
+            r".*?(?:trigger_row\.)?tgname\s*=\s*"
+            r"'chat_log_enqueue_memory_v1_consolidation'.*?"
+            r"(?:trigger_row\.)?tgenabled\s*<>\s*'D'.*?"
+            r"(?:trigger_row\.)?tgtype\s*<>\s*5.*?"
+            r"pg_catalog\.to_regprocedure\(\s*"
+            r"'memory\.enqueue_chat_log_consolidation\(\)'\s*\).*?\)",
+            combined,
+        )
+        self.assertEqual(len(optional_guards), 4)
+        self.assertNotRegex(
+            combined,
+            r"'memory\.enqueue_chat_log_consolidation\(\)'::regprocedure",
         )
 
     def test_answer_binding_sql_has_exact_outcomes_limits_and_manifests(self) -> None:

@@ -22,13 +22,6 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-try:
-    from tools.governed_memory_release.build_candidate_runtime import (
-        _source_tree_sha256,
-    )
-except ModuleNotFoundError:  # Direct script execution from this directory.
-    from build_candidate_runtime import _source_tree_sha256
-
 from tools.governed_memory_validation.verify_migration_manifest import (
     verify as verify_migration_manifest,
 )
@@ -80,19 +73,22 @@ OBSERVATION_KEYS = {
 EXPECTED_CREATE_BLOCKERS = [
     "production_activation_not_authorized",
     "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-    "chat_deletion_memory_cancellation_coordination_not_implemented",
+    "phase6e_deletion_coordination_disposable_proof_pending",
+    "legacy_project_memory_thread_dependencies_not_separated",
+    "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+    "legacy_chat_owner_thread_lineage_not_remediated",
     "calibration_artifact_unapproved_retrieval_off",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
 ]
 EXPECTED_CLEANUP_BLOCKERS: list[str] = []
-EXPECTED_RUNTIME_SOURCE_SHA256 = (
+EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256 = (
     "d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0"
 )
-EXPECTED_RUNTIME_RECEIPT_SHA256 = (
+EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256 = (
     "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
 )
 EXPECTED_RUNTIME_MANIFEST_SHA256 = (
-    "9240cff040f09944ca181317d5bd2d07446a39d7009d7442aa87c56b66b0dca6"
+    "af1ca49f4298a696456d57aacdc12bfc563733115d9922773b89bfd0c3bf32d5"
 )
 EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256 = (
     "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8"
@@ -100,13 +96,13 @@ EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256 = (
 EXPECTED_PHASE6B_PROOF_CANONICAL_SHA256 = (
     "5872a3acfcefbcedbb6da10715dbbb7214bb833a4aa64037b4b189079273b4a5"
 )
-EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256 = (
-    "bb87fc8e585a879c07fcdff3313f1d7628fdc850edab2008e1937bf125c7cace"
+EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256 = (
+    "d13a985e29b631be0686b854e9dc1a97c4ea59c1750e73453f6379973243dd52"
 )
-EXPECTED_RUNTIME_PYTHON_SHA256 = (
+EXPECTED_PHASE6B_RUNTIME_PYTHON_SHA256 = (
     "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 )
-EXPECTED_RUNTIME_WHEEL_SHA256 = (
+EXPECTED_PHASE6B_RUNTIME_WHEEL_SHA256 = (
     "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db"
 )
 EXPECTED_RUNTIME_LOCK_SHA256 = (
@@ -118,14 +114,14 @@ EXPECTED_BUILD_LOCK_SHA256 = (
 EXPECTED_RUNTIME_PACKAGES_SHA256 = (
     "ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882"
 )
-EXPECTED_RUNTIME_PYTHON = (
+EXPECTED_PHASE6B_RUNTIME_PYTHON = (
     "/tmp/governed-memory-successor-runtime-"
     f"{EXPECTED_RUNTIME_LOCK_SHA256}-"
-    f"{EXPECTED_RUNTIME_SOURCE_SHA256}/bin/python"
+    f"{EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256}/bin/python"
 )
-EXPECTED_RUNTIME_WHEEL = (
+EXPECTED_PHASE6B_RUNTIME_WHEEL = (
     "/tmp/governed-memory-successor-build-"
-    f"{EXPECTED_BUILD_LOCK_SHA256}-{EXPECTED_RUNTIME_SOURCE_SHA256}/dist/"
+    f"{EXPECTED_BUILD_LOCK_SHA256}-{EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256}/dist/"
     "governed_memory_successor-0.0.0-py3-none-any.whl"
 )
 EXPECTED_RUNTIME_RECEIPT_KEYS = {
@@ -205,37 +201,44 @@ EXPECTED_PHASE6B_PROOF_KEYS = {
 }
 EXPECTED_DISPOSABLE_VALIDATION = {
     "scope": "successor_disposable_only",
-    "evidence_status": "phase6b_disposable_proof_passed_not_production_activation",
-    "current_full_proof_complete": True,
+    "evidence_status": (
+        "phase6b_proof_historical_noncurrent_"
+        "phase6e_deletion_proof_pending"
+    ),
+    "current_full_proof_complete": False,
     "validation_document": "docs/memory/clean_successor/VALIDATION.md",
     "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
-    "current_candidate_python": EXPECTED_RUNTIME_PYTHON,
-    "postgresql_fresh_empty": True,
-    "qdrant_fresh_empty": True,
-    "migration_forward_rollback_reapply": True,
-    "normalized_catalog_equivalent_after_reapply": True,
-    "forced_rls_owner_isolation_and_direct_dml_denial": True,
-    "asymmetric_jwt_and_jwks_boundary_invoked": True,
-    "owner_http_lifecycle_invoked": True,
-    "all_owner_routes_invoked": True,
-    "alternating_owner_pool_isolation": True,
-    "owner_pool_max_size": 1,
-    "distinct_chat_a_chat_b": True,
-    "cold_extraction_reconstruction": True,
-    "cold_postgresql_projection_rebuild": True,
-    "correction_retraction_hard_delete_and_retention": True,
+    "current_candidate_python": None,
+    "postgresql_fresh_empty": False,
+    "qdrant_fresh_empty": False,
+    "migration_forward_rollback_reapply": False,
+    "normalized_catalog_equivalent_after_reapply": False,
+    "forced_rls_owner_isolation_and_direct_dml_denial": False,
+    "asymmetric_jwt_and_jwks_boundary_invoked": False,
+    "owner_http_lifecycle_invoked": False,
+    "all_owner_routes_invoked": False,
+    "alternating_owner_pool_isolation": False,
+    "owner_pool_max_size": None,
+    "distinct_chat_a_chat_b": False,
+    "cold_extraction_reconstruction": False,
+    "cold_postgresql_projection_rebuild": False,
+    "correction_retraction_hard_delete_and_retention": False,
     "live_supabase_user_adapter_unit_validated": True,
     "live_supabase_session_freshness_verified": False,
-    "qdrant_v1_19_0_real_disposable_compatibility_verified": True,
-    "pilot_marker_disposable_proof_complete": True,
-    "worker_runtime_composition_validated": True,
+    "qdrant_v1_19_0_real_disposable_compatibility_verified": False,
+    "pilot_marker_disposable_proof_complete": False,
+    "worker_runtime_composition_validated": False,
     "worker_runtime_composition_status": (
-        "implemented_inactive_persistently_fair_three_lane_"
-        "real_two_database_disposable_validated"
+        "phase6d_inactive_static_candidate_phase6e_disposable_proof_pending"
     ),
-    "worker_cross_process_singleton_validated": True,
+    "worker_cross_process_singleton_validated": False,
     "worker_cross_process_singleton_status": (
-        "implemented_inactive_real_concurrent_lock_disposable_validated"
+        "phase6d_inactive_static_candidate_phase6e_disposable_proof_pending"
+    ),
+    "deletion_coordination_disposable_proof_complete": False,
+    "deletion_coordination_status": (
+        "exact_chat_targets_only_inactive_not_routed_"
+        "phase6e_disposable_proof_pending"
     ),
     "production_routes_installed": False,
     "authenticated_frontend_verified": False,
@@ -245,11 +248,9 @@ EXPECTED_DISPOSABLE_VALIDATION = {
     "provider_external_calls": 0,
     "persistent_resources_created": False,
     "final_resources_absent": True,
-    "resource_cleanup_complete": True,
-    "current_proof_receipt": (
-        "ops/governed_memory/phase6b_disposable_proof_receipt.json"
-    ),
-    "current_proof_receipt_sha256": EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256,
+    "resource_cleanup_complete": False,
+    "current_proof_receipt": None,
+    "current_proof_receipt_sha256": None,
 }
 EXPECTED_ACTIVATION_BLOCKERS = [
     "production_activation_not_authorized",
@@ -266,7 +267,10 @@ EXPECTED_ACTIVATION_BLOCKERS = [
     "provider_adapter_real_call_validation_not_authorized_or_completed",
     "embedding_adapter_real_call_validation_not_authorized_or_completed",
     "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-    "chat_deletion_memory_cancellation_coordination_not_implemented",
+    "phase6e_deletion_coordination_disposable_proof_pending",
+    "legacy_project_memory_thread_dependencies_not_separated",
+    "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+    "legacy_chat_owner_thread_lineage_not_remediated",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
     "pilot_owner_and_scope_not_authorized",
     "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved",
@@ -321,7 +325,7 @@ def _canonical_json_sha256(value: object) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
-def _verify_phase6b_proof(value: object) -> None:
+def _verify_historical_phase6b_proof(value: object) -> None:
     if not isinstance(value, dict) or set(value) != EXPECTED_PHASE6B_PROOF_WRAPPER_KEYS:
         raise ReleaseGuardError("release_disposable_proof_invalid")
     proof = value.get("proof_receipt")
@@ -348,9 +352,10 @@ def _verify_phase6b_proof(value: object) -> None:
         != "7693d9db459f81f4d89e680108867ce31dd4c7ed"
         or proof.get("candidate_tree")
         != "f62ad8e9cccffe715927fa825f24cb4312a27934"
-        or proof.get("source_tree_sha256") != EXPECTED_RUNTIME_SOURCE_SHA256
+        or proof.get("source_tree_sha256")
+        != EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256
         or proof.get("runtime_build_receipt_sha256")
-        != EXPECTED_RUNTIME_RECEIPT_SHA256
+        != EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
         or proof.get("manifest_sha256")
         != "3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66"
         or proof.get("runtime_packages_sha256")
@@ -418,17 +423,20 @@ def verify_candidate_artifacts() -> dict[str, object]:
         EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256
     ):
         raise ReleaseGuardError("release_disposable_proof_invalid")
-    _verify_phase6b_proof(phase6b_proof)
+    _verify_historical_phase6b_proof(phase6b_proof)
     try:
-        migration_receipt = verify_migration_manifest(MIGRATION_ROOT)
+        migration_receipt = verify_migration_manifest(
+            MIGRATION_ROOT, phase6e_proof=True
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise ReleaseGuardError("release_migration_manifest_invalid") from exc
     if (
         _sha256(MIGRATION_MANIFEST)
-        != EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256
+        != EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256
         or migration_receipt.get("manifest_sha256")
-        != EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256
-        or migration_receipt.get("validation_state") != "disposable_validated"
+        != EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256
+        or migration_receipt.get("validation_state")
+        != "phase6e_disposable_deletion_proof_candidate"
         or migration_receipt.get("result") != "verified"
     ):
         raise ReleaseGuardError("release_migration_manifest_invalid")
@@ -478,13 +486,19 @@ def verify_candidate_artifacts() -> dict[str, object]:
     runtime_disposable = runtime_manifest.get("disposable_validation")
     runtime_activation = runtime_manifest.get("activation")
     runtime_release_guard = runtime_manifest.get("release_guard")
+    runtime_ingestion = runtime_manifest.get("ingestion")
     if (
         set(runtime_build_receipt) != EXPECTED_RUNTIME_RECEIPT_KEYS
-        or _sha256(RUNTIME_BUILD_RECEIPT) != EXPECTED_RUNTIME_RECEIPT_SHA256
+        or _sha256(RUNTIME_BUILD_RECEIPT)
+        != EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
         or _sha256(RUNTIME_MANIFEST) != EXPECTED_RUNTIME_MANIFEST_SHA256
-        or _source_tree_sha256(ROOT) != EXPECTED_RUNTIME_SOURCE_SHA256
         or runtime_manifest.get("schema_version")
         != "governed-memory-successor-runtime-manifest-v1"
+        or runtime_manifest.get("phase")
+        != (
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_deletion_proof_pending"
+        )
         or runtime_manifest.get("production_state_changed") is not False
         or runtime_build_receipt.get("schema_version")
         != "governed-memory-runtime-build-receipt-v1"
@@ -497,18 +511,19 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or runtime_build_receipt.get("project_distribution")
         != {"name": "governed-memory-successor", "version": "0.0.0"}
         or runtime_build_receipt.get("source_tree_sha256")
-        != EXPECTED_RUNTIME_SOURCE_SHA256
+        != EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256
         or runtime_build_receipt.get("candidate_python")
-        != EXPECTED_RUNTIME_PYTHON
+        != EXPECTED_PHASE6B_RUNTIME_PYTHON
         or runtime_build_receipt.get("candidate_python_sha256")
-        != EXPECTED_RUNTIME_PYTHON_SHA256
+        != EXPECTED_PHASE6B_RUNTIME_PYTHON_SHA256
         or runtime_build_receipt.get("runtime_lock_sha256")
         != EXPECTED_RUNTIME_LOCK_SHA256
         or runtime_build_receipt.get("build_lock_sha256")
         != EXPECTED_BUILD_LOCK_SHA256
-        or runtime_build_receipt.get("project_wheel") != EXPECTED_RUNTIME_WHEEL
+        or runtime_build_receipt.get("project_wheel")
+        != EXPECTED_PHASE6B_RUNTIME_WHEEL
         or runtime_build_receipt.get("project_wheel_sha256")
-        != EXPECTED_RUNTIME_WHEEL_SHA256
+        != EXPECTED_PHASE6B_RUNTIME_WHEEL_SHA256
         or type(runtime_build_receipt.get("runtime_package_count")) is not int
         or runtime_build_receipt["runtime_package_count"] != 19
         or not isinstance(runtime_build_receipt.get("runtime_packages"), dict)
@@ -535,30 +550,20 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
             "build_lock": "ops/governed_memory/build-requirements.lock",
             "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-            "current_source_tree_sha256": EXPECTED_RUNTIME_SOURCE_SHA256,
-            "current_candidate_python": EXPECTED_RUNTIME_PYTHON,
-            "current_candidate_python_sha256": EXPECTED_RUNTIME_PYTHON_SHA256,
-            "current_project_wheel_sha256": EXPECTED_RUNTIME_WHEEL_SHA256,
-            "current_source_bound": True,
-            "final_phase6b_runtime_rebuild_pending": False,
-            "current_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
-            "current_build_receipt_sha256": EXPECTED_RUNTIME_RECEIPT_SHA256,
-            "current_build_receipt_present": True,
+            "current_source_tree_sha256": None,
+            "current_candidate_python": None,
+            "current_candidate_python_sha256": None,
+            "current_project_wheel_sha256": None,
+            "current_source_bound": False,
+            "final_phase6d_runtime_rebuild_pending": True,
+            "current_build_receipt": None,
+            "current_build_receipt_sha256": None,
+            "current_build_receipt_present": False,
         }
-        or runtime_validation.get("current_source_tree_sha256")
-        != runtime_build_receipt["source_tree_sha256"]
-        or runtime_validation.get("current_candidate_python")
-        != runtime_build_receipt["candidate_python"]
-        or runtime_validation.get("current_candidate_python_sha256")
-        != runtime_build_receipt["candidate_python_sha256"]
-        or runtime_validation.get("current_project_wheel_sha256")
-        != runtime_build_receipt["project_wheel_sha256"]
-        or runtime_validation.get("current_build_receipt_sha256")
-        != EXPECTED_RUNTIME_RECEIPT_SHA256
-        or runtime_validation.get("current_source_bound") is not True
-        or runtime_validation.get("final_phase6b_runtime_rebuild_pending")
-        is not False
-        or runtime_validation.get("current_build_receipt_present") is not True
+        or runtime_validation.get("current_source_bound") is not False
+        or runtime_validation.get("final_phase6d_runtime_rebuild_pending")
+        is not True
+        or runtime_validation.get("current_build_receipt_present") is not False
         or not isinstance(runtime_disposable, dict)
         or runtime_disposable != EXPECTED_DISPOSABLE_VALIDATION
         or not isinstance(runtime_activation, dict)
@@ -569,6 +574,135 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or runtime_activation.get("installed_timers") != []
         or runtime_activation.get("enabled_timers") != []
         or runtime_activation.get("blockers") != EXPECTED_ACTIVATION_BLOCKERS
+        or not isinstance(runtime_ingestion, dict)
+        or runtime_ingestion.get("source_erasure_status")
+        != (
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending"
+        )
+        or runtime_ingestion.get("source_erasure_selectors")
+        != ["thread", "message_tail", "recent", "all_conversations"]
+        or runtime_ingestion.get("source_erasure_direct_delete_roots")
+        != ["public.chat_log", "public.chat_attachments", "public.threads"]
+        or runtime_ingestion.get("source_erasure_allowed_auxiliary_effects")
+        != [
+            "public.active_thread_selection",
+            "trusted_web.response_transcript_v1",
+        ]
+        or runtime_ingestion.get("source_erasure_auxiliary_effect_authority")
+        != (
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only"
+        )
+        or runtime_ingestion.get(
+            "source_erasure_validated_auxiliary_foreign_keys"
+        )
+        != {
+            "public.active_thread_selection": [
+                {
+                    "constraint_name": (
+                        "active_thread_selection_owner_thread_fk"
+                    ),
+                    "child_columns": ["owner_user_id", "thread_id"],
+                    "parent_table": "public.threads",
+                    "parent_columns": ["owner_user_id", "id"],
+                    "validated": True,
+                    "delete_action": "cascade",
+                }
+            ],
+            "trusted_web.response_transcript_v1": [
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_user_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "user_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_assistant_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "assistant_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+            ],
+        }
+        or runtime_ingestion.get(
+            "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
+        )
+        is not False
+        or runtime_ingestion.get("source_erasure_unknown_dependency_action")
+        != (
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance"
+        )
+        or runtime_ingestion.get("source_erasure_transient_target_tables")
+        != [
+            "memory_ingest_private.source_erasure_target",
+            "memory_ingest_private.source_erasure_thread_target",
+        ]
+        or runtime_ingestion.get("source_erasure_permanent_tombstone_tables")
+        != [
+            "memory_ingest_private.source_erasure_message_tombstone",
+            "memory_ingest_private.source_erasure_thread_tombstone",
+        ]
+        or runtime_ingestion.get("source_erasure_tombstone_identity_scope")
+        != "global_message_and_thread_uuid"
+        or runtime_ingestion.get("source_erasure_targets_retained_until")
+        != "conversation_deletion_final_receipt_acknowledged"
+        or runtime_ingestion.get("source_erasure_tombstones_immutable")
+        is not True
+        or runtime_ingestion.get("source_erasure_runtime_catalog_attestation")
+        != (
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_and_"
+            "inheritance_inventory"
+        )
+        or runtime_ingestion.get(
+            "source_erasure_unclassified_side_effects_allowed"
+        )
+        is not False
+        or runtime_ingestion.get(
+            "source_erasure_legacy_capture_trigger_required"
+        )
+        is not False
+        or runtime_ingestion.get(
+            "source_erasure_legacy_capture_trigger_if_present"
+        )
+        != "exact_disabled_identity_only"
+        or runtime_ingestion.get(
+            "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
+        )
+        is not False
+        or runtime_ingestion.get(
+            "source_erasure_structured_lifeswitch_data_or_accounts_deleted"
+        )
+        is not False
+        or runtime_ingestion.get(
+            "source_erasure_legacy_project_rows_deleted"
+        )
+        is not False
         or runtime_release_guard
         != {
             "create_allowed": False,
@@ -579,6 +713,31 @@ def verify_candidate_artifacts() -> dict[str, object]:
         }
     ):
         raise ReleaseGuardError("release_runtime_contract_invalid")
+    if runtime_manifest.get("historical_evidence") != {
+        "phase5_runtime_build_receipt": (
+            "ops/governed_memory/history/phase5/runtime_build_receipt.json"
+        ),
+        "phase5_disposable_proof_receipt": (
+            "ops/governed_memory/history/phase5/disposable_proof_receipt.json"
+        ),
+        "phase6b_runtime_build_receipt": (
+            "ops/governed_memory/runtime_build_receipt.json"
+        ),
+        "phase6b_runtime_build_receipt_sha256": (
+            EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
+        ),
+        "phase6b_disposable_proof_receipt": (
+            "ops/governed_memory/phase6b_disposable_proof_receipt.json"
+        ),
+        "phase6b_disposable_proof_receipt_sha256": (
+            EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256
+        ),
+        "phase6b_proof_status": (
+            "historical_noncurrent_after_phase6d_source_and_migration_changes"
+        ),
+        "reusable_for_current_candidate": False,
+    }:
+        raise ReleaseGuardError("release_historical_evidence_contract_invalid")
     if (
         bootstrap.get("schema_version") != "governed-memory-bootstrap-contract-v1"
         or bootstrap.get("state") != "inactive_candidate_no_resources_created"
@@ -589,6 +748,148 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or bootstrap.get("qdrant", {}).get("existing_target_action") != "refuse"
     ):
         raise ReleaseGuardError("release_bootstrap_contract_invalid")
+    bridge_contract = bootstrap.get("conversation_bridge", {})
+    if (
+        bridge_contract.get("source_erasure_selectors")
+        != ["thread", "message_tail", "recent", "all_conversations"]
+        or bridge_contract.get("source_erasure_exact_chat_targets_only")
+        is not True
+        or bridge_contract.get(
+            "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
+        )
+        is not False
+        or bridge_contract.get("source_erasure_chat_tables")
+        != ["public.chat_log", "public.chat_attachments", "public.threads"]
+        or bridge_contract.get("source_erasure_direct_delete_roots")
+        != ["public.chat_log", "public.chat_attachments", "public.threads"]
+        or bridge_contract.get("source_erasure_allowed_auxiliary_effects")
+        != [
+            "public.active_thread_selection",
+            "trusted_web.response_transcript_v1",
+        ]
+        or bridge_contract.get("source_erasure_auxiliary_effect_authority")
+        != (
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only"
+        )
+        or bridge_contract.get(
+            "source_erasure_validated_auxiliary_foreign_keys"
+        )
+        != {
+            "public.active_thread_selection": [
+                {
+                    "constraint_name": (
+                        "active_thread_selection_owner_thread_fk"
+                    ),
+                    "child_columns": ["owner_user_id", "thread_id"],
+                    "parent_table": "public.threads",
+                    "parent_columns": ["owner_user_id", "id"],
+                    "validated": True,
+                    "delete_action": "cascade",
+                }
+            ],
+            "trusted_web.response_transcript_v1": [
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_user_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "user_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_assistant_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "assistant_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+            ],
+        }
+        or bridge_contract.get(
+            "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
+        )
+        is not False
+        or bridge_contract.get("source_erasure_unknown_dependency_action")
+        != (
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance"
+        )
+        or bridge_contract.get("source_erasure_transient_target_tables")
+        != [
+            "memory_ingest_private.source_erasure_target",
+            "memory_ingest_private.source_erasure_thread_target",
+        ]
+        or bridge_contract.get("source_erasure_permanent_tombstone_tables")
+        != [
+            "memory_ingest_private.source_erasure_message_tombstone",
+            "memory_ingest_private.source_erasure_thread_tombstone",
+        ]
+        or bridge_contract.get("source_erasure_tombstone_identity_scope")
+        != "global_message_and_thread_uuid"
+        or bridge_contract.get("source_erasure_targets_retained_until")
+        != "conversation_deletion_final_receipt_acknowledged"
+        or bridge_contract.get("source_erasure_tombstones_immutable")
+        is not True
+        or bridge_contract.get("source_erasure_runtime_catalog_attestation")
+        != (
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_and_"
+            "inheritance_inventory"
+        )
+        or bridge_contract.get(
+            "source_erasure_unclassified_side_effects_allowed"
+        )
+        is not False
+        or bridge_contract.get(
+            "source_erasure_legacy_capture_trigger_required"
+        )
+        is not False
+        or bridge_contract.get(
+            "source_erasure_legacy_capture_trigger_if_present"
+        )
+        != "exact_disabled_identity_only"
+        or bridge_contract.get(
+            "source_erasure_structured_lifeswitch_tables_or_accounts_deleted"
+        )
+        is not False
+        or bridge_contract.get("source_erasure_legacy_project_rows_deleted")
+        is not False
+        or bridge_contract.get("source_erasure_status")
+        != (
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending"
+        )
+        or bridge_contract.get(
+            "source_erasure_content_free_consent_security_audit_receipts_retained"
+        )
+        is not True
+        or bridge_contract.get(
+            "source_erasure_requester_membership_granted_in_production"
+        )
+        is not False
+    ):
+        raise ReleaseGuardError("release_source_erasure_scope_invalid")
     cleanup = bootstrap.get("cleanup_policy")
     create_policy = bootstrap.get("create_policy")
     implementation = bootstrap.get("candidate_implementation_status")
@@ -602,13 +903,30 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or not isinstance(implementation, dict)
         or implementation.get("session_id_required") is not True
         or implementation.get("runtime")
-        != "phase6b_source_bound_disposable_proof_passed_inactive"
+        != (
+            "phase6d_inactive_static_candidate_runtime_rebuild_"
+            "and_phase6e_proof_pending"
+        )
         or implementation.get("owner_claim_fact_detail")
-        != "implemented_candidate_phase6b_disposable_validated_not_production_applied"
+        != (
+            "implemented_candidate_phase6d_not_yet_disposable_"
+            "validated_not_production_applied"
+        )
         or implementation.get("qdrant_adapter")
-        != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
+        != (
+            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
+            "current_phase6e_proof_pending"
+        )
         or implementation.get("pilot_marker")
-        != "implemented_phase6b_disposable_validated_not_production_applied"
+        != (
+            "implemented_phase6d_not_yet_disposable_validated_"
+            "not_production_applied"
+        )
+        or implementation.get("deletion_coordinator")
+        != (
+            "exact_chat_targets_only_inactive_static_candidate_"
+            "not_routed_phase6e_disposable_proof_pending"
+        )
         or implementation.get("calibration")
         != "independently_bound_unapproved_retrieval_off"
     ):
@@ -651,19 +969,158 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or pilot.get("provider_policy", {}).get("provider_adapter_status")
         != "strict_fake_tested_zero_real_calls"
         or pilot.get("provider_policy", {}).get("embedding_adapter_status")
-        != "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls"
+        != (
+            "strict_3072_fake_tested_durable_request_dispatch_marker_"
+            "current_disposable_proof_pending_zero_real_calls"
+        )
         or pilot.get("provider_policy", {}).get("calibration_status")
         != "independently_bound_unapproved_retrieval_off"
         or pilot.get("candidate_surfaces", {}).get("owner_claim_fact_detail")
-        != "implemented_candidate_phase6b_disposable_validated_not_production_applied"
+        != (
+            "implemented_candidate_phase6d_not_yet_disposable_"
+            "validated_not_production_applied"
+        )
         or pilot.get("candidate_surfaces", {}).get("runtime")
-        != "phase6b_source_bound_disposable_proof_passed_inactive"
+        != (
+            "phase6d_inactive_static_candidate_runtime_rebuild_"
+            "and_phase6e_proof_pending"
+        )
         or pilot.get("candidate_surfaces", {}).get("pilot_marker")
-        != "implemented_phase6b_disposable_validated_not_production_applied"
+        != (
+            "implemented_phase6d_not_yet_disposable_validated_"
+            "not_production_applied"
+        )
+        or pilot.get("candidate_surfaces", {}).get("deletion_coordinator")
+        != (
+            "exact_chat_targets_only_inactive_static_candidate_"
+            "not_routed_phase6e_disposable_proof_pending"
+        )
         or pilot.get("provider_policy", {}).get("qdrant_adapter_status")
-        != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
+        != (
+            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
+            "current_phase6e_proof_pending"
+        )
+        or not isinstance(pilot.get("start_blockers"), list)
+        or "legacy_project_memory_thread_dependencies_not_separated"
+        not in pilot.get("start_blockers", [])
+        or "trusted_web_transcript_composite_owner_thread_lineage_not_installed"
+        not in pilot.get("start_blockers", [])
+        or "legacy_chat_owner_thread_lineage_not_remediated"
+        not in pilot.get("start_blockers", [])
+        or "phase6e_deletion_coordination_disposable_proof_pending"
+        not in pilot.get("start_blockers", [])
     ):
         raise ReleaseGuardError("release_pilot_contract_invalid")
+    source_erasure = pilot.get("source_erasure")
+    if not isinstance(source_erasure, dict) or source_erasure != {
+        "status": (
+            "phase6d_inactive_static_candidate_not_routed_"
+            "phase6e_disposable_proof_pending"
+        ),
+        "selectors": ["thread", "message_tail", "recent", "all_conversations"],
+        "direct_delete_roots": [
+            "public.chat_log",
+            "public.chat_attachments",
+            "public.threads",
+        ],
+        "transient_target_tables": [
+            "memory_ingest_private.source_erasure_target",
+            "memory_ingest_private.source_erasure_thread_target",
+        ],
+        "permanent_tombstone_tables": [
+            "memory_ingest_private.source_erasure_message_tombstone",
+            "memory_ingest_private.source_erasure_thread_tombstone",
+        ],
+        "tombstone_identity_scope": "global_message_and_thread_uuid",
+        "targets_retained_until": (
+            "conversation_deletion_final_receipt_acknowledged"
+        ),
+        "tombstones_immutable": True,
+        "runtime_catalog_attestation": (
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_and_"
+            "inheritance_inventory"
+        ),
+        "allowed_auxiliary_effects": [
+            "public.active_thread_selection",
+            "trusted_web.response_transcript_v1",
+        ],
+        "auxiliary_effect_authority": (
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only"
+        ),
+        "validated_auxiliary_foreign_keys": {
+            "public.active_thread_selection": [
+                {
+                    "constraint_name": (
+                        "active_thread_selection_owner_thread_fk"
+                    ),
+                    "child_columns": ["owner_user_id", "thread_id"],
+                    "parent_table": "public.threads",
+                    "parent_columns": ["owner_user_id", "id"],
+                    "validated": True,
+                    "delete_action": "cascade",
+                }
+            ],
+            "trusted_web.response_transcript_v1": [
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_user_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "user_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+                {
+                    "constraint_name": (
+                        "response_transcript_v1_assistant_chat_log_id_fkey"
+                    ),
+                    "child_columns": [
+                        "assistant_chat_log_id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "parent_table": "public.chat_log",
+                    "parent_columns": [
+                        "id",
+                        "owner_user_id",
+                        "thread_id",
+                    ],
+                    "validated": True,
+                    "delete_action": "cascade",
+                },
+            ],
+        },
+        "weak_single_column_transcript_foreign_keys_allowed": False,
+        "unknown_dependency_action": (
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance"
+        ),
+        "unclassified_side_effects_allowed": False,
+        "legacy_capture_trigger_required": False,
+        "legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+        "exact_materialized_chat_targets_only": True,
+        "matching_chat_attachments_deleted": True,
+        "eligible_empty_chat_threads_deleted": True,
+        "matching_bridge_rows_deleted": True,
+        "successor_memory_derived_from_exact_targets_deleted": True,
+        "memory_only_selector_allowed": False,
+        "account_wide_memory_selector_allowed": False,
+        "accounts_deleted": False,
+        "structured_lifeswitch_data_deleted": False,
+        "legacy_project_rows_deleted": False,
+        "content_free_consent_security_audit_receipts_retained": True,
+    }:
+        raise ReleaseGuardError("release_source_erasure_scope_invalid")
     if (
         receipt.get("additionalProperties") is not False
         or receipt.get("properties", {}).get("reason_code", {}).get("enum") is None

@@ -16,6 +16,9 @@ CREATE ROLE governed_memory_worker
 CREATE ROLE memory_ingest_writer
   NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
   NOBYPASSRLS NOINHERIT;
+CREATE ROLE memory_erasure_requester
+  NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+  NOBYPASSRLS NOINHERIT;
 -- Production owns the conversation tables and bridge definer functions with
 -- the existing sage superuser. The disposable fixture mirrors that boundary.
 CREATE ROLE sage
@@ -122,9 +125,11 @@ CREATE TABLE public.chat_attachments (
   created_at timestamptz NOT NULL DEFAULT pg_catalog.transaction_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT pg_catalog.transaction_timestamp(),
   deleted_at timestamptz,
-  FOREIGN KEY (thread_id, owner_user_id)
+  CONSTRAINT chat_attachments_thread_owner_fk
+    FOREIGN KEY (thread_id, owner_user_id)
     REFERENCES public.threads(id, owner_user_id) ON DELETE CASCADE,
-  FOREIGN KEY (message_id, owner_user_id, thread_id)
+  CONSTRAINT chat_attachments_message_owner_thread_fk
+    FOREIGN KEY (message_id, owner_user_id, thread_id)
     REFERENCES public.chat_log(id, owner_user_id, thread_id) ON DELETE CASCADE
 );
 

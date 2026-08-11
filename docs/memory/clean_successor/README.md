@@ -1,78 +1,62 @@
-# Governed Memory clean successor — Phase 6B inactive candidate
+# Governed Memory clean successor — Phase 6D inactive candidate
 
-This repository contains the single current governed-Memory source candidate.
-It is not production activated: no successor service is installed, enabled,
-started, routed, or connected to a production successor store. No production
-PostgreSQL or Qdrant resource has been created, and no real provider call has
-been authorized or made.
+This repository contains the single current governed-Memory successor source
+candidate. It is not production activated: no successor service, listener,
+route, timer, capture membership, PostgreSQL database, or Qdrant collection has
+been installed, enabled, started, or created. No provider call is authorized.
 
-The successor requires CPython 3.12.x. The current Phase 6B successor has a
-sealed CPython 3.12.3 runtime with 19 hash-locked packages. The checked receipt
-at `ops/governed_memory/runtime_build_receipt.json` (SHA-256
-`ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69`)
-binds installable successor source-inventory SHA-256
-`d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0`,
-wheel SHA-256
-`c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db`,
-and candidate-Python SHA-256
-`1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118`.
-Every installed successor module imports in isolated mode from that runtime;
-no outer `rag_engine` module or OpenAI SDK is importable or loaded. Response
-retrieval reads the successor-owned packaged predicate catalog.
-The build made zero network or provider calls, created no persistent resources,
-and changed no production state. The full Phase 6B disposable migration and
-two-database worker run subsequently passed. Nothing is activated.
+PostgreSQL remains canonical and Qdrant remains derived and rebuildable.
+Supabase remains account authority; accounts are not copied into Memory. Legacy
+claims, cards, vectors, jobs, reviews, preferences, compatibility state, and
+attachment content are not imported.
 
-PostgreSQL is canonical. Qdrant is a disposable, derived index rebuilt only
-from current PostgreSQL claims and applied projection receipts. Supabase remains
-the account authority; accounts are not copied. Legacy claims, cards, vectors,
-jobs, reviews, preferences, compatibility state, and attachment content are not
-imported.
+The successor requires CPython 3.12.x. A new source-bound CPython 3.12.3
+runtime build is pending. Phase 6D made zero external provider calls, and no
+semantic retrieval-score threshold is activated.
 
-## Implemented source surfaces
+## Phase 6D addition: chat-source erasure
 
-- Owner authority comes only from the verified Supabase JWT `sub`. A signed
-  `session_id` is mandatory. The exact `auth.sessions` RPC contract is staged,
-  but it is not installed or live verified.
-- The owner-scoped claim-list and claim-detail routes passed fresh Phase 6B
-  disposable migration, owner-isolation, and HTTP lifecycle validation.
-- Strict provider and 3072-dimension embedding adapters are fake-tested. A
-  content-free durable request marker must commit before an embedding HTTP
-  call; a marked request is never automatically resent. They have made zero
-  external provider calls and have no production authorization.
-- The exact Qdrant adapter is fake-tested for configured alias/physical target,
-  3072-dimensional `Dot`, six payload indexes, owner-filtered bounded search,
-  ambiguous-write readback, and verified deletion. Qdrant v1.19.0 is pinned at
-  digest `057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc`;
-  real disposable compatibility passed. Persistent Qdrant remains unapproved.
-- The content-free monotonic pilot marker exists as migration candidate 0004
-  and passed Phase 6B disposable insert, exact-replay, conflicting-replay,
-  read, rollback, and reapply validation. It is not production-applied.
-- The one-shot worker has inactive two-database composition, exact PostgreSQL
-  RPC repositories, exact loopback Qdrant transport, a PostgreSQL session
-  advisory lock, and a persistent content-free three-lane fairness cursor.
-  These surfaces passed the Phase 6B disposable two-database runtime run.
-- Messages with an attachment row are excluded at enqueue, lease, and exact
-  source read. Context-required messages perform one content-free successor
-  receipt lookup for crash recovery, then terminalize by two exact marks when
-  fresh or one after recovery from a completed first mark. They perform zero
-  successor writes, provider, embedding, or vector calls.
-- Capture is owner-serialized and limited to 20 outbox rows across all states
-  in a rolling 24-hour window. Exact replay consumes no additional slot; the
-  limit returns a typed content-free result so the chat transcript can commit.
-  This limit has focused/static and adapter coverage but was not driven to the
-  20-row boundary in the disposable runtime run.
-- Qdrant failure before embedding dispatch remains retryable. Failure after a
-  durable embedding marker is terminal without a second embedding call; the
-  canonical PostgreSQL claim remains, and later projection for that claim is
-  blocked until an explicit reconciliation workflow safely repairs it.
-- Calibration requires independently expected artifact and approval-receipt
-  SHA-256 values. The checked-in artifact is unapproved, so semantic retrieval
-  remains off and no semantic retrieval-score threshold is activated.
-- Verbal Sage frontend candidate `6d80ba` was built but is undeployed;
-  authenticated visual QA is pending.
+The inactive deletion coordinator is a fenced, replay-safe two-database saga.
+It accepts only these conversation selectors:
 
-## Current path
+- `thread`
+- `message_tail`
+- `recent`
+- `all_conversations`
+
+Each request first materializes an exact owner-scoped chat target manifest.
+Only those chat rows, their matching chat attachments, matching bridge rows,
+eligible empty chat threads, and successor memory derived from those exact chat
+targets participate. Claim-vector deletion continues through the existing
+verified per-claim PostgreSQL/Qdrant lifecycle before chat rows are removed.
+The only permitted database-driven side effects are deletion of chat-derived
+trusted-web response transcripts and the active-thread UI selection attached
+to a deleted thread. Trusted-web transcript effects require exact named,
+validated `ON DELETE CASCADE` composite lineage from
+`(user_chat_log_id, owner_user_id, thread_id)` and
+`(assistant_chat_log_id, owner_user_id, thread_id)` to
+`public.chat_log(id, owner_user_id, thread_id)`. Weak single-column transcript
+foreign keys are refused. The migration and runtime reject every unclassified
+foreign-key edge, delete trigger, delete rule, and inheritance edge.
+
+The bridge retains exact message and thread target inventories until final
+acknowledgment. It then keeps only immutable, content-free global UUID
+tombstones in `source_erasure_message_tombstone` and
+`source_erasure_thread_tombstone`, preventing deleted chat identities from
+being recreated. The old capture trigger is not required; if a transitional
+copy remains, it must have the exact expected identity and be disabled.
+
+There is no memory-only selector and no account-wide arbitrary Memory purge.
+The coordinator cannot delete accounts, LifeSwitch libraries, workouts or
+weightlifting sessions, daily food logs, measurements, or any other structured
+LifeSwitch tracking data. Content-free consent, security, audit, and final
+absence receipts are retained.
+
+The coordinator is source-only and inactive. It has no mounted HTTP route, no
+new service or timer, no production role membership, and no authority to run
+against production data.
+
+## Current successor path
 
 ```text
 post-cutover user message
@@ -87,51 +71,69 @@ post-cutover user message
   -> answer binding
 ```
 
-Qdrant cannot supply owner identity, fact content, policy, lifecycle, current
-revision, or rebuild truth. PostgreSQL reloads and revalidates every candidate
-before rendering. Attachment storage remains available, but attachment content
-is not release-1 Memory input.
+Attachment storage remains available, but attachment content is not Memory
+input. A chat-erasure request may delete matching attachment rows only because
+they belong to the exact selected chat scope. Thread and all-conversation
+selectors also include unattached rows owned by the selected chat threads.
 
-Terminal proposal replay is bounded to the 30 days before terminal proposal
-retention purge. After the content-bearing proposal is
-removed, exact replay is unavailable and the API returns
-`proposal_retention_purged` using content-free audit evidence rather than
-reconstructing deleted proposal content.
+The current mixed production conversation database still has two restrictive
+legacy project-memory relationships to `public.threads`. The clean bridge
+refuses installation while either relationship exists; it does not delete or
+install compatibility hooks on those project records. Their complete dependent
+legacy branch must be retired in a separately authorized, receipted cleanup
+after legacy writers are quiescent.
+
+The read-only live seebx catalog audit found nine rows in
+`trusted_web.response_transcript_v1`. Aggregate checks found their owner and
+thread values consistent with both referenced chat rows, but the live foreign
+keys protect only `user_chat_log_id` and `assistant_chat_log_id`. That
+constraint shape remains unsafe and is refused. Installing the required
+composite lineage is a separately authorized schema correction, not part of
+this inactive candidate.
+
+The same audit found 2,106 rows in `public.chat_log`, including 710 rows with a
+NULL `thread_id` and 118 rows with a NULL owner; those counts may overlap.
+Before activation, those chat rows require an explicit chat-only mapping,
+quarantine, or reset decision. That remediation must never include accounts,
+libraries, workouts or weightlifting sessions, food logs, measurements, or any
+other structured LifeSwitch data.
+
+Terminal proposal replay remains bounded to 30 days. After retention removes a
+terminal proposal, exact replay is unavailable; `proposal_retention_purged` is
+returned from content-free audit evidence without reconstructing deleted
+proposal content.
 
 ## Proof boundary
 
-The current Phase 6B harness passed with disposable PostgreSQL and Qdrant
-against pre-promotion HEAD
-`7693d9db459f81f4d89e680108867ce31dd4c7ed`, tree
-`f62ad8e9cccffe715927fa825f24cb4312a27934`, and migration-manifest SHA-256
-`3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66`.
-It used PostgreSQL 16.14 and Qdrant 1.19.0; proved fresh-store migration
-forward/rollback/reapply, normalized-catalog equivalence, forced-RLS and
-direct-DML denial, synthetic JWT/JWKS owner isolation, every owner lifecycle
-route, cold extraction and projection rebuild, lifecycle deletion/retention,
-pilot-marker behavior, inactive two-database worker composition, fairness-lane
-advancement, and cross-process singleton refusal. It made zero external
-provider calls, read no production data, invoked no production endpoint or
-service, and removed its exact invocation-owned resources. The checked receipt
-is `ops/governed_memory/phase6b_disposable_proof_receipt.json`.
+The checked Phase 6B runtime-build and disposable proof receipts are preserved
+as historical evidence. They attest the earlier Phase 6B source and migration
+bytes only. Phase 6D changed runtime and migration source, so neither receipt is
+current proof and neither may be reused for activation.
 
-The metadata-promotion commit intentionally preserves the attested HEAD/tree
-and pre-promotion manifest hash. It changes validation metadata, guard pins,
-tests, and documentation, not successor package source or migration SQL.
+Phase 6E must build a new source-bound runtime and run the full disposable
+PostgreSQL/Qdrant harness. It must prove exact target selection, cancellation of
+matching ingest work, verified claim/vector deletion, absence checks, chat and
+attachment deletion, empty-thread rules, replay, retry, crash recovery,
+owner-isolation, closed foreign-key/trigger/rule/inheritance scope,
+structured-LifeSwitch preservation, and content-free receipts.
+Until that proof passes, all migration packages remain
+`isolated_candidate_not_yet_disposable_validated_not_production_applied`.
 
-The proof does not establish live Supabase session revocation, real provider
-behavior, the rolling 20-row capture boundary under disposable execution,
-installed production routes, authenticated frontend behavior, persistent
-Qdrant suitability, semantic calibration, or production readiness.
+## Other inactive boundaries
 
-## Activation and retirement
+- Signed Supabase JWT `sub` remains owner authority and signed `session_id` is
+  mandatory. The `auth.sessions` RPC is staged but not installed or live
+  verified.
+- Provider and embedding adapters remain fake-tested with zero authorized real
+  calls.
+- Semantic calibration is unapproved, so retrieval remains off.
+- Persistent PostgreSQL and Qdrant targets are not approved or created.
+- Frontend candidate `6d80ba` remains built, undeployed, and visually
+  unverified.
+- Legacy owner-scoped read, write, and shadow paths are not yet proved
+  quiescent.
 
-Production remains unchanged. Any authorized pilot must use a new empty
-PostgreSQL database and new empty Qdrant collection with no old or unprocessed
-data. Both checked-in systemd templates default off, have no install target,
-and are not installed.
-
-Old services, stores, source, tests, and compatibility routes are not deleted
-by this candidate. After a proved pilot, retire them in explicit batches:
-disable exact owner paths, observe, preserve one recovery manifest, and delete
-only approved targets with a content-free receipt.
+Production remains unchanged. Old services, stores, source, tests, and
+compatibility routes are not deleted by Phase 6D. Retirement remains a later,
+explicitly authorized sequence with exact targets, recovery evidence, an
+observation window, and a content-free deletion receipt.

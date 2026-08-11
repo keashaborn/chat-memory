@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-successor-schema-contract-v1",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "database": "governed_memory",
   "schemas": [
     "memory",
@@ -37,6 +37,13 @@
     },
     "ingest_writer": {
       "name": "memory_ingest_writer",
+      "login": false,
+      "inherit": false,
+      "superuser": false,
+      "bypassrls": false
+    },
+    "erasure_requester": {
+      "name": "memory_erasure_requester",
       "login": false,
       "inherit": false,
       "superuser": false,
@@ -83,6 +90,11 @@
     "answer_binding",
     "audit_event",
     "claim_deletion_receipt",
+    "source_erasure_operation",
+    "source_erasure_target",
+    "erased_chat_message_tombstone",
+    "source_erasure_claim",
+    "source_erasure_receipt",
     "pilot_marker"
   ],
   "owner_bearing_tables": [
@@ -97,7 +109,12 @@
     "projection_outbox",
     "answer_binding",
     "audit_event",
-    "claim_deletion_receipt"
+    "claim_deletion_receipt",
+    "source_erasure_operation",
+    "source_erasure_target",
+    "erased_chat_message_tombstone",
+    "source_erasure_claim",
+    "source_erasure_receipt"
   ],
   "worker_scheduler": {
     "sequence": "memory_private.worker_lane_sequence",
@@ -132,6 +149,14 @@
     "memory_private.correct_claim(uuid,uuid,text,text,text,jsonb)",
     "memory_private.retract_claim(uuid,uuid,text,text)",
     "memory_private.request_claim_deletion(uuid,uuid,text,text)",
+    "memory_private.register_source_erasure(uuid,uuid,text,text,integer,text)",
+    "memory_private.append_source_erasure_targets(uuid,uuid[],uuid[],timestamptz[],text[])",
+    "memory_private.seal_source_erasure(uuid)",
+    "memory_private.prepare_source_erasure_claim_deletions(uuid,integer)",
+    "memory_private.read_source_erasure_progress(uuid)",
+    "memory_private.finalize_source_erasure_memory(uuid)",
+    "memory_private.ack_source_erasure_conversation_deleted(uuid,text)",
+    "memory_private.read_source_erasure_receipt(uuid)",
     "memory_private.lease_projection_jobs(text,integer,integer,text)",
     "memory_private.mark_projection_embedding_dispatched(uuid,uuid,text,text,text,text,text,text)",
     "memory_private.finish_projection_job(uuid,uuid,text,text,text,text,text,text)",
@@ -184,13 +209,24 @@
     "memory_private.guard_provider_call_mutation()",
     "memory_private.guard_proposal_mutation()",
         "memory_private.guard_projection_outbox_mutation()",
+        "memory_private.owner_source_erasure_active(uuid)",
+        "memory_private.guard_source_erasure_fence()",
+        "memory_private.assert_chat_messages_not_erased(uuid,uuid)",
+        "memory_private.guard_erased_chat_message_replay()",
+        "memory_private.guard_erased_chat_message_tombstone_immutable()",
+        "memory_private.assert_source_erasure_tombstones(uuid,uuid,integer,timestamptz)",
+        "memory_private.assert_source_erasure_deletion_catalog()",
         "memory_private.operation_id_conflicts(uuid,uuid,uuid,uuid,uuid,text[])",
         "memory_private.reject_pending_correction_for_lifecycle(uuid,uuid,uuid)",
     "memory_ingest_private.framed_utf8_field(text,text)",
     "memory_ingest_private.timestamp_utc_text(timestamptz)",
     "memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)",
     "memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)",
-    "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)"
+    "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)",
+    "memory_ingest_private.source_erasure_target_sha256(uuid,uuid,uuid,uuid,timestamptz)",
+    "memory_ingest_private.assert_chat_deletion_catalog()",
+    "memory_ingest_private.serialize_response_transcript_source_erasure()",
+    "memory_ingest_private.serialize_chat_source_erasure()"
   ],
   "interface_contracts": {
     "evidence_selection": "Full source hash is distinct from the selected excerpt hash; UTF-8 offsets, window lineage, optional one-review context lineage, bridge source binding, and canonical selection binding are persisted.",
@@ -208,7 +244,34 @@
         "answer_binding_retention": "Each terminal answer binding expires exactly 90 days after its one server-owned creation timestamp. A bounded worker purge first appends an exact content-free retention receipt, then deletes only that locked expired binding under a binding-specific local purge context. Exact answer replay is unavailable after retention purge.",
     "hard_delete": "A verified applied Qdrant delete is required before content purge. Reciprocal proposal and revision foreign keys use deferred NO ACTION so the closed graph is checked at commit. The immutable claim_deletion_receipt remains content-free and is not part of retention purge.",
     "owner_claim_detail": "The owner-scoped detail function returns only the requested current claim revision after deriving authority from current_owner_id. The list surface remains content-free, direct runtime table access remains denied, and a literal is capped at 2000 UTF-8 bytes by the HTTP contract.",
-    "pilot_marker": "The global marker is content-free, not owner-bearing, monotonic, append-only, and absent until an authorized pilot start. The worker may read it; only the governed database owner can execute the start transition."
+    "pilot_marker": "The global marker is content-free, not owner-bearing, monotonic, append-only, and absent until an authorized pilot start. The worker may read it; only the governed database owner can execute the start transition.",
+    "chat_source_erasure": "Only exact materialized chat targets selected by thread, message_tail, recent, or all_conversations may be erased. The only direct deletion roots are public.chat_log, public.chat_attachments, and public.threads. The only permitted auxiliary effects are public.active_thread_selection and trusted_web.response_transcript_v1 through exact named validated ON DELETE CASCADE foreign keys. Each trusted-web transcript edge must bind its chat id together with owner_user_id and thread_id to public.chat_log(id, owner_user_id, thread_id); current weak single-column transcript foreign keys are refused. Every unknown foreign key, user trigger, rewrite rule, or inheritance edge on the mutation graph fails closed before deletion. Exact message and thread target inventories remain through final receipt acknowledgment; permanent immutable global message/thread UUID tombstones prevent deleted chat identity replay. The disabled legacy capture trigger may be absent and, if present, must have its exact disabled identity. Legacy project rows, accounts, LifeSwitch libraries, workouts and weightlifting sessions, daily food logs, measurements, and all other structured tracking are never deleted by this contract. Matching bridge rows and successor memory derived from the exact chat targets participate in the fenced replay-safe coordinator. There is no memory-only or account-wide memory selector. Content-free consent, security, audit, and final absence receipts are retained. Phase 6D source erasure is inactive, Phase 6E disposable database and Qdrant deletion proof is pending, and production activation is not authorized."
+  },
+  "erased_chat_message_tombstone": {
+    "table": "memory.erased_chat_message_tombstone",
+    "content_free": true,
+    "private_forced_rls": true,
+    "primary_key": [
+      "message_id"
+    ],
+    "global_message_identity": true,
+    "audit_columns": [
+      "owner_user_id",
+      "erasure_operation_id",
+      "erased_at"
+    ],
+    "created_atomically": "when_exact_source_erasure_target_manifest_seals",
+    "retention": "permanent_no_runtime_delete_path",
+    "rejected_lineage": [
+      "conversation_source_message_id",
+      "conversation_context_message_id",
+      "answer_binding_response_id"
+    ],
+    "cross_owner_lineage_action": "manual_review_before_tombstone_or_delete",
+    "race_serialization": "transaction_advisory_lock_per_global_message_id",
+    "transition_reverification": "exact_target_count_owner_operation_erased_at_and_cross_owner_lineage_before_memory_finalization_and_final_acknowledgment",
+    "runtime_catalog_attestation": "exact_private_table_schema_and_complete_user_trigger_inventory_before_seal_or_deletion",
+    "production_applied": false
   },
   "claim_detail": {
     "database": "governed_memory",
@@ -220,7 +283,7 @@
     "detail_literal_max_utf8_bytes": 2000,
     "direct_runtime_table_access": false,
     "migration": "0003_owner_claim_detail/forward.pgsql",
-    "disposable_validated": true,
+    "disposable_validated": false,
     "production_applied": false
   },
   "pilot_marker": {
@@ -237,7 +300,7 @@
     "read_function": "memory_private.read_pilot_marker()",
     "start_function": "memory_private.mark_pilot_started(text,uuid,text,text,timestamptz)",
     "migration": "0004_pilot_marker/forward.pgsql",
-    "disposable_validated": true,
+    "disposable_validated": false,
     "production_applied": false,
     "pilot_ever_started": false
   },
@@ -317,16 +380,131 @@
       "memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid)",
       "memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer)",
       "memory_ingest_private.expire_memory_ingest(integer)",
-      "memory_ingest_private.purge_terminal_memory_ingest(integer)"
+      "memory_ingest_private.purge_terminal_memory_ingest(integer)",
+      "memory_ingest_private.begin_source_erasure(uuid,text,uuid,uuid,integer,text)",
+      "memory_ingest_private.read_source_erasure(uuid)",
+      "memory_ingest_private.lease_source_erasure(text,integer)",
+      "memory_ingest_private.read_source_erasure_targets(uuid,uuid,timestamptz,uuid,integer)",
+      "memory_ingest_private.release_source_erasure_lease(uuid,uuid)",
+      "memory_ingest_private.mark_source_erasure_governed_deleted(uuid,uuid,text,integer,text)",
+      "memory_ingest_private.finalize_source_erasure(uuid,uuid,text)",
+      "memory_ingest_private.ack_source_erasure_completion(uuid,uuid,text)",
+      "memory_ingest_private.fail_source_erasure(uuid,uuid,text,text)"
     ],
     "internal_functions": [
       "memory_ingest_private.framed_utf8_field(text,text)",
       "memory_ingest_private.timestamp_utc_text(timestamptz)",
       "memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)",
       "memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)",
-      "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)"
+      "memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)",
+      "memory_ingest_private.source_erasure_target_sha256(uuid,uuid,uuid,uuid,timestamptz)",
+      "memory_ingest_private.assert_chat_deletion_catalog()",
+      "memory_ingest_private.serialize_response_transcript_source_erasure()",
+      "memory_ingest_private.serialize_chat_source_erasure()",
+      "memory_ingest_private.serialize_thread_source_erasure()",
+      "memory_ingest_private.serialize_attachment_source_erasure()",
+      "memory_ingest_private.guard_source_erasure_receipt_immutable()"
     ],
-    "writer_membership_activation": "production_membership_not_granted; disposable_harness_membership_only"
+    "writer_membership_activation": "production_membership_not_granted; prior_phase6b_disposable_harness_membership_only",
+    "source_erasure_requester_membership_activation": "production_membership_not_granted; phase6e_disposable_proof_pending",
+    "source_erasure_selectors": [
+      "thread",
+      "message_tail",
+      "recent",
+      "all_conversations"
+    ],
+    "source_erasure_exact_chat_targets_only": true,
+    "source_erasure_memory_only_selector_allowed": false,
+    "source_erasure_account_wide_memory_selector_allowed": false,
+    "source_erasure_chat_tables": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads"
+    ],
+    "source_erasure_direct_delete_roots": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads"
+    ],
+    "source_erasure_transient_target_tables": [
+      "memory_ingest_private.source_erasure_target",
+      "memory_ingest_private.source_erasure_thread_target"
+    ],
+    "source_erasure_permanent_tombstone_tables": [
+      "memory_ingest_private.source_erasure_message_tombstone",
+      "memory_ingest_private.source_erasure_thread_tombstone"
+    ],
+    "source_erasure_tombstone_identity_scope": "global_message_and_thread_uuid",
+    "source_erasure_targets_retained_until": "conversation_deletion_final_receipt_acknowledged",
+    "source_erasure_tombstones_immutable": true,
+    "source_erasure_runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
+    "source_erasure_allowed_auxiliary_effects": [
+      "public.active_thread_selection",
+      "trusted_web.response_transcript_v1"
+    ],
+    "source_erasure_auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
+    "source_erasure_validated_auxiliary_foreign_keys": {
+      "public.active_thread_selection": [
+        {
+          "constraint_name": "active_thread_selection_owner_thread_fk",
+          "child_columns": [
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.threads",
+          "parent_columns": [
+            "owner_user_id",
+            "id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ],
+      "trusted_web.response_transcript_v1": [
+        {
+          "constraint_name": "response_transcript_v1_user_chat_log_id_fkey",
+          "child_columns": [
+            "user_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        },
+        {
+          "constraint_name": "response_transcript_v1_assistant_chat_log_id_fkey",
+          "child_columns": [
+            "assistant_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ]
+    },
+    "source_erasure_weak_single_column_transcript_foreign_keys_allowed": false,
+    "source_erasure_unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
+    "source_erasure_unclassified_side_effects_allowed": false,
+    "source_erasure_legacy_capture_trigger_required": false,
+    "source_erasure_legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "source_erasure_structured_lifeswitch_tables_allowed": false,
+    "source_erasure_legacy_project_rows_deleted": false,
+    "source_erasure_accounts_deleted": false,
+    "source_erasure_content_free_receipts_retained": true,
+    "source_erasure_runtime_status": "phase6d_inactive_static_candidate_phase6e_disposable_proof_pending"
   },
   "states": {
     "sensitivity": [
@@ -348,7 +526,8 @@
       "completed",
       "skipped",
       "expired",
-      "failed_terminal"
+      "failed_terminal",
+      "erasure_cancelled"
     ],
     "extraction_job": [
       "pending",
@@ -389,6 +568,23 @@
       "applied",
       "failed_terminal",
       "superseded"
+    ],
+    "conversation_source_erasure": [
+      "fenced",
+      "retryable",
+      "governed_deletion_pending",
+      "governed_deleted",
+      "conversation_deleted_pending_ack",
+      "completed",
+      "manual_review"
+    ],
+    "successor_source_erasure": [
+      "receiving",
+      "fenced",
+      "claim_deletion_pending",
+      "memory_deleted",
+      "completed",
+      "manual_review"
     ],
         "answer_binding_outcome": [
             "exposed",
@@ -523,7 +719,10 @@
       "provider_adapter_real_call_validation_not_authorized_or_completed",
       "embedding_adapter_real_call_validation_not_authorized_or_completed",
       "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-      "chat_deletion_memory_cancellation_coordination_not_implemented",
+      "phase6e_deletion_coordination_disposable_proof_pending",
+      "legacy_project_memory_thread_dependencies_not_separated",
+      "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+      "legacy_chat_owner_thread_lineage_not_remediated",
       "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"

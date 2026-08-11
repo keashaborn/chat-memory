@@ -1,132 +1,100 @@
-# Governed Memory Phase 6B activation boundary
+# Governed Memory Phase 6D activation boundary
 
 ## Current state
 
-The Phase 6B source candidate is inactive and not authorized. Neither systemd
-template is installed or enabled. No production successor database, collection,
-listener, route, firewall rule, capture membership, provider request, or pilot
-marker row exists. The release guard returns `activation_blockers_open` for
-create and `authorization_missing` for cleanup, with an empty action plan and
-zero executed commands.
+Phase 6D is inactive and not authorized. No production successor database,
+Qdrant collection, service, timer, listener, route, firewall rule, capture
+membership, erasure-requester membership, provider request, or pilot marker row
+has been created. The release guard must continue to refuse creation with
+`activation_blockers_open` and cleanup with `authorization_missing`.
 
-The current checked Phase 6B runtime receipt has SHA-256
-`ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69`
-and binds installable successor source-inventory SHA-256
-`d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0`
-to the sealed CPython 3.12.3 candidate. The full Phase 6B disposable migration
-and two-database worker run passed; its checked receipt is
-`ops/governed_memory/phase6b_disposable_proof_receipt.json`. Neither receipt is
-production activation evidence.
+The Phase 6B proof and runtime receipts are historical and noncurrent after the
+Phase 6D source and migration changes. Phase 6E disposable deletion proof and a
+new source-bound runtime receipt are mandatory before activation review.
 
-## Exact candidate targets
+## Exact future targets
 
-On the seebx backend:
+On the seebx backend, any later authorized pilot remains bounded to:
 
-- HTTP candidate: `172.31.32.171:8091`, with Verbal Sage
-  `172.31.43.160/32` as the only intended source;
-- canonical PostgreSQL: new `127.0.0.1:55432`, database
+- HTTP candidate `172.31.32.171:8091`, with Verbal Sage
+  `172.31.43.160/32` as the intended source;
+- new canonical PostgreSQL at `127.0.0.1:55432`, database
   `governed_memory`;
-- derived Qdrant: new `127.0.0.1:6343`, collection
+- new derived Qdrant at `127.0.0.1:6343`, collection
   `governed_memory_9a54cf123493_000001`, alias
-  `governed_memory_active`, size 3072, distance `Dot`; and
-- content-free conversation bridge:
-  `memory_ingest_private.memory_ingest_outbox` in the existing conversation
-  database through `brains_app`.
+  `governed_memory_active`; and
+- the existing conversation database through SECURITY DEFINER RPCs only.
 
-No existing database, collection, volume, snapshot, vector, claim, review,
-preference, attachment, or compatibility row may seed the successor.
+Existing databases, collections, volumes, snapshots, claims, vectors, reviews,
+preferences, attachment content, and compatibility state cannot seed the
+successor.
 
-Qdrant v1.19.0 is pinned at immutable digest
-`057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc`.
-The exact adapter is fake-tested, but real disposable compatibility against
-that image also passed. The digest is not persistent-pilot approval.
+## Deletion boundary
 
-## Implemented but inactive
+The inactive candidate permits only exact chat selectors: `thread`,
+`message_tail`, `recent`, and `all_conversations`. A future route may coordinate
+deletion of exact chat rows, matching chat attachments, matching bridge rows,
+eligible empty chat threads, and successor memory derived from those exact
+targets. Chat-derived trusted-web response transcripts and an active-thread UI
+selection may disappear only through exact named, validated `ON DELETE
+CASCADE` composite lineage. Each trusted-web transcript relationship must bind
+its chat-log ID together with `owner_user_id` and `thread_id` to
+`public.chat_log(id, owner_user_id, thread_id)`. The current live single-column
+transcript foreign keys are refused. Every other foreign-key edge, delete
+trigger, delete rule, or inheritance edge is a hard refusal.
 
-- JWT `sub` is owner authority and signed `session_id` is mandatory. The staged
-  Supabase `auth.sessions` RPC is not installed or live verified.
-- Owner-scoped claim detail passed fresh Phase 6B disposable migration,
-  owner-isolation, and lifecycle validation.
-- Strict provider and 3072 embedding adapters are fake-tested. Embedding HTTP
-  dispatch requires a durable content-free request marker; marked requests are
-  never automatically resent. The exact
-  Qdrant adapter is fake-tested and proved against disposable Qdrant 1.19.0;
-  no real provider call has occurred.
-- Migration 0004 implements a content-free append-only pilot marker and passed
-  fresh Phase 6B disposable insert/replay/conflict/read validation.
-- The one-item worker has inactive exact two-database composition, RPC-only
-  repositories, loopback Qdrant transport, exact target configuration,
-  persistent three-lane fairness, and PostgreSQL session advisory locking.
-  These passed the Phase 6B disposable two-database and concurrent-lock run.
-- Calibration requires independent artifact and approval-receipt hashes. Its
-  artifact is unapproved and retrieval remains off.
-- Frontend candidate `6d80ba` is built, undeployed, and awaiting authenticated
-  visual QA.
+Activation must preserve exact message/thread targets through the final
+acknowledgment and permanent immutable global UUID tombstones afterward. It
+must not depend on the legacy capture trigger or function; absence is valid,
+while any surviving copy must be exact and disabled.
+
+No future activation may expose a memory-only or account-wide arbitrary Memory
+purge. Accounts and structured LifeSwitch data—including libraries, workouts,
+weightlifting sessions, food logs, and measurements—must remain outside the
+coordinator. Content-free consent, security, audit, and absence receipts must
+remain available.
 
 ## Activation blockers
 
-The machine-readable runtime manifest is authoritative for the current blocker
-list. Before any persistent pilot, all of the following remain required:
+The machine-readable runtime manifest is authoritative. At minimum:
 
-1. Obtain explicit production activation and exact pilot-owner/scope authority.
-2. Install and live-verify the mandatory `session_id`/`auth.sessions` RPC path,
-   including revoked, missing, outage, rotation, and cross-owner cases.
-3. Mount and verify live Supabase runtime credentials without exposing them.
-4. Keep semantic retrieval off until an independently authorized calibration
-   artifact is approved.
-5. Preserve the passing Phase 6B disposable proof binding. Reproduce it if the
-   sealed source, migrations, runner, runtime locks, or pinned images change.
-   The rolling 20-row capture ceiling still needs boundary execution before a
-   pilot even though its focused/static and adapter checks pass.
-6. Authorize any real provider/embedding validation separately; unknown
-   post-dispatch outcomes remain terminal and are never automatically retried.
-   Implement and authorize projection reconciliation with a sequence-safe
-   Qdrant repair fence; unresolved marked work blocks later same-claim
-   projection until then.
-7. Create fresh isolated persistent PostgreSQL and Qdrant targets only after a
-   scoped creation authorization and implement the production store-role
-   bootstrap.
+1. Complete Phase 6E disposable deletion and full regression proof against a
+   clean, sealed candidate; review and promote its metadata separately.
+2. Obtain explicit production activation and exact pilot-owner/scope authority.
+3. Install and live-verify Supabase user/session authority and credentials.
+4. Keep retrieval off until calibration is independently approved.
+5. Authorize any real provider or embedding validation separately.
+6. Implement sequence-safe Qdrant reconciliation and repair.
+7. Authorize and create fresh isolated persistent stores; never adopt old
+   targets.
 8. Prove port-8091 source firewall and private transport/TLS boundaries.
-9. Install the HTTP and worker units in mode `off`, then prove their exact
-    source, configuration, disabled state, and zero listeners.
-10. Authorize and activate capture for one exact owner only.
-11. Deploy frontend candidate `6d80ba` and complete authenticated visual QA.
-12. Prove owner-scoped legacy Memory read/write/shadow paths are quiesced.
-13. Authorize one owner, at most 20 post-cutover messages, at most 24 hours,
-    and one generation call per exact attempt.
-14. Implement and prove chat-deletion cancellation/erasure coordination.
+9. Install HTTP and worker units dormant, then prove exact source,
+   configuration, disabled state, and zero listeners.
+10. Add and prove a narrowly scoped authenticated chat-deletion route; no route
+    is mounted in Phase 6D.
+11. Deploy and visually validate the authenticated frontend.
+12. Prove legacy owner-scoped read, write, and shadow paths quiescent.
+13. Separately authorize and install the exact trusted-web transcript composite
+    owner/thread lineage. The nine live transcript rows passed aggregate
+    consistency checks, but their current constraint shape is unsafe.
+14. Resolve the 2,106 legacy chat rows through an explicit chat-only mapping,
+    quarantine, or reset plan. The inventory includes 710 NULL thread IDs and
+    118 NULL owners; the counts may overlap. Never include accounts or
+    structured LifeSwitch data in that remediation.
+15. Retire the complete legacy project-memory branch that currently restricts
+    thread deletion, then re-capture the live chat deletion graph. Do not merely
+    drop its foreign keys and do not let the coordinator delete project rows.
 
 ## Authorized sequence
 
-Each step is a separate checkpoint:
+Each mutation remains a separate approval checkpoint: capture exact pre-state;
+seal and prove the runtime; run Phase 6E disposable validation; review proof;
+authorize persistent targets and credentials; create empty stores; install
+dormant units; prove network and identity boundaries; mount only approved
+routes; visually validate; quiesce legacy paths; then authorize one bounded
+pilot.
 
-1. Capture seebx hostname, HEAD/tree, services, ports, store identities, and
-   legacy flags in a content-free pre-state receipt.
-2. Verify and use the checked runtime receipt that binds the sealed Phase 6B
-   source, runtime/build locks, installed package, and wheel bytes. Rebuild it
-   if any successor package byte or lock changes; never reuse the Phase 5
-   receipt.
-3. Reproduce the full disposable proof if the sealed source, runtime, migration
-   manifest, pinned images, or proof environment changes.
-4. Review and authorize exact persistent targets and credentials. Existing
-   target detection must refuse; adoption is prohibited.
-5. Create empty stores and prove exact roles, forced RLS, zero user rows, exact
-   Qdrant alias/collection/indexes, and zero points.
-6. Install both dormant units, then prove firewall/private transport.
-7. Prove live Supabase user and session authority plus owner-negative cases.
-8. Prove two-database worker composition, persistent three-lane fairness, and
-   cross-process concurrency one.
-9. Deploy and visually validate the authenticated frontend.
-10. Quiesce legacy paths for the authorized owner.
-11. Record the monotonic pilot marker and start only within the approved bounds.
-12. Stop on authority ambiguity, owner leakage, legacy/attachment reads,
-    provider outcome uncertainty, projection mismatch, or firewall failure.
-
-## Cleanup and retirement
-
-The cleanup proof-blocker list is empty, but cleanup remains hard-refused because
-no scoped cleanup authorization exists. The release guard returns
-`authorization_missing` with no action plan; caller-supplied zero counts cannot
-grant authority. After an authorized, proved pilot, retire legacy components
-only in explicit, recoverable batches; never use wildcard/prefix teardown or
-SQL cascade.
+Cleanup remains hard-refused without a separate scoped authorization. Never use
+wildcard or prefix teardown, SQL `CASCADE`, or caller-supplied counts as
+authority. Legacy retirement occurs only in explicit recoverable batches after
+the successor pilot is proved.

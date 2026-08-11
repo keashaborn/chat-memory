@@ -7,6 +7,7 @@
 --   governed_memory_api    LOGIN   NOSUPERUSER NOBYPASSRLS NOINHERIT
 --   governed_memory_worker LOGIN   NOSUPERUSER NOBYPASSRLS NOINHERIT
 --   memory_ingest_writer   NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT
+--   memory_erasure_requester NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT
 -- The deployment principal must be a member of governed_memory_owner and must
 -- SET ROLE governed_memory_owner before applying 0001_foundation.
 -- Runtime adapters must send transient answer-binding content as bind
@@ -89,7 +90,8 @@ BEGIN
       ('governed_memory_owner'::text, false),
       ('governed_memory_api'::text, true),
       ('governed_memory_worker'::text, true),
-      ('memory_ingest_writer'::text, false)
+      ('memory_ingest_writer'::text, false),
+      ('memory_erasure_requester'::text, false)
     ) AS required(role_name, must_login)
   LOOP
     IF NOT EXISTS (

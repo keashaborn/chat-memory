@@ -49,6 +49,13 @@
         "inherit": false,
         "superuser": false,
         "bypassrls": false
+      },
+      {
+        "name": "memory_erasure_requester",
+        "login": false,
+        "inherit": false,
+        "superuser": false,
+        "bypassrls": false
       }
     ],
     "existing_target_action": "refuse",
@@ -58,11 +65,11 @@
   },
   "qdrant": {
     "authority": "derived_only",
-    "image_scope": "pinned_disposable_candidate_real_compatibility_verified",
+    "image_scope": "pinned_disposable_candidate_phase6e_current_proof_pending",
     "image": "qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc",
     "persistent_pilot_image": null,
-    "persistent_pilot_digest_status": "v1_19_0_digest_pinned_disposable_verified_persistent_pilot_unapproved",
-    "real_disposable_compatibility_verified": true,
+    "persistent_pilot_digest_status": "v1_19_0_digest_pinned_phase6b_proof_historical_current_phase6e_proof_pending_persistent_pilot_unapproved",
+    "real_disposable_compatibility_verified": false,
     "persistent_pilot_approved": false,
     "container": "governed-memory-qdrant-9a54cf123493-000001",
     "volume": "governed-memory-qdrant-data-9a54cf123493-000001",
@@ -102,7 +109,105 @@
     "post_cutover_user_messages_only": true,
     "pilot_capture_limit_per_owner_rolling_24h": 20,
     "pilot_capture_limit_enforcement": "owner_scoped_transaction_advisory_lock_all_outbox_states",
-    "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id"
+    "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
+    "source_erasure_status": "phase6d_inactive_static_candidate_phase6e_disposable_proof_pending",
+    "source_erasure_requester_role": "memory_erasure_requester",
+    "source_erasure_requester_membership_granted_in_production": false,
+    "source_erasure_selectors": [
+      "thread",
+      "message_tail",
+      "recent",
+      "all_conversations"
+    ],
+    "source_erasure_exact_chat_targets_only": true,
+    "source_erasure_memory_only_or_account_wide_memory_selector_allowed": false,
+    "source_erasure_chat_tables": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads"
+    ],
+    "source_erasure_direct_delete_roots": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads"
+    ],
+    "source_erasure_transient_target_tables": [
+      "memory_ingest_private.source_erasure_target",
+      "memory_ingest_private.source_erasure_thread_target"
+    ],
+    "source_erasure_permanent_tombstone_tables": [
+      "memory_ingest_private.source_erasure_message_tombstone",
+      "memory_ingest_private.source_erasure_thread_tombstone"
+    ],
+    "source_erasure_tombstone_identity_scope": "global_message_and_thread_uuid",
+    "source_erasure_targets_retained_until": "conversation_deletion_final_receipt_acknowledged",
+    "source_erasure_tombstones_immutable": true,
+    "source_erasure_runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
+    "source_erasure_allowed_auxiliary_effects": [
+      "public.active_thread_selection",
+      "trusted_web.response_transcript_v1"
+    ],
+    "source_erasure_auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
+    "source_erasure_validated_auxiliary_foreign_keys": {
+      "public.active_thread_selection": [
+        {
+          "constraint_name": "active_thread_selection_owner_thread_fk",
+          "child_columns": [
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.threads",
+          "parent_columns": [
+            "owner_user_id",
+            "id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ],
+      "trusted_web.response_transcript_v1": [
+        {
+          "constraint_name": "response_transcript_v1_user_chat_log_id_fkey",
+          "child_columns": [
+            "user_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        },
+        {
+          "constraint_name": "response_transcript_v1_assistant_chat_log_id_fkey",
+          "child_columns": [
+            "assistant_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ]
+    },
+    "source_erasure_weak_single_column_transcript_foreign_keys_allowed": false,
+    "source_erasure_unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
+    "source_erasure_unclassified_side_effects_allowed": false,
+    "source_erasure_legacy_capture_trigger_required": false,
+    "source_erasure_legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "source_erasure_structured_lifeswitch_tables_or_accounts_deleted": false,
+    "source_erasure_legacy_project_rows_deleted": false,
+    "source_erasure_content_free_consent_security_audit_receipts_retained": true
   },
   "isolation": {
     "reuse_existing_postgres_daemon": false,
@@ -116,19 +221,20 @@
     "import_legacy_vectors": false
   },
   "candidate_implementation_status": {
-    "runtime": "phase6b_source_bound_disposable_proof_passed_inactive",
+    "runtime": "phase6d_inactive_static_candidate_runtime_rebuild_and_phase6e_proof_pending",
     "session_id_required": true,
     "supabase_auth_sessions_rpc": "staged_candidate_not_installed_or_live_verified",
-    "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_validated_not_production_applied",
+    "owner_claim_fact_detail": "implemented_candidate_phase6d_not_yet_disposable_validated_not_production_applied",
     "provider_adapter": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter": "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
-    "qdrant_adapter": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
-    "pilot_marker": "implemented_phase6b_disposable_validated_not_production_applied",
+    "embedding_adapter": "strict_3072_fake_tested_durable_request_dispatch_marker_current_disposable_proof_pending_zero_real_calls",
+    "qdrant_adapter": "exact_fake_tested_phase6b_real_disposable_proof_historical_current_phase6e_proof_pending",
+    "pilot_marker": "implemented_phase6d_not_yet_disposable_validated_not_production_applied",
     "worker_algorithm": "implemented_fake_tested",
-    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
+    "worker_runtime_composition": "implemented_inactive_static_candidate_phase6e_disposable_proof_pending",
+    "deletion_coordinator": "exact_chat_targets_only_inactive_static_candidate_not_routed_phase6e_disposable_proof_pending",
     "worker_context_required_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
-    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive",
-    "worker_cross_process_singleton": "postgresql_session_advisory_lock_disposable_validated_inactive",
+    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_phase6e_proof_pending",
+    "worker_cross_process_singleton": "postgresql_session_advisory_lock_phase6e_proof_pending",
     "calibration": "independently_bound_unapproved_retrieval_off",
     "frontend_candidate": "6d80ba_built_undeployed_visual_qa_pending"
   },
@@ -143,7 +249,10 @@
     "unresolved_creation_prerequisites": [
       "production_activation_not_authorized",
       "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-      "chat_deletion_memory_cancellation_coordination_not_implemented",
+      "phase6e_deletion_coordination_disposable_proof_pending",
+      "legacy_project_memory_thread_dependencies_not_separated",
+      "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+      "legacy_chat_owner_thread_lineage_not_remediated",
       "calibration_artifact_unapproved_retrieval_off",
       "frontend_candidate_6d80ba_undeployed_visual_qa_pending"
     ]

@@ -65,6 +65,9 @@ BEGIN
   IF actor IS NULL OR p_claim_id IS NULL THEN
     RAISE EXCEPTION 'invalid claim-detail input' USING ERRCODE = '22023';
   END IF;
+  IF memory_private.owner_source_erasure_active(actor) THEN
+    RETURN;
+  END IF;
   RETURN QUERY
   SELECT claim.claim_id, claim.lifecycle_state, revision.revision_id,
          revision.revision_number, revision.revision_sha256,

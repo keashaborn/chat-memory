@@ -10,6 +10,16 @@ BEGIN
     RAISE EXCEPTION
       'foundation rollback requires governed_memory_owner in governed_memory';
   END IF;
+  IF EXISTS (SELECT 1 FROM memory.source_erasure_operation LIMIT 1)
+     OR EXISTS (SELECT 1 FROM memory.source_erasure_target LIMIT 1)
+     OR EXISTS (
+       SELECT 1 FROM memory.erased_chat_message_tombstone LIMIT 1
+     )
+     OR EXISTS (SELECT 1 FROM memory.source_erasure_claim LIMIT 1)
+     OR EXISTS (SELECT 1 FROM memory.source_erasure_receipt LIMIT 1) THEN
+    RAISE EXCEPTION
+      'foundation rollback is empty-only; source erasure state exists';
+  END IF;
   IF EXISTS (SELECT 1 FROM memory.evidence LIMIT 1)
      OR EXISTS (SELECT 1 FROM memory.extraction_job LIMIT 1)
      OR EXISTS (SELECT 1 FROM memory.provider_call LIMIT 1)
@@ -29,6 +39,23 @@ $preflight$;
 
 DROP FUNCTION memory_private.next_worker_lane();
 DROP SEQUENCE memory_private.worker_lane_sequence;
+
+DROP FUNCTION memory_private.read_source_erasure_receipt(uuid);
+DROP FUNCTION memory_private.ack_source_erasure_conversation_deleted(
+  uuid,text
+);
+DROP FUNCTION memory_private.finalize_source_erasure_memory(uuid);
+DROP FUNCTION memory_private.read_source_erasure_progress(uuid);
+DROP FUNCTION memory_private.prepare_source_erasure_claim_deletions(
+  uuid,integer
+);
+DROP FUNCTION memory_private.seal_source_erasure(uuid);
+DROP FUNCTION memory_private.append_source_erasure_targets(
+  uuid,uuid[],uuid[],timestamptz[],text[]
+);
+DROP FUNCTION memory_private.register_source_erasure(
+  uuid,uuid,text,text,integer,text
+);
 
 DROP FUNCTION memory_private.record_answer_binding(
   uuid,uuid,uuid,text,text,text[],text[],text[],integer,integer,text,text,
@@ -94,7 +121,32 @@ DROP TRIGGER answer_binding_immutable ON memory.answer_binding;
 DROP TRIGGER audit_event_append_only ON memory.audit_event;
 DROP TRIGGER claim_deletion_receipt_immutable
   ON memory.claim_deletion_receipt;
+DROP TRIGGER source_erasure_receipt_immutable
+  ON memory.source_erasure_receipt;
+DROP TRIGGER erased_chat_message_tombstone_immutable
+  ON memory.erased_chat_message_tombstone;
+DROP TRIGGER erased_chat_message_replay ON memory.evidence;
+DROP TRIGGER erased_chat_message_replay ON memory.answer_binding;
 
+DROP TRIGGER source_erasure_fence ON memory.evidence;
+DROP TRIGGER source_erasure_fence ON memory.extraction_job;
+DROP TRIGGER source_erasure_fence ON memory.provider_call;
+DROP TRIGGER source_erasure_fence ON memory.proposal;
+DROP TRIGGER source_erasure_fence ON memory.claim;
+DROP TRIGGER source_erasure_fence ON memory.claim_revision;
+DROP TRIGGER source_erasure_fence ON memory.claim_evidence;
+DROP TRIGGER source_erasure_fence ON memory.projection_outbox;
+DROP TRIGGER source_erasure_fence ON memory.answer_binding;
+
+DROP FUNCTION memory_private.guard_source_erasure_fence();
+DROP FUNCTION memory_private.assert_source_erasure_deletion_catalog();
+DROP FUNCTION memory_private.assert_source_erasure_tombstones(
+  uuid,uuid,integer,timestamptz
+);
+DROP FUNCTION
+  memory_private.guard_erased_chat_message_tombstone_immutable();
+DROP FUNCTION memory_private.guard_erased_chat_message_replay();
+DROP FUNCTION memory_private.assert_chat_messages_not_erased(uuid,uuid);
 DROP FUNCTION memory_private.guard_projection_outbox_mutation();
 DROP FUNCTION memory_private.guard_proposal_mutation();
 DROP FUNCTION memory_private.guard_provider_call_mutation();
@@ -102,6 +154,7 @@ DROP FUNCTION memory_private.guard_evidence_mutation();
 DROP FUNCTION memory_private.guard_append_only_audit();
 DROP FUNCTION memory_private.guard_answer_binding_mutation();
 DROP FUNCTION memory_private.guard_immutable_fact();
+DROP FUNCTION memory_private.owner_source_erasure_active(uuid);
 
 ALTER TABLE memory.proposal
   DROP CONSTRAINT proposal_correction_revision_fk;
@@ -109,6 +162,12 @@ ALTER TABLE memory.proposal
   DROP CONSTRAINT proposal_correction_claim_fk;
 ALTER TABLE memory.claim
   DROP CONSTRAINT claim_current_revision_fk;
+
+DROP TABLE memory.source_erasure_receipt;
+DROP TABLE memory.source_erasure_claim;
+DROP TABLE memory.erased_chat_message_tombstone;
+DROP TABLE memory.source_erasure_target;
+DROP TABLE memory.source_erasure_operation;
 
 DROP TABLE memory.answer_binding;
 DROP TABLE memory.claim_deletion_receipt;

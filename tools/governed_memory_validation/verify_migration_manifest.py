@@ -100,7 +100,7 @@ EXPECTED_PACKAGE_CONTRACTS = {
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def expected_package_contracts(*, preliminary: bool) -> dict[str, dict[str, object]]:
+def expected_package_contracts(*, phase6e_proof: bool) -> dict[str, dict[str, object]]:
     contracts = {
         relative: {
             **contract,
@@ -108,7 +108,7 @@ def expected_package_contracts(*, preliminary: bool) -> dict[str, dict[str, obje
         }
         for relative, contract in EXPECTED_PACKAGE_CONTRACTS.items()
     }
-    if preliminary:
+    if phase6e_proof:
         for relative in (
             "0001_foundation/package.json",
             "0003_owner_claim_detail/package.json",
@@ -164,7 +164,7 @@ def checked_path(root: Path, relative: str) -> Path:
     return candidate
 
 
-def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
+def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
     root = root.resolve(strict=True)
     manifest_path = root / "manifest.json"
     manifest = load_json(manifest_path)
@@ -173,7 +173,9 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id:
         raise ValueError("missing migration candidate id")
-    expected_manifest_status = NOT_VALIDATED_STATUS if preliminary else VALIDATED_STATUS
+    expected_manifest_status = (
+        NOT_VALIDATED_STATUS if phase6e_proof else VALIDATED_STATUS
+    )
     if manifest.get("status") != expected_manifest_status:
         raise ValueError("unexpected migration candidate status")
     if manifest.get("authority") != {
@@ -182,7 +184,7 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
         "production_provider_call_authorized": False,
         "production_qdrant_change_authorized": False,
         "legacy_import_authorized": False,
-        "disposable_validation_authorized": True,
+        "disposable_validation_authorized": False,
     }:
         raise ValueError("unexpected migration authority contract")
     if manifest.get("execution_order") != EXPECTED_EXECUTION_ORDER:
@@ -197,7 +199,7 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
         "claim_detail_rollback_data_mutation": False,
         "pilot_marker_rollback_empty_only": True,
         "cascade_ddl_allowed": False,
-        "disposable_database_execution_performed": not preliminary,
+        "disposable_database_execution_performed": not phase6e_proof,
         "production_database_execution_performed": False,
         "production_checkout_files_changed": False,
         "production_data_read": False,
@@ -236,7 +238,7 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
     if observed != EXPECTED_FILES:
         raise ValueError("migration directory contains an undeclared file")
 
-    package_contracts = expected_package_contracts(preliminary=preliminary)
+    package_contracts = expected_package_contracts(phase6e_proof=phase6e_proof)
     for package_relative in EXPECTED_PACKAGES:
         if package_relative not in expected:
             raise ValueError(f"package missing from manifest: {package_relative}")
@@ -305,8 +307,8 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
         "result": "verified",
         "schema_version": "governed-memory-migration-verification-v4",
         "validation_state": (
-            "preliminary_disposable_proof_candidate"
-            if preliminary
+            "phase6e_disposable_deletion_proof_candidate"
+            if phase6e_proof
             else "disposable_validated"
         ),
     }
@@ -314,19 +316,19 @@ def verify(root: Path, *, preliminary: bool = False) -> dict[str, object]:
 
 def main() -> int:
     arguments = list(sys.argv[1:])
-    preliminary = False
-    if arguments[:1] == ["--preliminary-disposable-proof"]:
-        preliminary = True
+    phase6e_proof = False
+    if arguments[:1] == ["--phase6e-disposable-deletion-proof"]:
+        phase6e_proof = True
         arguments.pop(0)
     if len(arguments) > 1:
         raise SystemExit(
             "usage: verify_migration_manifest.py "
-            "[--preliminary-disposable-proof] [migration_root]"
+            "[--phase6e-disposable-deletion-proof] [migration_root]"
         )
     default_root = Path(__file__).resolve().parents[2] / "governed-memory-migrations"
     root = Path(arguments[0]) if arguments else default_root
     try:
-        receipt = verify(root, preliminary=preliminary)
+        receipt = verify(root, phase6e_proof=phase6e_proof)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"MIGRATION_MANIFEST_INVALID={error}", file=sys.stderr)
         return 1

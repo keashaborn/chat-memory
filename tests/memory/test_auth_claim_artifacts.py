@@ -9,11 +9,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "governed-memory-migrations"
+FOUNDATION = MIGRATIONS / "0001_foundation"
 CLAIM_DETAIL = MIGRATIONS / "0003_owner_claim_detail"
 SESSION_AUTHORITY = ROOT / "ops/governed_memory/supabase_session_authority"
 RUNNER = ROOT / "tools/governed_memory_validation/run_disposable_successor.sh"
-VALIDATED_STATUS = (
-    "isolated_candidate_disposable_validated_not_production_applied"
+CURRENT_STATUS = (
+    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
 )
 
 
@@ -40,23 +41,339 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sql_function(sql: str, qualified_name: str) -> str:
+    marker = f"CREATE FUNCTION {qualified_name}("
+    if marker not in sql:
+        raise AssertionError(f"function missing: {qualified_name}")
+    return sql.split(marker, 1)[1].split("$function$;", 1)[0]
+
+
+class FoundationErasedChatTombstoneTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.forward = (FOUNDATION / "forward.pgsql").read_text(
+            encoding="utf-8"
+        )
+        cls.rollback = (FOUNDATION / "rollback.pgsql").read_text(
+            encoding="utf-8"
+        )
+
+    def test_tombstone_is_global_private_permanent_and_manifest_bound(self) -> None:
+        table = self.forward.split(
+            "CREATE TABLE memory.erased_chat_message_tombstone (", 1
+        )[1].split("\n);", 1)[0]
+        self.assertIn("message_id uuid PRIMARY KEY", table)
+        self.assertIn("owner_user_id uuid NOT NULL", table)
+        self.assertIn("erasure_operation_id uuid NOT NULL", table)
+        self.assertIn("erased_at timestamptz NOT NULL", table)
+        self.assertIn(
+            "REFERENCES memory.source_erasure_operation(\n"
+            "    owner_user_id, operation_id\n"
+            "  ) ON DELETE RESTRICT",
+            table,
+        )
+        self.assertIn(
+            "ALTER TABLE memory.erased_chat_message_tombstone "
+            "ENABLE ROW LEVEL SECURITY",
+            self.forward,
+        )
+        self.assertIn(
+            "ALTER TABLE memory.erased_chat_message_tombstone "
+            "FORCE ROW LEVEL SECURITY",
+            self.forward,
+        )
+        self.assertIn(
+            "CREATE POLICY owner_internal ON "
+            "memory.erased_chat_message_tombstone",
+            self.forward,
+        )
+        self.assertNotIn(
+            "CREATE POLICY owner_isolation ON "
+            "memory.erased_chat_message_tombstone",
+            self.forward,
+        )
+
+        seal = _sql_function(
+            self.forward, "memory_private.seal_source_erasure"
+        )
+        ordered = (
+            "source erasure target manifest is incomplete",
+            "ORDER BY target.message_id",
+            "cross_owner_chat_message_lineage",
+            "INSERT INTO memory.erased_chat_message_tombstone",
+            "ON CONFLICT (message_id) DO NOTHING",
+            "erased chat message tombstone lineage conflicts",
+        )
+        self.assertEqual(sorted(ordered, key=seal.index), list(ordered))
+        self.assertRegex(
+            seal,
+            r"evidence\.owner_user_id\s*<>\s*operation\.owner_user_id",
+        )
+        self.assertRegex(
+            seal,
+            r"binding\.owner_user_id\s*<>\s*operation\.owner_user_id",
+        )
+        self.assertIn("binding.response_id", seal)
+        self.assertIn("evidence.context_message_id", seal)
+
+        guard = _sql_function(
+            self.forward, "memory_private.assert_chat_messages_not_erased"
+        )
+        self.assertIn("ORDER BY message_id", guard)
+        self.assertIn("pg_advisory_xact_lock", guard)
+        self.assertIn("tombstone.message_id IN", guard)
+        self.assertNotIn("tombstone.owner_user_id", guard)
+        for function_name, exact_call in (
+            (
+                "memory_private.record_selected_evidence",
+                "assert_chat_messages_not_erased(\n"
+                "    p_message_id, p_context_message_id",
+            ),
+            (
+                "memory_private.record_answer_binding",
+                "assert_chat_messages_not_erased(\n"
+                "    p_response_id, NULL::uuid",
+            ),
+        ):
+            with self.subTest(function=function_name):
+                self.assertIn(
+                    exact_call,
+                    _sql_function(self.forward, function_name),
+                )
+        self.assertEqual(
+            self.forward.count(
+                "CREATE TRIGGER erased_chat_message_replay\n"
+                "  BEFORE INSERT ON memory."
+            ),
+            2,
+        )
+        self.assertIn(
+            "CREATE TRIGGER erased_chat_message_tombstone_immutable",
+            self.forward,
+        )
+        verifier = _sql_function(
+            self.forward,
+            "memory_private.assert_source_erasure_tombstones",
+        )
+        for required in (
+            "ORDER BY target.message_id",
+            "observed_target_count <> p_target_count",
+            "observed_tombstone_count <> p_target_count",
+            "tombstone.owner_user_id <> p_owner_user_id",
+            "tombstone.erasure_operation_id <> p_operation_id",
+            "tombstone.erased_at IS DISTINCT FROM p_sealed_at",
+            "evidence.owner_user_id <> p_owner_user_id",
+            "binding.owner_user_id <> p_owner_user_id",
+        ):
+            self.assertIn(required, verifier)
+
+    def test_every_delete_entry_point_locks_then_checks_closed_catalog(self) -> None:
+        catalog = _sql_function(
+            self.forward,
+            "memory_private.assert_source_erasure_deletion_catalog",
+        )
+        roots = (
+            "answer_binding",
+            "claim_evidence",
+            "projection_outbox",
+            "proposal",
+            "claim_revision",
+            "claim",
+            "provider_call",
+            "extraction_job",
+            "evidence",
+            "entity",
+            "source_erasure_claim",
+            "source_erasure_target",
+        )
+        for root in roots:
+            self.assertIn(f"'memory.{root}'::regclass::oid", catalog)
+        for required in (
+            "pg_catalog.pg_constraint",
+            "constraint_row.confrelid = ANY(deletion_roots)",
+            "EXCEPT ALL",
+            "pg_catalog.pg_trigger",
+            "(trigger_row.tgtype::integer & 8) = 8",
+            "pg_catalog.pg_rewrite",
+            "rewrite_row.ev_type = '4'",
+            "pg_catalog.pg_inherits",
+            "LOCK TABLE memory.erased_chat_message_tombstone\n"
+            "    IN SHARE ROW EXCLUSIVE MODE;",
+            "pg_catalog.pg_policy",
+            "pg_catalog.aclexplode",
+            "erased_chat_message_tombstone_operation_fk",
+            "erased_chat_message_tombstone_owner_nonzero",
+            "pg_catalog.pg_get_expr",
+            "erased_chat_message_tombstone_immutable",
+            "erased_chat_message_replay",
+            "erased chat replay or permanent tombstone trigger inventory differs",
+        ):
+            self.assertIn(required, catalog)
+        self.assertNotIn("confdeltype = 'c'", catalog)
+
+        lock_sequence = [
+            f"LOCK TABLE memory.{root} IN ROW EXCLUSIVE MODE;"
+            for root in roots
+        ]
+        delete_entry_points = (
+            "memory_private.purge_terminal_proposals",
+            "memory_private.purge_expired_answer_bindings",
+            "memory_private.finalize_claim_deletion",
+            "memory_private.finalize_source_erasure_memory",
+            "memory_private.ack_source_erasure_conversation_deleted",
+        )
+        for function_name in delete_entry_points:
+            body = _sql_function(self.forward, function_name)
+            with self.subTest(function=function_name):
+                positions = [body.index(lock) for lock in lock_sequence]
+                self.assertEqual(positions, sorted(positions))
+                assertion_position = body.index(
+                    "PERFORM "
+                    "memory_private.assert_source_erasure_deletion_catalog();"
+                )
+                self.assertLess(positions[-1], assertion_position)
+                self.assertLess(assertion_position, body.index("DELETE FROM"))
+
+        register = _sql_function(
+            self.forward, "memory_private.register_source_erasure"
+        )
+        register_locks = [
+            lock.replace("ROW EXCLUSIVE", "SHARE ROW EXCLUSIVE")
+            for lock in lock_sequence
+        ]
+        register_positions = [register.index(lock) for lock in register_locks]
+        self.assertEqual(register_positions, sorted(register_positions))
+        self.assertLess(
+            register_positions[-1],
+            register.index(
+                "PERFORM "
+                "memory_private.assert_source_erasure_deletion_catalog();"
+            ),
+        )
+        seal = _sql_function(
+            self.forward, "memory_private.seal_source_erasure"
+        )
+        seal_positions = [seal.index(lock) for lock in lock_sequence]
+        self.assertEqual(seal_positions, sorted(seal_positions))
+        self.assertLess(
+            seal.index(
+                "PERFORM "
+                "memory_private.assert_source_erasure_deletion_catalog();"
+            ),
+            seal.index("INSERT INTO memory.erased_chat_message_tombstone"),
+        )
+
+        tombstone_assertion = (
+            "PERFORM memory_private.assert_source_erasure_tombstones(\n"
+            "    operation.operation_id, operation.owner_user_id,\n"
+            "    operation.target_count, operation.sealed_at\n"
+            "  );"
+        )
+        for function_name in (
+            "memory_private.finalize_source_erasure_memory",
+            "memory_private.ack_source_erasure_conversation_deleted",
+        ):
+            body = _sql_function(self.forward, function_name)
+            with self.subTest(tombstone_reverification=function_name):
+                self.assertIn(tombstone_assertion, body)
+                self.assertLess(
+                    body.index(tombstone_assertion), body.index("DELETE FROM")
+                )
+        ack = _sql_function(
+            self.forward,
+            "memory_private.ack_source_erasure_conversation_deleted",
+        )
+        self.assertLess(
+            ack.index(tombstone_assertion),
+            ack.index("INSERT INTO memory.source_erasure_receipt"),
+        )
+
+    def test_metadata_and_empty_only_rollback_preserve_tombstones(self) -> None:
+        package = _load_json(FOUNDATION / "package.json")
+        self.assertEqual(package["object_contract"]["table_count"], 18)
+        self.assertEqual(
+            package["object_contract"]["owner_bearing_table_count"], 17
+        )
+        self.assertTrue(
+            package["object_contract"][
+                "global_chat_message_id_replay_suppression"
+            ]
+        )
+        self.assertTrue(
+            package["object_contract"][
+                "tombstone_reverified_before_finalization_and_ack"
+            ]
+        )
+        self.assertTrue(
+            package["object_contract"][
+                "runtime_tombstone_catalog_attestation"
+            ]
+        )
+        schema = _load_json(MIGRATIONS / "schema_contract.json")
+        self.assertIn("erased_chat_message_tombstone", schema["tables"])
+        self.assertIn(
+            "erased_chat_message_tombstone", schema["owner_bearing_tables"]
+        )
+        tombstone = schema["erased_chat_message_tombstone"]
+        self.assertEqual(tombstone["primary_key"], ["message_id"])
+        self.assertTrue(tombstone["global_message_identity"])
+        self.assertEqual(
+            tombstone["cross_owner_lineage_action"],
+            "manual_review_before_tombstone_or_delete",
+        )
+        self.assertEqual(
+            tombstone["retention"], "permanent_no_runtime_delete_path"
+        )
+        for signature in (
+            "memory_private.assert_chat_messages_not_erased(uuid,uuid)",
+            "memory_private.guard_erased_chat_message_replay()",
+            "memory_private.guard_erased_chat_message_tombstone_immutable()",
+            "memory_private.assert_source_erasure_tombstones(uuid,uuid,integer,timestamptz)",
+            "memory_private.assert_source_erasure_deletion_catalog()",
+        ):
+            self.assertIn(signature, schema["internal_functions"])
+        self.assertIn(
+            "exact_target_count_owner_operation_erased_at",
+            tombstone["transition_reverification"],
+        )
+        self.assertIn(
+            "complete_user_trigger_inventory",
+            tombstone["runtime_catalog_attestation"],
+        )
+
+        self.assertIn(
+            "SELECT 1 FROM memory.erased_chat_message_tombstone LIMIT 1",
+            self.rollback,
+        )
+        self.assertLess(
+            self.rollback.index(
+                "DROP TABLE memory.erased_chat_message_tombstone;"
+            ),
+            self.rollback.index("DROP TABLE memory.source_erasure_operation;"),
+        )
+        self.assertNotRegex(
+            self.forward + self.rollback,
+            re.compile(r"\b(?:DROP|TRUNCATE)\b[^;]*\bCASCADE\b", re.I),
+        )
+
+
 class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_package_hashes_and_manifest_report_current_truth(self) -> None:
         package_path = CLAIM_DETAIL / "package.json"
         package = _load_json(package_path)
         forward_path = CLAIM_DETAIL / "forward.pgsql"
         rollback_path = CLAIM_DETAIL / "rollback.pgsql"
-        self.assertEqual(package["status"], VALIDATED_STATUS)
-        self.assertTrue(package["activation"]["disposable_database_validated"])
+        self.assertEqual(package["status"], CURRENT_STATUS)
+        self.assertFalse(package["activation"]["disposable_database_validated"])
         self.assertEqual(package["forward"]["sha256"], _sha256(forward_path))
         self.assertEqual(package["rollback"]["sha256"], _sha256(rollback_path))
         self.assertFalse(package["rollback"]["empty_only"])
         self.assertFalse(package["rollback"]["data_mutation"])
 
         manifest = _load_json(MIGRATIONS / "manifest.json")
-        self.assertEqual(manifest["status"], VALIDATED_STATUS)
-        self.assertEqual(package["status"], VALIDATED_STATUS)
-        self.assertTrue(
+        self.assertEqual(manifest["status"], CURRENT_STATUS)
+        self.assertEqual(package["status"], CURRENT_STATUS)
+        self.assertFalse(
             manifest["safety"]["disposable_database_execution_performed"]
         )
         entries = {item["path"]: item["sha256"] for item in manifest["files"]}
@@ -113,9 +430,9 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
 
         schema = _load_json(MIGRATIONS / "schema_contract.json")
         package = _load_json(CLAIM_DETAIL / "package.json")
-        self.assertEqual(package["status"], VALIDATED_STATUS)
-        self.assertEqual(schema["status"], VALIDATED_STATUS)
-        self.assertEqual(package["status"], VALIDATED_STATUS)
+        self.assertEqual(package["status"], CURRENT_STATUS)
+        self.assertEqual(schema["status"], CURRENT_STATUS)
+        self.assertEqual(package["status"], CURRENT_STATUS)
         self.assertIn(
             "memory_private.read_claim(uuid)",
             schema["function_surface"],
@@ -149,7 +466,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": True,
+                "disposable_validated": False,
                 "production_applied": False,
             },
         )
@@ -157,7 +474,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='7693d9db459f81f4d89e680108867ce31dd4c7ed'",
+            "readonly EXPECTED_BASE='51bf3f40d25b732df426498382628098d22c6d2a'",
             runner,
         )
         qdrant_digest = (
@@ -210,7 +527,15 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             rollback.index("0004_pilot_marker/rollback.pgsql"),
         )
         self.assertIn("pilot_marker_not_empty_before_rollback", rollback)
-        self.assertIn("--preliminary-disposable-proof", runner)
+        self.assertIn("--phase6e-disposable-deletion-proof", runner)
+        self.assertIn(
+            "readonly PHASE6E_DELETION_INTEGRATION_READY='false'",
+            runner,
+        )
+        self.assertIn(
+            "phase6e_deletion_integration_proof_not_implemented",
+            runner,
+        )
         absence = runner.split("assert_rollback_absence() {", 1)[1].split(
             "verify_apply_rollback_reapply() {", 1
         )[0]

@@ -8,6 +8,7 @@ DO $preflight$
 DECLARE
   expected_column record;
   forbidden_relation text;
+  inbound_fk record;
   privilege_name text;
 BEGIN
   IF pg_catalog.current_setting('server_version_num')::integer < 150000 THEN
@@ -23,6 +24,12 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'memory_ingest_writer'
+      AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'memory_erasure_requester'
       AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
       AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
       AND NOT rolinherit
@@ -48,6 +55,11 @@ BEGIN
     'brains_app', 'memory_ingest_writer', 'MEMBER'
   ) THEN
     RAISE EXCEPTION 'capture writer membership must be absent before migration';
+  END IF;
+  IF pg_catalog.pg_has_role(
+    'brains_app', 'memory_erasure_requester', 'MEMBER'
+  ) THEN
+    RAISE EXCEPTION 'erasure requester membership must be absent before migration';
   END IF;
   IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL THEN
     RAISE EXCEPTION 'conversation bridge schema already exists';
@@ -82,6 +94,7 @@ BEGIN
       ('chat_log', 'created_at', 'timestamp with time zone'),
       ('threads', 'id', 'uuid'),
       ('threads', 'owner_user_id', 'uuid'),
+      ('threads', 'created_at', 'timestamp with time zone'),
       ('chat_attachments', 'owner_user_id', 'uuid'),
       ('chat_attachments', 'thread_id', 'uuid'),
       ('chat_attachments', 'message_id', 'uuid')
@@ -133,6 +146,550 @@ BEGIN
     RAISE EXCEPTION 'chat_log key or owner/thread lineage contract differs';
   END IF;
   IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.contype = 'f'
+      AND constraint_row.conrelid = 'public.chat_attachments'::regclass
+      AND constraint_row.confrelid = 'public.threads'::regclass
+      AND constraint_row.convalidated
+      AND constraint_row.confdeltype = 'c'
+      AND constraint_row.confupdtype = 'a'
+      AND constraint_row.confmatchtype = 's'
+      AND NOT constraint_row.condeferrable
+      AND NOT constraint_row.condeferred
+      AND constraint_row.conkey = ARRAY[
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+            AND attribute.attname = 'thread_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+            AND attribute.attname = 'owner_user_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        )
+      ]
+      AND constraint_row.confkey = ARRAY[
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.threads'::regclass
+            AND attribute.attname = 'id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.threads'::regclass
+            AND attribute.attname = 'owner_user_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        )
+      ]
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.contype = 'f'
+      AND constraint_row.conrelid = 'public.chat_attachments'::regclass
+      AND constraint_row.confrelid = 'public.chat_log'::regclass
+      AND constraint_row.convalidated
+      AND constraint_row.confdeltype = 'c'
+      AND constraint_row.confupdtype = 'a'
+      AND constraint_row.confmatchtype = 's'
+      AND NOT constraint_row.condeferrable
+      AND NOT constraint_row.condeferred
+      AND constraint_row.conkey = ARRAY[
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+            AND attribute.attname = 'message_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+            AND attribute.attname = 'owner_user_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+            AND attribute.attname = 'thread_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        )
+      ]
+      AND constraint_row.confkey = ARRAY[
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_log'::regclass
+            AND attribute.attname = 'id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_log'::regclass
+            AND attribute.attname = 'owner_user_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ),
+        (
+          SELECT attribute.attnum
+          FROM pg_catalog.pg_attribute AS attribute
+          WHERE attribute.attrelid = 'public.chat_log'::regclass
+            AND attribute.attname = 'thread_id'
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        )
+      ]
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = 'public.chat_attachments'::regclass
+      AND attname = 'owner_user_id' AND attnotnull AND NOT attisdropped
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = 'public.chat_attachments'::regclass
+      AND attname = 'thread_id' AND attnotnull AND NOT attisdropped
+  ) THEN
+    RAISE EXCEPTION 'attachment owner/thread/message lineage contract differs';
+  END IF;
+  IF pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+       FROM (VALUES
+         ('owner_user_id', 'uuid', true),
+         ('thread_id', 'uuid', true),
+         ('user_chat_log_id', 'uuid', true),
+         ('assistant_chat_log_id', 'uuid', true)
+       ) AS expected(column_name, type_name, required_not_null)
+       LEFT JOIN pg_catalog.pg_attribute AS attribute
+         ON attribute.attrelid =
+              pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+        AND attribute.attname = expected.column_name
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+       WHERE attribute.attnum IS NULL
+          OR attribute.atttypid <> expected.type_name::regtype
+          OR attribute.attnotnull IS DISTINCT FROM expected.required_not_null
+     ) THEN
+    RAISE EXCEPTION 'response transcript source columns differ';
+  END IF;
+
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_constraint AS constraint_row
+       WHERE constraint_row.contype = 'f'
+         AND constraint_row.conrelid =
+             pg_catalog.to_regclass('public.active_thread_selection')
+         AND constraint_row.confrelid = 'public.threads'::regclass
+         AND constraint_row.convalidated
+         AND constraint_row.confdeltype = 'c'
+         AND constraint_row.confupdtype = 'a'
+         AND constraint_row.confmatchtype = 's'
+         AND NOT constraint_row.condeferrable
+         AND NOT constraint_row.condeferred
+         AND constraint_row.conkey = ARRAY[
+           (
+             SELECT attribute.attnum
+             FROM pg_catalog.pg_attribute AS attribute
+             WHERE attribute.attrelid = constraint_row.conrelid
+               AND attribute.attname = 'owner_user_id'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+           ),
+           (
+             SELECT attribute.attnum
+             FROM pg_catalog.pg_attribute AS attribute
+             WHERE attribute.attrelid = constraint_row.conrelid
+               AND attribute.attname = 'thread_id'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+           )
+         ]
+         AND constraint_row.confkey = ARRAY[
+           (
+             SELECT attribute.attnum
+             FROM pg_catalog.pg_attribute AS attribute
+             WHERE attribute.attrelid = 'public.threads'::regclass
+               AND attribute.attname = 'owner_user_id'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+           ),
+           (
+             SELECT attribute.attnum
+             FROM pg_catalog.pg_attribute AS attribute
+             WHERE attribute.attrelid = 'public.threads'::regclass
+               AND attribute.attname = 'id'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+           )
+         ]
+     ) THEN
+    RAISE EXCEPTION 'active-thread chat-auxiliary lineage contract differs';
+  END IF;
+  IF pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NOT NULL
+     AND (
+       NOT EXISTS (
+         SELECT 1
+         FROM pg_catalog.pg_constraint AS constraint_row
+         WHERE constraint_row.contype = 'f'
+           AND constraint_row.conrelid =
+               pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+           AND constraint_row.confrelid = 'public.chat_log'::regclass
+           AND constraint_row.convalidated
+           AND constraint_row.confdeltype = 'c'
+           AND constraint_row.confupdtype = 'a'
+           AND constraint_row.confmatchtype = 's'
+           AND NOT constraint_row.condeferrable
+           AND NOT constraint_row.condeferred
+           AND constraint_row.conkey = ARRAY[
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'user_chat_log_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'owner_user_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'thread_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             )
+           ]
+           AND constraint_row.confkey = ARRAY[
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'owner_user_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'thread_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             )
+           ]
+       ) OR NOT EXISTS (
+         SELECT 1
+         FROM pg_catalog.pg_constraint AS constraint_row
+         WHERE constraint_row.contype = 'f'
+           AND constraint_row.conrelid =
+               pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+           AND constraint_row.confrelid = 'public.chat_log'::regclass
+           AND constraint_row.convalidated
+           AND constraint_row.confdeltype = 'c'
+           AND constraint_row.confupdtype = 'a'
+           AND constraint_row.confmatchtype = 's'
+           AND NOT constraint_row.condeferrable
+           AND NOT constraint_row.condeferred
+           AND constraint_row.conkey = ARRAY[
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'assistant_chat_log_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'owner_user_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = constraint_row.conrelid
+                 AND attribute.attname = 'thread_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             )
+           ]
+           AND constraint_row.confkey = ARRAY[
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'owner_user_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             ),
+             (
+               SELECT attribute.attnum
+               FROM pg_catalog.pg_attribute AS attribute
+               WHERE attribute.attrelid = 'public.chat_log'::regclass
+                 AND attribute.attname = 'thread_id'
+                 AND attribute.attnum > 0
+                 AND NOT attribute.attisdropped
+             )
+           ]
+       )
+     ) THEN
+    RAISE EXCEPTION 'trusted-web chat-auxiliary lineage contract differs';
+  END IF;
+
+  FOR inbound_fk IN
+    SELECT constraint_row.conname,
+      child_namespace.nspname AS child_schema,
+      child_relation.relname AS child_table,
+      parent_namespace.nspname AS parent_schema,
+      parent_relation.relname AS parent_table,
+      constraint_row.confdeltype,
+      constraint_row.confupdtype,
+      constraint_row.confmatchtype,
+      constraint_row.condeferrable,
+      constraint_row.condeferred,
+      constraint_row.convalidated,
+      ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.conkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) AS child_columns,
+      ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.confkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.confrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) AS parent_columns
+    FROM pg_catalog.pg_constraint AS constraint_row
+    JOIN pg_catalog.pg_class AS child_relation
+      ON child_relation.oid = constraint_row.conrelid
+    JOIN pg_catalog.pg_namespace AS child_namespace
+      ON child_namespace.oid = child_relation.relnamespace
+    JOIN pg_catalog.pg_class AS parent_relation
+      ON parent_relation.oid = constraint_row.confrelid
+    JOIN pg_catalog.pg_namespace AS parent_namespace
+      ON parent_namespace.oid = parent_relation.relnamespace
+    WHERE constraint_row.contype = 'f'
+      AND (
+        constraint_row.confrelid IN (
+          'public.chat_log'::regclass,
+          'public.threads'::regclass,
+          'public.chat_attachments'::regclass
+        )
+        OR constraint_row.confrelid =
+             pg_catalog.to_regclass('public.active_thread_selection')
+        OR constraint_row.confrelid =
+             pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+      )
+  LOOP
+    IF inbound_fk.confupdtype <> 'a'
+       OR inbound_fk.confmatchtype <> 's'
+       OR inbound_fk.condeferrable
+       OR inbound_fk.condeferred
+       OR NOT (
+         (
+           inbound_fk.child_schema = 'public'
+           AND inbound_fk.child_table = 'chat_log'
+           AND inbound_fk.conname = 'chat_log_owner_thread_fk'
+           AND inbound_fk.parent_schema = 'public'
+           AND inbound_fk.parent_table = 'threads'
+           AND inbound_fk.child_columns =
+               ARRAY['owner_user_id', 'thread_id']::text[]
+           AND inbound_fk.parent_columns =
+               ARRAY['owner_user_id', 'id']::text[]
+           AND inbound_fk.confdeltype = 'a'
+           AND NOT inbound_fk.convalidated
+         ) OR (
+           inbound_fk.child_schema = 'public'
+           AND inbound_fk.child_table = 'chat_attachments'
+           AND inbound_fk.conname = 'chat_attachments_thread_owner_fk'
+           AND inbound_fk.parent_schema = 'public'
+           AND inbound_fk.parent_table = 'threads'
+           AND inbound_fk.child_columns =
+               ARRAY['thread_id', 'owner_user_id']::text[]
+           AND inbound_fk.parent_columns =
+               ARRAY['id', 'owner_user_id']::text[]
+           AND inbound_fk.confdeltype = 'c'
+           AND inbound_fk.convalidated
+         ) OR (
+           inbound_fk.child_schema = 'public'
+           AND inbound_fk.child_table = 'chat_attachments'
+           AND inbound_fk.conname =
+               'chat_attachments_message_owner_thread_fk'
+           AND inbound_fk.parent_schema = 'public'
+           AND inbound_fk.parent_table = 'chat_log'
+           AND inbound_fk.child_columns =
+               ARRAY['message_id', 'owner_user_id', 'thread_id']::text[]
+           AND inbound_fk.parent_columns =
+               ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+           AND inbound_fk.confdeltype = 'c'
+           AND inbound_fk.convalidated
+         ) OR (
+           inbound_fk.child_schema = 'public'
+           AND inbound_fk.child_table = 'active_thread_selection'
+           AND inbound_fk.conname =
+               'active_thread_selection_owner_thread_fk'
+           AND inbound_fk.parent_schema = 'public'
+           AND inbound_fk.parent_table = 'threads'
+           AND inbound_fk.child_columns =
+               ARRAY['owner_user_id', 'thread_id']::text[]
+           AND inbound_fk.parent_columns =
+               ARRAY['owner_user_id', 'id']::text[]
+           AND inbound_fk.confdeltype = 'c'
+           AND inbound_fk.convalidated
+         ) OR (
+           inbound_fk.child_schema = 'trusted_web'
+           AND inbound_fk.child_table = 'response_transcript_v1'
+           AND inbound_fk.parent_schema = 'public'
+           AND inbound_fk.parent_table = 'chat_log'
+           AND (
+             (
+               inbound_fk.conname =
+                   'response_transcript_v1_user_chat_log_id_fkey'
+               AND inbound_fk.child_columns =
+                   ARRAY[
+                     'user_chat_log_id', 'owner_user_id', 'thread_id'
+                   ]::text[]
+             ) OR (
+               inbound_fk.conname =
+                   'response_transcript_v1_assistant_chat_log_id_fkey'
+               AND inbound_fk.child_columns =
+                   ARRAY[
+                     'assistant_chat_log_id', 'owner_user_id', 'thread_id'
+                   ]::text[]
+             )
+           )
+           AND inbound_fk.parent_columns =
+               ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+           AND inbound_fk.confdeltype = 'c'
+           AND inbound_fk.convalidated
+         )
+       ) THEN
+      RAISE EXCEPTION
+        'unclassified inbound chat deletion dependency: %.% -> %.%',
+        inbound_fk.child_schema, inbound_fk.child_table,
+        inbound_fk.parent_schema, inbound_fk.parent_table;
+    END IF;
+  END LOOP;
+
+  IF pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_trigger AS trigger_row
+       WHERE trigger_row.tgrelid =
+             pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+         AND NOT trigger_row.tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'preexisting response transcript trigger is forbidden';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE NOT trigger_row.tgisinternal
+      AND (trigger_row.tgtype::integer & 8) = 8
+      AND (
+        trigger_row.tgrelid IN (
+          'public.chat_log'::regclass,
+          'public.threads'::regclass,
+          'public.chat_attachments'::regclass
+        )
+        OR trigger_row.tgrelid =
+             pg_catalog.to_regclass('public.active_thread_selection')
+        OR trigger_row.tgrelid =
+             pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+      )
+  ) THEN
+    RAISE EXCEPTION 'unclassified user DELETE trigger reaches chat deletion';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_rewrite AS rewrite_row
+    WHERE rewrite_row.ev_type = '4'
+      AND (
+        rewrite_row.ev_class IN (
+          'public.chat_log'::regclass,
+          'public.threads'::regclass,
+          'public.chat_attachments'::regclass
+        )
+        OR rewrite_row.ev_class =
+             pg_catalog.to_regclass('public.active_thread_selection')
+        OR rewrite_row.ev_class =
+             pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+      )
+  ) THEN
+    RAISE EXCEPTION 'unclassified DELETE rewrite rule reaches chat deletion';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_inherits AS inheritance_row
+    WHERE inheritance_row.inhrelid IN (
+        'public.chat_log'::regclass,
+        'public.threads'::regclass,
+        'public.chat_attachments'::regclass,
+        pg_catalog.to_regclass('public.active_thread_selection'),
+        pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+      )
+      OR inheritance_row.inhparent IN (
+        'public.chat_log'::regclass,
+        'public.threads'::regclass,
+        'public.chat_attachments'::regclass,
+        pg_catalog.to_regclass('public.active_thread_selection'),
+        pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat deletion root inheritance is forbidden';
+  END IF;
+  IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_trigger
     WHERE tgrelid = 'public.chat_log'::regclass
       AND tgname = 'chat_log_guard_canonical_owner'
@@ -144,12 +701,18 @@ BEGIN
       AND tgname = 'chat_log_guard_immutable'
       AND tgenabled = 'O' AND NOT tgisinternal
       AND tgfoid = 'public.guard_chat_log_immutable()'::regprocedure
-  ) OR NOT EXISTS (
+  ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_trigger
     WHERE tgrelid = 'public.chat_log'::regclass
       AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
-      AND tgenabled = 'D' AND NOT tgisinternal
-      AND tgfoid = 'memory.enqueue_chat_log_consolidation()'::regprocedure
+      AND NOT tgisinternal
+      AND (
+        tgenabled <> 'D'
+        OR tgtype <> 5
+        OR tgfoid IS DISTINCT FROM pg_catalog.to_regprocedure(
+             'memory.enqueue_chat_log_consolidation()'
+           )
+      )
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_trigger
     WHERE tgrelid = 'public.chat_log'::regclass
@@ -187,7 +750,8 @@ $preflight$;
 CREATE SCHEMA memory_ingest_private AUTHORIZATION sage;
 REVOKE ALL ON SCHEMA memory_ingest_private FROM PUBLIC;
 GRANT USAGE ON SCHEMA memory_ingest_private
-  TO memory_ingest_writer, governed_memory_worker;
+  TO memory_ingest_writer, memory_erasure_requester,
+     governed_memory_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE sage IN SCHEMA memory_ingest_private
   REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
@@ -225,6 +789,730 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION memory_ingest_private.timestamp_utc_text(timestamptz)
   FROM PUBLIC;
+
+CREATE FUNCTION memory_ingest_private.assert_chat_deletion_catalog()
+RETURNS void
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  active_edge_count integer := 0;
+  attachment_message_edge_count integer := 0;
+  attachment_thread_edge_count integer := 0;
+  chat_thread_edge_count integer := 0;
+  catalog_relation record;
+  deletion_roots oid[];
+  inbound_fk record;
+  message_tombstone_operation_edge_count integer := 0;
+  source_target_operation_edge_count integer := 0;
+  thread_target_operation_edge_count integer := 0;
+  thread_tombstone_operation_edge_count integer := 0;
+  trusted_assistant_edge_count integer := 0;
+  trusted_user_edge_count integer := 0;
+BEGIN
+  deletion_roots := ARRAY[
+    'public.chat_log'::regclass::oid,
+    'public.threads'::regclass::oid,
+    'public.chat_attachments'::regclass::oid,
+    'memory_ingest_private.memory_ingest_outbox'::regclass::oid,
+    'memory_ingest_private.source_erasure_operation'::regclass::oid,
+    'memory_ingest_private.source_erasure_target'::regclass::oid,
+    'memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+    'memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+    'memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+    'memory_ingest_private.source_erasure_receipt'::regclass::oid,
+    pg_catalog.to_regclass('public.active_thread_selection')::oid,
+    pg_catalog.to_regclass('trusted_web.response_transcript_v1')::oid
+  ];
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.unnest(deletion_roots) AS root(root_oid)
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = root.root_oid
+    WHERE root.root_oid IS NOT NULL
+      AND relation.relkind <> 'r'
+  ) THEN
+    RAISE EXCEPTION 'chat deletion roots must be ordinary tables';
+  END IF;
+  FOR catalog_relation IN
+    SELECT * FROM (VALUES
+      ('memory_ingest_private.source_erasure_target'::regclass::oid,
+       ARRAY[
+         'owner_user_id', 'operation_id', 'message_id', 'thread_id',
+         'source_created_at', 'target_sha256'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'uuid'::regtype, 'timestamptz'::regtype, 'text'::regtype
+       ]::oid[]),
+      ('memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+       ARRAY[
+         'owner_user_id', 'operation_id', 'thread_id',
+         'source_created_at', 'target_sha256'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'timestamptz'::regtype, 'text'::regtype
+       ]::oid[]),
+      ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+       ARRAY[
+         'message_id', 'owner_user_id', 'operation_id', 'erased_at'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'timestamptz'::regtype
+       ]::oid[]),
+      ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+       ARRAY[
+         'thread_id', 'owner_user_id', 'operation_id', 'erased_at'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'timestamptz'::regtype
+       ]::oid[]),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       ARRAY[
+         'receipt_id', 'owner_user_id', 'operation_id', 'selector_sha256',
+         'target_manifest_sha256', 'target_count',
+         'thread_target_manifest_sha256', 'thread_target_count',
+         'deleted_message_count', 'deleted_thread_count',
+         'deleted_attachment_count', 'deleted_bridge_row_count',
+         'message_tombstone_count', 'thread_tombstone_count',
+         'tombstone_manifest_sha256', 'governed_receipt_sha256',
+         'receipt_sha256', 'completed_at'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'text'::regtype, 'text'::regtype, 'integer'::regtype,
+         'text'::regtype, 'integer'::regtype, 'integer'::regtype,
+         'integer'::regtype, 'integer'::regtype, 'integer'::regtype,
+         'integer'::regtype, 'integer'::regtype, 'text'::regtype,
+         'text'::regtype, 'text'::regtype, 'timestamptz'::regtype
+       ]::oid[])
+    ) AS expected(relation_oid, column_names, column_types)
+  LOOP
+    IF (
+      SELECT pg_catalog.array_agg(attribute.attname::text
+               ORDER BY attribute.attnum)
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = catalog_relation.relation_oid
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ) IS DISTINCT FROM catalog_relation.column_names OR (
+      SELECT pg_catalog.array_agg(attribute.atttypid
+               ORDER BY attribute.attnum)
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = catalog_relation.relation_oid
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ) IS DISTINCT FROM catalog_relation.column_types OR EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = catalog_relation.relation_oid
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+        AND NOT attribute.attnotnull
+    ) THEN
+      RAISE EXCEPTION 'chat deletion private schema differs: %',
+        catalog_relation.relation_oid::regclass;
+    END IF;
+  END LOOP;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('memory_ingest_private.source_erasure_target'::regclass::oid,
+       'source_erasure_target_pkey'::text, 'p'::"char"),
+      ('memory_ingest_private.source_erasure_target'::regclass::oid,
+       'source_erasure_target_operation_fk'::text, 'f'::"char"),
+      ('memory_ingest_private.source_erasure_target'::regclass::oid,
+       'source_erasure_target_hash'::text, 'c'::"char"),
+      ('memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+       'source_erasure_thread_target_pkey'::text, 'p'::"char"),
+      ('memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+       'source_erasure_thread_target_operation_fk'::text, 'f'::"char"),
+      ('memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+       'source_erasure_thread_target_hash'::text, 'c'::"char"),
+      ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+       'source_erasure_message_tombstone_pkey'::text, 'p'::"char"),
+      ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+       'source_erasure_message_tombstone_operation_fk'::text, 'f'::"char"),
+      ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+       'source_erasure_thread_tombstone_pkey'::text, 'p'::"char"),
+      ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+       'source_erasure_thread_tombstone_operation_fk'::text, 'f'::"char"),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       'source_erasure_receipt_pkey'::text, 'p'::"char"),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       'source_erasure_receipt_operation_unique'::text, 'u'::"char"),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       'source_erasure_receipt_hashes'::text, 'c'::"char"),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       'source_erasure_receipt_counts'::text, 'c'::"char")
+    ) AS expected(relation_oid, constraint_name, constraint_type)
+    LEFT JOIN pg_catalog.pg_constraint AS constraint_row
+      ON constraint_row.conrelid = expected.relation_oid
+     AND constraint_row.conname = expected.constraint_name
+     AND constraint_row.contype = expected.constraint_type
+     AND constraint_row.convalidated
+    WHERE constraint_row.oid IS NULL
+  ) OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid IN (
+      'memory_ingest_private.source_erasure_target'::regclass,
+      'memory_ingest_private.source_erasure_thread_target'::regclass,
+      'memory_ingest_private.source_erasure_message_tombstone'::regclass,
+      'memory_ingest_private.source_erasure_thread_tombstone'::regclass,
+      'memory_ingest_private.source_erasure_receipt'::regclass
+    )
+  ) <> 14 THEN
+    RAISE EXCEPTION 'chat deletion private constraint inventory differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_target'::regclass
+      AND constraint_row.conname = 'source_erasure_target_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (owner_user_id, operation_id, message_id)'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_target'::regclass
+      AND constraint_row.conname = 'source_erasure_thread_target_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (owner_user_id, operation_id, thread_id)'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_message_tombstone'::regclass
+      AND constraint_row.conname =
+          'source_erasure_message_tombstone_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (message_id)'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_tombstone'::regclass
+      AND constraint_row.conname =
+          'source_erasure_thread_tombstone_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (thread_id)'
+  ) THEN
+    RAISE EXCEPTION 'chat deletion target or tombstone identity differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_target'::regclass
+      AND constraint_row.conname = 'source_erasure_target_hash'
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'target_sha256'
+          ) > 0
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            '64'
+          ) > 0
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_target'::regclass
+      AND constraint_row.conname = 'source_erasure_thread_target_hash'
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'target_sha256'
+          ) > 0
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            '64'
+          ) > 0
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_receipt'::regclass
+      AND constraint_row.conname = 'source_erasure_receipt_hashes'
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'thread_target_manifest_sha256'
+          ) > 0
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'tombstone_manifest_sha256'
+          ) > 0
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_receipt'::regclass
+      AND constraint_row.conname = 'source_erasure_receipt_counts'
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'message_tombstone_count'
+          ) > 0
+      AND pg_catalog.strpos(
+            pg_catalog.pg_get_constraintdef(constraint_row.oid, true),
+            'thread_tombstone_count'
+          ) > 0
+  ) THEN
+    RAISE EXCEPTION 'chat deletion target or receipt check differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.contype = 'f'
+      AND constraint_row.conrelid IN (
+        'memory_ingest_private.memory_ingest_outbox'::regclass,
+        'memory_ingest_private.source_erasure_operation'::regclass,
+        'memory_ingest_private.source_erasure_target'::regclass,
+        'memory_ingest_private.source_erasure_thread_target'::regclass,
+        'memory_ingest_private.source_erasure_message_tombstone'::regclass,
+        'memory_ingest_private.source_erasure_thread_tombstone'::regclass,
+        'memory_ingest_private.source_erasure_receipt'::regclass
+      )
+      AND NOT (
+        constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_target'::regclass
+        AND constraint_row.conname = 'source_erasure_target_operation_fk'
+        AND constraint_row.confrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+        AND constraint_row.confdeltype = 'r'
+        AND constraint_row.confupdtype = 'a'
+        AND constraint_row.convalidated
+        AND NOT constraint_row.condeferrable
+        AND NOT constraint_row.condeferred
+      )
+      AND NOT (
+        constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_target'::regclass
+        AND constraint_row.conname =
+          'source_erasure_thread_target_operation_fk'
+        AND constraint_row.confrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+        AND constraint_row.confdeltype = 'r'
+        AND constraint_row.confupdtype = 'a'
+        AND constraint_row.convalidated
+        AND NOT constraint_row.condeferrable
+        AND NOT constraint_row.condeferred
+      )
+      AND NOT (
+        constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_message_tombstone'::regclass
+        AND constraint_row.conname =
+          'source_erasure_message_tombstone_operation_fk'
+        AND constraint_row.confrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+        AND constraint_row.confdeltype = 'r'
+        AND constraint_row.confupdtype = 'a'
+        AND constraint_row.convalidated
+        AND NOT constraint_row.condeferrable
+        AND NOT constraint_row.condeferred
+      )
+      AND NOT (
+        constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_tombstone'::regclass
+        AND constraint_row.conname =
+          'source_erasure_thread_tombstone_operation_fk'
+        AND constraint_row.confrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+        AND constraint_row.confdeltype = 'r'
+        AND constraint_row.confupdtype = 'a'
+        AND constraint_row.convalidated
+        AND NOT constraint_row.condeferrable
+        AND NOT constraint_row.condeferred
+      )
+  ) THEN
+    RAISE EXCEPTION 'private deletion root outbound dependency differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute AS attribute
+    WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+      AND attribute.attname = 'owner_user_id'
+      AND attribute.atttypid = 'uuid'::regtype
+      AND attribute.attnotnull
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute AS attribute
+    WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+      AND attribute.attname = 'thread_id'
+      AND attribute.atttypid = 'uuid'::regtype
+      AND attribute.attnotnull
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute AS attribute
+    WHERE attribute.attrelid = 'public.chat_attachments'::regclass
+      AND attribute.attname = 'message_id'
+      AND attribute.atttypid = 'uuid'::regtype
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+  ) THEN
+    RAISE EXCEPTION 'attachment deletion columns differ';
+  END IF;
+  IF pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+       FROM (VALUES
+         ('owner_user_id', 'uuid', true),
+         ('thread_id', 'uuid', true),
+         ('user_chat_log_id', 'uuid', true),
+         ('assistant_chat_log_id', 'uuid', true)
+       ) AS expected(column_name, type_name, required_not_null)
+       LEFT JOIN pg_catalog.pg_attribute AS attribute
+         ON attribute.attrelid =
+              pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+        AND attribute.attname = expected.column_name
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+       WHERE attribute.attnum IS NULL
+          OR attribute.atttypid <> expected.type_name::regtype
+          OR attribute.attnotnull IS DISTINCT FROM expected.required_not_null
+     ) THEN
+    RAISE EXCEPTION 'response transcript deletion columns differ';
+  END IF;
+
+  FOR inbound_fk IN
+    SELECT constraint_row.conname,
+      child_namespace.nspname AS child_schema,
+      child_relation.relname AS child_table,
+      parent_namespace.nspname AS parent_schema,
+      parent_relation.relname AS parent_table,
+      constraint_row.confdeltype,
+      constraint_row.confupdtype,
+      constraint_row.confmatchtype,
+      constraint_row.condeferrable,
+      constraint_row.condeferred,
+      constraint_row.convalidated,
+      ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.conkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) AS child_columns,
+      ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.confkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.confrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) AS parent_columns
+    FROM pg_catalog.pg_constraint AS constraint_row
+    JOIN pg_catalog.pg_class AS child_relation
+      ON child_relation.oid = constraint_row.conrelid
+    JOIN pg_catalog.pg_namespace AS child_namespace
+      ON child_namespace.oid = child_relation.relnamespace
+    JOIN pg_catalog.pg_class AS parent_relation
+      ON parent_relation.oid = constraint_row.confrelid
+    JOIN pg_catalog.pg_namespace AS parent_namespace
+      ON parent_namespace.oid = parent_relation.relnamespace
+    WHERE constraint_row.contype = 'f'
+      AND constraint_row.confrelid = ANY(deletion_roots)
+  LOOP
+    IF inbound_fk.confupdtype <> 'a'
+       OR inbound_fk.confmatchtype <> 's'
+       OR inbound_fk.condeferrable
+       OR inbound_fk.condeferred THEN
+      RAISE EXCEPTION
+        'unsafe inbound chat deletion dependency: %.% -> %.%',
+        inbound_fk.child_schema, inbound_fk.child_table,
+        inbound_fk.parent_schema, inbound_fk.parent_table;
+    ELSIF inbound_fk.child_schema = 'public'
+       AND inbound_fk.child_table = 'chat_log'
+       AND inbound_fk.conname = 'chat_log_owner_thread_fk'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'threads'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'id']::text[]
+       AND inbound_fk.confdeltype = 'a'
+       AND NOT inbound_fk.convalidated THEN
+      chat_thread_edge_count := chat_thread_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'public'
+       AND inbound_fk.child_table = 'chat_attachments'
+       AND inbound_fk.conname = 'chat_attachments_thread_owner_fk'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'threads'
+       AND inbound_fk.child_columns =
+           ARRAY['thread_id', 'owner_user_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['id', 'owner_user_id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      attachment_thread_edge_count := attachment_thread_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'public'
+       AND inbound_fk.child_table = 'chat_attachments'
+       AND inbound_fk.conname =
+           'chat_attachments_message_owner_thread_fk'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'chat_log'
+       AND inbound_fk.child_columns =
+           ARRAY['message_id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      attachment_message_edge_count := attachment_message_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'public'
+       AND inbound_fk.child_table = 'active_thread_selection'
+       AND inbound_fk.conname =
+           'active_thread_selection_owner_thread_fk'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'threads'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      active_edge_count := active_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'trusted_web'
+       AND inbound_fk.child_table = 'response_transcript_v1'
+       AND inbound_fk.conname =
+           'response_transcript_v1_user_chat_log_id_fkey'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'chat_log'
+       AND inbound_fk.child_columns = ARRAY[
+         'user_chat_log_id', 'owner_user_id', 'thread_id'
+       ]::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      trusted_user_edge_count := trusted_user_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'trusted_web'
+       AND inbound_fk.child_table = 'response_transcript_v1'
+       AND inbound_fk.conname =
+           'response_transcript_v1_assistant_chat_log_id_fkey'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'chat_log'
+       AND inbound_fk.child_columns =
+           ARRAY[
+             'assistant_chat_log_id', 'owner_user_id', 'thread_id'
+           ]::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      trusted_assistant_edge_count := trusted_assistant_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'memory_ingest_private'
+       AND inbound_fk.child_table = 'source_erasure_target'
+       AND inbound_fk.conname = 'source_erasure_target_operation_fk'
+       AND inbound_fk.parent_schema = 'memory_ingest_private'
+       AND inbound_fk.parent_table = 'source_erasure_operation'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.confdeltype = 'r'
+       AND inbound_fk.convalidated THEN
+      source_target_operation_edge_count :=
+        source_target_operation_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'memory_ingest_private'
+       AND inbound_fk.child_table = 'source_erasure_thread_target'
+       AND inbound_fk.conname = 'source_erasure_thread_target_operation_fk'
+       AND inbound_fk.parent_schema = 'memory_ingest_private'
+       AND inbound_fk.parent_table = 'source_erasure_operation'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.confdeltype = 'r'
+       AND inbound_fk.convalidated THEN
+      thread_target_operation_edge_count :=
+        thread_target_operation_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'memory_ingest_private'
+       AND inbound_fk.child_table = 'source_erasure_message_tombstone'
+       AND inbound_fk.conname =
+           'source_erasure_message_tombstone_operation_fk'
+       AND inbound_fk.parent_schema = 'memory_ingest_private'
+       AND inbound_fk.parent_table = 'source_erasure_operation'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.confdeltype = 'r'
+       AND inbound_fk.convalidated THEN
+      message_tombstone_operation_edge_count :=
+        message_tombstone_operation_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'memory_ingest_private'
+       AND inbound_fk.child_table = 'source_erasure_thread_tombstone'
+       AND inbound_fk.conname =
+           'source_erasure_thread_tombstone_operation_fk'
+       AND inbound_fk.parent_schema = 'memory_ingest_private'
+       AND inbound_fk.parent_table = 'source_erasure_operation'
+       AND inbound_fk.child_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['owner_user_id', 'operation_id']::text[]
+       AND inbound_fk.confdeltype = 'r'
+       AND inbound_fk.convalidated THEN
+      thread_tombstone_operation_edge_count :=
+        thread_tombstone_operation_edge_count + 1;
+    ELSE
+      RAISE EXCEPTION
+        'unclassified inbound chat deletion dependency: %.% -> %.%',
+        inbound_fk.child_schema, inbound_fk.child_table,
+        inbound_fk.parent_schema, inbound_fk.parent_table;
+    END IF;
+  END LOOP;
+
+  IF chat_thread_edge_count <> 1
+     OR attachment_thread_edge_count <> 1
+     OR attachment_message_edge_count <> 1
+     OR source_target_operation_edge_count <> 1
+     OR thread_target_operation_edge_count <> 1
+     OR message_tombstone_operation_edge_count <> 1
+     OR thread_tombstone_operation_edge_count <> 1
+     OR active_edge_count <> CASE WHEN
+          pg_catalog.to_regclass('public.active_thread_selection') IS NULL
+        THEN 0 ELSE 1 END
+     OR trusted_user_edge_count <> CASE WHEN
+          pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
+        THEN 0 ELSE 1 END
+     OR trusted_assistant_edge_count <> CASE WHEN
+          pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
+        THEN 0 ELSE 1 END THEN
+    RAISE EXCEPTION 'chat deletion dependency inventory differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid,
+       'chat_log_guard_canonical_owner'::text, 'O'::"char", 23::smallint,
+       pg_catalog.to_regprocedure('public.guard_canonical_owner()')),
+      ('public.chat_log'::regclass::oid,
+       'chat_log_guard_immutable'::text, 'O'::"char", 19::smallint,
+       pg_catalog.to_regprocedure('public.guard_chat_log_immutable()')),
+      ('public.chat_log'::regclass::oid,
+       'chat_log_serialize_source_erasure'::text, 'O'::"char", 7::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.serialize_chat_source_erasure()'
+       )),
+      ('public.threads'::regclass::oid,
+       'threads_guard_canonical_owner'::text, 'O'::"char", 23::smallint,
+       pg_catalog.to_regprocedure('public.guard_canonical_owner()')),
+      ('public.threads'::regclass::oid,
+       'threads_serialize_source_erasure'::text, 'O'::"char", 23::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.serialize_thread_source_erasure()'
+       )),
+      ('public.chat_attachments'::regclass::oid,
+       'chat_attachments_serialize_source_erasure'::text,
+       'O'::"char", 23::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.serialize_attachment_source_erasure()'
+       )),
+      (pg_catalog.to_regclass('trusted_web.response_transcript_v1')::oid,
+       'response_transcript_serialize_source_erasure'::text,
+       'O'::"char", 23::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.serialize_response_transcript_source_erasure()'
+       )),
+      ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+       'source_erasure_receipt_immutable'::text,
+       'O'::"char", 27::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.guard_source_erasure_receipt_immutable()'
+       )),
+      ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+       'source_erasure_message_tombstone_immutable'::text,
+       'O'::"char", 27::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.guard_source_erasure_receipt_immutable()'
+       )),
+      ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+       'source_erasure_thread_tombstone_immutable'::text,
+       'O'::"char", 27::smallint,
+       pg_catalog.to_regprocedure(
+         'memory_ingest_private.guard_source_erasure_receipt_immutable()'
+       ))
+    ) AS expected(
+      relation_oid, trigger_name, enabled_state, trigger_type, function_oid
+    )
+    LEFT JOIN pg_catalog.pg_trigger AS trigger_row
+      ON trigger_row.tgrelid = expected.relation_oid
+     AND trigger_row.tgname = expected.trigger_name
+     AND trigger_row.tgenabled = expected.enabled_state
+     AND trigger_row.tgtype = expected.trigger_type
+     AND trigger_row.tgfoid = expected.function_oid
+     AND NOT trigger_row.tgisinternal
+    WHERE expected.relation_oid IS NOT NULL
+      AND trigger_row.oid IS NULL
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = 'public.chat_log'::regclass
+      AND trigger_row.tgname =
+          'chat_log_enqueue_memory_v1_consolidation'
+      AND NOT trigger_row.tgisinternal
+      AND (
+        trigger_row.tgenabled <> 'D'
+        OR trigger_row.tgtype <> 5
+        OR trigger_row.tgfoid IS DISTINCT FROM pg_catalog.to_regprocedure(
+             'memory.enqueue_chat_log_consolidation()'
+           )
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = ANY(deletion_roots)
+      AND NOT trigger_row.tgisinternal
+      AND NOT EXISTS (
+        SELECT 1
+        FROM (VALUES
+          ('public.chat_log'::regclass::oid,
+           'chat_log_guard_canonical_owner'::text),
+          ('public.chat_log'::regclass::oid,
+           'chat_log_guard_immutable'::text),
+          ('public.chat_log'::regclass::oid,
+           'chat_log_enqueue_memory_v1_consolidation'::text),
+          ('public.chat_log'::regclass::oid,
+           'chat_log_serialize_source_erasure'::text),
+          ('public.threads'::regclass::oid,
+           'threads_guard_canonical_owner'::text),
+          ('public.threads'::regclass::oid,
+           'threads_serialize_source_erasure'::text),
+          ('public.chat_attachments'::regclass::oid,
+           'chat_attachments_serialize_source_erasure'::text),
+          (pg_catalog.to_regclass(
+             'trusted_web.response_transcript_v1'
+           )::oid,
+           'response_transcript_serialize_source_erasure'::text),
+          ('memory_ingest_private.source_erasure_receipt'::regclass::oid,
+           'source_erasure_receipt_immutable'::text),
+          ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+           'source_erasure_message_tombstone_immutable'::text),
+          ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+           'source_erasure_thread_tombstone_immutable'::text)
+        ) AS expected(relation_oid, trigger_name)
+        WHERE expected.relation_oid = trigger_row.tgrelid
+          AND expected.trigger_name = trigger_row.tgname
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat deletion mutation trigger inventory differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_rewrite AS rewrite_row
+    WHERE rewrite_row.ev_class = ANY(deletion_roots)
+  ) THEN
+    RAISE EXCEPTION 'rewrite rule reaches chat deletion mutation state';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_inherits AS inheritance_row
+    WHERE inheritance_row.inhrelid = ANY(deletion_roots)
+       OR inheritance_row.inhparent = ANY(deletion_roots)
+  ) THEN
+    RAISE EXCEPTION 'chat deletion root inheritance is forbidden';
+  END IF;
+END;
+$function$;
+REVOKE ALL ON FUNCTION
+  memory_ingest_private.assert_chat_deletion_catalog()
+FROM PUBLIC;
 
 CREATE FUNCTION memory_ingest_private.ingest_window_sha256(
   p_owner_user_id uuid,
@@ -468,13 +1756,15 @@ CREATE TABLE memory_ingest_private.memory_ingest_outbox (
     AND (
       context_review_count = 0
       OR eligibility_decision = 'review_context'
-      OR state IN ('completed', 'skipped', 'failed_terminal')
+      OR state IN (
+        'completed', 'skipped', 'failed_terminal', 'erasure_cancelled'
+      )
     )
   ),
   CONSTRAINT memory_ingest_outbox_state CHECK (
     state IN (
       'pending', 'claimed', 'retryable', 'completed', 'skipped',
-      'expired', 'failed_terminal'
+      'expired', 'failed_terminal', 'erasure_cancelled'
     )
   ),
   CONSTRAINT memory_ingest_outbox_decision CHECK (
@@ -501,7 +1791,10 @@ CREATE TABLE memory_ingest_private.memory_ingest_outbox (
       AND lease_expires_at IS NULL)
   ),
   CONSTRAINT memory_ingest_outbox_terminal_shape CHECK (
-    (state IN ('completed', 'skipped', 'expired', 'failed_terminal')
+    (state IN (
+      'completed', 'skipped', 'expired', 'failed_terminal',
+      'erasure_cancelled'
+    )
       AND completed_at IS NOT NULL
       AND content_sha256 IS NULL
       AND terminal_receipt_sha256 IS NOT NULL)
@@ -564,6 +1857,9 @@ CREATE TABLE memory_ingest_private.memory_ingest_outbox (
         'source_binding_mismatch', 'successor_receipt_mismatch',
         'successor_write_failed', 'worker_transient_failure'
       ))
+    OR
+    (state = 'erasure_cancelled'
+      AND last_error_code = 'source_erasure_fenced')
   )
 );
 
@@ -584,6 +1880,310 @@ REVOKE ALL ON TABLE public.chat_log, public.threads, public.chat_attachments
 ALTER TABLE memory_ingest_private.memory_ingest_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_ingest_private.memory_ingest_outbox FORCE ROW LEVEL SECURITY;
 CREATE POLICY owner_internal ON memory_ingest_private.memory_ingest_outbox
+  TO sage USING (true) WITH CHECK (true);
+
+CREATE FUNCTION memory_ingest_private.source_erasure_target_sha256(
+  p_owner_user_id uuid,
+  p_operation_id uuid,
+  p_message_id uuid,
+  p_thread_id uuid,
+  p_source_created_at timestamptz
+)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.source_erasure_target.v1' || E'\n'
+      || memory_ingest_private.framed_utf8_field(
+           'owner_user_id', p_owner_user_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'operation_id', p_operation_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'message_id', p_message_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'thread_id', p_thread_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'source_created_at',
+           memory_ingest_private.timestamp_utc_text(p_source_created_at)
+         ),
+    'UTF8'
+  )), 'hex')
+$function$;
+
+CREATE TABLE memory_ingest_private.source_erasure_operation (
+  operation_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  selector_kind text NOT NULL,
+  selector_thread_id uuid,
+  selector_anchor_message_id uuid,
+  selector_duration_seconds integer,
+  selector_from_inclusive timestamptz,
+  selector_through_inclusive timestamptz NOT NULL,
+  selector_sha256 text NOT NULL,
+  confirmation_sha256 text NOT NULL,
+  target_count integer NOT NULL,
+  target_manifest_sha256 text NOT NULL,
+  thread_target_count integer NOT NULL,
+  thread_target_manifest_sha256 text NOT NULL,
+  state text NOT NULL,
+  governed_receipt_sha256 text,
+  attempt_count integer NOT NULL DEFAULT 0,
+  lease_token uuid,
+  leased_by text,
+  lease_expires_at timestamptz,
+  last_error_code text,
+  created_at timestamptz NOT NULL,
+  governed_completed_at timestamptz,
+  completed_at timestamptz,
+  CONSTRAINT source_erasure_operation_owner_id UNIQUE (
+    owner_user_id, operation_id
+  ),
+  CONSTRAINT source_erasure_operation_owner_nonzero CHECK (
+    owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid
+  ),
+  CONSTRAINT source_erasure_operation_selector CHECK (
+    (selector_kind = 'thread'
+      AND selector_thread_id IS NOT NULL
+      AND selector_anchor_message_id IS NULL
+      AND selector_duration_seconds IS NULL)
+    OR
+    (selector_kind = 'message_tail'
+      AND selector_thread_id IS NOT NULL
+      AND selector_anchor_message_id IS NOT NULL
+      AND selector_duration_seconds IS NULL
+      AND selector_from_inclusive IS NOT NULL)
+    OR
+    (selector_kind = 'recent'
+      AND selector_thread_id IS NULL
+      AND selector_anchor_message_id IS NULL
+      AND selector_duration_seconds IN (3600,86400,604800,2592000)
+      AND selector_from_inclusive IS NOT NULL)
+    OR
+    (selector_kind = 'all_conversations'
+      AND selector_thread_id IS NULL
+      AND selector_anchor_message_id IS NULL
+      AND selector_duration_seconds IS NULL
+      AND selector_from_inclusive IS NULL)
+  ),
+  CONSTRAINT source_erasure_operation_hashes CHECK (
+    selector_sha256 ~ '^[0-9a-f]{64}$'
+    AND confirmation_sha256 ~ '^[0-9a-f]{64}$'
+    AND target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND thread_target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND (
+      governed_receipt_sha256 IS NULL
+      OR governed_receipt_sha256 ~ '^[0-9a-f]{64}$'
+    )
+  ),
+  CONSTRAINT source_erasure_operation_state CHECK (
+    state IN (
+      'fenced', 'retryable', 'governed_deletion_pending',
+      'governed_deleted', 'conversation_deleted_pending_ack',
+      'completed', 'manual_review'
+    )
+  ),
+  CONSTRAINT source_erasure_operation_counts CHECK (
+    target_count BETWEEN 0 AND 100000
+    AND thread_target_count BETWEEN 0 AND 100000
+    AND attempt_count BETWEEN 0 AND 1000
+  ),
+  CONSTRAINT source_erasure_operation_lease CHECK (
+    (lease_token IS NULL AND leased_by IS NULL AND lease_expires_at IS NULL)
+    OR
+    (state <> 'completed' AND lease_token IS NOT NULL
+      AND leased_by IS NOT NULL AND lease_expires_at > created_at)
+  ),
+  CONSTRAINT source_erasure_operation_completion CHECK (
+    (state IN ('conversation_deleted_pending_ack', 'completed')
+      AND governed_receipt_sha256 IS NOT NULL
+      AND governed_completed_at IS NOT NULL AND completed_at IS NOT NULL)
+    OR
+    (state NOT IN ('conversation_deleted_pending_ack', 'completed')
+      AND completed_at IS NULL)
+  )
+);
+
+CREATE UNIQUE INDEX source_erasure_one_active_owner_idx
+  ON memory_ingest_private.source_erasure_operation(owner_user_id)
+  WHERE state <> 'completed';
+
+CREATE TABLE memory_ingest_private.source_erasure_target (
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  message_id uuid NOT NULL,
+  thread_id uuid NOT NULL,
+  source_created_at timestamptz NOT NULL,
+  target_sha256 text NOT NULL,
+  PRIMARY KEY (owner_user_id, operation_id, message_id),
+  CONSTRAINT source_erasure_target_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory_ingest_private.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT,
+  CONSTRAINT source_erasure_target_hash CHECK (
+    target_sha256 ~ '^[0-9a-f]{64}$'
+  )
+);
+
+CREATE INDEX source_erasure_target_page_idx
+  ON memory_ingest_private.source_erasure_target(
+    owner_user_id, operation_id, source_created_at, message_id
+  );
+
+CREATE TABLE memory_ingest_private.source_erasure_thread_target (
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  thread_id uuid NOT NULL,
+  source_created_at timestamptz NOT NULL,
+  target_sha256 text NOT NULL,
+  PRIMARY KEY (owner_user_id, operation_id, thread_id),
+  CONSTRAINT source_erasure_thread_target_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory_ingest_private.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT,
+  CONSTRAINT source_erasure_thread_target_hash CHECK (
+    target_sha256 ~ '^[0-9a-f]{64}$'
+  )
+);
+
+CREATE INDEX source_erasure_thread_target_page_idx
+  ON memory_ingest_private.source_erasure_thread_target(
+    owner_user_id, operation_id, source_created_at, thread_id
+  );
+
+CREATE TABLE memory_ingest_private.source_erasure_message_tombstone (
+  message_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  erased_at timestamptz NOT NULL,
+  CONSTRAINT source_erasure_message_tombstone_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory_ingest_private.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT
+);
+
+CREATE TABLE memory_ingest_private.source_erasure_thread_tombstone (
+  thread_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  erased_at timestamptz NOT NULL,
+  CONSTRAINT source_erasure_thread_tombstone_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory_ingest_private.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT
+);
+
+CREATE TABLE memory_ingest_private.source_erasure_receipt (
+  receipt_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  selector_sha256 text NOT NULL,
+  target_manifest_sha256 text NOT NULL,
+  target_count integer NOT NULL,
+  thread_target_manifest_sha256 text NOT NULL,
+  thread_target_count integer NOT NULL,
+  deleted_message_count integer NOT NULL,
+  deleted_thread_count integer NOT NULL,
+  deleted_attachment_count integer NOT NULL,
+  deleted_bridge_row_count integer NOT NULL,
+  message_tombstone_count integer NOT NULL,
+  thread_tombstone_count integer NOT NULL,
+  tombstone_manifest_sha256 text NOT NULL,
+  governed_receipt_sha256 text NOT NULL,
+  receipt_sha256 text NOT NULL,
+  completed_at timestamptz NOT NULL,
+  CONSTRAINT source_erasure_receipt_operation_unique UNIQUE (
+    owner_user_id, operation_id
+  ),
+  CONSTRAINT source_erasure_receipt_hashes CHECK (
+    selector_sha256 ~ '^[0-9a-f]{64}$'
+    AND target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND thread_target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND tombstone_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND governed_receipt_sha256 ~ '^[0-9a-f]{64}$'
+    AND receipt_sha256 ~ '^[0-9a-f]{64}$'
+  ),
+  CONSTRAINT source_erasure_receipt_counts CHECK (
+    target_count BETWEEN 0 AND 100000
+    AND thread_target_count BETWEEN 0 AND 100000
+    AND deleted_message_count BETWEEN 0 AND target_count
+    AND deleted_thread_count BETWEEN 0 AND 100000
+    AND deleted_attachment_count BETWEEN 0 AND 1000000
+    AND deleted_bridge_row_count BETWEEN 0 AND target_count
+    AND message_tombstone_count = target_count
+    AND thread_tombstone_count BETWEEN deleted_thread_count
+      AND thread_target_count
+  )
+);
+
+ALTER TABLE memory_ingest_private.source_erasure_operation OWNER TO sage;
+ALTER TABLE memory_ingest_private.source_erasure_target OWNER TO sage;
+ALTER TABLE memory_ingest_private.source_erasure_thread_target OWNER TO sage;
+ALTER TABLE memory_ingest_private.source_erasure_message_tombstone
+  OWNER TO sage;
+ALTER TABLE memory_ingest_private.source_erasure_thread_tombstone
+  OWNER TO sage;
+ALTER TABLE memory_ingest_private.source_erasure_receipt OWNER TO sage;
+REVOKE ALL ON TABLE
+  memory_ingest_private.source_erasure_operation,
+  memory_ingest_private.source_erasure_target,
+  memory_ingest_private.source_erasure_thread_target,
+  memory_ingest_private.source_erasure_message_tombstone,
+  memory_ingest_private.source_erasure_thread_tombstone,
+  memory_ingest_private.source_erasure_receipt
+FROM PUBLIC, memory_ingest_writer, memory_erasure_requester,
+  governed_memory_worker;
+ALTER TABLE memory_ingest_private.source_erasure_operation
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_operation
+  FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_target
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_target
+  FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_thread_target
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_thread_target
+  FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_message_tombstone
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_message_tombstone
+  FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_thread_tombstone
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_thread_tombstone
+  FORCE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_receipt
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_ingest_private.source_erasure_receipt
+  FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_operation
+  TO sage USING (true) WITH CHECK (true);
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_target
+  TO sage USING (true) WITH CHECK (true);
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_thread_target
+  TO sage USING (true) WITH CHECK (true);
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_message_tombstone
+  TO sage USING (true) WITH CHECK (true);
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_thread_tombstone
+  TO sage USING (true) WITH CHECK (true);
+CREATE POLICY owner_internal
+  ON memory_ingest_private.source_erasure_receipt
   TO sage USING (true) WITH CHECK (true);
 
 CREATE FUNCTION memory_ingest_private.enqueue_chat_log_message(
@@ -1280,6 +2880,34 @@ BEGIN
   IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 1000 THEN
     RAISE EXCEPTION 'invalid bridge purge limit' USING ERRCODE = '22023';
   END IF;
+  LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
+  END IF;
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE trusted_web.response_transcript_v1 IN ROW EXCLUSIVE MODE';
+  END IF;
+  LOCK TABLE memory_ingest_private.memory_ingest_outbox
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_operation
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_message_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_receipt
+    IN ROW EXCLUSIVE MODE;
+  PERFORM memory_ingest_private.assert_chat_deletion_catalog();
   WITH candidates AS (
     SELECT value.outbox_id
     FROM memory_ingest_private.memory_ingest_outbox AS value
@@ -1301,11 +2929,2308 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION memory_ingest_private.begin_source_erasure(
+  p_operation_id uuid,
+  p_selector_kind text,
+  p_thread_id uuid,
+  p_anchor_message_id uuid,
+  p_recent_seconds integer,
+  p_confirmation_sha256 text
+)
+RETURNS TABLE(
+  outcome text,
+  operation_id uuid,
+  state text,
+  target_count integer,
+  selector_sha256 text,
+  target_manifest_sha256 text
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  actor uuid;
+  requested_at timestamptz;
+  from_inclusive timestamptz;
+  anchor_created_at timestamptz;
+  selector_hash text;
+  target_manifest text;
+  thread_target_manifest text;
+  observed_attachment_count bigint;
+  observed_count integer;
+  observed_thread_count integer;
+  existing memory_ingest_private.source_erasure_operation%ROWTYPE;
+BEGIN
+  IF session_user <> 'brains_app'
+     OR NOT pg_catalog.pg_has_role(
+       session_user, 'memory_erasure_requester', 'MEMBER'
+     ) THEN
+    RAISE EXCEPTION 'authorized erasure requester membership required'
+      USING ERRCODE = '42501';
+  END IF;
+  actor := NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid;
+  IF actor IS NULL OR p_operation_id IS NULL
+     OR COALESCE(
+       pg_catalog.current_setting('app.auth_context_sha256', true), ''
+     ) !~ '^[0-9a-f]{64}$'
+     OR COALESCE(p_confirmation_sha256, '') !~ '^[0-9a-f]{64}$'
+     OR p_selector_kind NOT IN (
+       'thread', 'message_tail', 'recent', 'all_conversations'
+     )
+     OR (p_selector_kind = 'thread' AND (
+       p_thread_id IS NULL OR p_anchor_message_id IS NOT NULL
+       OR p_recent_seconds IS NOT NULL
+     ))
+     OR (p_selector_kind = 'message_tail' AND (
+       p_thread_id IS NULL OR p_anchor_message_id IS NULL
+       OR p_recent_seconds IS NOT NULL
+     ))
+     OR (p_selector_kind = 'recent' AND (
+       p_thread_id IS NOT NULL OR p_anchor_message_id IS NOT NULL
+       OR p_recent_seconds NOT IN (3600,86400,604800,2592000)
+     ))
+     OR (p_selector_kind = 'all_conversations' AND (
+       p_thread_id IS NOT NULL OR p_anchor_message_id IS NOT NULL
+       OR p_recent_seconds IS NOT NULL
+     )) THEN
+    RAISE EXCEPTION 'invalid source erasure request'
+      USING ERRCODE = '22023';
+  END IF;
+
+  LOCK TABLE public.threads IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_log IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_attachments IN SHARE ROW EXCLUSIVE MODE;
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE public.active_thread_selection '
+      'IN SHARE ROW EXCLUSIVE MODE';
+  END IF;
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE trusted_web.response_transcript_v1 '
+      'IN SHARE ROW EXCLUSIVE MODE';
+  END IF;
+  LOCK TABLE memory_ingest_private.memory_ingest_outbox
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_operation
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_target
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_target
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_message_tombstone
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_tombstone
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_receipt
+    IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM memory_ingest_private.assert_chat_deletion_catalog();
+  requested_at := pg_catalog.transaction_timestamp();
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(actor::text || '|chat_source_erasure', 0)
+  );
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      actor::text || '|chat_source_erasure|' || p_operation_id::text, 0
+    )
+  );
+
+  SELECT value.* INTO existing
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.owner_user_id = actor
+    AND value.operation_id = p_operation_id;
+  IF FOUND THEN
+    IF existing.selector_kind IS DISTINCT FROM p_selector_kind
+       OR existing.selector_thread_id IS DISTINCT FROM p_thread_id
+       OR existing.selector_anchor_message_id
+            IS DISTINCT FROM p_anchor_message_id
+       OR existing.selector_duration_seconds IS DISTINCT FROM p_recent_seconds
+       OR existing.confirmation_sha256 IS DISTINCT FROM p_confirmation_sha256
+    THEN
+      RAISE EXCEPTION 'source erasure operation replay drifted'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN QUERY SELECT 'replayed'::text, existing.operation_id,
+      existing.state, existing.target_count, existing.selector_sha256,
+      existing.target_manifest_sha256;
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_operation AS active
+    WHERE active.owner_user_id = actor
+      AND active.state <> 'completed'
+  ) THEN
+    RAISE EXCEPTION 'owner source erasure already active'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF p_selector_kind IN ('thread', 'message_tail') THEN
+    PERFORM 1
+    FROM public.threads AS thread
+    WHERE thread.owner_user_id = actor
+      AND thread.id = p_thread_id
+      AND thread.created_at IS NOT NULL
+      AND thread.created_at <= requested_at
+    FOR KEY SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'source erasure thread is absent or invalid'
+        USING ERRCODE = 'P0002';
+    END IF;
+  END IF;
+  IF p_selector_kind = 'thread' THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.chat_log AS source
+      WHERE source.owner_user_id = actor
+        AND source.thread_id = p_thread_id
+        AND (
+          source.created_at IS NULL OR source.created_at > requested_at
+        )
+    ) THEN
+      RAISE EXCEPTION 'source erasure thread has invalid chat time or lineage'
+        USING ERRCODE = '23514';
+    END IF;
+  ELSIF p_selector_kind = 'all_conversations' AND EXISTS (
+    SELECT 1
+    FROM public.chat_log AS source
+    WHERE source.owner_user_id = actor
+      AND (
+        source.thread_id IS NULL OR source.created_at IS NULL
+        OR source.created_at > requested_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'all-conversation erasure has invalid chat time or lineage'
+      USING ERRCODE = '23514';
+  ELSIF p_selector_kind = 'all_conversations' AND EXISTS (
+    SELECT 1
+    FROM public.threads AS thread
+    WHERE thread.owner_user_id = actor
+      AND (
+        thread.created_at IS NULL OR thread.created_at > requested_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'all-conversation erasure has invalid thread time'
+      USING ERRCODE = '23514';
+  ELSIF p_selector_kind = 'all_conversations' AND (
+    SELECT pg_catalog.count(*)
+    FROM public.threads AS thread
+    WHERE thread.owner_user_id = actor
+      AND thread.created_at <= requested_at
+  ) > 100000 THEN
+    RAISE EXCEPTION 'source erasure thread target limit exceeded'
+      USING ERRCODE = '54000';
+  END IF;
+
+  IF p_selector_kind = 'message_tail' THEN
+    SELECT source.created_at INTO anchor_created_at
+    FROM public.chat_log AS source
+    WHERE source.owner_user_id = actor
+      AND source.thread_id = p_thread_id
+      AND source.id = p_anchor_message_id
+    FOR KEY SHARE;
+    IF NOT FOUND OR anchor_created_at IS NULL THEN
+      RAISE EXCEPTION 'source erasure anchor is absent'
+        USING ERRCODE = 'P0002';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM public.chat_log AS source
+      WHERE source.owner_user_id = actor
+        AND source.thread_id = p_thread_id
+        AND source.created_at IS NULL
+    ) THEN
+      RAISE EXCEPTION 'message-tail erasure has invalid chat time'
+        USING ERRCODE = '23514';
+    END IF;
+    from_inclusive := anchor_created_at;
+  ELSIF p_selector_kind = 'recent' THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.chat_log AS source
+      WHERE source.owner_user_id = actor
+        AND source.created_at IS NULL
+    ) THEN
+      RAISE EXCEPTION 'recent erasure has invalid chat time'
+        USING ERRCODE = '23514';
+    END IF;
+    from_inclusive := requested_at
+      - pg_catalog.make_interval(secs => p_recent_seconds);
+  END IF;
+  IF (
+    p_selector_kind = 'message_tail' AND EXISTS (
+      SELECT 1
+      FROM public.chat_log AS source
+      WHERE source.owner_user_id = actor
+        AND source.thread_id = p_thread_id
+        AND source.created_at > requested_at
+        AND (source.created_at, source.id) >= (
+          anchor_created_at, p_anchor_message_id
+        )
+    )
+  ) OR (
+    p_selector_kind = 'recent' AND EXISTS (
+      SELECT 1
+      FROM public.chat_log AS source
+      WHERE source.owner_user_id = actor
+        AND source.created_at > requested_at
+    )
+  ) THEN
+    RAISE EXCEPTION 'source erasure selector has future-dated chat rows'
+      USING ERRCODE = '23514';
+  END IF;
+
+  selector_hash := pg_catalog.encode(pg_catalog.sha256(
+    pg_catalog.convert_to(
+      'governed_memory.source_erasure_selector.v1' || E'\n'
+        || memory_ingest_private.framed_utf8_field(
+             'owner_user_id', actor::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'operation_id', p_operation_id::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'selector_kind', p_selector_kind
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'thread_id', p_thread_id::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'anchor_message_id', p_anchor_message_id::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'recent_seconds', p_recent_seconds::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'from_inclusive',
+             memory_ingest_private.timestamp_utc_text(from_inclusive)
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'through_inclusive',
+             memory_ingest_private.timestamp_utc_text(requested_at)
+           ),
+      'UTF8'
+    )
+  ), 'hex');
+
+  INSERT INTO memory_ingest_private.source_erasure_operation(
+    operation_id, owner_user_id, selector_kind, selector_thread_id,
+    selector_anchor_message_id, selector_duration_seconds,
+    selector_from_inclusive, selector_through_inclusive,
+    selector_sha256, confirmation_sha256, target_count,
+    target_manifest_sha256, thread_target_count,
+    thread_target_manifest_sha256, state, created_at
+  ) VALUES (
+    p_operation_id, actor, p_selector_kind, p_thread_id,
+    p_anchor_message_id, p_recent_seconds, from_inclusive, requested_at,
+    selector_hash, p_confirmation_sha256, 0, pg_catalog.repeat('0', 64),
+    0, pg_catalog.repeat('0', 64), 'fenced', requested_at
+  );
+
+  INSERT INTO memory_ingest_private.source_erasure_target(
+    owner_user_id, operation_id, message_id, thread_id,
+    source_created_at, target_sha256
+  )
+  SELECT actor, p_operation_id, source.id, source.thread_id,
+    source.created_at,
+    memory_ingest_private.source_erasure_target_sha256(
+      actor, p_operation_id, source.id, source.thread_id, source.created_at
+    )
+  FROM public.chat_log AS source
+  WHERE source.owner_user_id = actor
+    AND source.created_at IS NOT NULL
+    AND source.created_at <= requested_at
+    AND (
+      (p_selector_kind = 'thread' AND source.thread_id = p_thread_id)
+      OR
+      (p_selector_kind = 'message_tail'
+        AND source.thread_id = p_thread_id
+        AND (source.created_at, source.id) >= (
+          anchor_created_at, p_anchor_message_id
+        ))
+      OR
+      (p_selector_kind = 'recent' AND source.created_at >= from_inclusive)
+      OR p_selector_kind = 'all_conversations'
+    )
+  ORDER BY source.created_at, source.id;
+
+  INSERT INTO memory_ingest_private.source_erasure_thread_target(
+    owner_user_id, operation_id, thread_id, source_created_at, target_sha256
+  )
+  SELECT actor, p_operation_id, thread.id, thread.created_at,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_thread_target.v1' || E'\n'
+        || memory_ingest_private.framed_utf8_field(
+             'owner_user_id', actor::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'operation_id', p_operation_id::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'thread_id', thread.id::text
+           )
+        || memory_ingest_private.framed_utf8_field(
+             'source_created_at',
+             memory_ingest_private.timestamp_utc_text(thread.created_at)
+           ),
+      'UTF8'
+    )), 'hex')
+  FROM public.threads AS thread
+  WHERE thread.owner_user_id = actor
+    AND thread.created_at IS NOT NULL
+    AND thread.created_at <= requested_at
+    AND (
+      (p_selector_kind IN ('thread', 'message_tail')
+        AND thread.id = p_thread_id)
+      OR p_selector_kind = 'all_conversations'
+      OR (p_selector_kind = 'recent' AND EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_target AS target
+        WHERE target.owner_user_id = actor
+          AND target.operation_id = p_operation_id
+          AND target.thread_id = thread.id
+      ))
+    )
+  ORDER BY thread.created_at, thread.id;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    WHERE target.owner_user_id = actor
+      AND target.operation_id = p_operation_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_thread_target
+          AS thread_target
+        WHERE thread_target.owner_user_id = target.owner_user_id
+          AND thread_target.operation_id = target.operation_id
+          AND thread_target.thread_id = target.thread_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'source erasure message/thread lineage differs'
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_thread_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.thread_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_thread_count, thread_target_manifest
+  FROM memory_ingest_private.source_erasure_thread_target AS target
+  WHERE target.owner_user_id = actor
+    AND target.operation_id = p_operation_id;
+  IF observed_thread_count > 100000
+     OR (
+       p_selector_kind IN ('thread', 'message_tail')
+       AND observed_thread_count <> 1
+     ) THEN
+    RAISE EXCEPTION 'source erasure thread target inventory differs'
+      USING ERRCODE = '54000';
+  END IF;
+
+  IF (
+    p_selector_kind IN ('thread', 'message_tail') AND EXISTS (
+      SELECT 1
+      FROM public.chat_log AS residual
+      WHERE residual.thread_id = p_thread_id
+        AND residual.owner_user_id IS DISTINCT FROM actor
+    )
+  ) OR (
+    p_selector_kind IN ('message_tail', 'recent') AND EXISTS (
+      SELECT 1
+      FROM memory_ingest_private.source_erasure_target AS target_thread
+      JOIN public.chat_log AS residual
+        ON residual.thread_id = target_thread.thread_id
+      WHERE target_thread.owner_user_id = actor
+        AND target_thread.operation_id = p_operation_id
+        AND residual.owner_user_id IS DISTINCT FROM actor
+    )
+  ) OR (
+    p_selector_kind = 'all_conversations' AND EXISTS (
+      SELECT 1
+      FROM public.threads AS thread
+      JOIN public.chat_log AS residual
+        ON residual.thread_id = thread.id
+      WHERE thread.owner_user_id = actor
+        AND thread.created_at <= requested_at
+        AND residual.owner_user_id IS DISTINCT FROM actor
+    )
+  ) THEN
+    RAISE EXCEPTION 'source erasure candidate thread has mixed owner lineage'
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.message_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_count, target_manifest
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = actor
+    AND target.operation_id = p_operation_id;
+  IF observed_count > 100000 THEN
+    RAISE EXCEPTION 'source erasure target limit exceeded'
+      USING ERRCODE = '54000';
+  END IF;
+
+  IF p_selector_kind = 'thread' THEN
+    SELECT pg_catalog.count(*)
+    INTO observed_attachment_count
+    FROM public.chat_attachments AS attachment
+    WHERE attachment.owner_user_id = actor
+      AND attachment.thread_id = p_thread_id;
+  ELSIF p_selector_kind = 'all_conversations' THEN
+    SELECT pg_catalog.count(*)
+    INTO observed_attachment_count
+    FROM public.chat_attachments AS attachment
+    JOIN public.threads AS thread
+      ON thread.id = attachment.thread_id
+     AND thread.owner_user_id = attachment.owner_user_id
+    WHERE thread.owner_user_id = actor
+      AND thread.created_at <= requested_at;
+  ELSE
+    SELECT pg_catalog.count(*)
+    INTO observed_attachment_count
+    FROM public.chat_attachments AS attachment
+    WHERE attachment.owner_user_id = actor
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM memory_ingest_private.source_erasure_target AS target
+          WHERE target.owner_user_id = actor
+            AND target.operation_id = p_operation_id
+            AND target.thread_id = attachment.thread_id
+            AND target.message_id = attachment.message_id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM memory_ingest_private.source_erasure_target AS target_thread
+          WHERE target_thread.owner_user_id = actor
+            AND target_thread.operation_id = p_operation_id
+            AND target_thread.thread_id = attachment.thread_id
+            AND NOT EXISTS (
+              SELECT 1
+              FROM public.chat_log AS remaining
+              WHERE remaining.owner_user_id = actor
+                AND remaining.thread_id = target_thread.thread_id
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM memory_ingest_private.source_erasure_target
+                    AS remaining_target
+                  WHERE remaining_target.owner_user_id = actor
+                    AND remaining_target.operation_id = p_operation_id
+                    AND remaining_target.thread_id = remaining.thread_id
+                    AND remaining_target.message_id = remaining.id
+                )
+            )
+        )
+      );
+  END IF;
+  IF observed_attachment_count > 1000000 THEN
+    RAISE EXCEPTION 'source erasure attachment target limit exceeded'
+      USING ERRCODE = '54000';
+  END IF;
+
+  UPDATE memory_ingest_private.source_erasure_operation AS operation
+  SET target_count = observed_count,
+      target_manifest_sha256 = target_manifest,
+      thread_target_count = observed_thread_count,
+      thread_target_manifest_sha256 = thread_target_manifest
+  WHERE operation.owner_user_id = actor
+    AND operation.operation_id = p_operation_id;
+
+  UPDATE memory_ingest_private.memory_ingest_outbox AS bridge
+  SET state = 'erasure_cancelled', content_sha256 = NULL,
+      completed_at = requested_at,
+      terminal_receipt_sha256 =
+        memory_ingest_private.terminal_receipt_sha256(
+          bridge.source_binding_sha256, 'erasure_cancelled',
+          bridge.eligibility_decision, bridge.context_review_count,
+          NULL::uuid, NULL::uuid, 'source_erasure_fenced', requested_at
+        ),
+      lease_token = NULL, claimed_by = NULL, claimed_at = NULL,
+      lease_expires_at = NULL,
+      last_error_code = 'source_erasure_fenced', updated_at = requested_at
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = actor
+    AND target.operation_id = p_operation_id
+    AND bridge.owner_user_id = target.owner_user_id
+    AND bridge.message_id = target.message_id
+    AND bridge.state IN ('pending', 'claimed', 'retryable');
+
+  RETURN QUERY SELECT 'fenced'::text, p_operation_id, 'fenced'::text,
+    observed_count, selector_hash, target_manifest;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.read_source_erasure(
+  p_operation_id uuid
+)
+RETURNS TABLE(
+  operation_id uuid,
+  selector_kind text,
+  state text,
+  target_count integer,
+  selector_sha256 text,
+  target_manifest_sha256 text,
+  governed_receipt_sha256 text,
+  last_error_code text,
+  created_at timestamptz,
+  completed_at timestamptz
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  actor uuid;
+BEGIN
+  IF session_user <> 'brains_app'
+     OR NOT pg_catalog.pg_has_role(
+       session_user, 'memory_erasure_requester', 'MEMBER'
+     ) THEN
+    RAISE EXCEPTION 'authorized erasure requester membership required'
+      USING ERRCODE = '42501';
+  END IF;
+  actor := NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid;
+  IF actor IS NULL OR p_operation_id IS NULL
+     OR COALESCE(
+       pg_catalog.current_setting('app.auth_context_sha256', true), ''
+     ) !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid source erasure status request'
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN QUERY
+  SELECT value.operation_id, value.selector_kind, value.state,
+    value.target_count, value.selector_sha256,
+    value.target_manifest_sha256, value.governed_receipt_sha256,
+    value.last_error_code, value.created_at, value.completed_at
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.owner_user_id = actor
+    AND value.operation_id = p_operation_id;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.lease_source_erasure(
+  p_worker_id text,
+  p_lease_seconds integer
+)
+RETURNS TABLE(
+  operation_id uuid,
+  owner_user_id uuid,
+  selector_kind text,
+  selector_sha256 text,
+  target_count integer,
+  target_manifest_sha256 text,
+  state text,
+  governed_receipt_sha256 text,
+  lease_token uuid
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  target memory_ingest_private.source_erasure_operation%ROWTYPE;
+  new_lease_token uuid;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR pg_catalog.octet_length(COALESCE(p_worker_id, '')) NOT BETWEEN 1 AND 128
+     OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300 THEN
+    RAISE EXCEPTION 'invalid source erasure lease request'
+      USING ERRCODE = '22023';
+  END IF;
+  UPDATE memory_ingest_private.source_erasure_operation AS expired
+  SET lease_token = NULL, leased_by = NULL, lease_expires_at = NULL,
+      state = CASE WHEN expired.state IN (
+          'governed_deleted', 'conversation_deleted_pending_ack'
+        ) THEN expired.state ELSE 'retryable' END,
+      last_error_code = CASE WHEN expired.state IN (
+          'governed_deleted', 'conversation_deleted_pending_ack'
+        ) THEN expired.last_error_code ELSE 'coordinator_lease_expired' END
+  WHERE expired.lease_token IS NOT NULL
+    AND expired.lease_expires_at <= pg_catalog.clock_timestamp();
+  UPDATE memory_ingest_private.source_erasure_operation AS exhausted
+  SET state = 'manual_review',
+      last_error_code = 'coordinator_attempts_exhausted'
+  WHERE exhausted.lease_token IS NULL
+    AND exhausted.attempt_count >= 1000
+    AND exhausted.state IN (
+      'fenced', 'retryable', 'governed_deletion_pending', 'governed_deleted'
+    );
+  SELECT value.* INTO target
+  FROM memory_ingest_private.source_erasure_operation AS value
+    WHERE value.state IN (
+      'fenced', 'retryable', 'governed_deletion_pending', 'governed_deleted',
+      'conversation_deleted_pending_ack'
+    )
+    AND value.lease_token IS NULL
+    AND (
+      value.attempt_count < 1000
+      OR value.state = 'conversation_deleted_pending_ack'
+    )
+  ORDER BY value.created_at, value.operation_id
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  new_lease_token := pg_catalog.gen_random_uuid();
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET lease_token = new_lease_token, leased_by = p_worker_id,
+      lease_expires_at = pg_catalog.clock_timestamp()
+        + pg_catalog.make_interval(secs => p_lease_seconds),
+      attempt_count = CASE
+        WHEN value.state = 'conversation_deleted_pending_ack'
+             AND value.attempt_count >= 1000 THEN 1000
+        ELSE value.attempt_count + 1
+      END,
+      state = CASE WHEN value.state IN ('fenced', 'retryable')
+        THEN 'governed_deletion_pending' ELSE value.state END,
+      last_error_code = NULL
+  WHERE value.owner_user_id = target.owner_user_id
+    AND value.operation_id = target.operation_id;
+  RETURN QUERY SELECT target.operation_id, target.owner_user_id,
+    target.selector_kind, target.selector_sha256, target.target_count,
+    target.target_manifest_sha256,
+    CASE WHEN target.state IN ('fenced', 'retryable')
+      THEN 'governed_deletion_pending' ELSE target.state END,
+    target.governed_receipt_sha256, new_lease_token;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.read_source_erasure_targets(
+  p_operation_id uuid,
+  p_lease_token uuid,
+  p_after_created_at timestamptz,
+  p_after_message_id uuid,
+  p_limit integer
+)
+RETURNS TABLE(
+  owner_user_id uuid,
+  message_id uuid,
+  thread_id uuid,
+  source_created_at timestamptz,
+  target_sha256 text
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory_ingest_private.source_erasure_operation%ROWTYPE;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL
+     OR p_limit NOT BETWEEN 1 AND 500
+     OR (p_after_created_at IS NULL) <> (p_after_message_id IS NULL) THEN
+    RAISE EXCEPTION 'invalid source erasure target request'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id;
+  IF operation.lease_token <> p_lease_token
+     OR operation.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'source erasure lease is stale'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN QUERY
+  SELECT target.owner_user_id, target.message_id, target.thread_id,
+    target.source_created_at, target.target_sha256
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+    AND (
+      p_after_created_at IS NULL
+      OR (target.source_created_at, target.message_id)
+           > (p_after_created_at, p_after_message_id)
+    )
+  ORDER BY target.source_created_at, target.message_id
+  LIMIT p_limit;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.release_source_erasure_lease(
+  p_operation_id uuid,
+  p_lease_token uuid
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL THEN
+    RAISE EXCEPTION 'invalid source erasure lease release'
+      USING ERRCODE = '22023';
+  END IF;
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET lease_token = NULL, leased_by = NULL, lease_expires_at = NULL
+  WHERE value.operation_id = p_operation_id
+    AND value.lease_token = p_lease_token;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'source erasure lease is stale'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN 'released'::text;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.mark_source_erasure_governed_deleted(
+  p_operation_id uuid,
+  p_lease_token uuid,
+  p_governed_receipt_sha256 text,
+  p_expected_target_count integer,
+  p_expected_target_manifest_sha256 text
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory_ingest_private.source_erasure_operation%ROWTYPE;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL
+     OR COALESCE(p_governed_receipt_sha256, '') !~ '^[0-9a-f]{64}$'
+     OR p_expected_target_count NOT BETWEEN 0 AND 100000
+     OR COALESCE(p_expected_target_manifest_sha256, '')
+          !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid governed erasure receipt'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.state = 'governed_deleted' THEN
+    IF operation.governed_receipt_sha256 <> p_governed_receipt_sha256
+       OR operation.target_count <> p_expected_target_count
+       OR operation.target_manifest_sha256
+            <> p_expected_target_manifest_sha256 THEN
+      RAISE EXCEPTION 'governed erasure receipt replay drifted'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN 'replayed'::text;
+  END IF;
+  IF operation.lease_token <> p_lease_token
+     OR operation.lease_expires_at <= pg_catalog.clock_timestamp()
+     OR operation.state <> 'governed_deletion_pending'
+     OR operation.target_count <> p_expected_target_count
+     OR operation.target_manifest_sha256 <> p_expected_target_manifest_sha256
+  THEN
+    RAISE EXCEPTION 'governed erasure receipt does not match fence'
+      USING ERRCODE = '40001';
+  END IF;
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET state = 'governed_deleted',
+      governed_receipt_sha256 = p_governed_receipt_sha256,
+      governed_completed_at = pg_catalog.transaction_timestamp(),
+      lease_token = NULL, leased_by = NULL, lease_expires_at = NULL,
+      last_error_code = NULL
+  WHERE value.operation_id = p_operation_id;
+  RETURN 'governed_deleted'::text;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.finalize_source_erasure(
+  p_operation_id uuid,
+  p_lease_token uuid,
+  p_governed_receipt_sha256 text
+)
+RETURNS TABLE(
+  outcome text,
+  receipt_sha256 text,
+  deleted_message_count integer,
+  deleted_thread_count integer,
+  deleted_attachment_count integer,
+  deleted_bridge_row_count integer,
+  completed_at timestamptz
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory_ingest_private.source_erasure_operation%ROWTYPE;
+  stored memory_ingest_private.source_erasure_receipt%ROWTYPE;
+  removed_messages integer := 0;
+  removed_threads integer := 0;
+  removed_attachments integer := 0;
+  removed_bridge_rows integer := 0;
+  removed_more integer := 0;
+  message_tombstone_count integer := 0;
+  thread_tombstone_count integer := 0;
+  observed_message_tombstone_count integer := 0;
+  observed_thread_tombstone_count integer := 0;
+  observed_target_count integer := 0;
+  observed_thread_target_count integer := 0;
+  remaining_transcript boolean := false;
+  finished_at timestamptz;
+  observed_target_manifest text;
+  observed_thread_target_manifest text;
+  tombstone_manifest text;
+  receipt_hash text;
+  new_receipt_id uuid;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL
+     OR COALESCE(p_governed_receipt_sha256, '') !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid source erasure finalization'
+      USING ERRCODE = '22023';
+  END IF;
+  LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
+  END IF;
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE trusted_web.response_transcript_v1 IN ROW EXCLUSIVE MODE';
+  END IF;
+  LOCK TABLE memory_ingest_private.memory_ingest_outbox
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_operation
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_message_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_receipt
+    IN ROW EXCLUSIVE MODE;
+  PERFORM memory_ingest_private.assert_chat_deletion_catalog();
+  SELECT value.* INTO STRICT operation
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  SELECT value.* INTO stored
+  FROM memory_ingest_private.source_erasure_receipt AS value
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  IF FOUND THEN
+    IF stored.governed_receipt_sha256 <> p_governed_receipt_sha256 THEN
+      RAISE EXCEPTION 'source erasure finalization replay drifted'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN QUERY SELECT 'replayed'::text, stored.receipt_sha256,
+      stored.deleted_message_count, stored.deleted_thread_count,
+      stored.deleted_attachment_count, stored.deleted_bridge_row_count,
+      stored.completed_at;
+    RETURN;
+  END IF;
+  IF operation.state <> 'governed_deleted'
+     OR operation.governed_receipt_sha256 <> p_governed_receipt_sha256
+     OR operation.lease_token <> p_lease_token
+     OR operation.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'governed deletion is not verified'
+      USING ERRCODE = '40001';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      operation.owner_user_id::text || '|chat_source_erasure', 0
+    )
+  );
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.message_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_target_count, observed_target_manifest
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_thread_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.thread_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_thread_target_count, observed_thread_target_manifest
+  FROM memory_ingest_private.source_erasure_thread_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  IF observed_target_count <> operation.target_count
+     OR observed_target_manifest <> operation.target_manifest_sha256
+     OR observed_thread_target_count <> operation.thread_target_count
+     OR observed_thread_target_manifest <>
+          operation.thread_target_manifest_sha256 THEN
+    RAISE EXCEPTION 'conversation source target inventory drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN public.chat_log AS source
+      ON source.id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND (
+        source.owner_user_id IS DISTINCT FROM target.owner_user_id
+        OR source.thread_id IS DISTINCT FROM target.thread_id
+        OR source.created_at IS DISTINCT FROM target.source_created_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'conversation source target lineage drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN memory_ingest_private.memory_ingest_outbox AS bridge
+      ON bridge.message_id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND bridge.owner_user_id IS DISTINCT FROM target.owner_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    JOIN public.chat_log AS residual
+      ON residual.thread_id = target.thread_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND residual.owner_user_id IS DISTINCT FROM target.owner_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    JOIN public.threads AS thread
+      ON thread.id = target.thread_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND (
+        thread.owner_user_id IS DISTINCT FROM target.owner_user_id
+        OR thread.created_at IS DISTINCT FROM target.source_created_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'conversation source owner/thread lineage drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  finished_at := pg_catalog.transaction_timestamp();
+  INSERT INTO memory_ingest_private.source_erasure_message_tombstone(
+    message_id, owner_user_id, operation_id, erased_at
+  )
+  SELECT target.message_id, target.owner_user_id, target.operation_id,
+    finished_at
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+  ORDER BY target.message_id;
+  GET DIAGNOSTICS message_tombstone_count = ROW_COUNT;
+  IF message_tombstone_count <> operation.target_count THEN
+    RAISE EXCEPTION 'conversation message tombstone count drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  DELETE FROM public.chat_attachments AS attachment
+  USING memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+    AND attachment.owner_user_id = target.owner_user_id
+    AND attachment.thread_id = target.thread_id
+    AND attachment.message_id = target.message_id;
+  GET DIAGNOSTICS removed_attachments = ROW_COUNT;
+  DELETE FROM public.chat_log AS source
+  USING memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+    AND source.owner_user_id = target.owner_user_id
+    AND source.id = target.message_id;
+  GET DIAGNOSTICS removed_messages = ROW_COUNT;
+
+  INSERT INTO memory_ingest_private.source_erasure_thread_tombstone(
+    thread_id, owner_user_id, operation_id, erased_at
+  )
+  SELECT target.thread_id, target.owner_user_id, target.operation_id,
+    finished_at
+  FROM memory_ingest_private.source_erasure_thread_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.chat_log AS remaining
+      WHERE remaining.thread_id = target.thread_id
+    )
+  ORDER BY target.thread_id;
+  GET DIAGNOSTICS thread_tombstone_count = ROW_COUNT;
+
+  DELETE FROM public.chat_attachments AS attachment
+  USING memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+  WHERE tombstone.owner_user_id = operation.owner_user_id
+    AND tombstone.operation_id = operation.operation_id
+    AND attachment.owner_user_id = operation.owner_user_id
+    AND attachment.thread_id = tombstone.thread_id;
+  GET DIAGNOSTICS removed_more = ROW_COUNT;
+  removed_attachments := removed_attachments + removed_more;
+
+  DELETE FROM public.threads AS thread
+  USING memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+  WHERE tombstone.owner_user_id = operation.owner_user_id
+    AND tombstone.operation_id = operation.operation_id
+    AND thread.owner_user_id = operation.owner_user_id
+    AND thread.id = tombstone.thread_id
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.chat_log AS remaining
+      WHERE remaining.thread_id = tombstone.thread_id
+    );
+  GET DIAGNOSTICS removed_threads = ROW_COUNT;
+  IF removed_threads > thread_tombstone_count THEN
+    RAISE EXCEPTION 'conversation thread tombstone count drifted'
+      USING ERRCODE = '40001';
+  END IF;
+
+  DELETE FROM memory_ingest_private.memory_ingest_outbox AS bridge
+  USING memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+    AND bridge.owner_user_id = target.owner_user_id
+    AND bridge.message_id = target.message_id;
+  GET DIAGNOSTICS removed_bridge_rows = ROW_COUNT;
+
+  SELECT
+    pg_catalog.count(*) FILTER (
+      WHERE tombstone.identity_kind = 'message'
+    )::integer,
+    pg_catalog.count(*) FILTER (
+      WHERE tombstone.identity_kind = 'thread'
+    )::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.conversation_suppression_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          memory_ingest_private.framed_utf8_field(
+            'identity_kind', tombstone.identity_kind
+          )
+            || memory_ingest_private.framed_utf8_field(
+                 'identity_id', tombstone.identity_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'owner_user_id', tombstone.owner_user_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'operation_id', tombstone.operation_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'erased_at',
+                 memory_ingest_private.timestamp_utc_text(
+                   tombstone.erased_at
+                 )
+               ),
+          '' ORDER BY tombstone.identity_kind, tombstone.identity_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_message_tombstone_count,
+    observed_thread_tombstone_count, tombstone_manifest
+  FROM (
+    SELECT 'message'::text AS identity_kind,
+      value.message_id AS identity_id, value.owner_user_id,
+      value.operation_id, value.erased_at
+    FROM memory_ingest_private.source_erasure_message_tombstone AS value
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id
+    UNION ALL
+    SELECT 'thread'::text AS identity_kind,
+      value.thread_id AS identity_id, value.owner_user_id,
+      value.operation_id, value.erased_at
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS value
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id
+  ) AS tombstone;
+  IF observed_message_tombstone_count <> message_tombstone_count
+     OR observed_thread_tombstone_count <> thread_tombstone_count THEN
+    RAISE EXCEPTION 'conversation suppression tombstone inventory drifted'
+      USING ERRCODE = '40001';
+  END IF;
+
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS ('
+      'SELECT 1 '
+      'FROM trusted_web.response_transcript_v1 AS transcript '
+      'JOIN memory_ingest_private.source_erasure_target AS target '
+      'ON (target.message_id = transcript.user_chat_log_id '
+      'OR target.message_id = transcript.assistant_chat_log_id) '
+      'WHERE target.owner_user_id = $1 '
+      'AND target.operation_id = $2'
+      ')'
+    INTO remaining_transcript
+    USING operation.owner_user_id, operation.operation_id;
+  END IF;
+  IF remaining_transcript OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_message_tombstone
+          AS tombstone
+        WHERE tombstone.message_id = target.message_id
+          AND tombstone.owner_user_id = target.owner_user_id
+          AND tombstone.operation_id = target.operation_id
+          AND tombstone.erased_at = finished_at
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.chat_log AS remaining
+        WHERE remaining.thread_id = target.thread_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id = target.thread_id
+          AND tombstone.owner_user_id = target.owner_user_id
+          AND tombstone.operation_id = target.operation_id
+          AND tombstone.erased_at = finished_at
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN public.chat_log AS source
+      ON source.id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN public.chat_attachments AS attachment
+      ON attachment.message_id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN memory_ingest_private.memory_ingest_outbox AS bridge
+      ON bridge.message_id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    JOIN public.threads AS thread
+      ON thread.id = tombstone.thread_id
+    WHERE tombstone.owner_user_id = operation.owner_user_id
+      AND tombstone.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    JOIN public.chat_attachments AS attachment
+      ON attachment.thread_id = tombstone.thread_id
+    WHERE tombstone.owner_user_id = operation.owner_user_id
+      AND tombstone.operation_id = operation.operation_id
+  ) THEN
+    RAISE EXCEPTION 'conversation source absence verification failed'
+      USING ERRCODE = '40001';
+  END IF;
+  receipt_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.conversation_source_erasure_receipt.v2' || E'\n'
+      || memory_ingest_private.framed_utf8_field(
+           'owner_user_id', operation.owner_user_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'operation_id', operation.operation_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'selector_sha256', operation.selector_sha256
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'target_manifest_sha256', operation.target_manifest_sha256
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'target_count', operation.target_count::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'thread_target_manifest_sha256',
+           operation.thread_target_manifest_sha256
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'thread_target_count', operation.thread_target_count::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'deleted_message_count', removed_messages::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'deleted_thread_count', removed_threads::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'deleted_attachment_count', removed_attachments::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'deleted_bridge_row_count', removed_bridge_rows::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'message_tombstone_count', message_tombstone_count::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'thread_tombstone_count', thread_tombstone_count::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'tombstone_manifest_sha256', tombstone_manifest
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'governed_receipt_sha256', p_governed_receipt_sha256
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'completed_at',
+           memory_ingest_private.timestamp_utc_text(finished_at)
+         ),
+    'UTF8'
+  )), 'hex');
+  new_receipt_id := pg_catalog.gen_random_uuid();
+  INSERT INTO memory_ingest_private.source_erasure_receipt(
+    receipt_id, owner_user_id, operation_id, selector_sha256,
+    target_manifest_sha256, target_count, thread_target_manifest_sha256,
+    thread_target_count, deleted_message_count,
+    deleted_thread_count, deleted_attachment_count,
+    deleted_bridge_row_count, message_tombstone_count,
+    thread_tombstone_count, tombstone_manifest_sha256,
+    governed_receipt_sha256, receipt_sha256, completed_at
+  ) VALUES (
+    new_receipt_id, operation.owner_user_id, operation.operation_id,
+    operation.selector_sha256, operation.target_manifest_sha256,
+    operation.target_count, operation.thread_target_manifest_sha256,
+    operation.thread_target_count, removed_messages, removed_threads,
+    removed_attachments, removed_bridge_rows,
+    message_tombstone_count, thread_tombstone_count, tombstone_manifest,
+    p_governed_receipt_sha256, receipt_hash, finished_at
+  );
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET state = 'conversation_deleted_pending_ack',
+      completed_at = finished_at, last_error_code = NULL
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN QUERY SELECT 'conversation_deleted_pending_ack'::text, receipt_hash,
+    removed_messages, removed_threads, removed_attachments,
+    removed_bridge_rows, finished_at;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.ack_source_erasure_completion(
+  p_operation_id uuid,
+  p_lease_token uuid,
+  p_conversation_receipt_sha256 text
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory_ingest_private.source_erasure_operation%ROWTYPE;
+  stored memory_ingest_private.source_erasure_receipt%ROWTYPE;
+  remaining_transcript boolean := false;
+  observed_target_count integer := 0;
+  observed_thread_target_count integer := 0;
+  observed_message_tombstone_count integer := 0;
+  observed_thread_tombstone_count integer := 0;
+  removed_target_count integer := 0;
+  removed_thread_target_count integer := 0;
+  observed_target_manifest text;
+  observed_thread_target_manifest text;
+  observed_tombstone_manifest text;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL
+     OR COALESCE(p_conversation_receipt_sha256, '')
+          !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid source erasure completion acknowledgement'
+      USING ERRCODE = '22023';
+  END IF;
+  LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
+  END IF;
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'LOCK TABLE trusted_web.response_transcript_v1 IN ROW EXCLUSIVE MODE';
+  END IF;
+  LOCK TABLE memory_ingest_private.memory_ingest_outbox
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_operation
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_target
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_message_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_thread_tombstone
+    IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.source_erasure_receipt
+    IN ROW EXCLUSIVE MODE;
+  PERFORM memory_ingest_private.assert_chat_deletion_catalog();
+  SELECT value.* INTO STRICT operation
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  SELECT value.* INTO STRICT stored
+  FROM memory_ingest_private.source_erasure_receipt AS value
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  IF stored.receipt_sha256 <> p_conversation_receipt_sha256 THEN
+    RAISE EXCEPTION 'source erasure completion receipt drifted'
+      USING ERRCODE = '23514';
+  END IF;
+  IF operation.state = 'completed' THEN
+    RETURN 'replayed'::text;
+  END IF;
+  IF operation.state <> 'conversation_deleted_pending_ack'
+     OR operation.lease_token <> p_lease_token
+     OR operation.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'source erasure completion lease is stale'
+      USING ERRCODE = '55000';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      operation.owner_user_id::text || '|chat_source_erasure', 0
+    )
+  );
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.message_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_target_count, observed_target_manifest
+  FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_thread_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.thread_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_thread_target_count, observed_thread_target_manifest
+  FROM memory_ingest_private.source_erasure_thread_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  IF observed_target_count <> operation.target_count
+     OR observed_target_manifest <> operation.target_manifest_sha256
+     OR observed_target_manifest <> stored.target_manifest_sha256
+     OR observed_thread_target_count <> operation.thread_target_count
+     OR observed_thread_target_count <> stored.thread_target_count
+     OR observed_thread_target_manifest <>
+          operation.thread_target_manifest_sha256
+     OR observed_thread_target_manifest <>
+          stored.thread_target_manifest_sha256 THEN
+    RAISE EXCEPTION 'pending-ack source erasure target inventory drifted'
+      USING ERRCODE = '40001';
+  END IF;
+
+  SELECT
+    pg_catalog.count(*) FILTER (
+      WHERE tombstone.identity_kind = 'message'
+    )::integer,
+    pg_catalog.count(*) FILTER (
+      WHERE tombstone.identity_kind = 'thread'
+    )::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.conversation_suppression_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          memory_ingest_private.framed_utf8_field(
+            'identity_kind', tombstone.identity_kind
+          )
+            || memory_ingest_private.framed_utf8_field(
+                 'identity_id', tombstone.identity_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'owner_user_id', tombstone.owner_user_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'operation_id', tombstone.operation_id::text
+               )
+            || memory_ingest_private.framed_utf8_field(
+                 'erased_at',
+                 memory_ingest_private.timestamp_utc_text(
+                   tombstone.erased_at
+                 )
+               ),
+          '' ORDER BY tombstone.identity_kind, tombstone.identity_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_message_tombstone_count,
+    observed_thread_tombstone_count, observed_tombstone_manifest
+  FROM (
+    SELECT 'message'::text AS identity_kind,
+      value.message_id AS identity_id, value.owner_user_id,
+      value.operation_id, value.erased_at
+    FROM memory_ingest_private.source_erasure_message_tombstone AS value
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id
+    UNION ALL
+    SELECT 'thread'::text AS identity_kind,
+      value.thread_id AS identity_id, value.owner_user_id,
+      value.operation_id, value.erased_at
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS value
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id
+  ) AS tombstone;
+  IF observed_message_tombstone_count <> stored.message_tombstone_count
+     OR observed_message_tombstone_count <> operation.target_count
+     OR observed_thread_tombstone_count <> stored.thread_tombstone_count
+     OR observed_thread_tombstone_count < stored.deleted_thread_count
+     OR observed_thread_tombstone_count > stored.thread_target_count
+     OR observed_tombstone_manifest <> stored.tombstone_manifest_sha256 THEN
+    RAISE EXCEPTION 'pending-ack suppression tombstone receipt drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_message_tombstone
+          AS tombstone
+        WHERE tombstone.message_id = target.message_id
+          AND tombstone.owner_user_id = target.owner_user_id
+          AND tombstone.operation_id = target.operation_id
+          AND tombstone.erased_at = stored.completed_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'pending-ack message tombstone binding drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.chat_log AS remaining
+        WHERE remaining.thread_id = target.thread_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id = target.thread_id
+          AND tombstone.owner_user_id = target.owner_user_id
+          AND tombstone.operation_id = target.operation_id
+          AND tombstone.erased_at = stored.completed_at
+      )
+  ) THEN
+    RAISE EXCEPTION 'pending-ack thread tombstone binding drifted'
+      USING ERRCODE = '40001';
+  END IF;
+
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'SELECT EXISTS ('
+      'SELECT 1 '
+      'FROM trusted_web.response_transcript_v1 AS transcript '
+      'JOIN memory_ingest_private.source_erasure_target AS target '
+      'ON (target.message_id = transcript.user_chat_log_id '
+      'OR target.message_id = transcript.assistant_chat_log_id) '
+      'WHERE target.owner_user_id = $1 '
+      'AND target.operation_id = $2'
+      ')'
+    INTO remaining_transcript
+    USING operation.owner_user_id, operation.operation_id;
+  END IF;
+  IF remaining_transcript OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN public.chat_log AS source
+      ON source.id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN public.chat_attachments AS attachment
+      ON attachment.message_id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN memory_ingest_private.memory_ingest_outbox AS bridge
+      ON bridge.message_id = target.message_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    JOIN public.chat_log AS residual
+      ON residual.thread_id = target.thread_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND residual.owner_user_id IS DISTINCT FROM target.owner_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    JOIN public.threads AS thread
+      ON thread.id = target.thread_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND (
+        thread.owner_user_id IS DISTINCT FROM target.owner_user_id
+        OR thread.created_at IS DISTINCT FROM target.source_created_at
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    JOIN public.threads AS thread
+      ON thread.id = tombstone.thread_id
+    WHERE tombstone.owner_user_id = operation.owner_user_id
+      AND tombstone.operation_id = operation.operation_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    JOIN public.chat_attachments AS attachment
+      ON attachment.thread_id = tombstone.thread_id
+    WHERE tombstone.owner_user_id = operation.owner_user_id
+      AND tombstone.operation_id = operation.operation_id
+  ) THEN
+    RAISE EXCEPTION 'pending-ack conversation absence verification failed'
+      USING ERRCODE = '40001';
+  END IF;
+  DELETE FROM memory_ingest_private.source_erasure_thread_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  GET DIAGNOSTICS removed_thread_target_count = ROW_COUNT;
+  IF removed_thread_target_count <> operation.thread_target_count THEN
+    RAISE EXCEPTION 'pending-ack thread target purge drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  DELETE FROM memory_ingest_private.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  GET DIAGNOSTICS removed_target_count = ROW_COUNT;
+  IF removed_target_count <> operation.target_count THEN
+    RAISE EXCEPTION 'pending-ack source erasure target purge drifted'
+      USING ERRCODE = '40001';
+  END IF;
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET state = 'completed', lease_token = NULL, leased_by = NULL,
+      lease_expires_at = NULL, last_error_code = NULL
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN 'completed'::text;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.fail_source_erasure(
+  p_operation_id uuid,
+  p_lease_token uuid,
+  p_failure_mode text,
+  p_error_code text
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  resulting_state text;
+  operation memory_ingest_private.source_erasure_operation%ROWTYPE;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_lease_token IS NULL
+     OR p_failure_mode NOT IN ('retryable', 'manual_review')
+     OR pg_catalog.octet_length(COALESCE(p_error_code, '')) NOT BETWEEN 1 AND 128
+     OR p_error_code !~ '^[a-z][a-z0-9_]{0,127}$' THEN
+    RAISE EXCEPTION 'invalid source erasure failure'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory_ingest_private.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.lease_token <> p_lease_token
+     OR operation.lease_expires_at <= pg_catalog.clock_timestamp() THEN
+    RAISE EXCEPTION 'source erasure lease is stale'
+      USING ERRCODE = '55000';
+  END IF;
+  IF operation.state = 'conversation_deleted_pending_ack' THEN
+    IF p_failure_mode <> 'retryable' THEN
+      RAISE EXCEPTION 'deleted conversation may only remain pending ack'
+        USING ERRCODE = '55000';
+    END IF;
+    resulting_state := 'conversation_deleted_pending_ack';
+  ELSE
+    resulting_state := p_failure_mode;
+  END IF;
+  UPDATE memory_ingest_private.source_erasure_operation AS value
+  SET state = resulting_state, lease_token = NULL, leased_by = NULL,
+      lease_expires_at = NULL, last_error_code = p_error_code
+  WHERE value.operation_id = p_operation_id
+    AND value.lease_token = p_lease_token;
+  RETURN resulting_state;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.serialize_chat_source_erasure()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  fence_owner uuid;
+BEGIN
+  FOR fence_owner IN
+    SELECT candidate.owner_id
+    FROM (
+      SELECT NEW.owner_user_id AS owner_id
+      UNION
+      SELECT target.owner_user_id
+      FROM memory_ingest_private.source_erasure_target AS target
+      JOIN memory_ingest_private.source_erasure_operation AS operation
+        ON operation.owner_user_id = target.owner_user_id
+       AND operation.operation_id = target.operation_id
+      WHERE target.message_id = NEW.id
+        AND operation.state <> 'completed'
+      UNION
+      SELECT target.owner_user_id
+      FROM memory_ingest_private.source_erasure_thread_target AS target
+      JOIN memory_ingest_private.source_erasure_operation AS operation
+        ON operation.owner_user_id = target.owner_user_id
+       AND operation.operation_id = target.operation_id
+      WHERE target.thread_id = NEW.thread_id
+        AND operation.state <> 'completed'
+      UNION
+      SELECT tombstone.owner_user_id
+      FROM memory_ingest_private.source_erasure_message_tombstone
+        AS tombstone
+      WHERE tombstone.message_id = NEW.id
+      UNION
+      SELECT tombstone.owner_user_id
+      FROM memory_ingest_private.source_erasure_thread_tombstone
+        AS tombstone
+      WHERE tombstone.thread_id = NEW.thread_id
+    ) AS candidate
+    WHERE candidate.owner_id IS NOT NULL
+    ORDER BY candidate.owner_id::text
+  LOOP
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        fence_owner::text || '|chat_source_erasure', 0
+      )
+    );
+  END LOOP;
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_message_tombstone AS tombstone
+    WHERE tombstone.message_id = NEW.id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    WHERE tombstone.thread_id = NEW.thread_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_operation AS operation
+    WHERE operation.state <> 'completed'
+      AND (
+        (operation.owner_user_id = NEW.owner_user_id
+          AND (
+            (operation.selector_kind = 'thread'
+              AND NEW.thread_id = operation.selector_thread_id)
+            OR
+            (operation.selector_kind = 'message_tail'
+              AND NEW.thread_id = operation.selector_thread_id
+              AND (
+                NEW.created_at IS NULL
+                OR (
+                  NEW.created_at >= operation.selector_from_inclusive
+                  AND NEW.created_at <= operation.selector_through_inclusive
+                )
+              ))
+            OR
+            (operation.selector_kind = 'recent'
+              AND (
+                NEW.created_at IS NULL
+                OR (
+                  NEW.created_at >= operation.selector_from_inclusive
+                  AND NEW.created_at <= operation.selector_through_inclusive
+                )
+              ))
+            OR
+            (operation.selector_kind = 'all_conversations'
+              AND (
+                NEW.thread_id IS NULL OR NEW.created_at IS NULL
+                OR NEW.created_at <= operation.selector_through_inclusive
+              ))
+          ))
+        OR
+        EXISTS (
+          SELECT 1
+          FROM memory_ingest_private.source_erasure_target AS target
+          WHERE target.owner_user_id = operation.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.message_id = NEW.id
+        )
+        OR
+        (NEW.owner_user_id IS DISTINCT FROM operation.owner_user_id
+          AND EXISTS (
+            SELECT 1
+            FROM memory_ingest_private.source_erasure_thread_target
+              AS target
+            WHERE target.owner_user_id = operation.owner_user_id
+              AND target.operation_id = operation.operation_id
+              AND target.thread_id = NEW.thread_id
+          ))
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.serialize_thread_source_erasure()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  fence_owner uuid;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.thread_id = NEW.id
+          AND operation.state <> 'completed'
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id = NEW.id
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  ELSE
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION SELECT OLD.owner_user_id
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.thread_id IN (NEW.id, OLD.id)
+          AND operation.state <> 'completed'
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id IN (NEW.id, OLD.id)
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    WHERE tombstone.thread_id = NEW.id
+  ) OR (
+    TG_OP = 'UPDATE' AND EXISTS (
+      SELECT 1
+      FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+      WHERE tombstone.thread_id = OLD.id
+    )
+  ) THEN
+    RAISE EXCEPTION 'erased chat thread identity may not be reused'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_target AS target
+    JOIN memory_ingest_private.source_erasure_operation AS operation
+      ON operation.owner_user_id = target.owner_user_id
+     AND operation.operation_id = target.operation_id
+    WHERE operation.state <> 'completed'
+      AND target.thread_id = NEW.id
+  ) OR (
+    TG_OP = 'UPDATE' AND EXISTS (
+      SELECT 1
+      FROM memory_ingest_private.source_erasure_thread_target AS target
+      JOIN memory_ingest_private.source_erasure_operation AS operation
+        ON operation.owner_user_id = target.owner_user_id
+       AND operation.operation_id = target.operation_id
+      WHERE operation.state <> 'completed'
+        AND target.thread_id = OLD.id
+    )
+  ) THEN
+    RAISE EXCEPTION 'thread source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.owner_user_id IS NOT NULL AND EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_operation AS operation
+    WHERE operation.owner_user_id = NEW.owner_user_id
+      AND operation.state <> 'completed'
+      AND (
+        (operation.selector_kind = 'thread'
+          AND NEW.id = operation.selector_thread_id)
+        OR
+        (operation.selector_kind = 'all_conversations'
+          AND (
+            NEW.created_at IS NULL
+            OR NEW.created_at <= operation.selector_through_inclusive
+          ))
+      )
+  ) THEN
+    RAISE EXCEPTION 'thread source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  IF TG_OP = 'UPDATE'
+     AND OLD.owner_user_id IS NOT NULL
+     AND EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_operation AS operation
+    WHERE operation.owner_user_id = OLD.owner_user_id
+      AND operation.state <> 'completed'
+      AND (
+        (operation.selector_kind = 'thread'
+          AND OLD.id = operation.selector_thread_id)
+        OR
+        (operation.selector_kind = 'all_conversations'
+          AND (
+            OLD.created_at IS NULL
+            OR OLD.created_at <= operation.selector_through_inclusive
+          ))
+      )
+  ) THEN
+    RAISE EXCEPTION 'thread source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.serialize_attachment_source_erasure()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  fence_owner uuid;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.message_id = NEW.message_id
+          AND operation.state <> 'completed'
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.thread_id = NEW.thread_id
+          AND operation.state <> 'completed'
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_message_tombstone
+          AS tombstone
+        WHERE tombstone.message_id = NEW.message_id
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id = NEW.thread_id
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  ELSE
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION SELECT OLD.owner_user_id
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.message_id IN (NEW.message_id, OLD.message_id)
+          AND operation.state <> 'completed'
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_target AS target
+        JOIN memory_ingest_private.source_erasure_operation AS operation
+          ON operation.owner_user_id = target.owner_user_id
+         AND operation.operation_id = target.operation_id
+        WHERE target.thread_id IN (NEW.thread_id, OLD.thread_id)
+          AND operation.state <> 'completed'
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_message_tombstone
+          AS tombstone
+        WHERE tombstone.message_id IN (NEW.message_id, OLD.message_id)
+        UNION
+        SELECT tombstone.owner_user_id
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id IN (NEW.thread_id, OLD.thread_id)
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_message_tombstone AS tombstone
+    WHERE tombstone.message_id = NEW.message_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_thread_tombstone AS tombstone
+    WHERE tombstone.thread_id = NEW.thread_id
+  ) OR (
+    TG_OP = 'UPDATE' AND (
+      EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_message_tombstone
+          AS tombstone
+        WHERE tombstone.message_id = OLD.message_id
+      ) OR EXISTS (
+        SELECT 1
+        FROM memory_ingest_private.source_erasure_thread_tombstone
+          AS tombstone
+        WHERE tombstone.thread_id = OLD.thread_id
+      )
+    )
+  ) THEN
+    RAISE EXCEPTION 'erased chat attachment identity may not be reused'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_operation AS operation
+    WHERE operation.state <> 'completed'
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM memory_ingest_private.source_erasure_target AS target
+          WHERE target.owner_user_id = operation.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.message_id = NEW.message_id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM memory_ingest_private.source_erasure_thread_target AS target
+          WHERE target.owner_user_id = operation.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.thread_id = NEW.thread_id
+        )
+        OR (TG_OP = 'UPDATE' AND (
+          EXISTS (
+            SELECT 1
+            FROM memory_ingest_private.source_erasure_target AS target
+            WHERE target.owner_user_id = operation.owner_user_id
+              AND target.operation_id = operation.operation_id
+              AND target.message_id = OLD.message_id
+          ) OR EXISTS (
+            SELECT 1
+            FROM memory_ingest_private.source_erasure_thread_target AS target
+            WHERE target.owner_user_id = operation.owner_user_id
+              AND target.operation_id = operation.operation_id
+              AND target.thread_id = OLD.thread_id
+          )
+        ))
+      )
+  ) THEN
+    RAISE EXCEPTION 'attachment source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE FUNCTION
+  memory_ingest_private.serialize_response_transcript_source_erasure()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  fence_owner uuid;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION
+        SELECT source.owner_user_id
+        FROM public.chat_log AS source
+        WHERE source.id IN (
+          NEW.user_chat_log_id, NEW.assistant_chat_log_id
+        )
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_target AS target
+        WHERE target.message_id IN (
+          NEW.user_chat_log_id, NEW.assistant_chat_log_id
+        )
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  ELSE
+    FOR fence_owner IN
+      SELECT candidate.owner_id
+      FROM (
+        SELECT NEW.owner_user_id AS owner_id
+        UNION SELECT OLD.owner_user_id
+        UNION
+        SELECT source.owner_user_id
+        FROM public.chat_log AS source
+        WHERE source.id IN (
+          NEW.user_chat_log_id, NEW.assistant_chat_log_id,
+          OLD.user_chat_log_id, OLD.assistant_chat_log_id
+        )
+        UNION
+        SELECT target.owner_user_id
+        FROM memory_ingest_private.source_erasure_target AS target
+        WHERE target.message_id IN (
+          NEW.user_chat_log_id, NEW.assistant_chat_log_id,
+          OLD.user_chat_log_id, OLD.assistant_chat_log_id
+        )
+      ) AS candidate
+      WHERE candidate.owner_id IS NOT NULL
+      ORDER BY candidate.owner_id::text
+    LOOP
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+          fence_owner::text || '|chat_source_erasure', 0
+        )
+      );
+    END LOOP;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN memory_ingest_private.source_erasure_operation AS operation
+      ON operation.owner_user_id = target.owner_user_id
+     AND operation.operation_id = target.operation_id
+    WHERE operation.state <> 'completed'
+      AND target.message_id IN (
+        NEW.user_chat_log_id, NEW.assistant_chat_log_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'response transcript source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  IF TG_OP = 'UPDATE' AND EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.source_erasure_target AS target
+    JOIN memory_ingest_private.source_erasure_operation AS operation
+      ON operation.owner_user_id = target.owner_user_id
+     AND operation.operation_id = target.operation_id
+    WHERE operation.state <> 'completed'
+      AND target.message_id IN (
+        OLD.user_chat_log_id, OLD.assistant_chat_log_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'response transcript source erasure fence is active'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE FUNCTION memory_ingest_private.guard_source_erasure_receipt_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  RAISE EXCEPTION 'source erasure receipt or suppression tombstone is immutable'
+    USING ERRCODE = '55000';
+END;
+$function$;
+
+CREATE TRIGGER chat_log_serialize_source_erasure
+  BEFORE INSERT ON public.chat_log
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.serialize_chat_source_erasure();
+CREATE TRIGGER threads_serialize_source_erasure
+  BEFORE INSERT OR UPDATE ON public.threads
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.serialize_thread_source_erasure();
+CREATE TRIGGER chat_attachments_serialize_source_erasure
+  BEFORE INSERT OR UPDATE ON public.chat_attachments
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.serialize_attachment_source_erasure();
+DO $response_transcript_trigger$
+BEGIN
+  IF pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'CREATE TRIGGER response_transcript_serialize_source_erasure '
+      'BEFORE INSERT OR UPDATE '
+      'ON trusted_web.response_transcript_v1 '
+      'FOR EACH ROW EXECUTE FUNCTION '
+      'memory_ingest_private.'
+      'serialize_response_transcript_source_erasure()';
+  END IF;
+END;
+$response_transcript_trigger$;
+CREATE TRIGGER source_erasure_receipt_immutable
+  BEFORE UPDATE OR DELETE
+  ON memory_ingest_private.source_erasure_receipt
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.guard_source_erasure_receipt_immutable();
+CREATE TRIGGER source_erasure_message_tombstone_immutable
+  BEFORE UPDATE OR DELETE
+  ON memory_ingest_private.source_erasure_message_tombstone
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.guard_source_erasure_receipt_immutable();
+CREATE TRIGGER source_erasure_thread_tombstone_immutable
+  BEFORE UPDATE OR DELETE
+  ON memory_ingest_private.source_erasure_thread_tombstone
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_ingest_private.guard_source_erasure_receipt_immutable();
+
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA memory_ingest_private
-  FROM PUBLIC, memory_ingest_writer, governed_memory_worker;
+  FROM PUBLIC, memory_ingest_writer, memory_erasure_requester,
+       governed_memory_worker;
 GRANT EXECUTE ON FUNCTION memory_ingest_private.enqueue_chat_log_message(
   uuid,text
 ) TO memory_ingest_writer;
+GRANT EXECUTE ON FUNCTION
+  memory_ingest_private.begin_source_erasure(
+    uuid,text,uuid,uuid,integer,text
+  ),
+  memory_ingest_private.read_source_erasure(uuid)
+TO memory_erasure_requester;
 GRANT EXECUTE ON FUNCTION
   memory_ingest_private.lease_memory_ingest(text,integer,integer),
   memory_ingest_private.read_leased_chat_log_message(uuid,uuid),
@@ -1313,34 +5238,741 @@ GRANT EXECUTE ON FUNCTION
   memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid),
   memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer),
   memory_ingest_private.expire_memory_ingest(integer),
-  memory_ingest_private.purge_terminal_memory_ingest(integer)
+  memory_ingest_private.purge_terminal_memory_ingest(integer),
+  memory_ingest_private.lease_source_erasure(text,integer),
+  memory_ingest_private.read_source_erasure_targets(
+    uuid,uuid,timestamptz,uuid,integer
+  ),
+  memory_ingest_private.release_source_erasure_lease(uuid,uuid),
+  memory_ingest_private.mark_source_erasure_governed_deleted(
+    uuid,uuid,text,integer,text
+  ),
+  memory_ingest_private.finalize_source_erasure(uuid,uuid,text),
+  memory_ingest_private.ack_source_erasure_completion(uuid,uuid,text),
+  memory_ingest_private.fail_source_erasure(uuid,uuid,text,text)
 TO governed_memory_worker;
 
 DO $postflight$
 DECLARE
+  expected_column record;
+  expected_constraint record;
   forbidden_role text;
   forbidden_relation text;
+  function_oid oid;
+  function_signature text;
+  object_definition text;
+  observed_count integer;
+  relation_oid oid;
   runtime_role text;
+  should_execute boolean;
+  should_security_definer boolean;
   privilege_name text;
 BEGIN
+  PERFORM memory_ingest_private.assert_chat_deletion_catalog();
   IF NOT EXISTS (
     SELECT 1
-    FROM pg_catalog.pg_class AS relation
-    JOIN pg_catalog.pg_namespace AS namespace
-      ON namespace.oid = relation.relnamespace
-    WHERE namespace.nspname = 'memory_ingest_private'
-      AND relation.relname = 'memory_ingest_outbox'
-      AND relation.relrowsecurity
-      AND relation.relforcerowsecurity
-      AND relation.relowner = 'sage'::regrole
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'memory_erasure_requester'
+      AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR pg_catalog.pg_has_role(
+    'brains_app', 'memory_ingest_writer', 'MEMBER'
+  ) OR pg_catalog.pg_has_role(
+    'brains_app', 'memory_erasure_requester', 'MEMBER'
   ) THEN
-    RAISE EXCEPTION 'bridge table owner or forced RLS differs';
+    RAISE EXCEPTION 'inactive bridge role or membership contract differs';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_namespace AS namespace
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(
+        namespace.nspacl,
+        pg_catalog.acldefault('n', namespace.nspowner)
+      )
+    ) AS acl
+    WHERE namespace.nspname = 'memory_ingest_private'
+      AND acl.grantee NOT IN (
+        'sage'::regrole::oid,
+        'memory_ingest_writer'::regrole::oid,
+        'memory_erasure_requester'::regrole::oid,
+        'governed_memory_worker'::regrole::oid
+      )
+  ) THEN
+    RAISE EXCEPTION 'unexpected bridge schema ACL exists';
   END IF;
   FOREACH runtime_role IN ARRAY ARRAY[
-    'memory_ingest_writer', 'governed_memory_worker'
+    'memory_ingest_writer', 'memory_erasure_requester',
+    'governed_memory_worker'
+  ] LOOP
+    IF NOT pg_catalog.has_schema_privilege(
+      runtime_role, 'memory_ingest_private', 'USAGE'
+    ) OR pg_catalog.has_schema_privilege(
+      runtime_role, 'memory_ingest_private', 'CREATE'
+    ) THEN
+      RAISE EXCEPTION 'bridge schema privilege differs for %', runtime_role;
+    END IF;
+  END LOOP;
+
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_class AS relation
+  JOIN pg_catalog.pg_namespace AS namespace
+    ON namespace.oid = relation.relnamespace
+  WHERE namespace.nspname = 'memory_ingest_private'
+    AND relation.relkind IN ('r', 'p');
+  IF observed_count <> 7 THEN
+    RAISE EXCEPTION 'bridge private table inventory differs';
+  END IF;
+
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_attribute AS attribute
+  WHERE attribute.attrelid =
+        'memory_ingest_private.source_erasure_receipt'::regclass
+    AND attribute.attnum > 0
+    AND NOT attribute.attisdropped;
+  IF observed_count <> 18 THEN
+    RAISE EXCEPTION 'source erasure receipt column inventory differs';
+  END IF;
+  FOR expected_column IN
+    SELECT * FROM (VALUES
+      ('receipt_id', 'uuid'),
+      ('owner_user_id', 'uuid'),
+      ('operation_id', 'uuid'),
+      ('selector_sha256', 'text'),
+      ('target_manifest_sha256', 'text'),
+      ('target_count', 'integer'),
+      ('thread_target_manifest_sha256', 'text'),
+      ('thread_target_count', 'integer'),
+      ('deleted_message_count', 'integer'),
+      ('deleted_thread_count', 'integer'),
+      ('deleted_attachment_count', 'integer'),
+      ('deleted_bridge_row_count', 'integer'),
+      ('message_tombstone_count', 'integer'),
+      ('thread_tombstone_count', 'integer'),
+      ('tombstone_manifest_sha256', 'text'),
+      ('governed_receipt_sha256', 'text'),
+      ('receipt_sha256', 'text'),
+      ('completed_at', 'timestamp with time zone')
+    ) AS expected(column_name, type_name)
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid =
+            'memory_ingest_private.source_erasure_receipt'::regclass
+        AND attribute.attname = expected_column.column_name
+        AND attribute.atttypid = expected_column.type_name::regtype
+        AND attribute.attnotnull
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ) THEN
+      RAISE EXCEPTION 'source erasure receipt column differs: %',
+        expected_column.column_name;
+    END IF;
+  END LOOP;
+
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_attribute AS attribute
+  WHERE attribute.attrelid =
+        'memory_ingest_private.source_erasure_thread_target'::regclass
+    AND attribute.attnum > 0
+    AND NOT attribute.attisdropped;
+  IF observed_count <> 5 OR EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('owner_user_id', 'uuid'),
+      ('operation_id', 'uuid'),
+      ('thread_id', 'uuid'),
+      ('source_created_at', 'timestamp with time zone'),
+      ('target_sha256', 'text')
+    ) AS expected(column_name, type_name)
+    LEFT JOIN pg_catalog.pg_attribute AS attribute
+      ON attribute.attrelid =
+           'memory_ingest_private.source_erasure_thread_target'::regclass
+     AND attribute.attname = expected.column_name
+     AND attribute.atttypid = expected.type_name::regtype
+     AND attribute.attnotnull
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped
+    WHERE attribute.attnum IS NULL
+  ) THEN
+    RAISE EXCEPTION 'source erasure thread target columns differ';
+  END IF;
+  FOREACH forbidden_relation IN ARRAY ARRAY[
+    'memory_ingest_private.source_erasure_message_tombstone',
+    'memory_ingest_private.source_erasure_thread_tombstone'
+  ] LOOP
+    relation_oid := pg_catalog.to_regclass(forbidden_relation);
+    SELECT pg_catalog.count(*)::integer INTO observed_count
+    FROM pg_catalog.pg_attribute AS attribute
+    WHERE attribute.attrelid = relation_oid
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped;
+    IF observed_count <> 4 OR EXISTS (
+      SELECT 1
+      FROM (VALUES
+        (CASE WHEN forbidden_relation LIKE '%message%'
+           THEN 'message_id' ELSE 'thread_id' END, 'uuid'),
+        ('owner_user_id', 'uuid'),
+        ('operation_id', 'uuid'),
+        ('erased_at', 'timestamp with time zone')
+      ) AS expected(column_name, type_name)
+      LEFT JOIN pg_catalog.pg_attribute AS attribute
+        ON attribute.attrelid = relation_oid
+       AND attribute.attname = expected.column_name
+       AND attribute.atttypid = expected.type_name::regtype
+       AND attribute.attnotnull
+       AND attribute.attnum > 0
+       AND NOT attribute.attisdropped
+      WHERE attribute.attnum IS NULL
+    ) THEN
+      RAISE EXCEPTION 'suppression tombstone columns differ: %',
+        forbidden_relation;
+    END IF;
+  END LOOP;
+
+  FOREACH forbidden_relation IN ARRAY ARRAY[
+    'memory_ingest_private.memory_ingest_outbox',
+    'memory_ingest_private.source_erasure_operation',
+    'memory_ingest_private.source_erasure_target',
+    'memory_ingest_private.source_erasure_thread_target',
+    'memory_ingest_private.source_erasure_message_tombstone',
+    'memory_ingest_private.source_erasure_thread_tombstone',
+    'memory_ingest_private.source_erasure_receipt'
+  ] LOOP
+    relation_oid := pg_catalog.to_regclass(forbidden_relation);
+    IF relation_oid IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_class AS relation
+      WHERE relation.oid = relation_oid
+        AND relation.relkind = 'r'
+        AND relation.relrowsecurity
+        AND relation.relforcerowsecurity
+        AND relation.relowner = 'sage'::regrole
+    ) THEN
+      RAISE EXCEPTION 'bridge table owner or forced RLS differs: %',
+        forbidden_relation;
+    END IF;
+    SELECT pg_catalog.count(*)::integer INTO observed_count
+    FROM pg_catalog.pg_policy AS policy
+    WHERE policy.polrelid = relation_oid;
+    IF observed_count <> 1 OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_policy AS policy
+      WHERE policy.polrelid = relation_oid
+        AND policy.polname = 'owner_internal'
+        AND policy.polcmd = '*'
+        AND policy.polpermissive
+        AND policy.polroles = ARRAY['sage'::regrole::oid]::oid[]
+        AND pg_catalog.pg_get_expr(
+              policy.polqual, policy.polrelid, true
+            ) = 'true'
+        AND pg_catalog.pg_get_expr(
+              policy.polwithcheck, policy.polrelid, true
+            ) = 'true'
+    ) THEN
+      RAISE EXCEPTION 'bridge table RLS policy differs: %', forbidden_relation;
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_class AS relation
+      CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(
+          relation.relacl,
+          pg_catalog.acldefault('r', relation.relowner)
+        )
+      ) AS acl
+      WHERE relation.oid = relation_oid
+        AND acl.grantee <> 'sage'::regrole::oid
+    ) THEN
+      RAISE EXCEPTION 'direct bridge table ACL exists: %', forbidden_relation;
+    END IF;
+  END LOOP;
+
+  FOR expected_constraint IN
+    SELECT * FROM (VALUES
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_pkey', 'p'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_owner_id', 'u'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_operation_unique', 'u'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_message_unique', 'u'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_owner_nonzero', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_hashes', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_cutover', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_window', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_context_review', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_state', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_decision', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_attempts', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_lease_shape', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_terminal_shape', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_result_shape', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_error_size', 'c'),
+      ('memory_ingest_private.memory_ingest_outbox',
+       'memory_ingest_outbox_error_semantics', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_owner_id', 'u'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_owner_nonzero', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_selector', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_hashes', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_state', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_counts', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_lease', 'c'),
+      ('memory_ingest_private.source_erasure_operation',
+       'source_erasure_operation_completion', 'c'),
+      ('memory_ingest_private.source_erasure_target',
+       'source_erasure_target_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_target',
+       'source_erasure_target_operation_fk', 'f'),
+      ('memory_ingest_private.source_erasure_target',
+       'source_erasure_target_hash', 'c'),
+      ('memory_ingest_private.source_erasure_thread_target',
+       'source_erasure_thread_target_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_thread_target',
+       'source_erasure_thread_target_operation_fk', 'f'),
+      ('memory_ingest_private.source_erasure_thread_target',
+       'source_erasure_thread_target_hash', 'c'),
+      ('memory_ingest_private.source_erasure_message_tombstone',
+       'source_erasure_message_tombstone_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_message_tombstone',
+       'source_erasure_message_tombstone_operation_fk', 'f'),
+      ('memory_ingest_private.source_erasure_thread_tombstone',
+       'source_erasure_thread_tombstone_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_thread_tombstone',
+       'source_erasure_thread_tombstone_operation_fk', 'f'),
+      ('memory_ingest_private.source_erasure_receipt',
+       'source_erasure_receipt_pkey', 'p'),
+      ('memory_ingest_private.source_erasure_receipt',
+       'source_erasure_receipt_operation_unique', 'u'),
+      ('memory_ingest_private.source_erasure_receipt',
+       'source_erasure_receipt_hashes', 'c'),
+      ('memory_ingest_private.source_erasure_receipt',
+       'source_erasure_receipt_counts', 'c')
+    ) AS expected(table_name, constraint_name, constraint_type)
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_constraint AS constraint_row
+      WHERE constraint_row.conrelid = pg_catalog.to_regclass(
+              expected_constraint.table_name
+            )
+        AND constraint_row.conname = expected_constraint.constraint_name
+        AND constraint_row.contype = expected_constraint.constraint_type::"char"
+        AND constraint_row.convalidated
+    ) THEN
+      RAISE EXCEPTION 'bridge constraint differs: %.%',
+        expected_constraint.table_name,
+        expected_constraint.constraint_name;
+    END IF;
+  END LOOP;
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid IN (
+    'memory_ingest_private.memory_ingest_outbox'::regclass,
+    'memory_ingest_private.source_erasure_operation'::regclass,
+    'memory_ingest_private.source_erasure_target'::regclass,
+    'memory_ingest_private.source_erasure_thread_target'::regclass,
+    'memory_ingest_private.source_erasure_message_tombstone'::regclass,
+    'memory_ingest_private.source_erasure_thread_tombstone'::regclass,
+    'memory_ingest_private.source_erasure_receipt'::regclass
+  );
+  IF observed_count <> 40 THEN
+    RAISE EXCEPTION 'bridge constraint inventory differs';
+  END IF;
+
+  SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+  INTO object_definition
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid =
+        'memory_ingest_private.source_erasure_operation'::regclass
+    AND constraint_row.conname = 'source_erasure_operation_selector';
+  IF object_definition IS NULL
+     OR pg_catalog.strpos(object_definition, 'thread') = 0
+     OR pg_catalog.strpos(object_definition, 'message_tail') = 0
+     OR pg_catalog.strpos(object_definition, 'recent') = 0
+     OR pg_catalog.strpos(object_definition, 'all_conversations') = 0 THEN
+    RAISE EXCEPTION 'source erasure selector constraint is not chat-only';
+  END IF;
+  SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+  INTO object_definition
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid =
+        'memory_ingest_private.memory_ingest_outbox'::regclass
+    AND constraint_row.conname = 'memory_ingest_outbox_state';
+  IF object_definition IS NULL
+     OR pg_catalog.strpos(object_definition, 'erasure_cancelled') = 0 THEN
+    RAISE EXCEPTION 'bridge erasure-cancelled state constraint differs';
+  END IF;
+  SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+  INTO object_definition
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid =
+        'memory_ingest_private.source_erasure_operation'::regclass
+    AND constraint_row.conname = 'source_erasure_operation_state';
+  IF object_definition IS NULL OR pg_catalog.strpos(
+       object_definition, 'conversation_deleted_pending_ack'
+     ) = 0 THEN
+    RAISE EXCEPTION 'source erasure pending-ack state constraint differs';
+  END IF;
+  SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+  INTO object_definition
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid =
+        'memory_ingest_private.source_erasure_receipt'::regclass
+    AND constraint_row.conname = 'source_erasure_receipt_counts';
+  IF object_definition IS NULL
+     OR pg_catalog.strpos(
+          object_definition, 'deleted_message_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'deleted_thread_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'deleted_attachment_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'deleted_bridge_row_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'thread_target_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'message_tombstone_count'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'thread_tombstone_count'
+        ) = 0 THEN
+    RAISE EXCEPTION 'source erasure receipt count constraint differs';
+  END IF;
+  SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+  INTO object_definition
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid =
+        'memory_ingest_private.source_erasure_receipt'::regclass
+    AND constraint_row.conname = 'source_erasure_receipt_hashes';
+  IF object_definition IS NULL
+     OR pg_catalog.strpos(
+          object_definition, 'thread_target_manifest_sha256'
+        ) = 0
+     OR pg_catalog.strpos(
+          object_definition, 'tombstone_manifest_sha256'
+        ) = 0 THEN
+    RAISE EXCEPTION 'source erasure receipt hash constraint differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_target'::regclass
+      AND constraint_row.conname = 'source_erasure_target_operation_fk'
+      AND constraint_row.confrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+      AND constraint_row.confdeltype = 'r'
+      AND constraint_row.convalidated
+  ) THEN
+    RAISE EXCEPTION 'source erasure target ownership fence differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('memory_ingest_private.source_erasure_thread_target'::regclass::oid,
+       'source_erasure_thread_target_operation_fk'::text),
+      ('memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
+       'source_erasure_message_tombstone_operation_fk'::text),
+      ('memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
+       'source_erasure_thread_tombstone_operation_fk'::text)
+    ) AS expected(relation_oid, constraint_name)
+    LEFT JOIN pg_catalog.pg_constraint AS constraint_row
+      ON constraint_row.conrelid = expected.relation_oid
+     AND constraint_row.conname = expected.constraint_name
+     AND constraint_row.confrelid =
+           'memory_ingest_private.source_erasure_operation'::regclass
+     AND constraint_row.confdeltype = 'r'
+     AND constraint_row.confupdtype = 'a'
+     AND constraint_row.convalidated
+     AND NOT constraint_row.condeferrable
+     AND NOT constraint_row.condeferred
+    WHERE constraint_row.oid IS NULL
+  ) THEN
+    RAISE EXCEPTION 'source erasure child ownership fence differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_message_tombstone'::regclass
+      AND constraint_row.conname =
+          'source_erasure_message_tombstone_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (message_id)'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'memory_ingest_private.source_erasure_thread_tombstone'::regclass
+      AND constraint_row.conname =
+          'source_erasure_thread_tombstone_pkey'
+      AND pg_catalog.pg_get_constraintdef(constraint_row.oid, true) =
+          'PRIMARY KEY (thread_id)'
+  ) THEN
+    RAISE EXCEPTION 'suppression tombstone global identity differs';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index AS index_row
+    WHERE index_row.indexrelid = pg_catalog.to_regclass(
+            'memory_ingest_private.source_erasure_one_active_owner_idx'
+          )
+      AND index_row.indrelid =
+          'memory_ingest_private.source_erasure_operation'::regclass
+      AND index_row.indisunique
+      AND index_row.indisvalid
+      AND index_row.indisready
+      AND index_row.indnkeyatts = 1
+      AND index_row.indexprs IS NULL
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 1, true
+          ) = 'owner_user_id'
+      AND pg_catalog.pg_get_expr(
+            index_row.indpred, index_row.indrelid, true
+          ) IN (
+            'state <> ''completed''::text',
+            '(state <> ''completed''::text)'
+          )
+  ) THEN
+    RAISE EXCEPTION 'source erasure active-owner index differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index AS index_row
+    WHERE index_row.indexrelid = pg_catalog.to_regclass(
+            'memory_ingest_private.source_erasure_target_page_idx'
+          )
+      AND index_row.indrelid =
+          'memory_ingest_private.source_erasure_target'::regclass
+      AND NOT index_row.indisunique
+      AND index_row.indisvalid
+      AND index_row.indisready
+      AND index_row.indnkeyatts = 4
+      AND index_row.indpred IS NULL
+      AND index_row.indexprs IS NULL
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 1, true
+          ) = 'owner_user_id'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 2, true
+          ) = 'operation_id'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 3, true
+          ) = 'source_created_at'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 4, true
+          ) = 'message_id'
+  ) THEN
+    RAISE EXCEPTION 'source erasure target page index differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index AS index_row
+    WHERE index_row.indexrelid = pg_catalog.to_regclass(
+            'memory_ingest_private.source_erasure_thread_target_page_idx'
+          )
+      AND index_row.indrelid =
+          'memory_ingest_private.source_erasure_thread_target'::regclass
+      AND NOT index_row.indisunique
+      AND index_row.indisvalid
+      AND index_row.indisready
+      AND index_row.indnkeyatts = 4
+      AND index_row.indpred IS NULL
+      AND index_row.indexprs IS NULL
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 1, true
+          ) = 'owner_user_id'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 2, true
+          ) = 'operation_id'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 3, true
+          ) = 'source_created_at'
+      AND pg_catalog.pg_get_indexdef(
+            index_row.indexrelid, 4, true
+          ) = 'thread_id'
+  ) THEN
+    RAISE EXCEPTION 'source erasure thread target page index differs';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = 'public.chat_log'::regclass
+      AND trigger_row.tgname = 'chat_log_serialize_source_erasure'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 7
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.serialize_chat_source_erasure()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'chat source erasure serialization trigger differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = 'public.threads'::regclass
+      AND trigger_row.tgname = 'threads_serialize_source_erasure'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 23
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.serialize_thread_source_erasure()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'thread source erasure serialization trigger differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = 'public.chat_attachments'::regclass
+      AND trigger_row.tgname = 'chat_attachments_serialize_source_erasure'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 23
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.serialize_attachment_source_erasure()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'attachment source erasure serialization trigger differs';
+  END IF;
+  IF pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_trigger AS trigger_row
+       WHERE trigger_row.tgrelid =
+             pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+         AND trigger_row.tgname =
+             'response_transcript_serialize_source_erasure'
+         AND trigger_row.tgenabled = 'O'
+         AND NOT trigger_row.tgisinternal
+         AND trigger_row.tgtype = 23
+         AND trigger_row.tgfoid =
+             'memory_ingest_private.serialize_response_transcript_source_erasure()'::regprocedure
+     ) THEN
+    RAISE EXCEPTION 'response transcript serialization trigger differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_receipt'::regclass
+      AND trigger_row.tgname = 'source_erasure_receipt_immutable'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 27
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.guard_source_erasure_receipt_immutable()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'source erasure receipt immutability trigger differs';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_message_tombstone'::regclass
+      AND trigger_row.tgname =
+          'source_erasure_message_tombstone_immutable'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 27
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.guard_source_erasure_receipt_immutable()'::regprocedure
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_thread_tombstone'::regclass
+      AND trigger_row.tgname =
+          'source_erasure_thread_tombstone_immutable'
+      AND trigger_row.tgenabled = 'O'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgtype = 27
+      AND trigger_row.tgfoid =
+          'memory_ingest_private.guard_source_erasure_receipt_immutable()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'suppression tombstone immutability trigger differs';
+  END IF;
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_trigger AS trigger_row
+  WHERE NOT trigger_row.tgisinternal
+    AND (
+      (trigger_row.tgrelid = 'public.chat_log'::regclass
+        AND trigger_row.tgname = 'chat_log_serialize_source_erasure')
+      OR
+      (trigger_row.tgrelid = 'public.threads'::regclass
+        AND trigger_row.tgname = 'threads_serialize_source_erasure')
+      OR
+      (trigger_row.tgrelid = 'public.chat_attachments'::regclass
+        AND trigger_row.tgname = 'chat_attachments_serialize_source_erasure')
+      OR
+      (trigger_row.tgrelid =
+          pg_catalog.to_regclass('trusted_web.response_transcript_v1')
+        AND trigger_row.tgname =
+          'response_transcript_serialize_source_erasure')
+      OR
+      (trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_receipt'::regclass
+        AND trigger_row.tgname = 'source_erasure_receipt_immutable')
+      OR
+      (trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_message_tombstone'::regclass
+        AND trigger_row.tgname =
+          'source_erasure_message_tombstone_immutable')
+      OR
+      (trigger_row.tgrelid =
+          'memory_ingest_private.source_erasure_thread_tombstone'::regclass
+        AND trigger_row.tgname =
+          'source_erasure_thread_tombstone_immutable')
+    );
+  IF observed_count <> 6 + CASE WHEN pg_catalog.to_regclass(
+       'trusted_web.response_transcript_v1'
+     ) IS NULL THEN 0 ELSE 1 END THEN
+    RAISE EXCEPTION 'source erasure trigger inventory differs';
+  END IF;
+
+  FOREACH runtime_role IN ARRAY ARRAY[
+    'memory_ingest_writer', 'memory_erasure_requester',
+    'governed_memory_worker'
   ] LOOP
     FOREACH forbidden_relation IN ARRAY ARRAY[
       'memory_ingest_private.memory_ingest_outbox',
+      'memory_ingest_private.source_erasure_operation',
+      'memory_ingest_private.source_erasure_target',
+      'memory_ingest_private.source_erasure_thread_target',
+      'memory_ingest_private.source_erasure_message_tombstone',
+      'memory_ingest_private.source_erasure_thread_tombstone',
+      'memory_ingest_private.source_erasure_receipt',
       'public.chat_log', 'public.threads', 'public.chat_attachments'
     ] LOOP
       FOREACH privilege_name IN ARRAY ARRAY[
@@ -1356,55 +5988,205 @@ BEGIN
       END LOOP;
     END LOOP;
   END LOOP;
-  IF pg_catalog.has_function_privilege(
-       'brains_app',
-       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
-       'EXECUTE'
-     ) OR NOT pg_catalog.has_function_privilege(
-       'memory_ingest_writer',
-       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
-       'EXECUTE'
-     ) OR pg_catalog.has_function_privilege(
-       'governed_memory_worker',
-       'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
-       'EXECUTE'
-     ) OR NOT pg_catalog.has_function_privilege(
-       'governed_memory_worker',
-       'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
-       'EXECUTE'
-     ) THEN
-    RAISE EXCEPTION 'bridge function privilege contract differs';
+
+  SELECT pg_catalog.count(*)::integer INTO observed_count
+  FROM pg_catalog.pg_proc AS routine
+  WHERE routine.pronamespace =
+        pg_catalog.to_regnamespace('memory_ingest_private')
+    AND routine.prokind = 'f';
+  IF observed_count <> 29 THEN
+    RAISE EXCEPTION 'bridge function inventory differs';
   END IF;
-  FOREACH forbidden_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
-    IF pg_catalog.to_regrole(forbidden_role) IS NOT NULL AND (
-      pg_catalog.has_table_privilege(
-        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'SELECT'
-      ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'INSERT'
-      ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'UPDATE'
-      ) OR pg_catalog.has_table_privilege(
-        forbidden_role, 'memory_ingest_private.memory_ingest_outbox', 'DELETE'
-      ) OR pg_catalog.has_schema_privilege(
-        forbidden_role, 'memory_ingest_private', 'USAGE'
-      ) OR pg_catalog.has_function_privilege(
-        forbidden_role,
-        'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
-        'EXECUTE'
-      ) OR pg_catalog.has_function_privilege(
-        forbidden_role,
-        'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
-        'EXECUTE'
-      )
+
+  FOREACH function_signature IN ARRAY ARRAY[
+    'memory_ingest_private.framed_utf8_field(text,text)',
+    'memory_ingest_private.timestamp_utc_text(timestamptz)',
+    'memory_ingest_private.assert_chat_deletion_catalog()',
+    'memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)',
+    'memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)',
+    'memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)',
+    'memory_ingest_private.source_erasure_target_sha256(uuid,uuid,uuid,uuid,timestamptz)',
+    'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+    'memory_ingest_private.lease_memory_ingest(text,integer,integer)',
+    'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
+    'memory_ingest_private.mark_memory_ingest_context_review(uuid,uuid)',
+    'memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid)',
+    'memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer)',
+    'memory_ingest_private.expire_memory_ingest(integer)',
+    'memory_ingest_private.purge_terminal_memory_ingest(integer)',
+    'memory_ingest_private.begin_source_erasure(uuid,text,uuid,uuid,integer,text)',
+    'memory_ingest_private.read_source_erasure(uuid)',
+    'memory_ingest_private.lease_source_erasure(text,integer)',
+    'memory_ingest_private.read_source_erasure_targets(uuid,uuid,timestamptz,uuid,integer)',
+    'memory_ingest_private.release_source_erasure_lease(uuid,uuid)',
+    'memory_ingest_private.mark_source_erasure_governed_deleted(uuid,uuid,text,integer,text)',
+    'memory_ingest_private.finalize_source_erasure(uuid,uuid,text)',
+    'memory_ingest_private.ack_source_erasure_completion(uuid,uuid,text)',
+    'memory_ingest_private.fail_source_erasure(uuid,uuid,text,text)',
+    'memory_ingest_private.serialize_chat_source_erasure()',
+    'memory_ingest_private.serialize_thread_source_erasure()',
+    'memory_ingest_private.serialize_attachment_source_erasure()',
+    'memory_ingest_private.serialize_response_transcript_source_erasure()',
+    'memory_ingest_private.guard_source_erasure_receipt_immutable()'
+  ] LOOP
+    function_oid := pg_catalog.to_regprocedure(function_signature);
+    should_security_definer := function_signature NOT IN (
+      'memory_ingest_private.framed_utf8_field(text,text)',
+      'memory_ingest_private.timestamp_utc_text(timestamptz)',
+      'memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)',
+      'memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)',
+      'memory_ingest_private.terminal_receipt_sha256(text,text,text,integer,uuid,uuid,text,timestamptz)',
+      'memory_ingest_private.source_erasure_target_sha256(uuid,uuid,uuid,uuid,timestamptz)'
+    );
+    IF function_oid IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_proc AS routine
+      JOIN pg_catalog.pg_language AS language
+        ON language.oid = routine.prolang
+      WHERE routine.oid = function_oid
+        AND routine.prokind = 'f'
+        AND routine.proowner = 'sage'::regrole
+        AND routine.prosecdef = should_security_definer
+        AND routine.proconfig = ARRAY['search_path=pg_catalog']::text[]
+        AND language.lanname = CASE WHEN should_security_definer
+              THEN 'plpgsql' ELSE 'sql' END
     ) THEN
-      RAISE EXCEPTION 'forbidden role % can access bridge table', forbidden_role;
+      RAISE EXCEPTION 'bridge function definition differs: %',
+        function_signature;
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_proc AS routine
+      CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(
+          routine.proacl,
+          pg_catalog.acldefault('f', routine.proowner)
+        )
+      ) AS acl
+      WHERE routine.oid = function_oid
+        AND acl.privilege_type = 'EXECUTE'
+        AND acl.grantee NOT IN (
+          'sage'::regrole::oid,
+          'memory_ingest_writer'::regrole::oid,
+          'memory_erasure_requester'::regrole::oid,
+          'governed_memory_worker'::regrole::oid
+        )
+    ) THEN
+      RAISE EXCEPTION 'unexpected bridge function ACL exists: %',
+        function_signature;
+    END IF;
+    FOREACH runtime_role IN ARRAY ARRAY[
+      'brains_app', 'memory_ingest_writer', 'memory_erasure_requester',
+      'governed_memory_worker'
+    ] LOOP
+      should_execute :=
+        (runtime_role = 'memory_ingest_writer' AND function_signature =
+          'memory_ingest_private.enqueue_chat_log_message(uuid,text)')
+        OR
+        (runtime_role = 'memory_erasure_requester' AND function_signature IN (
+          'memory_ingest_private.begin_source_erasure(uuid,text,uuid,uuid,integer,text)',
+          'memory_ingest_private.read_source_erasure(uuid)'
+        ))
+        OR
+        (runtime_role = 'governed_memory_worker' AND function_signature IN (
+          'memory_ingest_private.lease_memory_ingest(text,integer,integer)',
+          'memory_ingest_private.read_leased_chat_log_message(uuid,uuid)',
+          'memory_ingest_private.mark_memory_ingest_context_review(uuid,uuid)',
+          'memory_ingest_private.ack_memory_ingest(uuid,uuid,text,uuid,uuid)',
+          'memory_ingest_private.fail_memory_ingest(uuid,uuid,text,text,integer)',
+          'memory_ingest_private.expire_memory_ingest(integer)',
+          'memory_ingest_private.purge_terminal_memory_ingest(integer)',
+          'memory_ingest_private.lease_source_erasure(text,integer)',
+          'memory_ingest_private.read_source_erasure_targets(uuid,uuid,timestamptz,uuid,integer)',
+          'memory_ingest_private.release_source_erasure_lease(uuid,uuid)',
+          'memory_ingest_private.mark_source_erasure_governed_deleted(uuid,uuid,text,integer,text)',
+          'memory_ingest_private.finalize_source_erasure(uuid,uuid,text)',
+          'memory_ingest_private.ack_source_erasure_completion(uuid,uuid,text)',
+          'memory_ingest_private.fail_source_erasure(uuid,uuid,text,text)'
+        ));
+      IF pg_catalog.has_function_privilege(
+           runtime_role, function_oid, 'EXECUTE'
+         ) IS DISTINCT FROM should_execute THEN
+        RAISE EXCEPTION 'bridge function privilege differs: % %',
+          runtime_role, function_signature;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  FOREACH forbidden_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF pg_catalog.to_regrole(forbidden_role) IS NOT NULL THEN
+      IF pg_catalog.has_schema_privilege(
+        forbidden_role, 'memory_ingest_private', 'USAGE'
+      ) THEN
+        RAISE EXCEPTION 'forbidden role % can use bridge schema', forbidden_role;
+      END IF;
+      IF pg_catalog.has_table_privilege(
+        forbidden_role,
+        'memory_ingest_private.memory_ingest_outbox', 'SELECT'
+      ) OR pg_catalog.has_table_privilege(
+        forbidden_role,
+        'memory_ingest_private.memory_ingest_outbox', 'INSERT'
+      ) OR pg_catalog.has_table_privilege(
+        forbidden_role,
+        'memory_ingest_private.memory_ingest_outbox', 'UPDATE'
+      ) OR pg_catalog.has_table_privilege(
+        forbidden_role,
+        'memory_ingest_private.memory_ingest_outbox', 'DELETE'
+      ) THEN
+        RAISE EXCEPTION 'forbidden role % can access bridge outbox',
+          forbidden_role;
+      END IF;
+      FOREACH forbidden_relation IN ARRAY ARRAY[
+        'memory_ingest_private.memory_ingest_outbox',
+        'memory_ingest_private.source_erasure_operation',
+        'memory_ingest_private.source_erasure_target',
+        'memory_ingest_private.source_erasure_thread_target',
+        'memory_ingest_private.source_erasure_message_tombstone',
+        'memory_ingest_private.source_erasure_thread_tombstone',
+        'memory_ingest_private.source_erasure_receipt'
+      ] LOOP
+        FOREACH privilege_name IN ARRAY ARRAY[
+          'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+          'REFERENCES', 'TRIGGER'
+        ] LOOP
+          IF pg_catalog.has_table_privilege(
+            forbidden_role, forbidden_relation, privilege_name
+          ) THEN
+            RAISE EXCEPTION 'forbidden role % can access %',
+              forbidden_role, forbidden_relation;
+          END IF;
+        END LOOP;
+      END LOOP;
+      FOREACH function_signature IN ARRAY ARRAY[
+        'memory_ingest_private.enqueue_chat_log_message(uuid,text)',
+        'memory_ingest_private.begin_source_erasure(uuid,text,uuid,uuid,integer,text)',
+        'memory_ingest_private.read_source_erasure(uuid)',
+        'memory_ingest_private.lease_source_erasure(text,integer)',
+        'memory_ingest_private.read_source_erasure_targets(uuid,uuid,timestamptz,uuid,integer)',
+        'memory_ingest_private.finalize_source_erasure(uuid,uuid,text)',
+        'memory_ingest_private.ack_source_erasure_completion(uuid,uuid,text)'
+      ] LOOP
+        IF pg_catalog.has_function_privilege(
+          forbidden_role, function_signature, 'EXECUTE'
+        ) THEN
+          RAISE EXCEPTION 'forbidden role % can execute %',
+            forbidden_role, function_signature;
+        END IF;
+      END LOOP;
     END IF;
   END LOOP;
-  IF NOT EXISTS (
+  IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_trigger
     WHERE tgrelid = 'public.chat_log'::regclass
       AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
-      AND tgenabled = 'D' AND NOT tgisinternal
+      AND NOT tgisinternal
+      AND (
+        tgenabled <> 'D'
+        OR tgtype <> 5
+        OR tgfoid IS DISTINCT FROM pg_catalog.to_regprocedure(
+             'memory.enqueue_chat_log_consolidation()'
+           )
+      )
   ) THEN
     RAISE EXCEPTION 'legacy chat capture trigger changed during migration';
   END IF;

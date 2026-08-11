@@ -54,9 +54,11 @@ EXPECTED_PACKAGE_FILES = {
     "api.py",
     "auth.py",
     "contracts.py",
+    "conversation_deletion.py",
     "conversation_capture.py",
     "conversation_source.py",
     "eligibility.py",
+    "deletion_contracts.py",
     "exclusive_cutover.py",
     "extraction.py",
     "http_api.py",
@@ -84,6 +86,8 @@ EXPECTED_RUNTIME_PACKAGE_FILES = {
     "__main__.py",
     "application.py",
     "calibration.py",
+    "deletion_coordinator.py",
+    "deletion_postgres.py",
     "environment.py",
     "once_worker.py",
     "pilot_marker.py",
@@ -109,6 +113,9 @@ EXPECTED_TEST_FILES = {
     "test_chat_memory_e2e.py",
     "test_conversation_bridge.py",
     "test_conversation_capture.py",
+    "test_conversation_deletion.py",
+    "test_deletion_contracts.py",
+    "test_deletion_coordinator.py",
     "test_eligibility.py",
     "test_exclusive_cutover.py",
     "test_extraction.py",
@@ -216,6 +223,13 @@ EXPECTED_CANDIDATE_PYTHON = (
     "/tmp/governed-memory-successor-runtime-"
     f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_SOURCE_TREE_SHA256}/bin/python"
 )
+PHASE6B_SOURCE_TREE_SHA256 = (
+    "d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0"
+)
+PHASE6B_CANDIDATE_PYTHON = (
+    "/tmp/governed-memory-successor-runtime-"
+    f"{EXPECTED_RUNTIME_LOCK_SHA256}-{PHASE6B_SOURCE_TREE_SHA256}/bin/python"
+)
 RECORDED_SOURCE_TREE_SHA256 = (
     "af2fc1255476724200397651c6c0fab9c70d7b7720035788410f1846b937f60b"
 )
@@ -260,7 +274,8 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["phase"],
-            "phase6b_disposable_validated_inactive_activation_blocked",
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_deletion_proof_pending",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
@@ -304,6 +319,119 @@ class RuntimeManifestTests(unittest.TestCase):
                     "enqueue_lease_and_source_read_require_no_owner_thread_"
                     "message_attachment_row"
                 ),
+                "source_erasure_status": (
+                    "phase6d_inactive_static_candidate_"
+                    "phase6e_disposable_proof_pending"
+                ),
+                "source_erasure_scope": (
+                    "exact_materialized_chat_targets_and_matching_chat_"
+                    "attachments_bridge_rows_eligible_empty_chat_threads_and_"
+                    "successor_memory_derived_from_exact_targets_only"
+                ),
+                "source_erasure_selectors": [
+                    "thread",
+                    "message_tail",
+                    "recent",
+                    "all_conversations",
+                ],
+                "source_erasure_direct_delete_roots": [
+                    "public.chat_log",
+                    "public.chat_attachments",
+                    "public.threads",
+                ],
+                "source_erasure_transient_target_tables": [
+                    "memory_ingest_private.source_erasure_target",
+                    "memory_ingest_private.source_erasure_thread_target",
+                ],
+                "source_erasure_permanent_tombstone_tables": [
+                    "memory_ingest_private.source_erasure_message_tombstone",
+                    "memory_ingest_private.source_erasure_thread_tombstone",
+                ],
+                "source_erasure_tombstone_identity_scope": (
+                    "global_message_and_thread_uuid"
+                ),
+                "source_erasure_targets_retained_until": (
+                    "conversation_deletion_final_receipt_acknowledged"
+                ),
+                "source_erasure_tombstones_immutable": True,
+                "source_erasure_runtime_catalog_attestation": (
+                    "exact_mutated_relation_schema_foreign_key_trigger_rule_"
+                    "and_inheritance_inventory"
+                ),
+                "source_erasure_allowed_auxiliary_effects": [
+                    "public.active_thread_selection",
+                    "trusted_web.response_transcript_v1",
+                ],
+                "source_erasure_auxiliary_effect_authority": (
+                    "exact_named_validated_on_delete_cascade_composite_owner_"
+                    "thread_foreign_keys_only"
+                ),
+                "source_erasure_validated_auxiliary_foreign_keys": {
+                    "public.active_thread_selection": [
+                        {
+                            "constraint_name": (
+                                "active_thread_selection_owner_thread_fk"
+                            ),
+                            "child_columns": ["owner_user_id", "thread_id"],
+                            "parent_table": "public.threads",
+                            "parent_columns": ["owner_user_id", "id"],
+                            "validated": True,
+                            "delete_action": "cascade",
+                        }
+                    ],
+                    "trusted_web.response_transcript_v1": [
+                        {
+                            "constraint_name": (
+                                "response_transcript_v1_user_chat_log_id_fkey"
+                            ),
+                            "child_columns": [
+                                "user_chat_log_id",
+                                "owner_user_id",
+                                "thread_id",
+                            ],
+                            "parent_table": "public.chat_log",
+                            "parent_columns": [
+                                "id",
+                                "owner_user_id",
+                                "thread_id",
+                            ],
+                            "validated": True,
+                            "delete_action": "cascade",
+                        },
+                        {
+                            "constraint_name": (
+                                "response_transcript_v1_assistant_chat_log_id_fkey"
+                            ),
+                            "child_columns": [
+                                "assistant_chat_log_id",
+                                "owner_user_id",
+                                "thread_id",
+                            ],
+                            "parent_table": "public.chat_log",
+                            "parent_columns": [
+                                "id",
+                                "owner_user_id",
+                                "thread_id",
+                            ],
+                            "validated": True,
+                            "delete_action": "cascade",
+                        },
+                    ],
+                },
+                "source_erasure_weak_single_column_transcript_foreign_keys_allowed": False,
+                "source_erasure_unknown_dependency_action": (
+                    "fail_closed_before_delete_on_unknown_foreign_key_"
+                    "delete_trigger_delete_rule_or_inheritance"
+                ),
+                "source_erasure_unclassified_side_effects_allowed": False,
+                "source_erasure_legacy_capture_trigger_required": False,
+                "source_erasure_legacy_capture_trigger_if_present": (
+                    "exact_disabled_identity_only"
+                ),
+                "source_erasure_memory_only_or_account_wide_memory_selector_allowed": False,
+                "source_erasure_structured_lifeswitch_data_or_accounts_deleted": False,
+                "source_erasure_legacy_project_rows_deleted": False,
+                "source_erasure_content_free_consent_security_audit_receipts_retained": True,
                 "pilot_capture_limit": (
                     "owner_locked_twenty_rows_all_states_rolling_24h_exact_"
                     "replay_no_new_slot_typed_limit_result_focused_static_and_"
@@ -382,28 +510,33 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             adapters["embedding"],
             "strict_3072_fake_tested_durable_request_dispatch_marker_"
-            "disposable_validated_zero_real_calls",
+            "zero_real_calls_current_disposable_proof_pending",
         )
         self.assertEqual(
             adapters["qdrant"],
-            "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
+            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
+            "current_phase6e_proof_pending",
         )
         self.assertEqual(adapters["algorithm"], "implemented_fake_tested")
         self.assertEqual(
             adapters["cli_composition"],
-            "implemented_inactive_disposable_validated",
+            "implemented_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
         )
         self.assertEqual(
             adapters["cross_process_singleton"],
-            "postgresql_session_advisory_lock_disposable_validated_inactive",
+            "postgresql_session_advisory_lock_static_candidate_"
+            "phase6e_proof_pending",
         )
         self.assertEqual(
             adapters["conversation_bridge"],
-            "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_disposable_validated_inactive",
+            "two_database_rpc_only_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
         )
         self.assertEqual(
             adapters["scheduler"],
-            "private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive",
+            "private_content_free_postgresql_sequence_cyclic_three_lane_"
+            "static_candidate_phase6e_proof_pending",
         )
 
     def test_successor_validation_is_disposable_and_not_activation_proof(self) -> None:
@@ -414,37 +547,35 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertEqual(
             validation["evidence_status"],
-            "phase6b_disposable_proof_passed_not_production_activation",
+            "phase6b_proof_historical_noncurrent_"
+            "phase6e_deletion_proof_pending",
         )
-        self.assertTrue(validation["current_full_proof_complete"])
-        self.assertEqual(validation["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
-        self.assertEqual(
-            validation["current_proof_receipt"],
-            "ops/governed_memory/phase6b_disposable_proof_receipt.json",
-        )
-        self.assertEqual(
-            validation["current_proof_receipt_sha256"],
-            hashlib.sha256(PHASE6B_DISPOSABLE_PROOF_RECEIPT.read_bytes()).hexdigest(),
-        )
+        self.assertFalse(validation["current_full_proof_complete"])
+        self.assertIsNone(validation["current_candidate_python"])
+        self.assertIsNone(validation["current_proof_receipt"])
+        self.assertIsNone(validation["current_proof_receipt_sha256"])
         self.assertTrue(validation["final_resources_absent"])
-        self.assertTrue(validation["resource_cleanup_complete"])
-        self.assertTrue(validation["all_owner_routes_invoked"])
-        self.assertTrue(validation["alternating_owner_pool_isolation"])
-        self.assertEqual(validation["owner_pool_max_size"], 1)
-        self.assertTrue(
+        self.assertFalse(validation["resource_cleanup_complete"])
+        self.assertFalse(validation["all_owner_routes_invoked"])
+        self.assertFalse(validation["alternating_owner_pool_isolation"])
+        self.assertIsNone(validation["owner_pool_max_size"])
+        self.assertFalse(
             validation["qdrant_v1_19_0_real_disposable_compatibility_verified"]
         )
-        self.assertTrue(validation["pilot_marker_disposable_proof_complete"])
-        self.assertTrue(validation["worker_runtime_composition_validated"])
+        self.assertFalse(validation["pilot_marker_disposable_proof_complete"])
+        self.assertFalse(validation["worker_runtime_composition_validated"])
         self.assertEqual(
             validation["worker_runtime_composition_status"],
-            "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
         )
-        self.assertTrue(validation["worker_cross_process_singleton_validated"])
+        self.assertFalse(validation["worker_cross_process_singleton_validated"])
         self.assertEqual(
             validation["worker_cross_process_singleton_status"],
-            "implemented_inactive_real_concurrent_lock_disposable_validated",
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
         )
+        self.assertFalse(validation["deletion_coordination_disposable_proof_complete"])
         self.assertFalse(validation["semantic_threshold_calibrated"])
         self.assertFalse(validation["persistent_resources_created"])
         self.assertEqual(
@@ -456,11 +587,27 @@ class RuntimeManifestTests(unittest.TestCase):
                 "phase5_disposable_proof_receipt": (
                     "ops/governed_memory/history/phase5/disposable_proof_receipt.json"
                 ),
+                "phase6b_runtime_build_receipt": (
+                    "ops/governed_memory/runtime_build_receipt.json"
+                ),
+                "phase6b_runtime_build_receipt_sha256": (
+                    CURRENT_RUNTIME_BUILD_RECEIPT_SHA256
+                ),
+                "phase6b_disposable_proof_receipt": (
+                    "ops/governed_memory/phase6b_disposable_proof_receipt.json"
+                ),
+                "phase6b_disposable_proof_receipt_sha256": hashlib.sha256(
+                    PHASE6B_DISPOSABLE_PROOF_RECEIPT.read_bytes()
+                ).hexdigest(),
+                "phase6b_proof_status": (
+                    "historical_noncurrent_after_phase6d_source_and_"
+                    "migration_changes"
+                ),
                 "reusable_for_current_candidate": False,
             },
         )
         self.assertFalse(manifest["activation"]["production_authorized"])
-        self.assertTrue(
+        self.assertFalse(
             manifest["infrastructure"][
                 "qdrant_real_disposable_compatibility_verified"
             ]
@@ -479,7 +626,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertFalse(http_runtime["supabase_auth_sessions_rpc_live_verified"])
         self.assertTrue(http_runtime["owner_claim_fact_detail_implemented"])
-        self.assertTrue(
+        self.assertFalse(
             http_runtime["owner_claim_fact_detail_disposable_proof_complete"]
         )
         self.assertIn(
@@ -535,6 +682,18 @@ class RuntimeManifestTests(unittest.TestCase):
             "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved",
             manifest["activation"]["blockers"],
         )
+        self.assertIn(
+            "legacy_project_memory_thread_dependencies_not_separated",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+            manifest["activation"]["blockers"],
+        )
+        self.assertIn(
+            "legacy_chat_owner_thread_lineage_not_remediated",
+            manifest["activation"]["blockers"],
+        )
         self.assertEqual(
             manifest["release_guard"],
             {
@@ -575,31 +734,22 @@ class RuntimeManifestTests(unittest.TestCase):
                 "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-                "current_source_tree_sha256": EXPECTED_SOURCE_TREE_SHA256,
-                "current_candidate_python": EXPECTED_CANDIDATE_PYTHON,
-                "current_candidate_python_sha256": (
-                    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
-                ),
-                "current_project_wheel_sha256": CURRENT_PROJECT_WHEEL_SHA256,
-                "current_source_bound": True,
-                "final_phase6b_runtime_rebuild_pending": False,
-                "current_build_receipt": (
-                    "ops/governed_memory/runtime_build_receipt.json"
-                ),
-                "current_build_receipt_sha256": (
-                    CURRENT_RUNTIME_BUILD_RECEIPT_SHA256
-                ),
-                "current_build_receipt_present": True,
+                "current_source_tree_sha256": None,
+                "current_candidate_python": None,
+                "current_candidate_python_sha256": None,
+                "current_project_wheel_sha256": None,
+                "current_source_bound": False,
+                "final_phase6d_runtime_rebuild_pending": True,
+                "current_build_receipt": None,
+                "current_build_receipt_sha256": None,
+                "current_build_receipt_present": False,
             },
         )
         self.assertNotIn(
             "candidate_owned_runtime_environment_not_built",
             manifest["activation"]["blockers"],
         )
-        self.assertNotIn(
-            "final_phase6b_runtime_rebuild_and_receipt_pending",
-            manifest["activation"]["blockers"],
-        )
+        self.assertFalse(manifest["validation_runtime"]["current_source_bound"])
         self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
         self.assertEqual(hashlib.sha256(BUILD_LOCK.read_bytes()).hexdigest(), EXPECTED_BUILD_LOCK_SHA256)
         self.assertTrue(RUNTIME_BUILD_RECEIPT.is_file())
@@ -617,11 +767,11 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             current_build_receipt["candidate_python"],
-            EXPECTED_CANDIDATE_PYTHON,
+            PHASE6B_CANDIDATE_PYTHON,
         )
         self.assertEqual(
             current_build_receipt["source_tree_sha256"],
-            EXPECTED_SOURCE_TREE_SHA256,
+            PHASE6B_SOURCE_TREE_SHA256,
         )
         self.assertEqual(
             current_build_receipt["project_wheel_sha256"],
@@ -654,7 +804,7 @@ class RuntimeManifestTests(unittest.TestCase):
             EXPECTED_PROJECT_WHEEL_SHA256,
         )
         self.assertNotEqual(
-            RECORDED_SOURCE_TREE_SHA256,
+            PHASE6B_SOURCE_TREE_SHA256,
             EXPECTED_SOURCE_TREE_SHA256,
         )
         historical_proof = json.loads(
@@ -718,6 +868,156 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             contract["hard_requirements"]["production_activation_blockers"],
             self.load_manifest()["activation"]["blockers"],
+        )
+        bridge = contract["bridge"]
+        self.assertEqual(
+            bridge["source_erasure_selectors"],
+            ["thread", "message_tail", "recent", "all_conversations"],
+        )
+        self.assertEqual(
+            bridge["source_erasure_direct_delete_roots"],
+            ["public.chat_log", "public.chat_attachments", "public.threads"],
+        )
+        self.assertEqual(
+            bridge["source_erasure_allowed_auxiliary_effects"],
+            [
+                "public.active_thread_selection",
+                "trusted_web.response_transcript_v1",
+            ],
+        )
+        self.assertEqual(
+            bridge["source_erasure_auxiliary_effect_authority"],
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only",
+        )
+        self.assertEqual(
+            bridge["source_erasure_validated_auxiliary_foreign_keys"],
+            {
+                "public.active_thread_selection": [
+                    {
+                        "constraint_name": (
+                            "active_thread_selection_owner_thread_fk"
+                        ),
+                        "child_columns": ["owner_user_id", "thread_id"],
+                        "parent_table": "public.threads",
+                        "parent_columns": ["owner_user_id", "id"],
+                        "validated": True,
+                        "delete_action": "cascade",
+                    }
+                ],
+                "trusted_web.response_transcript_v1": [
+                    {
+                        "constraint_name": (
+                            "response_transcript_v1_user_chat_log_id_fkey"
+                        ),
+                        "child_columns": [
+                            "user_chat_log_id",
+                            "owner_user_id",
+                            "thread_id",
+                        ],
+                        "parent_table": "public.chat_log",
+                        "parent_columns": [
+                            "id",
+                            "owner_user_id",
+                            "thread_id",
+                        ],
+                        "validated": True,
+                        "delete_action": "cascade",
+                    },
+                    {
+                        "constraint_name": (
+                            "response_transcript_v1_assistant_chat_log_id_fkey"
+                        ),
+                        "child_columns": [
+                            "assistant_chat_log_id",
+                            "owner_user_id",
+                            "thread_id",
+                        ],
+                        "parent_table": "public.chat_log",
+                        "parent_columns": [
+                            "id",
+                            "owner_user_id",
+                            "thread_id",
+                        ],
+                        "validated": True,
+                        "delete_action": "cascade",
+                    },
+                ],
+            },
+        )
+        self.assertFalse(
+            bridge[
+                "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
+            ]
+        )
+        self.assertEqual(
+            bridge["source_erasure_unknown_dependency_action"],
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance",
+        )
+        self.assertEqual(
+            bridge["source_erasure_transient_target_tables"],
+            [
+                "memory_ingest_private.source_erasure_target",
+                "memory_ingest_private.source_erasure_thread_target",
+            ],
+        )
+        self.assertEqual(
+            bridge["source_erasure_permanent_tombstone_tables"],
+            [
+                "memory_ingest_private.source_erasure_message_tombstone",
+                "memory_ingest_private.source_erasure_thread_tombstone",
+            ],
+        )
+        self.assertEqual(
+            bridge["source_erasure_tombstone_identity_scope"],
+            "global_message_and_thread_uuid",
+        )
+        self.assertEqual(
+            bridge["source_erasure_targets_retained_until"],
+            "conversation_deletion_final_receipt_acknowledged",
+        )
+        self.assertTrue(bridge["source_erasure_tombstones_immutable"])
+        self.assertEqual(
+            bridge["source_erasure_runtime_catalog_attestation"],
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_"
+            "and_inheritance_inventory",
+        )
+        self.assertFalse(
+            bridge["source_erasure_unclassified_side_effects_allowed"]
+        )
+        self.assertFalse(
+            bridge["source_erasure_legacy_capture_trigger_required"]
+        )
+        self.assertEqual(
+            bridge["source_erasure_legacy_capture_trigger_if_present"],
+            "exact_disabled_identity_only",
+        )
+        self.assertFalse(bridge["source_erasure_legacy_project_rows_deleted"])
+        self.assertFalse(bridge["source_erasure_accounts_deleted"])
+        self.assertFalse(
+            bridge["source_erasure_structured_lifeswitch_tables_allowed"]
+        )
+        self.assertEqual(
+            bridge["source_erasure_runtime_status"],
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
+        )
+        self.assertIn(
+            "memory_ingest_private.assert_chat_deletion_catalog()",
+            contract["internal_functions"],
+        )
+        self.assertIn(
+            "memory_ingest_private.assert_chat_deletion_catalog()",
+            bridge["internal_functions"],
+        )
+        self.assertIn(
+            "memory_ingest_private.serialize_response_transcript_source_erasure()",
+            contract["internal_functions"],
+        )
+        self.assertIn(
+            "memory_ingest_private.serialize_response_transcript_source_erasure()",
+            bridge["internal_functions"],
         )
 
     def test_route_surface_is_exact_and_owner_is_not_a_path_parameter(self) -> None:
@@ -1033,7 +1333,10 @@ class SourceInventoryTests(unittest.TestCase):
         }
         for path in sorted(PACKAGE.glob("*.py")):
             source = path.read_text(encoding="utf-8")
-            lowered = source.lower()
+            lowered = source.lower().replace(
+                "chat_source_and_derived_governed_conversational_memory_v1",
+                "current_chat_source_erasure_contract",
+            )
             for token in prohibited_text:
                 with self.subTest(path=path.name, token=token):
                     self.assertNotIn(token, lowered)
@@ -1169,14 +1472,14 @@ class SourceInventoryTests(unittest.TestCase):
         self.assertEqual(definitions[0][0], "contracts.py")
         self.assertEqual(aliases, [])
 
-    def test_readme_records_disposable_integration_without_activation(self) -> None:
+    def test_readme_records_phase6e_proof_pending_without_activation(self) -> None:
         readme = SUCCESSOR_README.read_text(encoding="utf-8")
         normalized = " ".join(readme.split())
         for required in (
-            "disposable PostgreSQL and Qdrant",
-            "zero external provider calls",
+            "Phase 6E",
+            "historical evidence",
             "not production activated",
-            "semantic retrieval-score threshold",
+            "structured LifeSwitch",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, normalized)
@@ -1215,24 +1518,25 @@ class SourceInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_runtime_receipt_source_exactly_matches_current_successor(self) -> None:
+    def test_phase6b_runtime_receipt_is_historical_not_current(self) -> None:
         runtime = json.loads(MANIFEST.read_text(encoding="utf-8"))[
             "validation_runtime"
         ]
         build_receipt = json.loads(
             RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
         )
-        self.assertFalse(runtime["final_phase6b_runtime_rebuild_pending"])
-        self.assertTrue(runtime["current_source_bound"])
+        self.assertTrue(runtime["final_phase6d_runtime_rebuild_pending"])
+        self.assertFalse(runtime["current_source_bound"])
+        self.assertIsNone(runtime["current_source_tree_sha256"])
+        self.assertIsNone(runtime["current_candidate_python"])
         self.assertEqual(
-            runtime["current_source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
-        )
-        self.assertEqual(runtime["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
-        self.assertEqual(
-            build_receipt["source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
+            build_receipt["source_tree_sha256"], PHASE6B_SOURCE_TREE_SHA256
         )
         self.assertEqual(
-            build_receipt["candidate_python"], EXPECTED_CANDIDATE_PYTHON
+            build_receipt["candidate_python"], PHASE6B_CANDIDATE_PYTHON
+        )
+        self.assertNotEqual(
+            EXPECTED_SOURCE_TREE_SHA256, PHASE6B_SOURCE_TREE_SHA256
         )
 
 

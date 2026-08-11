@@ -30,6 +30,105 @@
     "compatibility_memory": false,
     "assistant_preferences": false
   },
+  "source_erasure": {
+    "status": "phase6d_inactive_static_candidate_not_routed_phase6e_disposable_proof_pending",
+    "selectors": [
+      "thread",
+      "message_tail",
+      "recent",
+      "all_conversations"
+    ],
+    "direct_delete_roots": [
+      "public.chat_log",
+      "public.chat_attachments",
+      "public.threads"
+    ],
+    "transient_target_tables": [
+      "memory_ingest_private.source_erasure_target",
+      "memory_ingest_private.source_erasure_thread_target"
+    ],
+    "permanent_tombstone_tables": [
+      "memory_ingest_private.source_erasure_message_tombstone",
+      "memory_ingest_private.source_erasure_thread_tombstone"
+    ],
+    "tombstone_identity_scope": "global_message_and_thread_uuid",
+    "targets_retained_until": "conversation_deletion_final_receipt_acknowledged",
+    "tombstones_immutable": true,
+    "runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
+    "allowed_auxiliary_effects": [
+      "public.active_thread_selection",
+      "trusted_web.response_transcript_v1"
+    ],
+    "auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
+    "validated_auxiliary_foreign_keys": {
+      "public.active_thread_selection": [
+        {
+          "constraint_name": "active_thread_selection_owner_thread_fk",
+          "child_columns": [
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.threads",
+          "parent_columns": [
+            "owner_user_id",
+            "id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ],
+      "trusted_web.response_transcript_v1": [
+        {
+          "constraint_name": "response_transcript_v1_user_chat_log_id_fkey",
+          "child_columns": [
+            "user_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        },
+        {
+          "constraint_name": "response_transcript_v1_assistant_chat_log_id_fkey",
+          "child_columns": [
+            "assistant_chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade"
+        }
+      ]
+    },
+    "weak_single_column_transcript_foreign_keys_allowed": false,
+    "unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
+    "unclassified_side_effects_allowed": false,
+    "legacy_capture_trigger_required": false,
+    "legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "exact_materialized_chat_targets_only": true,
+    "matching_chat_attachments_deleted": true,
+    "eligible_empty_chat_threads_deleted": true,
+    "matching_bridge_rows_deleted": true,
+    "successor_memory_derived_from_exact_targets_deleted": true,
+    "memory_only_selector_allowed": false,
+    "account_wide_memory_selector_allowed": false,
+    "accounts_deleted": false,
+    "structured_lifeswitch_data_deleted": false,
+    "legacy_project_rows_deleted": false,
+    "content_free_consent_security_audit_receipts_retained": true
+  },
   "required_start_state": {
     "postgresql_user_row_count": 0,
     "qdrant_point_count": 0,
@@ -52,10 +151,11 @@
   "provider_policy": {
     "provider_calls_before_pilot_authorization": 0,
     "provider_adapter_status": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter_status": "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
-    "qdrant_adapter_status": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
+    "embedding_adapter_status": "strict_3072_fake_tested_durable_request_dispatch_marker_current_disposable_proof_pending_zero_real_calls",
+    "qdrant_adapter_status": "exact_fake_tested_phase6b_real_disposable_proof_historical_current_phase6e_proof_pending",
     "worker_algorithm_status": "implemented_fake_tested",
-    "worker_runtime_composition_status": "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
+    "worker_runtime_composition_status": "implemented_inactive_static_candidate_phase6e_disposable_proof_pending",
+    "deletion_coordinator_status": "exact_chat_targets_only_inactive_static_candidate_not_routed_phase6e_disposable_proof_pending",
     "context_required_runtime_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
     "qdrant_unavailable_policy": "predispatch_qdrant_unavailability_retryable_post_embedding_dispatch_failure_terminal_without_embedding_resend_canonical_postgresql_claim_retained_later_same_claim_projection_blocked_explicit_projection_reconciliation_required",
     "calibration_status": "independently_bound_unapproved_retrieval_off",
@@ -74,9 +174,10 @@
     "profile_metadata_authority": false
   },
   "candidate_surfaces": {
-    "runtime": "phase6b_source_bound_disposable_proof_passed_inactive",
-    "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_validated_not_production_applied",
-    "pilot_marker": "implemented_phase6b_disposable_validated_not_production_applied",
+    "runtime": "phase6d_inactive_static_candidate_runtime_rebuild_and_phase6e_proof_pending",
+    "owner_claim_fact_detail": "implemented_candidate_phase6d_not_yet_disposable_validated_not_production_applied",
+    "pilot_marker": "implemented_phase6d_not_yet_disposable_validated_not_production_applied",
+    "deletion_coordinator": "exact_chat_targets_only_inactive_static_candidate_not_routed_phase6e_disposable_proof_pending",
     "frontend": "6d80ba_built_undeployed_visual_qa_pending"
   },
   "start_blockers": [
@@ -90,7 +191,10 @@
     "provider_adapter_real_call_validation_not_authorized_or_completed",
     "embedding_adapter_real_call_validation_not_authorized_or_completed",
     "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-    "chat_deletion_memory_cancellation_coordination_not_implemented",
+    "phase6e_deletion_coordination_disposable_proof_pending",
+    "legacy_project_memory_thread_dependencies_not_separated",
+    "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+    "legacy_chat_owner_thread_lineage_not_remediated",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
     "pilot_owner_not_authorized",
     "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"

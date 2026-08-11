@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_foundation_0001",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "governed_memory",
@@ -18,11 +18,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "521051825dca7db0b94362a7c33b2bbc342db236cc403e876b842d3a53297dbb"
+    "sha256": "61db7568e132945f913ccdb899664f2492e1f22cffd67f36c047855298f8cee7"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "cdca4dfbe63b681c960221c0ae1ddcb222c78e1bdeddef1dfe6a463350a0bb0d",
+    "sha256": "7d0a1473357e737518bd7de4d6f2599dac8d48ca55254925398b8c5f81b0816e",
     "empty_only": true
   },
   "data_policy": {
@@ -37,10 +37,14 @@
       "memory",
       "memory_private"
     ],
-    "table_count": 13,
-    "owner_bearing_table_count": 12,
+    "table_count": 18,
+    "owner_bearing_table_count": 17,
     "forced_rls": true,
     "direct_runtime_table_access": false,
+    "permanent_erased_chat_message_tombstone": "memory.erased_chat_message_tombstone",
+    "global_chat_message_id_replay_suppression": true,
+    "tombstone_reverified_before_finalization_and_ack": true,
+    "runtime_tombstone_catalog_attestation": true,
     "cascade_ddl": false
   },
   "activation": {
@@ -48,7 +52,7 @@
     "production_services_changed": false,
     "production_database_applied": false,
     "production_qdrant_changed": false,
-    "disposable_database_validated": true,
-    "disposable_qdrant_validated": true
+    "disposable_database_validated": false,
+    "disposable_qdrant_validated": false
   }
 }

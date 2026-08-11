@@ -3181,6 +3181,177 @@ CREATE INDEX claim_deletion_receipt_owner_time_idx
 CREATE INDEX claim_deletion_receipt_audit_idx
   ON memory.claim_deletion_receipt(owner_user_id, audit_event_id);
 
+CREATE TABLE memory.source_erasure_operation (
+  operation_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  selector_kind text NOT NULL,
+  selector_sha256 text NOT NULL,
+  target_count integer NOT NULL,
+  target_manifest_sha256 text NOT NULL,
+  received_target_count integer NOT NULL DEFAULT 0,
+  touched_claim_count integer NOT NULL DEFAULT 0,
+  deleted_claim_count integer NOT NULL DEFAULT 0,
+  pre_fence_provider_dispatch_count integer NOT NULL DEFAULT 0,
+  state text NOT NULL,
+  governed_receipt_sha256 text,
+  conversation_receipt_sha256 text,
+  created_at timestamptz NOT NULL DEFAULT pg_catalog.clock_timestamp(),
+  sealed_at timestamptz,
+  memory_deleted_at timestamptz,
+  completed_at timestamptz,
+  last_error_code text,
+  CONSTRAINT source_erasure_operation_owner_id UNIQUE (
+    owner_user_id, operation_id
+  ),
+  CONSTRAINT source_erasure_operation_owner_nonzero CHECK (
+    owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid
+  ),
+  CONSTRAINT source_erasure_operation_selector CHECK (
+    selector_kind IN (
+      'thread', 'message_tail', 'recent', 'all_conversations'
+    )
+  ),
+  CONSTRAINT source_erasure_operation_hashes CHECK (
+    selector_sha256 ~ '^[0-9a-f]{64}$'
+    AND target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND (
+      governed_receipt_sha256 IS NULL
+      OR governed_receipt_sha256 ~ '^[0-9a-f]{64}$'
+    )
+    AND (
+      conversation_receipt_sha256 IS NULL
+      OR conversation_receipt_sha256 ~ '^[0-9a-f]{64}$'
+    )
+  ),
+  CONSTRAINT source_erasure_operation_counts CHECK (
+    target_count BETWEEN 0 AND 100000
+    AND received_target_count BETWEEN 0 AND target_count
+    AND touched_claim_count BETWEEN 0 AND 100000
+    AND deleted_claim_count BETWEEN 0 AND touched_claim_count
+    AND pre_fence_provider_dispatch_count BETWEEN 0 AND 100000
+  ),
+  CONSTRAINT source_erasure_operation_state CHECK (
+    state IN (
+      'receiving', 'fenced', 'claim_deletion_pending',
+      'memory_deleted', 'completed', 'manual_review'
+    )
+  ),
+  CONSTRAINT source_erasure_operation_completion CHECK (
+    (state = 'receiving' AND sealed_at IS NULL)
+    OR
+    (state IN ('fenced', 'claim_deletion_pending', 'manual_review')
+      AND sealed_at IS NOT NULL AND completed_at IS NULL)
+    OR
+    (state = 'memory_deleted' AND sealed_at IS NOT NULL
+      AND governed_receipt_sha256 IS NOT NULL
+      AND memory_deleted_at IS NOT NULL AND completed_at IS NULL)
+    OR
+    (state = 'completed' AND sealed_at IS NOT NULL
+      AND governed_receipt_sha256 IS NOT NULL
+      AND conversation_receipt_sha256 IS NOT NULL
+      AND memory_deleted_at IS NOT NULL AND completed_at IS NOT NULL)
+  )
+);
+
+CREATE UNIQUE INDEX source_erasure_one_active_owner_idx
+  ON memory.source_erasure_operation(owner_user_id)
+  WHERE state <> 'completed';
+
+CREATE TABLE memory.source_erasure_target (
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  message_id uuid NOT NULL,
+  thread_id uuid NOT NULL,
+  source_created_at timestamptz NOT NULL,
+  target_sha256 text NOT NULL,
+  PRIMARY KEY (owner_user_id, operation_id, message_id),
+  CONSTRAINT source_erasure_target_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT,
+  CONSTRAINT source_erasure_target_hash CHECK (
+    target_sha256 ~ '^[0-9a-f]{64}$'
+  )
+);
+
+CREATE INDEX source_erasure_target_page_idx
+  ON memory.source_erasure_target(
+    owner_user_id, operation_id, source_created_at, message_id
+  );
+
+CREATE TABLE memory.erased_chat_message_tombstone (
+  message_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  erasure_operation_id uuid NOT NULL,
+  erased_at timestamptz NOT NULL,
+  CONSTRAINT erased_chat_message_tombstone_operation_fk FOREIGN KEY (
+    owner_user_id, erasure_operation_id
+  ) REFERENCES memory.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT,
+  CONSTRAINT erased_chat_message_tombstone_owner_nonzero CHECK (
+    owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid
+  )
+);
+
+CREATE TABLE memory.source_erasure_claim (
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  claim_id uuid NOT NULL,
+  claim_delete_operation_id uuid NOT NULL,
+  prior_state_sha256 text NOT NULL,
+  revision_id uuid NOT NULL,
+  revision_sha256 text NOT NULL,
+  delete_outbox_id uuid,
+  created_at timestamptz NOT NULL DEFAULT pg_catalog.clock_timestamp(),
+  PRIMARY KEY (owner_user_id, operation_id, claim_id),
+  CONSTRAINT source_erasure_claim_operation_fk FOREIGN KEY (
+    owner_user_id, operation_id
+  ) REFERENCES memory.source_erasure_operation(
+    owner_user_id, operation_id
+  ) ON DELETE RESTRICT,
+  CONSTRAINT source_erasure_claim_delete_operation_unique UNIQUE (
+    owner_user_id, claim_delete_operation_id
+  ),
+  CONSTRAINT source_erasure_claim_hashes CHECK (
+    prior_state_sha256 ~ '^[0-9a-f]{64}$'
+    AND revision_sha256 ~ '^[0-9a-f]{64}$'
+  )
+);
+
+CREATE TABLE memory.source_erasure_receipt (
+  receipt_id uuid PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
+  selector_sha256 text NOT NULL,
+  target_manifest_sha256 text NOT NULL,
+  target_count integer NOT NULL,
+  touched_claim_count integer NOT NULL,
+  claim_deletion_receipt_count integer NOT NULL,
+  pre_fence_provider_dispatch_count integer NOT NULL,
+  governed_absence_sha256 text NOT NULL,
+  conversation_receipt_sha256 text NOT NULL,
+  receipt_sha256 text NOT NULL,
+  completed_at timestamptz NOT NULL,
+  CONSTRAINT source_erasure_receipt_operation_unique UNIQUE (
+    owner_user_id, operation_id
+  ),
+  CONSTRAINT source_erasure_receipt_hashes CHECK (
+    selector_sha256 ~ '^[0-9a-f]{64}$'
+    AND target_manifest_sha256 ~ '^[0-9a-f]{64}$'
+    AND governed_absence_sha256 ~ '^[0-9a-f]{64}$'
+    AND conversation_receipt_sha256 ~ '^[0-9a-f]{64}$'
+    AND receipt_sha256 ~ '^[0-9a-f]{64}$'
+  ),
+  CONSTRAINT source_erasure_receipt_counts CHECK (
+    target_count BETWEEN 0 AND 100000
+    AND touched_claim_count BETWEEN 0 AND 100000
+    AND claim_deletion_receipt_count = touched_claim_count
+    AND pre_fence_provider_dispatch_count BETWEEN 0 AND 100000
+  )
+);
+
 INSERT INTO memory.predicate_catalog(
   predicate, catalog_name, schema_revision, catalog_sha256,
   subject_kinds, object_kinds, sensitivities, epistemic_statuses
@@ -3277,6 +3448,708 @@ ALTER FUNCTION memory_private.current_owner_id()
 REVOKE ALL ON FUNCTION memory_private.current_owner_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION memory_private.current_owner_id()
   TO governed_memory_api;
+
+CREATE FUNCTION memory_private.owner_source_erasure_active(
+  p_owner_user_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM memory.source_erasure_operation AS operation
+    WHERE operation.owner_user_id = p_owner_user_id
+      AND operation.state <> 'completed'
+  )
+$function$;
+ALTER FUNCTION memory_private.owner_source_erasure_active(uuid)
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION memory_private.owner_source_erasure_active(uuid)
+  FROM PUBLIC;
+
+CREATE FUNCTION memory_private.assert_chat_messages_not_erased(
+  p_source_message_id uuid,
+  p_context_message_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  locked_message_id uuid;
+BEGIN
+  IF p_source_message_id IS NULL THEN
+    RAISE EXCEPTION 'conversation source message id is required'
+      USING ERRCODE = '22023';
+  END IF;
+  FOR locked_message_id IN
+    SELECT DISTINCT message_id
+    FROM pg_catalog.unnest(
+      ARRAY[p_source_message_id, p_context_message_id]::uuid[]
+    ) AS candidate(message_id)
+    WHERE message_id IS NOT NULL
+    ORDER BY message_id
+  LOOP
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'governed_memory.erased_chat_message.v1|'
+          || locked_message_id::text,
+        0
+      )
+    );
+  END LOOP;
+  IF EXISTS (
+    SELECT 1
+    FROM memory.erased_chat_message_tombstone AS tombstone
+    WHERE tombstone.message_id IN (
+      p_source_message_id, p_context_message_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'erased chat message cannot enter successor Memory'
+      USING ERRCODE = '55000';
+  END IF;
+END;
+$function$;
+ALTER FUNCTION memory_private.assert_chat_messages_not_erased(uuid,uuid)
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION
+  memory_private.assert_chat_messages_not_erased(uuid,uuid)
+FROM PUBLIC;
+
+CREATE FUNCTION memory_private.guard_erased_chat_message_replay()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  IF TG_TABLE_SCHEMA = 'memory' AND TG_TABLE_NAME = 'evidence'
+     AND NEW.source_kind = 'conversation_message' THEN
+    PERFORM memory_private.assert_chat_messages_not_erased(
+      NEW.source_message_id, NEW.context_message_id
+    );
+  ELSIF TG_TABLE_SCHEMA = 'memory'
+        AND TG_TABLE_NAME = 'answer_binding' THEN
+    PERFORM memory_private.assert_chat_messages_not_erased(
+      NEW.response_id, NULL::uuid
+    );
+  ELSIF TG_TABLE_SCHEMA <> 'memory'
+        OR TG_TABLE_NAME NOT IN ('evidence', 'answer_binding') THEN
+    RAISE EXCEPTION 'erased chat replay guard attached to wrong table'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION memory_private.guard_erased_chat_message_replay()
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION memory_private.guard_erased_chat_message_replay()
+  FROM PUBLIC;
+
+CREATE FUNCTION memory_private.guard_erased_chat_message_tombstone_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  RAISE EXCEPTION 'erased chat message tombstone is immutable'
+    USING ERRCODE = '55000';
+END;
+$function$;
+ALTER FUNCTION
+  memory_private.guard_erased_chat_message_tombstone_immutable()
+OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION
+  memory_private.guard_erased_chat_message_tombstone_immutable()
+FROM PUBLIC;
+
+CREATE FUNCTION memory_private.assert_source_erasure_tombstones(
+  p_operation_id uuid,
+  p_owner_user_id uuid,
+  p_target_count integer,
+  p_sealed_at timestamptz
+)
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  locked_message_id uuid;
+  observed_target_count integer;
+  observed_tombstone_count integer;
+BEGIN
+  IF p_operation_id IS NULL OR p_owner_user_id IS NULL
+     OR p_target_count IS NULL OR p_target_count NOT BETWEEN 0 AND 100000
+     OR p_sealed_at IS NULL THEN
+    RAISE EXCEPTION 'invalid source erasure tombstone assertion'
+      USING ERRCODE = '22023';
+  END IF;
+  FOR locked_message_id IN
+    SELECT target.message_id
+    FROM memory.source_erasure_target AS target
+    WHERE target.owner_user_id = p_owner_user_id
+      AND target.operation_id = p_operation_id
+    ORDER BY target.message_id
+  LOOP
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'governed_memory.erased_chat_message.v1|'
+          || locked_message_id::text,
+        0
+      )
+    );
+  END LOOP;
+  SELECT pg_catalog.count(*)::integer INTO observed_target_count
+  FROM memory.source_erasure_target AS target
+  WHERE target.owner_user_id = p_owner_user_id
+    AND target.operation_id = p_operation_id;
+  SELECT pg_catalog.count(*)::integer INTO observed_tombstone_count
+  FROM memory.erased_chat_message_tombstone AS tombstone
+  WHERE tombstone.owner_user_id = p_owner_user_id
+    AND tombstone.erasure_operation_id = p_operation_id;
+  IF observed_target_count <> p_target_count
+     OR observed_tombstone_count <> p_target_count
+     OR EXISTS (
+       SELECT 1
+       FROM memory.source_erasure_target AS target
+       LEFT JOIN memory.erased_chat_message_tombstone AS tombstone
+         ON tombstone.message_id = target.message_id
+       WHERE target.owner_user_id = p_owner_user_id
+         AND target.operation_id = p_operation_id
+         AND (
+           tombstone.message_id IS NULL
+           OR tombstone.owner_user_id <> p_owner_user_id
+           OR tombstone.erasure_operation_id <> p_operation_id
+           OR tombstone.erased_at IS DISTINCT FROM p_sealed_at
+         )
+     ) OR EXISTS (
+       SELECT 1
+       FROM memory.erased_chat_message_tombstone AS tombstone
+       LEFT JOIN memory.source_erasure_target AS target
+         ON target.owner_user_id = p_owner_user_id
+        AND target.operation_id = p_operation_id
+        AND target.message_id = tombstone.message_id
+       WHERE tombstone.owner_user_id = p_owner_user_id
+         AND tombstone.erasure_operation_id = p_operation_id
+         AND target.message_id IS NULL
+     ) THEN
+    RAISE EXCEPTION 'source erasure tombstone inventory differs'
+      USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM memory.evidence AS evidence
+    JOIN memory.source_erasure_target AS target
+      ON target.owner_user_id = p_owner_user_id
+     AND target.operation_id = p_operation_id
+     AND target.message_id IN (
+       evidence.source_message_id, evidence.context_message_id
+     )
+    WHERE evidence.source_kind = 'conversation_message'
+      AND evidence.owner_user_id <> p_owner_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory.answer_binding AS binding
+    JOIN memory.source_erasure_target AS target
+      ON target.owner_user_id = p_owner_user_id
+     AND target.operation_id = p_operation_id
+     AND target.message_id = binding.response_id
+    WHERE binding.owner_user_id <> p_owner_user_id
+  ) THEN
+    RAISE EXCEPTION 'cross-owner chat message lineage appeared after seal'
+      USING ERRCODE = '40001';
+  END IF;
+END;
+$function$;
+ALTER FUNCTION memory_private.assert_source_erasure_tombstones(
+  uuid,uuid,integer,timestamptz
+) OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION memory_private.assert_source_erasure_tombstones(
+  uuid,uuid,integer,timestamptz
+) FROM PUBLIC;
+
+CREATE FUNCTION memory_private.assert_source_erasure_deletion_catalog()
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  deletion_roots oid[];
+BEGIN
+  deletion_roots := ARRAY[
+    'memory.answer_binding'::regclass::oid,
+    'memory.claim_evidence'::regclass::oid,
+    'memory.projection_outbox'::regclass::oid,
+    'memory.proposal'::regclass::oid,
+    'memory.claim_revision'::regclass::oid,
+    'memory.claim'::regclass::oid,
+    'memory.provider_call'::regclass::oid,
+    'memory.extraction_job'::regclass::oid,
+    'memory.evidence'::regclass::oid,
+    'memory.entity'::regclass::oid,
+    'memory.source_erasure_claim'::regclass::oid,
+    'memory.source_erasure_target'::regclass::oid
+  ];
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.unnest(deletion_roots) AS root(root_oid)
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = root.root_oid
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname <> 'memory'
+       OR relation.relkind <> 'r'
+  ) THEN
+    RAISE EXCEPTION 'source erasure deletion roots differ';
+  END IF;
+
+  -- This lock follows the exact deletion-root locks at every caller.  It
+  -- freezes the permanent tombstone schema and rows through each assertion
+  -- and destructive transition without making the tombstone a deletion root.
+  LOCK TABLE memory.erased_chat_message_tombstone
+    IN SHARE ROW EXCLUSIVE MODE;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE relation.oid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND namespace.nspname = 'memory'
+      AND relation.relname = 'erased_chat_message_tombstone'
+      AND relation.relkind = 'r'
+      AND relation.relpersistence = 'p'
+      AND relation.relowner = 'governed_memory_owner'::regrole
+      AND relation.relrowsecurity
+      AND relation.relforcerowsecurity
+  ) OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_policy AS policy_row
+    WHERE policy_row.polrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+  ) <> 1 OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policy AS policy_row
+    WHERE policy_row.polrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND policy_row.polname = 'owner_internal'
+      AND policy_row.polpermissive
+      AND policy_row.polroles =
+            ARRAY['governed_memory_owner'::regrole::oid]
+      AND policy_row.polcmd = '*'
+      AND pg_catalog.regexp_replace(
+            pg_catalog.pg_get_expr(
+              policy_row.polqual, policy_row.polrelid
+            ), '[[:space:]()]', '', 'g'
+          ) = 'true'
+      AND pg_catalog.regexp_replace(
+            pg_catalog.pg_get_expr(
+              policy_row.polwithcheck, policy_row.polrelid
+            ), '[[:space:]()]', '', 'g'
+          ) = 'true'
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS relation
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(
+        relation.relacl,
+        pg_catalog.acldefault('r', relation.relowner)
+      )
+    ) AS acl_entry
+    WHERE relation.oid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND acl_entry.grantee <> 'governed_memory_owner'::regrole::oid
+  ) OR EXISTS (
+    WITH expected(
+      ordinal_position, column_name, type_name, is_not_null,
+      has_default, identity_kind, generated_kind
+    ) AS (
+      VALUES
+        (1, 'message_id'::text, 'uuid'::text, true, false, ''::text, ''::text),
+        (2, 'owner_user_id', 'uuid', true, false, '', ''),
+        (3, 'erasure_operation_id', 'uuid', true, false, '', ''),
+        (4, 'erased_at', 'timestamp with time zone', true, false, '', '')
+    ), actual AS (
+      SELECT attribute.attnum::integer, attribute.attname::text,
+        pg_catalog.format_type(attribute.atttypid, attribute.atttypmod),
+        attribute.attnotnull, attribute.atthasdef,
+        attribute.attidentity::text, attribute.attgenerated::text
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid =
+              'memory.erased_chat_message_tombstone'::regclass
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ), drift AS (
+      (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+      UNION ALL
+      (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    )
+    SELECT 1 FROM drift
+  ) OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+  ) <> 3 OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND constraint_row.conname = 'erased_chat_message_tombstone_pkey'
+      AND constraint_row.contype = 'p'
+      AND constraint_row.convalidated
+      AND ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.conkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) = ARRAY['message_id']::text[]
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND constraint_row.conname =
+            'erased_chat_message_tombstone_operation_fk'
+      AND constraint_row.contype = 'f'
+      AND constraint_row.confrelid =
+            'memory.source_erasure_operation'::regclass
+      AND constraint_row.confdeltype = 'r'
+      AND constraint_row.confupdtype = 'a'
+      AND constraint_row.confmatchtype = 's'
+      AND NOT constraint_row.condeferrable
+      AND NOT constraint_row.condeferred
+      AND constraint_row.convalidated
+      AND ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.conkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) = ARRAY['owner_user_id','erasure_operation_id']::text[]
+      AND ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.confkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.confrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) = ARRAY['owner_user_id','operation_id']::text[]
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND constraint_row.conname =
+            'erased_chat_message_tombstone_owner_nonzero'
+      AND constraint_row.contype = 'c'
+      AND constraint_row.convalidated
+      AND pg_catalog.regexp_replace(
+            pg_catalog.pg_get_expr(
+              constraint_row.conbin, constraint_row.conrelid
+            ),
+            '[[:space:]()]', '', 'g'
+          ) =
+            'owner_user_id<>''00000000-0000-0000-0000-000000000000''::uuid'
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_inherits AS inheritance_row
+    WHERE inheritance_row.inhrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+       OR inheritance_row.inhparent =
+            'memory.erased_chat_message_tombstone'::regclass
+  ) THEN
+    RAISE EXCEPTION 'erased chat message tombstone schema differs';
+  END IF;
+
+  IF EXISTS (
+    WITH expected(
+      constraint_name, child_schema, child_table, parent_schema, parent_table,
+      child_columns, parent_columns, delete_action, update_action, match_type,
+      is_deferrable, initially_deferred, is_validated
+    ) AS (
+      VALUES
+        ('extraction_job_evidence_fk'::text, 'memory'::text,
+         'extraction_job'::text, 'memory'::text, 'evidence'::text,
+         ARRAY['owner_user_id','evidence_id']::text[],
+         ARRAY['owner_user_id','evidence_id']::text[],
+         'r'::text, 'a'::text, 's'::text, false, false, true),
+        ('provider_call_job_fk', 'memory', 'provider_call', 'memory',
+         'extraction_job', ARRAY['owner_user_id','job_id']::text[],
+         ARRAY['owner_user_id','job_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('proposal_evidence_fk', 'memory', 'proposal', 'memory', 'evidence',
+         ARRAY['owner_user_id','evidence_id']::text[],
+         ARRAY['owner_user_id','evidence_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('proposal_provider_call_fk', 'memory', 'proposal', 'memory',
+         'provider_call', ARRAY['owner_user_id','provider_call_id']::text[],
+         ARRAY['owner_user_id','provider_call_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('proposal_correction_claim_fk', 'memory', 'proposal', 'memory',
+         'claim', ARRAY['owner_user_id','correction_of_claim_id']::text[],
+         ARRAY['owner_user_id','claim_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('claim_revision_claim_fk', 'memory', 'claim_revision', 'memory',
+         'claim', ARRAY['owner_user_id','claim_id']::text[],
+         ARRAY['owner_user_id','claim_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('claim_revision_proposal_fk', 'memory', 'claim_revision', 'memory',
+         'proposal', ARRAY['owner_user_id','source_proposal_id']::text[],
+         ARRAY['owner_user_id','proposal_id']::text[],
+         'a', 'a', 's', true, true, true),
+        ('claim_revision_subject_fk', 'memory', 'claim_revision', 'memory',
+         'entity', ARRAY['owner_user_id','subject_entity_id']::text[],
+         ARRAY['owner_user_id','entity_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('claim_revision_object_fk', 'memory', 'claim_revision', 'memory',
+         'entity', ARRAY['owner_user_id','object_entity_id']::text[],
+         ARRAY['owner_user_id','entity_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('claim_current_revision_fk', 'memory', 'claim', 'memory',
+         'claim_revision',
+         ARRAY['owner_user_id','claim_id','current_revision_id']::text[],
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         'a', 'a', 's', true, true, true),
+        ('proposal_correction_revision_fk', 'memory', 'proposal', 'memory',
+         'claim_revision',
+         ARRAY[
+           'owner_user_id','correction_of_claim_id',
+           'correction_target_revision_id'
+         ]::text[],
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         'a', 'a', 's', true, true, true),
+        ('claim_evidence_revision_fk', 'memory', 'claim_evidence', 'memory',
+         'claim_revision',
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('claim_evidence_evidence_fk', 'memory', 'claim_evidence', 'memory',
+         'evidence', ARRAY['owner_user_id','evidence_id']::text[],
+         ARRAY['owner_user_id','evidence_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('projection_outbox_claim_fk', 'memory', 'projection_outbox',
+         'memory', 'claim', ARRAY['owner_user_id','claim_id']::text[],
+         ARRAY['owner_user_id','claim_id']::text[],
+         'r', 'a', 's', false, false, true),
+        ('projection_outbox_revision_fk', 'memory', 'projection_outbox',
+         'memory', 'claim_revision',
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         ARRAY['owner_user_id','claim_id','revision_id']::text[],
+         'r', 'a', 's', false, false, true)
+    ), actual AS (
+      SELECT constraint_row.conname::text,
+        child_namespace.nspname::text, child_relation.relname::text,
+        parent_namespace.nspname::text, parent_relation.relname::text,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM pg_catalog.unnest(constraint_row.conkey)
+            WITH ORDINALITY AS key_column(attnum, ordinal_position)
+          JOIN pg_catalog.pg_attribute AS attribute
+            ON attribute.attrelid = constraint_row.conrelid
+           AND attribute.attnum = key_column.attnum
+          ORDER BY key_column.ordinal_position
+        ),
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM pg_catalog.unnest(constraint_row.confkey)
+            WITH ORDINALITY AS key_column(attnum, ordinal_position)
+          JOIN pg_catalog.pg_attribute AS attribute
+            ON attribute.attrelid = constraint_row.confrelid
+           AND attribute.attnum = key_column.attnum
+          ORDER BY key_column.ordinal_position
+        ),
+        constraint_row.confdeltype::text,
+        constraint_row.confupdtype::text,
+        constraint_row.confmatchtype::text,
+        constraint_row.condeferrable, constraint_row.condeferred,
+        constraint_row.convalidated
+      FROM pg_catalog.pg_constraint AS constraint_row
+      JOIN pg_catalog.pg_class AS child_relation
+        ON child_relation.oid = constraint_row.conrelid
+      JOIN pg_catalog.pg_namespace AS child_namespace
+        ON child_namespace.oid = child_relation.relnamespace
+      JOIN pg_catalog.pg_class AS parent_relation
+        ON parent_relation.oid = constraint_row.confrelid
+      JOIN pg_catalog.pg_namespace AS parent_namespace
+        ON parent_namespace.oid = parent_relation.relnamespace
+      WHERE constraint_row.contype = 'f'
+        AND constraint_row.confrelid = ANY(deletion_roots)
+    ), drift AS (
+      (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+      UNION ALL
+      (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    )
+    SELECT 1 FROM drift
+  ) THEN
+    RAISE EXCEPTION
+      'source erasure deletion inbound foreign-key inventory differs';
+  END IF;
+
+  IF EXISTS (
+    WITH expected(
+      table_name, trigger_name, trigger_type, function_schema,
+      function_name, function_arguments, enabled_state
+    ) AS (
+      VALUES
+        ('answer_binding'::text, 'answer_binding_immutable'::text, 27,
+         'memory_private'::text, 'guard_answer_binding_mutation'::text,
+         ''::text, 'O'::text),
+        ('answer_binding', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('claim_evidence', 'claim_evidence_immutable', 27,
+         'memory_private', 'guard_immutable_fact', '', 'O'),
+        ('claim_evidence', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('projection_outbox', 'projection_outbox_guard', 31,
+         'memory_private', 'guard_projection_outbox_mutation', '', 'O'),
+        ('projection_outbox', 'source_erasure_fence', 31,
+         'memory_private', 'guard_source_erasure_fence', '', 'O'),
+        ('proposal', 'proposal_guard', 27, 'memory_private',
+         'guard_proposal_mutation', '', 'O'),
+        ('proposal', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('claim_revision', 'claim_revision_immutable', 27,
+         'memory_private', 'guard_immutable_fact', '', 'O'),
+        ('claim_revision', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('claim', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('provider_call', 'provider_call_guard', 27, 'memory_private',
+         'guard_provider_call_mutation', '', 'O'),
+        ('provider_call', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('extraction_job', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('evidence', 'evidence_guard', 27, 'memory_private',
+         'guard_evidence_mutation', '', 'O'),
+        ('evidence', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O')
+    ), actual AS (
+      SELECT relation.relname::text, trigger_row.tgname::text,
+        trigger_row.tgtype::integer, routine_namespace.nspname::text,
+        routine.proname::text,
+        pg_catalog.pg_get_function_identity_arguments(routine.oid),
+        trigger_row.tgenabled::text
+      FROM pg_catalog.pg_trigger AS trigger_row
+      JOIN pg_catalog.pg_class AS relation
+        ON relation.oid = trigger_row.tgrelid
+      JOIN pg_catalog.pg_proc AS routine ON routine.oid = trigger_row.tgfoid
+      JOIN pg_catalog.pg_namespace AS routine_namespace
+        ON routine_namespace.oid = routine.pronamespace
+      WHERE trigger_row.tgrelid = ANY(deletion_roots)
+        AND NOT trigger_row.tgisinternal
+        AND (trigger_row.tgtype::integer & 8) = 8
+    ), drift AS (
+      (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+      UNION ALL
+      (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    )
+    SELECT 1 FROM drift
+  ) THEN
+    RAISE EXCEPTION 'source erasure deletion trigger inventory differs';
+  END IF;
+  IF EXISTS (
+    WITH expected(
+      table_name, trigger_name, trigger_type, function_schema,
+      function_name, function_arguments, enabled_state
+    ) AS (
+      VALUES
+        ('evidence'::text, 'evidence_guard'::text, 27,
+         'memory_private'::text, 'guard_evidence_mutation'::text,
+         ''::text, 'O'::text),
+        ('evidence', 'erased_chat_message_replay', 7, 'memory_private',
+         'guard_erased_chat_message_replay', '', 'O'),
+        ('evidence', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('answer_binding', 'answer_binding_immutable', 27,
+         'memory_private', 'guard_answer_binding_mutation', '', 'O'),
+        ('answer_binding', 'erased_chat_message_replay', 7,
+         'memory_private', 'guard_erased_chat_message_replay', '', 'O'),
+        ('answer_binding', 'source_erasure_fence', 31, 'memory_private',
+         'guard_source_erasure_fence', '', 'O'),
+        ('erased_chat_message_tombstone',
+         'erased_chat_message_tombstone_immutable', 27,
+         'memory_private',
+         'guard_erased_chat_message_tombstone_immutable', '', 'O')
+    ), actual AS (
+      SELECT relation.relname::text, trigger_row.tgname::text,
+        trigger_row.tgtype::integer, routine_namespace.nspname::text,
+        routine.proname::text,
+        pg_catalog.pg_get_function_identity_arguments(routine.oid),
+        trigger_row.tgenabled::text
+      FROM pg_catalog.pg_trigger AS trigger_row
+      JOIN pg_catalog.pg_class AS relation
+        ON relation.oid = trigger_row.tgrelid
+      JOIN pg_catalog.pg_namespace AS relation_namespace
+        ON relation_namespace.oid = relation.relnamespace
+      JOIN pg_catalog.pg_proc AS routine ON routine.oid = trigger_row.tgfoid
+      JOIN pg_catalog.pg_namespace AS routine_namespace
+        ON routine_namespace.oid = routine.pronamespace
+      WHERE relation_namespace.nspname = 'memory'
+        AND relation.relname IN (
+          'evidence', 'answer_binding', 'erased_chat_message_tombstone'
+        )
+        AND NOT trigger_row.tgisinternal
+    ), drift AS (
+      (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+      UNION ALL
+      (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+    )
+    SELECT 1 FROM drift
+  ) THEN
+    RAISE EXCEPTION
+      'erased chat replay or permanent tombstone trigger inventory differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_rewrite AS rewrite_row
+    WHERE rewrite_row.ev_type = '4'
+      AND rewrite_row.ev_class = ANY(deletion_roots)
+  ) THEN
+    RAISE EXCEPTION 'source erasure deletion rule is forbidden';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_inherits AS inheritance_row
+    WHERE inheritance_row.inhrelid = ANY(deletion_roots)
+       OR inheritance_row.inhparent = ANY(deletion_roots)
+  ) THEN
+    RAISE EXCEPTION 'source erasure deletion inheritance is forbidden';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_rewrite AS rewrite_row
+    WHERE rewrite_row.ev_class =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND rewrite_row.ev_type IN ('2', '3', '4')
+  ) THEN
+    RAISE EXCEPTION 'erased chat message tombstone rewrite rule is forbidden';
+  END IF;
+END;
+$function$;
+ALTER FUNCTION memory_private.assert_source_erasure_deletion_catalog()
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION
+  memory_private.assert_source_erasure_deletion_catalog()
+FROM PUBLIC;
 
 REVOKE ALL ON ALL TABLES IN SCHEMA memory FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA memory FROM PUBLIC;
@@ -3390,6 +4263,47 @@ CREATE POLICY owner_isolation ON memory.claim_deletion_receipt
   USING (owner_user_id = (SELECT memory_private.current_owner_id()))
   WITH CHECK (owner_user_id = (SELECT memory_private.current_owner_id()));
 CREATE POLICY owner_internal ON memory.claim_deletion_receipt
+  TO governed_memory_owner USING (true) WITH CHECK (true);
+
+ALTER TABLE memory.source_erasure_operation ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory.source_erasure_operation FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_isolation ON memory.source_erasure_operation
+  TO governed_memory_api
+  USING (owner_user_id = (SELECT memory_private.current_owner_id()))
+  WITH CHECK (owner_user_id = (SELECT memory_private.current_owner_id()));
+CREATE POLICY owner_internal ON memory.source_erasure_operation
+  TO governed_memory_owner USING (true) WITH CHECK (true);
+
+ALTER TABLE memory.source_erasure_target ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory.source_erasure_target FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_isolation ON memory.source_erasure_target
+  TO governed_memory_api
+  USING (owner_user_id = (SELECT memory_private.current_owner_id()))
+  WITH CHECK (owner_user_id = (SELECT memory_private.current_owner_id()));
+CREATE POLICY owner_internal ON memory.source_erasure_target
+  TO governed_memory_owner USING (true) WITH CHECK (true);
+
+ALTER TABLE memory.erased_chat_message_tombstone ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory.erased_chat_message_tombstone FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_internal ON memory.erased_chat_message_tombstone
+  TO governed_memory_owner USING (true) WITH CHECK (true);
+
+ALTER TABLE memory.source_erasure_claim ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory.source_erasure_claim FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_isolation ON memory.source_erasure_claim
+  TO governed_memory_api
+  USING (owner_user_id = (SELECT memory_private.current_owner_id()))
+  WITH CHECK (owner_user_id = (SELECT memory_private.current_owner_id()));
+CREATE POLICY owner_internal ON memory.source_erasure_claim
+  TO governed_memory_owner USING (true) WITH CHECK (true);
+
+ALTER TABLE memory.source_erasure_receipt ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory.source_erasure_receipt FORCE ROW LEVEL SECURITY;
+CREATE POLICY owner_isolation ON memory.source_erasure_receipt
+  TO governed_memory_api
+  USING (owner_user_id = (SELECT memory_private.current_owner_id()))
+  WITH CHECK (owner_user_id = (SELECT memory_private.current_owner_id()));
+CREATE POLICY owner_internal ON memory.source_erasure_receipt
   TO governed_memory_owner USING (true) WITH CHECK (true);
 
 CREATE FUNCTION memory_private.guard_immutable_fact()
@@ -3904,6 +4818,106 @@ REVOKE ALL ON FUNCTION memory_private.guard_proposal_mutation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION memory_private.guard_projection_outbox_mutation()
   FROM PUBLIC;
 
+CREATE FUNCTION memory_private.guard_source_erasure_fence()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  row_owner uuid;
+  active_operation_id uuid;
+  authorized_operation_id uuid;
+  row_operation_id uuid;
+  hard_delete_operation_id uuid;
+BEGIN
+  row_owner := CASE WHEN TG_OP = 'DELETE'
+    THEN OLD.owner_user_id ELSE NEW.owner_user_id END;
+  SELECT operation.operation_id INTO active_operation_id
+  FROM memory.source_erasure_operation AS operation
+  WHERE operation.owner_user_id = row_owner
+    AND operation.state IN (
+      'receiving', 'fenced', 'claim_deletion_pending',
+      'memory_deleted', 'manual_review'
+    );
+  IF active_operation_id IS NULL THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  BEGIN
+    authorized_operation_id := NULLIF(pg_catalog.current_setting(
+      'app.memory_source_erasure_operation_id', true
+    ), '')::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    authorized_operation_id := NULL;
+  END;
+  IF session_user = 'governed_memory_worker'
+     AND authorized_operation_id = active_operation_id THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  IF TG_TABLE_NAME = 'projection_outbox' THEN
+    row_operation_id := CASE WHEN TG_OP = 'DELETE'
+      THEN OLD.operation_id ELSE NEW.operation_id END;
+    IF session_user = 'governed_memory_worker'
+       AND (CASE WHEN TG_OP = 'DELETE'
+         THEN OLD.operation ELSE NEW.operation END) = 'delete'
+       AND EXISTS (
+         SELECT 1
+         FROM memory.source_erasure_claim AS source_claim
+         WHERE source_claim.owner_user_id = row_owner
+           AND source_claim.operation_id = active_operation_id
+           AND source_claim.claim_delete_operation_id = row_operation_id
+       ) THEN
+      RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    IF session_user = 'governed_memory_worker'
+       AND TG_OP = 'UPDATE'
+       AND EXISTS (
+         SELECT 1
+         FROM memory.source_erasure_claim AS source_claim
+         WHERE source_claim.owner_user_id = row_owner
+           AND source_claim.operation_id = active_operation_id
+           AND source_claim.claim_id = OLD.claim_id
+       )
+       AND (
+         (OLD.state IN ('pending', 'retryable')
+           AND NEW.state = 'superseded')
+         OR
+         (OLD.state = 'claimed'
+           AND OLD.lease_expires_at <= pg_catalog.clock_timestamp()
+           AND NEW.state IN ('retryable', 'failed_terminal'))
+       ) THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+  IF TG_OP = 'DELETE' AND session_user = 'governed_memory_worker' THEN
+    BEGIN
+      hard_delete_operation_id := NULLIF(pg_catalog.current_setting(
+        'app.memory_hard_delete_operation_id', true
+      ), '')::uuid;
+    EXCEPTION WHEN invalid_text_representation THEN
+      hard_delete_operation_id := NULL;
+    END;
+    IF hard_delete_operation_id IS NOT NULL AND EXISTS (
+      SELECT 1
+      FROM memory.source_erasure_claim AS source_claim
+      WHERE source_claim.owner_user_id = row_owner
+        AND source_claim.operation_id = active_operation_id
+        AND source_claim.claim_delete_operation_id = hard_delete_operation_id
+    ) THEN
+      RETURN OLD;
+    END IF;
+  END IF;
+  RAISE EXCEPTION 'owner memory source erasure is in progress'
+    USING ERRCODE = '55000';
+END;
+$function$;
+
+ALTER FUNCTION memory_private.guard_source_erasure_fence()
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON FUNCTION memory_private.guard_source_erasure_fence()
+  FROM PUBLIC;
+
 CREATE TRIGGER evidence_guard
   BEFORE UPDATE OR DELETE ON memory.evidence
   FOR EACH ROW EXECUTE FUNCTION memory_private.guard_evidence_mutation();
@@ -3934,6 +4948,49 @@ CREATE TRIGGER audit_event_append_only
 CREATE TRIGGER claim_deletion_receipt_immutable
   BEFORE UPDATE OR DELETE ON memory.claim_deletion_receipt
   FOR EACH ROW EXECUTE FUNCTION memory_private.guard_append_only_audit();
+CREATE TRIGGER source_erasure_receipt_immutable
+  BEFORE UPDATE OR DELETE ON memory.source_erasure_receipt
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_append_only_audit();
+CREATE TRIGGER erased_chat_message_tombstone_immutable
+  BEFORE UPDATE OR DELETE ON memory.erased_chat_message_tombstone
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_private.guard_erased_chat_message_tombstone_immutable();
+CREATE TRIGGER erased_chat_message_replay
+  BEFORE INSERT ON memory.evidence
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_private.guard_erased_chat_message_replay();
+CREATE TRIGGER erased_chat_message_replay
+  BEFORE INSERT ON memory.answer_binding
+  FOR EACH ROW EXECUTE FUNCTION
+    memory_private.guard_erased_chat_message_replay();
+
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.evidence
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.extraction_job
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.provider_call
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.proposal
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.claim
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.claim_revision
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.claim_evidence
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.projection_outbox
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
+CREATE TRIGGER source_erasure_fence
+  BEFORE INSERT OR UPDATE OR DELETE ON memory.answer_binding
+  FOR EACH ROW EXECUTE FUNCTION memory_private.guard_source_erasure_fence();
 
 CREATE FUNCTION memory_private.operation_id_conflicts(
   p_owner_user_id uuid,
@@ -4124,6 +5181,9 @@ BEGIN
     pg_catalog.hashtextextended(
       p_owner_user_id::text || '|intake|' || p_operation_id::text, 0
     )
+  );
+  PERFORM memory_private.assert_chat_messages_not_erased(
+    p_message_id, p_context_message_id
   );
 
   IF p_decision <> 'send_external' THEN
@@ -4559,7 +5619,10 @@ BEGIN
     AND job.state = 'claimed'
     AND job.lease_expires_at <= pg_catalog.clock_timestamp()
     AND provider.attempt_number = job.attempt_count
-    AND provider.state IN ('reserved', 'dispatched');
+    AND provider.state IN ('reserved', 'dispatched')
+    AND NOT memory_private.owner_source_erasure_active(
+      provider.owner_user_id
+    );
 
   UPDATE memory.extraction_job AS expired_job
   SET state = CASE
@@ -4594,7 +5657,10 @@ BEGIN
       ) THEN 'provider_outcome_unknown' ELSE 'lease_expired_before_dispatch' END,
       updated_at = pg_catalog.clock_timestamp()
   WHERE expired_job.state = 'claimed'
-    AND expired_job.lease_expires_at <= pg_catalog.clock_timestamp();
+    AND expired_job.lease_expires_at <= pg_catalog.clock_timestamp()
+    AND NOT memory_private.owner_source_erasure_active(
+      expired_job.owner_user_id
+    );
 
   UPDATE memory.evidence AS evidence
   SET review_excerpt = NULL, excerpt_expires_at = NULL
@@ -4602,7 +5668,10 @@ BEGIN
   WHERE terminal_job.owner_user_id = evidence.owner_user_id
     AND terminal_job.evidence_id = evidence.evidence_id
     AND terminal_job.state = 'failed_terminal'
-    AND evidence.review_excerpt IS NOT NULL;
+    AND evidence.review_excerpt IS NOT NULL
+    AND NOT memory_private.owner_source_erasure_active(
+      evidence.owner_user_id
+    );
 
   FOR candidate IN
     SELECT job.owner_user_id, job.job_id, job.evidence_id,
@@ -4624,6 +5693,7 @@ BEGIN
       AND job.attempt_count < job.max_attempts
       AND evidence.source_kind = 'conversation_message'
       AND evidence.review_excerpt IS NOT NULL
+      AND NOT memory_private.owner_source_erasure_active(job.owner_user_id)
     ORDER BY job.available_at, job.created_at, job.job_id
     FOR UPDATE OF job SKIP LOCKED
     LIMIT p_limit
@@ -5481,6 +6551,9 @@ BEGIN
      OR (p_before IS NULL) <> (p_before_id IS NULL) THEN
     RAISE EXCEPTION 'invalid proposal-list input' USING ERRCODE = '22023';
   END IF;
+  IF memory_private.owner_source_erasure_active(actor) THEN
+    RETURN;
+  END IF;
   RETURN QUERY
   SELECT proposal.proposal_id, proposal.operation_id,
          proposal.proposal_sha256,
@@ -5573,6 +6646,9 @@ BEGIN
        AS distinct_ids
      ) <> pg_catalog.cardinality(p_claim_ids) THEN
     RAISE EXCEPTION 'invalid candidate IDs' USING ERRCODE = '22023';
+  END IF;
+  IF memory_private.owner_source_erasure_active(actor) THEN
+    RETURN;
   END IF;
   RETURN QUERY
   SELECT claim.owner_user_id, claim.claim_id, revision.revision_id,
@@ -5801,6 +6877,9 @@ BEGIN
      OR (p_before IS NULL) <> (p_before_id IS NULL) THEN
     RAISE EXCEPTION 'invalid claim-list input' USING ERRCODE = '22023';
   END IF;
+  IF memory_private.owner_source_erasure_active(actor) THEN
+    RETURN;
+  END IF;
   RETURN QUERY
   SELECT claim.claim_id, claim.lifecycle_state, revision.revision_id,
          revision.revision_number, revision.revision_sha256,
@@ -5884,6 +6963,11 @@ BEGIN
   IF actor IS NULL THEN
     RAISE EXCEPTION 'authenticated owner context required'
       USING ERRCODE = '42501';
+  END IF;
+  IF memory_private.owner_source_erasure_active(actor) THEN
+    RETURN QUERY SELECT 0::bigint, 0::bigint, 0::bigint, 0::bigint,
+      NULL::timestamptz;
+    RETURN;
   END IF;
   RETURN QUERY
   SELECT
@@ -6902,6 +7986,19 @@ BEGIN
   IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 1000 THEN
     RAISE EXCEPTION 'invalid proposal purge limit' USING ERRCODE = '22023';
   END IF;
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
   FOR candidate IN
     SELECT proposal.owner_user_id, proposal.proposal_id,
            proposal.proposal_sha256, proposal.review_state,
@@ -7005,6 +8102,19 @@ BEGIN
     RAISE EXCEPTION 'invalid answer-binding purge limit'
       USING ERRCODE = '22023';
   END IF;
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
   FOR candidate IN
     SELECT binding.owner_user_id, binding.binding_id, binding.expires_at
     FROM memory.answer_binding AS binding
@@ -7953,11 +9063,41 @@ DECLARE
   existing_transition memory.audit_event%ROWTYPE;
   existing_deletion_event memory.audit_event%ROWTYPE;
   existing_deletion_receipt memory.claim_deletion_receipt%ROWTYPE;
+  request_actor_kind text;
+  request_actor_user_id uuid;
+  request_reason_code text;
+  source_erasure_operation_id uuid;
 BEGIN
-  IF session_user <> 'governed_memory_api' THEN
-    RAISE EXCEPTION 'api role required' USING ERRCODE = '42501';
+  IF session_user = 'governed_memory_api' THEN
+    actor := memory_private.current_owner_id();
+    request_actor_kind := 'owner';
+    request_actor_user_id := actor;
+    request_reason_code := 'explicit_owner_deletion';
+  ELSIF session_user = 'governed_memory_worker' THEN
+    BEGIN
+      source_erasure_operation_id := NULLIF(pg_catalog.current_setting(
+        'app.memory_source_erasure_operation_id', true
+      ), '')::uuid;
+    EXCEPTION WHEN invalid_text_representation THEN
+      source_erasure_operation_id := NULL;
+    END;
+    SELECT operation.owner_user_id INTO actor
+    FROM memory.source_erasure_operation AS operation
+    JOIN memory.source_erasure_claim AS source_claim
+      ON source_claim.owner_user_id = operation.owner_user_id
+     AND source_claim.operation_id = operation.operation_id
+    WHERE operation.operation_id = source_erasure_operation_id
+      AND operation.state IN ('fenced', 'claim_deletion_pending')
+      AND source_claim.claim_id = p_claim_id
+      AND source_claim.claim_delete_operation_id = p_operation_id
+      AND source_claim.prior_state_sha256 = p_expected_state_sha256
+      AND source_claim.revision_sha256 = p_expected_revision_sha256;
+    request_actor_kind := 'worker';
+    request_actor_user_id := NULL::uuid;
+    request_reason_code := 'source_erasure';
+  ELSE
+    RAISE EXCEPTION 'claim deletion role required' USING ERRCODE = '42501';
   END IF;
-  actor := memory_private.current_owner_id();
   IF actor IS NULL OR p_operation_id IS NULL OR p_claim_id IS NULL
      OR p_expected_revision_sha256 IS NULL
      OR p_expected_revision_sha256 !~ '^[0-9a-f]{64}$'
@@ -8004,16 +9144,16 @@ BEGIN
        OR existing_deletion_receipt.point_id IS DISTINCT FROM p_claim_id
        OR existing_deletion_receipt.revision_sha256
             IS DISTINCT FROM p_expected_revision_sha256
-       OR existing_transition.actor_kind IS DISTINCT FROM 'owner'
-       OR existing_transition.actor_user_id IS DISTINCT FROM actor
+       OR existing_transition.actor_kind IS DISTINCT FROM request_actor_kind
+       OR existing_transition.actor_user_id
+            IS DISTINCT FROM request_actor_user_id
        OR existing_transition.object_type IS DISTINCT FROM 'claim'
        OR existing_transition.object_id IS DISTINCT FROM p_claim_id
        OR existing_transition.prior_state_sha256
             IS DISTINCT FROM p_expected_state_sha256
        OR existing_transition.new_state_sha256
             IS DISTINCT FROM existing_deletion_receipt.prior_state_sha256
-       OR existing_transition.reason_code
-            IS DISTINCT FROM 'explicit_owner_deletion'
+       OR existing_transition.reason_code IS DISTINCT FROM request_reason_code
        OR existing_transition.event_sha256 IS DISTINCT FROM event_hash
        OR existing_deletion_event.actor_kind IS DISTINCT FROM 'worker'
        OR existing_deletion_event.actor_user_id IS NOT NULL
@@ -8059,14 +9199,14 @@ BEGIN
        OR existing_outbox.point_id IS DISTINCT FROM p_claim_id
        OR existing_outbox.revision_sha256
             IS DISTINCT FROM p_expected_revision_sha256
-       OR existing_transition.actor_kind IS DISTINCT FROM 'owner'
-       OR existing_transition.actor_user_id IS DISTINCT FROM actor
+       OR existing_transition.actor_kind IS DISTINCT FROM request_actor_kind
+       OR existing_transition.actor_user_id
+            IS DISTINCT FROM request_actor_user_id
        OR existing_transition.object_type IS DISTINCT FROM 'claim'
        OR existing_transition.object_id IS DISTINCT FROM p_claim_id
        OR existing_transition.prior_state_sha256
             IS DISTINCT FROM p_expected_state_sha256
-       OR existing_transition.reason_code
-            IS DISTINCT FROM 'explicit_owner_deletion'
+       OR existing_transition.reason_code IS DISTINCT FROM request_reason_code
        OR existing_transition.event_sha256 IS DISTINCT FROM event_hash THEN
       RAISE EXCEPTION 'claim-deletion request replay drifted'
         USING ERRCODE = '23514';
@@ -8154,9 +9294,10 @@ BEGIN
     object_type, object_id, transition_code, prior_state_sha256,
     new_state_sha256, reason_code, event_sha256
   ) VALUES (
-    actor, p_operation_id, 'owner', actor, 'claim', target.claim_id,
+    actor, p_operation_id, request_actor_kind, request_actor_user_id,
+    'claim', target.claim_id,
     'claim_deletion_requested', prior_state_hash, new_state_hash,
-    'explicit_owner_deletion', event_hash
+    request_reason_code, event_hash
   );
   RETURN QUERY SELECT 'deletion_pending'::text, new_outbox_id;
 END;
@@ -8268,7 +9409,22 @@ BEGIN
       END,
       updated_at = pg_catalog.clock_timestamp()
   WHERE expired_outbox.state = 'claimed'
-    AND expired_outbox.lease_expires_at <= pg_catalog.clock_timestamp();
+    AND expired_outbox.lease_expires_at <= pg_catalog.clock_timestamp()
+    AND (
+      NOT memory_private.owner_source_erasure_active(
+        expired_outbox.owner_user_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM memory.source_erasure_claim AS source_claim
+        JOIN memory.source_erasure_operation AS source_operation
+          ON source_operation.owner_user_id = source_claim.owner_user_id
+         AND source_operation.operation_id = source_claim.operation_id
+        WHERE source_claim.owner_user_id = expired_outbox.owner_user_id
+          AND source_claim.claim_id = expired_outbox.claim_id
+          AND source_operation.state <> 'completed'
+      )
+    );
 
   WITH superseded AS (
     UPDATE memory.projection_outbox AS outbox
@@ -8278,6 +9434,19 @@ BEGIN
         updated_at = pg_catalog.transaction_timestamp()
     WHERE outbox.state IN ('pending', 'retryable')
       AND outbox.embedding_request_sha256 IS NULL
+      AND (
+        NOT memory_private.owner_source_erasure_active(outbox.owner_user_id)
+        OR EXISTS (
+          SELECT 1
+          FROM memory.source_erasure_claim AS source_claim
+          JOIN memory.source_erasure_operation AS source_operation
+            ON source_operation.owner_user_id = source_claim.owner_user_id
+           AND source_operation.operation_id = source_claim.operation_id
+          WHERE source_claim.owner_user_id = outbox.owner_user_id
+            AND source_claim.claim_id = outbox.claim_id
+            AND source_operation.state <> 'completed'
+        )
+      )
       AND EXISTS (
         SELECT 1
         FROM memory.claim AS claim
@@ -8341,6 +9510,26 @@ BEGIN
     WHERE outbox.state IN ('pending', 'retryable')
       AND outbox.available_at <= pg_catalog.clock_timestamp()
       AND outbox.attempt_count < outbox.max_attempts
+      AND (
+        NOT memory_private.owner_source_erasure_active(outbox.owner_user_id)
+        OR (
+          outbox.operation = 'delete'
+          AND EXISTS (
+            SELECT 1
+            FROM memory.source_erasure_claim AS source_claim
+            JOIN memory.source_erasure_operation AS source_operation
+              ON source_operation.owner_user_id = source_claim.owner_user_id
+             AND source_operation.operation_id = source_claim.operation_id
+            WHERE source_claim.owner_user_id = outbox.owner_user_id
+              AND source_claim.claim_id = outbox.claim_id
+              AND source_claim.claim_delete_operation_id
+                    = outbox.operation_id
+              AND source_operation.state IN (
+                'fenced', 'claim_deletion_pending'
+              )
+          )
+        )
+      )
       AND claim.projection_sequence = outbox.sequence_number
       AND claim.current_revision_id = outbox.revision_id
       AND claim.current_state_sha256 = memory_private.claim_state_sha256(
@@ -8822,6 +10011,7 @@ DECLARE
   candidate_job_ids uuid[] := ARRAY[]::uuid[];
   recomputed_state_sha256 text;
   recomputed_manifest_sha256 text;
+  source_erasure_operation_id uuid;
 BEGIN
   IF session_user <> 'governed_memory_worker' THEN
     RAISE EXCEPTION 'worker role required' USING ERRCODE = '42501';
@@ -8861,6 +10051,21 @@ BEGIN
       p_owner_user_id::text || '|claim|' || p_claim_id::text, 0
     )
   );
+  SELECT source_claim.operation_id INTO source_erasure_operation_id
+  FROM memory.source_erasure_claim AS source_claim
+  JOIN memory.source_erasure_operation AS operation
+    ON operation.owner_user_id = source_claim.owner_user_id
+   AND operation.operation_id = source_claim.operation_id
+  WHERE source_claim.owner_user_id = p_owner_user_id
+    AND source_claim.claim_id = p_claim_id
+    AND source_claim.claim_delete_operation_id = p_operation_id
+    AND operation.state IN ('fenced', 'claim_deletion_pending');
+  IF source_erasure_operation_id IS NOT NULL THEN
+    PERFORM pg_catalog.set_config(
+      'app.memory_source_erasure_operation_id',
+      source_erasure_operation_id::text, true
+    );
+  END IF;
   SELECT value.* INTO stored_deletion_receipt
   FROM memory.claim_deletion_receipt AS value
   WHERE value.owner_user_id = p_owner_user_id
@@ -9038,7 +10243,15 @@ BEGIN
          AND transition.object_type = 'claim'
          AND transition.object_id = target.claim_id
          AND transition.transition_code = 'claim_deletion_requested'
-         AND transition.reason_code = 'explicit_owner_deletion'
+         AND (
+           transition.reason_code = 'explicit_owner_deletion'
+           OR (
+             transition.reason_code = 'source_erasure'
+             AND transition.actor_kind = 'worker'
+             AND transition.actor_user_id IS NULL
+             AND source_erasure_operation_id IS NOT NULL
+           )
+         )
          AND transition.new_state_sha256 = target.current_state_sha256
      ) THEN
     RAISE EXCEPTION 'exact applied Qdrant delete receipt is absent or stale'
@@ -9154,6 +10367,19 @@ BEGIN
   PERFORM pg_catalog.set_config(
     'app.memory_hard_delete_operation_id', p_operation_id::text, true
   );
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
   SET CONSTRAINTS ALL DEFERRED;
   DELETE FROM memory.answer_binding AS binding
   WHERE binding.owner_user_id = p_owner_user_id
@@ -9495,6 +10721,9 @@ BEGIN
       0
     )
   );
+  PERFORM memory_private.assert_chat_messages_not_erased(
+    p_response_id, NULL::uuid
+  );
   SELECT pg_catalog.count(*)::integer INTO existing_count
   FROM memory.answer_binding AS value
   WHERE value.owner_user_id = actor
@@ -9811,6 +11040,1062 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION memory_private.register_source_erasure(
+  p_operation_id uuid,
+  p_owner_user_id uuid,
+  p_selector_kind text,
+  p_selector_sha256 text,
+  p_target_count integer,
+  p_target_manifest_sha256 text
+)
+RETURNS TABLE(outcome text, state text, received_target_count integer)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  existing memory.source_erasure_operation%ROWTYPE;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_owner_user_id IS NULL
+     OR p_owner_user_id = '00000000-0000-0000-0000-000000000000'::uuid
+     OR p_selector_kind NOT IN (
+       'thread', 'message_tail', 'recent', 'all_conversations'
+     )
+     OR COALESCE(p_selector_sha256, '') !~ '^[0-9a-f]{64}$'
+     OR p_target_count NOT BETWEEN 0 AND 100000
+     OR COALESCE(p_target_manifest_sha256, '') !~ '^[0-9a-f]{64}$'
+  THEN
+    RAISE EXCEPTION 'invalid source erasure registration'
+      USING ERRCODE = '22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      p_owner_user_id::text || '|memory_source_erasure', 0
+    )
+  );
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      p_owner_user_id::text || '|memory_source_erasure|'
+        || p_operation_id::text, 0
+    )
+  );
+  SELECT value.* INTO existing
+  FROM memory.source_erasure_operation AS value
+  WHERE value.owner_user_id = p_owner_user_id
+    AND value.operation_id = p_operation_id;
+  IF FOUND THEN
+    IF existing.selector_kind <> p_selector_kind
+       OR existing.selector_sha256 <> p_selector_sha256
+       OR existing.target_count <> p_target_count
+       OR existing.target_manifest_sha256 <> p_target_manifest_sha256 THEN
+      RAISE EXCEPTION 'source erasure registration replay drifted'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN QUERY SELECT 'replayed'::text, existing.state,
+      existing.received_target_count;
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM memory.source_erasure_operation AS active
+    WHERE active.owner_user_id = p_owner_user_id
+      AND active.state <> 'completed'
+  ) THEN
+    RAISE EXCEPTION 'owner memory source erasure already active'
+      USING ERRCODE = '55000';
+  END IF;
+
+  -- Drain every deletion root in the same global order used by finalizers.
+  -- SHARE ROW EXCLUSIVE conflicts with the ROW EXCLUSIVE lock taken by DML,
+  -- so no pre-fence writer can commit after the active operation appears.
+  LOCK TABLE memory.answer_binding IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
+
+  -- Recheck after the write-drain barrier.  The owner advisory lock serializes
+  -- normal registrations; this second check also fails closed if privileged
+  -- direct DML introduced an active row while the barrier was being acquired.
+  IF EXISTS (
+    SELECT 1 FROM memory.source_erasure_operation AS active
+    WHERE active.owner_user_id = p_owner_user_id
+      AND active.state <> 'completed'
+  ) THEN
+    RAISE EXCEPTION 'owner memory source erasure already active'
+      USING ERRCODE = '55000';
+  END IF;
+  INSERT INTO memory.source_erasure_operation(
+    operation_id, owner_user_id, selector_kind, selector_sha256,
+    target_count, target_manifest_sha256, state
+  ) VALUES (
+    p_operation_id, p_owner_user_id, p_selector_kind, p_selector_sha256,
+    p_target_count, p_target_manifest_sha256, 'receiving'
+  );
+  RETURN QUERY SELECT 'registered'::text, 'receiving'::text, 0;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.append_source_erasure_targets(
+  p_operation_id uuid,
+  p_message_ids uuid[],
+  p_thread_ids uuid[],
+  p_source_created_at timestamptz[],
+  p_target_sha256s text[]
+)
+RETURNS TABLE(outcome text, inserted_count integer, received_target_count integer)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  item_count integer;
+  item_index integer;
+  prior_index integer;
+  expected_hash text;
+  existing memory.source_erasure_target%ROWTYPE;
+  inserted integer := 0;
+  received integer;
+BEGIN
+  item_count := pg_catalog.cardinality(p_message_ids);
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR item_count IS NULL
+     OR item_count NOT BETWEEN 1 AND 500
+     OR pg_catalog.cardinality(p_thread_ids) <> item_count
+     OR pg_catalog.cardinality(p_source_created_at) <> item_count
+     OR pg_catalog.cardinality(p_target_sha256s) <> item_count THEN
+    RAISE EXCEPTION 'invalid source erasure target page'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.state <> 'receiving' THEN
+    RAISE EXCEPTION 'source erasure target set is sealed'
+      USING ERRCODE = '55000';
+  END IF;
+  FOR item_index IN 1..item_count LOOP
+    IF p_message_ids[item_index] IS NULL
+       OR p_thread_ids[item_index] IS NULL
+       OR p_source_created_at[item_index] IS NULL
+       OR COALESCE(p_target_sha256s[item_index], '') !~ '^[0-9a-f]{64}$'
+    THEN
+      RAISE EXCEPTION 'invalid source erasure target row'
+        USING ERRCODE = '22023';
+    END IF;
+    IF item_index > 1 THEN
+      prior_index := item_index - 1;
+      IF (p_source_created_at[item_index], p_message_ids[item_index])
+           <= (p_source_created_at[prior_index], p_message_ids[prior_index]) THEN
+        RAISE EXCEPTION 'source erasure target page is not sorted unique'
+          USING ERRCODE = '22023';
+      END IF;
+    END IF;
+    expected_hash := pg_catalog.encode(pg_catalog.sha256(
+      pg_catalog.convert_to(
+        'governed_memory.source_erasure_target.v1' || E'\n'
+          || memory_private.framed_utf8_field(
+               'owner_user_id', operation.owner_user_id::text
+             )
+          || memory_private.framed_utf8_field(
+               'operation_id', operation.operation_id::text
+             )
+          || memory_private.framed_utf8_field(
+               'message_id', p_message_ids[item_index]::text
+             )
+          || memory_private.framed_utf8_field(
+               'thread_id', p_thread_ids[item_index]::text
+             )
+          || memory_private.framed_utf8_field(
+               'source_created_at',
+               memory_private.timestamp_utc_text(
+                 p_source_created_at[item_index]
+               )
+             ),
+        'UTF8'
+      )
+    ), 'hex');
+    IF expected_hash <> p_target_sha256s[item_index] THEN
+      RAISE EXCEPTION 'source erasure target hash mismatch'
+        USING ERRCODE = '23514';
+    END IF;
+    SELECT target.* INTO existing
+    FROM memory.source_erasure_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+      AND target.message_id = p_message_ids[item_index];
+    IF FOUND THEN
+      IF existing.thread_id <> p_thread_ids[item_index]
+         OR existing.source_created_at <> p_source_created_at[item_index]
+         OR existing.target_sha256 <> p_target_sha256s[item_index] THEN
+        RAISE EXCEPTION 'source erasure target replay drifted'
+          USING ERRCODE = '23514';
+      END IF;
+    ELSE
+      INSERT INTO memory.source_erasure_target(
+        owner_user_id, operation_id, message_id, thread_id,
+        source_created_at, target_sha256
+      ) VALUES (
+        operation.owner_user_id, operation.operation_id,
+        p_message_ids[item_index], p_thread_ids[item_index],
+        p_source_created_at[item_index], p_target_sha256s[item_index]
+      );
+      inserted := inserted + 1;
+    END IF;
+  END LOOP;
+  SELECT pg_catalog.count(*)::integer INTO received
+  FROM memory.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  IF received > operation.target_count THEN
+    RAISE EXCEPTION 'source erasure received too many targets'
+      USING ERRCODE = '23514';
+  END IF;
+  UPDATE memory.source_erasure_operation AS value
+  SET received_target_count = received
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN QUERY SELECT CASE WHEN inserted = 0
+    THEN 'replayed'::text ELSE 'appended'::text END, inserted, received;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.seal_source_erasure(p_operation_id uuid)
+RETURNS TABLE(outcome text, state text, touched_claim_count integer)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  recomputed_manifest text;
+  observed_target_count integer;
+  touched_count integer;
+  dispatched_count integer;
+  locked_message_id uuid;
+  sealed_timestamp timestamptz;
+BEGIN
+  IF session_user <> 'governed_memory_worker' OR p_operation_id IS NULL THEN
+    RAISE EXCEPTION 'invalid source erasure seal request'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.state <> 'receiving' THEN
+    RETURN QUERY SELECT 'replayed'::text, operation.state,
+      operation.touched_claim_count;
+    RETURN;
+  END IF;
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
+  SELECT pg_catalog.count(*)::integer,
+    pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+      'governed_memory.source_erasure_target_manifest.v1' || E'\n'
+        || COALESCE(pg_catalog.string_agg(
+          target.target_sha256, E'\n'
+          ORDER BY target.source_created_at, target.message_id
+        ), ''),
+      'UTF8'
+    )), 'hex')
+  INTO observed_target_count, recomputed_manifest
+  FROM memory.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  IF observed_target_count <> operation.target_count
+     OR operation.received_target_count <> operation.target_count
+     OR recomputed_manifest <> operation.target_manifest_sha256 THEN
+    RAISE EXCEPTION 'source erasure target manifest is incomplete'
+      USING ERRCODE = '40001';
+  END IF;
+
+  sealed_timestamp := pg_catalog.transaction_timestamp();
+  FOR locked_message_id IN
+    SELECT target.message_id
+    FROM memory.source_erasure_target AS target
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+    ORDER BY target.message_id
+  LOOP
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'governed_memory.erased_chat_message.v1|'
+          || locked_message_id::text,
+        0
+      )
+    );
+  END LOOP;
+  IF EXISTS (
+    SELECT 1
+    FROM memory.evidence AS evidence
+    JOIN memory.source_erasure_target AS target
+      ON target.operation_id = operation.operation_id
+     AND target.message_id IN (
+       evidence.source_message_id, evidence.context_message_id
+     )
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND evidence.source_kind = 'conversation_message'
+      AND evidence.owner_user_id <> operation.owner_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory.answer_binding AS binding
+    JOIN memory.source_erasure_target AS target
+      ON target.operation_id = operation.operation_id
+     AND target.message_id = binding.response_id
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND binding.owner_user_id <> operation.owner_user_id
+  ) THEN
+    UPDATE memory.source_erasure_operation AS value
+    SET state = 'manual_review', sealed_at = sealed_timestamp,
+        last_error_code = 'cross_owner_chat_message_lineage'
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id;
+    RETURN QUERY SELECT 'manual_review'::text, 'manual_review'::text, 0;
+    RETURN;
+  END IF;
+  INSERT INTO memory.erased_chat_message_tombstone(
+    message_id, owner_user_id, erasure_operation_id, erased_at
+  )
+  SELECT target.message_id, operation.owner_user_id,
+    operation.operation_id, sealed_timestamp
+  FROM memory.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id
+  ORDER BY target.message_id
+  ON CONFLICT (message_id) DO NOTHING;
+  IF (
+    SELECT pg_catalog.count(*)
+    FROM memory.source_erasure_target AS target
+    JOIN memory.erased_chat_message_tombstone AS tombstone
+      ON tombstone.message_id = target.message_id
+     AND tombstone.owner_user_id = operation.owner_user_id
+     AND tombstone.erasure_operation_id = operation.operation_id
+     AND tombstone.erased_at = sealed_timestamp
+    WHERE target.owner_user_id = operation.owner_user_id
+      AND target.operation_id = operation.operation_id
+  ) <> observed_target_count THEN
+    RAISE EXCEPTION 'erased chat message tombstone lineage conflicts'
+      USING ERRCODE = '23514';
+  END IF;
+
+  WITH targeted_evidence AS (
+    SELECT DISTINCT evidence.evidence_id
+    FROM memory.evidence AS evidence
+    WHERE evidence.owner_user_id = operation.owner_user_id
+      AND evidence.source_kind = 'conversation_message'
+      AND (
+        EXISTS (
+          SELECT 1 FROM memory.source_erasure_target AS target
+          WHERE target.owner_user_id = evidence.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.message_id = evidence.source_message_id
+        )
+        OR EXISTS (
+          SELECT 1 FROM memory.source_erasure_target AS target
+          WHERE target.owner_user_id = evidence.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.message_id = evidence.context_message_id
+        )
+      )
+  ), touched AS (
+    SELECT link.claim_id
+    FROM memory.claim_evidence AS link
+    JOIN targeted_evidence AS target
+      ON target.evidence_id = link.evidence_id
+    WHERE link.owner_user_id = operation.owner_user_id
+    UNION
+    SELECT revision.claim_id
+    FROM memory.claim_revision AS revision
+    JOIN memory.proposal AS proposal
+      ON proposal.owner_user_id = revision.owner_user_id
+     AND proposal.proposal_id = revision.source_proposal_id
+    JOIN targeted_evidence AS target
+      ON target.evidence_id = proposal.evidence_id
+    WHERE revision.owner_user_id = operation.owner_user_id
+    UNION
+    SELECT proposal.correction_of_claim_id
+    FROM memory.proposal AS proposal
+    JOIN targeted_evidence AS target
+      ON target.evidence_id = proposal.evidence_id
+    WHERE proposal.owner_user_id = operation.owner_user_id
+      AND proposal.correction_of_claim_id IS NOT NULL
+  )
+  INSERT INTO memory.source_erasure_claim(
+    owner_user_id, operation_id, claim_id, claim_delete_operation_id,
+    prior_state_sha256, revision_id, revision_sha256
+  )
+  SELECT claim.owner_user_id, operation.operation_id, claim.claim_id,
+    memory_private.uuid5(
+      operation.operation_id, 'claim-delete:' || claim.claim_id::text
+    ),
+    claim.current_state_sha256, revision.revision_id,
+    revision.revision_sha256
+  FROM touched
+  JOIN memory.claim AS claim
+    ON claim.owner_user_id = operation.owner_user_id
+   AND claim.claim_id = touched.claim_id
+  JOIN memory.claim_revision AS revision
+    ON revision.owner_user_id = claim.owner_user_id
+   AND revision.claim_id = claim.claim_id
+   AND revision.revision_id = claim.current_revision_id
+  WHERE claim.lifecycle_state IN ('active', 'correction_pending', 'retracted')
+  ORDER BY claim.claim_id;
+
+  IF EXISTS (
+    WITH targeted_evidence AS (
+      SELECT evidence.evidence_id
+      FROM memory.evidence AS evidence
+      WHERE evidence.owner_user_id = operation.owner_user_id
+        AND EXISTS (
+          SELECT 1 FROM memory.source_erasure_target AS target
+          WHERE target.owner_user_id = evidence.owner_user_id
+            AND target.operation_id = operation.operation_id
+            AND target.message_id IN (
+              evidence.source_message_id, evidence.context_message_id
+            )
+        )
+    )
+    SELECT 1
+    FROM memory.claim_evidence AS link
+    JOIN targeted_evidence AS target ON target.evidence_id = link.evidence_id
+    JOIN memory.claim AS claim
+      ON claim.owner_user_id = link.owner_user_id
+     AND claim.claim_id = link.claim_id
+    WHERE link.owner_user_id = operation.owner_user_id
+      AND claim.lifecycle_state = 'deletion_pending'
+  ) THEN
+    UPDATE memory.source_erasure_operation AS value
+    SET state = 'manual_review', sealed_at = sealed_timestamp,
+        last_error_code = 'overlapping_claim_deletion'
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id;
+    RETURN QUERY SELECT 'manual_review'::text, 'manual_review'::text, 0;
+    RETURN;
+  END IF;
+
+  SELECT pg_catalog.count(*)::integer INTO touched_count
+  FROM memory.source_erasure_claim AS source_claim
+  WHERE source_claim.owner_user_id = operation.owner_user_id
+    AND source_claim.operation_id = operation.operation_id;
+  IF EXISTS (
+    SELECT 1
+    FROM memory.source_erasure_claim AS source_claim
+    JOIN memory.projection_outbox AS outbox
+      ON outbox.owner_user_id = source_claim.owner_user_id
+     AND outbox.claim_id = source_claim.claim_id
+    WHERE source_claim.owner_user_id = operation.owner_user_id
+      AND source_claim.operation_id = operation.operation_id
+      AND outbox.operation = 'upsert'
+      AND outbox.embedding_request_sha256 IS NOT NULL
+      AND outbox.state IN ('claimed', 'failed_terminal')
+  ) THEN
+    UPDATE memory.source_erasure_operation AS value
+    SET state = 'manual_review', sealed_at = sealed_timestamp,
+        touched_claim_count = touched_count,
+        last_error_code = 'pre_fence_projection_dispatch_uncertain'
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id;
+    RETURN QUERY SELECT 'manual_review'::text, 'manual_review'::text,
+      touched_count;
+    RETURN;
+  END IF;
+  SELECT pg_catalog.count(*)::integer INTO dispatched_count
+  FROM memory.provider_call AS call
+  JOIN memory.extraction_job AS job
+    ON job.owner_user_id = call.owner_user_id
+   AND job.job_id = call.job_id
+  JOIN memory.evidence AS evidence
+    ON evidence.owner_user_id = job.owner_user_id
+   AND evidence.evidence_id = job.evidence_id
+  WHERE call.owner_user_id = operation.owner_user_id
+    AND call.state IN ('dispatched', 'completed', 'outcome_unknown')
+    AND EXISTS (
+      SELECT 1 FROM memory.source_erasure_target AS target
+      WHERE target.owner_user_id = evidence.owner_user_id
+        AND target.operation_id = operation.operation_id
+        AND target.message_id IN (
+          evidence.source_message_id, evidence.context_message_id
+        )
+    );
+  UPDATE memory.source_erasure_operation AS value
+  SET state = CASE WHEN touched_count = 0
+        THEN 'fenced' ELSE 'claim_deletion_pending' END,
+      received_target_count = observed_target_count,
+      touched_claim_count = touched_count,
+      pre_fence_provider_dispatch_count = dispatched_count,
+      sealed_at = sealed_timestamp,
+      last_error_code = NULL
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN QUERY SELECT 'sealed'::text,
+    CASE WHEN touched_count = 0
+      THEN 'fenced'::text ELSE 'claim_deletion_pending'::text END,
+    touched_count;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.prepare_source_erasure_claim_deletions(
+  p_operation_id uuid,
+  p_limit integer
+)
+RETURNS TABLE(outcome text, prepared_count integer, remaining_count integer)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  source_claim memory.source_erasure_claim%ROWTYPE;
+  request_receipt record;
+  prepared integer := 0;
+  remaining integer;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL OR p_limit NOT BETWEEN 1 AND 100 THEN
+    RAISE EXCEPTION 'invalid source erasure claim preparation'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.state NOT IN ('fenced', 'claim_deletion_pending') THEN
+    RAISE EXCEPTION 'source erasure is not claim-deletion ready'
+      USING ERRCODE = '55000';
+  END IF;
+  PERFORM pg_catalog.set_config(
+    'app.memory_source_erasure_operation_id', operation.operation_id::text, true
+  );
+  FOR source_claim IN
+    SELECT value.*
+    FROM memory.source_erasure_claim AS value
+    WHERE value.owner_user_id = operation.owner_user_id
+      AND value.operation_id = operation.operation_id
+      AND value.delete_outbox_id IS NULL
+    ORDER BY value.claim_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT p_limit
+  LOOP
+    SELECT * INTO STRICT request_receipt
+    FROM memory_private.request_claim_deletion(
+      source_claim.claim_delete_operation_id,
+      source_claim.claim_id,
+      source_claim.revision_sha256,
+      source_claim.prior_state_sha256
+    );
+    IF request_receipt.outcome NOT IN ('deletion_pending', 'replayed')
+       OR request_receipt.outbox_id IS NULL THEN
+      RAISE EXCEPTION 'source claim deletion request receipt is invalid'
+        USING ERRCODE = '23514';
+    END IF;
+    UPDATE memory.source_erasure_claim AS value
+    SET delete_outbox_id = request_receipt.outbox_id
+    WHERE value.owner_user_id = source_claim.owner_user_id
+      AND value.operation_id = source_claim.operation_id
+      AND value.claim_id = source_claim.claim_id;
+    prepared := prepared + 1;
+  END LOOP;
+  SELECT pg_catalog.count(*)::integer INTO remaining
+  FROM memory.source_erasure_claim AS value
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id
+    AND value.delete_outbox_id IS NULL;
+  RETURN QUERY SELECT CASE WHEN prepared = 0
+    THEN 'no_new_claim_deletions'::text ELSE 'prepared'::text END,
+    prepared, remaining;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.read_source_erasure_progress(
+  p_operation_id uuid
+)
+RETURNS TABLE(
+  owner_user_id uuid,
+  operation_id uuid,
+  state text,
+  target_count integer,
+  target_manifest_sha256 text,
+  touched_claim_count integer,
+  prepared_claim_count integer,
+  deleted_claim_count integer,
+  governed_receipt_sha256 text,
+  conversation_receipt_sha256 text,
+  last_error_code text
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  prepared integer;
+  deleted integer;
+BEGIN
+  IF session_user NOT IN ('governed_memory_worker', 'governed_memory_api')
+     OR p_operation_id IS NULL THEN
+    RAISE EXCEPTION 'source erasure progress role required'
+      USING ERRCODE = '42501';
+  END IF;
+  IF session_user = 'governed_memory_api' THEN
+    SELECT value.* INTO STRICT operation
+    FROM memory.source_erasure_operation AS value
+    WHERE value.owner_user_id = memory_private.current_owner_id()
+      AND value.operation_id = p_operation_id;
+  ELSE
+    SELECT value.* INTO STRICT operation
+    FROM memory.source_erasure_operation AS value
+    WHERE value.operation_id = p_operation_id;
+  END IF;
+  SELECT pg_catalog.count(*) FILTER (
+      WHERE source_claim.delete_outbox_id IS NOT NULL
+    )::integer,
+    pg_catalog.count(receipt.receipt_id)::integer
+  INTO prepared, deleted
+  FROM memory.source_erasure_claim AS source_claim
+  LEFT JOIN memory.claim_deletion_receipt AS receipt
+    ON receipt.owner_user_id = source_claim.owner_user_id
+   AND receipt.operation_id = source_claim.claim_delete_operation_id
+  WHERE source_claim.owner_user_id = operation.owner_user_id
+    AND source_claim.operation_id = operation.operation_id;
+  RETURN QUERY SELECT operation.owner_user_id, operation.operation_id,
+    operation.state, operation.target_count,
+    operation.target_manifest_sha256, operation.touched_claim_count,
+    prepared, deleted, operation.governed_receipt_sha256,
+    operation.conversation_receipt_sha256, operation.last_error_code;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.finalize_source_erasure_memory(
+  p_operation_id uuid
+)
+RETURNS TABLE(
+  outcome text,
+  governed_receipt_sha256 text,
+  target_count integer,
+  target_manifest_sha256 text,
+  touched_claim_count integer,
+  deleted_claim_count integer
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  deleted integer;
+  absence_hash text;
+  target_evidence_ids uuid[] := ARRAY[]::uuid[];
+  target_proposal_ids uuid[] := ARRAY[]::uuid[];
+  target_call_ids uuid[] := ARRAY[]::uuid[];
+  target_job_ids uuid[] := ARRAY[]::uuid[];
+BEGIN
+  IF session_user <> 'governed_memory_worker' OR p_operation_id IS NULL THEN
+    RAISE EXCEPTION 'invalid source erasure memory finalization'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  IF operation.state NOT IN (
+    'fenced', 'claim_deletion_pending', 'memory_deleted'
+  ) THEN
+    RAISE EXCEPTION 'source erasure memory is not ready'
+      USING ERRCODE = '55000';
+  END IF;
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
+  PERFORM memory_private.assert_source_erasure_tombstones(
+    operation.operation_id, operation.owner_user_id,
+    operation.target_count, operation.sealed_at
+  );
+  IF operation.state = 'memory_deleted' THEN
+    RETURN QUERY SELECT 'replayed'::text,
+      operation.governed_receipt_sha256, operation.target_count,
+      operation.target_manifest_sha256, operation.touched_claim_count,
+      operation.deleted_claim_count;
+    RETURN;
+  END IF;
+  SELECT pg_catalog.count(receipt.receipt_id)::integer INTO deleted
+  FROM memory.source_erasure_claim AS source_claim
+  LEFT JOIN memory.claim_deletion_receipt AS receipt
+    ON receipt.owner_user_id = source_claim.owner_user_id
+   AND receipt.operation_id = source_claim.claim_delete_operation_id
+  WHERE source_claim.owner_user_id = operation.owner_user_id
+    AND source_claim.operation_id = operation.operation_id;
+  IF deleted <> operation.touched_claim_count THEN
+    RETURN QUERY SELECT 'claim_deletion_pending'::text, NULL::text,
+      operation.target_count, operation.target_manifest_sha256,
+      operation.touched_claim_count, deleted;
+    RETURN;
+  END IF;
+
+  PERFORM pg_catalog.set_config(
+    'app.memory_source_erasure_operation_id', operation.operation_id::text, true
+  );
+  PERFORM pg_catalog.set_config(
+    'app.memory_hard_delete_operation_id', operation.operation_id::text, true
+  );
+  SELECT COALESCE(
+    pg_catalog.array_agg(evidence.evidence_id ORDER BY evidence.evidence_id),
+    ARRAY[]::uuid[]
+  ) INTO target_evidence_ids
+  FROM memory.evidence AS evidence
+  WHERE evidence.owner_user_id = operation.owner_user_id
+    AND evidence.source_kind = 'conversation_message'
+    AND EXISTS (
+      SELECT 1 FROM memory.source_erasure_target AS target
+      WHERE target.owner_user_id = evidence.owner_user_id
+        AND target.operation_id = operation.operation_id
+        AND target.message_id IN (
+          evidence.source_message_id, evidence.context_message_id
+        )
+    );
+  SELECT COALESCE(
+    pg_catalog.array_agg(proposal.proposal_id ORDER BY proposal.proposal_id),
+    ARRAY[]::uuid[]
+  ) INTO target_proposal_ids
+  FROM memory.proposal AS proposal
+  WHERE proposal.owner_user_id = operation.owner_user_id
+    AND proposal.evidence_id = ANY(target_evidence_ids);
+  SELECT COALESCE(pg_catalog.array_agg(
+    DISTINCT job.job_id
+  ), ARRAY[]::uuid[]) INTO target_job_ids
+  FROM memory.extraction_job AS job
+  WHERE job.owner_user_id = operation.owner_user_id
+    AND job.evidence_id = ANY(target_evidence_ids);
+  SELECT COALESCE(pg_catalog.array_agg(
+    DISTINCT call.provider_call_id
+  ), ARRAY[]::uuid[]) INTO target_call_ids
+  FROM memory.provider_call AS call
+  WHERE call.owner_user_id = operation.owner_user_id
+    AND (
+      call.job_id = ANY(target_job_ids)
+      OR EXISTS (
+        SELECT 1 FROM memory.proposal AS proposal
+        WHERE proposal.owner_user_id = call.owner_user_id
+          AND proposal.proposal_id = ANY(target_proposal_ids)
+          AND proposal.provider_call_id = call.provider_call_id
+      )
+    );
+
+  DELETE FROM memory.answer_binding AS binding
+  WHERE binding.owner_user_id = operation.owner_user_id
+    AND EXISTS (
+      SELECT 1 FROM memory.source_erasure_target AS target
+      WHERE target.owner_user_id = binding.owner_user_id
+        AND target.operation_id = operation.operation_id
+        AND target.message_id = binding.response_id
+    );
+  DELETE FROM memory.proposal AS proposal
+  WHERE proposal.owner_user_id = operation.owner_user_id
+    AND proposal.proposal_id = ANY(target_proposal_ids);
+  DELETE FROM memory.provider_call AS call
+  WHERE call.owner_user_id = operation.owner_user_id
+    AND call.provider_call_id = ANY(target_call_ids)
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.proposal AS proposal
+      WHERE proposal.owner_user_id = call.owner_user_id
+        AND proposal.provider_call_id = call.provider_call_id
+    );
+  DELETE FROM memory.extraction_job AS job
+  WHERE job.owner_user_id = operation.owner_user_id
+    AND job.job_id = ANY(target_job_ids)
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.provider_call AS call
+      WHERE call.owner_user_id = job.owner_user_id
+        AND call.job_id = job.job_id
+    );
+  DELETE FROM memory.evidence AS evidence
+  WHERE evidence.owner_user_id = operation.owner_user_id
+    AND evidence.evidence_id = ANY(target_evidence_ids)
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.claim_evidence AS link
+      WHERE link.owner_user_id = evidence.owner_user_id
+        AND link.evidence_id = evidence.evidence_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM memory.proposal AS proposal
+      WHERE proposal.owner_user_id = evidence.owner_user_id
+        AND proposal.evidence_id = evidence.evidence_id
+    );
+
+  IF EXISTS (
+    SELECT 1 FROM memory.evidence AS evidence
+    WHERE evidence.owner_user_id = operation.owner_user_id
+      AND evidence.source_kind = 'conversation_message'
+      AND EXISTS (
+        SELECT 1 FROM memory.source_erasure_target AS target
+        WHERE target.owner_user_id = evidence.owner_user_id
+          AND target.operation_id = operation.operation_id
+          AND target.message_id IN (
+            evidence.source_message_id, evidence.context_message_id
+          )
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM memory.source_erasure_claim AS source_claim
+    LEFT JOIN memory.claim_deletion_receipt AS receipt
+      ON receipt.owner_user_id = source_claim.owner_user_id
+     AND receipt.operation_id = source_claim.claim_delete_operation_id
+    WHERE source_claim.owner_user_id = operation.owner_user_id
+      AND source_claim.operation_id = operation.operation_id
+      AND receipt.receipt_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'governed source erasure absence verification failed'
+      USING ERRCODE = '40001';
+  END IF;
+
+  absence_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.source_erasure_memory_receipt.v1' || E'\n'
+      || memory_private.framed_utf8_field(
+           'owner_user_id', operation.owner_user_id::text
+         )
+      || memory_private.framed_utf8_field(
+           'operation_id', operation.operation_id::text
+         )
+      || memory_private.framed_utf8_field(
+           'selector_sha256', operation.selector_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'target_manifest_sha256', operation.target_manifest_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'target_count', operation.target_count::text
+         )
+      || memory_private.framed_utf8_field(
+           'touched_claim_count', operation.touched_claim_count::text
+         )
+      || memory_private.framed_utf8_field(
+           'claim_deletion_receipt_count', deleted::text
+         )
+      || memory_private.framed_utf8_field(
+           'pre_fence_provider_dispatch_count',
+           operation.pre_fence_provider_dispatch_count::text
+         ),
+    'UTF8'
+  )), 'hex');
+  UPDATE memory.source_erasure_operation AS value
+  SET state = 'memory_deleted', deleted_claim_count = deleted,
+      governed_receipt_sha256 = absence_hash,
+      memory_deleted_at = pg_catalog.transaction_timestamp(),
+      last_error_code = NULL
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN QUERY SELECT 'memory_deleted'::text, absence_hash,
+    operation.target_count, operation.target_manifest_sha256,
+    operation.touched_claim_count, deleted;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.ack_source_erasure_conversation_deleted(
+  p_operation_id uuid,
+  p_conversation_receipt_sha256 text
+)
+RETURNS TABLE(outcome text, receipt_sha256 text, completed_at timestamptz)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  operation memory.source_erasure_operation%ROWTYPE;
+  stored memory.source_erasure_receipt%ROWTYPE;
+  completed timestamptz;
+  final_hash text;
+BEGIN
+  IF session_user <> 'governed_memory_worker'
+     OR p_operation_id IS NULL
+     OR COALESCE(p_conversation_receipt_sha256, '') !~ '^[0-9a-f]{64}$'
+  THEN
+    RAISE EXCEPTION 'invalid conversation erasure acknowledgment'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT value.* INTO STRICT operation
+  FROM memory.source_erasure_operation AS value
+  WHERE value.operation_id = p_operation_id
+  FOR UPDATE;
+  SELECT value.* INTO stored
+  FROM memory.source_erasure_receipt AS value
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  IF FOUND THEN
+    IF stored.conversation_receipt_sha256
+         <> p_conversation_receipt_sha256 THEN
+      RAISE EXCEPTION 'source erasure acknowledgment replay drifted'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN QUERY SELECT 'replayed'::text, stored.receipt_sha256,
+      stored.completed_at;
+    RETURN;
+  END IF;
+  IF operation.state <> 'memory_deleted'
+     OR operation.governed_receipt_sha256 IS NULL THEN
+    RAISE EXCEPTION 'governed memory erasure is not complete'
+      USING ERRCODE = '40001';
+  END IF;
+  LOCK TABLE memory.answer_binding IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.projection_outbox IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.proposal IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim_revision IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.provider_call IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.extraction_job IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.evidence IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.entity IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_claim IN ROW EXCLUSIVE MODE;
+  LOCK TABLE memory.source_erasure_target IN ROW EXCLUSIVE MODE;
+  PERFORM memory_private.assert_source_erasure_deletion_catalog();
+  PERFORM memory_private.assert_source_erasure_tombstones(
+    operation.operation_id, operation.owner_user_id,
+    operation.target_count, operation.sealed_at
+  );
+  completed := pg_catalog.transaction_timestamp();
+  final_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.source_erasure_final_receipt.v1' || E'\n'
+      || memory_private.framed_utf8_field(
+           'owner_user_id', operation.owner_user_id::text
+         )
+      || memory_private.framed_utf8_field(
+           'operation_id', operation.operation_id::text
+         )
+      || memory_private.framed_utf8_field(
+           'selector_sha256', operation.selector_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'target_manifest_sha256', operation.target_manifest_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'target_count', operation.target_count::text
+         )
+      || memory_private.framed_utf8_field(
+           'governed_absence_sha256', operation.governed_receipt_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'conversation_receipt_sha256', p_conversation_receipt_sha256
+         )
+      || memory_private.framed_utf8_field(
+           'completed_at', memory_private.timestamp_utc_text(completed)
+         ),
+    'UTF8'
+  )), 'hex');
+  INSERT INTO memory.source_erasure_receipt(
+    owner_user_id, operation_id, selector_sha256,
+    target_manifest_sha256, target_count, touched_claim_count,
+    claim_deletion_receipt_count, pre_fence_provider_dispatch_count,
+    governed_absence_sha256, conversation_receipt_sha256,
+    receipt_sha256, completed_at
+  ) VALUES (
+    operation.owner_user_id, operation.operation_id,
+    operation.selector_sha256, operation.target_manifest_sha256,
+    operation.target_count, operation.touched_claim_count,
+    operation.deleted_claim_count,
+    operation.pre_fence_provider_dispatch_count,
+    operation.governed_receipt_sha256, p_conversation_receipt_sha256,
+    final_hash, completed
+  );
+  DELETE FROM memory.source_erasure_claim AS source_claim
+  WHERE source_claim.owner_user_id = operation.owner_user_id
+    AND source_claim.operation_id = operation.operation_id;
+  DELETE FROM memory.source_erasure_target AS target
+  WHERE target.owner_user_id = operation.owner_user_id
+    AND target.operation_id = operation.operation_id;
+  UPDATE memory.source_erasure_operation AS value
+  SET state = 'completed',
+      conversation_receipt_sha256 = p_conversation_receipt_sha256,
+      completed_at = completed, last_error_code = NULL
+  WHERE value.owner_user_id = operation.owner_user_id
+    AND value.operation_id = operation.operation_id;
+  RETURN QUERY SELECT 'completed'::text, final_hash, completed;
+END;
+$function$;
+
+CREATE FUNCTION memory_private.read_source_erasure_receipt(
+  p_operation_id uuid
+)
+RETURNS TABLE(
+  operation_id uuid,
+  selector_sha256 text,
+  target_manifest_sha256 text,
+  target_count integer,
+  touched_claim_count integer,
+  claim_deletion_receipt_count integer,
+  pre_fence_provider_dispatch_count integer,
+  governed_absence_sha256 text,
+  conversation_receipt_sha256 text,
+  receipt_sha256 text,
+  completed_at timestamptz
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  actor uuid;
+BEGIN
+  IF session_user NOT IN ('governed_memory_worker', 'governed_memory_api')
+     OR p_operation_id IS NULL THEN
+    RAISE EXCEPTION 'source erasure receipt role required'
+      USING ERRCODE = '42501';
+  END IF;
+  actor := CASE WHEN session_user = 'governed_memory_api'
+    THEN memory_private.current_owner_id() ELSE NULL::uuid END;
+  RETURN QUERY
+  SELECT receipt.operation_id, receipt.selector_sha256,
+    receipt.target_manifest_sha256, receipt.target_count,
+    receipt.touched_claim_count, receipt.claim_deletion_receipt_count,
+    receipt.pre_fence_provider_dispatch_count,
+    receipt.governed_absence_sha256,
+    receipt.conversation_receipt_sha256, receipt.receipt_sha256,
+    receipt.completed_at
+  FROM memory.source_erasure_receipt AS receipt
+  WHERE receipt.operation_id = p_operation_id
+    AND (session_user = 'governed_memory_worker'
+      OR receipt.owner_user_id = actor);
+END;
+$function$;
+
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA memory_private
   FROM PUBLIC, governed_memory_api, governed_memory_worker;
 
@@ -9823,6 +12108,8 @@ GRANT EXECUTE ON FUNCTION
   memory_private.correct_claim(uuid,uuid,text,text,text,jsonb),
   memory_private.retract_claim(uuid,uuid,text,text),
   memory_private.request_claim_deletion(uuid,uuid,text,text),
+  memory_private.read_source_erasure_progress(uuid),
+  memory_private.read_source_erasure_receipt(uuid),
   memory_private.record_answer_binding(
     uuid,uuid,uuid,text,text,text[],text[],text[],integer,integer,text,text,
     boolean,uuid[],uuid[],text,text,text,text,text
@@ -9858,7 +12145,18 @@ GRANT EXECUTE ON FUNCTION
   ),
   memory_private.finish_projection_job(
     uuid,uuid,text,text,text,text,text,text
-  )
+  ),
+  memory_private.request_claim_deletion(uuid,uuid,text,text),
+  memory_private.register_source_erasure(uuid,uuid,text,text,integer,text),
+  memory_private.append_source_erasure_targets(
+    uuid,uuid[],uuid[],timestamptz[],text[]
+  ),
+  memory_private.seal_source_erasure(uuid),
+  memory_private.prepare_source_erasure_claim_deletions(uuid,integer),
+  memory_private.read_source_erasure_progress(uuid),
+  memory_private.finalize_source_erasure_memory(uuid),
+  memory_private.ack_source_erasure_conversation_deleted(uuid,text),
+  memory_private.read_source_erasure_receipt(uuid)
 TO governed_memory_worker;
 GRANT EXECUTE ON FUNCTION memory_private.finalize_claim_deletion(
   uuid,uuid,uuid,text,uuid,uuid,text,integer,text,text,
@@ -9869,6 +12167,8 @@ DO $postflight$
 DECLARE
   relation_name text;
   forbidden_role text;
+  function_identity text;
+  routine_oid oid;
 BEGIN
   IF (
     SELECT pg_catalog.count(*)
@@ -9876,14 +12176,17 @@ BEGIN
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'memory' AND relation.relkind = 'r'
-  ) <> 13 THEN
-    RAISE EXCEPTION 'foundation must contain exactly 13 tables';
+  ) <> 18 THEN
+    RAISE EXCEPTION 'foundation must contain exactly 18 tables';
   END IF;
 
   FOREACH relation_name IN ARRAY ARRAY[
     'evidence', 'extraction_job', 'provider_call', 'proposal', 'entity',
     'claim', 'claim_revision', 'claim_evidence', 'projection_outbox',
-    'answer_binding', 'audit_event', 'claim_deletion_receipt'
+    'answer_binding', 'audit_event', 'claim_deletion_receipt',
+    'source_erasure_operation', 'source_erasure_target',
+    'erased_chat_message_tombstone', 'source_erasure_claim',
+    'source_erasure_receipt'
   ] LOOP
     IF NOT EXISTS (
       SELECT 1
@@ -9918,6 +12221,325 @@ BEGIN
     ) THEN
       RAISE EXCEPTION 'runtime role has direct table authority on %',
         relation_name;
+    END IF;
+  END LOOP;
+
+  IF (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_policies AS policy_row
+    WHERE policy_row.schemaname = 'memory'
+      AND policy_row.tablename = 'erased_chat_message_tombstone'
+  ) <> 1 OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policies AS policy_row
+    WHERE policy_row.schemaname = 'memory'
+      AND policy_row.tablename = 'erased_chat_message_tombstone'
+      AND policy_row.policyname = 'owner_internal'
+      AND policy_row.permissive = 'PERMISSIVE'
+      AND policy_row.roles = ARRAY['governed_memory_owner']::name[]
+      AND policy_row.cmd = 'ALL'
+      AND policy_row.qual IS NOT NULL
+      AND policy_row.with_check IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION
+      'erased chat message tombstone private RLS contract differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('message_id', 'uuid'),
+      ('owner_user_id', 'uuid'),
+      ('erasure_operation_id', 'uuid'),
+      ('erased_at', 'timestamp with time zone')
+    ) AS expected(column_name, type_name)
+    LEFT JOIN pg_catalog.pg_attribute AS attribute
+      ON attribute.attrelid =
+           'memory.erased_chat_message_tombstone'::regclass
+     AND attribute.attname = expected.column_name
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped
+    WHERE attribute.attnum IS NULL
+       OR pg_catalog.format_type(attribute.atttypid, attribute.atttypmod)
+            <> expected.type_name
+       OR NOT attribute.attnotnull
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND constraint_row.conname =
+            'erased_chat_message_tombstone_pkey'
+      AND constraint_row.contype = 'p'
+      AND ARRAY(
+        SELECT attribute.attname::text
+        FROM pg_catalog.unnest(constraint_row.conkey)
+          WITH ORDINALITY AS key_column(attnum, ordinal_position)
+        JOIN pg_catalog.pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+        ORDER BY key_column.ordinal_position
+      ) = ARRAY['message_id']::text[]
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND constraint_row.conname =
+            'erased_chat_message_tombstone_operation_fk'
+      AND constraint_row.contype = 'f'
+      AND constraint_row.confrelid =
+            'memory.source_erasure_operation'::regclass
+      AND constraint_row.confdeltype = 'r'
+      AND constraint_row.confupdtype = 'a'
+      AND constraint_row.confmatchtype = 's'
+      AND NOT constraint_row.condeferrable
+      AND NOT constraint_row.condeferred
+      AND constraint_row.convalidated
+  ) THEN
+    RAISE EXCEPTION 'erased chat message tombstone shape differs';
+  END IF;
+
+  FOREACH relation_name IN ARRAY ARRAY[
+    'source_erasure_operation', 'source_erasure_target',
+    'source_erasure_claim', 'source_erasure_receipt'
+  ] LOOP
+    IF (
+      SELECT pg_catalog.count(*)
+      FROM pg_catalog.pg_policies AS policy_row
+      WHERE policy_row.schemaname = 'memory'
+        AND policy_row.tablename = relation_name
+    ) <> 2 OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_policies AS policy_row
+      WHERE policy_row.schemaname = 'memory'
+        AND policy_row.tablename = relation_name
+        AND policy_row.policyname = 'owner_isolation'
+        AND policy_row.permissive = 'PERMISSIVE'
+        AND policy_row.roles = ARRAY['governed_memory_api']::name[]
+        AND policy_row.cmd = 'ALL'
+        AND policy_row.qual IS NOT NULL
+        AND policy_row.with_check IS NOT NULL
+    ) OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_policies AS policy_row
+      WHERE policy_row.schemaname = 'memory'
+        AND policy_row.tablename = relation_name
+        AND policy_row.policyname = 'owner_internal'
+        AND policy_row.permissive = 'PERMISSIVE'
+        AND policy_row.roles = ARRAY['governed_memory_owner']::name[]
+        AND policy_row.cmd = 'ALL'
+        AND policy_row.qual IS NOT NULL
+        AND policy_row.with_check IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION
+        'source erasure table % lacks its exact two-policy RLS contract',
+        relation_name;
+    END IF;
+  END LOOP;
+
+  FOREACH relation_name IN ARRAY ARRAY[
+    'evidence', 'extraction_job', 'provider_call', 'proposal', 'claim',
+    'claim_revision', 'claim_evidence', 'projection_outbox', 'answer_binding'
+  ] LOOP
+    IF (
+      SELECT pg_catalog.count(*)
+      FROM pg_catalog.pg_trigger AS trigger_row
+      JOIN pg_catalog.pg_class AS relation
+        ON relation.oid = trigger_row.tgrelid
+      JOIN pg_catalog.pg_namespace AS relation_namespace
+        ON relation_namespace.oid = relation.relnamespace
+      JOIN pg_catalog.pg_proc AS routine
+        ON routine.oid = trigger_row.tgfoid
+      JOIN pg_catalog.pg_namespace AS routine_namespace
+        ON routine_namespace.oid = routine.pronamespace
+      WHERE relation_namespace.nspname = 'memory'
+        AND relation.relname = relation_name
+        AND trigger_row.tgname = 'source_erasure_fence'
+        AND NOT trigger_row.tgisinternal
+        AND trigger_row.tgenabled = 'O'
+        AND trigger_row.tgtype = 31
+        AND routine_namespace.nspname = 'memory_private'
+        AND routine.proname = 'guard_source_erasure_fence'
+        AND pg_catalog.pg_get_function_identity_arguments(routine.oid) = ''
+    ) <> 1 THEN
+      RAISE EXCEPTION 'source erasure fence trigger differs on %',
+        relation_name;
+    END IF;
+  END LOOP;
+
+  IF (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_trigger AS trigger_row
+    JOIN pg_catalog.pg_class AS relation
+      ON relation.oid = trigger_row.tgrelid
+    JOIN pg_catalog.pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_proc AS routine
+      ON routine.oid = trigger_row.tgfoid
+    JOIN pg_catalog.pg_namespace AS routine_namespace
+      ON routine_namespace.oid = routine.pronamespace
+    WHERE relation_namespace.nspname = 'memory'
+      AND relation.relname = 'source_erasure_receipt'
+      AND trigger_row.tgname = 'source_erasure_receipt_immutable'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled = 'O'
+      AND trigger_row.tgtype = 27
+      AND routine_namespace.nspname = 'memory_private'
+      AND routine.proname = 'guard_append_only_audit'
+      AND pg_catalog.pg_get_function_identity_arguments(routine.oid) = ''
+  ) <> 1 THEN
+    RAISE EXCEPTION 'source erasure receipt immutable trigger differs';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND trigger_row.tgname = 'erased_chat_message_tombstone_immutable'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled = 'O'
+      AND trigger_row.tgtype = 27
+      AND trigger_row.tgfoid = pg_catalog.to_regprocedure(
+            'memory_private.guard_erased_chat_message_tombstone_immutable()'
+          )
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid =
+            'memory.erased_chat_message_tombstone'::regclass
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgname <> 'erased_chat_message_tombstone_immutable'
+  ) THEN
+    RAISE EXCEPTION 'erased chat message tombstone trigger differs';
+  END IF;
+  IF EXISTS (
+    SELECT expected.relation_oid
+    FROM (VALUES
+      ('memory.evidence'::regclass::oid),
+      ('memory.answer_binding'::regclass::oid)
+    ) AS expected(relation_oid)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_trigger AS trigger_row
+      WHERE trigger_row.tgrelid = expected.relation_oid
+        AND trigger_row.tgname = 'erased_chat_message_replay'
+        AND NOT trigger_row.tgisinternal
+        AND trigger_row.tgenabled = 'O'
+        AND trigger_row.tgtype = 7
+        AND trigger_row.tgfoid = pg_catalog.to_regprocedure(
+              'memory_private.guard_erased_chat_message_replay()'
+            )
+    )
+  ) THEN
+    RAISE EXCEPTION 'erased chat message replay trigger differs';
+  END IF;
+
+  FOREACH function_identity IN ARRAY ARRAY[
+    'register_source_erasure(uuid,uuid,text,text,integer,text)',
+    'append_source_erasure_targets(uuid,uuid[],uuid[],timestamptz[],text[])',
+    'seal_source_erasure(uuid)',
+    'prepare_source_erasure_claim_deletions(uuid,integer)',
+    'read_source_erasure_progress(uuid)',
+    'finalize_source_erasure_memory(uuid)',
+    'ack_source_erasure_conversation_deleted(uuid,text)',
+    'read_source_erasure_receipt(uuid)',
+    'owner_source_erasure_active(uuid)',
+    'guard_source_erasure_fence()',
+    'assert_chat_messages_not_erased(uuid,uuid)',
+    'guard_erased_chat_message_replay()',
+    'guard_erased_chat_message_tombstone_immutable()',
+    'assert_source_erasure_tombstones(uuid,uuid,integer,timestamptz)',
+    'assert_source_erasure_deletion_catalog()'
+  ] LOOP
+    routine_oid := pg_catalog.to_regprocedure(
+      'memory_private.' || function_identity
+    );
+    IF routine_oid IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_proc AS routine
+      WHERE routine.oid = routine_oid
+        AND routine.proowner = 'governed_memory_owner'::regrole
+        AND routine.prosecdef
+    ) OR EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_proc AS routine
+      CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(
+          routine.proacl,
+          pg_catalog.acldefault('f', routine.proowner)
+        )
+      ) AS acl_entry
+      WHERE routine.oid = routine_oid
+        AND acl_entry.grantee = 0
+        AND acl_entry.privilege_type = 'EXECUTE'
+    ) THEN
+      RAISE EXCEPTION
+        'source erasure function % lacks exact ownership or PUBLIC revocation',
+        function_identity;
+    END IF;
+  END LOOP;
+
+  FOREACH function_identity IN ARRAY ARRAY[
+    'register_source_erasure(uuid,uuid,text,text,integer,text)',
+    'append_source_erasure_targets(uuid,uuid[],uuid[],timestamptz[],text[])',
+    'seal_source_erasure(uuid)',
+    'prepare_source_erasure_claim_deletions(uuid,integer)',
+    'finalize_source_erasure_memory(uuid)',
+    'ack_source_erasure_conversation_deleted(uuid,text)'
+  ] LOOP
+    IF NOT pg_catalog.has_function_privilege(
+      'governed_memory_worker',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) OR pg_catalog.has_function_privilege(
+      'governed_memory_api',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) THEN
+      RAISE EXCEPTION 'source erasure worker-only grant differs for %',
+        function_identity;
+    END IF;
+  END LOOP;
+
+  FOREACH function_identity IN ARRAY ARRAY[
+    'read_source_erasure_progress(uuid)',
+    'read_source_erasure_receipt(uuid)'
+  ] LOOP
+    IF NOT pg_catalog.has_function_privilege(
+      'governed_memory_worker',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) OR NOT pg_catalog.has_function_privilege(
+      'governed_memory_api',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) THEN
+      RAISE EXCEPTION 'source erasure read grant differs for %',
+        function_identity;
+    END IF;
+  END LOOP;
+
+  FOREACH function_identity IN ARRAY ARRAY[
+    'owner_source_erasure_active(uuid)',
+    'guard_source_erasure_fence()',
+    'assert_chat_messages_not_erased(uuid,uuid)',
+    'guard_erased_chat_message_replay()',
+    'guard_erased_chat_message_tombstone_immutable()',
+    'assert_source_erasure_tombstones(uuid,uuid,integer,timestamptz)',
+    'assert_source_erasure_deletion_catalog()'
+  ] LOOP
+    IF pg_catalog.has_function_privilege(
+      'governed_memory_worker',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) OR pg_catalog.has_function_privilege(
+      'governed_memory_api',
+      'memory_private.' || function_identity,
+      'EXECUTE'
+    ) THEN
+      RAISE EXCEPTION 'source erasure internal function grant differs for %',
+        function_identity;
     END IF;
   END LOOP;
 

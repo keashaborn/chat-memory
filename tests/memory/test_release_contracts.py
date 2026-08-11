@@ -38,6 +38,47 @@ from tools.governed_memory_release.release_guard import (
 ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "ops" / "governed_memory"
 
+EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS = {
+    "public.active_thread_selection": [
+        {
+            "constraint_name": "active_thread_selection_owner_thread_fk",
+            "child_columns": ["owner_user_id", "thread_id"],
+            "parent_table": "public.threads",
+            "parent_columns": ["owner_user_id", "id"],
+            "validated": True,
+            "delete_action": "cascade",
+        }
+    ],
+    "trusted_web.response_transcript_v1": [
+        {
+            "constraint_name": "response_transcript_v1_user_chat_log_id_fkey",
+            "child_columns": [
+                "user_chat_log_id",
+                "owner_user_id",
+                "thread_id",
+            ],
+            "parent_table": "public.chat_log",
+            "parent_columns": ["id", "owner_user_id", "thread_id"],
+            "validated": True,
+            "delete_action": "cascade",
+        },
+        {
+            "constraint_name": (
+                "response_transcript_v1_assistant_chat_log_id_fkey"
+            ),
+            "child_columns": [
+                "assistant_chat_log_id",
+                "owner_user_id",
+                "thread_id",
+            ],
+            "parent_table": "public.chat_log",
+            "parent_columns": ["id", "owner_user_id", "thread_id"],
+            "validated": True,
+            "delete_action": "cascade",
+        },
+    ],
+}
+
 
 def observation(operation: str, *, state: str) -> dict[str, object]:
     return {
@@ -108,6 +149,14 @@ class ReleaseArtifactTests(unittest.TestCase):
         original = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
+        migration_manifest_sha256 = hashlib.sha256(
+            release_guard.MIGRATION_MANIFEST.read_bytes()
+        ).hexdigest()
+        migration_receipt = {
+            "manifest_sha256": migration_manifest_sha256,
+            "validation_state": "phase6e_disposable_deletion_proof_candidate",
+            "result": "verified",
+        }
         variants = []
         redirected = json.loads(json.dumps(original))
         redirected["validation_runtime"]["current_build_receipt"] = (
@@ -122,6 +171,43 @@ class ReleaseArtifactTests(unittest.TestCase):
         activated["release_guard"]["create_allowed"] = True
         activated["production_state_changed"] = True
         variants.append(activated)
+        widened = json.loads(json.dumps(original))
+        widened["ingestion"]["source_erasure_direct_delete_roots"].append(
+            "memory.project_thread_binding_event"
+        )
+        variants.append(widened)
+        permissive = json.loads(json.dumps(original))
+        permissive["ingestion"]["source_erasure_unknown_dependency_action"] = (
+            "continue_on_unknown_dependency"
+        )
+        variants.append(permissive)
+        blocker_removed = json.loads(json.dumps(original))
+        blocker_removed["activation"]["blockers"].remove(
+            "legacy_project_memory_thread_dependencies_not_separated"
+        )
+        variants.append(blocker_removed)
+        transcript_blocker_removed = json.loads(json.dumps(original))
+        transcript_blocker_removed["activation"]["blockers"].remove(
+            "trusted_web_transcript_composite_owner_thread_lineage_not_installed"
+        )
+        variants.append(transcript_blocker_removed)
+        legacy_chat_blocker_removed = json.loads(json.dumps(original))
+        legacy_chat_blocker_removed["activation"]["blockers"].remove(
+            "legacy_chat_owner_thread_lineage_not_remediated"
+        )
+        variants.append(legacy_chat_blocker_removed)
+        weak_transcript_lineage = json.loads(json.dumps(original))
+        weak_transcript_lineage["ingestion"][
+            "source_erasure_validated_auxiliary_foreign_keys"
+        ]["trusted_web.response_transcript_v1"][0]["child_columns"] = [
+            "user_chat_log_id"
+        ]
+        variants.append(weak_transcript_lineage)
+        weak_transcript_allowed = json.loads(json.dumps(original))
+        weak_transcript_allowed["ingestion"][
+            "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
+        ] = True
+        variants.append(weak_transcript_allowed)
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -131,8 +217,21 @@ class ReleaseArtifactTests(unittest.TestCase):
                     json.dumps(variant, sort_keys=True),
                     encoding="utf-8",
                 )
+                variant_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
                 with self.subTest(index=index), mock.patch.object(
                     release_guard, "RUNTIME_MANIFEST", path
+                ), mock.patch.object(
+                    release_guard,
+                    "EXPECTED_RUNTIME_MANIFEST_SHA256",
+                    variant_sha256,
+                ), mock.patch.object(
+                    release_guard,
+                    "EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256",
+                    migration_manifest_sha256,
+                ), mock.patch.object(
+                    release_guard,
+                    "verify_migration_manifest",
+                    return_value=migration_receipt,
                 ):
                     with self.assertRaisesRegex(
                         ReleaseGuardError,
@@ -142,7 +241,17 @@ class ReleaseArtifactTests(unittest.TestCase):
 
             lock = root / "runtime-requirements.lock"
             lock.write_text("drift\n", encoding="utf-8")
-            with mock.patch.object(release_guard, "RUNTIME_LOCK", lock):
+            with mock.patch.object(
+                release_guard, "RUNTIME_LOCK", lock
+            ), mock.patch.object(
+                release_guard,
+                "EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256",
+                migration_manifest_sha256,
+            ), mock.patch.object(
+                release_guard,
+                "verify_migration_manifest",
+                return_value=migration_receipt,
+            ):
                 with self.assertRaisesRegex(
                     ReleaseGuardError,
                     "release_runtime_dependency_invalid",
@@ -173,15 +282,17 @@ class ReleaseArtifactTests(unittest.TestCase):
                 ):
                     verify_candidate_artifacts()
 
-        preliminary = {
-            "manifest_sha256": release_guard.EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256,
-            "validation_state": "preliminary_disposable_proof_candidate",
+        wrong_state = {
+            "manifest_sha256": (
+                release_guard.EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256
+            ),
+            "validation_state": "disposable_validated",
             "result": "verified",
         }
         with mock.patch.object(
             release_guard,
             "verify_migration_manifest",
-            return_value=preliminary,
+            return_value=wrong_state,
         ):
             with self.assertRaisesRegex(
                 ReleaseGuardError,
@@ -258,7 +369,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     ),
                     mock.patch.object(
                         release_guard,
-                        "EXPECTED_RUNTIME_RECEIPT_SHA256",
+                        "EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256",
                         receipt_sha256,
                     ),
                     mock.patch.object(
@@ -273,7 +384,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     ),
                     mock.patch.object(
                         release_guard,
-                        "_verify_phase6b_proof",
+                        "_verify_historical_phase6b_proof",
                         return_value=None,
                     ),
                 )
@@ -527,21 +638,25 @@ class ReleaseArtifactTests(unittest.TestCase):
             contract["candidate_implementation_status"][
                 "owner_claim_fact_detail"
             ],
-            "implemented_candidate_phase6b_disposable_validated_not_production_applied",
+            "implemented_candidate_phase6d_not_yet_disposable_"
+            "validated_not_production_applied",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["runtime"],
-            "phase6b_source_bound_disposable_proof_passed_inactive",
+            "phase6d_inactive_static_candidate_runtime_rebuild_"
+            "and_phase6e_proof_pending",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["qdrant_adapter"],
-            "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
+            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
+            "current_phase6e_proof_pending",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["pilot_marker"],
-            "implemented_phase6b_disposable_validated_not_production_applied",
+            "implemented_phase6d_not_yet_disposable_validated_"
+            "not_production_applied",
         )
-        self.assertTrue(contract["qdrant"]["real_disposable_compatibility_verified"])
+        self.assertFalse(contract["qdrant"]["real_disposable_compatibility_verified"])
         self.assertFalse(contract["qdrant"]["persistent_pilot_approved"])
         self.assertNotIn(
             "owner_claim_fact_detail_api_not_implemented",
@@ -567,6 +682,68 @@ class ReleaseArtifactTests(unittest.TestCase):
             contract["cleanup_policy"]["current_cleanup_authorized"]
         )
         self.assertFalse(contract["production_state_changed"])
+        erasure = contract["conversation_bridge"]
+        self.assertEqual(
+            erasure["source_erasure_selectors"],
+            ["thread", "message_tail", "recent", "all_conversations"],
+        )
+        self.assertEqual(
+            erasure["source_erasure_direct_delete_roots"],
+            ["public.chat_log", "public.chat_attachments", "public.threads"],
+        )
+        self.assertEqual(
+            erasure["source_erasure_allowed_auxiliary_effects"],
+            [
+                "public.active_thread_selection",
+                "trusted_web.response_transcript_v1",
+            ],
+        )
+        self.assertEqual(
+            erasure["source_erasure_auxiliary_effect_authority"],
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only",
+        )
+        self.assertEqual(
+            erasure["source_erasure_validated_auxiliary_foreign_keys"],
+            EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS,
+        )
+        self.assertFalse(
+            erasure[
+                "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
+            ]
+        )
+        self.assertEqual(
+            erasure["source_erasure_unknown_dependency_action"],
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance",
+        )
+        self.assertTrue(erasure["source_erasure_exact_chat_targets_only"])
+        self.assertFalse(
+            erasure[
+                "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
+            ]
+        )
+        self.assertFalse(
+            erasure["source_erasure_structured_lifeswitch_tables_or_accounts_deleted"]
+        )
+        self.assertFalse(erasure["source_erasure_legacy_project_rows_deleted"])
+        self.assertIn(
+            "legacy_project_memory_thread_dependencies_not_separated",
+            contract["create_policy"]["unresolved_creation_prerequisites"],
+        )
+        self.assertIn(
+            "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+            contract["create_policy"]["unresolved_creation_prerequisites"],
+        )
+        self.assertIn(
+            "legacy_chat_owner_thread_lineage_not_remediated",
+            contract["create_policy"]["unresolved_creation_prerequisites"],
+        )
+        self.assertEqual(
+            erasure["source_erasure_status"],
+            "phase6d_inactive_static_candidate_"
+            "phase6e_disposable_proof_pending",
+        )
 
     def test_pilot_is_bounded_blocked_and_attachment_free(self) -> None:
         pilot = json.loads(
@@ -621,33 +798,129 @@ class ReleaseArtifactTests(unittest.TestCase):
             "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
             pilot["start_blockers"],
         )
+        self.assertIn(
+            "legacy_project_memory_thread_dependencies_not_separated",
+            pilot["start_blockers"],
+        )
+        self.assertIn(
+            "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
+            pilot["start_blockers"],
+        )
+        self.assertIn(
+            "legacy_chat_owner_thread_lineage_not_remediated",
+            pilot["start_blockers"],
+        )
         self.assertEqual(
             pilot["provider_policy"]["provider_adapter_status"],
             "strict_fake_tested_zero_real_calls",
         )
         self.assertEqual(
             pilot["provider_policy"]["embedding_adapter_status"],
-            "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
+            "strict_3072_fake_tested_durable_request_dispatch_marker_"
+            "current_disposable_proof_pending_zero_real_calls",
         )
         self.assertEqual(
             pilot["provider_policy"]["qdrant_adapter_status"],
-            "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
+            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
+            "current_phase6e_proof_pending",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["owner_claim_fact_detail"],
-            "implemented_candidate_phase6b_disposable_validated_not_production_applied",
+            "implemented_candidate_phase6d_not_yet_disposable_"
+            "validated_not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["runtime"],
-            "phase6b_source_bound_disposable_proof_passed_inactive",
+            "phase6d_inactive_static_candidate_runtime_rebuild_"
+            "and_phase6e_proof_pending",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["pilot_marker"],
-            "implemented_phase6b_disposable_validated_not_production_applied",
+            "implemented_phase6d_not_yet_disposable_validated_"
+            "not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["frontend"],
             "6d80ba_built_undeployed_visual_qa_pending",
+        )
+        source_erasure = pilot["source_erasure"]
+        self.assertEqual(
+            source_erasure["selectors"],
+            ["thread", "message_tail", "recent", "all_conversations"],
+        )
+        self.assertEqual(
+            source_erasure["direct_delete_roots"],
+            ["public.chat_log", "public.chat_attachments", "public.threads"],
+        )
+        self.assertEqual(
+            source_erasure["allowed_auxiliary_effects"],
+            [
+                "public.active_thread_selection",
+                "trusted_web.response_transcript_v1",
+            ],
+        )
+        self.assertEqual(
+            source_erasure["auxiliary_effect_authority"],
+            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
+            "foreign_keys_only",
+        )
+        self.assertEqual(
+            source_erasure["validated_auxiliary_foreign_keys"],
+            EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS,
+        )
+        self.assertFalse(
+            source_erasure[
+                "weak_single_column_transcript_foreign_keys_allowed"
+            ]
+        )
+        self.assertEqual(
+            source_erasure["unknown_dependency_action"],
+            "fail_closed_before_delete_on_unknown_foreign_key_"
+            "delete_trigger_delete_rule_or_inheritance",
+        )
+        self.assertEqual(
+            source_erasure["transient_target_tables"],
+            [
+                "memory_ingest_private.source_erasure_target",
+                "memory_ingest_private.source_erasure_thread_target",
+            ],
+        )
+        self.assertEqual(
+            source_erasure["permanent_tombstone_tables"],
+            [
+                "memory_ingest_private.source_erasure_message_tombstone",
+                "memory_ingest_private.source_erasure_thread_tombstone",
+            ],
+        )
+        self.assertEqual(
+            source_erasure["tombstone_identity_scope"],
+            "global_message_and_thread_uuid",
+        )
+        self.assertEqual(
+            source_erasure["targets_retained_until"],
+            "conversation_deletion_final_receipt_acknowledged",
+        )
+        self.assertTrue(source_erasure["tombstones_immutable"])
+        self.assertEqual(
+            source_erasure["runtime_catalog_attestation"],
+            "exact_mutated_relation_schema_foreign_key_trigger_rule_"
+            "and_inheritance_inventory",
+        )
+        self.assertFalse(source_erasure["unclassified_side_effects_allowed"])
+        self.assertFalse(source_erasure["legacy_capture_trigger_required"])
+        self.assertEqual(
+            source_erasure["legacy_capture_trigger_if_present"],
+            "exact_disabled_identity_only",
+        )
+        self.assertFalse(source_erasure["memory_only_selector_allowed"])
+        self.assertFalse(source_erasure["account_wide_memory_selector_allowed"])
+        self.assertFalse(source_erasure["accounts_deleted"])
+        self.assertFalse(source_erasure["structured_lifeswitch_data_deleted"])
+        self.assertFalse(source_erasure["legacy_project_rows_deleted"])
+        self.assertEqual(
+            source_erasure["status"],
+            "phase6d_inactive_static_candidate_not_routed_"
+            "phase6e_disposable_proof_pending",
         )
 
     def test_receipt_schema_is_closed_and_content_free(self) -> None:

@@ -13,8 +13,8 @@ set -Eeuo pipefail
 #   GM_VALIDATION_EXPECTED_BRANCH='<exact candidate branch>'
 #   GM_VALIDATION_EXPECTED_HEAD='<exact 40-character candidate commit>'
 #   GM_VALIDATION_EXPECTED_TREE='<exact 40-character candidate tree>'
-# Preliminary migration proof only, before validation metadata is promoted:
-#   GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
+# Phase 6E deletion proof only, before validation metadata is promoted:
+#   GM_VALIDATION_PHASE6E_MIGRATION_PROOF='019fe927:PHASE6E_DELETION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 #
 # The EXIT trap is installed before Docker creation. It removes only resources
 # whose captured ID, exact name, and three ownership labels still agree.
@@ -27,11 +27,12 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='7693d9db459f81f4d89e680108867ce31dd4c7ed'
+readonly EXPECTED_BASE='51bf3f40d25b732df426498382628098d22c6d2a'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly PRELIMINARY_PROOF_AUTHORIZATION_VALUE='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly EXPECTED_MANIFEST_SHA256='bb87fc8e585a879c07fcdff3313f1d7628fdc850edab2008e1937bf125c7cace'
+readonly PHASE6E_PROOF_AUTHORIZATION_VALUE='019fe927:PHASE6E_DELETION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
+readonly PHASE6E_DELETION_INTEGRATION_READY='false'
+readonly EXPECTED_MANIFEST_SHA256='d13a985e29b631be0686b854e9dc1a97c4ea59c1750e73453f6379973243dd52'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69'
 
@@ -59,12 +60,12 @@ RUNTIME_LOCK="${ROOT}/ops/governed_memory/runtime-requirements.lock"
 BUILD_LOCK="${ROOT}/ops/governed_memory/build-requirements.lock"
 RUNTIME_BUILD_RECEIPT="${ROOT}/ops/governed_memory/runtime_build_receipt.json"
 VALIDATION_RUNTIME_PYTHON="${GM_VALIDATION_RUNTIME_PYTHON:-}"
-PRELIMINARY_PROOF_AUTHORIZATION="${GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF:-}"
+PHASE6E_PROOF_AUTHORIZATION="${GM_VALIDATION_PHASE6E_MIGRATION_PROOF:-}"
 TEST_PYTHON=''
 readonly SCRIPT_DIR ROOT MIGRATIONS RUNTIME_PACKAGES RUNTIME_LOCK BUILD_LOCK
 readonly RUNTIME_BUILD_RECEIPT
 readonly VALIDATION_RUNTIME_PYTHON
-readonly PRELIMINARY_PROOF_AUTHORIZATION
+readonly PHASE6E_PROOF_AUTHORIZATION
 
 EXPECTED_ROOT="${GM_VALIDATION_EXPECTED_ROOT:-}"
 EXPECTED_BRANCH="${GM_VALIDATION_EXPECTED_BRANCH:-}"
@@ -787,12 +788,12 @@ verify_migration_manifest() {
 
   verifier_arguments=("${MIGRATIONS}")
   expected_validation_state='disposable_validated'
-  if [[ -n "${PRELIMINARY_PROOF_AUTHORIZATION}" ]]; then
-    [[ "${PRELIMINARY_PROOF_AUTHORIZATION}" == \
-       "${PRELIMINARY_PROOF_AUTHORIZATION_VALUE}" ]] \
-      || die 'preliminary_migration_proof_authorization_invalid'
-    verifier_arguments=(--preliminary-disposable-proof "${MIGRATIONS}")
-    expected_validation_state='preliminary_disposable_proof_candidate'
+  if [[ -n "${PHASE6E_PROOF_AUTHORIZATION}" ]]; then
+    [[ "${PHASE6E_PROOF_AUTHORIZATION}" == \
+       "${PHASE6E_PROOF_AUTHORIZATION_VALUE}" ]] \
+      || die 'phase6e_migration_proof_authorization_invalid'
+    verifier_arguments=(--phase6e-disposable-deletion-proof "${MIGRATIONS}")
+    expected_validation_state='phase6e_disposable_deletion_proof_candidate'
   fi
 
   receipt="$(
@@ -2022,6 +2023,8 @@ preflight() {
   [[ "${ROOT}" == "${EXPECTED_ROOT}" ]] || die 'wrong_candidate_root'
   [[ "${GM_VALIDATION_DISPOSABLE_AUTHORIZATION:-}" == "${AUTHORIZATION_VALUE}" ]] \
     || die 'explicit_disposable_authorization_missing'
+  [[ "${PHASE6E_DELETION_INTEGRATION_READY}" == 'true' ]] \
+    || die 'phase6e_deletion_integration_proof_not_implemented'
   [[ "${POSTGRES_PORT}" != '5432' && "${QDRANT_PORT}" != '6333' \
      && "${JWKS_PORT}" != '8088' && "${API_PORT}" != '8088' ]] \
     || die 'production_port_constant_detected'

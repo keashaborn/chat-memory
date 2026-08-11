@@ -16,6 +16,10 @@ from ..contracts import (
     require_utc,
     require_uuid,
 )
+from ..deletion_contracts import (
+    DeletionCoordinatorOutcome,
+    DeletionCoordinatorReceipt,
+)
 from ..repository import IngestSuccessorReceipt
 from ..worker import BRIDGE_LEASE_FIELDS, process_ingest_item
 from .once_worker import (
@@ -97,6 +101,29 @@ def _receipt(work_id: UUID) -> OnceWorkerReceipt:
         ),
         work_id=work_id,
         work_kind=WorkKind.INGEST,
+    )
+
+
+def _deletion_receipt(
+    receipt: DeletionCoordinatorReceipt,
+) -> OnceWorkerReceipt:
+    if not isinstance(receipt, DeletionCoordinatorReceipt):
+        raise ContractViolation("invalid_deletion_coordinator_receipt")
+    material = {
+        "outcome": OnceWorkerOutcome.COMPLETED.value,
+        "qdrant_preflight_sha256": None,
+        "work_id": str(receipt.operation_id),
+        "work_kind": WorkKind.SOURCE_ERASURE.value,
+    }
+    return OnceWorkerReceipt(
+        outcome=OnceWorkerOutcome.COMPLETED,
+        qdrant_preflight_sha256=None,
+        receipt_sha256=canonical_sha256(
+            "governed_memory.once_worker_receipt",
+            material,
+        ),
+        work_id=receipt.operation_id,
+        work_kind=WorkKind.SOURCE_ERASURE,
     )
 
 
@@ -638,14 +665,33 @@ class FairOnceRunner:
         bridge_worker: BridgeIngestWorker,
         extraction_worker: Any,
         projection_worker: Any,
+        deletion_worker: Any | None = None,
     ) -> None:
         self._pilot_repository = pilot_repository
         self._lane_scheduler = lane_scheduler
         self._bridge_worker = bridge_worker
         self._extraction_worker = extraction_worker
         self._projection_worker = projection_worker
+        self._deletion_worker = deletion_worker
 
     async def run_once(self) -> OnceWorkerReceipt:
+        if self._deletion_worker is not None:
+            deletion = await self._deletion_worker.advance_one()
+            if deletion is not None:
+                if not isinstance(deletion, DeletionCoordinatorReceipt):
+                    raise ContractViolation(
+                        "invalid_deletion_coordinator_receipt"
+                    )
+                if (
+                    deletion.outcome is DeletionCoordinatorOutcome.PROCESSING
+                    and deletion.pending_claim_deletions > 0
+                ):
+                    projection = await self._projection_worker.run_once()
+                    if projection.outcome is OnceWorkerOutcome.COMPLETED:
+                        return projection
+                    if projection.outcome is not OnceWorkerOutcome.NO_WORK:
+                        raise ContractViolation("invalid_worker_lane_receipt")
+                return _deletion_receipt(deletion)
         if await self._pilot_repository.pilot_ever_started() is not True:
             raise ContractViolation("pilot_never_started")
         first_lane = await self._lane_scheduler.next_worker_lane()
@@ -679,6 +725,7 @@ class FairOnceRunner:
 __all__ = [
     "BRIDGE_MESSAGE_FIELDS",
     "BridgeIngestWorker",
+    "_deletion_receipt",
     "FairOnceRunner",
     "PostgresConversationBridge",
     "PostgresSuccessorIngest",

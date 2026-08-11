@@ -15,6 +15,11 @@ from uuid import UUID
 from ..contracts import ContractViolation, require_key, require_sha256
 from ..extraction import parse_predicate_catalog
 from .environment import QDRANT_API_KEY_ENV
+from .deletion_coordinator import InactiveDeletionCoordinator
+from .deletion_postgres import (
+    PostgresConversationDeletionRepository,
+    PostgresSuccessorDeletionRepository,
+)
 from .https_transport import RetryFreeBoundedHttpsTransport
 from .once_worker import (
     OnceWorker,
@@ -554,6 +559,14 @@ async def run_runtime_once(
                     ),
                     extraction_worker=extraction_worker,
                     projection_worker=projection_worker,
+                    deletion_worker=InactiveDeletionCoordinator(
+                        conversation=PostgresConversationDeletionRepository(
+                            conversation
+                        ),
+                        successor=PostgresSuccessorDeletionRepository(
+                            connection
+                        ),
+                    ),
                 ).run_once()
             finally:
                 await conversation.close()
