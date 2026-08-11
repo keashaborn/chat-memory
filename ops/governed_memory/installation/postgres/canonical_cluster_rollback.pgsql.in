@@ -1,0 +1,1179 @@
+-- TEMPLATE ONLY. Exact empty-only teardown for the fresh successor cluster.
+-- This recognizes only durable states reachable after complete statements in
+-- canonical_cluster.pgsql.in, plus the state after this template has dropped
+-- the canonical database. It never targets a source or legacy database.
+-- The controller supplies the explicit variable only after separate rollback
+-- authorization and after the migration rollback packages have succeeded.
+\set ON_ERROR_STOP on
+
+\if :{?governed_memory_empty_cluster_rollback}
+\else
+DO $governed_memory_refusal$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'P0001',
+    MESSAGE = 'required governed_memory_empty_cluster_rollback variable is absent';
+END
+$governed_memory_refusal$;
+\endif
+
+SELECT :'governed_memory_empty_cluster_rollback' = 'on'
+  AS governed_memory_empty_cluster_rollback_enabled
+\gset
+\if :governed_memory_empty_cluster_rollback_enabled
+\else
+DO $governed_memory_refusal$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'P0001',
+    MESSAGE = 'governed_memory_empty_cluster_rollback must be exactly on';
+END
+$governed_memory_refusal$;
+\endif
+
+-- Cluster-wide preflight. The only accepted role sets are the six exact
+-- CREATE ROLE prefixes: none, owner, owner+api, through all five roles.
+-- A database can exist only with all five roles. The one canonical membership
+-- can exist only after all roles exist. All attributes, settings, comments,
+-- security labels, memberships, database ACL rows, and shared dependencies are
+-- checked before any destructive statement is reached.
+DO $cluster_preflight$
+DECLARE
+  target_role_names constant name[] := ARRAY[
+    'governed_memory_owner',
+    'governed_memory_api',
+    'governed_memory_worker',
+    'memory_ingest_writer',
+    'memory_erasure_requester'
+  ]::name[];
+  expected_role_name name;
+  expected_role_index integer;
+  target_role_count integer;
+  target_database_oid oid;
+  owner_role_oid oid;
+  api_role_oid oid;
+  worker_role_oid oid;
+  bootstrap_role_oid oid;
+  target_membership_count integer;
+  canonical_membership_count integer;
+  canonical_membership_oid oid;
+  database_record record;
+  database_acl_state text;
+BEGIN
+  IF pg_catalog.current_database() <> 'postgres'
+     OR current_user <> 'governed_memory_bootstrap'
+     OR session_user <> 'governed_memory_bootstrap'
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_authid AS role
+       WHERE role.rolname = 'governed_memory_bootstrap'
+         AND role.rolcanlogin
+         AND role.rolsuper
+     ) THEN
+    RAISE EXCEPTION 'canonical cluster rollback session identity differs';
+  END IF;
+
+  SELECT role.oid
+  INTO bootstrap_role_oid
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = 'governed_memory_bootstrap';
+
+  SELECT pg_catalog.count(*)
+  INTO target_role_count
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = ANY (target_role_names);
+
+  IF target_role_count < 0 OR target_role_count > 5 THEN
+    RAISE EXCEPTION 'canonical role count differs';
+  END IF;
+
+  FOR expected_role_index IN 1..5 LOOP
+    expected_role_name := target_role_names[expected_role_index];
+    IF (
+      SELECT pg_catalog.count(*) = 1
+      FROM pg_catalog.pg_authid AS role
+      WHERE role.rolname = expected_role_name
+    ) IS DISTINCT FROM (expected_role_index <= target_role_count) THEN
+      RAISE EXCEPTION 'canonical role creation prefix differs at %',
+        expected_role_name;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_authid AS role
+    WHERE role.rolname = ANY (target_role_names)
+      AND (
+        role.rolcanlogin
+        OR role.rolinherit
+        OR role.rolsuper
+        OR role.rolcreatedb
+        OR role.rolcreaterole
+        OR role.rolreplication
+        OR role.rolbypassrls
+        OR role.rolconnlimit <> -1
+        OR role.rolpassword IS NOT NULL
+        OR role.rolvaliduntil IS NOT NULL
+      )
+  ) THEN
+    RAISE EXCEPTION 'canonical role attributes differ';
+  END IF;
+
+  SELECT role.oid INTO owner_role_oid
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = 'governed_memory_owner';
+  SELECT role.oid INTO api_role_oid
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = 'governed_memory_api';
+  SELECT role.oid INTO worker_role_oid
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = 'governed_memory_worker';
+
+  SELECT
+    pg_catalog.count(*),
+    pg_catalog.count(*) FILTER (WHERE
+      granted_role.rolname = 'governed_memory_owner'
+      AND member_role.rolname = 'governed_memory_bootstrap'
+      AND grantor_role.rolname = 'governed_memory_bootstrap'
+      AND NOT membership.admin_option
+      AND membership.inherit_option
+      AND membership.set_option
+    ),
+    pg_catalog.max(membership.oid) FILTER (WHERE
+      granted_role.rolname = 'governed_memory_owner'
+      AND member_role.rolname = 'governed_memory_bootstrap'
+      AND grantor_role.rolname = 'governed_memory_bootstrap'
+      AND NOT membership.admin_option
+      AND membership.inherit_option
+      AND membership.set_option
+    )
+  INTO
+    target_membership_count,
+    canonical_membership_count,
+    canonical_membership_oid
+  FROM pg_catalog.pg_auth_members AS membership
+  JOIN pg_catalog.pg_authid AS granted_role
+    ON granted_role.oid = membership.roleid
+  JOIN pg_catalog.pg_authid AS member_role
+    ON member_role.oid = membership.member
+  JOIN pg_catalog.pg_authid AS grantor_role
+    ON grantor_role.oid = membership.grantor
+  WHERE granted_role.rolname = ANY (target_role_names)
+     OR member_role.rolname = ANY (target_role_names)
+     OR grantor_role.rolname = ANY (target_role_names);
+
+  IF target_membership_count <> canonical_membership_count
+     OR canonical_membership_count NOT IN (0, 1)
+     OR (canonical_membership_count = 1 AND target_role_count <> 5) THEN
+    RAISE EXCEPTION 'canonical role membership graph differs';
+  END IF;
+
+  -- The exact membership grantor is the pinned bootstrap superuser. PostgreSQL
+  -- therefore records no pg_shdepend row for this pg_auth_members object.
+  IF canonical_membership_oid IS NOT NULL AND EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_shdepend AS dependency
+    WHERE dependency.dbid = 0
+      AND dependency.classid =
+        'pg_catalog.pg_auth_members'::pg_catalog.regclass
+      AND dependency.objid = canonical_membership_oid
+  ) THEN
+    RAISE EXCEPTION 'canonical membership shared dependency differs';
+  END IF;
+
+  SELECT database.oid
+  INTO target_database_oid
+  FROM pg_catalog.pg_database AS database
+  WHERE database.datname = 'governed_memory';
+
+  IF target_database_oid IS NOT NULL AND target_role_count <> 5 THEN
+    RAISE EXCEPTION 'canonical database exists without the complete role set';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_db_role_setting AS setting
+    WHERE setting.setrole = ANY (
+      SELECT role.oid
+      FROM pg_catalog.pg_authid AS role
+      WHERE role.rolname = ANY (target_role_names)
+    )
+      OR (
+        target_database_oid IS NOT NULL
+        AND setting.setdatabase = target_database_oid
+      )
+  ) THEN
+    RAISE EXCEPTION 'canonical role or database settings differ';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_database AS database
+    JOIN pg_catalog.pg_authid AS owner_role
+      ON owner_role.oid = database.datdba
+    WHERE owner_role.rolname = ANY (target_role_names)
+      AND NOT (
+        target_database_oid IS NOT NULL
+        AND database.oid = target_database_oid
+        AND owner_role.rolname = 'governed_memory_owner'
+      )
+  ) THEN
+    RAISE EXCEPTION 'target role owns an unexpected database';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_shdescription AS description
+    WHERE (
+      description.classoid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND description.objoid = ANY (
+        SELECT role.oid
+        FROM pg_catalog.pg_authid AS role
+        WHERE role.rolname = ANY (target_role_names)
+      )
+    ) OR (
+      target_database_oid IS NOT NULL
+      AND description.classoid =
+        'pg_catalog.pg_database'::pg_catalog.regclass
+      AND description.objoid = target_database_oid
+    )
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_shseclabel AS label
+    WHERE (
+      label.classoid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+      AND label.objoid = ANY (
+        SELECT role.oid
+        FROM pg_catalog.pg_authid AS role
+        WHERE role.rolname = ANY (target_role_names)
+      )
+    ) OR (
+      target_database_oid IS NOT NULL
+      AND label.classoid = 'pg_catalog.pg_database'::pg_catalog.regclass
+      AND label.objoid = target_database_oid
+    )
+  ) THEN
+    RAISE EXCEPTION 'canonical role or database metadata differs';
+  END IF;
+
+  IF target_database_oid IS NULL THEN
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_shdepend AS dependency
+      JOIN pg_catalog.pg_authid AS referenced_role
+        ON dependency.refclassid =
+          'pg_catalog.pg_authid'::pg_catalog.regclass
+        AND dependency.refobjid = referenced_role.oid
+      WHERE referenced_role.rolname = ANY (target_role_names)
+    ) THEN
+      RAISE EXCEPTION 'roles-only state has a shared dependency';
+    END IF;
+  ELSE
+    SELECT database.*
+    INTO STRICT database_record
+    FROM pg_catalog.pg_database AS database
+    WHERE database.oid = target_database_oid;
+
+    IF database_record.datdba <> owner_role_oid
+       OR NOT database_record.datallowconn
+       OR database_record.datistemplate
+       OR database_record.encoding <>
+         pg_catalog.pg_char_to_encoding('UTF8')
+       OR database_record.datconnlimit <> -1
+       OR database_record.dattablespace <> (
+         SELECT tablespace.oid
+         FROM pg_catalog.pg_tablespace AS tablespace
+         WHERE tablespace.spcname = 'pg_default'
+       ) THEN
+      RAISE EXCEPTION 'canonical database properties differ';
+    END IF;
+
+    IF database_record.datacl IS NULL THEN
+      database_acl_state := 'default';
+    ELSIF (
+      SELECT pg_catalog.count(*) = 3
+        AND pg_catalog.bool_and(
+          acl.grantor = owner_role_oid
+          AND acl.grantee = owner_role_oid
+          AND acl.privilege_type IN ('CREATE', 'CONNECT', 'TEMPORARY')
+          AND NOT acl.is_grantable
+        )
+      FROM pg_catalog.aclexplode(database_record.datacl) AS acl
+    ) THEN
+      database_acl_state := 'public_revoked';
+    ELSIF (
+      SELECT pg_catalog.count(*) = 5
+        AND pg_catalog.bool_and(
+          (
+            acl.grantor = owner_role_oid
+            AND acl.grantee = owner_role_oid
+            AND acl.privilege_type IN ('CREATE', 'CONNECT', 'TEMPORARY')
+            AND NOT acl.is_grantable
+          ) OR (
+            acl.grantor = owner_role_oid
+            AND acl.grantee = api_role_oid
+            AND acl.privilege_type = 'CONNECT'
+            AND NOT acl.is_grantable
+          ) OR (
+            acl.grantor = owner_role_oid
+            AND acl.grantee = worker_role_oid
+            AND acl.privilege_type = 'CONNECT'
+            AND NOT acl.is_grantable
+          )
+        )
+      FROM pg_catalog.aclexplode(database_record.datacl) AS acl
+    ) THEN
+      database_acl_state := 'runtime_connect';
+    ELSE
+      RAISE EXCEPTION 'canonical database ACL differs';
+    END IF;
+
+    IF database_acl_state IN ('default', 'public_revoked')
+       AND canonical_membership_count <> 0 THEN
+      RAISE EXCEPTION 'membership precedes its canonical database ACL boundary';
+    END IF;
+
+    IF database_acl_state = 'runtime_connect' THEN
+      IF NOT (
+        SELECT pg_catalog.count(*) = 3
+          AND pg_catalog.count(*) FILTER (WHERE
+            dependency.refobjid = owner_role_oid
+            AND dependency.deptype = 'o'
+          ) = 1
+          AND pg_catalog.count(*) FILTER (WHERE
+            dependency.refobjid = api_role_oid
+            AND dependency.deptype = 'a'
+          ) = 1
+          AND pg_catalog.count(*) FILTER (WHERE
+            dependency.refobjid = worker_role_oid
+            AND dependency.deptype = 'a'
+          ) = 1
+          AND pg_catalog.bool_and(
+            dependency.dbid = 0
+            AND dependency.classid =
+              'pg_catalog.pg_database'::pg_catalog.regclass
+            AND dependency.objid = target_database_oid
+            AND dependency.objsubid = 0
+            AND dependency.refclassid =
+              'pg_catalog.pg_authid'::pg_catalog.regclass
+          )
+        FROM pg_catalog.pg_shdepend AS dependency
+        WHERE dependency.dbid = 0
+          AND dependency.classid =
+            'pg_catalog.pg_database'::pg_catalog.regclass
+          AND dependency.objid = target_database_oid
+      ) THEN
+        RAISE EXCEPTION 'canonical database shared dependencies differ';
+      END IF;
+    ELSE
+      IF NOT (
+        SELECT pg_catalog.count(*) = 1
+          AND pg_catalog.bool_and(
+            dependency.dbid = 0
+            AND dependency.classid =
+              'pg_catalog.pg_database'::pg_catalog.regclass
+            AND dependency.objid = target_database_oid
+            AND dependency.objsubid = 0
+            AND dependency.refclassid =
+              'pg_catalog.pg_authid'::pg_catalog.regclass
+            AND dependency.refobjid = owner_role_oid
+            AND dependency.deptype = 'o'
+          )
+        FROM pg_catalog.pg_shdepend AS dependency
+        WHERE dependency.dbid = 0
+          AND dependency.classid =
+            'pg_catalog.pg_database'::pg_catalog.regclass
+          AND dependency.objid = target_database_oid
+      ) THEN
+        RAISE EXCEPTION 'canonical database owner dependency differs';
+      END IF;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_shdepend AS dependency
+      JOIN pg_catalog.pg_authid AS referenced_role
+        ON dependency.refclassid =
+          'pg_catalog.pg_authid'::pg_catalog.regclass
+        AND dependency.refobjid = referenced_role.oid
+      WHERE referenced_role.rolname = ANY (target_role_names)
+        AND NOT (
+          dependency.dbid = target_database_oid
+          OR (
+            dependency.dbid = 0
+            AND dependency.classid =
+              'pg_catalog.pg_database'::pg_catalog.regclass
+            AND dependency.objid = target_database_oid
+          )
+        )
+    ) THEN
+      RAISE EXCEPTION 'target role has a dependency outside the canonical database';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_stat_activity AS activity
+      WHERE activity.datname = 'governed_memory'
+    ) OR EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_prepared_xacts AS prepared
+      WHERE prepared.database = 'governed_memory'
+    ) THEN
+      RAISE EXCEPTION 'canonical database has an active or prepared client';
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_replication_slots) THEN
+    RAISE EXCEPTION 'cluster has a replication slot';
+  END IF;
+END;
+$cluster_preflight$;
+
+SELECT EXISTS (
+  SELECT 1
+  FROM pg_catalog.pg_database AS database
+  WHERE database.datname = 'governed_memory'
+) AS governed_memory_database_present
+\gset
+
+\if :governed_memory_database_present
+\connect governed_memory
+
+-- Database-local preflight. A fresh PostgreSQL 16 database contains only its
+-- four system schemas and plpgsql. The only permitted additive state is the
+-- exact pgcrypto 1.3 trusted extension: its extension object is owned by the
+-- canonical owner, while its 36 known C functions are owned by the bootstrap
+-- superuser that PostgreSQL uses to install trusted-extension members. The
+-- extension object has the only database-local shared owner dependency.
+DO $empty_database_preflight$
+DECLARE
+  target_role_names constant name[] := ARRAY[
+    'governed_memory_owner',
+    'governed_memory_api',
+    'governed_memory_worker',
+    'memory_ingest_writer',
+    'memory_erasure_requester'
+  ]::name[];
+  current_database_oid oid;
+  owner_role_oid oid;
+  bootstrap_role_oid oid;
+  public_namespace_oid oid;
+  pgcrypto_extension_oid oid;
+  pgcrypto_present boolean;
+  canonical_membership_present boolean;
+  canonical_runtime_acl boolean;
+BEGIN
+  IF pg_catalog.current_database() <> 'governed_memory'
+     OR session_user <> 'governed_memory_bootstrap'
+     OR current_user <> 'governed_memory_bootstrap' THEN
+    RAISE EXCEPTION 'canonical empty database identity differs';
+  END IF;
+
+  SELECT database.oid, database.datdba
+  INTO current_database_oid, owner_role_oid
+  FROM pg_catalog.pg_database AS database
+  WHERE database.datname = pg_catalog.current_database();
+
+  SELECT role.oid INTO bootstrap_role_oid
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = 'governed_memory_bootstrap';
+
+  SELECT namespace.oid INTO public_namespace_oid
+  FROM pg_catalog.pg_namespace AS namespace
+  WHERE namespace.nspname = 'public';
+
+  IF public_namespace_oid IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_namespace AS namespace
+    JOIN pg_catalog.pg_authid AS owner_role
+      ON owner_role.oid = namespace.nspowner
+    WHERE namespace.oid = public_namespace_oid
+      AND owner_role.rolname = 'pg_database_owner'
+      AND (
+        SELECT pg_catalog.count(*) = 3
+          AND pg_catalog.bool_and(
+            (
+              acl.grantor = namespace.nspowner
+              AND acl.grantee = namespace.nspowner
+              AND acl.privilege_type IN ('CREATE', 'USAGE')
+              AND NOT acl.is_grantable
+            ) OR (
+              acl.grantor = namespace.nspowner
+              AND acl.grantee = 0
+              AND acl.privilege_type = 'USAGE'
+              AND NOT acl.is_grantable
+            )
+          )
+        FROM pg_catalog.aclexplode(
+          COALESCE(
+            namespace.nspacl,
+            pg_catalog.acldefault('n', namespace.nspowner)
+          )
+        ) AS acl
+      )
+  ) THEN
+    RAISE EXCEPTION 'canonical public schema owner or ACL differs';
+  END IF;
+
+  IF (
+    SELECT pg_catalog.array_agg(namespace.nspname ORDER BY namespace.nspname)
+    FROM pg_catalog.pg_namespace AS namespace
+  ) IS DISTINCT FROM ARRAY[
+    'information_schema'::name,
+    'pg_catalog'::name,
+    'pg_toast'::name,
+    'public'::name
+  ] THEN
+    RAISE EXCEPTION 'unexpected schema remains in canonical database';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS relation
+    WHERE relation.relnamespace = public_namespace_oid
+  ) THEN
+    RAISE EXCEPTION 'unexpected public relation or data remains';
+  END IF;
+
+  SELECT extension.oid
+  INTO pgcrypto_extension_oid
+  FROM pg_catalog.pg_extension AS extension
+  WHERE extension.extname = 'pgcrypto';
+  pgcrypto_present := pgcrypto_extension_oid IS NOT NULL;
+
+  IF pgcrypto_present THEN
+    IF (
+      SELECT pg_catalog.array_agg(extension.extname ORDER BY extension.extname)
+      FROM pg_catalog.pg_extension AS extension
+    ) IS DISTINCT FROM ARRAY['pgcrypto'::name, 'plpgsql'::name] THEN
+      RAISE EXCEPTION 'canonical extension set differs';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_extension AS extension
+      WHERE extension.oid = pgcrypto_extension_oid
+        AND extension.extowner = owner_role_oid
+        AND extension.extnamespace = public_namespace_oid
+        AND extension.extversion = '1.3'
+        AND extension.extrelocatable
+        AND extension.extconfig IS NULL
+        AND extension.extcondition IS NULL
+    ) THEN
+      RAISE EXCEPTION 'pgcrypto extension properties differ';
+    END IF;
+
+    IF EXISTS (
+      WITH expected(proname, argument_types) AS (
+        VALUES
+          ('digest'::name, ARRAY['text'::regtype::oid, 'text'::regtype::oid]),
+          ('digest'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('hmac'::name, ARRAY['text'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('hmac'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('crypt'::name, ARRAY['text'::regtype::oid, 'text'::regtype::oid]),
+          ('gen_salt'::name, ARRAY['text'::regtype::oid]),
+          ('gen_salt'::name, ARRAY['text'::regtype::oid, 'int4'::regtype::oid]),
+          ('encrypt'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('decrypt'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('encrypt_iv'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('decrypt_iv'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('gen_random_bytes'::name, ARRAY['int4'::regtype::oid]),
+          ('gen_random_uuid'::name, ARRAY[]::oid[]),
+          ('pgp_sym_encrypt'::name, ARRAY['text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_encrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_encrypt'::name, ARRAY['text'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_encrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_decrypt'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_decrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_decrypt'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_sym_decrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_encrypt'::name, ARRAY['text'::regtype::oid, 'bytea'::regtype::oid]),
+          ('pgp_pub_encrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid]),
+          ('pgp_pub_encrypt'::name, ARRAY['text'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_encrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_decrypt'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid]),
+          ('pgp_pub_decrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid]),
+          ('pgp_pub_decrypt'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_decrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_decrypt'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_pub_decrypt_bytea'::name, ARRAY['bytea'::regtype::oid, 'bytea'::regtype::oid, 'text'::regtype::oid, 'text'::regtype::oid]),
+          ('pgp_key_id'::name, ARRAY['bytea'::regtype::oid]),
+          ('armor'::name, ARRAY['bytea'::regtype::oid]),
+          ('armor'::name, ARRAY['bytea'::regtype::oid, 'text[]'::regtype::oid, 'text[]'::regtype::oid]),
+          ('dearmor'::name, ARRAY['text'::regtype::oid]),
+          ('pgp_armor_headers'::name, ARRAY['text'::regtype::oid])
+      ),
+      actual AS (
+        SELECT procedure.proname,
+          ARRAY(
+            SELECT argument.argument_oid
+            FROM pg_catalog.unnest(procedure.proargtypes)
+              WITH ORDINALITY AS argument(argument_oid, position)
+            ORDER BY argument.position
+          )::oid[] AS argument_types
+        FROM pg_catalog.pg_depend AS dependency
+        JOIN pg_catalog.pg_proc AS procedure
+          ON dependency.classid = 'pg_catalog.pg_proc'::regclass
+          AND dependency.objid = procedure.oid
+        WHERE dependency.refclassid =
+          'pg_catalog.pg_extension'::regclass
+          AND dependency.refobjid = pgcrypto_extension_oid
+          AND dependency.deptype = 'e'
+      ),
+      difference AS (
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+      )
+      SELECT 1 FROM difference
+    ) THEN
+      RAISE EXCEPTION 'pgcrypto extension member set differs';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_depend AS dependency
+      WHERE dependency.refclassid =
+        'pg_catalog.pg_extension'::pg_catalog.regclass
+        AND dependency.refobjid = pgcrypto_extension_oid
+        AND dependency.deptype = 'e'
+        AND dependency.classid <>
+          'pg_catalog.pg_proc'::pg_catalog.regclass
+    ) OR EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_depend AS dependency
+      JOIN pg_catalog.pg_proc AS procedure
+        ON dependency.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+        AND dependency.objid = procedure.oid
+      WHERE dependency.refclassid =
+        'pg_catalog.pg_extension'::pg_catalog.regclass
+        AND dependency.refobjid = pgcrypto_extension_oid
+        AND dependency.deptype = 'e'
+        AND (
+          procedure.pronamespace <> public_namespace_oid
+          OR procedure.proowner <> bootstrap_role_oid
+          OR procedure.prolang <> (
+            SELECT language.oid
+            FROM pg_catalog.pg_language AS language
+            WHERE language.lanname = 'c'
+          )
+          OR procedure.prokind <> 'f'
+          OR procedure.prosecdef
+          OR procedure.proleakproof
+          OR procedure.proisstrict IS DISTINCT FROM
+            (procedure.proname <> 'gen_random_uuid')
+          OR procedure.proretset IS DISTINCT FROM
+            (procedure.proname = 'pgp_armor_headers')
+          OR procedure.provolatile IS DISTINCT FROM CASE
+            WHEN procedure.proname IN (
+              'gen_salt',
+              'gen_random_bytes',
+              'gen_random_uuid',
+              'pgp_sym_encrypt',
+              'pgp_sym_encrypt_bytea',
+              'pgp_pub_encrypt',
+              'pgp_pub_encrypt_bytea'
+            ) THEN 'v'::"char"
+            ELSE 'i'::"char"
+          END
+          OR procedure.proparallel IS DISTINCT FROM 's'::"char"
+          OR procedure.prosrc IS DISTINCT FROM CASE procedure.proname
+            WHEN 'digest' THEN 'pg_digest'
+            WHEN 'hmac' THEN 'pg_hmac'
+            WHEN 'crypt' THEN 'pg_crypt'
+            WHEN 'gen_salt' THEN CASE procedure.pronargs
+              WHEN 1 THEN 'pg_gen_salt'
+              ELSE 'pg_gen_salt_rounds'
+            END
+            WHEN 'encrypt' THEN 'pg_encrypt'
+            WHEN 'decrypt' THEN 'pg_decrypt'
+            WHEN 'encrypt_iv' THEN 'pg_encrypt_iv'
+            WHEN 'decrypt_iv' THEN 'pg_decrypt_iv'
+            WHEN 'gen_random_bytes' THEN 'pg_random_bytes'
+            WHEN 'gen_random_uuid' THEN 'pg_random_uuid'
+            WHEN 'pgp_sym_encrypt' THEN 'pgp_sym_encrypt_text'
+            WHEN 'pgp_sym_encrypt_bytea' THEN 'pgp_sym_encrypt_bytea'
+            WHEN 'pgp_sym_decrypt' THEN 'pgp_sym_decrypt_text'
+            WHEN 'pgp_sym_decrypt_bytea' THEN 'pgp_sym_decrypt_bytea'
+            WHEN 'pgp_pub_encrypt' THEN 'pgp_pub_encrypt_text'
+            WHEN 'pgp_pub_encrypt_bytea' THEN 'pgp_pub_encrypt_bytea'
+            WHEN 'pgp_pub_decrypt' THEN 'pgp_pub_decrypt_text'
+            WHEN 'pgp_pub_decrypt_bytea' THEN 'pgp_pub_decrypt_bytea'
+            WHEN 'pgp_key_id' THEN 'pgp_key_id_w'
+            WHEN 'armor' THEN 'pg_armor'
+            WHEN 'dearmor' THEN 'pg_dearmor'
+            WHEN 'pgp_armor_headers' THEN 'pgp_armor_headers'
+          END
+          OR procedure.prorettype IS DISTINCT FROM CASE
+            WHEN procedure.proname IN (
+              'digest',
+              'hmac',
+              'encrypt',
+              'decrypt',
+              'encrypt_iv',
+              'decrypt_iv',
+              'gen_random_bytes',
+              'pgp_sym_encrypt',
+              'pgp_sym_encrypt_bytea',
+              'pgp_sym_decrypt_bytea',
+              'pgp_pub_encrypt',
+              'pgp_pub_encrypt_bytea',
+              'pgp_pub_decrypt_bytea',
+              'dearmor'
+            ) THEN 'bytea'::regtype::oid
+            WHEN procedure.proname = 'gen_random_uuid'
+              THEN 'uuid'::regtype::oid
+            WHEN procedure.proname = 'pgp_armor_headers'
+              THEN 'record'::regtype::oid
+            ELSE 'text'::regtype::oid
+          END
+          OR procedure.pronargs <>
+            pg_catalog.cardinality(procedure.proargtypes)
+          OR procedure.pronargdefaults <> 0
+          OR procedure.proargdefaults IS NOT NULL
+          OR procedure.provariadic <> 0
+          OR procedure.prosupport <> 0
+          OR procedure.procost <> 1
+          OR procedure.prorows <> CASE
+            WHEN procedure.proname = 'pgp_armor_headers' THEN 1000
+            ELSE 0
+          END
+          OR procedure.protrftypes IS NOT NULL
+          OR procedure.prosqlbody IS NOT NULL
+          OR (
+            procedure.proname = 'pgp_armor_headers'
+            AND (
+              procedure.proallargtypes IS DISTINCT FROM ARRAY[
+                'text'::regtype::oid,
+                'text'::regtype::oid,
+                'text'::regtype::oid
+              ]
+              OR procedure.proargmodes IS DISTINCT FROM ARRAY[
+                'i'::"char", 'o'::"char", 'o'::"char"
+              ]
+              OR procedure.proargnames IS DISTINCT FROM ARRAY[
+                ''::text, 'key'::text, 'value'::text
+              ]
+            )
+          )
+          OR (
+            procedure.proname <> 'pgp_armor_headers'
+            AND (
+              procedure.proallargtypes IS NOT NULL
+              OR procedure.proargmodes IS NOT NULL
+              OR procedure.proargnames IS NOT NULL
+            )
+          )
+          OR procedure.proconfig IS NOT NULL
+          OR procedure.probin IS DISTINCT FROM '$libdir/pgcrypto'
+          OR procedure.proacl IS NOT NULL
+        )
+    ) THEN
+      RAISE EXCEPTION 'pgcrypto extension member properties differ';
+    END IF;
+
+    IF NOT (
+      SELECT pg_catalog.count(*) = 1
+        AND pg_catalog.bool_and(
+          dependency.objsubid = 0
+          AND dependency.refclassid =
+            'pg_catalog.pg_authid'::pg_catalog.regclass
+          AND dependency.refobjid = owner_role_oid
+          AND dependency.deptype = 'o'
+          AND dependency.classid =
+            'pg_catalog.pg_extension'::pg_catalog.regclass
+          AND dependency.objid = pgcrypto_extension_oid
+        )
+      FROM pg_catalog.pg_shdepend AS dependency
+      WHERE dependency.dbid = current_database_oid
+    ) THEN
+      RAISE EXCEPTION 'pgcrypto trusted extension shared dependency differs';
+    END IF;
+  ELSE
+    IF (
+      SELECT pg_catalog.array_agg(extension.extname ORDER BY extension.extname)
+      FROM pg_catalog.pg_extension AS extension
+    ) IS DISTINCT FROM ARRAY['plpgsql'::name] THEN
+      RAISE EXCEPTION 'pre-pgcrypto extension set differs';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_shdepend AS dependency
+      WHERE dependency.dbid = current_database_oid
+    ) THEN
+      RAISE EXCEPTION 'pre-pgcrypto database has a shared dependency';
+    END IF;
+  END IF;
+
+  IF NOT (
+    SELECT pg_catalog.count(*) = CASE WHEN pgcrypto_present THEN 2 ELSE 1 END
+      AND pg_catalog.count(*) FILTER (WHERE
+        description.classoid =
+          'pg_catalog.pg_namespace'::pg_catalog.regclass
+        AND description.objoid = public_namespace_oid
+        AND description.objsubid = 0
+        AND description.description = 'standard public schema'
+      ) = 1
+      AND pg_catalog.count(*) FILTER (WHERE
+        pgcrypto_present
+        AND description.classoid =
+          'pg_catalog.pg_extension'::pg_catalog.regclass
+        AND description.objoid = pgcrypto_extension_oid
+        AND description.objsubid = 0
+        AND description.description = 'cryptographic functions'
+      ) = CASE WHEN pgcrypto_present THEN 1 ELSE 0 END
+    FROM pg_catalog.pg_description AS description
+    WHERE (
+      description.classoid =
+        'pg_catalog.pg_namespace'::pg_catalog.regclass
+      AND description.objoid = public_namespace_oid
+    ) OR (
+      pgcrypto_present
+      AND (
+        (
+          description.classoid =
+            'pg_catalog.pg_extension'::pg_catalog.regclass
+          AND description.objoid = pgcrypto_extension_oid
+        ) OR EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_depend AS member_dependency
+          WHERE member_dependency.classid = description.classoid
+            AND member_dependency.objid = description.objoid
+            AND member_dependency.refclassid =
+              'pg_catalog.pg_extension'::pg_catalog.regclass
+            AND member_dependency.refobjid = pgcrypto_extension_oid
+            AND member_dependency.deptype = 'e'
+        )
+      )
+    )
+  ) OR EXISTS (
+    SELECT 1 FROM pg_catalog.pg_seclabel
+  ) THEN
+    RAISE EXCEPTION 'canonical database-local comments or labels differ';
+  END IF;
+
+  -- Every object placed in public must be one of the exact pgcrypto members.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_depend AS namespace_dependency
+    WHERE namespace_dependency.refclassid =
+      'pg_catalog.pg_namespace'::pg_catalog.regclass
+      AND namespace_dependency.refobjid = public_namespace_oid
+      AND NOT (
+        pgcrypto_present
+        AND (
+          (
+            namespace_dependency.classid =
+              'pg_catalog.pg_extension'::pg_catalog.regclass
+            AND namespace_dependency.objid = pgcrypto_extension_oid
+          ) OR EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_depend AS extension_dependency
+            WHERE extension_dependency.classid = namespace_dependency.classid
+              AND extension_dependency.objid = namespace_dependency.objid
+              AND extension_dependency.objsubid =
+                namespace_dependency.objsubid
+              AND extension_dependency.refclassid =
+                'pg_catalog.pg_extension'::pg_catalog.regclass
+              AND extension_dependency.refobjid = pgcrypto_extension_oid
+              AND extension_dependency.deptype = 'e'
+          )
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'unexpected object remains in public schema';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_event_trigger)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_data_wrapper)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_server)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_publication)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_subscription)
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_largeobject_metadata)
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_cast AS cast_object
+       WHERE cast_object.oid >= 16384
+     )
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_transform AS transform
+       WHERE transform.oid >= 16384
+     )
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_am AS access_method
+       WHERE access_method.oid >= 16384
+     ) THEN
+    RAISE EXCEPTION 'unexpected database-level object remains';
+  END IF;
+
+  IF (
+    SELECT pg_catalog.array_agg(language.lanname ORDER BY language.lanname)
+    FROM pg_catalog.pg_language AS language
+  ) IS DISTINCT FROM ARRAY[
+    'c'::name,
+    'internal'::name,
+    'plpgsql'::name,
+    'sql'::name
+  ] THEN
+    RAISE EXCEPTION 'canonical language set differs';
+  END IF;
+
+  SELECT pg_catalog.count(*) = 1
+  INTO canonical_membership_present
+  FROM pg_catalog.pg_auth_members AS membership
+  JOIN pg_catalog.pg_authid AS granted_role
+    ON granted_role.oid = membership.roleid
+  JOIN pg_catalog.pg_authid AS member_role
+    ON member_role.oid = membership.member
+  JOIN pg_catalog.pg_authid AS grantor_role
+    ON grantor_role.oid = membership.grantor
+  WHERE granted_role.rolname = 'governed_memory_owner'
+    AND member_role.rolname = 'governed_memory_bootstrap'
+    AND grantor_role.rolname = 'governed_memory_bootstrap'
+    AND NOT membership.admin_option
+    AND membership.inherit_option
+    AND membership.set_option;
+
+  SELECT pg_catalog.count(*) = 5
+    AND pg_catalog.bool_and(
+      (
+        acl.grantor = owner_role_oid
+        AND acl.grantee = owner_role_oid
+        AND acl.privilege_type IN ('CREATE', 'CONNECT', 'TEMPORARY')
+        AND NOT acl.is_grantable
+      ) OR (
+        acl.grantor = owner_role_oid
+        AND acl.grantee IN (
+          SELECT role.oid
+          FROM pg_catalog.pg_authid AS role
+          WHERE role.rolname IN (
+            'governed_memory_api', 'governed_memory_worker'
+          )
+        )
+        AND acl.privilege_type = 'CONNECT'
+        AND NOT acl.is_grantable
+      )
+    )
+  INTO canonical_runtime_acl
+  FROM pg_catalog.pg_database AS database
+  CROSS JOIN LATERAL pg_catalog.aclexplode(database.datacl) AS acl
+  WHERE database.oid = current_database_oid;
+
+  IF pgcrypto_present
+     AND (
+       canonical_membership_present IS NOT TRUE
+       OR canonical_runtime_acl IS NOT TRUE
+     ) THEN
+    RAISE EXCEPTION 'pgcrypto precedes its canonical ACL or membership boundary';
+  END IF;
+END;
+$empty_database_preflight$;
+
+\connect postgres
+
+SELECT
+  pg_catalog.current_database() = 'postgres'
+  AND current_user = 'governed_memory_bootstrap'
+  AND session_user = 'governed_memory_bootstrap'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_stat_activity AS activity
+    WHERE activity.datname = 'governed_memory'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_prepared_xacts AS prepared
+    WHERE prepared.database = 'governed_memory'
+  ) AS governed_memory_final_drop_preflight
+\gset
+\if :governed_memory_final_drop_preflight
+\else
+DO $governed_memory_refusal$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'P0001',
+    MESSAGE = 'canonical database gained an active or prepared client';
+END
+$governed_memory_refusal$;
+\endif
+
+DROP DATABASE governed_memory;
+\endif
+
+-- Role-only recovery includes a fresh bootstrap stopped after any CREATE ROLE,
+-- and a retry after DROP DATABASE succeeded. Revalidate the complete graph in
+-- the same transaction that performs only exact-name role removals.
+BEGIN;
+DO $governed_memory_roles_only_recovery_preflight$
+DECLARE
+  target_role_names constant name[] := ARRAY[
+    'governed_memory_owner',
+    'governed_memory_api',
+    'governed_memory_worker',
+    'memory_ingest_writer',
+    'memory_erasure_requester'
+  ]::name[];
+  expected_role_index integer;
+  target_role_count integer;
+  target_membership_count integer;
+  canonical_membership_count integer;
+BEGIN
+  IF pg_catalog.current_database() <> 'postgres'
+     OR current_user <> 'governed_memory_bootstrap'
+     OR session_user <> 'governed_memory_bootstrap'
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_database AS database
+       WHERE database.datname = 'governed_memory'
+     ) THEN
+    RAISE EXCEPTION 'roles-only recovery identity or database state differs';
+  END IF;
+
+  SELECT pg_catalog.count(*)
+  INTO target_role_count
+  FROM pg_catalog.pg_authid AS role
+  WHERE role.rolname = ANY (target_role_names);
+
+  FOR expected_role_index IN 1..5 LOOP
+    IF (
+      SELECT pg_catalog.count(*) = 1
+      FROM pg_catalog.pg_authid AS role
+      WHERE role.rolname = target_role_names[expected_role_index]
+    ) IS DISTINCT FROM (expected_role_index <= target_role_count) THEN
+      RAISE EXCEPTION 'roles-only creation prefix differs';
+    END IF;
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_authid AS role
+    WHERE role.rolname = ANY (target_role_names)
+      AND (
+        role.rolcanlogin
+        OR role.rolinherit
+        OR role.rolsuper
+        OR role.rolcreatedb
+        OR role.rolcreaterole
+        OR role.rolreplication
+        OR role.rolbypassrls
+        OR role.rolconnlimit <> -1
+        OR role.rolpassword IS NOT NULL
+        OR role.rolvaliduntil IS NOT NULL
+      )
+  ) THEN
+    RAISE EXCEPTION 'roles-only attributes differ';
+  END IF;
+
+  SELECT
+    pg_catalog.count(*),
+    pg_catalog.count(*) FILTER (WHERE
+      granted_role.rolname = 'governed_memory_owner'
+      AND member_role.rolname = 'governed_memory_bootstrap'
+      AND grantor_role.rolname = 'governed_memory_bootstrap'
+      AND NOT membership.admin_option
+      AND membership.inherit_option
+      AND membership.set_option
+    )
+  INTO target_membership_count, canonical_membership_count
+  FROM pg_catalog.pg_auth_members AS membership
+  JOIN pg_catalog.pg_authid AS granted_role
+    ON granted_role.oid = membership.roleid
+  JOIN pg_catalog.pg_authid AS member_role
+    ON member_role.oid = membership.member
+  JOIN pg_catalog.pg_authid AS grantor_role
+    ON grantor_role.oid = membership.grantor
+  WHERE granted_role.rolname = ANY (target_role_names)
+     OR member_role.rolname = ANY (target_role_names)
+     OR grantor_role.rolname = ANY (target_role_names);
+
+  IF target_membership_count <> canonical_membership_count
+     OR canonical_membership_count NOT IN (0, 1)
+     OR (canonical_membership_count = 1 AND target_role_count <> 5)
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_db_role_setting AS setting
+       WHERE setting.setrole = ANY (
+         SELECT role.oid
+         FROM pg_catalog.pg_authid AS role
+         WHERE role.rolname = ANY (target_role_names)
+       )
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_database AS database
+       JOIN pg_catalog.pg_authid AS owner_role
+         ON owner_role.oid = database.datdba
+       WHERE owner_role.rolname = ANY (target_role_names)
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_shdepend AS dependency
+       JOIN pg_catalog.pg_authid AS referenced_role
+         ON dependency.refclassid =
+           'pg_catalog.pg_authid'::pg_catalog.regclass
+         AND dependency.refobjid = referenced_role.oid
+       WHERE referenced_role.rolname = ANY (target_role_names)
+     )
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_replication_slots
+     ) THEN
+    RAISE EXCEPTION 'roles-only recovery preflight failed';
+  END IF;
+END;
+$governed_memory_roles_only_recovery_preflight$;
+
+SELECT pg_catalog.count(*) = 1 AS governed_memory_owner_membership_present
+FROM pg_catalog.pg_auth_members AS membership
+JOIN pg_catalog.pg_authid AS granted_role
+  ON granted_role.oid = membership.roleid
+JOIN pg_catalog.pg_authid AS member_role
+  ON member_role.oid = membership.member
+JOIN pg_catalog.pg_authid AS grantor_role
+  ON grantor_role.oid = membership.grantor
+WHERE granted_role.rolname = 'governed_memory_owner'
+  AND member_role.rolname = 'governed_memory_bootstrap'
+  AND grantor_role.rolname = 'governed_memory_bootstrap'
+  AND NOT membership.admin_option
+  AND membership.inherit_option
+  AND membership.set_option
+\gset
+
+\if :governed_memory_owner_membership_present
+REVOKE governed_memory_owner FROM governed_memory_bootstrap;
+\endif
+DROP ROLE IF EXISTS governed_memory_api;
+DROP ROLE IF EXISTS governed_memory_worker;
+DROP ROLE IF EXISTS memory_ingest_writer;
+DROP ROLE IF EXISTS memory_erasure_requester;
+DROP ROLE IF EXISTS governed_memory_owner;
+COMMIT;
+
+SELECT
+  NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_database AS database
+    WHERE database.datname = 'governed_memory'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_authid AS role
+    WHERE role.rolname IN (
+      'governed_memory_owner',
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    )
+  ) AS governed_memory_cluster_rollback_complete
+\gset
+\if :governed_memory_cluster_rollback_complete
+\else
+DO $governed_memory_refusal$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'P0001',
+    MESSAGE = 'canonical cluster rollback postflight failed';
+END
+$governed_memory_refusal$;
+\endif

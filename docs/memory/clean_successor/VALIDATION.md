@@ -1,6 +1,14 @@
-# Governed Memory Phase 7C validation contract
+# Governed Memory Phase 8A proof-pending validation contract
 
 ## Current result
+
+Phase 8A packages the inactive installation controller, exact plan, authority
+schemas, journal, synthetic backend, hard-disabled Linux backend, and hermetic
+proof runner. The Phase 8A controller proof has not executed. There is no
+current Phase 8A proof receipt, no live execution surface, and no installation
+or activation authority.
+
+## Retained Phase 7C result
 
 Phase 7C disposable revalidation passed for the inactive installation
 candidate. The proof attests the exact pre-promotion candidate commit
@@ -78,18 +86,44 @@ CLI results are:
   and
 - `2`: refusal.
 
-Every decision receipt states zero evaluator mutations, zero provider calls,
-and no state change. Observation profiles describe externally observed state,
-not work performed by the evaluator.
+Every closed v2 decision receipt states zero evaluator mutations, zero provider
+calls, and no state change. Its `phase8b_migration_execution_contract` permits
+only canonical migrations 0001, 0003, and 0004 and excludes all source
+PostgreSQL steps and migration 0002. Observation profiles describe externally
+observed state, not work performed by the evaluator.
+
+The Phase 8A controller runner is separately scoped to the synthetic backend.
+Its closed matrix requires exactly 336 scenarios proving crash/resume,
+compensation, rollback, tamper refusal, empty-only gates, sentinel preservation,
+zero source PostgreSQL connections, catalog
+reads, application-row reads, and writes at every observation stage, and zero
+live effects before Phase 8A metadata can be promoted. It must cover every
+exact target, distinguish the active stores-only supervisor from disabled and
+inactive HTTP/worker units, and prove empty rollback retains every named root
+and the nonce-bound quarantine path. Even a passing result cannot authorize
+Phase 8B installation.
+
+The Phase 8B target, unit, source-I/O, and retained-root values recorded in the
+proof-pending manifest are future acceptance requirements. They are not
+current/live observations and do not claim that Phase 8B has executed.
+
+Before Phase 8B can be considered, separate artifacts and proof are still
+required for the trusted clock and atomic nonce claim, global execution lock,
+external journal-seal anchor, exact live probes, same-filesystem quarantine
+preflight, stores-only supervisor/boot recovery, encrypted backup/restore, and
+real disposable-PostgreSQL execution of the canonical cluster rollback. The
+Linux backend stays hard-disabled in Phase 8A.
 
 ## Required inactive migration mode
 
-An inactive executor must pass
-`-v governed_memory_inactive_installation=on` to
-`roles_preflight.pgsql` and
-`0002_conversation_bridge/forward.pgsql`. Omission defaults to active-mode LOGIN
-expectations and invalidates the inactive sequence. Inactive postflight requires
-API/worker `NOLOGIN`, all five exact role identities, and no writer/requester
+The Phase 8B canonical executor must pass
+`-v governed_memory_inactive_installation=on` to `roles_preflight.pgsql` and may
+apply only migrations 0001, 0003, and 0004. Omission defaults to active-mode
+LOGIN expectations and invalidates the inactive sequence. Phase 8B excludes
+the source-cluster role bootstrap and
+`0002_conversation_bridge/forward.pgsql`; both remain inside the separate Phase
+8C authority boundary. Inactive canonical postflight requires API/worker
+`NOLOGIN`, the exact canonical role identities, and no writer/requester
 membership edges.
 
 Rollback is empty-only and refuses if any role remains a direct member of
@@ -111,7 +145,7 @@ Install-preflight observations and both source SQL defenses require:
 
 The 2026-08-11 snapshot observed unsafe
 `log_parameter_max_length=-1`; therefore current installation observations must
-refuse before source-role creation. Phase 7C authorizes no configuration change.
+refuse before source-role creation. Phase 8A authorizes no configuration change.
 
 ## Current route-test scope
 
@@ -128,9 +162,9 @@ remain unverified.
 
 ## Residual validation boundary
 
-This proof does not establish live Supabase session freshness, persistent-store
-installation, production credentials or memberships, source logging
-remediation, firewall/TLS transport, production routing, real provider or
+The retained Phase 7C proof does not establish live Supabase session freshness,
+persistent-store installation, production credentials or memberships, source
+logging remediation, firewall/TLS transport, production routing, real provider or
 embedding behavior, semantic calibration, frontend deployment, authenticated
 visual QA, or activation. Those remain separate gates.
 
@@ -140,5 +174,9 @@ disposable run. The current runner was changed after attempt 4 only to expect
 the promoted migration-manifest hash and `disposable_validated` label. The
 release guard pins both runner hashes and classifies that exact two-line change
 as metadata-only; the current runner is not described as executed by attempt 4.
-Metadata and documentation changes that only bind this already-completed
-receipt do not authorize installation or activation.
+Metadata and documentation changes that bind the retained Phase 7C receipt or
+record the Phase 8A proof-pending package do not authorize installation or
+activation. Phase 8B remains a separate fresh-store authority boundary with
+zero source PostgreSQL connections, reads, or writes at every stage and retained
+named roots/quarantine after empty rollback; Phase 8C separately governs source
+logging and inactive bridge preparation.

@@ -1,0 +1,460 @@
+{
+  "schema_version": "governed-memory-inactive-installation-controller-plan-v1",
+  "state": "phase8a_inactive_controller_candidate_not_installed_not_authorized",
+  "execution_phase": "phase8b_only_after_separate_installation_authorization",
+  "server": "seebx",
+  "candidate_id": "governed_memory_9a54cf123493_000001",
+  "authority_boundary": {
+    "phase8a_executes_live_steps": false,
+    "phase8a_changes_source_postgresql": false,
+    "phase8a_changes_successor_postgresql": false,
+    "phase8a_changes_qdrant": false,
+    "phase8a_changes_services": false,
+    "phase8a_changes_credentials": false,
+    "phase8a_makes_provider_calls": false,
+    "installation_requires_separate_external_authority": true,
+    "rollback_requires_separate_external_authority": true,
+    "authority_is_never_inferred_from_this_plan": true
+  },
+  "scope": {
+    "source_postgresql_steps": [],
+    "source_bridge_migrations": [],
+    "supabase_steps": [],
+    "provider_steps": [],
+    "runtime_activation_steps": [],
+    "canonical_successor_migrations": [
+      "governed_memory_foundation_0001",
+      "governed_memory_owner_claim_detail_0003",
+      "governed_memory_pilot_marker_0004"
+    ]
+  },
+  "exact_targets": {
+    "postgres_container": "governed-memory-postgres-9a54cf123493-000001",
+    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000001",
+    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000001",
+    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000001",
+    "network": "governed-memory-net-9a54cf123493-000001",
+    "database": "governed_memory",
+    "collection": "governed_memory_9a54cf123493_000001",
+    "alias": "governed_memory_active",
+    "install_root": "/opt/governed-memory",
+    "environment_root": "/etc/governed-memory",
+    "runtime_environment_root": "/etc/governed-memory/runtime",
+    "state_root": "/var/lib/governed-memory",
+    "legacy_secret_quarantine_path_template": "/etc/governed-memory/.legacy-pilot.quarantine-{authorization_nonce_sha256}",
+    "backup_root": "/var/backups/governed-memory",
+    "http_unit": "governed-memory-http.service",
+    "worker_unit": "governed-memory-worker.service",
+    "store_supervisor_unit": "governed-memory-stores.service"
+  },
+  "directory_lifecycle": {
+    "create_or_verify_step": "I06_CREATE_OWNED_ROOTS",
+    "i04_preexisting_parent": "/etc/governed-memory",
+    "roots_retained_after_empty_rollback": [
+      "/opt/governed-memory",
+      "/etc/governed-memory",
+      "/etc/governed-memory/runtime",
+      "/var/lib/governed-memory",
+      "/var/backups/governed-memory"
+    ],
+    "empty_rollback_removes_named_roots": false,
+    "empty_rollback_removes_only_exact_attempt_owned_children": true,
+    "backup_root_disposition": "retain_root_remove_only_exact_attempt_backup_and_restore_artifacts",
+    "legacy_secret_quarantine_disposition": "retain_exact_nonce_derived_file_never_restore_to_unit_loadable_path"
+  },
+  "artifact_bindings": {
+    "hash_authority": "ops/governed_memory/installation/package_manifest.json",
+    "installation_contract": "ops/governed_memory/installation/contract.json",
+    "persistent_compose": "ops/governed_memory/installation/compose.persistent.in.yaml",
+    "canonical_cluster_bootstrap": "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+    "canonical_cluster_rollback": "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
+    "migration_manifest": "governed-memory-migrations/manifest.json",
+    "canonical_roles_preflight": "governed-memory-migrations/roles_preflight.pgsql",
+    "foundation_forward": "governed-memory-migrations/0001_foundation/forward.pgsql",
+    "foundation_rollback": "governed-memory-migrations/0001_foundation/rollback.pgsql",
+    "owner_claim_detail_forward": "governed-memory-migrations/0003_owner_claim_detail/forward.pgsql",
+    "owner_claim_detail_rollback": "governed-memory-migrations/0003_owner_claim_detail/rollback.pgsql",
+    "pilot_marker_forward": "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
+    "pilot_marker_rollback": "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
+    "qdrant_collection_create": "ops/governed_memory/qdrant_collection.create.json",
+    "qdrant_alias_create": "ops/governed_memory/qdrant_alias.create.json",
+    "http_unit_template": "ops/governed_memory/systemd/governed-memory-http.service.in",
+    "worker_unit_template": "ops/governed_memory/systemd/governed-memory-worker.service.in"
+  },
+  "required_adapter_capabilities_without_packaged_artifacts": [
+    {
+      "capability": "exact_store_supervisor_install_enable_start_disable_remove_and_boot_recovery_probe",
+      "typed_blocker": "store_supervisor_artifact_not_packaged"
+    },
+    {
+      "capability": "encrypted_empty_canonical_backup_create_restore_drill_and_attempt_artifact_removal",
+      "typed_blocker": "encrypted_backup_restore_adapter_artifact_not_packaged"
+    },
+    {
+      "capability": "trusted_clock_and_atomic_persistent_single_use_authorization_nonce_claim",
+      "typed_blocker": "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged"
+    },
+    {
+      "capability": "canonical_global_exclusive_installation_and_rollback_execution_lock",
+      "typed_blocker": "canonical_global_execution_lock_not_packaged"
+    },
+    {
+      "capability": "externally_anchored_journal_head_and_sequence_compare_and_set",
+      "typed_blocker": "external_journal_seal_anchor_not_packaged"
+    },
+    {
+      "capability": "exact_live_resource_preflight_postflight_and_drift_probes",
+      "typed_blocker": "exact_live_probe_adapter_not_packaged"
+    },
+    {
+      "capability": "same_filesystem_device_identity_and_no_replace_quarantine_preflight",
+      "typed_blocker": "same_filesystem_quarantine_preflight_adapter_not_packaged"
+    },
+    {
+      "capability": "canonical_cluster_bootstrap_and_empty_only_rollback_executor_with_disposable_postgresql_proof",
+      "typed_blocker": "canonical_cluster_rollback_not_disposable_postgresql_executed"
+    },
+    {
+      "capability": "exact_linux_installation_and_rollback_backend_bound_to_all_required_probes_locks_authority_and_journal_anchors",
+      "typed_blocker": "linux_execution_backend_hard_disabled"
+    }
+  ],
+  "execution_invariants": {
+    "ordered_steps_only": true,
+    "one_mutation_step_at_a_time": true,
+    "intent_journaled_before_effect": true,
+    "effect_probed_before_completion": true,
+    "resume_requires_exact_probe_match": true,
+    "probe_drift_refuses": true,
+    "journal_is_content_free_hash_chained_and_append_only": true,
+    "wildcards_allowed": false,
+    "prefix_matching_allowed": false,
+    "sql_cascade_allowed": false,
+    "source_application_rows_read": false,
+    "legacy_imports": false,
+    "historical_backfill": false,
+    "initial_successor_user_rows": 0,
+    "initial_qdrant_points": 0,
+    "http_and_worker_units_enabled": false,
+    "http_and_worker_units_started": false
+  },
+  "install_steps": [
+    {
+      "id": "I04_QUARANTINE_LEGACY_SECRET",
+      "effect": "atomically_rename_the_exact_preexisting_/etc/governed-memory/pilot.env_within_its_already_observed_parent_to_/etc/governed-memory/.legacy-pilot.quarantine-{authorization_nonce_sha256}_without_reading_or_recording_its_value_and_refuse_if_the_nonce_derived_destination_exists",
+      "artifact_refs": [
+        "ops/governed_memory/installation/contract.json"
+      ],
+      "rollback_disposition": "retain_quarantine_never_restore_to_unit_loadable_path"
+    },
+    {
+      "id": "I05_CREATE_SERVICE_IDENTITY",
+      "effect": "create_the_exact_governed_memory_system_user_and_group_with_no_supplementary_groups",
+      "artifact_refs": [
+        "ops/governed_memory/installation/service-account.json"
+      ],
+      "rollback_disposition": "retain_service_identity"
+    },
+    {
+      "id": "I06_CREATE_OWNED_ROOTS",
+      "effect": "create_or_verify_the_exact_install_environment_runtime_state_and_backup_roots_with_contract_sealed_ownership_and_modes_after_i04_has_used_the_preexisting_environment_parent",
+      "artifact_refs": [
+        "ops/governed_memory/installation/contract.json",
+        "ops/governed_memory/installation/service-account.json"
+      ],
+      "rollback_disposition": "retain_all_five_named_roots_and_remove_only_exact_attempt_owned_empty_children"
+    },
+    {
+      "id": "I07_STAGE_IMMUTABLE_RELEASE",
+      "effect": "stage_the_exact_hash_verified_candidate_release_without_switching_current",
+      "artifact_refs": [
+        "ops/governed_memory/installation/package_manifest.json"
+      ],
+      "rollback_disposition": "remove_only_the_exact_staged_release"
+    },
+    {
+      "id": "I08_PROVISION_FRESH_STORE_SECRETS",
+      "effect": "provision_only_fresh_bootstrap_and_qdrant_store_secrets_without_runtime_or_provider_credentials",
+      "artifact_refs": [
+        "ops/governed_memory/installation/secrets/bootstrap.env.example"
+      ],
+      "rollback_disposition": "remove_only_the_exact_fresh_store_secret_files"
+    },
+    {
+      "id": "I09_CREATE_NETWORK",
+      "effect": "create_the_exact_candidate_owned_docker_network",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "remove_exact_network_only_when_unused"
+    },
+    {
+      "id": "I10_CREATE_POSTGRES_VOLUME",
+      "effect": "create_the_exact_fresh_candidate_owned_postgresql_volume",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "remove_exact_volume_only_after_empty_proof"
+    },
+    {
+      "id": "I11_CREATE_QDRANT_VOLUME",
+      "effect": "create_the_exact_fresh_candidate_owned_qdrant_volume",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "remove_exact_volume_only_after_empty_proof"
+    },
+    {
+      "id": "I12_CREATE_POSTGRES_CONTAINER",
+      "effect": "create_the_exact_digest_pinned_postgresql_container_without_reusing_any_legacy_store",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "stop_and_remove_only_the_exact_owned_container"
+    },
+    {
+      "id": "I13_CREATE_QDRANT_CONTAINER",
+      "effect": "create_the_exact_authorized_digest_pinned_qdrant_container_without_reusing_any_legacy_store",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "stop_and_remove_only_the_exact_owned_container"
+    },
+    {
+      "id": "I14_START_VERIFY_STORES",
+      "effect": "start_only_the_two_exact_store_containers_and_verify_identity_health_loopback_binding_and_zero_successor_data",
+      "artifact_refs": [
+        "ops/governed_memory/installation/compose.persistent.in.yaml"
+      ],
+      "rollback_disposition": "containers_remain_exactly_addressed_for_reverse_teardown"
+    },
+    {
+      "id": "I15_BOOTSTRAP_CANONICAL_CLUSTER",
+      "effect": "bootstrap_only_the_fresh_canonical_successor_database_and_nologin_roles",
+      "artifact_refs": [
+        "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in"
+      ],
+      "rollback_disposition": "empty_only_exact_cluster_teardown"
+    },
+    {
+      "id": "I16_APPLY_FOUNDATION_0001",
+      "effect": "apply_governed_memory_foundation_0001_with_the_sealed_transaction_timeout_and_advisory_lock_runner",
+      "artifact_refs": [
+        "governed-memory-migrations/manifest.json",
+        "governed-memory-migrations/roles_preflight.pgsql",
+        "governed-memory-migrations/0001_foundation/package.json",
+        "governed-memory-migrations/0001_foundation/forward.pgsql"
+      ],
+      "rollback_disposition": "empty_only_migration_rollback"
+    },
+    {
+      "id": "I17_APPLY_OWNER_CLAIM_DETAIL_0003",
+      "effect": "apply_governed_memory_owner_claim_detail_0003_with_the_sealed_transaction_timeout_and_advisory_lock_runner",
+      "artifact_refs": [
+        "governed-memory-migrations/0003_owner_claim_detail/package.json",
+        "governed-memory-migrations/0003_owner_claim_detail/forward.pgsql"
+      ],
+      "rollback_disposition": "data_preserving_migration_rollback"
+    },
+    {
+      "id": "I18_APPLY_PILOT_MARKER_0004",
+      "effect": "apply_governed_memory_pilot_marker_0004_without_inserting_a_marker",
+      "artifact_refs": [
+        "governed-memory-migrations/0004_pilot_marker/package.json",
+        "governed-memory-migrations/0004_pilot_marker/forward.pgsql"
+      ],
+      "rollback_disposition": "empty_only_and_never_piloted_migration_rollback"
+    },
+    {
+      "id": "I19_CREATE_QDRANT_COLLECTION",
+      "effect": "create_the_exact_empty_physical_qdrant_collection",
+      "artifact_refs": [
+        "ops/governed_memory/qdrant_collection.create.json"
+      ],
+      "rollback_disposition": "delete_exact_collection_only_after_zero_point_proof"
+    },
+    {
+      "id": "I20_CREATE_QDRANT_ALIAS",
+      "effect": "create_the_exact_alias_to_the_exact_empty_physical_collection",
+      "artifact_refs": [
+        "ops/governed_memory/qdrant_alias.create.json"
+      ],
+      "rollback_disposition": "delete_only_the_exact_alias_when_its_target_matches"
+    },
+    {
+      "id": "I21_INSTALL_STORE_SUPERVISOR",
+      "effect": "install_the_exact_dormant_store_supervisor_artifact",
+      "artifact_refs": [],
+      "required_adapter_capability": "exact_store_supervisor_install_enable_start_disable_remove_and_boot_recovery_probe",
+      "typed_blocker_until_packaged": "store_supervisor_artifact_not_packaged",
+      "rollback_disposition": "disable_and_remove_only_the_exact_store_supervisor"
+    },
+    {
+      "id": "I22_ENABLE_START_STORE_SUPERVISOR",
+      "effect": "enable_and_start_only_the_exact_store_supervisor_then_verify_boot_recovery_contract",
+      "artifact_refs": [],
+      "required_adapter_capability": "exact_store_supervisor_install_enable_start_disable_remove_and_boot_recovery_probe",
+      "typed_blocker_until_packaged": "store_supervisor_artifact_not_packaged",
+      "rollback_disposition": "disable_stop_and_remove_only_the_exact_store_supervisor"
+    },
+    {
+      "id": "I23_INSTALL_HTTP_UNIT_DISABLED",
+      "effect": "install_the_exact_http_unit_without_enabling_or_starting_it_and_without_runtime_credentials",
+      "artifact_refs": [
+        "ops/governed_memory/systemd/governed-memory-http.service.in"
+      ],
+      "rollback_disposition": "remove_only_the_exact_disabled_unit"
+    },
+    {
+      "id": "I24_INSTALL_WORKER_UNIT_DISABLED",
+      "effect": "install_the_exact_worker_unit_without_enabling_or_starting_it_and_without_runtime_or_provider_credentials",
+      "artifact_refs": [
+        "ops/governed_memory/systemd/governed-memory-worker.service.in"
+      ],
+      "rollback_disposition": "remove_only_the_exact_disabled_unit"
+    },
+    {
+      "id": "I25_DAEMON_RELOAD_VERIFY_APP_UNITS_DORMANT",
+      "effect": "reload_systemd_and_prove_the_exact_http_and_worker_units_are_disabled_inactive_and_never_invoked",
+      "artifact_refs": [
+        "ops/governed_memory/systemd/governed-memory-http.service.in",
+        "ops/governed_memory/systemd/governed-memory-worker.service.in"
+      ],
+      "rollback_disposition": "application_units_remain_dormant_until_removed"
+    },
+    {
+      "id": "I26_CREATE_ENCRYPTED_EMPTY_BACKUP",
+      "effect": "create_and_hash_an_encrypted_backup_of_the_exact_empty_canonical_successor_store",
+      "artifact_refs": [],
+      "required_adapter_capability": "encrypted_empty_canonical_backup_create_restore_drill_and_attempt_artifact_removal",
+      "typed_blocker_until_packaged": "encrypted_backup_restore_adapter_artifact_not_packaged",
+      "rollback_disposition": "remove_only_invocation_owned_backup_attempt_artifacts"
+    },
+    {
+      "id": "I27_COLD_RESTART_SAME_VOLUMES_PROOF",
+      "effect": "cold_restart_the_exact_store_containers_on_the_same_exact_volumes_and_reprove_empty_identity_and_digests",
+      "artifact_refs": [],
+      "required_adapter_capability": "exact_store_supervisor_install_enable_start_disable_remove_and_boot_recovery_probe",
+      "typed_blocker_until_packaged": "store_supervisor_artifact_not_packaged",
+      "rollback_disposition": "preserve_exact_identity_for_reverse_teardown"
+    },
+    {
+      "id": "I28_RESTORE_DRILL_EMPTY_CANONICAL_PROOF",
+      "effect": "restore_the_encrypted_backup_into_an_invocation_owned_disposable_target_and_prove_exact_empty_canonical_equivalence_then_remove_the_target",
+      "artifact_refs": [],
+      "required_adapter_capability": "encrypted_empty_canonical_backup_create_restore_drill_and_attempt_artifact_removal",
+      "typed_blocker_until_packaged": "encrypted_backup_restore_adapter_artifact_not_packaged",
+      "rollback_disposition": "remove_only_invocation_owned_restore_and_backup_attempt_artifacts"
+    },
+    {
+      "id": "I29_SEAL_INACTIVE_POSTFLIGHT",
+      "effect": "seal_a_closed_content_free_installation_execution_receipt_binding_the_preflight_and_postflight_decision_receipts_and_proving_fresh_empty_stores_dormant_app_units_and_no_source_or_provider_activity",
+      "artifact_refs": [
+        "ops/governed_memory/installation/authority/installation_execution_receipt.schema.json",
+        "ops/governed_memory/installation/receipt.schema.json"
+      ],
+      "rollback_disposition": "retain_content_free_receipt"
+    }
+  ],
+  "rollback_steps": [
+    {
+      "id": "R01_VERIFY_EMPTY_EXACT_OWNERSHIP",
+      "effect": "verify_separate_rollback_authority_never_piloted_zero_rows_zero_points_zero_clients_and_exact_resource_ownership"
+    },
+    {
+      "id": "R02_REMOVE_WORKER_UNIT",
+      "effect": "verify_dormant_then_remove_only_the_exact_worker_unit"
+    },
+    {
+      "id": "R03_REMOVE_HTTP_UNIT",
+      "effect": "verify_dormant_then_remove_only_the_exact_http_unit"
+    },
+    {
+      "id": "R04_DISABLE_REMOVE_STORE_SUPERVISOR",
+      "effect": "disable_stop_and_remove_only_the_exact_store_supervisor"
+    },
+    {
+      "id": "R05_DELETE_QDRANT_ALIAS_EMPTY_ONLY",
+      "effect": "delete_only_the_exact_alias_after_exact_target_and_zero_point_proof"
+    },
+    {
+      "id": "R06_DELETE_QDRANT_COLLECTION_EMPTY_ONLY",
+      "effect": "delete_only_the_exact_owned_collection_after_zero_point_and_zero_client_proof"
+    },
+    {
+      "id": "R07_ROLLBACK_PILOT_MARKER_0004_EMPTY_ONLY",
+      "effect": "apply_the_exact_0004_rollback_only_when_the_pilot_marker_has_never_existed"
+    },
+    {
+      "id": "R08_ROLLBACK_OWNER_CLAIM_DETAIL_0003",
+      "effect": "apply_the_exact_data_preserving_0003_rollback"
+    },
+    {
+      "id": "R09_ROLLBACK_FOUNDATION_0001_EMPTY_ONLY",
+      "effect": "apply_the_exact_0001_rollback_only_after_all_successor_owner_and_erasure_rows_are_absent"
+    },
+    {
+      "id": "R10_DROP_CANONICAL_DATABASE_ROLES_EMPTY_ONLY",
+      "effect": "run_the_exact_canonical_cluster_rollback_after_database_catalog_and_role_graph_empty_only_preflight"
+    },
+    {
+      "id": "R11_STOP_REMOVE_QDRANT_CONTAINER",
+      "effect": "stop_and_remove_only_the_exact_owned_qdrant_container"
+    },
+    {
+      "id": "R12_STOP_REMOVE_POSTGRES_CONTAINER",
+      "effect": "stop_and_remove_only_the_exact_owned_postgresql_container"
+    },
+    {
+      "id": "R13_REMOVE_QDRANT_VOLUME_EXACT_EMPTY",
+      "effect": "remove_only_the_exact_owned_qdrant_volume_after_zero_point_proof"
+    },
+    {
+      "id": "R14_REMOVE_POSTGRES_VOLUME_EXACT_EMPTY",
+      "effect": "remove_only_the_exact_owned_postgresql_volume_after_database_teardown_and_empty_proof"
+    },
+    {
+      "id": "R15_REMOVE_NETWORK_EXACT_UNUSED",
+      "effect": "remove_only_the_exact_owned_network_after_proving_no_endpoints"
+    },
+    {
+      "id": "R16_REMOVE_BACKUP_ATTEMPT_ARTIFACTS",
+      "effect": "remove_only_exact_invocation_owned_backup_and_restore_drill_attempt_artifacts_while_retaining_/var/backups/governed-memory"
+    },
+    {
+      "id": "R17_REMOVE_FRESH_STORE_SECRETS",
+      "effect": "remove_only_the_exact_fresh_store_secret_files_without_touching_quarantine_or_runtime_credentials"
+    },
+    {
+      "id": "R18_REMOVE_IMMUTABLE_RELEASE",
+      "effect": "remove_only_the_exact_candidate_release_after_proving_no_current_link_or_process_reference"
+    },
+    {
+      "id": "R19_REMOVE_ATTEMPT_CHILDREN_RETAIN_NAMED_ROOTS",
+      "effect": "remove_only_exact_attempt_owned_empty_children_and_retain_the_named_install_environment_runtime_state_and_backup_roots"
+    },
+    {
+      "id": "R20_VERIFY_FINAL_ABSENCE",
+      "effect": "seal_final_absence_of_exact_candidate_containers_volumes_network_database_collection_alias_release_units_and_store_secrets"
+    }
+  ],
+  "rollback_retained_resources": [
+    "/etc/governed-memory/.legacy-pilot.quarantine-{authorization_nonce_sha256}_never_restored_to_a_unit_loadable_path",
+    "governed_memory_service_identity",
+    "/opt/governed-memory",
+    "/etc/governed-memory",
+    "/etc/governed-memory/runtime",
+    "/var/lib/governed-memory",
+    "/var/backups/governed-memory",
+    "content_free_hash_chained_controller_journal",
+    "content_free_authority_and_controller_receipts"
+  ],
+  "rollback_refusals": {
+    "pilot_ever_started": "retain_stores_and_only_quiesce_separately_authorized_routes_and_services",
+    "successor_user_rows_nonzero": "retain_stores",
+    "qdrant_points_nonzero": "retain_stores",
+    "active_clients_nonzero": "refuse_teardown",
+    "ownership_or_identity_drift": "refuse_teardown",
+    "authority_missing_or_mismatched": "refuse_teardown"
+  }
+}

@@ -1,4 +1,4 @@
-"""Phase 7C source inventory and inactive-runtime identity checks."""
+"""Phase 8A proof-pending controller and inactive-runtime identity checks."""
 
 from __future__ import annotations
 
@@ -138,6 +138,7 @@ EXPECTED_TEST_FILES = {
     "test_admission.py",
     "test_auth_claim_artifacts.py",
     "test_build_provenance.py",
+    "test_canonical_cluster_rollback.py",
     "test_chat_memory_e2e.py",
     "test_conversation_bridge.py",
     "test_conversation_capture.py",
@@ -156,6 +157,8 @@ EXPECTED_TEST_FILES = {
     "test_http_store.py",
     "test_https_transport.py",
     "test_inactive_installation_package.py",
+    "test_inactive_installation_controller.py",
+    "test_installation_authority.py",
     "test_intake_boundary.py",
     "test_lifecycle.py",
     "test_once_worker.py",
@@ -222,7 +225,7 @@ def _literal_exports(path: Path) -> tuple[str, ...]:
     return values[0]
 
 
-class Phase7BRuntimeInventoryTests(unittest.TestCase):
+class Phase8ARuntimeInventoryTests(unittest.TestCase):
     def load_manifest(self) -> dict[str, object]:
         return json.loads(RUNTIME_MANIFEST.read_text(encoding="utf-8"))
 
@@ -245,11 +248,11 @@ class Phase7BRuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(receipt["production_state_changed"])
         self.assertFalse(receipt["legacy_environment_imported"])
 
-    def test_runtime_manifest_is_phase7c_inactive_and_disposable_validated(self) -> None:
+    def test_runtime_manifest_is_phase8a_controller_proof_pending(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase7c_inactive_installation_package_disposable_revalidated_"
+            "phase8a_inactive_installation_controller_packaged_proof_pending_"
             "activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
@@ -336,6 +339,103 @@ class Phase7BRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(validation["production_endpoint_calls"], 0)
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertFalse(validation["persistent_resources_created"])
+        controller = manifest["installation_controller_validation"]
+        self.assertEqual(controller["scope"], "phase8a_synthetic_controller_only")
+        self.assertEqual(
+            controller["state"],
+            "packaged_proof_pending_not_installed_not_authorized",
+        )
+        self.assertEqual(controller["package_artifact_count"], 59)
+        self.assertEqual(controller["required_disposable_scenario_count"], 336)
+        self.assertEqual(
+            controller["installation_decision_receipt_schema_version"],
+            "governed-memory-installation-decision-receipt-v2",
+        )
+        self.assertEqual(
+            controller["phase8b_migration_execution_contract"],
+            {
+                "psql_variable_name": "governed_memory_inactive_installation",
+                "psql_variable_value": "on",
+                "canonical_roles_preflight_requires_variable": True,
+                "canonical_migrations": [
+                    "governed_memory_foundation_0001",
+                    "governed_memory_owner_claim_detail_0003",
+                    "governed_memory_pilot_marker_0004",
+                ],
+                "source_postgresql_steps": [],
+                "source_conversation_bridge_included": False,
+                "omission_defaults_to_active_mode_and_invalidates_inactive_installation": (
+                    True
+                ),
+                "evaluator_verifies_execution": False,
+            },
+        )
+        for source_count_key in (
+            "phase8b_source_connection_count_required",
+            "phase8b_source_catalog_read_count_required",
+            "phase8b_source_application_row_read_count_required",
+            "phase8b_source_write_count_required",
+        ):
+            self.assertEqual(controller[source_count_key], 0, source_count_key)
+        self.assertTrue(
+            controller[
+                "phase8b_all_exact_targets_required_in_every_observation_stage"
+            ]
+        )
+        self.assertEqual(
+            controller["phase8b_required_empty_rollback_retained_targets"],
+            [
+                "install_root",
+                "environment_root",
+                "runtime_environment_root",
+                "state_root",
+                "backup_root",
+                "legacy_secret_quarantine_path_template",
+            ],
+        )
+        self.assertEqual(
+            controller["phase8b_required_application_unit_postflight_state"],
+            "installed_disabled_inactive",
+        )
+        self.assertEqual(
+            controller["phase8b_required_store_supervisor_postflight_state"],
+            "installed_enabled_active_store_only",
+        )
+        self.assertFalse(controller["phase8b_store_supervisor_is_application_runtime"])
+        self.assertEqual(
+            controller["phase8b_installation_blockers"],
+            [
+                "separate_phase8b_dormant_installation_approval_required",
+                (
+                    "final_candidate_commit_tree_package_controller_and_plan_not_"
+                    "externally_signed"
+                ),
+                "external_owner_public_key_trust_anchor_not_installed",
+                "legacy_secret_exact_transition_receipt_absent",
+                "fresh_store_secret_generation_receipt_absent",
+                "persistent_qdrant_digest_not_authorized",
+                "runtime_wheel_and_offline_dependency_wheelhouse_not_packaged",
+                "store_supervisor_artifact_not_packaged",
+                "encrypted_backup_restore_adapter_artifact_not_packaged",
+                "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+                "canonical_global_execution_lock_not_packaged",
+                "external_journal_seal_anchor_not_packaged",
+                "exact_live_probe_adapter_not_packaged",
+                "same_filesystem_quarantine_preflight_adapter_not_packaged",
+                "canonical_cluster_rollback_not_disposable_postgresql_executed",
+                "linux_execution_backend_hard_disabled",
+                "exact_live_preflight_receipt_absent",
+            ],
+        )
+        self.assertFalse(controller["current_disposable_proof_executed"])
+        self.assertFalse(controller["current_disposable_proof_complete"])
+        self.assertIsNone(controller["current_disposable_proof_result"])
+        self.assertIsNone(controller["current_proof_receipt"])
+        self.assertIsNone(controller["current_proof_receipt_sha256"])
+        self.assertFalse(controller["live_backend_packaged"])
+        self.assertFalse(controller["live_execution_surface_exposed"])
+        self.assertFalse(controller["installation_authorized"])
+        self.assertFalse(controller["activation_authorized"])
 
     def test_current_validation_runtime_is_exact(self) -> None:
         runtime = self.load_manifest()["validation_runtime"]
@@ -595,6 +695,7 @@ class Phase7BRuntimeInventoryTests(unittest.TestCase):
             _file_names(VALIDATION_TOOLS),
             {
                 "postgres_bootstrap.pgsql",
+                "run_disposable_installation_controller.py",
                 "run_disposable_successor.sh",
                 "runtime_packages.json",
                 "verify_migration_manifest.py",
@@ -606,7 +707,15 @@ class Phase7BRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             _file_names(INSTALL_TOOLS),
-            {"__init__.py", "inactive_installation.py"},
+            {
+                "__init__.py",
+                "authority.py",
+                "controller.py",
+                "controller_linux.py",
+                "inactive_installation.py",
+                "journal.py",
+                "synthetic_backend.py",
+            },
         )
 
     def test_all_exports_are_literal_unique_and_versionless(self) -> None:
@@ -639,14 +748,16 @@ class Phase7BRuntimeInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_docs_and_runner_describe_phase7c_current_proof(self) -> None:
+    def test_docs_describe_phase8a_pending_and_phase7c_retained_proof(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
-            "Phase 7C disposable-validated inactive package",
+            "Phase 8A proof-pending inactive controller package",
+            "Retained Phase 7C successor proof",
             "CPython 3.12.3 Linux runtime",
             "Attempt 4 passed against pre-promotion candidate commit",
             "structured LifeSwitch data",
             "do not authorize installation, rollback, activation, or cleanup",
+            "zero source PostgreSQL connections",
         ):
             self.assertIn(required, normalized)
         runner = (

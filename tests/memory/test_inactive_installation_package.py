@@ -70,6 +70,55 @@ class InactiveInstallationPackageTests(unittest.TestCase):
             "source_application_row_read_count": 0,
         }
 
+    def _assert_closed_receipt_shape(self, receipt: dict[str, object]) -> None:
+        schema = json.loads(
+            (INSTALLATION / "receipt.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(receipt), set(schema["required"]))
+        self.assertEqual(set(receipt), set(schema["properties"]))
+        self.assertEqual(set(receipt), inactive_installation.DECISION_RECEIPT_KEYS)
+        self.assertEqual(
+            receipt["schema_version"],
+            "governed-memory-installation-decision-receipt-v2",
+        )
+        self.assertIn(receipt["stage"], inactive_installation.STAGES)
+        self.assertIn(
+            receipt["decision"],
+            {"refuse", inactive_installation.STRUCTURAL_DECISION},
+        )
+        for key in ("refusal_codes", "blockers"):
+            self.assertIs(type(receipt[key]), list)
+            self.assertTrue(all(type(item) is str for item in receipt[key]))
+            self.assertEqual(len(receipt[key]), len(set(receipt[key])))
+        self.assertIs(receipt["authorization_inferred"], False)
+        for key in ("candidate_git_commit", "candidate_git_tree"):
+            self.assertRegex(receipt[key], r"[0-9a-f]{40}\Z")
+        for key in (
+            "package_manifest_sha256",
+            "observation_canonical_sha256",
+        ):
+            self.assertRegex(receipt[key], r"[0-9a-f]{64}\Z")
+        prior_hash = receipt["prior_decision_receipt_sha256"]
+        self.assertTrue(
+            prior_hash is None
+            or (
+                type(prior_hash) is str
+                and re.fullmatch(r"[0-9a-f]{64}", prior_hash)
+            )
+        )
+        self.assertIs(type(receipt["receipt_chain"]), list)
+        self.assertIs(type(receipt["exact_target_states"]), dict)
+        self.assertIs(type(receipt["exact_source_cluster_states"]), dict)
+        self.assertIs(type(receipt["exact_successor_store_states"]), dict)
+        self.assertIs(
+            type(receipt["phase8b_migration_execution_contract"]), dict
+        )
+        self.assertIs(type(receipt["fresh_store_counts"]), dict)
+        self.assertIs(receipt["pilot_ever_started"], False)
+        self.assertIs(type(receipt["evaluator_mutating_commands_executed"]), int)
+        self.assertIs(type(receipt["evaluator_provider_calls"]), int)
+        self.assertIs(receipt["evaluator_state_changed"], False)
+
     def test_evaluator_is_structural_only_and_chains_exact_receipts(self) -> None:
         verification = {"package_manifest_sha256": "a" * 64}
         with mock.patch.object(
@@ -86,12 +135,27 @@ class InactiveInstallationPackageTests(unittest.TestCase):
             )
             self.assertFalse(initial["authorization_inferred"])
             self.assertEqual(
-                initial["inactive_migration_execution_contract"],
-                inactive_installation.INACTIVE_MIGRATION_EXECUTION_CONTRACT,
+                initial["phase8b_migration_execution_contract"],
+                inactive_installation.PHASE8B_MIGRATION_EXECUTION_CONTRACT,
+            )
+            self.assertEqual(
+                initial["schema_version"],
+                "governed-memory-installation-decision-receipt-v2",
             )
             self.assertFalse(
-                initial["inactive_migration_execution_contract"][
+                initial["phase8b_migration_execution_contract"][
                     "evaluator_verifies_execution"
+                ]
+            )
+            self.assertEqual(
+                initial["phase8b_migration_execution_contract"][
+                    "source_postgresql_steps"
+                ],
+                [],
+            )
+            self.assertFalse(
+                initial["phase8b_migration_execution_contract"][
+                    "source_conversation_bridge_included"
                 ]
             )
             self.assertIn(
@@ -211,33 +275,150 @@ class InactiveInstallationPackageTests(unittest.TestCase):
                     wrong_tree["refusal_codes"],
                 )
 
-    def test_source_profiles_close_all_runtime_membership_edges(self) -> None:
+    def test_refusal_receipts_never_reflect_untrusted_observation_content(self) -> None:
+        attacker = "ATTACKER_SECRET_MUST_NOT_ENTER_RECEIPT"
+        verification = {"package_manifest_sha256": "a" * 64}
+
+        bounded = self._observation("install_preflight")
+        bounded["target_states"] = {"postgres_container": attacker}
+        bounded["source_cluster_states"] = {"preparation_phase": attacker}
+        bounded["successor_store_states"] = {"postgresql": attacker}
+        bounded["successor_user_memory_row_count"] = attacker
+        bounded["pilot_ever_started"] = attacker
+
+        cyclic: dict[str, object] = {}
+        cyclic["cycle"] = cyclic
+        oversized = self._observation("install_preflight")
+        oversized["stage"] = attacker
+        oversized["target_states"] = {
+            "payload": attacker * 10000,
+            "nested": cyclic,
+        }
+        oversized["prior_decision_receipt_sha256"] = attacker
+
+        malformed: object = [attacker, {"payload": [attacker]}]
+        with mock.patch.object(
+            inactive_installation, "verify_package", return_value=verification
+        ):
+            receipts = [
+                inactive_installation.evaluate_observation(
+                    document,
+                    expected_candidate_git_commit="b" * 40,
+                    expected_candidate_git_tree="c" * 40,
+                )
+                for document in (bounded, oversized, malformed)
+            ]
+
+        for receipt in receipts:
+            with self.subTest(refusal_codes=receipt["refusal_codes"]):
+                self.assertEqual(receipt["decision"], "refuse")
+                self._assert_closed_receipt_shape(receipt)
+                self.assertNotIn(
+                    attacker,
+                    json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+                )
+                stage = receipt["stage"]
+                self.assertEqual(
+                    receipt["exact_target_states"],
+                    inactive_installation.TARGET_STATE_PROFILES[stage],
+                )
+                self.assertEqual(
+                    receipt["exact_source_cluster_states"],
+                    inactive_installation.SOURCE_CLUSTER_STATE_PROFILES[stage],
+                )
+                self.assertEqual(
+                    receipt["exact_successor_store_states"],
+                    inactive_installation.SUCCESSOR_STORE_STATE_PROFILES[stage],
+                )
+                self.assertEqual(
+                    receipt["fresh_store_counts"],
+                    inactive_installation.ZERO_FRESH_STORE_COUNTS,
+                )
+
+        self.assertIn(
+            "exact_target_state_mismatch", receipts[0]["refusal_codes"]
+        )
+        self.assertIn(
+            "source_cluster_state_mismatch", receipts[0]["refusal_codes"]
+        )
+        self.assertIn(
+            "successor_store_state_mismatch", receipts[0]["refusal_codes"]
+        )
+        self.assertIn(
+            "successor_user_memory_row_count_not_zero",
+            receipts[0]["refusal_codes"],
+        )
+        self.assertIn("pilot_already_started", receipts[0]["refusal_codes"])
+        self.assertEqual(
+            receipts[1]["observation_canonical_sha256"],
+            inactive_installation.INVALID_OBSERVATION_CANONICAL_SHA256,
+        )
+        self.assertIn(
+            "observation_value_bounds_exceeded", receipts[1]["refusal_codes"]
+        )
+        self.assertIn("observation_stage_invalid", receipts[1]["refusal_codes"])
+        self.assertIsNone(receipts[1]["prior_decision_receipt_sha256"])
+        self.assertIn("observation_not_object", receipts[2]["refusal_codes"])
+        self.assertIn("observation_shape_invalid", receipts[2]["refusal_codes"])
+
+    def test_source_profiles_enforce_phase8b_zero_connection_boundary(self) -> None:
+        expected = {
+            "connection_count": 0,
+            "catalog_read_count": 0,
+            "application_row_read_count": 0,
+            "write_count": 0,
+            "preparation_phase": "8C_separate_authorization_required",
+        }
         for stage, profile in (
             inactive_installation.SOURCE_CLUSTER_STATE_PROFILES.items()
         ):
             with self.subTest(stage=stage):
-                self.assertEqual(
-                    profile["inactive_source_runtime_membership_graph"], []
-                )
-                self.assertEqual(profile["brains_app_ingest_membership"], "absent")
-                self.assertEqual(profile["brains_app_erasure_membership"], "absent")
-                self.assertEqual(profile["api_ingest_membership"], "absent")
-                self.assertEqual(profile["api_erasure_membership"], "absent")
-                self.assertEqual(profile["worker_ingest_membership"], "absent")
-                self.assertEqual(profile["worker_erasure_membership"], "absent")
-                self.assertEqual(profile["source_log_duration"], "off")
-                self.assertEqual(
-                    profile["source_log_parameter_max_length"],
-                    "0_bind_logging_disabled",
-                )
+                self.assertEqual(profile, expected)
 
-    def test_disposable_runner_is_package_artifact_46_and_tamper_fails(self) -> None:
+    def test_decision_receipt_v2_schema_matches_closed_runtime_shape(self) -> None:
+        schema = json.loads(
+            (INSTALLATION / "receipt.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            schema["properties"]["schema_version"]["const"],
+            "governed-memory-installation-decision-receipt-v2",
+        )
+        self.assertEqual(
+            set(schema["required"]),
+            inactive_installation.DECISION_RECEIPT_KEYS,
+        )
+        self.assertEqual(
+            set(schema["properties"]),
+            inactive_installation.DECISION_RECEIPT_KEYS,
+        )
+        source = schema["properties"]["exact_source_cluster_states"]
+        self.assertFalse(source["additionalProperties"])
+        self.assertEqual(
+            set(source["required"]),
+            set(inactive_installation._PHASE8B_SOURCE_UNTOUCHED),
+        )
+        migration = schema["properties"][
+            "phase8b_migration_execution_contract"
+        ]
+        self.assertEqual(
+            set(migration["required"]),
+            set(inactive_installation.PHASE8B_MIGRATION_EXECUTION_CONTRACT),
+        )
+        self.assertEqual(
+            migration["properties"]["canonical_migrations"]["const"],
+            inactive_installation.PHASE8B_MIGRATION_EXECUTION_CONTRACT[
+                "canonical_migrations"
+            ],
+        )
+
+    def test_controller_runner_is_package_artifact_59_and_tamper_fails(self) -> None:
         result = inactive_installation.verify_package()
         runner_relative = (
-            "tools/governed_memory_validation/run_disposable_successor.sh"
+            "tools/governed_memory_validation/"
+            "run_disposable_installation_controller.py"
         )
         runner = ROOT / runner_relative
-        self.assertEqual(len(result["artifact_sha256"]), 46)
+        self.assertEqual(len(result["artifact_sha256"]), 59)
         self.assertEqual(
             result["artifact_sha256"][runner_relative],
             hashlib.sha256(runner.read_bytes()).hexdigest(),
@@ -297,81 +478,150 @@ class InactiveInstallationPackageTests(unittest.TestCase):
                         ):
                             inactive_installation._manifest_artifact_path(relative)
 
-    def test_persistent_descriptor_is_exact_pinned_and_inactive(self) -> None:
+    def test_phase8a_contract_is_exact_pinned_and_has_no_live_executor(self) -> None:
         contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+        plan = json.loads(
+            (INSTALLATION / "controller_plan.json").read_text(
+                encoding="utf-8"
+            )
+        )
         compose = COMPOSE.read_text(encoding="utf-8")
 
         self.assertEqual(
-            contract["state"], "candidate_only_not_installed_not_authorized"
+            contract["state"],
+            "phase8a_controller_packaged_no_live_executor_not_installed_not_authorized",
         )
-        self.assertFalse(contract["tooling"]["executes_commands"])
-        self.assertFalse(contract["tooling"]["creates_resources"])
-        self.assertFalse(contract["tooling"]["can_authorize_installation"])
-        self.assertFalse(contract["tooling"]["can_authorize_rollback"])
+        self.assertFalse(contract["tooling"]["live_backend_packaged"])
+        self.assertFalse(contract["tooling"]["live_install_cli_exposed"])
+        self.assertFalse(contract["tooling"]["live_rollback_cli_exposed"])
+        self.assertFalse(contract["tooling"]["executes_live_commands"])
+        self.assertFalse(contract["tooling"]["creates_live_resources"])
+        self.assertFalse(
+            contract["tooling"]["can_infer_installation_authority"]
+        )
         self.assertFalse(contract["evaluator_state_changed"])
+        split = contract["phase_split"]
+        self.assertEqual(split["phase8b_source_postgresql_connection_count"], 0)
+        self.assertEqual(split["phase8b_source_application_row_read_count"], 0)
+        self.assertEqual(split["phase8b_source_application_row_write_count"], 0)
         self.assertEqual(
-            contract["source_cluster_policy"][
-                "inactive_source_runtime_membership_graph"
-            ],
-            [],
+            contract["source_cluster_policy"]["source_roles_and_bridge_deferred_to"],
+            "phase8c",
         )
-        receipt_schema = json.loads(
-            (INSTALLATION / "receipt.schema.json").read_text(encoding="utf-8")
-        )
-        source_state_schema = receipt_schema["properties"][
-            "exact_source_cluster_states"
-        ]
-        self.assertIn(
-            "inactive_source_runtime_membership_graph",
-            source_state_schema["required"],
-        )
-        self.assertEqual(
-            source_state_schema["properties"][
-                "inactive_source_runtime_membership_graph"
-            ],
-            {"type": "array", "maxItems": 0},
-        )
-        execution = contract["inactive_migration_execution_contract"]
-        self.assertEqual(
-            execution["psql_variable_name"],
-            "governed_memory_inactive_installation",
-        )
-        self.assertEqual(execution["psql_variable_value"], "on")
-        self.assertTrue(execution["roles_preflight_pgsql_requires_variable"])
-        self.assertTrue(
-            execution["conversation_bridge_forward_pgsql_requires_variable"]
-        )
-        self.assertTrue(
-            execution[
-                "omission_defaults_to_active_mode_and_invalidates_inactive_installation"
-            ]
-        )
-        self.assertFalse(execution["evaluator_verifies_execution"])
-        logging_policy = contract["source_logging_policy"]
-        self.assertEqual(logging_policy["required_log_duration"], "off")
-        self.assertEqual(logging_policy["required_log_parameter_max_length"], 0)
-        self.assertEqual(
-            logging_policy["required_log_parameter_max_length_on_error"], 0
-        )
-        self.assertEqual(logging_policy["observed_log_parameter_max_length"], -1)
-        self.assertFalse(logging_policy["observed_state_safe"])
-        self.assertFalse(logging_policy["remediation_authorized"])
-        self.assertFalse(logging_policy["remediation_applied"])
-        self.assertTrue(
-            logging_policy["role_bootstrap_must_refuse_before_first_write"]
+        self.assertFalse(
+            contract["source_cluster_policy"]["phase8b_connection_allowed"]
         )
         self.assertIn(
             "source_logging_parameter_remediation_not_authorized_or_applied",
-            contract["installation_blockers"],
+            contract["phase8c_source_preparation_blockers"],
         )
-        sequence = contract["inactive_install_sequence"]
-        self.assertIn(
-            "apply_verified_successor_migrations_after_roles_preflight_with_psql_variable_governed_memory_inactive_installation_on",
-            sequence,
+        controller = contract["controller"]
+        self.assertEqual(
+            controller["linux_backend_state"],
+            "hard_disabled_no_live_execution_surface",
+        )
+        self.assertEqual(
+            controller["phase8a_forbidden_cli_commands"],
+            ["install", "rollback", "activate", "cleanup"],
+        )
+        self.assertEqual(
+            controller["phase8a_cli_commands"],
+            ["verify-package", "evaluate-observation"],
+        )
+        self.assertEqual(
+            controller["phase8a_disposable_proof_entrypoint"],
+            "tools/governed_memory_validation/"
+            "run_disposable_installation_controller.py",
+        )
+        self.assertFalse(
+            contract["authority"][
+                "phase8a_approval_is_phase8b_execution_authority"
+            ]
+        )
+        credential_policy = contract["dormant_install_credential_policy"]
+        self.assertTrue(
+            credential_policy["fresh_postgresql_bootstrap_password_required"]
+        )
+        self.assertTrue(credential_policy["fresh_qdrant_api_key_required"])
+        for key in (
+            "runtime_database_login_credentials_created",
+            "provider_credentials_created",
+            "supabase_credentials_created",
+            "service_token_created",
+            "pilot_marker_values_created",
+        ):
+            self.assertFalse(credential_policy[key], key)
+        self.assertFalse(
+            contract["legacy_secret_transition_policy"][
+                "value_may_be_read_copied_hashed_or_logged"
+            ]
+        )
+        self.assertFalse(
+            contract["legacy_secret_transition_policy"][
+                "restore_to_unit_loadable_path_during_compensation"
+            ]
+        )
+        self.assertFalse(
+            contract["legacy_secret_transition_policy"][
+                "same_filesystem_preflight_adapter_packaged"
+            ]
+        )
+        self.assertFalse(
+            controller["external_journal_seal_anchor_packaged"]
+        )
+        self.assertFalse(
+            controller["canonical_global_execution_lock_packaged"]
+        )
+        self.assertFalse(controller["exact_live_probe_adapter_packaged"])
+        authority = contract["authority"]
+        self.assertTrue(authority["signature_scope_verifier_packaged"])
+        self.assertFalse(authority["trusted_clock_adapter_packaged"])
+        self.assertFalse(
+            authority["atomic_persistent_nonce_claim_adapter_packaged"]
+        )
+        self.assertFalse(
+            authority["valid_verification_result_is_execution_capability"]
+        )
+        self.assertFalse(
+            contract["rollback_policy"][
+                "canonical_cluster_rollback_disposable_postgresql_executed"
+            ]
         )
         self.assertIn(
-            "apply_verified_conversation_bridge_migration_with_psql_variable_governed_memory_inactive_installation_on_without_runtime_memberships",
-            sequence,
+            "runtime_wheel_and_offline_dependency_wheelhouse_not_packaged",
+            contract["phase8b_installation_blockers"],
+        )
+        required_phase8b_blockers = {
+            "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+            "canonical_global_execution_lock_not_packaged",
+            "external_journal_seal_anchor_not_packaged",
+            "exact_live_probe_adapter_not_packaged",
+            "same_filesystem_quarantine_preflight_adapter_not_packaged",
+            "canonical_cluster_rollback_not_disposable_postgresql_executed",
+            "linux_execution_backend_hard_disabled",
+        }
+        self.assertLessEqual(
+            required_phase8b_blockers,
+            set(contract["phase8b_installation_blockers"]),
+        )
+        self.assertEqual(
+            {
+                entry["typed_blocker"]
+                for entry in plan[
+                    "required_adapter_capabilities_without_packaged_artifacts"
+                ]
+            },
+            {
+                "store_supervisor_artifact_not_packaged",
+                "encrypted_backup_restore_adapter_artifact_not_packaged",
+                "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+                "canonical_global_execution_lock_not_packaged",
+                "external_journal_seal_anchor_not_packaged",
+                "exact_live_probe_adapter_not_packaged",
+                "same_filesystem_quarantine_preflight_adapter_not_packaged",
+                "canonical_cluster_rollback_not_disposable_postgresql_executed",
+                "linux_execution_backend_hard_disabled",
+            },
         )
         self.assertFalse(
             contract["images"]["postgresql"]["installation_authorized"]
@@ -385,24 +635,66 @@ class InactiveInstallationPackageTests(unittest.TestCase):
                 "approved_for_persistent_installation"
             ]
         )
-        credential_policy = contract["database_role_credential_policy"]
-        self.assertFalse(
-            credential_policy[
-                "inactive_install_postflight_catalog_hash_is_activation_hash"
-            ]
+        self.assertEqual(plan["exact_targets"], contract["exact_targets"])
+        self.assertEqual(
+            set(plan["exact_targets"]),
+            {
+                "postgres_container",
+                "qdrant_container",
+                "postgres_volume",
+                "qdrant_volume",
+                "network",
+                "database",
+                "collection",
+                "alias",
+                "install_root",
+                "environment_root",
+                "runtime_environment_root",
+                "state_root",
+                "legacy_secret_quarantine_path_template",
+                "backup_root",
+                "http_unit",
+                "worker_unit",
+                "store_supervisor_unit",
+            },
         )
-        self.assertTrue(
-            credential_policy[
-                "post_activation_catalog_hash_must_bind_login_and_membership_state"
-            ]
+        for stage, profile in inactive_installation.TARGET_STATE_PROFILES.items():
+            with self.subTest(target_profile_stage=stage):
+                self.assertEqual(set(profile), set(plan["exact_targets"]))
+        rollback_postflight = inactive_installation.TARGET_STATE_PROFILES[
+            "rollback_postflight"
+        ]
+        for retained_root in (
+            "install_root",
+            "environment_root",
+            "runtime_environment_root",
+            "state_root",
+            "backup_root",
+            "legacy_secret_quarantine_path_template",
+        ):
+            self.assertTrue(
+                rollback_postflight[retained_root].startswith("retained_exact_"),
+                retained_root,
+            )
+        self.assertEqual(
+            inactive_installation.UNIT_STATE_PROFILES["install_postflight"],
+            {
+                "http": "installed_disabled_inactive",
+                "worker": "installed_disabled_inactive",
+                "store_supervisor": "installed_enabled_active_store_only",
+            },
         )
-        self.assertLess(
-            credential_policy["future_atomic_order"].index(
-                "capture_and_seal_post_activation_full_bridge_catalog_hash"
-            ),
-            credential_policy["future_atomic_order"].index(
-                "start_only_the_separately_approved_runtime"
-            ),
+        self.assertEqual(
+            inactive_installation.UNIT_STATE_PROFILES["rollback_postflight"],
+            {
+                "http": "absent",
+                "worker": "absent",
+                "store_supervisor": "absent",
+            },
+        )
+        self.assertRegex(
+            self._canonical_sha256(plan["exact_targets"]),
+            r"[0-9a-f]{64}\Z",
         )
         self.assertEqual(
             contract["images"]["qdrant"]["typed_blocker"],
@@ -421,6 +713,200 @@ class InactiveInstallationPackageTests(unittest.TestCase):
         )
         self.assertIn('restart: "no"', compose)
         self.assertNotIn("/opt/chat-memory", compose)
+
+    def test_controller_plan_and_cluster_rollback_are_closed_and_exact(self) -> None:
+        plan = json.loads(
+            (INSTALLATION / "controller_plan.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            tuple(step["id"] for step in plan["install_steps"]),
+            inactive_installation.PHASE8A_INSTALL_STEPS,
+        )
+        self.assertEqual(
+            tuple(step["id"] for step in plan["rollback_steps"]),
+            inactive_installation.PHASE8A_ROLLBACK_STEPS,
+        )
+        i29 = next(
+            step
+            for step in plan["install_steps"]
+            if step["id"] == "I29_SEAL_INACTIVE_POSTFLIGHT"
+        )
+        self.assertEqual(
+            i29["artifact_refs"],
+            [
+                "ops/governed_memory/installation/authority/"
+                "installation_execution_receipt.schema.json",
+                "ops/governed_memory/installation/receipt.schema.json",
+            ],
+        )
+        rendered_plan = json.dumps(
+            plan, sort_keys=True, separators=(",", ":")
+        )
+        for forbidden in (
+            "0002_conversation_bridge",
+            "source_cluster_roles.pgsql",
+        ):
+            self.assertNotIn(forbidden, rendered_plan.lower())
+        self.assertEqual(plan["scope"]["supabase_steps"], [])
+        self.assertEqual(plan["scope"]["provider_steps"], [])
+        self.assertFalse(
+            plan["authority_boundary"]["phase8a_makes_provider_calls"]
+        )
+        blockers = {
+            item["typed_blocker"]
+            for item in plan[
+                "required_adapter_capabilities_without_packaged_artifacts"
+            ]
+        }
+        contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+        self.assertEqual(
+            blockers,
+            {
+                "store_supervisor_artifact_not_packaged",
+                "encrypted_backup_restore_adapter_artifact_not_packaged",
+                "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+                "canonical_global_execution_lock_not_packaged",
+                "external_journal_seal_anchor_not_packaged",
+                "exact_live_probe_adapter_not_packaged",
+                "same_filesystem_quarantine_preflight_adapter_not_packaged",
+                "canonical_cluster_rollback_not_disposable_postgresql_executed",
+                "linux_execution_backend_hard_disabled",
+            },
+        )
+        self.assertLessEqual(
+            blockers,
+            set(contract["phase8b_installation_blockers"]),
+        )
+
+        transition = contract["legacy_secret_transition_policy"]
+        quarantine_template = (
+            "/etc/governed-memory/"
+            ".legacy-pilot.quarantine-{authorization_nonce_sha256}"
+        )
+        self.assertEqual(
+            transition["source_path"], "/etc/governed-memory/pilot.env"
+        )
+        self.assertEqual(
+            transition["destination_path_template"], quarantine_template
+        )
+        self.assertEqual(
+            plan["exact_targets"][
+                "legacy_secret_quarantine_path_template"
+            ],
+            quarantine_template,
+        )
+        self.assertEqual(
+            Path(transition["source_path"]).parent,
+            Path(transition["destination_path_template"]).parent,
+        )
+        self.assertEqual(
+            transition["source_and_destination_parent"],
+            "/etc/governed-memory",
+        )
+        self.assertTrue(transition["parent_must_preexist_i04"])
+        self.assertEqual(
+            transition["destination_nonce_derivation"],
+            "lowercase_hex_sha256_of_exact_utf8_authorization_nonce",
+        )
+        self.assertEqual(
+            transition["destination_nonce_sha256_pattern"],
+            "[0-9a-f]{64}",
+        )
+        self.assertTrue(transition["destination_must_not_preexist"])
+        self.assertFalse(transition["destination_is_unit_loadable"])
+        self.assertFalse(quarantine_template.endswith(".env"))
+        self.assertLess(
+            inactive_installation.PHASE8A_INSTALL_STEPS.index(
+                "I04_QUARANTINE_LEGACY_SECRET"
+            ),
+            inactive_installation.PHASE8A_INSTALL_STEPS.index(
+                "I06_CREATE_OWNED_ROOTS"
+            ),
+        )
+
+        lifecycle = contract["directory_lifecycle"]
+        self.assertEqual(
+            plan["directory_lifecycle"]["create_or_verify_step"],
+            lifecycle["create_or_verify_step"],
+        )
+        expected_roots = {
+            "/opt/governed-memory",
+            "/etc/governed-memory",
+            "/etc/governed-memory/runtime",
+            "/var/lib/governed-memory",
+            "/var/backups/governed-memory",
+        }
+        self.assertEqual(
+            {
+                profile["path"]
+                for profile in lifecycle["exact_roots"].values()
+            },
+            expected_roots,
+        )
+        self.assertTrue(
+            all(
+                profile["empty_rollback_disposition"].startswith(
+                    "retain_exact_root"
+                )
+                for profile in lifecycle["exact_roots"].values()
+            )
+        )
+        self.assertEqual(
+            set(
+                plan["directory_lifecycle"][
+                    "roots_retained_after_empty_rollback"
+                ]
+            ),
+            expected_roots,
+        )
+        self.assertFalse(lifecycle["empty_rollback_removes_named_roots"])
+        self.assertFalse(
+            plan["directory_lifecycle"][
+                "empty_rollback_removes_named_roots"
+            ]
+        )
+        backup = contract["postgres_backup_policy"]
+        self.assertEqual(
+            backup["backup_root_create_or_verify_step"],
+            "I06_CREATE_OWNED_ROOTS",
+        )
+        self.assertTrue(backup["backup_root_retained_after_empty_rollback"])
+        self.assertIn(
+            contract["exact_targets"]["backup_root"],
+            plan["rollback_retained_resources"],
+        )
+        rollback_effects = {
+            step["id"]: step["effect"] for step in plan["rollback_steps"]
+        }
+        self.assertIn(
+            "retaining_/var/backups/governed-memory",
+            rollback_effects["R16_REMOVE_BACKUP_ATTEMPT_ARTIFACTS"],
+        )
+        self.assertIn(
+            "retain_the_named_install_environment_runtime_state_and_backup_roots",
+            rollback_effects[
+                "R19_REMOVE_ATTEMPT_CHILDREN_RETAIN_NAMED_ROOTS"
+            ],
+        )
+
+        rollback_sql = (
+            POSTGRES / "canonical_cluster_rollback.pgsql.in"
+        ).read_text(encoding="utf-8")
+        rollback_upper = rollback_sql.upper()
+        self.assertNotIn("CASCADE", rollback_upper)
+        self.assertNotIn("DROP OWNED", rollback_upper)
+        self.assertEqual(
+            rollback_upper.count("DROP DATABASE GOVERNED_MEMORY;"), 1
+        )
+        self.assertIn(
+            "GOVERNED_MEMORY_ROLES_ONLY_RECOVERY_PREFLIGHT",
+            rollback_upper,
+        )
+        self.assertIn("PG_CATALOG.PG_SHDEPEND", rollback_upper)
+        self.assertIn("BEGIN;", rollback_upper)
+        self.assertIn("COMMIT;", rollback_upper)
 
     def test_secret_templates_contain_names_and_no_values(self) -> None:
         expected = {
@@ -659,10 +1145,20 @@ class InactiveInstallationPackageTests(unittest.TestCase):
         self.assertEqual(account["supplementary_groups"], [])
         self.assertFalse(account["docker_group_member"])
         self.assertFalse(account["sudo_rule"])
+        self.assertEqual(
+            account["runtime_environment_root"],
+            "/etc/governed-memory/runtime",
+        )
+        self.assertEqual(
+            account["runtime_environment_root_owner"],
+            "root:governed-memory",
+        )
+        self.assertEqual(account["runtime_environment_root_mode"], "0750")
         profiles = account["secret_file_profiles"]
         self.assertEqual(
             profiles["bootstrap.env"],
             {
+                "path": "/etc/governed-memory/bootstrap.env",
                 "owner": "root:root",
                 "mode": "0600",
                 "service_account_direct_read": False,
@@ -670,11 +1166,51 @@ class InactiveInstallationPackageTests(unittest.TestCase):
         )
         for runtime_file in ("http.env", "worker.env", "pilot.env"):
             self.assertEqual(
+                profiles[runtime_file]["path"],
+                f"/etc/governed-memory/runtime/{runtime_file}",
+            )
+            self.assertEqual(
                 profiles[runtime_file]["owner"],
                 "root:governed-memory",
             )
             self.assertEqual(profiles[runtime_file]["mode"], "0640")
         self.assertFalse(account["evaluator_state_changed"])
+
+    def test_successor_units_load_only_runtime_environment_files(self) -> None:
+        expected = {
+            "governed-memory-http.service.in": {
+                "/etc/governed-memory/runtime/http.env"
+            },
+            "governed-memory-worker.service.in": {
+                "/etc/governed-memory/runtime/worker.env",
+                "/etc/governed-memory/runtime/pilot.env",
+            },
+        }
+        unit_root = ROOT / "ops" / "governed_memory" / "systemd"
+        for unit_name, expected_paths in expected.items():
+            text = (unit_root / unit_name).read_text(encoding="utf-8")
+            loaded_paths = {
+                line.split("=", 1)[1]
+                for line in text.splitlines()
+                if line.startswith("EnvironmentFile=")
+            }
+            conditions = {
+                line.split("=", 1)[1]
+                for line in text.splitlines()
+                if line.startswith("ConditionPathExists=")
+            }
+            self.assertEqual(loaded_paths, expected_paths, unit_name)
+            self.assertEqual(conditions, expected_paths, unit_name)
+            for path in loaded_paths | conditions:
+                self.assertTrue(
+                    path.startswith("/etc/governed-memory/runtime/"), path
+                )
+            self.assertNotIn(
+                "EnvironmentFile=/etc/governed-memory/pilot.env", text
+            )
+            self.assertNotIn(
+                "ConditionPathExists=/etc/governed-memory/pilot.env", text
+            )
 
     def test_cli_exit_codes_never_authorize_an_observation(self) -> None:
         output = io.StringIO()

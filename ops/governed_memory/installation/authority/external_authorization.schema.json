@@ -1,0 +1,123 @@
+{
+  "$id": "https://lifeswitch.local/schemas/governed-memory/external-authorization-envelope-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "payload": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_phrase": {
+          "pattern": "^APPROVE PHASE 8B DORMANT INSTALL [0-9a-f]{64}$",
+          "type": "string"
+        },
+        "authorization_id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string"
+        },
+        "authorization_namespace": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "type": "string"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "type": "string"
+        },
+        "key_id": {
+          "description": "Lowercase SHA-256 of the exact 32-byte raw Ed25519 public key",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "nonce": {
+          "maxLength": 128,
+          "minLength": 32,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        "not_before": {
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "governed-memory-dormant-install-authorization-v1"
+        },
+        "scope_id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string"
+        },
+        "scope_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "single_use": {
+          "const": true
+        },
+        "thread_id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "authorization_id",
+        "authorization_namespace",
+        "thread_id",
+        "scope_id",
+        "scope_sha256",
+        "key_id",
+        "approval_phrase",
+        "nonce",
+        "issued_at",
+        "not_before",
+        "expires_at",
+        "single_use"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "governed-memory-external-authorization-envelope-v1"
+    },
+    "signature": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "key_id": {
+          "description": "Lowercase SHA-256 of the exact 32-byte raw Ed25519 public key",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "value_base64": {
+          "maxLength": 88,
+          "minLength": 88,
+          "pattern": "^[A-Za-z0-9+/]{86}==$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "key_id",
+        "value_base64"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "payload",
+    "signature"
+  ],
+  "title": "Governed Memory external dormant-install authorization",
+  "type": "object"
+}

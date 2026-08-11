@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import nullcontext
 import csv
 import hashlib
 import io
@@ -62,8 +63,8 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase7CReleaseArtifactTests(unittest.TestCase):
-    def test_phase7c_artifacts_verify_offline(self) -> None:
+class Phase8AReleaseArtifactTests(unittest.TestCase):
+    def test_phase8a_proof_pending_artifacts_verify_offline(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
@@ -71,15 +72,19 @@ class Phase7CReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             result["phase"],
-            "phase7c_disposable_revalidated_inactive_installation_package",
+            "phase8a_inactive_installation_controller_packaged_proof_pending",
         )
-        self.assertEqual(result["installation_package_artifact_count"], 46)
+        self.assertEqual(result["installation_package_artifact_count"], 59)
         self.assertEqual(result["external_calls"], 0)
         self.assertEqual(result["commands_executed"], 0)
         self.assertFalse(result["production_state_changed"])
         self.assertFalse(result["installation_authorized"])
         self.assertFalse(result["activation_authorized"])
         self.assertFalse(result["disposable_revalidation_required"])
+        self.assertFalse(
+            result["installation_controller_disposable_proof_complete"]
+        )
+        self.assertIsNone(result["installation_controller_proof_receipt"])
         self.assertIn(
             "ops/governed_memory/installation/package_manifest.json",
             result["artifact_sha256"],
@@ -168,6 +173,40 @@ class Phase7CReleaseArtifactTests(unittest.TestCase):
             lambda value: value["disposable_validation"].update(
                 {"runner_sealed": False}
             ),
+            lambda value: value["installation_controller_validation"].update(
+                {"current_disposable_proof_complete": True}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {"current_proof_receipt": "forged-phase8a-proof.json"}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {"live_backend_packaged": True}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {"controller_plan_sha256": "0" * 64}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {"required_disposable_scenario_count": 335}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {"phase8b_source_connection_count_required": 1}
+            ),
+            lambda value: value["installation_controller_validation"].update(
+                {
+                    "installation_decision_receipt_schema_version": (
+                        "governed-memory-installation-decision-receipt-v1"
+                    )
+                }
+            ),
+            lambda value: value["installation_controller_validation"][
+                "phase8b_migration_execution_contract"
+            ].update({"source_conversation_bridge_included": True}),
+            lambda value: value["installation_controller_validation"].update(
+                {"phase8b_store_supervisor_is_application_runtime": True}
+            ),
+            lambda value: value["installation_controller_validation"][
+                "phase8b_installation_blockers"
+            ].remove("canonical_global_execution_lock_not_packaged"),
             lambda value: value["http_runtime"].update(
                 {"source_logging_parameter_remediation_applied": True}
             ),
@@ -180,17 +219,12 @@ class Phase7CReleaseArtifactTests(unittest.TestCase):
             variant = json.loads(json.dumps(original))
             mutate(variant)
             variants.append(variant)
-        with tempfile.TemporaryDirectory() as directory:
-            for index, variant in enumerate(variants):
-                path = Path(directory) / f"runtime-{index}.json"
-                path.write_text(json.dumps(variant), encoding="utf-8")
-                with self.subTest(index=index), mock.patch.object(
-                    release_guard, "RUNTIME_MANIFEST", path
-                ), self.assertRaisesRegex(
-                    ReleaseGuardError,
-                    "release_(runtime_manifest|source_erasure_scope)_invalid",
-                ):
-                    verify_candidate_artifacts()
+        for index, variant in enumerate(variants):
+            with self.subTest(index=index), self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_(runtime_manifest|source_erasure_scope)_invalid",
+            ):
+                release_guard._verify_runtime_manifest(variant)
 
     def test_disposable_runner_tamper_fails_release_guard(self) -> None:
         runner = (
@@ -390,29 +424,17 @@ class Phase7CReleaseArtifactTests(unittest.TestCase):
         proof: dict[str, object],
         **expected_constants: object,
     ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "phase7c-proof.json"
-            path.write_text(
-                json.dumps(
-                    proof,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=True,
-                ),
-                encoding="ascii",
-            )
-            proof_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-            with mock.patch.multiple(
-                release_guard,
-                PHASE7C_DISPOSABLE_PROOF=path,
-                EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256=proof_sha256,
-                **expected_constants,
+        context = (
+            mock.patch.multiple(release_guard, **expected_constants)
+            if expected_constants
+            else nullcontext()
+        )
+        with context:
+            with self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_phase7c_disposable_proof_invalid",
             ):
-                with self.assertRaisesRegex(
-                    ReleaseGuardError,
-                    "release_phase7c_disposable_proof_invalid",
-                ):
-                    verify_candidate_artifacts()
+                release_guard._verify_phase7c_proof(proof)
 
     def test_phase7c_proof_shapes_are_closed(self) -> None:
         original = json.loads(
@@ -777,10 +799,12 @@ class Phase7CReleaseArtifactTests(unittest.TestCase):
         self.assertIn("Type=oneshot", worker_unit)
         self.assertIn("Restart=no", worker_unit)
         self.assertIn(
-            "ConditionPathExists=/etc/governed-memory/worker.env", worker_unit
+            "ConditionPathExists=/etc/governed-memory/runtime/worker.env",
+            worker_unit,
         )
         self.assertIn(
-            "ConditionPathExists=/etc/governed-memory/pilot.env", worker_unit
+            "ConditionPathExists=/etc/governed-memory/runtime/pilot.env",
+            worker_unit,
         )
         self.assertFalse(
             (OPS / "systemd" / "governed-memory-worker.timer").exists()

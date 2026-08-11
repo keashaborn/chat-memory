@@ -82,8 +82,15 @@ PACKAGE_ARTIFACTS = {
     "ops/governed_memory/calibration/semantic_retrieval.unapproved.json",
     "ops/governed_memory/installation/compose.persistent.in.yaml",
     "ops/governed_memory/installation/contract.json",
+    "ops/governed_memory/installation/controller_plan.json",
+    "ops/governed_memory/installation/authority/dormant_install_scope.schema.json",
+    "ops/governed_memory/installation/authority/external_authorization.schema.json",
+    "ops/governed_memory/installation/authority/installation_execution_receipt.schema.json",
+    "ops/governed_memory/installation/authority/recovery_proof.schema.json",
+    "ops/governed_memory/installation/journal.schema.json",
     "ops/governed_memory/installation/legacy_quiescence_manifest.json",
     "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+    "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
     "ops/governed_memory/installation/postgres/source_cluster_roles.pgsql.in",
     "ops/governed_memory/installation/receipt.schema.json",
     "ops/governed_memory/installation/secrets/bootstrap.env.example",
@@ -104,10 +111,66 @@ PACKAGE_ARTIFACTS = {
     "ops/governed_memory/systemd/governed-memory-http.service.in",
     "ops/governed_memory/systemd/governed-memory-worker.service.in",
     "tools/governed_memory_install/__init__.py",
+    "tools/governed_memory_install/authority.py",
+    "tools/governed_memory_install/controller.py",
+    "tools/governed_memory_install/controller_linux.py",
     "tools/governed_memory_install/inactive_installation.py",
+    "tools/governed_memory_install/journal.py",
+    "tools/governed_memory_install/synthetic_backend.py",
+    "tools/governed_memory_validation/run_disposable_installation_controller.py",
     "tools/governed_memory_validation/run_disposable_successor.sh",
     "tools/governed_memory_validation/verify_migration_manifest.py",
 }
+PHASE8A_INSTALL_STEPS = (
+    "I04_QUARANTINE_LEGACY_SECRET",
+    "I05_CREATE_SERVICE_IDENTITY",
+    "I06_CREATE_OWNED_ROOTS",
+    "I07_STAGE_IMMUTABLE_RELEASE",
+    "I08_PROVISION_FRESH_STORE_SECRETS",
+    "I09_CREATE_NETWORK",
+    "I10_CREATE_POSTGRES_VOLUME",
+    "I11_CREATE_QDRANT_VOLUME",
+    "I12_CREATE_POSTGRES_CONTAINER",
+    "I13_CREATE_QDRANT_CONTAINER",
+    "I14_START_VERIFY_STORES",
+    "I15_BOOTSTRAP_CANONICAL_CLUSTER",
+    "I16_APPLY_FOUNDATION_0001",
+    "I17_APPLY_OWNER_CLAIM_DETAIL_0003",
+    "I18_APPLY_PILOT_MARKER_0004",
+    "I19_CREATE_QDRANT_COLLECTION",
+    "I20_CREATE_QDRANT_ALIAS",
+    "I21_INSTALL_STORE_SUPERVISOR",
+    "I22_ENABLE_START_STORE_SUPERVISOR",
+    "I23_INSTALL_HTTP_UNIT_DISABLED",
+    "I24_INSTALL_WORKER_UNIT_DISABLED",
+    "I25_DAEMON_RELOAD_VERIFY_APP_UNITS_DORMANT",
+    "I26_CREATE_ENCRYPTED_EMPTY_BACKUP",
+    "I27_COLD_RESTART_SAME_VOLUMES_PROOF",
+    "I28_RESTORE_DRILL_EMPTY_CANONICAL_PROOF",
+    "I29_SEAL_INACTIVE_POSTFLIGHT",
+)
+PHASE8A_ROLLBACK_STEPS = (
+    "R01_VERIFY_EMPTY_EXACT_OWNERSHIP",
+    "R02_REMOVE_WORKER_UNIT",
+    "R03_REMOVE_HTTP_UNIT",
+    "R04_DISABLE_REMOVE_STORE_SUPERVISOR",
+    "R05_DELETE_QDRANT_ALIAS_EMPTY_ONLY",
+    "R06_DELETE_QDRANT_COLLECTION_EMPTY_ONLY",
+    "R07_ROLLBACK_PILOT_MARKER_0004_EMPTY_ONLY",
+    "R08_ROLLBACK_OWNER_CLAIM_DETAIL_0003",
+    "R09_ROLLBACK_FOUNDATION_0001_EMPTY_ONLY",
+    "R10_DROP_CANONICAL_DATABASE_ROLES_EMPTY_ONLY",
+    "R11_STOP_REMOVE_QDRANT_CONTAINER",
+    "R12_STOP_REMOVE_POSTGRES_CONTAINER",
+    "R13_REMOVE_QDRANT_VOLUME_EXACT_EMPTY",
+    "R14_REMOVE_POSTGRES_VOLUME_EXACT_EMPTY",
+    "R15_REMOVE_NETWORK_EXACT_UNUSED",
+    "R16_REMOVE_BACKUP_ATTEMPT_ARTIFACTS",
+    "R17_REMOVE_FRESH_STORE_SECRETS",
+    "R18_REMOVE_IMMUTABLE_RELEASE",
+    "R19_REMOVE_ATTEMPT_CHILDREN_RETAIN_NAMED_ROOTS",
+    "R20_VERIFY_FINAL_ABSENCE",
+)
 MEMORY_TIMER_STOP_SET = {
     "memory-v1-deferred-reconciliation-scan.timer",
     "memory-v1-evidence-intake-dispatcher.timer",
@@ -123,6 +186,15 @@ MEMORY_TIMER_STOP_SET = {
 
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
+MAX_OBSERVATION_NODES = 4096
+MAX_OBSERVATION_DEPTH = 16
+MAX_OBSERVATION_CONTAINER_ITEMS = 128
+MAX_OBSERVATION_STRING_CHARACTERS = 65536
+MAX_OBSERVATION_SINGLE_STRING_CHARACTERS = 4096
+MAX_OBSERVATION_CANONICAL_BYTES = 262144
+INVALID_OBSERVATION_CANONICAL_SHA256 = hashlib.sha256(
+    b"governed-memory-invalid-observation-content-not-retained-v1"
+).hexdigest()
 OBSERVATION_KEYS = {
     "schema_version",
     "stage",
@@ -163,8 +235,13 @@ TARGET_STATE_PROFILES = {
         "alias": "absent",
         "install_root": "absent",
         "environment_root": "present_exact_root_0700",
+        "runtime_environment_root": "absent",
+        "state_root": "absent",
+        "legacy_secret_quarantine_path_template": "nonce_bound_destination_absent",
+        "backup_root": "absent",
         "http_unit": "absent",
         "worker_unit": "absent",
+        "store_supervisor_unit": "absent",
     },
     "install_postflight": {
         "postgres_container": "present_exact_owned",
@@ -175,10 +252,15 @@ TARGET_STATE_PROFILES = {
         "database": "present_exact_empty",
         "collection": "present_exact_empty",
         "alias": "present_exact_binding",
-        "install_root": "present_exact_owned",
+        "install_root": "present_exact_root_0755",
         "environment_root": "present_exact_root_0700",
+        "runtime_environment_root": "present_exact_root_0750_root_governed_memory",
+        "state_root": "present_exact_root_0700_governed_memory",
+        "legacy_secret_quarantine_path_template": "present_exact_nonce_bound_non_unit_loadable",
+        "backup_root": "present_exact_root_0700",
         "http_unit": "installed_disabled_inactive",
         "worker_unit": "installed_disabled_inactive",
+        "store_supervisor_unit": "installed_enabled_active_store_only",
     },
     "rollback_preflight": {
         "postgres_container": "present_exact_owned",
@@ -189,10 +271,15 @@ TARGET_STATE_PROFILES = {
         "database": "present_exact_empty",
         "collection": "present_exact_empty",
         "alias": "present_exact_binding",
-        "install_root": "present_exact_owned",
+        "install_root": "present_exact_root_0755",
         "environment_root": "present_exact_root_0700",
+        "runtime_environment_root": "present_exact_root_0750_root_governed_memory",
+        "state_root": "present_exact_root_0700_governed_memory",
+        "legacy_secret_quarantine_path_template": "present_exact_nonce_bound_non_unit_loadable",
+        "backup_root": "present_exact_root_0700",
         "http_unit": "installed_disabled_inactive",
         "worker_unit": "installed_disabled_inactive",
+        "store_supervisor_unit": "installed_enabled_active_store_only",
     },
     "rollback_postflight": {
         "postgres_container": "absent",
@@ -203,10 +290,15 @@ TARGET_STATE_PROFILES = {
         "database": "absent",
         "collection": "absent",
         "alias": "absent",
-        "install_root": "absent",
-        "environment_root": "present_exact_root_0700",
+        "install_root": "retained_exact_root_0755",
+        "environment_root": "retained_exact_root_0700",
+        "runtime_environment_root": "retained_exact_root_0750_root_governed_memory",
+        "state_root": "retained_exact_root_0700_governed_memory",
+        "legacy_secret_quarantine_path_template": "retained_exact_nonce_bound_non_unit_loadable",
+        "backup_root": "retained_exact_root_0700_attempt_artifacts_absent",
         "http_unit": "absent",
         "worker_unit": "absent",
+        "store_supervisor_unit": "absent",
     },
 }
 PORT_STATE_PROFILES = {
@@ -238,93 +330,36 @@ ACCOUNT_STATE_PROFILES = {
     "rollback_postflight": "retained_exact_unprivileged",
 }
 UNIT_STATE_PROFILES = {
-    "install_preflight": "absent",
-    "install_postflight": "installed_disabled_inactive",
-    "rollback_preflight": "installed_disabled_inactive",
-    "rollback_postflight": "absent",
-}
-SOURCE_CLUSTER_STATE_PROFILES = {
     "install_preflight": {
-        "database": "memory_exact_catalog_only_preflight",
-        "runtime_role_set": "all_four_absent_or_all_four_retained_exact_nologin_noinherit_no_partial_set",
-        "conversation_bridge": "absent",
-        "inactive_source_runtime_membership_graph": [],
-        "brains_app_ingest_membership": "absent",
-        "brains_app_erasure_membership": "absent",
-        "api_ingest_membership": "absent",
-        "api_erasure_membership": "absent",
-        "worker_ingest_membership": "absent",
-        "worker_erasure_membership": "absent",
-        "direct_login_function_execute": "absent",
-        "structured_lifeswitch_relation_privileges": "absent",
-        "account_relation_privileges": "absent",
-        "source_log_duration": "off",
-        "source_log_parameter_max_length": "0_bind_logging_disabled",
-        "source_logging_policy": "exact_bind_and_statement_logging_disabled_pgaudit_not_preloaded",
+        "http": "absent",
+        "worker": "absent",
+        "store_supervisor": "absent",
     },
     "install_postflight": {
-        "database": "memory_exact_catalog_only_postflight",
-        "governed_memory_api_role": "present_exact_nologin_noinherit",
-        "governed_memory_worker_role": "present_exact_nologin_noinherit",
-        "memory_ingest_writer_role": "present_exact_nologin_noinherit",
-        "memory_erasure_requester_role": "present_exact_nologin_noinherit",
-        "conversation_bridge": "installed_exact_inactive",
-        "inactive_source_runtime_membership_graph": [],
-        "brains_app_ingest_membership": "absent",
-        "brains_app_erasure_membership": "absent",
-        "api_ingest_membership": "absent",
-        "api_erasure_membership": "absent",
-        "worker_ingest_membership": "absent",
-        "worker_erasure_membership": "absent",
-        "direct_login_function_execute": "absent",
-        "structured_lifeswitch_relation_privileges": "absent",
-        "account_relation_privileges": "absent",
-        "source_log_duration": "off",
-        "source_log_parameter_max_length": "0_bind_logging_disabled",
-        "source_logging_policy": "exact_bind_and_statement_logging_disabled_pgaudit_not_preloaded",
+        "http": "installed_disabled_inactive",
+        "worker": "installed_disabled_inactive",
+        "store_supervisor": "installed_enabled_active_store_only",
     },
     "rollback_preflight": {
-        "database": "memory_exact_catalog_only_preflight",
-        "governed_memory_api_role": "present_exact_nologin_noinherit",
-        "governed_memory_worker_role": "present_exact_nologin_noinherit",
-        "memory_ingest_writer_role": "present_exact_nologin_noinherit",
-        "memory_erasure_requester_role": "present_exact_nologin_noinherit",
-        "conversation_bridge": "installed_exact_inactive",
-        "inactive_source_runtime_membership_graph": [],
-        "brains_app_ingest_membership": "absent",
-        "brains_app_erasure_membership": "absent",
-        "api_ingest_membership": "absent",
-        "api_erasure_membership": "absent",
-        "worker_ingest_membership": "absent",
-        "worker_erasure_membership": "absent",
-        "direct_login_function_execute": "absent",
-        "structured_lifeswitch_relation_privileges": "absent",
-        "account_relation_privileges": "absent",
-        "source_log_duration": "off",
-        "source_log_parameter_max_length": "0_bind_logging_disabled",
-        "source_logging_policy": "exact_bind_and_statement_logging_disabled_pgaudit_not_preloaded",
+        "http": "installed_disabled_inactive",
+        "worker": "installed_disabled_inactive",
+        "store_supervisor": "installed_enabled_active_store_only",
     },
     "rollback_postflight": {
-        "database": "memory_exact_catalog_only_postflight",
-        "governed_memory_api_role": "retained_exact_nologin_noinherit",
-        "governed_memory_worker_role": "retained_exact_nologin_noinherit",
-        "memory_ingest_writer_role": "retained_exact_nologin_noinherit",
-        "memory_erasure_requester_role": "retained_exact_nologin_noinherit",
-        "conversation_bridge": "absent_after_empty_only_rollback",
-        "inactive_source_runtime_membership_graph": [],
-        "brains_app_ingest_membership": "absent",
-        "brains_app_erasure_membership": "absent",
-        "api_ingest_membership": "absent",
-        "api_erasure_membership": "absent",
-        "worker_ingest_membership": "absent",
-        "worker_erasure_membership": "absent",
-        "direct_login_function_execute": "absent",
-        "structured_lifeswitch_relation_privileges": "absent",
-        "account_relation_privileges": "absent",
-        "source_log_duration": "off",
-        "source_log_parameter_max_length": "0_bind_logging_disabled",
-        "source_logging_policy": "exact_bind_and_statement_logging_disabled_pgaudit_not_preloaded",
+        "http": "absent",
+        "worker": "absent",
+        "store_supervisor": "absent",
     },
+}
+_PHASE8B_SOURCE_UNTOUCHED = {
+    "connection_count": 0,
+    "catalog_read_count": 0,
+    "application_row_read_count": 0,
+    "write_count": 0,
+    "preparation_phase": "8C_separate_authorization_required",
+}
+SOURCE_CLUSTER_STATE_PROFILES = {
+    stage: dict(_PHASE8B_SOURCE_UNTOUCHED) for stage in sorted(STAGES)
 }
 SUCCESSOR_STORE_STATE_PROFILES = {
     "install_preflight": {
@@ -361,6 +396,15 @@ RECEIPT_CHAIN_STAGES = {
     ],
 }
 STRUCTURAL_DECISION = "structurally_valid_candidate_not_authorization"
+_PHASE8B_IMPLEMENTATION_BLOCKERS = {
+    "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+    "canonical_global_execution_lock_not_packaged",
+    "external_journal_seal_anchor_not_packaged",
+    "exact_live_probe_adapter_not_packaged",
+    "same_filesystem_quarantine_preflight_adapter_not_packaged",
+    "canonical_cluster_rollback_not_disposable_postgresql_executed",
+    "linux_execution_backend_hard_disabled",
+}
 BASE_AUTHORITY_BLOCKERS = {
     "install_preflight": {
         "separate_future_installation_approval_required",
@@ -369,25 +413,29 @@ BASE_AUTHORITY_BLOCKERS = {
         "credential_rotation_authority_not_evaluated",
         "persistent_qdrant_digest_authority_not_evaluated",
         "observation_tool_cannot_authorize_execution",
-    },
+    }
+    | _PHASE8B_IMPLEMENTATION_BLOCKERS,
     "install_postflight": {
         "installation_authority_not_attested_by_observation_tool",
         "separate_sealed_release_receipt_required",
         "candidate_commit_and_tree_not_sealed_for_installation",
         "observation_tool_cannot_authorize_execution",
-    },
+    }
+    | _PHASE8B_IMPLEMENTATION_BLOCKERS,
     "rollback_preflight": {
         "separate_future_rollback_approval_required",
         "separate_sealed_release_receipt_required",
         "candidate_commit_and_tree_not_sealed_for_installation",
         "observation_tool_cannot_authorize_execution",
-    },
+    }
+    | _PHASE8B_IMPLEMENTATION_BLOCKERS,
     "rollback_postflight": {
         "rollback_authority_not_attested_by_observation_tool",
         "separate_sealed_release_receipt_required",
         "candidate_commit_and_tree_not_sealed_for_installation",
         "observation_tool_cannot_authorize_execution",
-    },
+    }
+    | _PHASE8B_IMPLEMENTATION_BLOCKERS,
 }
 ZERO_FRESH_STORE_COUNTS = {
     "successor_user_memory_row_count": 0,
@@ -397,11 +445,17 @@ ZERO_FRESH_STORE_COUNTS = {
     "legacy_import_count": 0,
     "source_application_row_read_count": 0,
 }
-INACTIVE_MIGRATION_EXECUTION_CONTRACT = {
+PHASE8B_MIGRATION_EXECUTION_CONTRACT = {
     "psql_variable_name": "governed_memory_inactive_installation",
     "psql_variable_value": "on",
-    "roles_preflight_pgsql_requires_variable": True,
-    "conversation_bridge_forward_pgsql_requires_variable": True,
+    "canonical_roles_preflight_requires_variable": True,
+    "canonical_migrations": [
+        "governed_memory_foundation_0001",
+        "governed_memory_owner_claim_detail_0003",
+        "governed_memory_pilot_marker_0004",
+    ],
+    "source_postgresql_steps": [],
+    "source_conversation_bridge_included": False,
     "omission_defaults_to_active_mode_and_invalidates_inactive_installation": True,
     "evaluator_verifies_execution": False,
 }
@@ -420,23 +474,30 @@ EXPECTED_SERVICE_ACCOUNT = {
     "environment_root": "/etc/governed-memory",
     "environment_root_owner": "root:root",
     "environment_root_mode": "0700",
+    "runtime_environment_root": "/etc/governed-memory/runtime",
+    "runtime_environment_root_owner": "root:governed-memory",
+    "runtime_environment_root_mode": "0750",
     "secret_file_profiles": {
         "bootstrap.env": {
+            "path": "/etc/governed-memory/bootstrap.env",
             "owner": "root:root",
             "mode": "0600",
             "service_account_direct_read": False,
         },
         "http.env": {
+            "path": "/etc/governed-memory/runtime/http.env",
             "owner": "root:governed-memory",
             "mode": "0640",
             "loaded_by_unit": "governed-memory-http.service",
         },
         "worker.env": {
+            "path": "/etc/governed-memory/runtime/worker.env",
             "owner": "root:governed-memory",
             "mode": "0640",
             "loaded_by_unit": "governed-memory-worker.service",
         },
         "pilot.env": {
+            "path": "/etc/governed-memory/runtime/pilot.env",
             "owner": "root:governed-memory",
             "mode": "0640",
             "loaded_by_unit": "governed-memory-worker.service",
@@ -463,7 +524,7 @@ DECISION_RECEIPT_KEYS = {
     "exact_target_states",
     "exact_source_cluster_states",
     "exact_successor_store_states",
-    "inactive_migration_execution_contract",
+    "phase8b_migration_execution_contract",
     "fresh_store_counts",
     "pilot_ever_started",
     "evaluator_mutating_commands_executed",
@@ -547,6 +608,56 @@ def _valid_hash(value: object) -> bool:
     return isinstance(value, str) and HASH_RE.fullmatch(value) is not None
 
 
+def _bounded_observation_sha256(value: object) -> tuple[str, bool]:
+    """Hash bounded JSON without retaining attacker-controlled receipt data."""
+
+    stack: list[tuple[object, int]] = [(value, 0)]
+    seen_containers: set[int] = set()
+    node_count = 0
+    string_characters = 0
+    while stack:
+        item, depth = stack.pop()
+        node_count += 1
+        if node_count > MAX_OBSERVATION_NODES:
+            return INVALID_OBSERVATION_CANONICAL_SHA256, False
+        if item is None or type(item) is bool:
+            continue
+        if type(item) is int:
+            if item.bit_length() > 128:
+                return INVALID_OBSERVATION_CANONICAL_SHA256, False
+            continue
+        if type(item) is str:
+            if len(item) > MAX_OBSERVATION_SINGLE_STRING_CHARACTERS:
+                return INVALID_OBSERVATION_CANONICAL_SHA256, False
+            string_characters += len(item)
+            if string_characters > MAX_OBSERVATION_STRING_CHARACTERS:
+                return INVALID_OBSERVATION_CANONICAL_SHA256, False
+            continue
+        if type(item) not in {dict, list} or depth >= MAX_OBSERVATION_DEPTH:
+            return INVALID_OBSERVATION_CANONICAL_SHA256, False
+        identity = id(item)
+        if identity in seen_containers:
+            return INVALID_OBSERVATION_CANONICAL_SHA256, False
+        seen_containers.add(identity)
+        if len(item) > MAX_OBSERVATION_CONTAINER_ITEMS:
+            return INVALID_OBSERVATION_CANONICAL_SHA256, False
+        if type(item) is dict:
+            for key, nested in item.items():
+                if type(key) is not str:
+                    return INVALID_OBSERVATION_CANONICAL_SHA256, False
+                stack.append((key, depth + 1))
+                stack.append((nested, depth + 1))
+        else:
+            stack.extend((nested, depth + 1) for nested in item)
+    try:
+        canonical = _canonical_bytes(value)
+    except (MemoryError, OverflowError, RecursionError, TypeError, ValueError):
+        return INVALID_OBSERVATION_CANONICAL_SHA256, False
+    if len(canonical) > MAX_OBSERVATION_CANONICAL_BYTES:
+        return INVALID_OBSERVATION_CANONICAL_SHA256, False
+    return _sha256_bytes(canonical), True
+
+
 def verify_package() -> dict[str, object]:
     manifest_bytes = _read_bytes(PACKAGE_MANIFEST)
     manifest = _parse_json_bytes(manifest_bytes)
@@ -555,8 +666,9 @@ def verify_package() -> dict[str, object]:
     artifacts = manifest.get("artifacts")
     if (
         manifest.get("schema_version")
-        != "governed-memory-inactive-installation-package-manifest-v1"
-        or manifest.get("state") != "candidate_only_not_installed_not_authorized"
+        != "governed-memory-inactive-installation-package-manifest-v2"
+        or manifest.get("state")
+        != "phase8a_controller_packaged_no_live_executor_not_installed_not_authorized"
         or set(manifest) != {"schema_version", "state", "artifacts"}
         or not isinstance(artifacts, dict)
         or set(artifacts) != PACKAGE_ARTIFACTS
@@ -577,6 +689,11 @@ def verify_package() -> dict[str, object]:
     contract = _parse_json_bytes(
         artifact_bytes["ops/governed_memory/installation/contract.json"]
     )
+    controller_plan = _parse_json_bytes(
+        artifact_bytes[
+            "ops/governed_memory/installation/controller_plan.json"
+        ]
+    )
     quiescence = _parse_json_bytes(
         artifact_bytes[
             "ops/governed_memory/installation/legacy_quiescence_manifest.json"
@@ -586,26 +703,30 @@ def verify_package() -> dict[str, object]:
         artifact_bytes["ops/governed_memory/installation/service-account.json"]
     )
     if not all(
-        isinstance(value, dict) for value in (contract, quiescence, account)
+        isinstance(value, dict)
+        for value in (contract, controller_plan, quiescence, account)
     ):
         raise InstallationPackageError("installation_artifact_invalid")
+    installation_blockers = contract.get("phase8b_installation_blockers")
     if (
         contract.get("schema_version")
-        != "governed-memory-inactive-installation-contract-v1"
-        or contract.get("state") != "candidate_only_not_installed_not_authorized"
+        != "governed-memory-inactive-installation-contract-v2"
+        or contract.get("state")
+        != "phase8a_controller_packaged_no_live_executor_not_installed_not_authorized"
         or contract.get("evaluator_state_changed") is not False
-        or contract.get("inactive_migration_execution_contract")
-        != INACTIVE_MIGRATION_EXECUTION_CONTRACT
         or contract.get("tooling")
         != {
-            "mode": "offline_package_and_observation_validation_only",
-            "executes_commands": False,
-            "creates_resources": False,
-            "changes_services": False,
-            "changes_databases": False,
-            "changes_qdrant": False,
-            "can_authorize_installation": False,
-            "can_authorize_rollback": False,
+            "mode": "offline_package_authority_controller_and_disposable_simulation_only",
+            "live_backend_packaged": False,
+            "live_install_cli_exposed": False,
+            "live_rollback_cli_exposed": False,
+            "executes_live_commands": False,
+            "creates_live_resources": False,
+            "changes_live_services": False,
+            "changes_live_databases": False,
+            "changes_live_qdrant": False,
+            "can_infer_installation_authority": False,
+            "can_infer_rollback_authority": False,
         }
         or contract.get("images", {}).get("postgresql", {}).get(
             "installation_authorized"
@@ -617,12 +738,143 @@ def verify_package() -> dict[str, object]:
         is not False
         or contract.get("images", {}).get("qdrant", {}).get("typed_blocker")
         != "persistent_qdrant_digest_not_authorized"
-        or contract.get("source_cluster_policy", {}).get(
-            "inactive_source_runtime_membership_graph"
+        or contract.get("phase_split", {}).get(
+            "phase8b_source_postgresql_connection_count"
         )
-        != []
+        != 0
+        or contract.get("source_cluster_policy", {}).get(
+            "phase8b_connection_allowed"
+        )
+        is not False
+        or contract.get("controller", {}).get("linux_backend_state")
+        != "hard_disabled_no_live_execution_surface"
+        or contract.get("controller", {}).get(
+            "external_journal_seal_anchor_packaged"
+        )
+        is not False
+        or contract.get("controller", {}).get(
+            "canonical_global_execution_lock_packaged"
+        )
+        is not False
+        or contract.get("controller", {}).get(
+            "exact_live_probe_adapter_packaged"
+        )
+        is not False
+        or contract.get("controller", {}).get("phase8a_cli_commands")
+        != ["verify-package", "evaluate-observation"]
+        or contract.get("controller", {}).get(
+            "phase8a_disposable_proof_entrypoint"
+        )
+        != "tools/governed_memory_validation/"
+        "run_disposable_installation_controller.py"
+        or contract.get("authority", {}).get("phase8a_approval_is_phase8b_execution_authority")
+        is not False
+        or contract.get("authority", {}).get("signature_scope_verifier_packaged")
+        is not True
+        or contract.get("authority", {}).get("trusted_clock_adapter_packaged")
+        is not False
+        or contract.get("authority", {}).get(
+            "atomic_persistent_nonce_claim_adapter_packaged"
+        )
+        is not False
+        or contract.get("authority", {}).get(
+            "valid_verification_result_is_execution_capability"
+        )
+        is not False
+        or contract.get("legacy_secret_transition_policy", {}).get(
+            "same_filesystem_preflight_adapter_packaged"
+        )
+        is not False
+        or contract.get("rollback_policy", {}).get(
+            "canonical_cluster_rollback_disposable_postgresql_executed"
+        )
+        is not False
+        or not isinstance(installation_blockers, list)
+        or any(not isinstance(item, str) for item in installation_blockers)
+        or not _PHASE8B_IMPLEMENTATION_BLOCKERS.issubset(
+            set(installation_blockers)
+        )
+        or contract.get("dormant_install_credential_policy", {}).get(
+            "runtime_database_login_credentials_created"
+        )
+        is not False
+        or contract.get("dormant_install_credential_policy", {}).get(
+            "provider_credentials_created"
+        )
+        is not False
     ):
         raise InstallationPackageError("installation_contract_invalid")
+
+    install_steps = controller_plan.get("install_steps")
+    rollback_steps = controller_plan.get("rollback_steps")
+    adapter_requirements = controller_plan.get(
+        "required_adapter_capabilities_without_packaged_artifacts"
+    )
+    if (
+        controller_plan.get("schema_version")
+        != "governed-memory-inactive-installation-controller-plan-v1"
+        or controller_plan.get("state")
+        != "phase8a_inactive_controller_candidate_not_installed_not_authorized"
+        or controller_plan.get("authority_boundary", {}).get(
+            "phase8a_executes_live_steps"
+        )
+        is not False
+        or controller_plan.get("scope", {}).get("source_postgresql_steps")
+        != []
+        or controller_plan.get("scope", {}).get("source_bridge_migrations")
+        != []
+        or controller_plan.get("exact_targets") != contract.get("exact_targets")
+        or any(
+            set(profile) != set(contract.get("exact_targets", {}))
+            for profile in TARGET_STATE_PROFILES.values()
+        )
+        or any(
+            profile != _PHASE8B_SOURCE_UNTOUCHED
+            for profile in SOURCE_CLUSTER_STATE_PROFILES.values()
+        )
+        or any(
+            set(profile) != {"http", "worker", "store_supervisor"}
+            for profile in UNIT_STATE_PROFILES.values()
+        )
+        or not isinstance(adapter_requirements, list)
+        or any(not isinstance(item, dict) for item in adapter_requirements)
+        or {item.get("typed_blocker") for item in adapter_requirements}
+        != {
+            "store_supervisor_artifact_not_packaged",
+            "encrypted_backup_restore_adapter_artifact_not_packaged",
+            *_PHASE8B_IMPLEMENTATION_BLOCKERS,
+        }
+        or not isinstance(install_steps, list)
+        or any(not isinstance(item, dict) for item in install_steps)
+        or tuple(item.get("id") for item in install_steps)
+        != PHASE8A_INSTALL_STEPS
+        or next(
+            (
+                item.get("artifact_refs")
+                for item in install_steps
+                if item.get("id") == "I29_SEAL_INACTIVE_POSTFLIGHT"
+            ),
+            None,
+        )
+        != [
+            "ops/governed_memory/installation/authority/"
+            "installation_execution_receipt.schema.json",
+            "ops/governed_memory/installation/receipt.schema.json",
+        ]
+        or not isinstance(rollback_steps, list)
+        or any(not isinstance(item, dict) for item in rollback_steps)
+        or tuple(item.get("id") for item in rollback_steps)
+        != PHASE8A_ROLLBACK_STEPS
+        or controller_plan.get("execution_invariants", {}).get(
+            "source_application_rows_read"
+        )
+        is not False
+        or controller_plan.get("execution_invariants", {}).get(
+            "http_and_worker_units_started"
+        )
+        is not False
+    ):
+        raise InstallationPackageError("installation_controller_plan_invalid")
 
     try:
         compose = artifact_bytes[
@@ -696,6 +948,9 @@ def verify_package() -> dict[str, object]:
         "schema_version": "governed-memory-installation-package-verification-v1",
         "artifact_sha256": observed,
         "package_manifest_sha256": _sha256_bytes(manifest_bytes),
+        "exact_targets_sha256": _sha256_bytes(
+            _canonical_bytes(contract["exact_targets"])
+        ),
         "evaluator_mutating_commands_executed": 0,
         "evaluator_provider_calls": 0,
         "evaluator_state_changed": False,
@@ -740,7 +995,7 @@ def _validate_prior_receipts(
             not isinstance(prior, dict)
             or set(prior) != DECISION_RECEIPT_KEYS
             or prior.get("schema_version")
-            != "governed-memory-installation-decision-receipt-v1"
+            != "governed-memory-installation-decision-receipt-v2"
             or prior.get("stage") != expected_stage
             or prior.get("decision") != STRUCTURAL_DECISION
             or prior.get("refusal_codes") != []
@@ -760,8 +1015,8 @@ def _validate_prior_receipts(
             != SOURCE_CLUSTER_STATE_PROFILES[expected_stage]
             or prior.get("exact_successor_store_states")
             != SUCCESSOR_STORE_STATE_PROFILES[expected_stage]
-            or prior.get("inactive_migration_execution_contract")
-            != INACTIVE_MIGRATION_EXECUTION_CONTRACT
+            or prior.get("phase8b_migration_execution_contract")
+            != PHASE8B_MIGRATION_EXECUTION_CONTRACT
             or prior.get("fresh_store_counts") != ZERO_FRESH_STORE_COUNTS
             or prior.get("pilot_ever_started") is not False
             or prior.get("evaluator_mutating_commands_executed") != 0
@@ -783,43 +1038,95 @@ def evaluate_observation(
     expected_candidate_git_tree: str,
     prior_receipt_paths: list[Path] | None = None,
 ) -> dict[str, object]:
-    verification = verify_package()
-    if not isinstance(document, dict) or set(document) != OBSERVATION_KEYS:
-        raise InstallationPackageError("installation_observation_invalid")
-    stage = document.get("stage")
     if (
-        document.get("schema_version")
-        != "governed-memory-installation-observation-v1"
-        or stage not in STAGES
-        or document.get("hostname") != "ip-172-31-32-171"
-        or not isinstance(expected_candidate_git_commit, str)
-        or not isinstance(expected_candidate_git_tree, str)
+        type(expected_candidate_git_commit) is not str
+        or type(expected_candidate_git_tree) is not str
         or COMMIT_RE.fullmatch(expected_candidate_git_commit) is None
         or COMMIT_RE.fullmatch(expected_candidate_git_tree) is None
     ):
         raise InstallationPackageError("installation_observation_invalid")
-    assert isinstance(stage, str)
+    verification = verify_package()
     refusals: list[str] = []
-    if document.get("package_manifest_sha256") != verification[
-        "package_manifest_sha256"
-    ]:
+    bounded_observation_sha256, observation_is_bounded_json = (
+        _bounded_observation_sha256(document)
+    )
+    if not observation_is_bounded_json:
+        refusals.append("observation_value_bounds_exceeded")
+    if type(document) is not dict:
+        refusals.append("observation_not_object")
+        observation: dict[object, object] = {}
+        shape_is_exact = False
+    else:
+        observation = document
+        shape_is_exact = (
+            len(observation) == len(OBSERVATION_KEYS)
+            and all(type(key) is str for key in observation)
+            and set(observation) == OBSERVATION_KEYS
+        )
+    if not shape_is_exact:
+        refusals.append("observation_shape_invalid")
+    raw_stage = observation.get("stage")
+    stage_is_valid = (
+        type(raw_stage) is str
+        and len(raw_stage) <= 32
+        and raw_stage in STAGES
+    )
+    stage = raw_stage if stage_is_valid else "install_preflight"
+    assert isinstance(stage, str)
+    if not stage_is_valid:
+        refusals.append("observation_stage_invalid")
+    observed_schema = observation.get("schema_version")
+    if (
+        type(observed_schema) is not str
+        or observed_schema != "governed-memory-installation-observation-v1"
+    ):
+        refusals.append("observation_schema_version_mismatch")
+    observed_hostname = observation.get("hostname")
+    if (
+        type(observed_hostname) is not str
+        or observed_hostname != "ip-172-31-32-171"
+    ):
+        refusals.append("observation_hostname_mismatch")
+    observed_manifest_hash = observation.get("package_manifest_sha256")
+    if (
+        type(observed_manifest_hash) is not str
+        or observed_manifest_hash != verification["package_manifest_sha256"]
+    ):
         refusals.append("package_manifest_mismatch")
-    if document.get("candidate_git_commit") != expected_candidate_git_commit:
+    observed_commit = observation.get("candidate_git_commit")
+    if (
+        type(observed_commit) is not str
+        or observed_commit != expected_candidate_git_commit
+    ):
         refusals.append("candidate_git_commit_mismatch")
-    if document.get("candidate_git_tree") != expected_candidate_git_tree:
+    observed_tree = observation.get("candidate_git_tree")
+    if (
+        type(observed_tree) is not str
+        or observed_tree != expected_candidate_git_tree
+    ):
         refusals.append("candidate_git_tree_mismatch")
-    if document.get("target_states") != TARGET_STATE_PROFILES[stage]:
-        refusals.append("exact_target_state_mismatch")
-    if document.get("port_states") != PORT_STATE_PROFILES[stage]:
-        refusals.append("exact_port_state_mismatch")
-    if document.get("service_account_state") != ACCOUNT_STATE_PROFILES[stage]:
-        refusals.append("service_account_state_mismatch")
-    if document.get("unit_states") != UNIT_STATE_PROFILES[stage]:
-        refusals.append("unit_state_mismatch")
-    if document.get("source_cluster_states") != SOURCE_CLUSTER_STATE_PROFILES[stage]:
-        refusals.append("source_cluster_state_mismatch")
-    if document.get("successor_store_states") != SUCCESSOR_STORE_STATE_PROFILES[stage]:
-        refusals.append("successor_store_state_mismatch")
+    if observation_is_bounded_json:
+        if observation.get("target_states") != TARGET_STATE_PROFILES[stage]:
+            refusals.append("exact_target_state_mismatch")
+        if observation.get("port_states") != PORT_STATE_PROFILES[stage]:
+            refusals.append("exact_port_state_mismatch")
+        if (
+            observation.get("service_account_state")
+            != ACCOUNT_STATE_PROFILES[stage]
+        ):
+            refusals.append("service_account_state_mismatch")
+        if observation.get("unit_states") != UNIT_STATE_PROFILES[stage]:
+            refusals.append("unit_state_mismatch")
+        if (
+            observation.get("source_cluster_states")
+            != SOURCE_CLUSTER_STATE_PROFILES[stage]
+        ):
+            refusals.append("source_cluster_state_mismatch")
+        if (
+            observation.get("successor_store_states")
+            != SUCCESSOR_STORE_STATE_PROFILES[stage]
+        ):
+            refusals.append("successor_store_state_mismatch")
     for field in (
         "successor_user_memory_row_count",
         "successor_projection_queue_row_count",
@@ -828,13 +1135,13 @@ def evaluate_observation(
         "legacy_import_count",
         "source_application_row_read_count",
     ):
-        if type(document.get(field)) is not int or document[field] != 0:
+        if type(observation.get(field)) is not int or observation[field] != 0:
             refusals.append(field + "_not_zero")
-    if document.get("pilot_ever_started") is not False:
+    if observation.get("pilot_ever_started") is not False:
         refusals.append("pilot_already_started")
     prior_refusals, receipt_chain = _validate_prior_receipts(
         stage=stage,
-        document=document,
+        document=observation,
         prior_receipt_paths=prior_receipt_paths or [],
         candidate_git_commit=expected_candidate_git_commit,
         candidate_git_tree=expected_candidate_git_tree,
@@ -844,8 +1151,14 @@ def evaluate_observation(
     refusal_codes = sorted(set(refusals))
     decision = "refuse" if refusal_codes else STRUCTURAL_DECISION
     blockers = sorted(BASE_AUTHORITY_BLOCKERS[stage] | set(refusal_codes))
+    declared_prior_hash = observation.get("prior_decision_receipt_sha256")
+    normalized_prior_hash = (
+        declared_prior_hash
+        if receipt_chain and _valid_hash(declared_prior_hash)
+        else None
+    )
     return {
-        "schema_version": "governed-memory-installation-decision-receipt-v1",
+        "schema_version": "governed-memory-installation-decision-receipt-v2",
         "stage": stage,
         "decision": decision,
         "refusal_codes": refusal_codes,
@@ -854,23 +1167,22 @@ def evaluate_observation(
         "candidate_git_commit": expected_candidate_git_commit,
         "candidate_git_tree": expected_candidate_git_tree,
         "package_manifest_sha256": verification["package_manifest_sha256"],
-        "prior_decision_receipt_sha256": document[
-            "prior_decision_receipt_sha256"
-        ],
+        "prior_decision_receipt_sha256": normalized_prior_hash,
         "receipt_chain": receipt_chain,
-        "observation_canonical_sha256": hashlib.sha256(
-            _canonical_bytes(document)
-        ).hexdigest(),
-        "exact_target_states": document["target_states"],
-        "exact_source_cluster_states": document["source_cluster_states"],
-        "exact_successor_store_states": document["successor_store_states"],
-        "inactive_migration_execution_contract": (
-            INACTIVE_MIGRATION_EXECUTION_CONTRACT
+        "observation_canonical_sha256": bounded_observation_sha256,
+        "exact_target_states": dict(TARGET_STATE_PROFILES[stage]),
+        "exact_source_cluster_states": dict(
+            SOURCE_CLUSTER_STATE_PROFILES[stage]
         ),
-        "fresh_store_counts": {
-            field: document[field] for field in ZERO_FRESH_STORE_COUNTS
+        "exact_successor_store_states": dict(
+            SUCCESSOR_STORE_STATE_PROFILES[stage]
+        ),
+        "phase8b_migration_execution_contract": {
+            key: list(value) if isinstance(value, list) else value
+            for key, value in PHASE8B_MIGRATION_EXECUTION_CONTRACT.items()
         },
-        "pilot_ever_started": document["pilot_ever_started"],
+        "fresh_store_counts": dict(ZERO_FRESH_STORE_COUNTS),
+        "pilot_ever_started": False,
         "evaluator_mutating_commands_executed": 0,
         "evaluator_provider_calls": 0,
         "evaluator_state_changed": False,

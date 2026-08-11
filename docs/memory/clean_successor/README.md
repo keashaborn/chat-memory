@@ -1,11 +1,13 @@
-# Governed Memory clean successor - Phase 7C disposable-validated inactive package
+# Governed Memory clean successor - Phase 8A proof-pending inactive controller package
 
-Phase 7C is a disposable-revalidated, inactive installation candidate. It has not installed,
-enabled, or started a successor service, timer, listener, route, PostgreSQL
-database, Qdrant collection, role membership, credential, or firewall rule. It
-has not changed production data or called a provider. The package and its
-offline evaluator do not authorize installation, rollback, activation, or
-cleanup.
+Phase 8A packages an offline installation-controller candidate whose disposable
+controller proof is pending. Its Linux execution backend is hard-disabled and
+it exposes no install, rollback, activation, or cleanup command. It has not
+installed, enabled, or started a successor service, timer, listener, route,
+PostgreSQL database, Qdrant collection, role membership, credential, or
+firewall rule. It has not changed production data or called a provider. The
+package, authority verifier, controller, synthetic backend, and observation
+evaluator do not authorize installation, rollback, activation, or cleanup.
 
 PostgreSQL remains the canonical Memory store. Qdrant is derived and
 rebuildable. Both successor stores must start fresh and isolated; no legacy
@@ -25,7 +27,7 @@ The offline build recorded zero network and provider calls, zero persistent
 resources, and zero production-state changes. Build reproducibility alone is
 not database/Qdrant proof; the separate Phase 7C receipt closes that boundary.
 
-## Current disposable proof
+## Retained Phase 7C successor proof
 
 Attempt 4 passed against pre-promotion candidate commit
 `5c9524b463c4760297dcebe489271af8d0b246a7`, tree
@@ -66,28 +68,56 @@ content is never reconstructed.
 
 ## Inactive installation package
 
-The package contains:
+The Phase 8A package adds an Ed25519 scope verifier, an append-only
+intent-before-effect controller journal, a fail-closed state machine, a
+synthetic disposable backend, a hard-disabled Linux backend, an exact ordered
+install/rollback plan, and the hermetic controller proof runner. The Phase 8A
+controller proof requires exactly 336 closed synthetic scenarios and has not yet
+executed, so none of those artifacts is described as disposable-proved.
+
+The package also contains:
 
 - pinned persistent PostgreSQL and Qdrant descriptors with exact resource
   identities and `restart: "no"`;
 - a fresh successor cluster bootstrap with API and worker roles left `NOLOGIN`;
-- a narrowly additive source-cluster role bootstrap that grants no membership;
-- verified migrations whose inactive execution must explicitly pass
-  `-v governed_memory_inactive_installation=on` to both
-  `roles_preflight.pgsql` and the conversation-bridge forward migration;
+- a narrowly additive source-cluster role bootstrap that grants no membership,
+  packaged only for the separately authorized Phase 8C boundary;
+- a closed v2 structural decision receipt whose
+  `phase8b_migration_execution_contract` permits only canonical migrations
+  0001, 0003, and 0004, requires
+  `-v governed_memory_inactive_installation=on` for canonical role preflight,
+  and excludes every source-PostgreSQL step and migration 0002;
 - dormant systemd templates; root-owned secret-file contracts; and
 - a content-free observation evaluator that performs no commands or mutations.
 
 The container bootstrap administrator remains a LOGIN role backed by the
-root-only `bootstrap.env` file at mode `0600`. Phase 7C does not retire it.
+root-only `bootstrap.env` file at mode `0600`. Phase 8A does not retire it.
 Retirement requires a separate tested administrator/recovery login and a
 separately approved operation. API and worker passwords and LOGIN capability
 remain absent.
 
-The persistent descriptors are intentionally not restart-supervised. Boot
-recovery, encrypted PostgreSQL backup/restore, and persistent Qdrant digest
-authorization remain blockers. Disposable proof did not create or authorize
-the persistent package targets.
+The persistent descriptors are intentionally not restart-supervised. Phase 8B
+remains blocked on a packaged stores-only supervisor and boot recovery,
+encrypted PostgreSQL backup/restore, a persistent Qdrant digest, a trusted clock
+with atomic one-use nonce claims, a canonical global execution lock, an external
+journal-seal anchor, exact live probes, a same-filesystem quarantine preflight,
+and real disposable-PostgreSQL execution of the canonical cluster rollback.
+The Linux execution backend remains hard-disabled. Disposable proof did not
+create or authorize the persistent package targets.
+
+Phase 8B, if separately authorized later, is limited to fresh dormant
+successor stores. Every Phase 8B observation stage requires zero source
+PostgreSQL connections, catalog reads, application-row reads, and writes, and
+must cover every exact target. These are future acceptance requirements, not
+current or live observations. Install postflight must keep the HTTP and worker
+application units disabled and inactive while the separately classified store
+supervisor may be enabled and active for the stores only. Empty rollback
+must remove the exact candidate resources but retain `install_root`,
+`environment_root`, `runtime_environment_root`, `state_root`, `backup_root`,
+and the exact nonce-bound legacy-secret quarantine path. Phase 8C is the
+separate authority boundary for source logging remediation, inactive source
+roles, and the inactive conversation bridge. Runtime credentials, memberships,
+routes, services, provider validation, and pilot activation remain later gates.
 
 ## Source logging refusal
 
@@ -97,7 +127,7 @@ transaction-sampling logging disabled; `log_parameter_max_length=0`;
 parameter logging disabled. The 2026-08-11 read-only snapshot observed
 `log_duration=off` but `log_parameter_max_length=-1`. PostgreSQL treats `-1` as
 full bind-value logging, so the current source configuration is unsafe and the
-role bootstrap must refuse before its first write. Phase 7C does not change the
+role bootstrap must refuse before its first write. Phase 8A does not change the
 live setting. Remediation requires separate authorization and a new receipt.
 
 ## Bridge catalog seal
@@ -145,6 +175,6 @@ Frontend candidate `71377a838058d75320b55817fc8c9656d404f955`, tree
 `-zedD-GFt2yko7J17swb6`, remains undeployed and visually unverified. Successor
 `operation_id` and confirmation binding semantics remain unresolved.
 
-Production remains unchanged. Legacy components are not deleted by Phase 7C.
+Production remains unchanged. Legacy components are not deleted by Phase 8A.
 Retirement requires an active successor, exclusive routing proof, a rollback
 window, exact target receipts, and separate deletion authorization.

@@ -1,0 +1,205 @@
+{
+  "$id": "https://lifeswitch.local/schemas/governed-memory/dormant-install-scope-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authorization_namespace": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "type": "string"
+    },
+    "candidate_git_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "candidate_git_tree": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "controller_contract_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "exact_targets_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "execution_plan_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "operation": {
+      "const": "dormant_install"
+    },
+    "package_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "phase": {
+      "const": "8B"
+    },
+    "schema_version": {
+      "const": "governed-memory-dormant-install-scope-v1"
+    },
+    "scope_id": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "type": "string"
+    },
+    "secret_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_secret_names": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "const": "GOVERNED_MEMORY_BOOTSTRAP_PASSWORD"
+            },
+            {
+              "const": "GOVERNED_MEMORY_QDRANT_API_KEY"
+            }
+          ],
+          "type": "array"
+        },
+        "forbidden_secret_classes": {
+          "items": false,
+          "maxItems": 5,
+          "minItems": 5,
+          "prefixItems": [
+            {
+              "const": "pilot"
+            },
+            {
+              "const": "provider"
+            },
+            {
+              "const": "runtime"
+            },
+            {
+              "const": "service"
+            },
+            {
+              "const": "supabase"
+            }
+          ],
+          "type": "array"
+        },
+        "pilot_secret_count": {
+          "const": 0
+        },
+        "provider_secret_count": {
+          "const": 0
+        },
+        "runtime_secret_count": {
+          "const": 0
+        },
+        "secret_values_present": {
+          "const": false
+        },
+        "service_secret_count": {
+          "const": 0
+        },
+        "supabase_secret_count": {
+          "const": 0
+        }
+      },
+      "required": [
+        "allowed_secret_names",
+        "forbidden_secret_classes",
+        "runtime_secret_count",
+        "provider_secret_count",
+        "supabase_secret_count",
+        "service_secret_count",
+        "pilot_secret_count",
+        "secret_values_present"
+      ],
+      "type": "object"
+    },
+    "source_boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "source_postgres_connection_count": {
+          "const": 0
+        },
+        "source_postgres_read_count": {
+          "const": 0
+        },
+        "source_postgres_write_count": {
+          "const": 0
+        },
+        "source_preparation_phase": {
+          "const": "8C_separate_authorization_required"
+        }
+      },
+      "required": [
+        "source_postgres_connection_count",
+        "source_postgres_read_count",
+        "source_postgres_write_count",
+        "source_preparation_phase"
+      ],
+      "type": "object"
+    },
+    "store_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "initial_postgresql_user_row_count": {
+          "const": 0
+        },
+        "initial_qdrant_point_count": {
+          "const": 0
+        },
+        "legacy_imports_allowed": {
+          "const": false
+        },
+        "postgresql": {
+          "const": "fresh_isolated_empty"
+        },
+        "qdrant": {
+          "const": "fresh_isolated_empty"
+        },
+        "snapshot_restore_allowed": {
+          "const": false
+        },
+        "unprocessed_prefill_allowed": {
+          "const": false
+        }
+      },
+      "required": [
+        "postgresql",
+        "qdrant",
+        "legacy_imports_allowed",
+        "snapshot_restore_allowed",
+        "unprocessed_prefill_allowed",
+        "initial_postgresql_user_row_count",
+        "initial_qdrant_point_count"
+      ],
+      "type": "object"
+    },
+    "thread_id": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "phase",
+    "operation",
+    "authorization_namespace",
+    "thread_id",
+    "scope_id",
+    "candidate_git_commit",
+    "candidate_git_tree",
+    "package_manifest_sha256",
+    "controller_contract_sha256",
+    "execution_plan_sha256",
+    "exact_targets_sha256",
+    "source_boundary",
+    "store_policy",
+    "secret_policy"
+  ],
+  "title": "Governed Memory Phase 8B dormant installation scope",
+  "type": "object"
+}

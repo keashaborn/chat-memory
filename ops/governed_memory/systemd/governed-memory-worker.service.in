@@ -4,8 +4,8 @@
 Description=Governed Memory clean successor one-shot worker candidate
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/governed-memory/worker.env
-ConditionPathExists=/etc/governed-memory/pilot.env
+ConditionPathExists=/etc/governed-memory/runtime/worker.env
+ConditionPathExists=/etc/governed-memory/runtime/pilot.env
 
 [Service]
 Type=oneshot
@@ -13,8 +13,8 @@ User=governed-memory
 Group=governed-memory
 Environment=GOVERNED_MEMORY_WORKER_MODE=off
 Environment=GOVERNED_MEMORY_EXCLUSIVE_MODE=legacy
-EnvironmentFile=/etc/governed-memory/worker.env
-EnvironmentFile=/etc/governed-memory/pilot.env
+EnvironmentFile=/etc/governed-memory/runtime/worker.env
+EnvironmentFile=/etc/governed-memory/runtime/pilot.env
 ExecStart=/opt/governed-memory/current/venv/bin/python -m rag_engine.governed_memory.runtime.once_worker --once
 Restart=no
 TimeoutStartSec=120

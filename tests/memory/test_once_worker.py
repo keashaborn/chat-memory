@@ -397,8 +397,8 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
                 if line.startswith("ConditionPathExists=")
             ),
             (
-                "ConditionPathExists=/etc/governed-memory/worker.env",
-                "ConditionPathExists=/etc/governed-memory/pilot.env",
+                "ConditionPathExists=/etc/governed-memory/runtime/worker.env",
+                "ConditionPathExists=/etc/governed-memory/runtime/pilot.env",
             ),
         )
         self.assertEqual(
@@ -408,8 +408,8 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
                 if line.startswith("EnvironmentFile=")
             ),
             (
-                "EnvironmentFile=/etc/governed-memory/worker.env",
-                "EnvironmentFile=/etc/governed-memory/pilot.env",
+                "EnvironmentFile=/etc/governed-memory/runtime/worker.env",
+                "EnvironmentFile=/etc/governed-memory/runtime/pilot.env",
             ),
         )
         self.assertNotIn("[Install]", unit)

@@ -5,14 +5,14 @@
 Description=Governed Memory clean successor HTTP candidate
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/governed-memory/http.env
+ConditionPathExists=/etc/governed-memory/runtime/http.env
 
 [Service]
 Type=simple
 User=governed-memory
 Group=governed-memory
 Environment=GOVERNED_MEMORY_HTTP_MODE=off
-EnvironmentFile=/etc/governed-memory/http.env
+EnvironmentFile=/etc/governed-memory/runtime/http.env
 ExecStart=/opt/governed-memory/current/venv/bin/governed-memory-http
 Restart=no
 TimeoutStartSec=30

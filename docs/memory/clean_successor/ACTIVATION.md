@@ -1,10 +1,13 @@
-# Governed Memory Phase 7C activation boundary
+# Governed Memory Phase 8A proof-pending activation boundary
 
-Phase 7C disposable revalidation passed, but the candidate remains inactive and
-not authorized for installation or activation. No persistent successor store,
+The retained Phase 7C disposable revalidation passed. Phase 8A now packages an
+inactive installation controller, but its synthetic proof is pending and its
+Linux backend is hard-disabled. The candidate remains uninstalled and is not
+authorized for installation or activation. No persistent successor store,
 service, timer, route, listener, role credential, role membership, firewall
-rule, provider call, or pilot marker exists. The release guard must continue to refuse creation with
-`activation_blockers_open` and cleanup with `authorization_missing`.
+rule, provider call, or pilot marker exists. The release guard must continue to
+refuse creation with `activation_blockers_open` and cleanup with
+`authorization_missing`.
 
 ## Exact future targets
 
@@ -64,22 +67,38 @@ The exact ordered blocker set in `runtime_manifest.json` is:
 
 Each item is a separate approval checkpoint:
 
-1. retain the completed Phase 7C proof unless proof-critical bytes change, and
-   refresh exact production/service/store/catalog evidence;
-2. authorize and apply the source logging remediation, then re-prove it;
-3. authorize the persistent Qdrant digest, restart supervision, boot recovery,
-   and encrypted PostgreSQL backup/restore;
-4. rotate the exposed provider key and mint distinct successor credentials;
-5. authorize installation and create only the exact fresh empty targets;
-6. run both inactive migration entry points with
-   `governed_memory_inactive_installation=on` and prove all runtime roles remain
-   `NOLOGIN` with no memberships;
-7. install dormant units without enabling or starting them;
+1. retain the completed Phase 7C proof unless its proof-critical bytes change;
+2. complete all 336 closed Phase 8A synthetic controller scenarios and
+   separately promote that proof;
+3. package and approve the persistent Qdrant digest, stores-only supervisor and
+   boot recovery, encrypted PostgreSQL backup/restore, runtime wheel, offline
+   dependency wheelhouse, trusted clock with atomic nonce claim, global
+   execution lock, external journal-seal anchor, exact live probes, and
+   same-filesystem quarantine preflight; execute the canonical cluster rollback
+   against real disposable PostgreSQL and keep the Linux backend disabled until
+   those gates pass;
+4. authorize Phase 8B with an externally signed final commit, tree, package,
+   controller, and plan scope;
+5. in Phase 8B, create only the exact fresh empty dormant successor stores;
+   require zero source PostgreSQL connections, catalog reads, application-row
+   reads, and writes at every stage; observe every exact target; keep HTTP and
+   worker disabled and inactive while treating the stores-only supervisor as a
+   separate state; and retain all named roots plus the nonce-bound quarantine
+   path after empty rollback; the v2 decision receipt permits canonical
+   migrations 0001, 0003, and 0004 only and excludes source PostgreSQL and
+   migration 0002, with no provider credentials or API/worker LOGIN roles;
+   treat every listed state as a required future observation, not current/live
+   evidence;
+6. separately authorize Phase 8C, remediate and re-prove source logging, then
+   install only the inactive source roles and conversation bridge with no
+   runtime memberships;
+7. rotate the exposed provider key and mint distinct successor runtime
+   credentials only under a later activation authorization;
 8. prove pg_hba, private transport/firewall, live Supabase account/session
    authority, chat-only route behavior, and frontend semantics;
 9. authorize credential provisioning, enable only exact API/worker LOGIN roles,
    and grant only exact runtime memberships;
-10. recompute and seal the full post-activation conversation catalog hash;
+10. recompute and seal the full post-membership conversation catalog hash;
 11. start the successor alone, prove exact routing and owner isolation, and
     complete authenticated visual QA;
 12. authorize one bounded pilot; and

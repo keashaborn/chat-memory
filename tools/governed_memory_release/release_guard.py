@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Offline verifier for the Phase 7C disposable-revalidated inactive package.
+"""Offline verifier for the Phase 8A proof-pending inactive controller package.
 
 The guard reads repository artifacts only. It cannot install, authorize, start,
 route, migrate, delete, or call a provider. Observation evaluation is retained
 only as a content-free refusal surface for future separately authorized work.
+The completed Phase 7C successor proof remains independently verified evidence;
+it is not presented as proof of the new installation controller.
 """
 
 from collections.abc import Mapping, Sequence
@@ -272,6 +274,16 @@ EXPECTED_PHASE7C_RESILIENCE_RECEIPT_KEYS = {
     'target_count',
 }
 
+EXPECTED_PHASE8A_CONTROLLER_CONTRACT_SHA256 = (
+    "5a9412ce71066c13f62dcf1fc7c72032de747c5d314405c3bebe6400aaa05564"
+)
+EXPECTED_PHASE8A_CONTROLLER_PLAN_SHA256 = (
+    "7fa38bc1d7ee416e6349a59fe5eec22d1b62682fec883350b4fe5cfe1735943d"
+)
+EXPECTED_PHASE8A_CONTROLLER_RUNNER_SHA256 = (
+    "9f40830c7b3b0bb0ee263eb9a78b095e690fe1452853785f8f15059335b01125"
+)
+
 EXPECTED_DISPOSABLE_VALIDATION = {'scope': 'successor_disposable_only',
  'evidence_status': 'phase7c_disposable_installation_revalidation_passed_not_production_activation',
  'current_full_proof_complete': True,
@@ -321,6 +333,94 @@ EXPECTED_DISPOSABLE_VALIDATION = {'scope': 'successor_disposable_only',
  'resource_cleanup_complete': True,
  'current_proof_receipt': 'ops/governed_memory/phase7c_disposable_proof_receipt.json',
  'current_proof_receipt_sha256': 'd4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0'}
+EXPECTED_INSTALLATION_CONTROLLER_VALIDATION = {
+    "scope": "phase8a_synthetic_controller_only",
+    "state": "packaged_proof_pending_not_installed_not_authorized",
+    "package_manifest_schema_version": (
+        "governed-memory-inactive-installation-package-manifest-v2"
+    ),
+    "package_artifact_count": 59,
+    "controller_contract": "ops/governed_memory/installation/contract.json",
+    "controller_contract_sha256": EXPECTED_PHASE8A_CONTROLLER_CONTRACT_SHA256,
+    "controller_plan": "ops/governed_memory/installation/controller_plan.json",
+    "controller_plan_sha256": EXPECTED_PHASE8A_CONTROLLER_PLAN_SHA256,
+    "disposable_runner": (
+        "tools/governed_memory_validation/"
+        "run_disposable_installation_controller.py"
+    ),
+    "disposable_runner_sha256": EXPECTED_PHASE8A_CONTROLLER_RUNNER_SHA256,
+    "required_disposable_scenario_count": 336,
+    "installation_decision_receipt_schema_version": (
+        "governed-memory-installation-decision-receipt-v2"
+    ),
+    "phase8b_migration_execution_contract": {
+        "psql_variable_name": "governed_memory_inactive_installation",
+        "psql_variable_value": "on",
+        "canonical_roles_preflight_requires_variable": True,
+        "canonical_migrations": [
+            "governed_memory_foundation_0001",
+            "governed_memory_owner_claim_detail_0003",
+            "governed_memory_pilot_marker_0004",
+        ],
+        "source_postgresql_steps": [],
+        "source_conversation_bridge_included": False,
+        "omission_defaults_to_active_mode_and_invalidates_inactive_installation": (
+            True
+        ),
+        "evaluator_verifies_execution": False,
+    },
+    "phase8b_source_connection_count_required": 0,
+    "phase8b_source_catalog_read_count_required": 0,
+    "phase8b_source_application_row_read_count_required": 0,
+    "phase8b_source_write_count_required": 0,
+    "phase8b_all_exact_targets_required_in_every_observation_stage": True,
+    "phase8b_required_empty_rollback_retained_targets": [
+        "install_root",
+        "environment_root",
+        "runtime_environment_root",
+        "state_root",
+        "backup_root",
+        "legacy_secret_quarantine_path_template",
+    ],
+    "phase8b_required_application_unit_postflight_state": (
+        "installed_disabled_inactive"
+    ),
+    "phase8b_required_store_supervisor_postflight_state": (
+        "installed_enabled_active_store_only"
+    ),
+    "phase8b_store_supervisor_is_application_runtime": False,
+    "phase8b_installation_blockers": [
+        "separate_phase8b_dormant_installation_approval_required",
+        (
+            "final_candidate_commit_tree_package_controller_and_plan_not_"
+            "externally_signed"
+        ),
+        "external_owner_public_key_trust_anchor_not_installed",
+        "legacy_secret_exact_transition_receipt_absent",
+        "fresh_store_secret_generation_receipt_absent",
+        "persistent_qdrant_digest_not_authorized",
+        "runtime_wheel_and_offline_dependency_wheelhouse_not_packaged",
+        "store_supervisor_artifact_not_packaged",
+        "encrypted_backup_restore_adapter_artifact_not_packaged",
+        "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
+        "canonical_global_execution_lock_not_packaged",
+        "external_journal_seal_anchor_not_packaged",
+        "exact_live_probe_adapter_not_packaged",
+        "same_filesystem_quarantine_preflight_adapter_not_packaged",
+        "canonical_cluster_rollback_not_disposable_postgresql_executed",
+        "linux_execution_backend_hard_disabled",
+        "exact_live_preflight_receipt_absent",
+    ],
+    "current_disposable_proof_executed": False,
+    "current_disposable_proof_complete": False,
+    "current_disposable_proof_result": None,
+    "current_proof_receipt": None,
+    "current_proof_receipt_sha256": None,
+    "live_backend_packaged": False,
+    "live_execution_surface_exposed": False,
+    "installation_authorized": False,
+    "activation_authorized": False,
+}
 EXPECTED_BOOTSTRAP_IMPLEMENTATION_STATUS = {'runtime': 'phase7c_source_bound_offline_build_sealed_disposable_validated_inactive',
  'session_id_required': True,
  'supabase_auth_sessions_rpc': 'staged_candidate_not_installed_or_live_verified',
@@ -360,10 +460,10 @@ EXPECTED_MIGRATION_PACKAGE_ID_SHA256 = (
     "949cfa26bdcdaae11fbc582664e38295c585229be88c06d42e356745b1e97d8d"
 )
 EXPECTED_PACKAGE_MANIFEST_SHA256 = (
-    "d851ee1749e90b403139b8b6376c8d71f219bd4d52b868062efac3936d71c3af"
+    "5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e"
 )
 EXPECTED_RUNTIME_MANIFEST_SHA256 = (
-    "fa71a22afa3ead0879324c4e3179165f3ab02fbf9de4445f564fa213eeee7327"
+    "e4c851e6cba93bf79835d0f7abd4708ca53e3471fe315caf16a7c0fadfe0d9a1"
 )
 EXPECTED_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -398,13 +498,13 @@ EXPECTED_RUNTIME_WHEEL = (
 
 EXPECTED_FIXED_ARTIFACT_HASHES = {
     "docs/memory/clean_successor/ACTIVATION.md": (
-        "92f1106dd9e37f4e5ecb5ff4bc856578fd14057caafdd1a480a165857fdd495a"
+        "439d8c6d295f975fe8c2f01751a04d25a8ea4adf5c04050b8266fcd640375090"
     ),
     "docs/memory/clean_successor/README.md": (
-        "03e7e02409dc04e2ec21931ce9e45bfba13f7a51d593e65c7ba359f96b8704e3"
+        "576b710154b1eb17b93d6e688b73bb6c265be04aa48b4f1bb7a6f64d98ff335e"
     ),
     "docs/memory/clean_successor/VALIDATION.md": (
-        "17abb30f9c79bd02fd9814941c3256953816cbeb5bdfa39e3c939145112c564a"
+        "f4dc69ea311245bb28e69964471a1c3643d1173137a5cf13f04b98af93b1b4e2"
     ),
     "governed-memory-migrations/manifest.json": (
         EXPECTED_MIGRATION_MANIFEST_SHA256
@@ -1012,6 +1112,7 @@ def _verify_runtime_manifest(runtime: object) -> None:
     assert isinstance(runtime, dict)
     validation = runtime.get("validation_runtime")
     disposable = runtime.get("disposable_validation")
+    installation_controller = runtime.get("installation_controller_validation")
     activation = runtime.get("activation")
     http = runtime.get("http_runtime")
     infrastructure = runtime.get("infrastructure")
@@ -1023,7 +1124,7 @@ def _verify_runtime_manifest(runtime: object) -> None:
         runtime.get("schema_version") == "governed-memory-successor-runtime-manifest-v1"
         and runtime.get("phase")
         == (
-            "phase7c_inactive_installation_package_disposable_revalidated_"
+            "phase8a_inactive_installation_controller_packaged_proof_pending_"
             "activation_blocked"
         )
         and runtime.get("production_state_changed") is False
@@ -1041,6 +1142,8 @@ def _verify_runtime_manifest(runtime: object) -> None:
         and validation.get("current_source_bound") is True
         and validation.get("current_runtime_rebuild_pending") is False
         and disposable == EXPECTED_DISPOSABLE_VALIDATION
+        and installation_controller
+        == EXPECTED_INSTALLATION_CONTROLLER_VALIDATION
         and isinstance(activation, dict)
         and activation.get("blockers") == EXPECTED_ACTIVATION_BLOCKERS
         and activation.get("production_authorized") is False
@@ -1225,6 +1328,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
     _require(
         package.get("package_manifest_sha256")
         == EXPECTED_PACKAGE_MANIFEST_SHA256
+        and len(package.get("artifact_sha256", {})) == 59
         and package.get("evaluator_mutating_commands_executed") == 0
         and package.get("evaluator_provider_calls") == 0
         and package.get("evaluator_state_changed") is False,
@@ -1273,7 +1377,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
     )
     return {
         "schema_version": "governed-memory-release-artifact-verification-v2",
-        "phase": "phase7c_disposable_revalidated_inactive_installation_package",
+        "phase": (
+            "phase8a_inactive_installation_controller_packaged_proof_pending"
+        ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "installation_package_artifact_count": len(
             package.get("artifact_sha256", {})
@@ -1282,6 +1388,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "migration_manifest_sha256": EXPECTED_MIGRATION_MANIFEST_SHA256,
         "runtime_source_sha256": EXPECTED_RUNTIME_SOURCE_SHA256,
         "disposable_revalidation_required": False,
+        "installation_controller_disposable_proof_complete": False,
+        "installation_controller_proof_receipt": None,
         "installation_authorized": False,
         "activation_authorized": False,
         "external_calls": 0,

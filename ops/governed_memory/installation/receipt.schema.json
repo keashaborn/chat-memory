@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://lifeswitch.local/schemas/governed-memory-installation-receipt-v1.json",
+  "$id": "https://lifeswitch.local/schemas/governed-memory-installation-receipt-v2.json",
   "title": "Governed Memory inactive installation decision receipt",
   "$comment": "This schema validates only the closed receipt shape. Exact stage-conditioned state values and transitive receipt-chain semantics are authoritative only in tools/governed_memory_install/inactive_installation.py. Schema validation alone is neither a structural decision nor authorization.",
   "x-stage-profile-authority": "tools/governed_memory_install/inactive_installation.py",
@@ -22,7 +22,7 @@
     "exact_target_states",
     "exact_source_cluster_states",
     "exact_successor_store_states",
-    "inactive_migration_execution_contract",
+    "phase8b_migration_execution_contract",
     "fresh_store_counts",
     "pilot_ever_started",
     "evaluator_mutating_commands_executed",
@@ -31,7 +31,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "governed-memory-installation-decision-receipt-v1"
+      "const": "governed-memory-installation-decision-receipt-v2"
     },
     "stage": {
       "enum": [
@@ -97,31 +97,67 @@
     },
     "exact_target_states": {
       "type": "object",
-      "additionalProperties": {"type": "string"}
+      "additionalProperties": false,
+      "required": [
+        "postgres_container",
+        "qdrant_container",
+        "postgres_volume",
+        "qdrant_volume",
+        "network",
+        "database",
+        "collection",
+        "alias",
+        "install_root",
+        "environment_root",
+        "runtime_environment_root",
+        "state_root",
+        "legacy_secret_quarantine_path_template",
+        "backup_root",
+        "http_unit",
+        "worker_unit",
+        "store_supervisor_unit"
+      ],
+      "patternProperties": {
+        "^[a-z][a-z0-9_]+$": {"type": "string"}
+      }
     },
     "exact_source_cluster_states": {
       "type": "object",
-      "required": ["inactive_source_runtime_membership_graph"],
+      "additionalProperties": false,
+      "required": [
+        "connection_count",
+        "catalog_read_count",
+        "application_row_read_count",
+        "write_count",
+        "preparation_phase"
+      ],
       "properties": {
-        "inactive_source_runtime_membership_graph": {
-          "type": "array",
-          "maxItems": 0
-        }
-      },
-      "additionalProperties": {"type": "string"}
+        "connection_count": {"const": 0},
+        "catalog_read_count": {"const": 0},
+        "application_row_read_count": {"const": 0},
+        "write_count": {"const": 0},
+        "preparation_phase": {"const": "8C_separate_authorization_required"}
+      }
     },
     "exact_successor_store_states": {
       "type": "object",
-      "additionalProperties": {"type": "string"}
+      "additionalProperties": false,
+      "required": ["postgresql", "qdrant"],
+      "properties": {
+        "postgresql": {"type": "string"},
+        "qdrant": {"type": "string"}
+      }
     },
-    "inactive_migration_execution_contract": {
+    "phase8b_migration_execution_contract": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "psql_variable_name",
         "psql_variable_value",
-        "roles_preflight_pgsql_requires_variable",
-        "conversation_bridge_forward_pgsql_requires_variable",
+        "canonical_roles_preflight_requires_variable",
+        "canonical_migrations",
+        "source_postgresql_steps",
+        "source_conversation_bridge_included",
         "omission_defaults_to_active_mode_and_invalidates_inactive_installation",
         "evaluator_verifies_execution"
       ],
@@ -130,10 +166,16 @@
           "const": "governed_memory_inactive_installation"
         },
         "psql_variable_value": {"const": "on"},
-        "roles_preflight_pgsql_requires_variable": {"const": true},
-        "conversation_bridge_forward_pgsql_requires_variable": {
-          "const": true
+        "canonical_roles_preflight_requires_variable": {"const": true},
+        "canonical_migrations": {
+          "const": [
+            "governed_memory_foundation_0001",
+            "governed_memory_owner_claim_detail_0003",
+            "governed_memory_pilot_marker_0004"
+          ]
         },
+        "source_postgresql_steps": {"const": []},
+        "source_conversation_bridge_included": {"const": false},
         "omission_defaults_to_active_mode_and_invalidates_inactive_installation": {
           "const": true
         },
