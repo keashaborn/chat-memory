@@ -60,7 +60,28 @@ class RouteSpecification:
             raise ContractViolation("caller_time_field_prohibited")
 
 
-OWNER_ROUTE_SPECIFICATIONS = (
+CONVERSATION_ERASURE_ROUTE_SPECIFICATION = RouteSpecification(
+    method=HttpMethod.POST,
+    path="/memory/conversations/erasure-requests",
+    operation="request_conversation_erasure",
+    mutation=True,
+    required_body_fields=(
+        "confirmation_sha256",
+        "contract_version",
+        "data_domain",
+        "operation_id",
+        "selector_kind",
+    ),
+    optional_body_fields=(
+        "anchor_message_id",
+        "recent_window_seconds",
+        "thread_id",
+    ),
+    server_time_owned=True,
+)
+
+
+CLAIM_OWNER_ROUTE_SPECIFICATIONS = (
     RouteSpecification(
         method=HttpMethod.GET,
         path="/memory/status",
@@ -149,6 +170,12 @@ OWNER_ROUTE_SPECIFICATIONS = (
 )
 
 
+OWNER_ROUTE_SPECIFICATIONS = (
+    *CLAIM_OWNER_ROUTE_SPECIFICATIONS,
+    CONVERSATION_ERASURE_ROUTE_SPECIFICATION,
+)
+
+
 def route_manifest_sha256() -> str:
     return canonical_sha256(
         "governed_memory.owner_routes",
@@ -187,6 +214,8 @@ def validate_route_body(
 
 
 __all__ = [
+    "CLAIM_OWNER_ROUTE_SPECIFICATIONS",
+    "CONVERSATION_ERASURE_ROUTE_SPECIFICATION",
     "HttpMethod",
     "OWNER_ROUTE_SPECIFICATIONS",
     "RouteSpecification",

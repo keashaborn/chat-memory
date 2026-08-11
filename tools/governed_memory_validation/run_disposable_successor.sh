@@ -13,8 +13,8 @@ set -Eeuo pipefail
 #   GM_VALIDATION_EXPECTED_BRANCH='<exact candidate branch>'
 #   GM_VALIDATION_EXPECTED_HEAD='<exact 40-character candidate commit>'
 #   GM_VALIDATION_EXPECTED_TREE='<exact 40-character candidate tree>'
-# Phase 6E deletion proof only, before validation metadata is promoted:
-#   GM_VALIDATION_PHASE6E_MIGRATION_PROOF='019fe927:PHASE6E_DELETION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
+# The promoted runner verifies only the validated migration-manifest state and
+# refuses the retired preliminary Phase 6E proof-mode environment variable.
 #
 # The EXIT trap is installed before Docker creation. It removes only resources
 # whose captured ID, exact name, and three ownership labels still agree.
@@ -27,14 +27,14 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='6e1090fcbcd36e9d2cac277edb11227a256853bb'
+readonly EXPECTED_BASE='6116d5c57fb298d929153eba977ae59e1cf2aeb4'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly PHASE6E_PROOF_AUTHORIZATION_VALUE='019fe927:PHASE6E_DELETION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PHASE6E_DELETION_INTEGRATION_READY='true'
-readonly EXPECTED_MANIFEST_SHA256='ac6e695b64c44a8380df13cafa11e773fe334a7bcca4530976477b397357bc83'
+readonly EXPECTED_MANIFEST_SHA256='57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150'
+readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256='0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
-readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86'
+readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
 readonly LABEL_SCOPE_VALUE='successor-disposable'
@@ -55,17 +55,17 @@ readonly POSTGRES_PASSWORD='successor_disposable_only'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 MIGRATIONS="${ROOT}/governed-memory-migrations"
+POSTGRES_BOOTSTRAP="${SCRIPT_DIR}/postgres_bootstrap.pgsql"
 RUNTIME_PACKAGES="${SCRIPT_DIR}/runtime_packages.json"
 RUNTIME_LOCK="${ROOT}/ops/governed_memory/runtime-requirements.lock"
 BUILD_LOCK="${ROOT}/ops/governed_memory/build-requirements.lock"
 RUNTIME_BUILD_RECEIPT="${ROOT}/ops/governed_memory/runtime_build_receipt.json"
 VALIDATION_RUNTIME_PYTHON="${GM_VALIDATION_RUNTIME_PYTHON:-}"
-PHASE6E_PROOF_AUTHORIZATION="${GM_VALIDATION_PHASE6E_MIGRATION_PROOF:-}"
 TEST_PYTHON=''
-readonly SCRIPT_DIR ROOT MIGRATIONS RUNTIME_PACKAGES RUNTIME_LOCK BUILD_LOCK
+readonly SCRIPT_DIR ROOT MIGRATIONS POSTGRES_BOOTSTRAP RUNTIME_PACKAGES
+readonly RUNTIME_LOCK BUILD_LOCK
 readonly RUNTIME_BUILD_RECEIPT
 readonly VALIDATION_RUNTIME_PYTHON
-readonly PHASE6E_PROOF_AUTHORIZATION
 
 EXPECTED_ROOT="${GM_VALIDATION_EXPECTED_ROOT:-}"
 EXPECTED_BRANCH="${GM_VALIDATION_EXPECTED_BRANCH:-}"
@@ -785,24 +785,24 @@ acquire_lock() {
   flock -n 9 || die 'runner_already_active'
 }
 
-verify_migration_manifest() {
-  local expected_validation_state receipt
-  local -a fields
-  local -a verifier_arguments
+verify_postgres_bootstrap_fixture() {
+  local receipt
 
-  verifier_arguments=("${MIGRATIONS}")
-  expected_validation_state='disposable_validated'
-  if [[ -n "${PHASE6E_PROOF_AUTHORIZATION}" ]]; then
-    [[ "${PHASE6E_PROOF_AUTHORIZATION}" == \
-       "${PHASE6E_PROOF_AUTHORIZATION_VALUE}" ]] \
-      || die 'phase6e_migration_proof_authorization_invalid'
-    verifier_arguments=(--phase6e-disposable-deletion-proof "${MIGRATIONS}")
-    expected_validation_state='phase6e_disposable_deletion_proof_candidate'
-  fi
+  [[ -f "${POSTGRES_BOOTSTRAP}" && ! -L "${POSTGRES_BOOTSTRAP}" ]] \
+    || die 'postgres_bootstrap_fixture_invalid'
+  receipt="$(sha256sum -- "${POSTGRES_BOOTSTRAP}")" \
+    || die 'postgres_bootstrap_fixture_sha256_failed'
+  [[ "${receipt%% *}" == "${EXPECTED_POSTGRES_BOOTSTRAP_SHA256}" ]] \
+    || die 'postgres_bootstrap_fixture_sha256_mismatch'
+}
+
+verify_migration_manifest() {
+  local receipt
+  local -a fields
 
   receipt="$(
     "${TEST_PYTHON}" -I -B \
-      "${SCRIPT_DIR}/verify_migration_manifest.py" "${verifier_arguments[@]}"
+      "${SCRIPT_DIR}/verify_migration_manifest.py" "${MIGRATIONS}"
   )" || die 'migration_manifest_verification_failed'
 
   mapfile -t fields < <(
@@ -830,7 +830,7 @@ PY
     || die 'migration_manifest_sha256_invalid'
   [[ "${fields[4]}" == "${EXPECTED_MANIFEST_SHA256}" ]] \
     || die 'migration_manifest_sha256_mismatch'
-  [[ "${fields[5]}" == "${expected_validation_state}" ]] \
+  [[ "${fields[5]}" == 'disposable_validated' ]] \
     || die 'migration_validation_state_mismatch'
   MIGRATION_MANIFEST_SHA256="${fields[4]}"
 }
@@ -1399,8 +1399,67 @@ apply_migrations() {
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'GRANT memory_ingest_writer, memory_erasure_requester TO brains_app' \
+    -c 'GRANT memory_ingest_writer TO brains_app; GRANT memory_erasure_requester TO governed_memory_api' \
     >/dev/null || die 'disposable_bridge_membership_grant_failed'
+  verify_disposable_bridge_memberships
+}
+
+verify_disposable_bridge_memberships() {
+  local observed
+
+  observed="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+      -c "WITH runtime_membership AS (
+        SELECT granted_role.rolname::text AS granted_role,
+          member_role.rolname::text AS member_role,
+          membership.admin_option,
+          membership.inherit_option,
+          membership.set_option
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS granted_role
+          ON granted_role.oid = membership.roleid
+        JOIN pg_catalog.pg_roles AS member_role
+          ON member_role.oid = membership.member
+        WHERE granted_role.rolname::text = ANY (ARRAY[
+          'brains_app',
+          'governed_memory_api',
+          'governed_memory_worker',
+          'memory_ingest_writer',
+          'memory_erasure_requester'
+        ]) OR member_role.rolname::text = ANY (ARRAY[
+          'brains_app',
+          'governed_memory_api',
+          'governed_memory_worker',
+          'memory_ingest_writer',
+          'memory_erasure_requester'
+        ])
+      )
+      SELECT CASE WHEN
+        pg_catalog.has_database_privilege(
+          'governed_memory_api', 'memory', 'CONNECT'
+        )
+        AND (SELECT pg_catalog.count(*) FROM runtime_membership) = 2
+        AND EXISTS (
+          SELECT 1 FROM runtime_membership
+          WHERE granted_role = 'memory_ingest_writer'
+            AND member_role = 'brains_app'
+            AND NOT admin_option
+            AND inherit_option
+            AND set_option
+        )
+        AND EXISTS (
+          SELECT 1 FROM runtime_membership
+          WHERE granted_role = 'memory_erasure_requester'
+            AND member_role = 'governed_memory_api'
+            AND NOT admin_option
+            AND NOT inherit_option
+            AND set_option
+        )
+      THEN 'passed' ELSE 'failed' END"
+  )" || die 'disposable_bridge_membership_postflight_query_failed'
+  [[ "${observed}" == 'passed' ]] \
+    || die 'disposable_bridge_membership_postflight_failed'
 }
 
 verify_phase6e_mixed_catalog_migration_refusal() {
@@ -1442,7 +1501,7 @@ rollback_migrations() {
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'REVOKE memory_ingest_writer, memory_erasure_requester FROM brains_app' \
+    -c 'REVOKE memory_ingest_writer FROM brains_app; REVOKE memory_erasure_requester FROM governed_memory_api' \
     >/dev/null || die 'disposable_bridge_membership_revoke_failed'
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
@@ -1526,7 +1585,7 @@ SQL
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'REVOKE memory_ingest_writer, memory_erasure_requester FROM brains_app' \
+    -c 'REVOKE memory_ingest_writer FROM brains_app; REVOKE memory_erasure_requester FROM governed_memory_api' \
     >/dev/null || die 'bridge_rollback_race_membership_revoke_failed'
 
   run_migration memory sage governed_memory_conversation_bridge_0002 \
@@ -1581,15 +1640,63 @@ SQL
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
     -c "DELETE FROM memory_ingest_private.memory_ingest_outbox WHERE message_id='73333333-3333-4333-8333-333333333333'::uuid; DELETE FROM public.chat_log WHERE id='73333333-3333-4333-8333-333333333333'::uuid; DELETE FROM public.threads WHERE id='72222222-2222-4222-8222-222222222222'::uuid" \
     >/dev/null || die 'bridge_rollback_race_cleanup_failed'
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c 'GRANT memory_ingest_writer TO brains_app; GRANT memory_erasure_requester TO governed_memory_api' \
+    >/dev/null || die 'bridge_rollback_race_membership_restore_failed'
+  verify_disposable_bridge_memberships
   printf 'SUCCESSOR_BRIDGE_ROLLBACK_RACE=inflight-commit-refused-row-preserved\n'
 }
 
 bootstrap_postgres() {
-  local marker
+  local logging_preflight marker membership_preflight
   assert_candidate_binding
+  logging_preflight="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "SELECT CASE WHEN
+        pg_catalog.current_setting('log_statement') = 'none'
+        AND pg_catalog.current_setting('log_duration') = 'off'
+        AND pg_catalog.current_setting(
+          'log_min_duration_statement'
+        )::integer = -1
+        AND pg_catalog.current_setting(
+          'log_min_duration_sample'
+        )::integer = -1
+        AND pg_catalog.current_setting(
+          'log_transaction_sample_rate'
+        )::numeric = 0
+        AND pg_catalog.current_setting(
+          'log_parameter_max_length'
+        )::integer = 0
+        AND pg_catalog.current_setting(
+          'log_parameter_max_length_on_error'
+        )::integer = 0
+        AND (
+          pg_catalog.current_setting(
+            'auto_explain.log_parameter_max_length', true
+          ) IS NULL
+          OR pg_catalog.current_setting(
+            'auto_explain.log_parameter_max_length', true
+          )::integer = 0
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.unnest(pg_catalog.string_to_array(
+            pg_catalog.current_setting('shared_preload_libraries'), ','
+          )) AS configured(library_name)
+          WHERE pg_catalog.lower(
+            pg_catalog.btrim(configured.library_name)
+          ) = 'pgaudit'
+        )
+      THEN 'passed' ELSE 'failed' END"
+  )" || die 'postgres_privileged_logging_preflight_query_failed'
+  [[ "${logging_preflight}" == 'passed' ]] \
+    || die 'postgres_privileged_logging_preflight_failed'
+  printf 'SUCCESSOR_POSTGRES_LOGGING_PREFLIGHT=privileged-cluster-safe\n'
   docker exec -i "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d postgres \
-    < "${SCRIPT_DIR}/postgres_bootstrap.pgsql" >/dev/null
+    < "${POSTGRES_BOOTSTRAP}" >/dev/null
 
   marker="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
@@ -1605,6 +1712,87 @@ bootstrap_postgres() {
   )" || die 'conversation_marker_unreadable'
   [[ "${marker}" == "governed-memory-successor-disposable:${RUN_ID}" ]] \
     || die 'conversation_marker_invalid'
+
+  membership_preflight="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "SELECT CASE WHEN
+        (
+          SELECT pg_catalog.count(*)
+          FROM pg_catalog.pg_authid AS principal
+          WHERE principal.rolname::text = ANY (ARRAY[
+            'governed_memory_bootstrap',
+            'governed_memory_owner',
+            'governed_memory_api',
+            'governed_memory_worker',
+            'memory_ingest_writer',
+            'memory_erasure_requester'
+          ])
+        ) = 6
+        AND EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_authid AS bootstrap
+          WHERE bootstrap.rolname = 'governed_memory_bootstrap'
+            AND bootstrap.rolcanlogin
+            AND bootstrap.rolsuper
+            AND bootstrap.rolcreatedb
+            AND bootstrap.rolcreaterole
+            AND bootstrap.rolreplication
+            AND bootstrap.rolbypassrls
+            AND bootstrap.rolinherit
+            AND bootstrap.rolpassword IS NULL
+        )
+        AND (
+          SELECT pg_catalog.count(*)
+          FROM pg_catalog.pg_auth_members AS membership
+          JOIN pg_catalog.pg_roles AS granted_role
+            ON granted_role.oid = membership.roleid
+          JOIN pg_catalog.pg_roles AS member_role
+            ON member_role.oid = membership.member
+          WHERE granted_role.rolname = 'governed_memory_owner'
+            AND member_role.rolname = 'governed_memory_bootstrap'
+            AND NOT membership.admin_option
+            AND membership.inherit_option
+            AND membership.set_option
+        ) = 1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_auth_members AS membership
+          JOIN pg_catalog.pg_roles AS granted_role
+            ON granted_role.oid = membership.roleid
+          JOIN pg_catalog.pg_roles AS member_role
+            ON member_role.oid = membership.member
+          WHERE (
+            granted_role.rolname::text = ANY (ARRAY[
+              'governed_memory_bootstrap',
+              'governed_memory_owner',
+              'governed_memory_api',
+              'governed_memory_worker',
+              'memory_ingest_writer',
+              'memory_erasure_requester'
+            ])
+            OR member_role.rolname::text = ANY (ARRAY[
+              'governed_memory_bootstrap',
+              'governed_memory_owner',
+              'governed_memory_api',
+              'governed_memory_worker',
+              'memory_ingest_writer',
+              'memory_erasure_requester'
+            ])
+          )
+          AND NOT (
+            granted_role.rolname = 'governed_memory_owner'
+            AND member_role.rolname = 'governed_memory_bootstrap'
+            AND NOT membership.admin_option
+            AND membership.inherit_option
+            AND membership.set_option
+          )
+        )
+      THEN 'passed' ELSE 'failed' END"
+  )" || die 'postgres_canonical_membership_preflight_query_failed'
+  [[ "${membership_preflight}" == 'passed' ]] \
+    || die 'postgres_canonical_membership_preflight_failed'
+  printf 'SUCCESSOR_POSTGRES_MEMBERSHIP_PREFLIGHT=canonical-bootstrap-owner-only\n'
 }
 
 normalized_schema_dump() {
@@ -2441,9 +2629,8 @@ preflight() {
   [[ "${ROOT}" == "${EXPECTED_ROOT}" ]] || die 'wrong_candidate_root'
   [[ "${GM_VALIDATION_DISPOSABLE_AUTHORIZATION:-}" == "${AUTHORIZATION_VALUE}" ]] \
     || die 'explicit_disposable_authorization_missing'
-  [[ "${PHASE6E_PROOF_AUTHORIZATION}" == \
-     "${PHASE6E_PROOF_AUTHORIZATION_VALUE}" ]] \
-    || die 'phase6e_migration_proof_authorization_missing'
+  [[ -z "${GM_VALIDATION_PHASE6E_MIGRATION_PROOF:-}" ]] \
+    || die 'retired_phase6e_preliminary_proof_mode_refused'
   [[ "${PHASE6E_DELETION_INTEGRATION_READY}" == 'true' ]] \
     || die 'phase6e_deletion_integration_proof_not_implemented'
   [[ "${POSTGRES_PORT}" != '5432' && "${QDRANT_PORT}" != '6333' \
@@ -2463,6 +2650,7 @@ preflight() {
 
   acquire_lock
   assert_candidate_binding
+  verify_postgres_bootstrap_fixture
   verify_migration_manifest
   verify_runtime_build_receipt
   verify_runtime_packages

@@ -10,7 +10,9 @@ from uuid import UUID
 
 from fastapi import FastAPI, Request
 
-from rag_engine.governed_memory.api import OWNER_ROUTE_SPECIFICATIONS
+from rag_engine.governed_memory.api import (
+    CLAIM_OWNER_ROUTE_SPECIFICATIONS,
+)
 from rag_engine.governed_memory.auth import (
     ActorRole,
     ActorScope,
@@ -421,7 +423,7 @@ class OwnerMemoryHttpApiTests(unittest.IsolatedAsyncioTestCase):
         )
         expected = tuple(
             (spec.method.value, spec.path, spec.operation)
-            for spec in OWNER_ROUTE_SPECIFICATIONS
+            for spec in CLAIM_OWNER_ROUTE_SPECIFICATIONS
         )
         self.assertEqual(actual, expected)
         self.assertFalse(any("owner" in route.path for route in router.routes))

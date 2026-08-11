@@ -4,6 +4,27 @@
 -- source reads are possible only for the exact newly inserted chat_log row
 -- bound to an active worker lease.
 
+\if :{?governed_memory_inactive_installation}
+\else
+  \set governed_memory_inactive_installation off
+\endif
+SELECT CASE :'governed_memory_inactive_installation'
+  WHEN 'on' THEN 'on'
+  WHEN 'off' THEN 'off'
+  ELSE NULL
+END AS governed_memory_installation_mode
+\gset
+\if :{?governed_memory_installation_mode}
+\else
+  \echo 'governed_memory_inactive_installation must be exactly on or off'
+  \quit 3
+\endif
+SELECT pg_catalog.set_config(
+  'governed_memory.inactive_installation',
+  :'governed_memory_installation_mode',
+  false
+);
+
 DO $preflight$
 DECLARE
   expected_column record;
@@ -21,6 +42,44 @@ BEGIN
   IF current_user <> 'sage' THEN
     RAISE EXCEPTION 'conversation bridge migration requires sage';
   END IF;
+  IF pg_catalog.current_setting('log_statement') <> 'none'
+     OR pg_catalog.current_setting(
+       'log_parameter_max_length_on_error'
+     )::integer <> 0
+     OR pg_catalog.current_setting('log_duration') <> 'off'
+     OR pg_catalog.current_setting(
+       'log_min_duration_statement'
+     )::integer <> -1
+     OR pg_catalog.current_setting(
+       'log_min_duration_sample'
+     )::integer <> -1
+     OR pg_catalog.current_setting(
+       'log_transaction_sample_rate'
+     )::numeric <> 0
+     OR pg_catalog.current_setting(
+       'log_parameter_max_length'
+     )::integer <> 0
+     OR (
+       pg_catalog.current_setting(
+         'auto_explain.log_parameter_max_length', true
+       ) IS NOT NULL
+       AND pg_catalog.current_setting(
+         'auto_explain.log_parameter_max_length', true
+       )::integer <> 0
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.unnest(
+         pg_catalog.string_to_array(
+           pg_catalog.current_setting('shared_preload_libraries'), ','
+         )
+       ) AS configured(library_name)
+       WHERE pg_catalog.lower(
+         pg_catalog.btrim(configured.library_name)
+       ) = 'pgaudit'
+     ) THEN
+    RAISE EXCEPTION 'source parameter logging preflight failed';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'memory_ingest_writer'
@@ -35,8 +94,24 @@ BEGIN
       AND NOT rolinherit
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'governed_memory_api'
+      AND rolcanlogin = (
+        pg_catalog.current_setting(
+          'governed_memory.inactive_installation'
+        ) = 'off'
+      )
+      AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'governed_memory_worker'
-      AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND rolcanlogin = (
+        pg_catalog.current_setting(
+          'governed_memory.inactive_installation'
+        ) = 'off'
+      )
+      AND NOT rolsuper AND NOT rolcreatedb
       AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
       AND NOT rolinherit
   ) THEN
@@ -51,15 +126,26 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'brains_app role is absent or unsafe';
   END IF;
-  IF pg_catalog.pg_has_role(
-    'brains_app', 'memory_ingest_writer', 'MEMBER'
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted_role
+      ON granted_role.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member_role
+      ON member_role.oid = membership.member
+    WHERE granted_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    ) OR member_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    )
   ) THEN
-    RAISE EXCEPTION 'capture writer membership must be absent before migration';
-  END IF;
-  IF pg_catalog.pg_has_role(
-    'brains_app', 'memory_erasure_requester', 'MEMBER'
-  ) THEN
-    RAISE EXCEPTION 'erasure requester membership must be absent before migration';
+    RAISE EXCEPTION 'source runtime membership graph must be empty before migration';
   END IF;
   IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL THEN
     RAISE EXCEPTION 'conversation bridge schema already exists';
@@ -2969,7 +3055,7 @@ DECLARE
   observed_thread_count integer;
   existing memory_ingest_private.source_erasure_operation%ROWTYPE;
 BEGIN
-  IF session_user <> 'brains_app'
+  IF session_user <> 'governed_memory_api'
      OR NOT pg_catalog.pg_has_role(
        session_user, 'memory_erasure_requester', 'MEMBER'
      ) THEN
@@ -3506,7 +3592,7 @@ AS $function$
 DECLARE
   actor uuid;
 BEGIN
-  IF session_user <> 'brains_app'
+  IF session_user <> 'governed_memory_api'
      OR NOT pg_catalog.pg_has_role(
        session_user, 'memory_erasure_requester', 'MEMBER'
      ) THEN
@@ -5278,14 +5364,66 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_catalog.pg_roles
+    WHERE rolname = 'memory_ingest_writer'
+      AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
     WHERE rolname = 'memory_erasure_requester'
       AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
       AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
       AND NOT rolinherit
-  ) OR pg_catalog.pg_has_role(
-    'brains_app', 'memory_ingest_writer', 'MEMBER'
-  ) OR pg_catalog.pg_has_role(
-    'brains_app', 'memory_erasure_requester', 'MEMBER'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'governed_memory_api'
+      AND rolcanlogin = (
+        pg_catalog.current_setting(
+          'governed_memory.inactive_installation'
+        ) = 'off'
+      )
+      AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'governed_memory_worker'
+      AND rolcanlogin = (
+        pg_catalog.current_setting(
+          'governed_memory.inactive_installation'
+        ) = 'off'
+      )
+      AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND NOT rolinherit
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'brains_app'
+      AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb
+      AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+      AND rolinherit
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted_role
+      ON granted_role.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member_role
+      ON member_role.oid = membership.member
+    WHERE granted_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    ) OR member_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    )
   ) THEN
     RAISE EXCEPTION 'inactive bridge role or membership contract differs';
   END IF;
@@ -6084,8 +6222,8 @@ BEGIN
         function_signature;
     END IF;
     FOREACH runtime_role IN ARRAY ARRAY[
-      'brains_app', 'memory_ingest_writer', 'memory_erasure_requester',
-      'governed_memory_worker'
+      'brains_app', 'governed_memory_api', 'memory_ingest_writer',
+      'memory_erasure_requester', 'governed_memory_worker'
     ] LOOP
       should_execute :=
         (runtime_role = 'memory_ingest_writer' AND function_signature =

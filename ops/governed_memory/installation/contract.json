@@ -1,0 +1,194 @@
+{
+  "schema_version": "governed-memory-inactive-installation-contract-v1",
+  "state": "candidate_only_not_installed_not_authorized",
+  "candidate_id": "governed_memory_9a54cf123493_000001",
+  "host": "ip-172-31-32-171",
+  "tooling": {
+    "mode": "offline_package_and_observation_validation_only",
+    "executes_commands": false,
+    "creates_resources": false,
+    "changes_services": false,
+    "changes_databases": false,
+    "changes_qdrant": false,
+    "can_authorize_installation": false,
+    "can_authorize_rollback": false
+  },
+  "observation_semantics": {
+    "target_and_store_profiles_are_externally_observed_state": true,
+    "profiles_are_not_actions_performed_by_the_evaluator": true,
+    "profiles_do_not_confer_installation_or_rollback_authority": true
+  },
+  "artifact_scope": {
+    "classification": "inactive_installation_inputs_not_release_authority",
+    "runtime_governance_contracts_included": true,
+    "release_guard_included": false,
+    "package_manifest_self_hash_included": false,
+    "candidate_commit_or_tree_embedded": false,
+    "separate_sealed_release_receipt_required": true,
+    "reason": "avoid self-binding cycles; the release guard independently pins this package and a future external receipt binds the final commit and tree"
+  },
+  "images": {
+    "postgresql": {
+      "reference": "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+      "persistent_candidate": true,
+      "candidate_digest_accepted_for_package": true,
+      "installation_authorized": false
+    },
+    "qdrant": {
+      "reference": "qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc",
+      "disposable_compatibility_verified": true,
+      "persistent_candidate": true,
+      "approved_for_persistent_installation": false,
+      "typed_blocker": "persistent_qdrant_digest_not_authorized"
+    }
+  },
+  "service_account": {
+    "user": "governed-memory",
+    "group": "governed-memory",
+    "home": "/var/lib/governed-memory",
+    "shell": "/usr/sbin/nologin",
+    "system_account": true,
+    "supplementary_groups": []
+  },
+  "exact_targets": {
+    "postgres_container": "governed-memory-postgres-9a54cf123493-000001",
+    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000001",
+    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000001",
+    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000001",
+    "network": "governed-memory-net-9a54cf123493-000001",
+    "database": "governed_memory",
+    "collection": "governed_memory_9a54cf123493_000001",
+    "alias": "governed_memory_active",
+    "install_root": "/opt/governed-memory",
+    "environment_root": "/etc/governed-memory",
+    "http_unit": "governed-memory-http.service",
+    "worker_unit": "governed-memory-worker.service"
+  },
+  "ports": {
+    "http": "172.31.32.171:8091",
+    "postgresql": "127.0.0.1:55432",
+    "qdrant": "127.0.0.1:6343"
+  },
+  "fresh_store_policy": {
+    "reuse_legacy_database": false,
+    "reuse_legacy_qdrant": false,
+    "restore_snapshot": false,
+    "import_legacy_rows": false,
+    "import_legacy_vectors": false,
+    "historical_backfill": false,
+    "unprocessed_prefill": false,
+    "required_initial_postgresql_user_rows": 0,
+    "required_initial_qdrant_points": 0
+  },
+  "source_cluster_policy": {
+    "database": "memory",
+    "existing_cluster": true,
+    "fresh_cluster": false,
+    "role_bootstrap_is_narrowly_additive": true,
+    "catalog_only_preflight": true,
+    "chat_or_lifeswitch_rows_read": false,
+    "memberships_granted_during_inactive_installation": false,
+    "inactive_source_runtime_membership_graph": [],
+    "source_http_login": "governed_memory_api",
+    "source_http_login_inherits": false,
+    "source_http_login_future_membership": "memory_erasure_requester",
+    "brains_app_erasure_membership_allowed": false,
+    "schemas_or_tables_created_during_role_bootstrap": false
+  },
+  "source_logging_policy": {
+    "required_log_duration": "off",
+    "required_log_parameter_max_length": 0,
+    "required_log_parameter_max_length_on_error": 0,
+    "observed_snapshot_at": "2026-08-11T12:52:02Z",
+    "observed_snapshot_is_drift_prone": true,
+    "observed_log_duration": "off",
+    "observed_log_parameter_max_length": -1,
+    "observed_state_safe": false,
+    "remediation_authorized": false,
+    "remediation_applied": false,
+    "role_bootstrap_must_refuse_before_first_write": true
+  },
+  "database_role_credential_policy": {
+    "container_bootstrap_superuser_login_retained": true,
+    "container_bootstrap_password_required": true,
+    "container_bootstrap_secret_file": "bootstrap.env",
+    "container_bootstrap_secret_file_owner": "root:root",
+    "container_bootstrap_secret_file_mode": "0600",
+    "container_bootstrap_retirement_in_phase7b": false,
+    "bootstrap_retirement_requires_separate_admin_login_and_tested_recovery": true,
+    "inactive_api_worker_login_enabled": false,
+    "inactive_api_worker_password_provisioned": false,
+    "api_and_worker_authentication_possible": false,
+    "credential_provisioning_in_phase7b": false,
+    "separate_future_approval_required": true,
+    "future_pg_hba_and_transport_proof_required_first": true,
+    "future_method_must_be_logging_safe": true,
+    "future_scram_iteration_policy_must_be_pinned": true,
+    "future_atomic_order": [
+      "prove_exact_pg_hba_and_transport",
+      "provision_distinct_pinned_scram_credentials",
+      "enable_exact_api_and_worker_login_roles",
+      "grant_only_exact_runtime_memberships",
+      "capture_and_seal_post_activation_full_bridge_catalog_hash",
+      "start_only_the_separately_approved_runtime"
+    ],
+    "inactive_install_postflight_catalog_hash_is_activation_hash": false,
+    "post_activation_catalog_hash_must_bind_login_and_membership_state": true
+  },
+  "inactive_migration_execution_contract": {
+    "psql_variable_name": "governed_memory_inactive_installation",
+    "psql_variable_value": "on",
+    "roles_preflight_pgsql_requires_variable": true,
+    "conversation_bridge_forward_pgsql_requires_variable": true,
+    "omission_defaults_to_active_mode_and_invalidates_inactive_installation": true,
+    "evaluator_verifies_execution": false
+  },
+  "inactive_install_sequence": [
+    "verify_exact_package_hashes",
+    "verify_external_installation_authorization_receipt",
+    "verify_external_credential_rotation_receipt",
+    "verify_external_persistent_qdrant_digest_authorization_receipt",
+    "capture_exact_preflight_receipt",
+    "create_exact_service_account",
+    "create_exact_owned_install_and_environment_directories",
+    "install_exact_candidate_release_without_current_symlink_switch",
+    "install_root_only_bootstrap_secret_mode_0600_and_unit_runtime_secrets_mode_0640",
+    "create_exact_fresh_persistent_store_containers_and_volumes",
+    "bootstrap_fresh_successor_roles_and_database",
+    "apply_verified_successor_migrations_after_roles_preflight_with_psql_variable_governed_memory_inactive_installation_on",
+    "bootstrap_existing_source_cluster_roles_after_catalog_only_preflight",
+    "apply_verified_conversation_bridge_migration_with_psql_variable_governed_memory_inactive_installation_on_without_runtime_memberships",
+    "create_exact_empty_qdrant_collection_and_alias",
+    "install_dormant_systemd_units_without_enable_or_start",
+    "capture_exact_install_postflight_receipt"
+  ],
+  "rollback_policy": {
+    "separate_external_authorization_required": true,
+    "pilot_ever_started_must_be_false": true,
+    "postgresql_user_row_count_must_be": 0,
+    "qdrant_point_count_must_be": 0,
+    "active_client_count_must_be": 0,
+    "wildcards_allowed": false,
+    "prefix_matching_allowed": false,
+    "sql_cascade_allowed": false,
+    "source_cluster_role_removal_is_not_automatic": true,
+    "source_bridge_rollback_requires_its_sealed_empty_only_preconditions": true,
+    "after_any_pilot_row": "retain_stores_and_disable_routes_services_only"
+  },
+  "installation_blockers": [
+    "separate_future_installation_approval_required",
+    "observation_tool_cannot_authorize_execution",
+    "credential_rotation_and_new_secret_receipt_absent",
+    "database_role_credentials_not_provisioned",
+    "conversation_bridge_catalog_hash_not_provisioned",
+    "source_logging_policy_not_live_verified",
+    "source_logging_parameter_remediation_not_authorized_or_applied",
+    "persistent_store_restart_supervision_and_boot_recovery_not_implemented_or_verified",
+    "canonical_postgresql_encrypted_backup_and_restore_not_proven",
+    "persistent_qdrant_digest_not_authorized",
+    "candidate_commit_and_tree_not_sealed_for_installation",
+    "exact_preflight_receipt_absent",
+    "separate_future_rollback_approval_required"
+  ],
+  "evaluator_state_changed": false
+}

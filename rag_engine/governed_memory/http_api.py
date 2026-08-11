@@ -25,7 +25,11 @@ from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHttpException
 
-from .api import OWNER_ROUTE_SPECIFICATIONS, RouteSpecification, validate_route_body
+from .api import (
+    CLAIM_OWNER_ROUTE_SPECIFICATIONS,
+    RouteSpecification,
+    validate_route_body,
+)
 from .auth import ActorRole, ActorScope, VerifiedActor
 from .contracts import ContractViolation
 
@@ -134,10 +138,16 @@ _EXPECTED_OPERATIONS = (
     "get_operation",
 )
 _SPECIFICATIONS = MappingProxyType(
-    {specification.operation: specification for specification in OWNER_ROUTE_SPECIFICATIONS}
+    {
+        specification.operation: specification
+        for specification in CLAIM_OWNER_ROUTE_SPECIFICATIONS
+    }
 )
 if (
-    tuple(specification.operation for specification in OWNER_ROUTE_SPECIFICATIONS)
+    tuple(
+        specification.operation
+        for specification in CLAIM_OWNER_ROUTE_SPECIFICATIONS
+    )
     != _EXPECTED_OPERATIONS
     or len(_SPECIFICATIONS) != len(_EXPECTED_OPERATIONS)
 ):

@@ -178,20 +178,21 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
     )
     if manifest.get("status") != expected_manifest_status:
         raise ValueError("unexpected migration candidate status")
-    if manifest.get("authority") != {
+    expected_authority = {
         "production_apply_authorized": False,
         "production_service_change_authorized": False,
         "production_provider_call_authorized": False,
         "production_qdrant_change_authorized": False,
         "legacy_import_authorized": False,
-        "disposable_validation_authorized": False,
-    }:
+        "disposable_validation_authorized": not phase6e_proof,
+    }
+    if manifest.get("authority") != expected_authority:
         raise ValueError("unexpected migration authority contract")
     if manifest.get("execution_order") != EXPECTED_EXECUTION_ORDER:
         raise ValueError("unexpected migration execution order")
     if manifest.get("rollback_order") != EXPECTED_ROLLBACK_ORDER:
         raise ValueError("unexpected migration rollback order")
-    if manifest.get("safety") != {
+    expected_safety = {
         "migration_runner_transaction_required": True,
         "migration_runner_timeouts_required": True,
         "migration_runner_advisory_lock_required": True,
@@ -204,7 +205,8 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
         "production_checkout_files_changed": False,
         "production_data_read": False,
         "provider_external_calls": 0,
-    }:
+    }
+    if manifest.get("safety") != expected_safety:
         raise ValueError("unexpected migration safety contract")
 
     expected: dict[str, str] = {}

@@ -23,6 +23,7 @@ class ActorRole(str, Enum):
 
 
 class ActorScope(str, Enum):
+    ERASE_CONVERSATIONS = "erase_conversations"
     READ_CLAIMS = "read_claims"
     REVIEW_PROPOSALS = "review_proposals"
     MUTATE_CLAIMS = "mutate_claims"

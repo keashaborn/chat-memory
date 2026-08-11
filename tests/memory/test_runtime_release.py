@@ -15,7 +15,10 @@ from fastapi import FastAPI, Request
 
 from rag_engine.governed_memory.auth import ActorRole, ActorScope, VerifiedActor
 from rag_engine.governed_memory.http_auth import HttpAuthError
-from rag_engine.governed_memory.http_service import HttpServiceConfigurationError
+from rag_engine.governed_memory.http_service import (
+    CONVERSATION_BRIDGE_CATALOG_SHA256_ENV,
+    HttpServiceConfigurationError,
+)
 from rag_engine.governed_memory.runtime.application import (
     API_BIND_HOST,
     API_BIND_PORT,
@@ -93,6 +96,11 @@ def active_environment() -> dict[str, str]:
             "postgresql://governed_memory_api:secret@127.0.0.1:55432/"
             "governed_memory"
         ),
+        "GOVERNED_MEMORY_CONVERSATION_POSTGRES_DSN": (
+            "postgresql://governed_memory_api:other-secret@127.0.0.1:5432/"
+            "memory"
+        ),
+        CONVERSATION_BRIDGE_CATALOG_SHA256_ENV: HASH,
         "GOVERNED_MEMORY_SUPABASE_ISSUER": ISSUER,
         "GOVERNED_MEMORY_SUPABASE_JWKS_URL": f"{ISSUER}/.well-known/jwks.json",
         "GOVERNED_MEMORY_SERVICE_TOKEN": "synthetic-service-token",

@@ -1,0 +1,98 @@
+{
+  "schema_version": "governed-memory-legacy-quiescence-manifest-v1",
+  "state": "inventory_only_no_unit_or_cron_changed",
+  "observed_at_utc": "2026-08-11T13:10:00Z",
+  "host": "ip-172-31-32-171",
+  "memory_timer_stop_set": [
+    {
+      "timer": "memory-v1-deferred-reconciliation-scan.timer",
+      "triggered_service": "memory-v1-deferred-reconciliation-scan.service"
+    },
+    {
+      "timer": "memory-v1-evidence-intake-dispatcher.timer",
+      "triggered_service": "memory-v1-evidence-intake-dispatcher.service"
+    },
+    {
+      "timer": "memory-v1-projection.timer",
+      "triggered_service": "memory-v1-projection.service"
+    },
+    {
+      "timer": "memory-v1-v5-2-local-packet-router.timer",
+      "triggered_service": "memory-v1-v5-2-local-packet-router.service"
+    },
+    {
+      "timer": "memory-v1-v5-chat-capture.timer",
+      "triggered_service": "memory-v1-v5-chat-capture.service"
+    },
+    {
+      "timer": "memory-v1-v5-local-auto-resolution.timer",
+      "triggered_service": "memory-v1-v5-local-auto-resolution.service"
+    },
+    {
+      "timer": "memory-v1-v5-local-auto-stage.timer",
+      "triggered_service": "memory-v1-v5-local-auto-stage.service"
+    },
+    {
+      "timer": "memory-v1-v5-local-claim-projection.timer",
+      "triggered_service": "memory-v1-v5-local-claim-projection.service"
+    },
+    {
+      "timer": "memory-v1-v5-local-legacy-reintake-audit.timer",
+      "triggered_service": "memory-v1-v5-local-legacy-reintake-audit.service"
+    },
+    {
+      "timer": "memory-v1-v5-local-packet-router.timer",
+      "triggered_service": "memory-v1-v5-local-packet-router.service"
+    }
+  ],
+  "cron_stop_set": [
+    {
+      "owner": "ubuntu",
+      "schedule": "0 3 * * *",
+      "working_directory": "/opt/chat-memory",
+      "executable": "/opt/chat-memory/eval_all_users.sh",
+      "exact_line_sha256": "71ba61ab03ee2635281d9d55b637a7adbeae04ac8330e8d733c1e9fc746e0cc4"
+    }
+  ],
+  "inventory_preserve_set": [
+    {
+      "timer": "chat-memory-git-sync.timer",
+      "triggered_service": "chat-memory-git-sync.service",
+      "classification": "repository_sync_not_memory_writer",
+      "action": "preserve_unless_separately_authorized"
+    }
+  ],
+  "preserved_runtime": {
+    "unit": "brains.service",
+    "action": "preserve_running_for_chat_and_lifeswitch",
+    "whole_unit_stop_is_not_the_exclusivity_mechanism": true,
+    "structured_lifeswitch_data_remains_outside_chat_erasure_scope": true
+  },
+  "phase6b_disposition_reconciliation": {
+    "unit": "chat-memory-git-sync.timer",
+    "prior_classification": "legacy_timer",
+    "current_verified_classification": "repository_sync_not_memory_reader_or_writer",
+    "current_action": "preserve_unless_separately_authorized",
+    "reason": "exact live unit inventory supersedes the broader historical disposition"
+  },
+  "future_quiescence_requirements": {
+    "separate_authorization_required": true,
+    "capture_pre_state_for_every_named_unit_and_crontab": true,
+    "stop_and_disable_only_exact_memory_timer_stop_set": true,
+    "stop_exact_triggered_services_and_wait_for_zero_main_pid": true,
+    "remove_only_exact_cron_line_after_crontab_hash_binding": true,
+    "git_sync_timer_changed": false,
+    "minimum_observation_window_hours": 24,
+    "zero_legacy_memory_process_starts_required": true,
+    "legacy_memory_provider_surfaces_unreachable_required": true,
+    "legacy_memory_router_surfaces_unreachable_required": true,
+    "legacy_memory_admin_surfaces_unreachable_required": true,
+    "zero_legacy_memory_readers_required": true,
+    "zero_legacy_postgresql_memory_writes_required": true,
+    "zero_legacy_qdrant_memory_writes_required": true,
+    "timer_and_cron_quiescence_alone_establishes_exclusivity": false,
+    "rollback": "restore_only_exact_recorded_pre_state"
+  },
+  "quiescence_performed": false,
+  "production_state_changed": false
+}

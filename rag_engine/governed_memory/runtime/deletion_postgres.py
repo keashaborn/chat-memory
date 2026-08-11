@@ -3,9 +3,10 @@ from __future__ import annotations
 """Static-SQL adapters for the inactive deletion coordinator.
 
 These classes do not open connections. The worker adapters are composed only
-inside the mode-off candidate worker; the owner request adapter remains
-unmounted. Supplied connections must already carry the narrowly scoped
-conversation request/worker or successor worker database role.
+inside the mode-off candidate worker. The owner request adapter requires a
+source connection authenticated as ``governed_memory_api`` and locally assumes
+only ``memory_erasure_requester`` inside each owner transaction. Worker
+connections remain separately role-scoped by their outer composition.
 """
 
 from contextlib import asynccontextmanager
@@ -93,6 +94,18 @@ _READ_OWNER_CONTEXT_SQL = (
 )
 _READ_AUTH_CONTEXT_SQL = (
     "SELECT pg_catalog.current_setting('app.auth_context_sha256',true)"
+)
+_SET_LOCAL_REQUESTER_ROLE_SQL = "SET LOCAL ROLE memory_erasure_requester"
+_READ_REQUESTER_ROLE_CONTEXT_SQL = (
+    "SELECT session_user::text AS session_user,"
+    "current_user::text AS current_user,"
+    "pg_catalog.pg_has_role(session_user,'memory_erasure_requester','MEMBER') "
+    "AS requester_member"
+)
+_REQUESTER_ROLE_CONTEXT_FIELDS = (
+    "session_user",
+    "current_user",
+    "requester_member",
 )
 
 _REGISTER_SOURCE_ERASURE_SQL = (
@@ -247,23 +260,93 @@ _LEGACY_PROJECT_THREAD_CATALOG_MESSAGES = frozenset(
         ),
     }
 )
+_CONVERSATION_REQUEST_INVALID_PAIR = (
+    "22023",
+    "invalid source erasure request",
+)
+_CONVERSATION_REPLAY_CONFLICT_PAIR = (
+    "23514",
+    "source erasure operation replay drifted",
+)
+_CONVERSATION_ALREADY_ACTIVE_PAIR = (
+    "55000",
+    "owner source erasure already active",
+)
+_CONVERSATION_SELECTOR_NOT_FOUND_PAIRS = frozenset(
+    {
+        ("P0002", "source erasure thread is absent or invalid"),
+        ("P0002", "source erasure anchor is absent"),
+    }
+)
+_CONVERSATION_SOURCE_PRECONDITION_PAIRS = frozenset(
+    {
+        (
+            "23514",
+            "source erasure thread has invalid chat time or lineage",
+        ),
+        (
+            "23514",
+            "all-conversation erasure has invalid chat time or lineage",
+        ),
+        ("23514", "all-conversation erasure has invalid thread time"),
+        ("23514", "message-tail erasure has invalid chat time"),
+        ("23514", "recent erasure has invalid chat time"),
+        ("23514", "source erasure selector has future-dated chat rows"),
+        ("23514", "source erasure message/thread lineage differs"),
+        (
+            "23514",
+            "source erasure candidate thread has mixed owner lineage",
+        ),
+        ("54000", "source erasure thread target limit exceeded"),
+        ("54000", "source erasure thread target inventory differs"),
+        ("54000", "source erasure target limit exceeded"),
+        ("54000", "source erasure attachment target limit exceeded"),
+    }
+)
+_AMBIGUOUS_TRANSPORT_SQLSTATES = frozenset(
+    {"40003", "57P01", "57P02", "57P03"}
+)
 
 
 def _conversation_database_failure(
     error: Exception,
 ) -> DeletionRepositoryFailure:
-    """Translate only the two sealed legacy project catalog conflicts."""
+    """Translate only exact sealed SQLSTATE and static-message pairs."""
 
     sqlstate = getattr(error, "sqlstate", None)
     message = getattr(error, "message", None)
+    if type(sqlstate) is not str or type(message) is not str:
+        return DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
+    pair = (sqlstate, message)
+    if pair == _CONVERSATION_REQUEST_INVALID_PAIR:
+        return DeletionRepositoryFailure.REQUEST_INVALID
+    if pair == _CONVERSATION_REPLAY_CONFLICT_PAIR:
+        return DeletionRepositoryFailure.REPLAY_CONFLICT
+    if pair == _CONVERSATION_ALREADY_ACTIVE_PAIR:
+        return DeletionRepositoryFailure.ALREADY_ACTIVE
+    if pair in _CONVERSATION_SELECTOR_NOT_FOUND_PAIRS:
+        return DeletionRepositoryFailure.SELECTOR_NOT_FOUND
+    if pair in _CONVERSATION_SOURCE_PRECONDITION_PAIRS:
+        return DeletionRepositoryFailure.SOURCE_PRECONDITION_FAILED
     if (
-        type(sqlstate) is str
-        and sqlstate == _LEGACY_PROJECT_THREAD_CATALOG_SQLSTATE
-        and type(message) is str
+        sqlstate == _LEGACY_PROJECT_THREAD_CATALOG_SQLSTATE
         and message in _LEGACY_PROJECT_THREAD_CATALOG_MESSAGES
     ):
         return DeletionRepositoryFailure.LEGACY_PROJECT_THREAD_DEPENDENCY
     return DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
+
+
+def _is_database_error_response(error: Exception) -> bool:
+    """Distinguish a server error response from transport outcome ambiguity."""
+
+    sqlstate = getattr(error, "sqlstate", None)
+    message = getattr(error, "message", None)
+    return (
+        type(sqlstate) is str
+        and type(message) is str
+        and not sqlstate.startswith("08")
+        and sqlstate not in _AMBIGUOUS_TRANSPORT_SQLSTATES
+    )
 
 
 def _uuid(value: object, code: str) -> UUID:
@@ -315,12 +398,32 @@ class PostgresConversationDeletionRepository:
         self,
         command: BoundConversationDeletion,
     ) -> AsyncIterator[Any]:
-        """Bind and verify owner authority inside the deletion transaction."""
+        """Assume the requester role, then bind owner authority transactionally."""
 
         if not isinstance(command, BoundConversationDeletion):
             raise ContractViolation("invalid_deletion_command")
         authority = command.authority
         async with self._connection.transaction():
+            await self._connection.execute(_SET_LOCAL_REQUESTER_ROLE_SQL)
+            role_context = _row(
+                await self._connection.fetchrow(
+                    _READ_REQUESTER_ROLE_CONTEXT_SQL
+                ),
+                _REQUESTER_ROLE_CONTEXT_FIELDS,
+                "invalid_conversation_deletion_role_context",
+            )
+            if role_context["session_user"] != "governed_memory_api":
+                raise ContractViolation(
+                    "conversation_deletion_session_user_mismatch"
+                )
+            if role_context["current_user"] != "memory_erasure_requester":
+                raise ContractViolation(
+                    "conversation_deletion_current_user_mismatch"
+                )
+            if role_context["requester_member"] is not True:
+                raise ContractViolation(
+                    "conversation_deletion_requester_membership_mismatch"
+                )
             await self._connection.execute(
                 _SET_OWNER_CONTEXT_SQL,
                 str(authority.owner_user_id),
@@ -385,8 +488,10 @@ class PostgresConversationDeletionRepository:
         if not isinstance(command, BoundConversationDeletion):
             raise ContractViolation("invalid_deletion_command")
         request = command.request
+        dispatched = False
         try:
             async with self._owner_transaction(command) as connection:
+                dispatched = True
                 begin = _row(
                     await connection.fetchrow(
                         _BEGIN_SOURCE_ERASURE_SQL,
@@ -430,9 +535,17 @@ class PostgresConversationDeletionRepository:
         except ContractViolation:
             raise
         except Exception as error:
-            raise DeletionRepositoryError(
-                _conversation_database_failure(error)
-            ) from None
+            failure = _conversation_database_failure(error)
+            if (
+                failure
+                is DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
+                and dispatched
+                and not _is_database_error_response(error)
+            ):
+                failure = (
+                    DeletionRepositoryFailure.OPERATION_OUTCOME_UNKNOWN
+                )
+            raise DeletionRepositoryError(failure) from None
 
     async def read_erasure_status(
         self,

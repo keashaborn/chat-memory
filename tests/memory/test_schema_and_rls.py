@@ -1079,7 +1079,7 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
@@ -1134,7 +1134,13 @@ class SchemaContractTests(unittest.TestCase):
         self.assertFalse(bridge["contains_attachment_text"])
         self.assertTrue(bridge["assumes_conversation_table_shape"])
         self.assertEqual(bridge["database"], "memory")
-        self.assertEqual(bridge["application_login_role"], "brains_app")
+        self.assertEqual(
+            bridge["capture_application_login_role"], "brains_app"
+        )
+        self.assertEqual(
+            bridge["source_erasure_application_login_role"],
+            "governed_memory_api",
+        )
         self.assertEqual(bridge["source_table"], "public.chat_log")
         self.assertEqual(
             bridge["source_row_capture"],
@@ -1412,12 +1418,11 @@ class PackageIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
         manifest = _load_json(ROOT_MANIFEST_PATH)
-        phase6e_proof = manifest["status"] == (
-            "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+        self.assertEqual(
+            manifest["status"],
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
-        receipt = verifier["verify"](
-            MIGRATIONS, phase6e_proof=phase6e_proof
-        )
+        receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "verified")
         self.assertEqual(
             receipt["schema_version"],
@@ -1425,16 +1430,10 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             receipt["validation_state"],
-            (
-                "phase6e_disposable_deletion_proof_candidate"
-                if phase6e_proof
-                else "disposable_validated"
-            ),
+            "disposable_validated",
         )
         with self.assertRaisesRegex(ValueError, "unexpected migration candidate status"):
-            verifier["verify"](
-                MIGRATIONS, phase6e_proof=not phase6e_proof
-            )
+            verifier["verify"](MIGRATIONS, phase6e_proof=True)
 
 
 class StaticSQLPolicyTests(unittest.TestCase):
@@ -3407,6 +3406,7 @@ class StaticSQLPolicyTests(unittest.TestCase):
 
         definitions = _function_definitions(self.bridge)
         begin = definitions["memory_ingest_private.begin_source_erasure"]
+        self.assertIn("session_user <> 'governed_memory_api'", begin)
         for selector in bridge_contract["source_erasure_selectors"]:
             self.assertIn(f"'{selector}'", begin)
         finalize = definitions[

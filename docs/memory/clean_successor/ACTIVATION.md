@@ -1,103 +1,103 @@
-# Governed Memory Phase 6E activation boundary
+# Governed Memory Phase 7C activation boundary
 
-## Current state
-
-Phase 6E is inactive and not authorized. A source-bound candidate runtime has
-been built, but its disposable proof has not yet been run or promoted. No
-production successor database, Qdrant collection, service, timer, listener,
-route, firewall rule, capture membership, erasure-requester membership,
-provider request, or pilot marker row has been created. The release guard must
-continue to refuse creation with
+Phase 7C disposable revalidation passed, but the candidate remains inactive and
+not authorized for installation or activation. No persistent successor store,
+service, timer, route, listener, role credential, role membership, firewall
+rule, provider call, or pilot marker exists. The release guard must continue to refuse creation with
 `activation_blockers_open` and cleanup with `authorization_missing`.
-
-The Phase 6B proof and runtime receipts are historical and noncurrent for this
-candidate. A passing Phase 6E disposable deletion proof, separate proof-metadata
-promotion, and explicit production authorization are mandatory before
-activation review.
 
 ## Exact future targets
 
-On the seebx backend, any later authorized pilot remains bounded to:
+Any later authorized pilot remains bounded to these seebx backend targets:
 
-- HTTP candidate `172.31.32.171:8091`, with Verbal Sage
-  `172.31.43.160/32` as the intended source;
-- new canonical PostgreSQL at `127.0.0.1:55432`, database
-  `governed_memory`;
-- new derived Qdrant at `127.0.0.1:6343`, collection
+- HTTP `172.31.32.171:8091`, with intended frontend source
+  `172.31.43.160/32`;
+- canonical PostgreSQL `127.0.0.1:55432`, database `governed_memory`;
+- derived Qdrant `127.0.0.1:6343`, collection
   `governed_memory_9a54cf123493_000001`, alias
   `governed_memory_active`; and
-- the existing conversation database through SECURITY DEFINER RPCs only.
+- the existing conversation database through exact SECURITY DEFINER RPCs.
 
-Existing databases, collections, volumes, snapshots, claims, vectors, reviews,
-preferences, attachment content, and compatibility state cannot seed the
-successor.
+Existing Memory databases, rows, collections, vectors, snapshots, volumes,
+preferences, reviews, compatibility state and attachment content cannot seed
+the successor.
 
-## Deletion boundary
+## Authoritative blockers
 
-The inactive candidate permits only exact chat selectors: `thread`,
-`message_tail`, `recent`, and `all_conversations`. A future route may coordinate
-deletion of exact chat rows, matching chat attachments, matching bridge rows,
-eligible empty chat threads, and successor memory derived from those exact
-targets. Chat-derived trusted-web response transcripts and an active-thread UI
-selection may disappear only through exact named, validated `ON DELETE
-CASCADE` composite lineage. Each trusted-web transcript relationship must bind
-its chat-log ID together with `owner_user_id` and `thread_id` to
-`public.chat_log(id, owner_user_id, thread_id)`. The current live single-column
-transcript foreign keys are refused. Every other foreign-key edge, delete
-trigger, delete rule, or inheritance edge is a hard refusal.
+The exact ordered blocker set in `runtime_manifest.json` is:
 
-Activation must preserve exact message/thread targets through the final
-acknowledgment and permanent immutable global UUID tombstones afterward. It
-must not depend on the legacy capture trigger or function; absence is valid,
-while any surviving copy must be exact and disabled.
+1. `production_activation_not_authorized`
+2. `inactive_installation_package_not_authorized`
+3. `semantic_calibration_artifact_unapproved_retrieval_off`
+4. `live_supabase_runtime_credentials_not_mounted_or_verified`
+5. `previously_exposed_successor_credentials_not_rotated`
+6. `database_role_credentials_not_provisioned`
+7. `conversation_bridge_catalog_hash_not_provisioned`
+8. `source_logging_policy_not_live_verified`
+9. `source_logging_parameter_remediation_not_authorized_or_applied`
+10. `pg_hba_and_transport_not_verified_for_runtime_logins`
+11. `supabase_auth_sessions_rpc_not_installed_or_live_verified`
+12. `fresh_isolated_persistent_postgresql_not_created`
+13. `fresh_isolated_persistent_qdrant_not_created_or_approved`
+14. `persistent_store_restart_supervision_and_boot_recovery_not_implemented_or_verified`
+15. `canonical_postgresql_encrypted_backup_and_restore_not_proven`
+16. `private_frontend_source_firewall_not_proved`
+17. `tls_termination_or_private_transport_not_decided`
+18. `production_store_runtime_credentials_and_role_activation_not_authorized_or_executed`
+19. `successor_http_service_not_installed`
+20. `successor_worker_service_not_installed`
+21. `successor_conversation_capture_not_activated`
+22. `successor_chat_deletion_route_candidate_not_installed_or_live_verified`
+23. `frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified`
+24. `source_erasure_requester_membership_not_granted_or_verified`
+25. `provider_adapter_real_call_validation_not_authorized_or_completed`
+26. `embedding_adapter_real_call_validation_not_authorized_or_completed`
+27. `projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented`
+28. `legacy_project_memory_thread_dependencies_not_separated`
+29. `trusted_web_transcript_composite_owner_thread_lineage_not_installed`
+30. `legacy_chat_owner_thread_lineage_not_remediated`
+31. `frontend_candidate_71377a_undeployed_visual_qa_pending`
+32. `pilot_owner_and_scope_not_authorized`
+33. `legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved`
 
-No future activation may expose a memory-only or account-wide arbitrary Memory
-purge. Accounts and structured LifeSwitch data—including libraries, workouts,
-weightlifting sessions, food logs, and measurements—must remain outside the
-coordinator. Content-free consent, security, audit, and absence receipts must
-remain available.
+## Ordered future sequence
 
-## Activation blockers
+Each item is a separate approval checkpoint:
 
-The machine-readable runtime manifest is authoritative. At minimum:
+1. retain the completed Phase 7C proof unless proof-critical bytes change, and
+   refresh exact production/service/store/catalog evidence;
+2. authorize and apply the source logging remediation, then re-prove it;
+3. authorize the persistent Qdrant digest, restart supervision, boot recovery,
+   and encrypted PostgreSQL backup/restore;
+4. rotate the exposed provider key and mint distinct successor credentials;
+5. authorize installation and create only the exact fresh empty targets;
+6. run both inactive migration entry points with
+   `governed_memory_inactive_installation=on` and prove all runtime roles remain
+   `NOLOGIN` with no memberships;
+7. install dormant units without enabling or starting them;
+8. prove pg_hba, private transport/firewall, live Supabase account/session
+   authority, chat-only route behavior, and frontend semantics;
+9. authorize credential provisioning, enable only exact API/worker LOGIN roles,
+   and grant only exact runtime memberships;
+10. recompute and seal the full post-activation conversation catalog hash;
+11. start the successor alone, prove exact routing and owner isolation, and
+    complete authenticated visual QA;
+12. authorize one bounded pilot; and
+13. only after an observation window and rollback proof, consider legacy
+    retirement as separately authorized exact batches.
 
-1. Complete Phase 6E disposable deletion and full regression proof against a
-   clean, sealed candidate; review and promote its metadata separately.
-2. Obtain explicit production activation and exact pilot-owner/scope authority.
-3. Install and live-verify Supabase user/session authority and credentials.
-4. Keep retrieval off until calibration is independently approved.
-5. Authorize any real provider or embedding validation separately.
-6. Implement sequence-safe Qdrant reconciliation and repair.
-7. Authorize and create fresh isolated persistent stores; never adopt old
-   targets.
-8. Prove port-8091 source firewall and private transport/TLS boundaries.
-9. Install HTTP and worker units dormant, then prove exact source,
-   configuration, disabled state, and zero listeners.
-10. Add and prove a narrowly scoped authenticated chat-deletion route; no route
-    is mounted in Phase 6E.
-11. Deploy and visually validate the authenticated frontend.
-12. Prove legacy owner-scoped read, write, and shadow paths quiescent.
-13. Separately authorize and install the exact trusted-web transcript composite
-    owner/thread lineage. The nine live transcript rows passed aggregate
-    consistency checks, but their current constraint shape is unsafe.
-14. Resolve the 2,106 legacy chat rows through an explicit chat-only mapping,
-    quarantine, or reset plan. The inventory includes 710 NULL thread IDs and
-    118 NULL owners; the counts may overlap. Never include accounts or
-    structured LifeSwitch data in that remediation.
-15. Retire the complete legacy project-memory branch that currently restricts
-    thread deletion, then re-capture the live chat deletion graph. Do not merely
-    drop its foreign keys and do not let the coordinator delete project rows.
+The inactive install-postflight catalog hash cannot be reused after LOGIN or
+membership changes. The container bootstrap administrator remains active until
+a separate recovery administrator is tested.
 
-## Authorized sequence
+## Deletion and rollback boundary
 
-Each mutation remains a separate approval checkpoint: capture exact pre-state;
-seal and prove the runtime; run Phase 6E disposable validation; review proof;
-authorize persistent targets and credentials; create empty stores; install
-dormant units; prove network and identity boundaries; mount only approved
-routes; visually validate; quiesce legacy paths; then authorize one bounded
-pilot.
+Deletion remains chat-only. Accounts and structured LifeSwitch data, including
+libraries, workouts, weightlifting sessions, food logs, measurements, plans and
+tracking records, remain outside the deletion graph.
 
-Cleanup remains hard-refused without a separate scoped authorization. Never use
-wildcard or prefix teardown, SQL `CASCADE`, or caller-supplied counts as
-authority. Legacy retirement occurs only in explicit recoverable batches after
-the successor pilot is proved.
+Cleanup is hard-refused without separate authorization. Never use wildcard or
+prefix teardown, SQL `CASCADE`, or caller-supplied counts as authority. Before
+any pilot row, rollback may remove only exact empty candidate targets under the
+sealed empty-only preconditions. After any pilot row, rollback means quiesce
+routes/services and retain stores for recovery; it is not schema teardown.

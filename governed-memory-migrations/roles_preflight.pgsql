@@ -4,15 +4,45 @@
 --
 -- Required cluster identities:
 --   governed_memory_owner  NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT
---   governed_memory_api    LOGIN   NOSUPERUSER NOBYPASSRLS NOINHERIT
---   governed_memory_worker LOGIN   NOSUPERUSER NOBYPASSRLS NOINHERIT
+--   governed_memory_api    NOLOGIN during inactive installation; LOGIN only
+--                          after separately approved credential activation
+--   governed_memory_worker NOLOGIN during inactive installation; LOGIN only
+--                          after separately approved credential activation
 --   memory_ingest_writer   NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT
 --   memory_erasure_requester NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT
 -- The deployment principal must be a member of governed_memory_owner and must
 -- SET ROLE governed_memory_owner before applying 0001_foundation.
--- Runtime adapters must send transient answer-binding content as bind
+-- The inactive installation runner must pass
+--   -v governed_memory_inactive_installation=on
+-- The default is off and retains the runtime LOGIN preflight. Runtime adapters
+-- must send transient answer-binding content as bind
 -- parameters over PostgreSQL extended query protocol; interpolated SQL is not
 -- an accepted deployment shape.
+-- The privileged canonical cluster bootstrap verifies
+-- shared_preload_libraries and refuses pgAudit before this owner-level
+-- preflight runs. PostgreSQL 16 does not permit governed_memory_owner to read
+-- that restricted cluster setting after SET ROLE.
+
+\if :{?governed_memory_inactive_installation}
+\else
+  \set governed_memory_inactive_installation off
+\endif
+SELECT CASE :'governed_memory_inactive_installation'
+  WHEN 'on' THEN 'on'
+  WHEN 'off' THEN 'off'
+  ELSE NULL
+END AS governed_memory_installation_mode
+\gset
+\if :{?governed_memory_installation_mode}
+\else
+  \echo 'governed_memory_inactive_installation must be exactly on or off'
+  \quit 3
+\endif
+SELECT pg_catalog.set_config(
+  'governed_memory.inactive_installation',
+  :'governed_memory_installation_mode',
+  false
+);
 
 DO $preflight$
 DECLARE
@@ -35,7 +65,18 @@ BEGIN
   IF pg_catalog.current_setting('server_encoding') <> 'UTF8' THEN
     RAISE EXCEPTION 'governed_memory requires UTF8 server encoding';
   END IF;
-  IF pg_catalog.current_setting('log_parameter_max_length')::integer <> 0
+  IF pg_catalog.current_setting('log_statement') <> 'none'
+     OR pg_catalog.current_setting('log_duration') <> 'off'
+     OR pg_catalog.current_setting(
+       'log_min_duration_statement'
+     )::integer <> -1
+     OR pg_catalog.current_setting(
+       'log_min_duration_sample'
+     )::integer <> -1
+     OR pg_catalog.current_setting(
+       'log_transaction_sample_rate'
+     )::numeric <> 0
+     OR pg_catalog.current_setting('log_parameter_max_length')::integer <> 0
      OR pg_catalog.current_setting(
        'log_parameter_max_length_on_error'
      )::integer <> 0 THEN
@@ -88,8 +129,14 @@ BEGIN
     SELECT role_name, must_login
     FROM (VALUES
       ('governed_memory_owner'::text, false),
-      ('governed_memory_api'::text, true),
-      ('governed_memory_worker'::text, true),
+      ('governed_memory_api'::text,
+       pg_catalog.current_setting(
+         'governed_memory.inactive_installation'
+       ) = 'off'),
+      ('governed_memory_worker'::text,
+       pg_catalog.current_setting(
+         'governed_memory.inactive_installation'
+       ) = 'off'),
       ('memory_ingest_writer'::text, false),
       ('memory_erasure_requester'::text, false)
     ) AS required(role_name, must_login)
@@ -109,6 +156,46 @@ BEGIN
       RAISE EXCEPTION 'role % is absent or unsafe', role_record.role_name;
     END IF;
   END LOOP;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted_role
+      ON granted_role.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member_role
+      ON member_role.oid = membership.member
+    WHERE granted_role.rolname = 'governed_memory_owner'
+      AND member_role.rolname = 'governed_memory_bootstrap'
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted_role
+      ON granted_role.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member_role
+      ON member_role.oid = membership.member
+    WHERE (
+      granted_role.rolname IN (
+        'governed_memory_bootstrap',
+        'governed_memory_owner',
+        'governed_memory_api',
+        'governed_memory_worker',
+        'memory_ingest_writer',
+        'memory_erasure_requester'
+      ) OR member_role.rolname IN (
+        'governed_memory_bootstrap',
+        'governed_memory_owner',
+        'governed_memory_api',
+        'governed_memory_worker',
+        'memory_ingest_writer',
+        'memory_erasure_requester'
+      )
+    ) AND NOT (
+      granted_role.rolname = 'governed_memory_owner'
+      AND member_role.rolname = 'governed_memory_bootstrap'
+    )
+  ) THEN
+    RAISE EXCEPTION 'canonical inactive role membership graph differs';
+  END IF;
 
   SELECT database.datdba,
          pg_catalog.bool_or(

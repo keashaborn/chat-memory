@@ -1,14 +1,14 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
   "candidate_id": "clean-governed-memory-successor-2026-08-10",
-  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
     "production_service_change_authorized": false,
     "production_provider_call_authorized": false,
     "production_qdrant_change_authorized": false,
     "legacy_import_authorized": false,
-    "disposable_validation_authorized": false
+    "disposable_validation_authorized": true
   },
   "execution_order": [
     "roles_preflight.pgsql",
@@ -26,11 +26,11 @@
   "files": [
     {
       "path": "roles_preflight.pgsql",
-      "sha256": "ed118b5101302af2aa655cf619b2c4b0237de513de81050b2dc84659cb21c679"
+      "sha256": "f823b0f6815a669084dd88e5c4650317a36cf786e64a15317421a76c0091f02b"
     },
     {
       "path": "schema_contract.json",
-      "sha256": "44231f43517d50bd7bd9ea337ea12893ded01a323bd4854e7a56e648f0c7eb4f"
+      "sha256": "1823964c8567216befd0c63aa0b4ef7676b4093ac62ccd41557bdffd3000c444"
     },
     {
       "path": "predicate_catalog.json",
@@ -38,7 +38,7 @@
     },
     {
       "path": "0001_foundation/package.json",
-      "sha256": "bca9f972c9615e293c1d399a0fd4b3c9653a10c7bf815320049147a974d034a2"
+      "sha256": "e51216e18fedda41a2ab26c24511a82d348e06eda26c9a83be1b670ecc45e13f"
     },
     {
       "path": "0001_foundation/forward.pgsql",
@@ -50,7 +50,7 @@
     },
     {
       "path": "0003_owner_claim_detail/package.json",
-      "sha256": "fca5f2eebf304d658db99ae917a50daf5cd64abd243cfc4531a70ccb4a9c8555"
+      "sha256": "4bff2faa1576fcec5c971ec0842a705958e6a33a8ad7bd9e02b49592634a26f0"
     },
     {
       "path": "0003_owner_claim_detail/forward.pgsql",
@@ -62,7 +62,7 @@
     },
     {
       "path": "0004_pilot_marker/package.json",
-      "sha256": "384f160cb5358e57d5d562b77f5d3768e8a3e3d9da0392bac4c6e07cca34d606"
+      "sha256": "00e9cae13891fdc0e1bb8e025679cd44155d20bda1a7bab31bdab48f5e542b59"
     },
     {
       "path": "0004_pilot_marker/forward.pgsql",
@@ -74,15 +74,15 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "7cb4aa634f906a75363ee073c4d9ae0806edd02e07dcf6271529ab042144afb6"
+      "sha256": "f57a3db05c94fa39699cc26f361844352f77a5806be6939244eb04c7cd000dde"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-      "sha256": "1501c1995dd9a37b3711f9da489e37e3aef304fd7c2d5a07e175222c6528444d"
+      "sha256": "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",
-      "sha256": "ce38c16fa2b367f0db1203aa0aa927325f05e023d2470cdb4c35a878ccc58599"
+      "sha256": "283c95879f36d1db727e15425432ec3963f8adc4861249af90817c1ab8da0158"
     }
   ],
   "safety": {
@@ -93,7 +93,7 @@
     "claim_detail_rollback_data_mutation": false,
     "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
-    "disposable_database_execution_performed": false,
+    "disposable_database_execution_performed": true,
     "production_database_execution_performed": false,
     "production_checkout_files_changed": false,
     "production_data_read": false,

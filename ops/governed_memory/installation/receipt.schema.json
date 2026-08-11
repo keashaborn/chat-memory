@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.local/schemas/governed-memory-installation-receipt-v1.json",
+  "title": "Governed Memory inactive installation decision receipt",
+  "$comment": "This schema validates only the closed receipt shape. Exact stage-conditioned state values and transitive receipt-chain semantics are authoritative only in tools/governed_memory_install/inactive_installation.py. Schema validation alone is neither a structural decision nor authorization.",
+  "x-stage-profile-authority": "tools/governed_memory_install/inactive_installation.py",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stage",
+    "decision",
+    "refusal_codes",
+    "blockers",
+    "authorization_inferred",
+    "candidate_git_commit",
+    "candidate_git_tree",
+    "package_manifest_sha256",
+    "prior_decision_receipt_sha256",
+    "receipt_chain",
+    "observation_canonical_sha256",
+    "exact_target_states",
+    "exact_source_cluster_states",
+    "exact_successor_store_states",
+    "inactive_migration_execution_contract",
+    "fresh_store_counts",
+    "pilot_ever_started",
+    "evaluator_mutating_commands_executed",
+    "evaluator_provider_calls",
+    "evaluator_state_changed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "governed-memory-installation-decision-receipt-v1"
+    },
+    "stage": {
+      "enum": [
+        "install_preflight",
+        "install_postflight",
+        "rollback_preflight",
+        "rollback_postflight"
+      ]
+    },
+    "decision": {
+      "enum": ["structurally_valid_candidate_not_authorization", "refuse"]
+    },
+    "refusal_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9_]+$"}
+    },
+    "blockers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9_]+$"}
+    },
+    "authorization_inferred": {"const": false},
+    "candidate_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_git_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "package_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prior_decision_receipt_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      ]
+    },
+    "receipt_chain": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "receipt_sha256"],
+        "properties": {
+          "stage": {
+            "enum": [
+              "install_preflight",
+              "install_postflight",
+              "rollback_preflight"
+            ]
+          },
+          "receipt_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "observation_canonical_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "exact_target_states": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "exact_source_cluster_states": {
+      "type": "object",
+      "required": ["inactive_source_runtime_membership_graph"],
+      "properties": {
+        "inactive_source_runtime_membership_graph": {
+          "type": "array",
+          "maxItems": 0
+        }
+      },
+      "additionalProperties": {"type": "string"}
+    },
+    "exact_successor_store_states": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "inactive_migration_execution_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "psql_variable_name",
+        "psql_variable_value",
+        "roles_preflight_pgsql_requires_variable",
+        "conversation_bridge_forward_pgsql_requires_variable",
+        "omission_defaults_to_active_mode_and_invalidates_inactive_installation",
+        "evaluator_verifies_execution"
+      ],
+      "properties": {
+        "psql_variable_name": {
+          "const": "governed_memory_inactive_installation"
+        },
+        "psql_variable_value": {"const": "on"},
+        "roles_preflight_pgsql_requires_variable": {"const": true},
+        "conversation_bridge_forward_pgsql_requires_variable": {
+          "const": true
+        },
+        "omission_defaults_to_active_mode_and_invalidates_inactive_installation": {
+          "const": true
+        },
+        "evaluator_verifies_execution": {"const": false}
+      }
+    },
+    "fresh_store_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "successor_user_memory_row_count",
+        "successor_projection_queue_row_count",
+        "qdrant_point_count",
+        "active_client_count",
+        "legacy_import_count",
+        "source_application_row_read_count"
+      ],
+      "properties": {
+        "successor_user_memory_row_count": {"const": 0},
+        "successor_projection_queue_row_count": {"const": 0},
+        "qdrant_point_count": {"const": 0},
+        "active_client_count": {"const": 0},
+        "legacy_import_count": {"const": 0},
+        "source_application_row_read_count": {"const": 0}
+      }
+    },
+    "pilot_ever_started": {"const": false},
+    "evaluator_mutating_commands_executed": {"const": 0},
+    "evaluator_provider_calls": {"const": 0},
+    "evaluator_state_changed": {"const": false}
+  }
+}

@@ -28,6 +28,12 @@ from .deletion_contracts import (
 
 class DeletionRepositoryFailure(str, Enum):
     CONVERSATION_UNAVAILABLE = "conversation_unavailable"
+    OPERATION_OUTCOME_UNKNOWN = "operation_outcome_unknown"
+    REQUEST_INVALID = "request_invalid"
+    REPLAY_CONFLICT = "replay_conflict"
+    ALREADY_ACTIVE = "already_active"
+    SELECTOR_NOT_FOUND = "selector_not_found"
+    SOURCE_PRECONDITION_FAILED = "source_precondition_failed"
     SUCCESSOR_UNAVAILABLE = "successor_unavailable"
     LEASE_LOST = "lease_lost"
     RECEIPT_INVALID = "receipt_invalid"
@@ -45,6 +51,30 @@ class DeletionRepositoryError(RuntimeError):
             self.code = "governed_project_thread_erasure_required"
             self.status_code = 409
             self.retryable = False
+        elif failure is DeletionRepositoryFailure.REQUEST_INVALID:
+            self.code = "memory_request_invalid"
+            self.status_code = 400
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.REPLAY_CONFLICT:
+            self.code = "conversation_erasure_replay_conflict"
+            self.status_code = 409
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.ALREADY_ACTIVE:
+            self.code = "conversation_erasure_already_active"
+            self.status_code = 409
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.SELECTOR_NOT_FOUND:
+            self.code = "conversation_erasure_selector_not_found"
+            self.status_code = 409
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.SOURCE_PRECONDITION_FAILED:
+            self.code = "conversation_erasure_source_precondition_failed"
+            self.status_code = 409
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.OPERATION_OUTCOME_UNKNOWN:
+            self.code = "memory_operation_outcome_unknown"
+            self.status_code = 503
+            self.retryable = True
         elif failure is DeletionRepositoryFailure.RECEIPT_INVALID:
             self.code = failure.value
             self.status_code = 500

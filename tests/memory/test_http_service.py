@@ -9,19 +9,43 @@ import unittest
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, Request
+import jwt
+from jwt.algorithms import RSAAlgorithm
 from starlette.exceptions import HTTPException as StarletteHttpException
 
 from rag_engine.governed_memory.api import OWNER_ROUTE_SPECIFICATIONS
 from rag_engine.governed_memory.auth import ActorRole, ActorScope, VerifiedActor
 from rag_engine.governed_memory.http_service import (
+    CONVERSATION_BRIDGE_CATALOG_SHA256_ENV,
+    CONVERSATION_POSTGRES_DSN_ENV,
+    EXPECTED_CONVERSATION_DATABASE_NAME,
+    EXPECTED_CONVERSATION_DATABASE_ROLE,
+    EXPECTED_CONVERSATION_REQUESTER_ROLE,
     EXPECTED_DATABASE_NAME,
     EXPECTED_DATABASE_ROLE,
     GovernedMemoryHttpServiceSettings,
     HttpServiceConfigurationError,
     HttpServicePreflightError,
     SERVICE_TOKEN_HEADER,
+    _CONVERSATION_BRIDGE_CATALOG_SQL,
+    _CONVERSATION_DML_PREFLIGHT_SQL,
+    _CONVERSATION_FUNCTION_PREFLIGHT_SQL,
+    _CONVERSATION_LOGGING_PREFLIGHT_SQL,
+    _CONVERSATION_ROLE_PREFLIGHT_SQL,
+    _CONVERSATION_SCHEMA_PREFLIGHT_SQL,
+    _RLS_PREFLIGHT_SQL,
+    _ROLE_PREFLIGHT_SQL,
+    _conversation_bridge_catalog_sha256,
+    _preflight_connection,
+    _preflight_conversation_connection,
     create_governed_memory_http_service,
+)
+from rag_engine.governed_memory.deletion_contracts import (
+    CONVERSATIONAL_ERASURE_DOMAIN,
+    DELETION_REQUEST_CONTRACT_VERSION,
+    erasure_target_manifest_sha256,
 )
 from tests.memory.test_http_api import (
     proposal_result,
@@ -32,17 +56,54 @@ from tests.memory.test_http_api import (
 ISSUER = "https://synthetic.supabase.invalid/auth/v1"
 JWKS_URL = f"{ISSUER}/.well-known/jwks.json"
 POSTGRES_DSN = "postgresql://governed_memory_api:secret@db.invalid/governed_memory"
+CONVERSATION_POSTGRES_DSN = (
+    "postgresql://governed_memory_api:other-secret@db.invalid/memory"
+)
 SERVICE_TOKEN = "dedicated-synthetic-service-token"
 OWNER = UUID("11111111-1111-4111-8111-111111111111")
 RESOURCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 NOW = datetime(2026, 8, 10, 18, 0, tzinfo=UTC)
 HASH = "a" * 64
+OPERATION = UUID("33333333-3333-4333-8333-333333333333")
+CONVERSATION_CATALOG_ROWS = [
+    {
+        "catalog_kind": "database",
+        "catalog_identity": "memory",
+        "catalog_payload": '{"encoding":"UTF8","owner":"sage"}',
+    },
+    {
+        "catalog_kind": "routine",
+        "catalog_identity": (
+            "memory_ingest_private.begin_source_erasure("
+            "uuid,text,uuid,uuid,integer,text)"
+        ),
+        "catalog_payload": '{"security_definer":true}',
+    },
+]
+BRIDGE_CATALOG_SHA256 = _conversation_bridge_catalog_sha256(
+    CONVERSATION_CATALOG_ROWS
+)
+
+
+class StaticJwksFetcher:
+    def __init__(self, body: bytes, events: list[str] | None = None) -> None:
+        self.body = body
+        self.events = events
+        self.calls: list[tuple[str, int, int]] = []
+
+    def __call__(self, url: str, timeout: int, maximum_bytes: int) -> bytes:
+        self.calls.append((url, timeout, maximum_bytes))
+        if self.events is not None:
+            self.events.append("resolver:jwks")
+        return self.body
 
 
 def active_settings(**overrides: object) -> GovernedMemoryHttpServiceSettings:
     values: dict[str, object] = {
         "mode": "on",
         "postgres_dsn": POSTGRES_DSN,
+        "conversation_postgres_dsn": CONVERSATION_POSTGRES_DSN,
+        "conversation_bridge_catalog_sha256": BRIDGE_CATALOG_SHA256,
         "supabase_issuer": ISSUER,
         "supabase_jwks_url": JWKS_URL,
         "service_token": SERVICE_TOKEN,
@@ -57,9 +118,22 @@ async def asgi_request(
     target: str,
     *,
     headers: Mapping[str, str] | None = None,
+    json_body: Mapping[str, object] | None = None,
 ) -> tuple[int, dict[str, str], Any]:
     parsed = urlsplit(target)
+    raw_body = (
+        b""
+        if json_body is None
+        else json.dumps(json_body, separators=(",", ":")).encode("utf-8")
+    )
     request_headers = {"host": "testserver", **dict(headers or {})}
+    if json_body is not None:
+        request_headers.update(
+            {
+                "content-type": "application/json",
+                "content-length": str(len(raw_body)),
+            }
+        )
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -85,7 +159,11 @@ async def asgi_request(
         if received:
             return {"type": "http.disconnect"}
         received = True
-        return {"type": "http.request", "body": b"", "more_body": False}
+        return {
+            "type": "http.request",
+            "body": raw_body,
+            "more_body": False,
+        }
 
     async def send(message: dict[str, Any]) -> None:
         messages.append(message)
@@ -133,9 +211,18 @@ class _AsyncContext:
 
 
 class FakeConnection:
-    def __init__(self, *, database_name: str = EXPECTED_DATABASE_NAME) -> None:
+    def __init__(
+        self,
+        *,
+        database_name: str = EXPECTED_DATABASE_NAME,
+        events: list[str] | None = None,
+        event_label: str = "successor",
+    ) -> None:
         self.database_name = database_name
+        self.events = events
+        self.event_label = event_label
         self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
         self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
         self.fetchval_calls: list[str] = []
         self.reset_calls = 0
@@ -167,6 +254,7 @@ class FakeConnection:
     async def fetch(
         self, query: str, *arguments: object
     ) -> list[Mapping[str, object]]:
+        self.fetch_calls.append((query, arguments))
         if "memory_private.list_proposals" not in query:
             raise AssertionError("unexpected_fetch")
         if not callable(self.jsonb_decoder):
@@ -206,20 +294,242 @@ class FakeConnection:
         return OWNER
 
     def transaction(self) -> _AsyncContext:
+        if self.events is not None:
+            self.events.append(f"{self.event_label}:transaction")
         return _AsyncContext(self)
 
     async def reset(self) -> None:
         self.reset_calls += 1
 
 
+class FakeConversationConnection(FakeConnection):
+    def __init__(
+        self,
+        *,
+        overrides: Mapping[str, object] | None = None,
+        catalog_rows: list[Mapping[str, object]] | None = None,
+        request_role_context: Mapping[str, object] | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            database_name=EXPECTED_CONVERSATION_DATABASE_NAME,
+            events=events,
+            event_label="conversation",
+        )
+        self.overrides = dict(overrides or {})
+        self.request_role_context = {
+            "session_user": EXPECTED_CONVERSATION_DATABASE_ROLE,
+            "current_user": EXPECTED_CONVERSATION_REQUESTER_ROLE,
+            "requester_member": True,
+            **dict(request_role_context or {}),
+        }
+        self.catalog_rows = list(catalog_rows or CONVERSATION_CATALOG_ROWS)
+        self.local_owner: str | None = None
+        self.local_auth_context: str | None = None
+        self.local_role: str | None = None
+        self.deletion_queries = 0
+        self.target_manifest_sha256 = erasure_target_manifest_sha256(
+            owner_user_id=OWNER,
+            operation_id=OPERATION,
+            targets=(),
+        )
+
+    def _row(self, values: dict[str, object]) -> dict[str, object]:
+        values.update(
+            {
+                key: value
+                for key, value in self.overrides.items()
+                if key in values
+            }
+        )
+        return values
+
+    async def fetchrow(
+        self,
+        query: str,
+        *arguments: object,
+    ) -> Mapping[str, object]:
+        self.fetchrow_calls.append((query, arguments))
+        if query == _CONVERSATION_ROLE_PREFLIGHT_SQL:
+            return self._row(
+                {
+                    "database_name": EXPECTED_CONVERSATION_DATABASE_NAME,
+                    "session_user": EXPECTED_CONVERSATION_DATABASE_ROLE,
+                    "current_user": EXPECTED_CONVERSATION_DATABASE_ROLE,
+                    "api_can_login": True,
+                    "api_inherits": False,
+                    "api_is_superuser": False,
+                    "api_can_create_database": False,
+                    "api_can_create_role": False,
+                    "api_can_replicate": False,
+                    "api_bypasses_rls": False,
+                    "requester_can_login": False,
+                    "requester_inherits": False,
+                    "requester_is_superuser": False,
+                    "requester_can_create_database": False,
+                    "requester_can_create_role": False,
+                    "requester_can_replicate": False,
+                    "requester_bypasses_rls": False,
+                    "api_direct_membership_count": 1,
+                    "requester_direct_member_count": 1,
+                    "api_effective_membership_count": 1,
+                    "requester_effective_membership_count": 0,
+                    "requester_member": True,
+                    "requester_admin_option": False,
+                    "requester_inherit_option": False,
+                    "requester_set_option": True,
+                    "brains_app_requester_member": False,
+                }
+            )
+        if query == _CONVERSATION_LOGGING_PREFLIGHT_SQL:
+            return self._row(
+                {
+                    "log_statement_disabled": True,
+                    "error_parameter_logging_disabled": True,
+                    "duration_logging_disabled": True,
+                    "duration_statement_logging_disabled": True,
+                    "duration_sample_logging_disabled": True,
+                    "transaction_sampling_disabled": True,
+                    "ordinary_parameter_logging_disabled": True,
+                    "pgaudit_not_preloaded": True,
+                    "auto_explain_parameter_logging_disabled": True,
+                }
+            )
+        if query == _CONVERSATION_SCHEMA_PREFLIGHT_SQL:
+            return self._row(
+                {
+                    "schema_owner_exact": True,
+                    "requester_has_usage": True,
+                    "requester_has_create": False,
+                    "schema_acl_entry_count": 5,
+                    "schema_owner_grantable_entry_count": 2,
+                    "schema_runtime_grantable_entry_count": 0,
+                    "schema_acl_exact": True,
+                }
+            )
+        if query == _CONVERSATION_FUNCTION_PREFLIGHT_SQL:
+            return self._row(
+                {
+                    "expected_function_count": 2,
+                    "expected_function_identity_exact": True,
+                    "requester_execute_count": 2,
+                    "requester_expected_execute_count": 2,
+                    "public_or_api_execute_count": 0,
+                    "expected_function_acl_entry_count": 4,
+                    "expected_function_owner_grantable_entry_count": 2,
+                    "expected_function_requester_grantable_entry_count": 0,
+                    "expected_function_acl_exact": True,
+                    "unexpected_public_api_or_requester_security_definer_count": 0,
+                }
+            )
+        if query == _CONVERSATION_DML_PREFLIGHT_SQL:
+            return self._row(
+                {
+                    "application_relation_count": 42,
+                    "application_sequence_count": 5,
+                    "public_table_count": 3,
+                    "chat_root_identity_exact": True,
+                    "private_table_count": 7,
+                    "private_table_identity_exact": True,
+                    "api_or_requester_has_relation_privilege": False,
+                    "public_api_or_requester_direct_relation_grant": False,
+                    "api_or_requester_has_column_privilege": False,
+                    "public_api_or_requester_direct_column_grant": False,
+                    "api_or_requester_has_sequence_privilege": False,
+                    "public_api_or_requester_direct_sequence_grant": False,
+                }
+            )
+        if "session_user::text AS session_user" in query:
+            if self.events is not None:
+                self.events.append("conversation:verify_role_context")
+            return dict(self.request_role_context)
+        if "begin_source_erasure" in query:
+            if self.events is not None:
+                self.events.append("conversation:begin_source_erasure")
+            self.deletion_queries += 1
+            return {
+                "outcome": "fenced",
+                "operation_id": OPERATION,
+                "state": "fenced",
+                "target_count": 0,
+                "selector_sha256": "7" * 64,
+                "target_manifest_sha256": self.target_manifest_sha256,
+            }
+        if "read_source_erasure" in query:
+            if self.events is not None:
+                self.events.append("conversation:read_source_erasure")
+            self.deletion_queries += 1
+            return {
+                "operation_id": OPERATION,
+                "selector_kind": "all_conversations",
+                "state": "fenced",
+                "target_count": 0,
+                "selector_sha256": "7" * 64,
+                "target_manifest_sha256": self.target_manifest_sha256,
+                "governed_receipt_sha256": None,
+                "last_error_code": None,
+                "created_at": NOW,
+                "completed_at": None,
+            }
+        raise AssertionError("unexpected_conversation_fetchrow")
+
+    async def fetch(
+        self,
+        query: str,
+        *arguments: object,
+    ) -> list[Mapping[str, object]]:
+        self.fetch_calls.append((query, arguments))
+        if query == _CONVERSATION_BRIDGE_CATALOG_SQL:
+            return list(self.catalog_rows)
+        return await super().fetch(query, *arguments)
+
+    async def execute(self, query: str, *arguments: object) -> str:
+        self.execute_calls.append((query, arguments))
+        if query == "SET LOCAL ROLE memory_erasure_requester":
+            self.local_role = EXPECTED_CONVERSATION_REQUESTER_ROLE
+            if self.events is not None:
+                self.events.append("conversation:set_role")
+        elif "'app.user_id'" in query:
+            self.local_owner = str(arguments[0])
+            if self.events is not None:
+                self.events.append("conversation:set_owner")
+        elif "'app.auth_context_sha256'" in query:
+            self.local_auth_context = str(arguments[0])
+            if self.events is not None:
+                self.events.append("conversation:set_auth_context")
+        return "SELECT 1"
+
+    async def fetchval(self, query: str) -> object:
+        self.fetchval_calls.append(query)
+        if "'app.user_id'" in query:
+            if self.events is not None:
+                self.events.append("conversation:verify_owner")
+            return self.local_owner
+        if "'app.auth_context_sha256'" in query:
+            if self.events is not None:
+                self.events.append("conversation:verify_auth_context")
+            return self.local_auth_context
+        raise AssertionError("unexpected_conversation_fetchval")
+
+
 class FakePool:
-    def __init__(self, connection: FakeConnection) -> None:
+    def __init__(
+        self,
+        connection: FakeConnection,
+        *,
+        events: list[str] | None = None,
+        event_label: str = "pool",
+    ) -> None:
         self.connection = connection
+        self.events = events
+        self.event_label = event_label
         self.acquire_calls = 0
         self.close_calls = 0
 
     def acquire(self) -> _AsyncContext:
         self.acquire_calls += 1
+        if self.events is not None:
+            self.events.append(f"{self.event_label}:acquire")
         return _AsyncContext(self.connection)
 
     async def close(self) -> None:
@@ -227,16 +537,17 @@ class FakePool:
 
 
 class RecordingPoolFactory:
-    def __init__(self, pool: FakePool) -> None:
-        self.pool = pool
+    def __init__(self, *pools: FakePool) -> None:
+        self.pools = pools
         self.calls: list[dict[str, object]] = []
 
     async def __call__(self, **kwargs: object) -> FakePool:
         self.calls.append(dict(kwargs))
+        pool = self.pools[len(self.calls) - 1]
         initializer = kwargs.get("init")
         if callable(initializer):
-            await initializer(self.pool.connection)
-        return self.pool
+            await initializer(pool.connection)
+        return pool
 
 
 class RecordingActorResolverFactory:
@@ -266,11 +577,14 @@ class RecordingActorResolverFactory:
 
 
 class RecordingAuthorityVerifier:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.calls: list[tuple[str, UUID]] = []
+        self.events = events
 
     async def __call__(self, request: Request, actor: VerifiedActor) -> None:
         self.calls.append((request.url.path, actor.owner_user_id))
+        if self.events is not None:
+            self.events.append("authority:verified")
 
 
 class ServiceSettingsTests(unittest.TestCase):
@@ -278,6 +592,7 @@ class ServiceSettingsTests(unittest.TestCase):
         settings = GovernedMemoryHttpServiceSettings.from_environment(
             {
                 "GOVERNED_MEMORY_POSTGRES_DSN": "invalid-but-unused",
+                CONVERSATION_POSTGRES_DSN_ENV: "invalid-but-unused",
                 "GOVERNED_MEMORY_SUPABASE_ISSUER": "invalid-but-unused",
                 "GOVERNED_MEMORY_SERVICE_TOKEN": "invalid-but-unused",
             }
@@ -308,6 +623,7 @@ class ServiceSettingsTests(unittest.TestCase):
         settings = active_settings()
         rendered = repr(settings)
         self.assertNotIn(POSTGRES_DSN, rendered)
+        self.assertNotIn(CONVERSATION_POSTGRES_DSN, rendered)
         self.assertNotIn(SERVICE_TOKEN, rendered)
         config = settings.authentication_config()
         self.assertEqual(config.audience, "authenticated")
@@ -315,6 +631,8 @@ class ServiceSettingsTests(unittest.TestCase):
 
         for field_name in (
             "postgres_dsn",
+            "conversation_postgres_dsn",
+            "conversation_bridge_catalog_sha256",
             "supabase_issuer",
             "supabase_jwks_url",
             "service_token",
@@ -334,6 +652,28 @@ class ServiceSettingsTests(unittest.TestCase):
         self.assertEqual(
             insecure.exception.code,
             "governed_memory_supabase_configuration_invalid",
+        )
+        for invalid_hash in ("", "A" * 64, "a" * 63, "g" * 64):
+            with self.subTest(invalid_hash=invalid_hash), self.assertRaises(
+                HttpServiceConfigurationError
+            ):
+                active_settings(
+                    conversation_bridge_catalog_sha256=invalid_hash
+                )
+
+    def test_on_environment_requires_full_bridge_catalog_hash(self) -> None:
+        environment = {
+            "GOVERNED_MEMORY_HTTP_MODE": "on",
+            "GOVERNED_MEMORY_POSTGRES_DSN": POSTGRES_DSN,
+            CONVERSATION_POSTGRES_DSN_ENV: CONVERSATION_POSTGRES_DSN,
+            CONVERSATION_BRIDGE_CATALOG_SHA256_ENV: BRIDGE_CATALOG_SHA256,
+            "GOVERNED_MEMORY_SUPABASE_ISSUER": ISSUER,
+            "GOVERNED_MEMORY_SUPABASE_JWKS_URL": JWKS_URL,
+            "GOVERNED_MEMORY_SERVICE_TOKEN": SERVICE_TOKEN,
+        }
+        self.assertEqual(
+            GovernedMemoryHttpServiceSettings.from_environment(environment),
+            active_settings(),
         )
 
     def test_on_refuses_without_live_authority_verifier(self) -> None:
@@ -507,10 +847,161 @@ class ServiceOffTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
-    async def test_on_preflights_single_pool_serves_and_closes_once(self) -> None:
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.rsa_private = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        jwk = json.loads(RSAAlgorithm.to_jwk(cls.rsa_private.public_key()))
+        jwk.update(
+            {
+                "alg": "RS256",
+                "kid": "service-integration-rsa",
+                "key_ops": ["verify"],
+                "use": "sig",
+            }
+        )
+        cls.jwks = json.dumps(
+            {"keys": [jwk]},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def _token(self) -> str:
+        now_seconds = int(NOW.timestamp())
+        return jwt.encode(
+            {
+                "iss": ISSUER,
+                "aud": "authenticated",
+                "sub": str(OWNER),
+                "session_id": str(OWNER),
+                "role": "authenticated",
+                "is_anonymous": False,
+                "iat": now_seconds - 60,
+                "exp": now_seconds + 300,
+            },
+            self.rsa_private,
+            algorithm="RS256",
+            headers={
+                "alg": "RS256",
+                "kid": "service-integration-rsa",
+                "typ": "JWT",
+            },
+        )
+
+    async def test_preflight_query_sequences_are_disjoint_and_exact(self) -> None:
+        successor = FakeConnection()
+        conversation = FakeConversationConnection()
+        await _preflight_connection(successor)
+        await _preflight_conversation_connection(
+            conversation,
+            BRIDGE_CATALOG_SHA256,
+        )
+        self.assertEqual(
+            successor.fetchrow_calls,
+            [
+                (_ROLE_PREFLIGHT_SQL, ()),
+                (_RLS_PREFLIGHT_SQL, ([
+                    "answer_binding",
+                    "audit_event",
+                    "claim",
+                    "claim_deletion_receipt",
+                    "claim_evidence",
+                    "claim_revision",
+                    "entity",
+                    "evidence",
+                    "extraction_job",
+                    "projection_outbox",
+                    "proposal",
+                    "provider_call",
+                ],)),
+            ],
+        )
+        self.assertEqual(
+            conversation.fetchrow_calls,
+            [
+                (_CONVERSATION_ROLE_PREFLIGHT_SQL, ()),
+                (_CONVERSATION_LOGGING_PREFLIGHT_SQL, ()),
+                (_CONVERSATION_SCHEMA_PREFLIGHT_SQL, ()),
+                (_CONVERSATION_FUNCTION_PREFLIGHT_SQL, ()),
+                (_CONVERSATION_DML_PREFLIGHT_SQL, ()),
+            ],
+        )
+        self.assertEqual(
+            conversation.fetch_calls,
+            [(_CONVERSATION_BRIDGE_CATALOG_SQL, ())],
+        )
+        self.assertIn(
+            "'memory_erasure_requester', routine.oid, 'EXECUTE'",
+            _CONVERSATION_FUNCTION_PREFLIGHT_SQL,
+        )
+        self.assertIn("pg_catalog.pg_attribute", _CONVERSATION_DML_PREFLIGHT_SQL)
+        self.assertIn(
+            "pg_catalog.has_column_privilege",
+            _CONVERSATION_DML_PREFLIGHT_SQL,
+        )
+        self.assertIn("target_policies AS (", _CONVERSATION_BRIDGE_CATALOG_SQL)
+        self.assertIn(
+            "policy.polrelid IN (SELECT oid FROM target_relations)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "target_trigger_routines AS (",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "target_policy_routines AS (",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "authority_routine_oids AS (",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "dependency.classid = 'pg_catalog.pg_policy'::pg_catalog.regclass",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "dependency.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "WHERE namespace.nspname <> 'pg_catalog'",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "SELECT routine_oid FROM target_trigger_routines",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "SELECT routine_oid FROM target_policy_routines",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "routine.oid IN (SELECT routine_oid FROM authority_routine_oids)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        policy_facts = _CONVERSATION_BRIDGE_CATALOG_SQL.split(
+            "), policy_facts AS (", 1
+        )[1].split("), trigger_facts AS (", 1)[0]
+        self.assertIn("FROM target_policies AS policy", policy_facts)
+        self.assertNotIn("nspname = 'memory_ingest_private'", policy_facts)
+        self.assertIn(
+            "index_value.indrelid IN (SELECT oid FROM target_relations)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "namespace.nspname IN (SELECT nspname FROM target_relations)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+
+    async def test_on_preflights_two_pools_serves_and_closes_once(self) -> None:
         connection = FakeConnection()
+        conversation_connection = FakeConversationConnection()
         pool = FakePool(connection)
-        pool_factory = RecordingPoolFactory(pool)
+        conversation_pool = FakePool(conversation_connection)
+        pool_factory = RecordingPoolFactory(pool, conversation_pool)
         actor_factory = RecordingActorResolverFactory()
         authority = RecordingAuthorityVerifier()
         service = create_governed_memory_http_service(
@@ -530,7 +1021,7 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(before[0], 503)
 
         async with service.router.lifespan_context(service):
-            self.assertEqual(len(pool_factory.calls), 1)
+            self.assertEqual(len(pool_factory.calls), 2)
             pool_arguments = pool_factory.calls[0]
             self.assertEqual(pool_arguments["dsn"], POSTGRES_DSN)
             self.assertEqual(pool_arguments["min_size"], 1)
@@ -547,7 +1038,22 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
                     "idle_in_transaction_session_timeout": "8000",
                 },
             )
+            conversation_arguments = pool_factory.calls[1]
+            self.assertEqual(
+                conversation_arguments["dsn"],
+                CONVERSATION_POSTGRES_DSN,
+            )
+            self.assertEqual(
+                conversation_arguments["server_settings"],
+                {
+                    "application_name": "governed_memory_conversation_http",
+                    "statement_timeout": "8000",
+                    "lock_timeout": "2000",
+                    "idle_in_transaction_session_timeout": "8000",
+                },
+            )
             self.assertEqual(len(connection.type_codec_calls), 1)
+            self.assertEqual(len(conversation_connection.type_codec_calls), 1)
             codec = connection.type_codec_calls[0]
             self.assertEqual(codec["type_name"], "jsonb")
             self.assertEqual(codec["schema"], "pg_catalog")
@@ -588,17 +1094,332 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             self.assertEqual(pool.close_calls, 0)
+            self.assertEqual(conversation_pool.close_calls, 0)
 
         self.assertEqual(pool.close_calls, 1)
+        self.assertEqual(conversation_pool.close_calls, 1)
         after = await asgi_request(service, "GET", "/readyz")
         self.assertEqual(after[0], 503)
 
-    async def test_standalone_proposal_jsonb_is_decoded_once(self) -> None:
-        connection = FakeConnection()
-        pool = FakePool(connection)
+    async def test_service_post_uses_real_resolver_synthetic_jwt_and_conversation_pool_only(
+        self,
+    ) -> None:
+        events: list[str] = []
+        successor_connection = FakeConnection(events=events)
+        conversation_connection = FakeConversationConnection(events=events)
+        successor_pool = FakePool(
+            successor_connection,
+            events=events,
+            event_label="successor",
+        )
+        conversation_pool = FakePool(
+            conversation_connection,
+            events=events,
+            event_label="conversation",
+        )
+        fetcher = StaticJwksFetcher(self.jwks, events)
+        authority = RecordingAuthorityVerifier(events)
         service = create_governed_memory_http_service(
             active_settings(),
-            pool_factory=RecordingPoolFactory(pool),
+            pool_factory=RecordingPoolFactory(
+                successor_pool,
+                conversation_pool,
+            ),
+            authority_verifier=authority,
+            token_clock=lambda: NOW,
+            jwks_fetcher=fetcher,
+        )
+        body = {
+            "confirmation_sha256": "c" * 64,
+            "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
+            "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
+            "operation_id": str(OPERATION),
+            "selector_kind": "all_conversations",
+        }
+        headers = {
+            "authorization": f"Bearer {self._token()}",
+            SERVICE_TOKEN_HEADER: SERVICE_TOKEN,
+        }
+
+        async with service.router.lifespan_context(service):
+            events.clear()
+            status, _, response = await asgi_request(
+                service,
+                "POST",
+                "/memory/conversations/erasure-requests",
+                headers=headers,
+                json_body=body,
+            )
+
+        self.assertEqual(status, 202)
+        self.assertEqual(response["operation_id"], str(OPERATION))
+        self.assertEqual(response["state"], "fenced")
+        self.assertEqual(len(fetcher.calls), 1)
+        self.assertEqual(
+            authority.calls,
+            [("/memory/conversations/erasure-requests", OWNER)],
+        )
+        self.assertEqual(successor_pool.acquire_calls, 1)
+        self.assertEqual(conversation_pool.acquire_calls, 2)
+        self.assertEqual(conversation_connection.deletion_queries, 2)
+        self.assertEqual(
+            events,
+            [
+                "resolver:jwks",
+                "authority:verified",
+                "conversation:acquire",
+                "conversation:transaction",
+                "conversation:set_role",
+                "conversation:verify_role_context",
+                "conversation:set_owner",
+                "conversation:set_auth_context",
+                "conversation:verify_owner",
+                "conversation:verify_auth_context",
+                "conversation:begin_source_erasure",
+                "conversation:read_source_erasure",
+            ],
+        )
+        executed_sql = [
+            query for query, _arguments in conversation_connection.execute_calls
+        ]
+        self.assertIn(
+            "SET LOCAL ROLE memory_erasure_requester",
+            executed_sql,
+        )
+        self.assertTrue(
+            any("'app.user_id'" in query for query in executed_sql)
+        )
+        self.assertTrue(
+            any("'app.auth_context_sha256'" in query for query in executed_sql)
+        )
+        conversation_fetch_sql = [
+            query for query, _arguments in conversation_connection.fetchrow_calls
+        ]
+        self.assertTrue(
+            any("begin_source_erasure" in query for query in conversation_fetch_sql)
+        )
+        self.assertTrue(
+            any("read_source_erasure" in query for query in conversation_fetch_sql)
+        )
+        successor_sql = [
+            query
+            for query, _arguments in (
+                successor_connection.fetchrow_calls
+                + successor_connection.execute_calls
+            )
+        ]
+        self.assertFalse(
+            any("source_erasure" in query for query in successor_sql)
+        )
+
+    async def test_service_post_role_context_drift_runs_zero_deletion_sql(
+        self,
+    ) -> None:
+        body = {
+            "confirmation_sha256": "c" * 64,
+            "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
+            "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
+            "operation_id": str(OPERATION),
+            "selector_kind": "all_conversations",
+        }
+        headers = {
+            "authorization": f"Bearer {self._token()}",
+            SERVICE_TOKEN_HEADER: SERVICE_TOKEN,
+        }
+        drifts = (
+            {"session_user": "brains_app"},
+            {"current_user": EXPECTED_CONVERSATION_DATABASE_ROLE},
+            {"requester_member": False},
+        )
+        for drift in drifts:
+            with self.subTest(drift=drift):
+                events: list[str] = []
+                successor_connection = FakeConnection(events=events)
+                conversation_connection = FakeConversationConnection(
+                    request_role_context=drift,
+                    events=events,
+                )
+                successor_pool = FakePool(
+                    successor_connection,
+                    events=events,
+                    event_label="successor",
+                )
+                conversation_pool = FakePool(
+                    conversation_connection,
+                    events=events,
+                    event_label="conversation",
+                )
+                service = create_governed_memory_http_service(
+                    active_settings(),
+                    pool_factory=RecordingPoolFactory(
+                        successor_pool,
+                        conversation_pool,
+                    ),
+                    authority_verifier=RecordingAuthorityVerifier(events),
+                    token_clock=lambda: NOW,
+                    jwks_fetcher=StaticJwksFetcher(self.jwks, events),
+                )
+                async with service.router.lifespan_context(service):
+                    events.clear()
+                    successor_connection.fetchrow_calls.clear()
+                    successor_connection.execute_calls.clear()
+                    conversation_connection.fetchrow_calls.clear()
+                    conversation_connection.execute_calls.clear()
+                    status, _, response = await asgi_request(
+                        service,
+                        "POST",
+                        "/memory/conversations/erasure-requests",
+                        headers=headers,
+                        json_body=body,
+                    )
+
+                self.assertEqual(status, 503)
+                self.assertEqual(
+                    response,
+                    {"error": {"code": "conversation_unavailable"}},
+                )
+                self.assertEqual(conversation_connection.deletion_queries, 0)
+                self.assertEqual(
+                    events,
+                    [
+                        "resolver:jwks",
+                        "authority:verified",
+                        "conversation:acquire",
+                        "conversation:transaction",
+                        "conversation:set_role",
+                        "conversation:verify_role_context",
+                    ],
+                )
+                self.assertFalse(
+                    any(
+                        "begin_source_erasure" in query
+                        or "read_source_erasure" in query
+                        for query, _arguments in (
+                            conversation_connection.fetchrow_calls
+                        )
+                    )
+                )
+                self.assertFalse(
+                    any(
+                        "source_erasure" in query
+                        for query, _arguments in (
+                            successor_connection.fetchrow_calls
+                            + successor_connection.execute_calls
+                        )
+                    )
+                )
+
+    async def test_source_preflight_rejects_every_authority_surface_drift(
+        self,
+    ) -> None:
+        self.assertIn(
+            "pg_catalog.string_to_array(",
+            _CONVERSATION_LOGGING_PREFLIGHT_SQL,
+        )
+        self.assertNotIn(
+            r"\\s*pgaudit",
+            _CONVERSATION_LOGGING_PREFLIGHT_SQL,
+        )
+        drifts = (
+            ("api_can_create_database", True),
+            ("requester_can_login", True),
+            ("requester_direct_member_count", 2),
+            ("api_effective_membership_count", 2),
+            ("requester_effective_membership_count", 1),
+            ("requester_admin_option", True),
+            ("requester_inherit_option", True),
+            ("requester_set_option", False),
+            ("brains_app_requester_member", True),
+            ("log_statement_disabled", False),
+            ("error_parameter_logging_disabled", False),
+            ("duration_logging_disabled", False),
+            ("duration_statement_logging_disabled", False),
+            ("duration_sample_logging_disabled", False),
+            ("transaction_sampling_disabled", False),
+            ("ordinary_parameter_logging_disabled", False),
+            ("pgaudit_not_preloaded", False),
+            ("auto_explain_parameter_logging_disabled", False),
+            ("schema_owner_exact", False),
+            ("schema_acl_entry_count", 6),
+            ("schema_owner_grantable_entry_count", 0),
+            ("schema_runtime_grantable_entry_count", 1),
+            ("schema_acl_exact", False),
+            ("expected_function_identity_exact", False),
+            ("requester_execute_count", 3),
+            ("expected_function_acl_entry_count", 5),
+            ("expected_function_owner_grantable_entry_count", 0),
+            ("expected_function_requester_grantable_entry_count", 1),
+            ("expected_function_acl_exact", False),
+            (
+                "unexpected_public_api_or_requester_security_definer_count",
+                1,
+            ),
+            ("chat_root_identity_exact", False),
+            ("private_table_identity_exact", False),
+            ("api_or_requester_has_relation_privilege", True),
+            ("public_api_or_requester_direct_relation_grant", True),
+            ("api_or_requester_has_column_privilege", True),
+            ("public_api_or_requester_direct_column_grant", True),
+            ("api_or_requester_has_sequence_privilege", True),
+            ("public_api_or_requester_direct_sequence_grant", True),
+        )
+        for field_name, drifted_value in drifts:
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(HttpServicePreflightError):
+                    await _preflight_conversation_connection(
+                        FakeConversationConnection(
+                            overrides={field_name: drifted_value}
+                        ),
+                        BRIDGE_CATALOG_SHA256,
+                    )
+
+        with self.assertRaises(HttpServicePreflightError):
+            await _preflight_conversation_connection(
+                FakeConversationConnection(),
+                "f" * 64,
+            )
+        with self.assertRaises(HttpServicePreflightError):
+            await _preflight_conversation_connection(
+                FakeConversationConnection(
+                    catalog_rows=[
+                        *CONVERSATION_CATALOG_ROWS,
+                        dict(CONVERSATION_CATALOG_ROWS[0]),
+                    ]
+                ),
+                BRIDGE_CATALOG_SHA256,
+            )
+
+    async def test_source_preflight_failure_closes_both_pools(self) -> None:
+        successor_pool = FakePool(FakeConnection())
+        conversation_pool = FakePool(
+            FakeConversationConnection(
+                overrides={"requester_set_option": False}
+            )
+        )
+        factory = RecordingPoolFactory(successor_pool, conversation_pool)
+        service = create_governed_memory_http_service(
+            active_settings(),
+            pool_factory=factory,
+            actor_resolver_factory=RecordingActorResolverFactory(),
+            authority_verifier=RecordingAuthorityVerifier(),
+            token_clock=lambda: NOW,
+        )
+        with self.assertRaises(HttpServicePreflightError):
+            async with service.router.lifespan_context(service):
+                self.fail("source_preflight_failure_must_not_enter_lifespan")
+        self.assertEqual(len(factory.calls), 2)
+        self.assertEqual(successor_pool.close_calls, 1)
+        self.assertEqual(conversation_pool.close_calls, 1)
+        self.assertEqual((await asgi_request(service, "GET", "/readyz"))[0], 503)
+
+    async def test_standalone_proposal_jsonb_is_decoded_once(self) -> None:
+        connection = FakeConnection()
+        conversation_connection = FakeConversationConnection()
+        pool = FakePool(connection)
+        conversation_pool = FakePool(conversation_connection)
+        service = create_governed_memory_http_service(
+            active_settings(),
+            pool_factory=RecordingPoolFactory(pool, conversation_pool),
             actor_resolver_factory=RecordingActorResolverFactory(),
             authority_verifier=RecordingAuthorityVerifier(),
             token_clock=lambda: NOW,
@@ -619,6 +1440,7 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body, [expected])
         self.assertIsInstance(body[0]["object_literal"], str)
         self.assertEqual(pool.close_calls, 1)
+        self.assertEqual(conversation_pool.close_calls, 1)
 
     async def test_preflight_failure_closes_pool_without_becoming_ready(self) -> None:
         connection = FakeConnection(database_name="wrong_database")
@@ -640,3 +1462,5 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    _CONVERSATION_LOGGING_PREFLIGHT_SQL,
+    _conversation_bridge_catalog_sha256,

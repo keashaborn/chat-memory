@@ -29,6 +29,7 @@ from tools.governed_memory_release.build_candidate_runtime import (
 )
 from tools.governed_memory_release.release_guard import (
     EXACT_TARGETS,
+    EXPECTED_ACTIVATION_BLOCKERS,
     ReleaseGuardError,
     evaluate_release_observation,
     verify_candidate_artifacts,
@@ -37,47 +38,6 @@ from tools.governed_memory_release.release_guard import (
 
 ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "ops" / "governed_memory"
-
-EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS = {
-    "public.active_thread_selection": [
-        {
-            "constraint_name": "active_thread_selection_owner_thread_fk",
-            "child_columns": ["owner_user_id", "thread_id"],
-            "parent_table": "public.threads",
-            "parent_columns": ["owner_user_id", "id"],
-            "validated": True,
-            "delete_action": "cascade",
-        }
-    ],
-    "trusted_web.response_transcript_v1": [
-        {
-            "constraint_name": "response_transcript_v1_user_chat_log_id_fkey",
-            "child_columns": [
-                "user_chat_log_id",
-                "owner_user_id",
-                "thread_id",
-            ],
-            "parent_table": "public.chat_log",
-            "parent_columns": ["id", "owner_user_id", "thread_id"],
-            "validated": True,
-            "delete_action": "cascade",
-        },
-        {
-            "constraint_name": (
-                "response_transcript_v1_assistant_chat_log_id_fkey"
-            ),
-            "child_columns": [
-                "assistant_chat_log_id",
-                "owner_user_id",
-                "thread_id",
-            ],
-            "parent_table": "public.chat_log",
-            "parent_columns": ["id", "owner_user_id", "thread_id"],
-            "validated": True,
-            "delete_action": "cascade",
-        },
-    ],
-}
 
 
 def observation(operation: str, *, state: str) -> dict[str, object]:
@@ -102,304 +62,495 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class ReleaseArtifactTests(unittest.TestCase):
-    def test_machine_readable_artifacts_verify_offline(self) -> None:
+class Phase7CReleaseArtifactTests(unittest.TestCase):
+    def test_phase7c_artifacts_verify_offline(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
-            "governed-memory-release-artifact-verification-v1",
+            "governed-memory-release-artifact-verification-v2",
         )
+        self.assertEqual(
+            result["phase"],
+            "phase7c_disposable_revalidated_inactive_installation_package",
+        )
+        self.assertEqual(result["installation_package_artifact_count"], 46)
         self.assertEqual(result["external_calls"], 0)
+        self.assertEqual(result["commands_executed"], 0)
         self.assertFalse(result["production_state_changed"])
-        self.assertEqual(len(result["artifact_sha256"]), 14)
+        self.assertFalse(result["installation_authorized"])
+        self.assertFalse(result["activation_authorized"])
+        self.assertFalse(result["disposable_revalidation_required"])
         self.assertIn(
-            "ops/governed_memory/systemd/governed-memory-worker.service.in",
+            "ops/governed_memory/installation/package_manifest.json",
             result["artifact_sha256"],
         )
         self.assertIn(
-            "ops/governed_memory/runtime_build_receipt.json",
+            "ops/governed_memory/history/phase6e/disposable_proof_receipt.json",
             result["artifact_sha256"],
         )
         self.assertIn(
-            "ops/governed_memory/history/phase6b/runtime_build_receipt.json",
+            "ops/governed_memory/phase7c_disposable_proof_receipt.json",
             result["artifact_sha256"],
         )
-        self.assertIn(
-            "ops/governed_memory/runtime_manifest.json",
+        self.assertNotIn(
+            "ops/governed_memory/phase6e_disposable_proof_receipt.json",
             result["artifact_sha256"],
         )
-        self.assertIn(
-            "ops/governed_memory/phase6b_disposable_proof_receipt.json",
-            result["artifact_sha256"],
+        self.assertEqual(
+            result["artifact_sha256"][
+                "tools/governed_memory_validation/run_disposable_successor.sh"
+            ],
+            "2acd2fb134d834b04f9b41448a2cfead"
+            "7712ce846dab38b001c1a8647eb9796b",
         )
-        self.assertIn(
-            "governed-memory-migrations/manifest.json",
-            result["artifact_sha256"],
-        )
-        self.assertIn(
-            "ops/governed_memory/runtime-requirements.lock",
-            result["artifact_sha256"],
-        )
-        self.assertIn(
-            "ops/governed_memory/build-requirements.lock",
-            result["artifact_sha256"],
-        )
-        self.assertIn(
-            "tools/governed_memory_validation/runtime_packages.json",
-            result["artifact_sha256"],
+        self.assertEqual(
+            result["artifact_sha256"][
+                "tools/governed_memory_validation/postgres_bootstrap.pgsql"
+            ],
+            "0c28d2e444cddea0b61e8ea7ac9f6084"
+            "b06e2038beb06bb65e754c4712eeb857",
         )
 
-    def test_runtime_manifest_or_lock_drift_is_rejected(self) -> None:
+    def test_owner_preflight_restricted_cluster_read_is_rejected(self) -> None:
+        original = (
+            ROOT / "governed-memory-migrations" / "roles_preflight.pgsql"
+        ).read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            migration_root = Path(directory)
+            (migration_root / "roles_preflight.pgsql").write_text(
+                original
+                + "\nSELECT pg_catalog.current_setting('shared_preload_libraries');\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                release_guard, "MIGRATION_ROOT", migration_root
+            ), self.assertRaisesRegex(
+                ReleaseGuardError, "release_logging_preflight_boundary_invalid"
+            ):
+                release_guard._verify_installation_text_contracts()
+
+    def test_runtime_manifest_semantic_drift_is_rejected(self) -> None:
         original = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
-        migration_manifest_sha256 = hashlib.sha256(
-            release_guard.MIGRATION_MANIFEST.read_bytes()
-        ).hexdigest()
-        migration_receipt = {
-            "manifest_sha256": migration_manifest_sha256,
-            "validation_state": "phase6e_disposable_deletion_proof_candidate",
-            "result": "verified",
-        }
-        variants = []
-        redirected = json.loads(json.dumps(original))
-        redirected["validation_runtime"]["current_build_receipt"] = (
-            "ops/governed_memory/history/phase5/runtime_build_receipt.json"
-        )
-        variants.append(redirected)
-        activated = json.loads(json.dumps(original))
-        activated["activation"]["production_authorized"] = True
-        activated["activation"]["running_services"] = [
-            "governed-memory-worker.service"
-        ]
-        activated["release_guard"]["create_allowed"] = True
-        activated["production_state_changed"] = True
-        variants.append(activated)
-        widened = json.loads(json.dumps(original))
-        widened["ingestion"]["source_erasure_direct_delete_roots"].append(
-            "memory.project_thread_binding_event"
-        )
-        variants.append(widened)
-        permissive = json.loads(json.dumps(original))
-        permissive["ingestion"]["source_erasure_unknown_dependency_action"] = (
-            "continue_on_unknown_dependency"
-        )
-        variants.append(permissive)
-        blocker_removed = json.loads(json.dumps(original))
-        blocker_removed["activation"]["blockers"].remove(
-            "legacy_project_memory_thread_dependencies_not_separated"
-        )
-        variants.append(blocker_removed)
-        transcript_blocker_removed = json.loads(json.dumps(original))
-        transcript_blocker_removed["activation"]["blockers"].remove(
-            "trusted_web_transcript_composite_owner_thread_lineage_not_installed"
-        )
-        variants.append(transcript_blocker_removed)
-        legacy_chat_blocker_removed = json.loads(json.dumps(original))
-        legacy_chat_blocker_removed["activation"]["blockers"].remove(
-            "legacy_chat_owner_thread_lineage_not_remediated"
-        )
-        variants.append(legacy_chat_blocker_removed)
-        weak_transcript_lineage = json.loads(json.dumps(original))
-        weak_transcript_lineage["ingestion"][
-            "source_erasure_validated_auxiliary_foreign_keys"
-        ]["trusted_web.response_transcript_v1"][0]["child_columns"] = [
-            "user_chat_log_id"
-        ]
-        variants.append(weak_transcript_lineage)
-        weak_transcript_allowed = json.loads(json.dumps(original))
-        weak_transcript_allowed["ingestion"][
-            "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
-        ] = True
-        variants.append(weak_transcript_allowed)
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        variants: list[dict[str, object]] = []
+        for mutate in (
+            lambda value: value["activation"].update(
+                {"production_authorized": True}
+            ),
+            lambda value: value["activation"]["running_services"].append(
+                "governed-memory-http.service"
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"current_full_proof_complete": False}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"disposable_revalidation_required": True}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"current_proof_receipt": None}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"production_data_read": True}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"provider_external_calls": 1}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"final_resources_absent": False}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"runner_path": "tools/unsealed-disposable-runner.sh"}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"runner_sha256": "0" * 64}
+            ),
+            lambda value: value["disposable_validation"].update(
+                {"runner_sealed": False}
+            ),
+            lambda value: value["http_runtime"].update(
+                {"source_logging_parameter_remediation_applied": True}
+            ),
+            lambda value: value["ingestion"].update(
+                {
+                    "source_erasure_structured_lifeswitch_data_or_accounts_deleted": True
+                }
+            ),
+        ):
+            variant = json.loads(json.dumps(original))
+            mutate(variant)
+            variants.append(variant)
+        with tempfile.TemporaryDirectory() as directory:
             for index, variant in enumerate(variants):
-                path = root / f"runtime-manifest-{index}.json"
-                path.write_text(
-                    json.dumps(variant, sort_keys=True),
-                    encoding="utf-8",
-                )
-                variant_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+                path = Path(directory) / f"runtime-{index}.json"
+                path.write_text(json.dumps(variant), encoding="utf-8")
                 with self.subTest(index=index), mock.patch.object(
                     release_guard, "RUNTIME_MANIFEST", path
-                ), mock.patch.object(
-                    release_guard,
-                    "EXPECTED_RUNTIME_MANIFEST_SHA256",
-                    variant_sha256,
-                ), mock.patch.object(
-                    release_guard,
-                    "EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256",
-                    migration_manifest_sha256,
-                ), mock.patch.object(
-                    release_guard,
-                    "verify_migration_manifest",
-                    return_value=migration_receipt,
-                ):
-                    with self.assertRaisesRegex(
-                        ReleaseGuardError,
-                        "release_runtime_contract_invalid",
-                    ):
-                        verify_candidate_artifacts()
-
-            lock = root / "runtime-requirements.lock"
-            lock.write_text("drift\n", encoding="utf-8")
-            with mock.patch.object(
-                release_guard, "RUNTIME_LOCK", lock
-            ), mock.patch.object(
-                release_guard,
-                "EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256",
-                migration_manifest_sha256,
-            ), mock.patch.object(
-                release_guard,
-                "verify_migration_manifest",
-                return_value=migration_receipt,
-            ):
-                with self.assertRaisesRegex(
+                ), self.assertRaisesRegex(
                     ReleaseGuardError,
-                    "release_runtime_dependency_invalid",
+                    "release_(runtime_manifest|source_erasure_scope)_invalid",
                 ):
                     verify_candidate_artifacts()
 
-    def test_disposable_proof_and_migration_state_drift_are_rejected(self) -> None:
+    def test_disposable_runner_tamper_fails_release_guard(self) -> None:
+        runner = (
+            ROOT
+            / "tools"
+            / "governed_memory_validation"
+            / "run_disposable_successor.sh"
+        ).resolve()
+        original_sha256 = release_guard._sha256
+
+        def altered_sha256(path: Path) -> str:
+            if path.resolve() == runner:
+                return "0" * 64
+            return original_sha256(path)
+
+        with mock.patch.object(
+            release_guard, "_sha256", side_effect=altered_sha256
+        ), self.assertRaisesRegex(
+            ReleaseGuardError, "release_artifact_hash_mismatch"
+        ):
+            verify_candidate_artifacts()
+
+    def test_postgres_bootstrap_tamper_fails_release_guard(self) -> None:
+        bootstrap = (
+            ROOT
+            / "tools"
+            / "governed_memory_validation"
+            / "postgres_bootstrap.pgsql"
+        ).resolve()
+        original_sha256 = release_guard._sha256
+
+        def altered_sha256(path: Path) -> str:
+            if path.resolve() == bootstrap:
+                return "0" * 64
+            return original_sha256(path)
+
+        with mock.patch.object(
+            release_guard, "_sha256", side_effect=altered_sha256
+        ), self.assertRaisesRegex(
+            ReleaseGuardError, "release_artifact_hash_mismatch"
+        ):
+            verify_candidate_artifacts()
+
+    def test_runtime_receipt_semantic_drift_is_rejected(self) -> None:
         original = json.loads(
-            (OPS / "phase6b_disposable_proof_receipt.json").read_text(
-                encoding="ascii"
-            )
+            (OPS / "runtime_build_receipt.json").read_text(encoding="ascii")
         )
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "phase6b-proof.json"
-            original["proof_receipt"]["production_data_read"] = True
-            path.write_text(json.dumps(original), encoding="ascii")
-            drift_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-            with mock.patch.object(
-                release_guard, "PHASE6B_DISPOSABLE_PROOF_RECEIPT", path
-            ), mock.patch.object(
-                release_guard,
-                "EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256",
-                drift_sha256,
-            ):
-                with self.assertRaisesRegex(
-                    ReleaseGuardError,
-                    "release_disposable_proof_invalid",
+        variants = []
+        for key, value in (
+            ("network_calls", 1),
+            ("provider_calls", 1),
+            ("legacy_environment_imported", True),
+            ("source_tree_sha256", "0" * 64),
+            ("project_wheel_sha256", "0" * 64),
+        ):
+            variant = json.loads(json.dumps(original))
+            variant[key] = value
+            variants.append(variant)
+        with tempfile.TemporaryDirectory() as directory:
+            for index, variant in enumerate(variants):
+                path = Path(directory) / f"receipt-{index}.json"
+                path.write_text(json.dumps(variant), encoding="ascii")
+                with self.subTest(index=index), mock.patch.object(
+                    release_guard, "RUNTIME_BUILD_RECEIPT", path
+                ), self.assertRaisesRegex(
+                    ReleaseGuardError, "release_runtime_contract_invalid"
                 ):
                     verify_candidate_artifacts()
 
-        wrong_state = {
-            "manifest_sha256": (
-                release_guard.EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256
-            ),
-            "validation_state": "disposable_validated",
+    def test_package_and_migration_identity_drift_are_rejected(self) -> None:
+        bad_package = {
+            "package_manifest_sha256": "0" * 64,
+            "evaluator_mutating_commands_executed": 0,
+            "evaluator_provider_calls": 0,
+            "evaluator_state_changed": False,
+        }
+        with mock.patch.object(
+            release_guard,
+            "verify_installation_package",
+            return_value=bad_package,
+        ), self.assertRaisesRegex(
+            ReleaseGuardError, "release_installation_package_invalid"
+        ):
+            verify_candidate_artifacts()
+
+        bad_migration = {
+            "schema_version": "governed-memory-migration-verification-v4",
             "result": "verified",
+            "validation_state": "phase7b_static_unit_validated_disposable_revalidation_required",
+            "manifest_sha256": release_guard.EXPECTED_MIGRATION_MANIFEST_SHA256,
+            "migration_package_id_sha256": (
+                release_guard.EXPECTED_MIGRATION_PACKAGE_ID_SHA256
+            ),
+            "file_count": 15,
         }
         with mock.patch.object(
             release_guard,
             "verify_migration_manifest",
-            return_value=wrong_state,
+            return_value=bad_migration,
+        ), self.assertRaisesRegex(
+            ReleaseGuardError, "release_migration_manifest_invalid"
         ):
-            with self.assertRaisesRegex(
-                ReleaseGuardError,
-                "release_migration_manifest_invalid",
-            ):
-                verify_candidate_artifacts()
+            verify_candidate_artifacts()
 
-    def test_historical_or_semantically_malformed_runtime_receipt_is_rejected(
+    def test_release_json_loader_is_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, payload in (
+                ("duplicate.json", b'{"a":1,"a":2}'),
+                ("nan.json", b'{"a":NaN}'),
+                ("infinite.json", b'{"a":Infinity}'),
+            ):
+                path = root / name
+                path.write_bytes(payload)
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    ReleaseGuardError, "release_json_invalid"
+                ):
+                    release_guard._load_json(path)
+
+    def test_phase6e_is_historical_and_retired_current_paths_are_absent(
         self,
     ) -> None:
-        historical = OPS / "history" / "phase5" / "runtime_build_receipt.json"
-        with mock.patch.object(
-            release_guard, "RUNTIME_BUILD_RECEIPT", historical
-        ):
-            with self.assertRaisesRegex(
-                ReleaseGuardError,
-                "release_runtime_contract_invalid",
-            ):
-                verify_candidate_artifacts()
-
-        original_receipt = json.loads(
-            (OPS / "runtime_build_receipt.json").read_text(encoding="ascii")
+        self.assertTrue(
+            (OPS / "history" / "phase6e" / "runtime_build_receipt.json").is_file()
         )
-        original_manifest = json.loads(
+        self.assertTrue(
+            (OPS / "history" / "phase6e" / "disposable_proof_receipt.json").is_file()
+        )
+        self.assertFalse(
+            (OPS / "phase6e_disposable_proof_receipt.json").exists()
+        )
+        self.assertTrue((OPS / "phase7c_disposable_proof_receipt.json").is_file())
+        self.assertFalse((OPS / "history" / "phase7c").exists())
+        self.assertFalse(
+            (
+                OPS
+                / "installation"
+                / "postgres"
+                / "canonical_bootstrap_finalize.pgsql"
+            ).exists()
+        )
+
+    def test_blockers_and_chat_only_scope_are_aligned(self) -> None:
+        runtime = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
-        variants: list[tuple[str, dict[str, object]]] = []
-        for label, key, value in (
-            ("python", "python_version", "3.12.2"),
-            ("platform", "platform", "linux_aarch64"),
-            ("runtime_lock", "runtime_lock", "history/phase5/runtime.lock"),
-            ("build_lock", "build_lock", "history/phase5/build.lock"),
-            (
-                "project",
-                "project_distribution",
-                {"name": "legacy-memory", "version": "0.0.0"},
-            ),
-        ):
-            variant = json.loads(json.dumps(original_receipt))
-            variant[key] = value
-            variants.append((label, variant))
-        packages = json.loads(json.dumps(original_receipt))
-        packages["runtime_packages"]["fastapi"] = "0.1.0"
-        variants.append(("packages", packages))
+        bootstrap = json.loads(
+            (OPS / "bootstrap_contract.json").read_text(encoding="utf-8")
+        )
+        pilot = json.loads(
+            (OPS / "pilot_contract.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (ROOT / "governed-memory-migrations" / "schema_contract.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(EXPECTED_ACTIVATION_BLOCKERS), 33)
+        self.assertNotIn(
+            "phase7b_disposable_revalidation_required",
+            EXPECTED_ACTIVATION_BLOCKERS,
+        )
+        self.assertEqual(
+            runtime["activation"]["blockers"], EXPECTED_ACTIVATION_BLOCKERS
+        )
+        self.assertEqual(
+            bootstrap["create_policy"]["unresolved_creation_prerequisites"],
+            EXPECTED_ACTIVATION_BLOCKERS,
+        )
+        self.assertEqual(pilot["start_blockers"], EXPECTED_ACTIVATION_BLOCKERS)
+        self.assertEqual(
+            schema["hard_requirements"]["production_activation_blockers"],
+            EXPECTED_ACTIVATION_BLOCKERS,
+        )
+        ingestion = runtime["ingestion"]
+        self.assertEqual(
+            ingestion["source_erasure_direct_delete_roots"],
+            ["public.chat_log", "public.chat_attachments", "public.threads"],
+        )
+        self.assertFalse(
+            ingestion[
+                "source_erasure_structured_lifeswitch_data_or_accounts_deleted"
+            ]
+        )
+        self.assertFalse(
+            ingestion[
+                "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
+            ]
+        )
+        self.assertFalse(pilot["source_erasure"]["accounts_deleted"])
+        self.assertFalse(
+            pilot["source_erasure"]["structured_lifeswitch_data_deleted"]
+        )
 
+    def _assert_phase7c_proof_rejected(
+        self,
+        proof: dict[str, object],
+        **expected_constants: object,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for label, receipt in variants:
-                receipt_path = root / f"runtime-receipt-{label}.json"
-                receipt_path.write_text(
-                    json.dumps(receipt, sort_keys=True),
-                    encoding="ascii",
+            path = Path(temporary) / "phase7c-proof.json"
+            path.write_text(
+                json.dumps(
+                    proof,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                ),
+                encoding="ascii",
+            )
+            proof_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+            with mock.patch.multiple(
+                release_guard,
+                PHASE7C_DISPOSABLE_PROOF=path,
+                EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256=proof_sha256,
+                **expected_constants,
+            ):
+                with self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    "release_phase7c_disposable_proof_invalid",
+                ):
+                    verify_candidate_artifacts()
+
+    def test_phase7c_proof_shapes_are_closed(self) -> None:
+        original = json.loads(
+            (OPS / "phase7c_disposable_proof_receipt.json").read_text(
+                encoding="ascii"
+            )
+        )
+        variants: list[tuple[str, dict[str, object]]] = []
+        outer = json.loads(json.dumps(original))
+        outer["unexpected"] = True
+        variants.append(("outer", outer))
+        nested = json.loads(json.dumps(original))
+        nested["http_vertical_slice_receipt"]["unexpected"] = True
+        variants.append(("nested", nested))
+        missing_outer = json.loads(json.dumps(original))
+        del missing_outer["phase"]
+        variants.append(("missing_outer", missing_outer))
+        missing_nested = json.loads(json.dumps(original))
+        del missing_nested["deletion_receipt"]["schema"]
+        variants.append(("missing_nested", missing_nested))
+
+        for label, variant in variants:
+            with self.subTest(label=label):
+                self._assert_phase7c_proof_rejected(variant)
+
+    def test_release_json_loader_rejects_duplicate_and_nonfinite_values(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "invalid.json"
+            for label, payload in (
+                ("duplicate", '{"value":1,"value":2}'),
+                ("nan", '{"value":NaN}'),
+                ("infinity", '{"value":Infinity}'),
+            ):
+                path.write_text(payload, encoding="ascii")
+                with self.subTest(label=label), self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    "release_json_invalid",
+                ):
+                    release_guard._load_json(path)
+
+    def test_phase7c_proof_parent_identity_drift_is_rejected(self) -> None:
+        original = json.loads(
+            (OPS / "phase7c_disposable_proof_receipt.json").read_text(
+                encoding="ascii"
+            )
+        )
+        for field, value in (
+            ("candidate_head", "a" * 40),
+            ("candidate_tree", "b" * 40),
+        ):
+            variant = json.loads(json.dumps(original))
+            variant["proof_receipt"][field] = value
+            proof_sha256 = release_guard._canonical_json_sha256(
+                variant["proof_receipt"]
+            )
+            variant["proof_receipt_canonical_sha256"] = proof_sha256
+            with self.subTest(field=field):
+                self._assert_phase7c_proof_rejected(
+                    variant,
+                    EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256=proof_sha256,
                 )
-                receipt_sha256 = hashlib.sha256(
-                    receipt_path.read_bytes()
-                ).hexdigest()
-                manifest = json.loads(json.dumps(original_manifest))
-                manifest["validation_runtime"][
-                    "current_build_receipt_sha256"
-                ] = receipt_sha256
-                manifest_path = root / f"runtime-manifest-{label}.json"
-                manifest_path.write_text(
-                    json.dumps(manifest, sort_keys=True),
-                    encoding="utf-8",
+
+    def test_phase7c_nested_receipt_hash_tamper_is_rejected(self) -> None:
+        original = json.loads(
+            (OPS / "phase7c_disposable_proof_receipt.json").read_text(
+                encoding="ascii"
+            )
+        )
+        original["http_vertical_slice_receipt"]["production_data_read"] = True
+        self._assert_phase7c_proof_rejected(original)
+
+    def test_phase7c_safety_semantic_drift_is_rejected(self) -> None:
+        original = json.loads(
+            (OPS / "phase7c_disposable_proof_receipt.json").read_text(
+                encoding="ascii"
+            )
+        )
+        variants = (
+            ("proof_network_call", "proof_receipt", "external_network_calls", 1),
+            (
+                "http_production_read",
+                "http_vertical_slice_receipt",
+                "production_data_read",
+                True,
+            ),
+            (
+                "lifeswitch_snapshot",
+                "deletion_receipt",
+                "lifeswitch_snapshot_bytes",
+                2766,
+            ),
+            (
+                "project_conflict_status",
+                "deletion_receipt",
+                "typed_project_conflict_status",
+                200,
+            ),
+            (
+                "resilience_crash_count",
+                "deletion_resilience_receipt",
+                "crash_boundary_count",
+                8,
+            ),
+        )
+        nested_bindings = {
+            "http_vertical_slice_receipt": (
+                "integration_receipt_sha256",
+                "EXPECTED_PHASE7C_HTTP_RECEIPT_SHA256",
+            ),
+            "deletion_receipt": (
+                "deletion_receipt_sha256",
+                "EXPECTED_PHASE7C_DELETION_RECEIPT_SHA256",
+            ),
+            "deletion_resilience_receipt": (
+                "deletion_resilience_receipt_sha256",
+                "EXPECTED_PHASE7C_RESILIENCE_RECEIPT_SHA256",
+            ),
+        }
+        for label, section, field, value in variants:
+            variant = json.loads(json.dumps(original))
+            variant[section][field] = value
+            constants: dict[str, object] = {}
+            if section in nested_bindings:
+                proof_field, constant = nested_bindings[section]
+                nested_sha256 = release_guard._canonical_json_sha256(
+                    variant[section]
                 )
-                manifest_sha256 = hashlib.sha256(
-                    manifest_path.read_bytes()
-                ).hexdigest()
-                patches = (
-                    mock.patch.object(
-                        release_guard,
-                        "RUNTIME_BUILD_RECEIPT",
-                        receipt_path,
-                    ),
-                    mock.patch.object(
-                        release_guard,
-                        "EXPECTED_PHASE6E_RUNTIME_RECEIPT_SHA256",
-                        receipt_sha256,
-                    ),
-                    mock.patch.object(
-                        release_guard,
-                        "RUNTIME_MANIFEST",
-                        manifest_path,
-                    ),
-                    mock.patch.object(
-                        release_guard,
-                        "EXPECTED_RUNTIME_MANIFEST_SHA256",
-                        manifest_sha256,
-                    ),
-                    mock.patch.object(
-                        release_guard,
-                        "_verify_historical_phase6b_proof",
-                        return_value=None,
-                    ),
-                )
-                with self.subTest(label=label), patches[0], patches[1], patches[
-                    2
-                ], patches[3], patches[4]:
-                    with self.assertRaisesRegex(
-                        ReleaseGuardError,
-                        "release_runtime_contract_invalid",
-                    ):
-                        verify_candidate_artifacts()
+                variant["proof_receipt"][proof_field] = nested_sha256
+                constants[constant] = nested_sha256
+            proof_sha256 = release_guard._canonical_json_sha256(
+                variant["proof_receipt"]
+            )
+            variant["proof_receipt_canonical_sha256"] = proof_sha256
+            constants["EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256"] = proof_sha256
+            with self.subTest(label=label):
+                self._assert_phase7c_proof_rejected(variant, **constants)
 
     def test_runtime_and_build_locks_are_closed_and_exact(self) -> None:
         runtime = _parse_hash_lock(RUNTIME_LOCK)
@@ -455,16 +606,14 @@ class ReleaseArtifactTests(unittest.TestCase):
 
             (package / "unexpected.txt").write_text("stale", encoding="utf-8")
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_source_inventory_invalid",
+                CandidateBuildError, "candidate_source_inventory_invalid"
             ):
                 _package_source_tree_sha256(package)
             (package / "unexpected.txt").unlink()
 
             first_asset.unlink()
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_source_inventory_invalid",
+                CandidateBuildError, "candidate_source_inventory_invalid"
             ):
                 _package_source_tree_sha256(package)
 
@@ -489,24 +638,21 @@ class ReleaseArtifactTests(unittest.TestCase):
             stale.write_bytes(b"stale")
             stale.chmod(0o600)
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_runtime_wheelhouse_invalid",
+                CandidateBuildError, "candidate_runtime_wheelhouse_invalid"
             ):
                 _verify_runtime_wheelhouse(wheelhouse, packages)
             stale.unlink()
 
             os.chmod(wheelhouse, 0o775)
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_runtime_wheelhouse_invalid",
+                CandidateBuildError, "candidate_runtime_wheelhouse_invalid"
             ):
                 _verify_runtime_wheelhouse(wheelhouse, packages)
             os.chmod(wheelhouse, 0o700)
 
             first.chmod(0o660)
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_runtime_wheelhouse_invalid",
+                CandidateBuildError, "candidate_runtime_wheelhouse_invalid"
             ):
                 _verify_runtime_wheelhouse(wheelhouse, packages)
 
@@ -551,9 +697,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
 
             def record_hash(value: bytes) -> str:
-                encoded = base64.urlsafe_b64encode(
-                    hashlib.sha256(value).digest()
-                )
+                encoded = base64.urlsafe_b64encode(hashlib.sha256(value).digest())
                 return "sha256=" + encoded.rstrip(b"=").decode("ascii")
 
             def write_wheel(*, corrupt_asset: bool = False) -> None:
@@ -571,11 +715,9 @@ class ReleaseArtifactTests(unittest.TestCase):
                 members.update(
                     {
                         f"{DIST_INFO_PREFIX}METADATA": metadata.encode("ascii"),
-                        f"{DIST_INFO_PREFIX}WHEEL": wheel_metadata.encode(
+                        f"{DIST_INFO_PREFIX}WHEEL": wheel_metadata.encode("ascii"),
+                        f"{DIST_INFO_PREFIX}entry_points.txt": entry_points.encode(
                             "ascii"
-                        ),
-                        f"{DIST_INFO_PREFIX}entry_points.txt": (
-                            entry_points.encode("ascii")
                         ),
                         f"{DIST_INFO_PREFIX}top_level.txt": b"rag_engine\n",
                     }
@@ -588,344 +730,17 @@ class ReleaseArtifactTests(unittest.TestCase):
                     writer.writerow((name, record_hash(value), str(len(value))))
                 writer.writerow((record_name, "", ""))
                 members[record_name] = output.getvalue().encode("utf-8")
-
                 with zipfile.ZipFile(wheel, "w") as archive:
                     for name in sorted(members):
                         archive.writestr(name, members[name])
 
             write_wheel()
             _verify_project_wheel(wheel, expected_package_root=package)
-
             write_wheel(corrupt_asset=True)
             with self.assertRaisesRegex(
-                CandidateBuildError,
-                "candidate_project_wheel_invalid",
+                CandidateBuildError, "candidate_project_wheel_invalid"
             ):
                 _verify_project_wheel(wheel, expected_package_root=package)
-
-    def test_bootstrap_uses_separate_fresh_exact_stores(self) -> None:
-        contract = json.loads(
-            (OPS / "bootstrap_contract.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(contract["state"], "inactive_candidate_no_resources_created")
-        self.assertEqual(contract["api"]["bind"], "172.31.32.171:8091")
-        self.assertEqual(
-            contract["api"]["allowed_source_ipv4"],
-            ["172.31.43.160/32"],
-        )
-        self.assertFalse(contract["isolation"]["reuse_existing_postgres_daemon"])
-        self.assertFalse(contract["isolation"]["reuse_existing_qdrant_daemon"])
-        self.assertEqual(
-            contract["postgresql"]["required_settings"],
-            {
-                "log_parameter_max_length": "0",
-                "log_parameter_max_length_on_error": "0",
-            },
-        )
-        self.assertEqual(
-            contract["conversation_bridge"]["outbox"],
-            "memory_ingest_private.memory_ingest_outbox",
-        )
-        self.assertFalse(contract["conversation_bridge"]["historical_scan_allowed"])
-        self.assertFalse(contract["conversation_bridge"]["base_table_select_for_worker_allowed"])
-        self.assertEqual(
-            contract["conversation_bridge"][
-                "pilot_capture_limit_per_owner_rolling_24h"
-            ],
-            20,
-        )
-        self.assertEqual(
-            contract["conversation_bridge"]["pilot_capture_limit_result"],
-            "pilot_limit_reached_null_outbox_id",
-        )
-        self.assertEqual(
-            contract["candidate_implementation_status"][
-                "owner_claim_fact_detail"
-            ],
-            "implemented_candidate_phase6d_not_yet_disposable_"
-            "validated_not_production_applied",
-        )
-        self.assertEqual(
-            contract["candidate_implementation_status"]["runtime"],
-            "phase6d_inactive_static_candidate_runtime_rebuild_"
-            "and_phase6e_proof_pending",
-        )
-        self.assertEqual(
-            contract["candidate_implementation_status"]["qdrant_adapter"],
-            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
-            "current_phase6e_proof_pending",
-        )
-        self.assertEqual(
-            contract["candidate_implementation_status"]["pilot_marker"],
-            "implemented_phase6d_not_yet_disposable_validated_"
-            "not_production_applied",
-        )
-        self.assertFalse(contract["qdrant"]["real_disposable_compatibility_verified"])
-        self.assertFalse(contract["qdrant"]["persistent_pilot_approved"])
-        self.assertNotIn(
-            "owner_claim_fact_detail_api_not_implemented",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertNotIn(
-            "final_phase6b_runtime_rebuild_and_receipt_pending",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertNotIn(
-            "qdrant_v1_19_0_real_disposable_compatibility_pending",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertNotIn(
-            "pilot_marker_disposable_proof_pending",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertEqual(
-            contract["cleanup_policy"]["unresolved_cleanup_prerequisites"],
-            [],
-        )
-        self.assertFalse(
-            contract["cleanup_policy"]["current_cleanup_authorized"]
-        )
-        self.assertFalse(contract["production_state_changed"])
-        erasure = contract["conversation_bridge"]
-        self.assertEqual(
-            erasure["source_erasure_selectors"],
-            ["thread", "message_tail", "recent", "all_conversations"],
-        )
-        self.assertEqual(
-            erasure["source_erasure_direct_delete_roots"],
-            ["public.chat_log", "public.chat_attachments", "public.threads"],
-        )
-        self.assertEqual(
-            erasure["source_erasure_allowed_auxiliary_effects"],
-            [
-                "public.active_thread_selection",
-                "trusted_web.response_transcript_v1",
-            ],
-        )
-        self.assertEqual(
-            erasure["source_erasure_auxiliary_effect_authority"],
-            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
-            "foreign_keys_only",
-        )
-        self.assertEqual(
-            erasure["source_erasure_validated_auxiliary_foreign_keys"],
-            EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS,
-        )
-        self.assertFalse(
-            erasure[
-                "source_erasure_weak_single_column_transcript_foreign_keys_allowed"
-            ]
-        )
-        self.assertEqual(
-            erasure["source_erasure_unknown_dependency_action"],
-            "fail_closed_before_delete_on_unknown_foreign_key_"
-            "delete_trigger_delete_rule_or_inheritance",
-        )
-        self.assertTrue(erasure["source_erasure_exact_chat_targets_only"])
-        self.assertFalse(
-            erasure[
-                "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
-            ]
-        )
-        self.assertFalse(
-            erasure["source_erasure_structured_lifeswitch_tables_or_accounts_deleted"]
-        )
-        self.assertFalse(erasure["source_erasure_legacy_project_rows_deleted"])
-        self.assertIn(
-            "legacy_project_memory_thread_dependencies_not_separated",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertIn(
-            "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertIn(
-            "legacy_chat_owner_thread_lineage_not_remediated",
-            contract["create_policy"]["unresolved_creation_prerequisites"],
-        )
-        self.assertEqual(
-            erasure["source_erasure_status"],
-            "phase6d_inactive_static_candidate_"
-            "phase6e_disposable_proof_pending",
-        )
-
-    def test_pilot_is_bounded_blocked_and_attachment_free(self) -> None:
-        pilot = json.loads(
-            (OPS / "pilot_contract.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(
-            pilot["state"],
-            "inactive_candidate_blocked_not_authorized",
-        )
-        self.assertEqual(pilot["limits"]["maximum_owner_accounts"], 1)
-        self.assertEqual(pilot["limits"]["maximum_post_cutover_user_messages"], 20)
-        self.assertEqual(
-            pilot["limits"]["maximum_post_cutover_user_messages_enforcement"],
-            "owner_locked_all_state_outbox_count_rolling_24h_focused_static_and_adapter_tested_not_disposable_runtime_exercised",
-        )
-        self.assertFalse(pilot["eligible_input"]["old_conversations"])
-        self.assertFalse(pilot["eligible_input"]["historical_backfill"])
-        self.assertFalse(pilot["eligible_input"]["attachment_content"])
-        self.assertEqual(pilot["provider_policy"]["provider_calls_before_pilot_authorization"], 0)
-        self.assertFalse(
-            pilot["authentication"][
-                "fresh_user_check_claimed_as_immediate_signout_revocation"
-            ]
-        )
-        self.assertTrue(pilot["authentication"]["session_id_required"])
-        self.assertFalse(
-            pilot["authentication"][
-                "supabase_auth_sessions_rpc_live_verified"
-            ]
-        )
-        self.assertIn(
-            "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-            pilot["start_blockers"],
-        )
-        self.assertNotIn(
-            "qdrant_v1_19_0_real_disposable_compatibility_pending",
-            pilot["start_blockers"],
-        )
-        self.assertNotIn(
-            "durable_pilot_marker_candidate_not_applied_or_disposable_proved",
-            pilot["start_blockers"],
-        )
-        self.assertNotIn(
-            "owner_claim_fact_detail_api_not_implemented",
-            pilot["start_blockers"],
-        )
-        self.assertNotIn(
-            "final_phase6b_runtime_rebuild_and_receipt_pending",
-            pilot["start_blockers"],
-        )
-        self.assertIn(
-            "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-            pilot["start_blockers"],
-        )
-        self.assertIn(
-            "legacy_project_memory_thread_dependencies_not_separated",
-            pilot["start_blockers"],
-        )
-        self.assertIn(
-            "trusted_web_transcript_composite_owner_thread_lineage_not_installed",
-            pilot["start_blockers"],
-        )
-        self.assertIn(
-            "legacy_chat_owner_thread_lineage_not_remediated",
-            pilot["start_blockers"],
-        )
-        self.assertEqual(
-            pilot["provider_policy"]["provider_adapter_status"],
-            "strict_fake_tested_zero_real_calls",
-        )
-        self.assertEqual(
-            pilot["provider_policy"]["embedding_adapter_status"],
-            "strict_3072_fake_tested_durable_request_dispatch_marker_"
-            "current_disposable_proof_pending_zero_real_calls",
-        )
-        self.assertEqual(
-            pilot["provider_policy"]["qdrant_adapter_status"],
-            "exact_fake_tested_phase6b_real_disposable_proof_historical_"
-            "current_phase6e_proof_pending",
-        )
-        self.assertEqual(
-            pilot["candidate_surfaces"]["owner_claim_fact_detail"],
-            "implemented_candidate_phase6d_not_yet_disposable_"
-            "validated_not_production_applied",
-        )
-        self.assertEqual(
-            pilot["candidate_surfaces"]["runtime"],
-            "phase6d_inactive_static_candidate_runtime_rebuild_"
-            "and_phase6e_proof_pending",
-        )
-        self.assertEqual(
-            pilot["candidate_surfaces"]["pilot_marker"],
-            "implemented_phase6d_not_yet_disposable_validated_"
-            "not_production_applied",
-        )
-        self.assertEqual(
-            pilot["candidate_surfaces"]["frontend"],
-            "6d80ba_built_undeployed_visual_qa_pending",
-        )
-        source_erasure = pilot["source_erasure"]
-        self.assertEqual(
-            source_erasure["selectors"],
-            ["thread", "message_tail", "recent", "all_conversations"],
-        )
-        self.assertEqual(
-            source_erasure["direct_delete_roots"],
-            ["public.chat_log", "public.chat_attachments", "public.threads"],
-        )
-        self.assertEqual(
-            source_erasure["allowed_auxiliary_effects"],
-            [
-                "public.active_thread_selection",
-                "trusted_web.response_transcript_v1",
-            ],
-        )
-        self.assertEqual(
-            source_erasure["auxiliary_effect_authority"],
-            "exact_named_validated_on_delete_cascade_composite_owner_thread_"
-            "foreign_keys_only",
-        )
-        self.assertEqual(
-            source_erasure["validated_auxiliary_foreign_keys"],
-            EXPECTED_SOURCE_ERASURE_AUXILIARY_FOREIGN_KEYS,
-        )
-        self.assertFalse(
-            source_erasure[
-                "weak_single_column_transcript_foreign_keys_allowed"
-            ]
-        )
-        self.assertEqual(
-            source_erasure["unknown_dependency_action"],
-            "fail_closed_before_delete_on_unknown_foreign_key_"
-            "delete_trigger_delete_rule_or_inheritance",
-        )
-        self.assertEqual(
-            source_erasure["transient_target_tables"],
-            [
-                "memory_ingest_private.source_erasure_target",
-                "memory_ingest_private.source_erasure_thread_target",
-            ],
-        )
-        self.assertEqual(
-            source_erasure["permanent_tombstone_tables"],
-            [
-                "memory_ingest_private.source_erasure_message_tombstone",
-                "memory_ingest_private.source_erasure_thread_tombstone",
-            ],
-        )
-        self.assertEqual(
-            source_erasure["tombstone_identity_scope"],
-            "global_message_and_thread_uuid",
-        )
-        self.assertEqual(
-            source_erasure["targets_retained_until"],
-            "conversation_deletion_final_receipt_acknowledged",
-        )
-        self.assertTrue(source_erasure["tombstones_immutable"])
-        self.assertEqual(
-            source_erasure["runtime_catalog_attestation"],
-            "exact_mutated_relation_schema_foreign_key_trigger_rule_"
-            "and_inheritance_inventory",
-        )
-        self.assertFalse(source_erasure["unclassified_side_effects_allowed"])
-        self.assertFalse(source_erasure["legacy_capture_trigger_required"])
-        self.assertEqual(
-            source_erasure["legacy_capture_trigger_if_present"],
-            "exact_disabled_identity_only",
-        )
-        self.assertFalse(source_erasure["memory_only_selector_allowed"])
-        self.assertFalse(source_erasure["account_wide_memory_selector_allowed"])
-        self.assertFalse(source_erasure["accounts_deleted"])
-        self.assertFalse(source_erasure["structured_lifeswitch_data_deleted"])
-        self.assertFalse(source_erasure["legacy_project_rows_deleted"])
-        self.assertEqual(
-            source_erasure["status"],
-            "phase6d_inactive_static_candidate_not_routed_"
-            "phase6e_disposable_proof_pending",
-        )
 
     def test_receipt_schema_is_closed_and_content_free(self) -> None:
         schema = json.loads(
@@ -944,7 +759,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
 
-    def test_systemd_template_cannot_be_enabled_from_repository(self) -> None:
+    def test_systemd_templates_are_dormant(self) -> None:
         http_unit = (
             OPS / "systemd" / "governed-memory-http.service.in"
         ).read_text(encoding="utf-8")
@@ -962,12 +777,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("Type=oneshot", worker_unit)
         self.assertIn("Restart=no", worker_unit)
         self.assertIn(
-            "ConditionPathExists=/etc/governed-memory/worker.env",
-            worker_unit,
+            "ConditionPathExists=/etc/governed-memory/worker.env", worker_unit
         )
         self.assertIn(
-            "ConditionPathExists=/etc/governed-memory/pilot.env",
-            worker_unit,
+            "ConditionPathExists=/etc/governed-memory/pilot.env", worker_unit
         )
         self.assertFalse(
             (OPS / "systemd" / "governed-memory-worker.timer").exists()
@@ -975,7 +788,7 @@ class ReleaseArtifactTests(unittest.TestCase):
 
 
 class ReleaseDecisionTests(unittest.TestCase):
-    def test_create_refuses_while_production_activation_blockers_remain(self) -> None:
+    def test_create_refuses_while_activation_blockers_remain(self) -> None:
         result = evaluate_release_observation(observation("create", state="absent"))
         self.assertFalse(result["allowed"])
         self.assertEqual(result["reason_code"], "activation_blockers_open")
@@ -990,13 +803,14 @@ class ReleaseDecisionTests(unittest.TestCase):
         self.assertEqual(result["exact_action_plan"], [])
 
     def test_cleanup_refuses_without_scoped_authorization(self) -> None:
-        document = observation("cleanup", state="present_exact")
-        result = evaluate_release_observation(document)
+        result = evaluate_release_observation(
+            observation("cleanup", state="present_exact")
+        )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["reason_code"], "authorization_missing")
         self.assertEqual(result["exact_action_plan"], [])
 
-    def test_cleanup_observation_counts_cannot_bypass_authorization(self) -> None:
+    def test_observation_counts_cannot_bypass_authority(self) -> None:
         document = observation("cleanup", state="present_exact")
         document["pilot_ever_started"] = True
         document["postgresql_user_row_count"] = 1
@@ -1005,7 +819,6 @@ class ReleaseDecisionTests(unittest.TestCase):
         result = evaluate_release_observation(document)
         self.assertFalse(result["allowed"])
         self.assertEqual(result["reason_code"], "authorization_missing")
-        self.assertEqual(result["exact_action_plan"], [])
 
 
 if __name__ == "__main__":

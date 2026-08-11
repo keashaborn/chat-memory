@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_foundation_0001",
-  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "governed_memory",
@@ -52,7 +52,7 @@
     "production_services_changed": false,
     "production_database_applied": false,
     "production_qdrant_changed": false,
-    "disposable_database_validated": false,
-    "disposable_qdrant_validated": false
+    "disposable_database_validated": true,
+    "disposable_qdrant_validated": true
   }
 }

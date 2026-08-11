@@ -5,6 +5,12 @@
 CREATE ROLE governed_memory_owner
   NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
   NOBYPASSRLS NOINHERIT;
+-- Passwordless synthetic mirror of the initdb bootstrap principal. The
+-- disposable harness continues to administer this cluster as postgres.
+CREATE ROLE governed_memory_bootstrap
+  LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS INHERIT
+  PASSWORD NULL;
+GRANT governed_memory_owner TO governed_memory_bootstrap;
 CREATE ROLE governed_memory_api
   LOGIN PASSWORD 'successor_api_disposable_only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
@@ -42,7 +48,8 @@ CREATE DATABASE memory
 COMMENT ON DATABASE memory IS
   'governed-memory-successor-disposable:019fe927';
 REVOKE ALL ON DATABASE memory FROM PUBLIC;
-GRANT CONNECT ON DATABASE memory TO brains_app, governed_memory_worker;
+GRANT CONNECT ON DATABASE memory
+  TO brains_app, governed_memory_api, governed_memory_worker;
 
 \connect governed_memory
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

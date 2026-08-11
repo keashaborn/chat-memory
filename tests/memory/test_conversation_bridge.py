@@ -145,6 +145,96 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
             r"(?:memory_ingest_writer|governed_memory_worker)\b",
         )
 
+    def test_source_logging_preflight_parses_preloaded_libraries_without_escaped_regex(self) -> None:
+        preflight = self.forward.split("DO $preflight$", 1)[1].split(
+            "$preflight$;", 1
+        )[0]
+        self.assertIn("pg_catalog.string_to_array(", preflight)
+        self.assertIn("pg_catalog.btrim(configured.library_name)", preflight)
+        self.assertIn("= 'pgaudit'", preflight)
+        self.assertNotIn(r"\\s*pgaudit", preflight)
+        self.assertIn("current_setting('log_duration') <> 'off'", preflight)
+        self.assertRegex(
+            preflight,
+            r"current_setting\(\s*'log_parameter_max_length'\s*\)"
+            r"::integer\s*<>\s*0",
+        )
+        self.assertNotIn("NOT IN (-1, 0)", preflight)
+
+    def test_postflight_rechecks_all_five_exact_role_identities(self) -> None:
+        postflight = self.forward.split("DO $postflight$", 1)[1].split(
+            "$postflight$;", 1
+        )[0]
+        for role in (
+            "brains_app",
+            "governed_memory_api",
+            "governed_memory_worker",
+            "memory_ingest_writer",
+            "memory_erasure_requester",
+        ):
+            with self.subTest(role=role):
+                self.assertIn(f"rolname = '{role}'", postflight)
+        self.assertIn("AND rolcanlogin AND NOT rolsuper", postflight)
+        self.assertGreaterEqual(
+            postflight.count("governed_memory.inactive_installation"), 2
+        )
+
+    def test_every_source_runtime_membership_edge_is_rejected_both_directions(
+        self,
+    ) -> None:
+        runtime_roles = {
+            "governed_memory_api",
+            "governed_memory_worker",
+            "memory_ingest_writer",
+            "memory_erasure_requester",
+        }
+
+        def membership_role_sets(sql: str) -> list[tuple[set[str], set[str]]]:
+            return [
+                (
+                    set(re.findall(r"'([^']+)'", granted)),
+                    set(re.findall(r"'([^']+)'", member)),
+                )
+                for granted, member in re.findall(
+                    r"WHERE granted_role\.rolname IN \((.*?)\)"
+                    r"\s+OR member_role\.rolname IN \((.*?)\)",
+                    sql,
+                    flags=re.DOTALL,
+                )
+            ]
+
+        preflight = self.forward.split("DO $preflight$", 1)[1].split(
+            "$preflight$;", 1
+        )[0]
+        postflight = self.forward.split("DO $postflight$", 1)[1].split(
+            "$postflight$;", 1
+        )[0]
+        rollback_preflight = self.rollback.split("DO $preflight$", 1)[1].split(
+            "$preflight$;", 1
+        )[0]
+        for label, block in (
+            ("forward preflight", preflight),
+            ("forward postflight", postflight),
+            ("rollback preflight", rollback_preflight),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(
+                    membership_role_sets(block),
+                    [(runtime_roles, runtime_roles)],
+                )
+                self.assertIn("membership.roleid", block)
+                self.assertIn("membership.member", block)
+
+        def rejected(member_role: str, granted_role: str) -> bool:
+            return member_role in runtime_roles or granted_role in runtime_roles
+
+        for runtime_role in runtime_roles:
+            with self.subTest(runtime_role=runtime_role, direction="member"):
+                self.assertTrue(rejected(runtime_role, "unrelated_role"))
+            with self.subTest(runtime_role=runtime_role, direction="roleid"):
+                self.assertTrue(rejected("unrelated_role", runtime_role))
+        self.assertFalse(rejected("unrelated_member", "unrelated_role"))
+
     def test_outbox_is_private_and_reader_is_exact_lease_token_only(self) -> None:
         self.assertIn(
             "CREATE TABLE memory_ingest_private.memory_ingest_outbox",
@@ -265,10 +355,10 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
             "pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
             self.rollback,
         )
-        self.assertIn(
-            "pg_catalog.pg_has_role(\n    'brains_app', 'memory_ingest_writer', 'MEMBER'",
-            self.rollback,
-        )
+        self.assertIn("FROM pg_catalog.pg_auth_members AS membership", self.rollback)
+        self.assertIn("granted_role.oid = membership.roleid", self.rollback)
+        self.assertIn("member_role.oid = membership.member", self.rollback)
+        self.assertNotIn("pg_catalog.pg_has_role(", self.rollback)
         self.assertIn(
             "SELECT 1 FROM memory_ingest_private.memory_ingest_outbox LIMIT 1",
             self.rollback,

@@ -10,15 +10,27 @@ BEGIN
   IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'conversation bridge rollback requires read committed';
   END IF;
-  IF pg_catalog.pg_has_role(
-    'brains_app', 'memory_ingest_writer', 'MEMBER'
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted_role
+      ON granted_role.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member_role
+      ON member_role.oid = membership.member
+    WHERE granted_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    ) OR member_role.rolname IN (
+      'governed_memory_api',
+      'governed_memory_worker',
+      'memory_ingest_writer',
+      'memory_erasure_requester'
+    )
   ) THEN
-    RAISE EXCEPTION 'revoke brains_app capture membership before rollback';
-  END IF;
-  IF pg_catalog.pg_has_role(
-    'brains_app', 'memory_erasure_requester', 'MEMBER'
-  ) THEN
-    RAISE EXCEPTION 'revoke brains_app erasure membership before rollback';
+    RAISE EXCEPTION
+      'source runtime membership graph must be empty before rollback';
   END IF;
 END;
 $preflight$;

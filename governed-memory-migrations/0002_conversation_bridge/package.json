@@ -1,12 +1,14 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "memory",
     "execution_role": "sage",
-    "application_login_role": "brains_app"
+    "capture_application_login_role": "brains_app",
+    "source_erasure_application_login_role": "governed_memory_api",
+    "inactive_installation_psql_variable": "governed_memory_inactive_installation=on"
   },
   "dependencies": [
     "roles_preflight.pgsql",
@@ -20,11 +22,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "1501c1995dd9a37b3711f9da489e37e3aef304fd7c2d5a07e175222c6528444d"
+    "sha256": "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "ce38c16fa2b367f0db1203aa0aa927325f05e023d2470cdb4c35a878ccc58599",
+    "sha256": "283c95879f36d1db727e15425432ec3963f8adc4861249af90817c1ab8da0158",
     "empty_only": true
   },
   "data_policy": {
@@ -62,6 +64,9 @@
     "source_role": "literal_user",
     "source_value": "frontend/chat:user",
     "application_capture_authority": "supabase_access_token_v1",
+    "capture_session_authority": "brains_app_plus_memory_ingest_writer_membership",
+    "source_erasure_session_authority": "governed_memory_api_plus_memory_erasure_requester_membership",
+    "brains_app_source_erasure_authority_allowed": false,
     "attachment_reads": "existence_only_owner_thread_message_no_columns_returned",
     "attachment_content_reads": false,
     "attachment_presence_required_absent": true,
@@ -118,7 +123,7 @@
     "production_writer_membership_granted": false,
     "production_services_changed": false,
     "production_database_applied": false,
-    "disposable_writer_membership_validated": false,
-    "disposable_database_validated": false
+    "disposable_writer_membership_validated": true,
+    "disposable_database_validated": true
   }
 }

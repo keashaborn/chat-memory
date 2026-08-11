@@ -13,9 +13,10 @@ FOUNDATION = MIGRATIONS / "0001_foundation"
 CLAIM_DETAIL = MIGRATIONS / "0003_owner_claim_detail"
 SESSION_AUTHORITY = ROOT / "ops/governed_memory/supabase_session_authority"
 RUNNER = ROOT / "tools/governed_memory_validation/run_disposable_successor.sh"
-CURRENT_STATUS = (
-    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+DELETION_INTEGRATION = (
+    ROOT / "tests/memory_integration/test_conversation_deletion_disposable.py"
 )
+CURRENT_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -364,7 +365,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         forward_path = CLAIM_DETAIL / "forward.pgsql"
         rollback_path = CLAIM_DETAIL / "rollback.pgsql"
         self.assertEqual(package["status"], CURRENT_STATUS)
-        self.assertFalse(package["activation"]["disposable_database_validated"])
+        self.assertTrue(package["activation"]["disposable_database_validated"])
         self.assertEqual(package["forward"]["sha256"], _sha256(forward_path))
         self.assertEqual(package["rollback"]["sha256"], _sha256(rollback_path))
         self.assertFalse(package["rollback"]["empty_only"])
@@ -373,8 +374,11 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         manifest = _load_json(MIGRATIONS / "manifest.json")
         self.assertEqual(manifest["status"], CURRENT_STATUS)
         self.assertEqual(package["status"], CURRENT_STATUS)
-        self.assertFalse(
+        self.assertTrue(
             manifest["safety"]["disposable_database_execution_performed"]
+        )
+        self.assertTrue(
+            manifest["authority"]["disposable_validation_authorized"]
         )
         entries = {item["path"]: item["sha256"] for item in manifest["files"]}
         for relative in (
@@ -466,7 +470,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": False,
+                "disposable_validated": True,
                 "production_applied": False,
             },
         )
@@ -474,7 +478,12 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='6e1090fcbcd36e9d2cac277edb11227a256853bb'",
+            "readonly EXPECTED_BASE='6116d5c57fb298d929153eba977ae59e1cf2aeb4'",
+            runner,
+        )
+        self.assertIn(
+            "readonly EXPECTED_MANIFEST_SHA256="
+            "'57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150'",
             runner,
         )
         qdrant_digest = (
@@ -492,12 +501,120 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             "[[ \"${QDRANT_SERVER_VERSION}\" == '1.19.0' ]]",
             runner,
         )
+        bootstrap = runner.split("bootstrap_postgres() {", 1)[1].split(
+            "verify_disposable_pilot_marker_semantics() {", 1
+        )[0]
+        self.assertIn(
+            "SUCCESSOR_POSTGRES_LOGGING_PREFLIGHT=privileged-cluster-safe",
+            bootstrap,
+        )
+        self.assertIn("shared_preload_libraries", bootstrap)
+        self.assertIn(
+            "postgres_privileged_logging_preflight_failed",
+            bootstrap,
+        )
+        self.assertIn(
+            "readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256="
+            "'0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857'",
+            runner,
+        )
+        fixture_verifier = runner.split(
+            "verify_postgres_bootstrap_fixture() {", 1
+        )[1].split("verify_migration_manifest() {", 1)[0]
+        self.assertIn("postgres_bootstrap_fixture_invalid", fixture_verifier)
+        self.assertIn("postgres_bootstrap_fixture_sha256_mismatch", fixture_verifier)
+        preflight = runner.split("preflight() {", 1)[1].split("full() {", 1)[0]
+        self.assertLess(
+            preflight.index("verify_postgres_bootstrap_fixture"),
+            preflight.index("verify_migration_manifest"),
+        )
+        full = runner.split("full() {", 1)[1]
+        self.assertLess(full.index("preflight"), full.index("create_resources"))
+        self.assertLess(
+            full.index("bootstrap_postgres"),
+            full.index("verify_phase6e_mixed_catalog_migration_refusal"),
+        )
+        for exact_membership_binding in (
+            "postgres_canonical_membership_preflight_query_failed",
+            "postgres_canonical_membership_preflight_failed",
+            "SUCCESSOR_POSTGRES_MEMBERSHIP_PREFLIGHT="
+            "canonical-bootstrap-owner-only",
+            "bootstrap.rolcanlogin",
+            "bootstrap.rolsuper",
+            "bootstrap.rolcreatedb",
+            "bootstrap.rolcreaterole",
+            "bootstrap.rolreplication",
+            "bootstrap.rolbypassrls",
+            "bootstrap.rolinherit",
+            "bootstrap.rolpassword IS NULL",
+            "granted_role.rolname = 'governed_memory_owner'",
+            "member_role.rolname = 'governed_memory_bootstrap'",
+            "NOT membership.admin_option",
+            "membership.inherit_option",
+            "membership.set_option",
+        ):
+            with self.subTest(exact_membership_binding=exact_membership_binding):
+                self.assertIn(exact_membership_binding, bootstrap)
         self.assertNotIn("qdrant/qdrant:v1.11.0", runner)
         self.assertIn("{{json .RepoDigests}}", runner)
         self.assertIn('if sys.argv[2] not in json.loads(sys.argv[1]):', runner)
         apply = runner.split("apply_migrations() {", 1)[1].split(
             "rollback_migrations() {", 1
         )[0]
+        bridge_membership = runner.split(
+            "verify_disposable_bridge_memberships() {", 1
+        )[1].split(
+            "verify_phase6e_mixed_catalog_migration_refusal() {", 1
+        )[0]
+        exact_grant = (
+            "GRANT memory_ingest_writer TO brains_app; "
+            "GRANT memory_erasure_requester TO governed_memory_api"
+        )
+        exact_revoke = (
+            "REVOKE memory_ingest_writer FROM brains_app; "
+            "REVOKE memory_erasure_requester FROM governed_memory_api"
+        )
+        self.assertIn(exact_grant, apply)
+        self.assertEqual(runner.count(exact_grant), 2)
+        self.assertEqual(runner.count(exact_revoke), 2)
+        self.assertNotIn(
+            "GRANT memory_ingest_writer, memory_erasure_requester TO brains_app",
+            runner,
+        )
+        self.assertNotIn("memory_erasure_requester TO brains_app", runner)
+        self.assertNotIn("memory_erasure_requester FROM brains_app", runner)
+        self.assertIn(
+            "WHERE granted_role = 'memory_ingest_writer'\n"
+            "            AND member_role = 'brains_app'\n"
+            "            AND NOT admin_option\n"
+            "            AND inherit_option\n"
+            "            AND set_option",
+            bridge_membership,
+        )
+        self.assertIn(
+            "WHERE granted_role = 'memory_erasure_requester'\n"
+            "            AND member_role = 'governed_memory_api'\n"
+            "            AND NOT admin_option\n"
+            "            AND NOT inherit_option\n"
+            "            AND set_option",
+            bridge_membership,
+        )
+        for exact_runtime_binding in (
+            "disposable_bridge_membership_postflight_query_failed",
+            "disposable_bridge_membership_postflight_failed",
+            "'governed_memory_api', 'memory', 'CONNECT'",
+            "(SELECT pg_catalog.count(*) FROM runtime_membership) = 2",
+            "granted_role = 'memory_ingest_writer'",
+            "member_role = 'brains_app'",
+            "granted_role = 'memory_erasure_requester'",
+            "member_role = 'governed_memory_api'",
+            "NOT admin_option",
+            "inherit_option",
+            "NOT inherit_option",
+            "set_option",
+        ):
+            with self.subTest(exact_runtime_binding=exact_runtime_binding):
+                self.assertIn(exact_runtime_binding, bridge_membership)
         rollback = runner.split("rollback_migrations() {", 1)[1].split(
             "verify_rollback_refuses_inflight_enqueue() {", 1
         )[0]
@@ -527,13 +644,13 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             rollback.index("0004_pilot_marker/rollback.pgsql"),
         )
         self.assertIn("pilot_marker_not_empty_before_rollback", rollback)
-        self.assertIn("--phase6e-disposable-deletion-proof", runner)
+        self.assertNotIn("--phase6e-disposable-deletion-proof", runner)
         self.assertIn(
             "readonly PHASE6E_DELETION_INTEGRATION_READY='true'",
             runner,
         )
         self.assertIn(
-            "phase6e_migration_proof_authorization_missing",
+            "retired_phase6e_preliminary_proof_mode_refused",
             runner,
         )
         rollback_race = runner.split(
@@ -572,6 +689,58 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             "memory_private.read_pilot_marker()",
         ):
             self.assertIn(object_name, absence)
+
+    def test_deletion_integration_keeps_capture_erasure_and_worker_lanes_split(
+        self,
+    ) -> None:
+        integration = DELETION_INTEGRATION.read_text(encoding="utf-8")
+        self.assertIn(
+            "self.conversation_api = await self._connect(\n"
+            "            \"governed_memory_api\",\n"
+            "            \"successor_api_disposable_only\",\n"
+            "            \"memory\",\n"
+            "        )",
+            integration,
+        )
+        erasure_context = integration.split(
+            "async def _erasure_owner_context(", 1
+        )[1].split("@staticmethod", 1)[0]
+        self.assertIn("self.conversation_api.transaction()", erasure_context)
+        self.assertIn("SET LOCAL ROLE memory_erasure_requester", erasure_context)
+        self.assertNotIn("self.brains", erasure_context)
+        self.assertEqual(
+            len(
+                re.findall(
+                    r"PostgresConversationDeletionRepository\(\s*"
+                    r"self\.conversation_api\s*\)",
+                    integration,
+                )
+            ),
+            3,
+        )
+        self.assertNotRegex(
+            integration,
+            r"PostgresConversationDeletionRepository\(\s*self\.brains\s*\)",
+        )
+        future_probe = integration.split(
+            "with self.assertRaises(asyncpg.PostgresError) as future_failure:",
+            1,
+        )[1].split(
+            "self.assertEqual(future_failure.exception.sqlstate, \"23514\")",
+            1,
+        )[0]
+        self.assertIn("self._erasure_owner_context(FUTURE_OWNER)", future_probe)
+        self.assertIn("self.conversation_api.fetchrow", future_probe)
+        self.assertGreaterEqual(
+            integration.count("async with self._owner_context(self.brains"),
+            4,
+        )
+        self.assertIn(
+            "PostgresConversationDeletionRepository(\n"
+            "            self.conversation_worker\n"
+            "        )",
+            integration,
+        )
 
     def test_runner_proves_marker_semantics_only_after_reapply(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")

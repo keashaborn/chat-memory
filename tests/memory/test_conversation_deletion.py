@@ -274,6 +274,8 @@ class _Transaction:
     async def __aexit__(self, exc_type, exc, traceback):
         self.connection.log.append("transaction.exit")
         self.connection.in_transaction = False
+        if self.connection.transaction_exit_error is not None:
+            raise self.connection.transaction_exit_error
 
 
 class _OwnerConnection:
@@ -282,13 +284,24 @@ class _OwnerConnection:
         *,
         forced_owner: str | None = None,
         forced_auth_context: str | None = None,
+        forced_session_user: str | None = None,
+        forced_current_user: str | None = None,
+        forced_requester_member: bool | None = None,
         begin_error: Exception | None = None,
+        role_error: Exception | None = None,
+        transaction_exit_error: Exception | None = None,
     ) -> None:
         self.forced_owner = forced_owner
         self.forced_auth_context = forced_auth_context
+        self.forced_session_user = forced_session_user
+        self.forced_current_user = forced_current_user
+        self.forced_requester_member = forced_requester_member
         self.begin_error = begin_error
+        self.role_error = role_error
+        self.transaction_exit_error = transaction_exit_error
         self.local_owner: str | None = None
         self.local_auth_context: str | None = None
+        self.local_role: str | None = None
         self.in_transaction = False
         self.log: list[str] = []
         self.deletion_queries = 0
@@ -304,7 +317,12 @@ class _OwnerConnection:
     async def execute(self, query: str, *args: object):
         if not self.in_transaction:
             raise AssertionError("owner context set outside transaction")
-        if "'app.user_id'" in query:
+        if query == "SET LOCAL ROLE memory_erasure_requester":
+            if self.role_error is not None:
+                raise self.role_error
+            self.local_role = "memory_erasure_requester"
+            self.log.append("role.set_requester")
+        elif "'app.user_id'" in query:
             self.local_owner = args[0]
             self.log.append("context.set_owner")
         elif "'app.auth_context_sha256'" in query:
@@ -333,7 +351,30 @@ class _OwnerConnection:
     async def fetchrow(self, query: str, *args: object):
         if not self.in_transaction:
             raise AssertionError("deletion SQL outside owner transaction")
-        if self.local_owner != str(OWNER) or self.local_auth_context != AUTH_CONTEXT:
+        if "session_user::text AS session_user" in query:
+            if self.local_role != "memory_erasure_requester":
+                raise AssertionError("role context read before set local role")
+            self.log.append("role.read_context")
+            return {
+                "session_user": (
+                    "governed_memory_api"
+                    if self.forced_session_user is None
+                    else self.forced_session_user
+                ),
+                "current_user": (
+                    self.local_role
+                    if self.forced_current_user is None
+                    else self.forced_current_user
+                ),
+                "requester_member": (
+                    True if self.forced_requester_member is None
+                    else self.forced_requester_member
+                ),
+            }
+        if self.local_role != "memory_erasure_requester" or (
+            self.local_owner != str(OWNER)
+            or self.local_auth_context != AUTH_CONTEXT
+        ):
             raise AssertionError("deletion SQL before authority binding")
         self.deletion_queries += 1
         if "begin_source_erasure" in query:
@@ -423,7 +464,6 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
             ),
             PostgresFailure("XX000", exact_message),
             PostgresFailure("P0001", exact_message + " "),
-            RuntimeError("sensitive catalog failure"),
         )
         for failure in cases:
             with self.subTest(failure=repr(failure)):
@@ -441,6 +481,211 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(raised.exception.status_code, 503)
                 self.assertTrue(raised.exception.retryable)
                 self.assertNotIn("sensitive", str(raised.exception))
+
+    async def test_exact_owner_request_database_failures_are_closed(self) -> None:
+        class PostgresFailure(Exception):
+            def __init__(self, sqlstate: str, message: str) -> None:
+                super().__init__("sensitive database detail")
+                self.sqlstate = sqlstate
+                self.message = message
+
+        preconditions = (
+            ("23514", "source erasure thread has invalid chat time or lineage"),
+            (
+                "23514",
+                "all-conversation erasure has invalid chat time or lineage",
+            ),
+            ("23514", "all-conversation erasure has invalid thread time"),
+            ("23514", "message-tail erasure has invalid chat time"),
+            ("23514", "recent erasure has invalid chat time"),
+            ("23514", "source erasure selector has future-dated chat rows"),
+            ("23514", "source erasure message/thread lineage differs"),
+            (
+                "23514",
+                "source erasure candidate thread has mixed owner lineage",
+            ),
+            ("54000", "source erasure thread target limit exceeded"),
+            ("54000", "source erasure thread target inventory differs"),
+            ("54000", "source erasure target limit exceeded"),
+            ("54000", "source erasure attachment target limit exceeded"),
+        )
+        cases = (
+            (
+                "22023",
+                "invalid source erasure request",
+                DeletionRepositoryFailure.REQUEST_INVALID,
+                "memory_request_invalid",
+                400,
+            ),
+            (
+                "23514",
+                "source erasure operation replay drifted",
+                DeletionRepositoryFailure.REPLAY_CONFLICT,
+                "conversation_erasure_replay_conflict",
+                409,
+            ),
+            (
+                "55000",
+                "owner source erasure already active",
+                DeletionRepositoryFailure.ALREADY_ACTIVE,
+                "conversation_erasure_already_active",
+                409,
+            ),
+            *(
+                (
+                    sqlstate,
+                    message,
+                    DeletionRepositoryFailure.SELECTOR_NOT_FOUND,
+                    "conversation_erasure_selector_not_found",
+                    409,
+                )
+                for sqlstate, message in (
+                    ("P0002", "source erasure thread is absent or invalid"),
+                    ("P0002", "source erasure anchor is absent"),
+                )
+            ),
+            *(
+                (
+                    sqlstate,
+                    message,
+                    DeletionRepositoryFailure.SOURCE_PRECONDITION_FAILED,
+                    "conversation_erasure_source_precondition_failed",
+                    409,
+                )
+                for sqlstate, message in preconditions
+            ),
+        )
+        for sqlstate, message, failure, code, status_code in cases:
+            with self.subTest(sqlstate=sqlstate, message=message):
+                with self.assertRaises(DeletionRepositoryError) as raised:
+                    await PostgresConversationDeletionRepository(
+                        _OwnerConnection(
+                            begin_error=PostgresFailure(sqlstate, message)
+                        )
+                    ).request_erasure(bound_command())
+                self.assertEqual(raised.exception.failure, failure)
+                self.assertEqual(raised.exception.code, code)
+                self.assertEqual(raised.exception.status_code, status_code)
+                self.assertFalse(raised.exception.retryable)
+                self.assertNotIn("sensitive", str(raised.exception))
+
+    async def test_transport_unknown_is_phase_sensitive(self) -> None:
+        class ConnectionFailure(Exception):
+            def __init__(self, sqlstate: str) -> None:
+                self.sqlstate = sqlstate
+                self.message = "sensitive connection outcome detail"
+
+        pre_dispatch = _OwnerConnection(
+            role_error=RuntimeError("sensitive pre-dispatch transport detail")
+        )
+        with self.assertRaises(DeletionRepositoryError) as pre:
+            await PostgresConversationDeletionRepository(
+                pre_dispatch
+            ).request_erasure(bound_command())
+        self.assertEqual(
+            pre.exception.failure,
+            DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE,
+        )
+        self.assertEqual(pre.exception.code, "conversation_unavailable")
+
+        post_dispatch = _OwnerConnection(
+            begin_error=RuntimeError("sensitive post-dispatch transport detail")
+        )
+        with self.assertRaises(DeletionRepositoryError) as post:
+            await PostgresConversationDeletionRepository(
+                post_dispatch
+            ).request_erasure(bound_command())
+        self.assertEqual(
+            post.exception.failure,
+            DeletionRepositoryFailure.OPERATION_OUTCOME_UNKNOWN,
+        )
+        self.assertEqual(
+            post.exception.code,
+            "memory_operation_outcome_unknown",
+        )
+        self.assertNotIn("sensitive", str(post.exception))
+
+        commit_unknown = _OwnerConnection(
+            transaction_exit_error=RuntimeError(
+                "sensitive commit outcome detail"
+            )
+        )
+        with self.assertRaises(DeletionRepositoryError) as commit:
+            await PostgresConversationDeletionRepository(
+                commit_unknown
+            ).request_erasure(bound_command())
+        self.assertEqual(
+            commit.exception.failure,
+            DeletionRepositoryFailure.OPERATION_OUTCOME_UNKNOWN,
+        )
+
+        ambiguous_cases = (
+            _OwnerConnection(begin_error=ConnectionFailure("08003")),
+            _OwnerConnection(
+                transaction_exit_error=ConnectionFailure("08006")
+            ),
+            _OwnerConnection(begin_error=ConnectionFailure("57P01")),
+            _OwnerConnection(begin_error=ConnectionFailure("40003")),
+            _OwnerConnection(
+                transaction_exit_error=ConnectionFailure("40003")
+            ),
+        )
+        for connection in ambiguous_cases:
+            with self.subTest(
+                sqlstate=(
+                    connection.begin_error
+                    or connection.transaction_exit_error
+                ).sqlstate
+            ):
+                with self.assertRaises(DeletionRepositoryError) as ambiguous:
+                    await PostgresConversationDeletionRepository(
+                        connection
+                    ).request_erasure(bound_command())
+                self.assertEqual(
+                    ambiguous.exception.failure,
+                    DeletionRepositoryFailure.OPERATION_OUTCOME_UNKNOWN,
+                )
+
+    async def test_closed_failure_pairs_reject_near_misses(self) -> None:
+        class PostgresFailure(Exception):
+            def __init__(self, sqlstate: str, message: str) -> None:
+                self.sqlstate = sqlstate
+                self.message = message
+
+        cases = (
+            PostgresFailure(
+                "23514", "source erasure operation replay drifted "
+            ),
+            PostgresFailure(
+                "23515", "source erasure operation replay drifted"
+            ),
+            PostgresFailure(
+                "55000", "owner source erasure already active "
+            ),
+            PostgresFailure(
+                "P0001", "source erasure anchor is absent"
+            ),
+            PostgresFailure(
+                "23514", "source erasure target limit exceeded"
+            ),
+            PostgresFailure(
+                "54000", "source erasure unknown limit exceeded"
+            ),
+        )
+        for error in cases:
+            with self.subTest(sqlstate=error.sqlstate, message=error.message):
+                with self.assertRaises(DeletionRepositoryError) as raised:
+                    await PostgresConversationDeletionRepository(
+                        _OwnerConnection(begin_error=error)
+                    ).request_erasure(bound_command())
+                self.assertEqual(
+                    raised.exception.failure,
+                    DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE,
+                )
+                self.assertEqual(
+                    raised.exception.code,
+                    "conversation_unavailable",
+                )
 
     async def test_register_replay_accepts_partial_page_count(self) -> None:
         value = replace(
@@ -485,6 +730,8 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
             connection.log,
             [
                 "transaction.enter",
+                "role.set_requester",
+                "role.read_context",
                 "context.set_owner",
                 "context.set_auth",
                 "context.read_owner",
@@ -503,6 +750,58 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(status)
         self.assertEqual(connection.deletion_queries, 1)
         self.assertEqual(connection.log[-2:], ["deletion.read", "transaction.exit"])
+
+    async def test_wrong_session_user_fails_before_owner_context_or_sql(
+        self,
+    ) -> None:
+        connection = _OwnerConnection(forced_session_user="brains_app")
+        with self.assertRaises(ContractViolation) as raised:
+            await PostgresConversationDeletionRepository(
+                connection
+            ).request_erasure(bound_command())
+        self.assertEqual(
+            raised.exception.code,
+            "conversation_deletion_session_user_mismatch",
+        )
+        self.assertEqual(connection.deletion_queries, 0)
+        self.assertEqual(
+            connection.log,
+            [
+                "transaction.enter",
+                "role.set_requester",
+                "role.read_context",
+                "transaction.exit",
+            ],
+        )
+
+    async def test_wrong_current_user_fails_before_owner_context_or_sql(
+        self,
+    ) -> None:
+        connection = _OwnerConnection(forced_current_user="governed_memory_api")
+        with self.assertRaises(ContractViolation) as raised:
+            await PostgresConversationDeletionRepository(
+                connection
+            ).read_erasure_status(bound_command())
+        self.assertEqual(
+            raised.exception.code,
+            "conversation_deletion_current_user_mismatch",
+        )
+        self.assertEqual(connection.deletion_queries, 0)
+
+    async def test_missing_requester_membership_fails_before_context_or_sql(
+        self,
+    ) -> None:
+        connection = _OwnerConnection(forced_requester_member=False)
+        with self.assertRaises(ContractViolation) as raised:
+            await PostgresConversationDeletionRepository(
+                connection
+            ).request_erasure(bound_command())
+        self.assertEqual(
+            raised.exception.code,
+            "conversation_deletion_requester_membership_mismatch",
+        )
+        self.assertEqual(connection.deletion_queries, 0)
+        self.assertNotIn("context.set_owner", connection.log)
 
     async def test_stale_owner_guc_fails_before_deletion_sql(self) -> None:
         connection = _OwnerConnection(forced_owner=str(OTHER_OWNER))

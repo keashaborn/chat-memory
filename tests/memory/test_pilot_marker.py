@@ -103,13 +103,19 @@ class PilotMarkerTests(unittest.TestCase):
         self.assertFalse(package["activation"]["production_database_applied"])
         self.assertEqual(
             package["status"],
-            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
         self.assertEqual(
             manifest["status"],
-            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
-        self.assertFalse(package["activation"]["disposable_database_validated"])
+        self.assertTrue(package["activation"]["disposable_database_validated"])
+        self.assertTrue(
+            manifest["safety"]["disposable_database_execution_performed"]
+        )
+        self.assertTrue(
+            manifest["authority"]["disposable_validation_authorized"]
+        )
         self.assertEqual(
             package["object_contract"],
             {

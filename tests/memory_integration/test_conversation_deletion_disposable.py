@@ -299,6 +299,11 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             "successor_api_disposable_only",
             "governed_memory",
         )
+        self.conversation_api = await self._connect(
+            "governed_memory_api",
+            "successor_api_disposable_only",
+            "memory",
+        )
         self.successor_worker = await self._connect(
             "governed_memory_worker",
             "successor_worker_disposable_only",
@@ -359,6 +364,25 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             )
             yield
 
+    @asynccontextmanager
+    async def _erasure_owner_context(
+        self, owner_user_id: UUID
+    ) -> AsyncIterator[None]:
+        async with self.conversation_api.transaction():
+            await self.conversation_api.execute(
+                "SET LOCAL ROLE memory_erasure_requester"
+            )
+            await self.conversation_api.execute(
+                "SELECT pg_catalog.set_config('app.user_id',$1::text,true)",
+                str(owner_user_id),
+            )
+            await self.conversation_api.execute(
+                "SELECT pg_catalog.set_config("
+                "'app.auth_context_sha256',$1::text,true)",
+                AUTH_CONTEXT_SHA256,
+            )
+            yield
+
     @staticmethod
     def _deletion_command(
         *, owner_user_id: UUID, operation_id: UUID, thread_id: UUID | None
@@ -409,7 +433,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(DeletionRepositoryError) as raised:
             await PostgresConversationDeletionRepository(
-                self.brains
+                self.conversation_api
             ).request_erasure(command)
         self.assertEqual(raised.exception.failure, expected_failure)
         self.assertEqual(
@@ -1366,8 +1390,8 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             future_dated=True,
         )
         with self.assertRaises(asyncpg.PostgresError) as future_failure:
-            async with self._owner_context(self.brains, FUTURE_OWNER):
-                await self.brains.fetchrow(
+            async with self._erasure_owner_context(FUTURE_OWNER):
+                await self.conversation_api.fetchrow(
                     "SELECT * FROM memory_ingest_private."
                     "begin_source_erasure("
                     "$1::uuid,'recent'::text,NULL::uuid,NULL::uuid,"
@@ -1396,7 +1420,9 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             operation_id=RESILIENCE_OPERATION,
             thread_id=RESILIENCE_THREAD,
         )
-        owner_repository = PostgresConversationDeletionRepository(self.brains)
+        owner_repository = PostgresConversationDeletionRepository(
+            self.conversation_api
+        )
         initial = await owner_repository.request_erasure(command)
         self.assertEqual(initial.state, ConversationErasureState.FENCED)
         self.assertEqual(initial.target_count, 501)
@@ -2008,7 +2034,9 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             operation_id=DELETE_OPERATION,
             thread_id=None,
         )
-        owner_repository = PostgresConversationDeletionRepository(self.brains)
+        owner_repository = PostgresConversationDeletionRepository(
+            self.conversation_api
+        )
         initial = await owner_repository.request_erasure(command)
         self.assertEqual(initial.state, ConversationErasureState.FENCED)
         self.assertEqual(initial.target_count, 2)
