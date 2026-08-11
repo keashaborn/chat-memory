@@ -12,8 +12,8 @@ MIGRATIONS = ROOT / "governed-memory-migrations"
 CLAIM_DETAIL = MIGRATIONS / "0003_owner_claim_detail"
 SESSION_AUTHORITY = ROOT / "ops/governed_memory/supabase_session_authority"
 RUNNER = ROOT / "tools/governed_memory_validation/run_disposable_successor.sh"
-PENDING_STATUS = (
-    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+VALIDATED_STATUS = (
+    "isolated_candidate_disposable_validated_not_production_applied"
 )
 
 
@@ -46,17 +46,17 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         package = _load_json(package_path)
         forward_path = CLAIM_DETAIL / "forward.pgsql"
         rollback_path = CLAIM_DETAIL / "rollback.pgsql"
-        self.assertEqual(package["status"], PENDING_STATUS)
-        self.assertFalse(package["activation"]["disposable_database_validated"])
+        self.assertEqual(package["status"], VALIDATED_STATUS)
+        self.assertTrue(package["activation"]["disposable_database_validated"])
         self.assertEqual(package["forward"]["sha256"], _sha256(forward_path))
         self.assertEqual(package["rollback"]["sha256"], _sha256(rollback_path))
         self.assertFalse(package["rollback"]["empty_only"])
         self.assertFalse(package["rollback"]["data_mutation"])
 
         manifest = _load_json(MIGRATIONS / "manifest.json")
-        self.assertEqual(manifest["status"], PENDING_STATUS)
-        self.assertEqual(package["status"], PENDING_STATUS)
-        self.assertFalse(
+        self.assertEqual(manifest["status"], VALIDATED_STATUS)
+        self.assertEqual(package["status"], VALIDATED_STATUS)
+        self.assertTrue(
             manifest["safety"]["disposable_database_execution_performed"]
         )
         entries = {item["path"]: item["sha256"] for item in manifest["files"]}
@@ -113,9 +113,9 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
 
         schema = _load_json(MIGRATIONS / "schema_contract.json")
         package = _load_json(CLAIM_DETAIL / "package.json")
-        self.assertEqual(package["status"], PENDING_STATUS)
-        self.assertEqual(schema["status"], PENDING_STATUS)
-        self.assertEqual(package["status"], PENDING_STATUS)
+        self.assertEqual(package["status"], VALIDATED_STATUS)
+        self.assertEqual(schema["status"], VALIDATED_STATUS)
+        self.assertEqual(package["status"], VALIDATED_STATUS)
         self.assertIn(
             "memory_private.read_claim(uuid)",
             schema["function_surface"],
@@ -149,7 +149,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": False,
+                "disposable_validated": True,
                 "production_applied": False,
             },
         )
@@ -157,7 +157,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='594535ae717cf90f3031286804b9fe5effe2c1aa'",
+            "readonly EXPECTED_BASE='7693d9db459f81f4d89e680108867ce31dd4c7ed'",
             runner,
         )
         qdrant_digest = (

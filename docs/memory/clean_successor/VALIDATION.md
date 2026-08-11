@@ -2,24 +2,24 @@
 
 ## Current proof state
 
-The full Phase 5 disposable harness previously passed under preliminary mode
-against candidate HEAD
-`699c80761065d19832d2c0f3b2b50342a5a8350c`, tree
-`c5c13579ffa54da4f30fc198254c98b662c7029b`, and pre-promotion migration
+The full Phase 6B disposable harness passed under the explicitly authorized
+preliminary-metadata mode against candidate HEAD
+`7693d9db459f81f4d89e680108867ce31dd4c7ed`, tree
+`f62ad8e9cccffe715927fa825f24cb4312a27934`, and pre-promotion migration
 manifest SHA-256
-`2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45`.
-Invocation `ac6e240b-1b9e-4442-a592-2b4d1c2e8492` used PostgreSQL 16.14 and
+`3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66`.
+Invocation `1547b8b5-e238-4817-af95-66b565633704` used PostgreSQL 16.14 and
 Qdrant 1.19.0. It emitted connect-trace SHA-256
-`b054ede64b1f16ce694d110e5d69e4635db41d0f6f2348102d880df8f54338c3`,
+`39328c4fcbd6f2bd18ba40a0cd3aa14daf179d0d8e62597f39d932c91a396956`,
 foundation dump SHA-256
-`852c37925e3a4fc424d4f06456d053bafff3ba8461261303da66b312111c6923`,
+`141cf9164a5edc0dfbbc254a9ea07f81116933959e45173af02600a8c7083404`,
 bridge dump SHA-256
-`c4f802917f69244d6d27cf9bd9e55947e312f22aa9e34fcffe52d4486f09539d`,
+`fd13d38ed3f56312969262fa27d9e706df6ee28222c6d28b4b0036602f025949`,
 and integration receipt SHA-256
-`6479f3f0feb8f155754edd3467b8c80f043ae47a19f11ddc459f5c3896fe4c37`.
-All invocation-owned resources were removed and proof ports were released.
-This is historical evidence only: Phase 6B changed runtime and migration bytes,
-so none of these receipts validate the current candidate.
+`f6644fe1ac106117195885e46cd97e6436bbb772a4a1b2a2a2490a9101b28096`.
+All exact invocation-owned resources were removed and proof ports were
+released. The complete terminal v5 receipt is preserved in
+`ops/governed_memory/phase6b_disposable_proof_receipt.json`.
 
 The current Phase 6B source-bound CPython 3.12.3 runtime receipt at
 `ops/governed_memory/runtime_build_receipt.json` has SHA-256
@@ -30,25 +30,21 @@ and wheel SHA-256
 `c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db`.
 Its isolated import sweep covers all installed successor modules and rejects
 outer `rag_engine` modules, the OpenAI SDK, and files outside the runtime.
-The build is complete, but that runtime has not yet been used by the full Phase
-6B disposable migration and two-database worker run.
+That runtime was used by the passing Phase 6B disposable migration and
+two-database worker run.
 
-The first current-candidate reproduction uses the explicit preliminary
-migration-proof authorization because validation metadata remains pending. It
-emits a new `SUCCESSOR_DISPOSABLE_RECEIPT=` JSON line from
-`tools/governed_memory_validation/run_disposable_successor.sh`. A separately
-authorized proof-metadata promotion changes the Git tree, so the attested
+The authorized proof-metadata promotion changes the Git tree, so the attested
 pre-promotion HEAD/tree remain immutable receipt facts rather than being
-rewritten as the promoted tree. After that promotion, a default-mode
-reproduction omits the preliminary authorization. A receipt is not added to
-the tree it attests because doing so would change the tree hash. Neither mode
-extends to production.
+rewritten as the promoted tree. Default-mode reproduction omits the preliminary
+authorization and emits a new `SUCCESSOR_DISPOSABLE_RECEIPT=` JSON line from
+`tools/governed_memory_validation/run_disposable_successor.sh`. A reproduction
+receipt is not added to the same tree it attests because doing so would change
+the tree hash. Neither mode extends to production.
 
 Reproduce on the seebx backend only, from the sealed candidate commit:
 
 ```bash
 GM_VALIDATION_DISPOSABLE_AUTHORIZATION='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
-GM_VALIDATION_PRELIMINARY_MIGRATION_PROOF='019fe927:PRELIMINARY_MIGRATION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS' \
 GM_VALIDATION_RUNTIME_PYTHON='<phase6b-candidate-python>' \
 GM_VALIDATION_EXPECTED_ROOT='<absolute-candidate-worktree>' \
 GM_VALIDATION_EXPECTED_BRANCH='<candidate-branch>' \
@@ -72,7 +68,7 @@ The run must bind one unchanged candidate to:
 - cleanup of every invocation-owned container, volume, network, relay, and
   process.
 
-## Historical Phase 5 proof coverage
+## Phase 6B proof coverage
 
 The passing run proved:
 
@@ -88,8 +84,8 @@ The passing run proved:
 - Qdrant v1.19.0 compatibility for exact alias/physical target, size 3072,
   `Dot`, six required indexes, bounded owner search without vectors, ambiguous
   upsert readback, and alias-plus-physical deletion verification;
-- explicit activation blockers for the then-unwired worker repository,
-  transport, configuration, CLI composition, and cross-process singleton;
+- inactive real two-database worker repository, transport, configuration, CLI
+  composition, persistent fairness cursor, and cross-process singleton;
 - all owner HTTP lifecycle routes and alternating-owner isolation; and
 - final resource absence plus unchanged HEAD/tree at completion.
 
@@ -107,16 +103,14 @@ off throughout this run.
 Frontend candidate `6d80ba` is built but undeployed. Disposable backend proof
 does not substitute for authenticated visual QA.
 
-## Phase 6B proof still required
+## Remaining validation gaps
 
-The next full disposable run must bind the changed 0001 and 0002 migrations,
-the new two-database worker composition, exact pilot identity, persistent
-three-lane fairness, attachment exclusion, source-deletion receipt recovery,
-context terminalization, owner-serialized rolling capture limits, and
-concurrent advisory-lock behavior. Until that run
-passes, both changed migration packages and the root manifest remain explicitly
-not disposable-validated. Chat-deletion cancellation/erasure coordination is
-not implemented and remains an activation blocker.
+The passing run did not exercise the rolling 20-row capture ceiling to its
+boundary, call a real provider or embedding endpoint, verify live Supabase
+session freshness, approve semantic calibration, prove persistent-store
+operation, install production routes, or validate the authenticated frontend.
+Chat-deletion cancellation/erasure coordination is not implemented and remains
+an activation blocker.
 
 ## Corrections made before the passing run
 

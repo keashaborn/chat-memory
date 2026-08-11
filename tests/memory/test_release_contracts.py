@@ -70,7 +70,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(result["external_calls"], 0)
         self.assertFalse(result["production_state_changed"])
-        self.assertEqual(len(result["artifact_sha256"]), 11)
+        self.assertEqual(len(result["artifact_sha256"]), 13)
         self.assertIn(
             "ops/governed_memory/systemd/governed-memory-worker.service.in",
             result["artifact_sha256"],
@@ -81,6 +81,14 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertIn(
             "ops/governed_memory/runtime_manifest.json",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "ops/governed_memory/phase6b_disposable_proof_receipt.json",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "governed-memory-migrations/manifest.json",
             result["artifact_sha256"],
         )
         self.assertIn(
@@ -140,6 +148,46 @@ class ReleaseArtifactTests(unittest.TestCase):
                     "release_runtime_dependency_invalid",
                 ):
                     verify_candidate_artifacts()
+
+    def test_disposable_proof_and_migration_state_drift_are_rejected(self) -> None:
+        original = json.loads(
+            (OPS / "phase6b_disposable_proof_receipt.json").read_text(
+                encoding="ascii"
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "phase6b-proof.json"
+            original["proof_receipt"]["production_data_read"] = True
+            path.write_text(json.dumps(original), encoding="ascii")
+            drift_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+            with mock.patch.object(
+                release_guard, "PHASE6B_DISPOSABLE_PROOF_RECEIPT", path
+            ), mock.patch.object(
+                release_guard,
+                "EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256",
+                drift_sha256,
+            ):
+                with self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    "release_disposable_proof_invalid",
+                ):
+                    verify_candidate_artifacts()
+
+        preliminary = {
+            "manifest_sha256": release_guard.EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256,
+            "validation_state": "preliminary_disposable_proof_candidate",
+            "result": "verified",
+        }
+        with mock.patch.object(
+            release_guard,
+            "verify_migration_manifest",
+            return_value=preliminary,
+        ):
+            with self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_migration_manifest_invalid",
+            ):
+                verify_candidate_artifacts()
 
     def test_historical_or_semantically_malformed_runtime_receipt_is_rejected(
         self,
@@ -223,10 +271,15 @@ class ReleaseArtifactTests(unittest.TestCase):
                         "EXPECTED_RUNTIME_MANIFEST_SHA256",
                         manifest_sha256,
                     ),
+                    mock.patch.object(
+                        release_guard,
+                        "_verify_phase6b_proof",
+                        return_value=None,
+                    ),
                 )
                 with self.subTest(label=label), patches[0], patches[1], patches[
                     2
-                ], patches[3]:
+                ], patches[3], patches[4]:
                     with self.assertRaisesRegex(
                         ReleaseGuardError,
                         "release_runtime_contract_invalid",
@@ -474,11 +527,11 @@ class ReleaseArtifactTests(unittest.TestCase):
             contract["candidate_implementation_status"][
                 "owner_claim_fact_detail"
             ],
-            "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
+            "implemented_candidate_phase6b_disposable_validated_not_production_applied",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["runtime"],
-            "phase6b_source_bound_receipt_present_disposable_execution_pending",
+            "phase6b_source_bound_disposable_proof_passed_inactive",
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["qdrant_adapter"],
@@ -486,7 +539,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             contract["candidate_implementation_status"]["pilot_marker"],
-            "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
+            "implemented_phase6b_disposable_validated_not_production_applied",
         )
         self.assertTrue(contract["qdrant"]["real_disposable_compatibility_verified"])
         self.assertFalse(contract["qdrant"]["persistent_pilot_approved"])
@@ -527,7 +580,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertEqual(pilot["limits"]["maximum_post_cutover_user_messages"], 20)
         self.assertEqual(
             pilot["limits"]["maximum_post_cutover_user_messages_enforcement"],
-            "owner_locked_all_state_outbox_count_rolling_24h_focused_static_and_adapter_tested_inactive_disposable_proof_pending",
+            "owner_locked_all_state_outbox_count_rolling_24h_focused_static_and_adapter_tested_not_disposable_runtime_exercised",
         )
         self.assertFalse(pilot["eligible_input"]["old_conversations"])
         self.assertFalse(pilot["eligible_input"]["historical_backfill"])
@@ -574,7 +627,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             pilot["provider_policy"]["embedding_adapter_status"],
-            "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls",
+            "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
         )
         self.assertEqual(
             pilot["provider_policy"]["qdrant_adapter_status"],
@@ -582,15 +635,15 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["owner_claim_fact_detail"],
-            "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
+            "implemented_candidate_phase6b_disposable_validated_not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["runtime"],
-            "phase6b_source_bound_receipt_present_disposable_execution_pending",
+            "phase6b_source_bound_disposable_proof_passed_inactive",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["pilot_marker"],
-            "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
+            "implemented_phase6b_disposable_validated_not_production_applied",
         )
         self.assertEqual(
             pilot["candidate_surfaces"]["frontend"],

@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
   "candidate_id": "clean-governed-memory-successor-2026-08-10",
-  "status": "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
     "production_service_change_authorized": false,
@@ -30,7 +30,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "9c7e661e4ac9488a313cd97ca86f0e81f2b4d7a1a98d630899664b552f38e9e3"
+      "sha256": "928b7165d0bb75edbc1acfef3e34f4bb011c9b8020a1dc15a1da58205c5577f8"
     },
     {
       "path": "predicate_catalog.json",
@@ -38,7 +38,7 @@
     },
     {
       "path": "0001_foundation/package.json",
-      "sha256": "e727d821217c1bfb8f44a528a9730097f6ed5f33ccf9f6adde59940999c54b50"
+      "sha256": "4ff9a91b5a8a0fe5621e59e2625c1ff460f59bc2e36d5419e3dd3116d5b8ad11"
     },
     {
       "path": "0001_foundation/forward.pgsql",
@@ -50,7 +50,7 @@
     },
     {
       "path": "0003_owner_claim_detail/package.json",
-      "sha256": "73043991d054fa19c0932100bd11bf69c67dad670d8e35553bfd61cca63ec883"
+      "sha256": "fc247723a82ddb061047dd9b23a72e33f12dfe2ec5b3ba70642550707cc1da39"
     },
     {
       "path": "0003_owner_claim_detail/forward.pgsql",
@@ -62,7 +62,7 @@
     },
     {
       "path": "0004_pilot_marker/package.json",
-      "sha256": "384f160cb5358e57d5d562b77f5d3768e8a3e3d9da0392bac4c6e07cca34d606"
+      "sha256": "00e9cae13891fdc0e1bb8e025679cd44155d20bda1a7bab31bdab48f5e542b59"
     },
     {
       "path": "0004_pilot_marker/forward.pgsql",
@@ -74,7 +74,7 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "44eda0e1e93e7e2baa5e34f3bb760779b32b0d1d2913e229a810870e1e8da323"
+      "sha256": "aae3cdc883a56ef99328d49a81dd52c1d47da43738b4bd573f54d0b24d9997b2"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
@@ -93,7 +93,7 @@
     "claim_detail_rollback_data_mutation": false,
     "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
-    "disposable_database_execution_performed": false,
+    "disposable_database_execution_performed": true,
     "production_database_execution_performed": false,
     "production_checkout_files_changed": false,
     "production_data_read": false,

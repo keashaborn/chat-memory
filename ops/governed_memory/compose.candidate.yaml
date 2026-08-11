@@ -1,6 +1,6 @@
 # DISPOSABLE VALIDATION ONLY. Qdrant v1.19.0 is pinned by immutable digest.
-# Full Phase 6B disposable validation is pending. This compose candidate is not
-# persistent-pilot approval and the release guard still refuses create.
+# Full Phase 6B disposable validation passed. This compose candidate is still
+# disposable-only, not persistent-pilot approval, and the guard refuses create.
 x-governed-memory-scope: disposable-validation-only
 name: governed-memory-9a54cf123493-000001
 

@@ -1074,7 +1074,7 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "isolated_candidate_not_yet_disposable_validated_not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])

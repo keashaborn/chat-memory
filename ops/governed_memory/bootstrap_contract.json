@@ -116,19 +116,19 @@
     "import_legacy_vectors": false
   },
   "candidate_implementation_status": {
-    "runtime": "phase6b_source_bound_receipt_present_disposable_execution_pending",
+    "runtime": "phase6b_source_bound_disposable_proof_passed_inactive",
     "session_id_required": true,
     "supabase_auth_sessions_rpc": "staged_candidate_not_installed_or_live_verified",
-    "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied",
+    "owner_claim_fact_detail": "implemented_candidate_phase6b_disposable_validated_not_production_applied",
     "provider_adapter": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter": "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls",
+    "embedding_adapter": "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
     "qdrant_adapter": "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved",
-    "pilot_marker": "implemented_phase6b_disposable_revalidation_pending_not_production_applied",
+    "pilot_marker": "implemented_phase6b_disposable_validated_not_production_applied",
     "worker_algorithm": "implemented_fake_tested",
-    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_focused_unit_tested_real_two_database_disposable_proof_pending",
+    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
     "worker_context_required_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
-    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_focused_unit_tested_disposable_proof_pending",
-    "worker_cross_process_singleton": "postgresql_session_advisory_lock_implemented_focused_unit_tested_inactive",
+    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive",
+    "worker_cross_process_singleton": "postgresql_session_advisory_lock_disposable_validated_inactive",
     "calibration": "independently_bound_unapproved_retrieval_off",
     "frontend_candidate": "6d80ba_built_undeployed_visual_qa_pending"
   },
@@ -143,7 +143,6 @@
     "unresolved_creation_prerequisites": [
       "production_activation_not_authorized",
       "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-      "phase6b_migration_contract_disposable_proof_pending",
       "chat_deletion_memory_cancellation_coordination_not_implemented",
       "calibration_artifact_unapproved_retrieval_off",
       "frontend_candidate_6d80ba_undeployed_visual_qa_pending"

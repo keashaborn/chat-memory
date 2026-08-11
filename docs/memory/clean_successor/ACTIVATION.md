@@ -14,8 +14,9 @@ The current checked Phase 6B runtime receipt has SHA-256
 and binds installable successor source-inventory SHA-256
 `d08cc71966beec1e31e107c08b71daa4e51daf3c0b3b6f5ef584ef8bae41c0e0`
 to the sealed CPython 3.12.3 candidate. The full Phase 6B disposable migration
-and two-database worker receipt remain pending. The runtime receipt alone is
-not production activation evidence.
+and two-database worker run passed; its checked receipt is
+`ops/governed_memory/phase6b_disposable_proof_receipt.json`. Neither receipt is
+production activation evidence.
 
 ## Exact candidate targets
 
@@ -44,20 +45,19 @@ that image also passed. The digest is not persistent-pilot approval.
 
 - JWT `sub` is owner authority and signed `session_id` is mandatory. The staged
   Supabase `auth.sessions` RPC is not installed or live verified.
-- Owner-scoped claim detail is implemented and candidate-tested; its older
-  proof is historical and fresh Phase 6B disposable revalidation is pending.
+- Owner-scoped claim detail passed fresh Phase 6B disposable migration,
+  owner-isolation, and lifecycle validation.
 - Strict provider and 3072 embedding adapters are fake-tested. Embedding HTTP
   dispatch requires a durable content-free request marker; marked requests are
   never automatically resent. The exact
   Qdrant adapter is fake-tested and proved against disposable Qdrant 1.19.0;
   no real provider call has occurred.
-- Migration 0004 implements a content-free append-only pilot marker; its older
-  proof is historical and fresh Phase 6B disposable revalidation is pending.
+- Migration 0004 implements a content-free append-only pilot marker and passed
+  fresh Phase 6B disposable insert/replay/conflict/read validation.
 - The one-item worker has inactive exact two-database composition, RPC-only
   repositories, loopback Qdrant transport, exact target configuration,
   persistent three-lane fairness, and PostgreSQL session advisory locking.
-  These are focused-test results only; fresh disposable and concurrent proof
-  remain open.
+  These passed the Phase 6B disposable two-database and concurrent-lock run.
 - Calibration requires independent artifact and approval-receipt hashes. Its
   artifact is unapproved and retrieval remains off.
 - Frontend candidate `6d80ba` is built, undeployed, and awaiting authenticated
@@ -74,9 +74,10 @@ list. Before any persistent pilot, all of the following remain required:
 3. Mount and verify live Supabase runtime credentials without exposing them.
 4. Keep semantic retrieval off until an independently authorized calibration
    artifact is approved.
-5. Use the fresh sealed runtime to prove the Phase 6B two-database worker,
-   persistent fairness cursor, attachment exclusion, exact pilot identity, and
-   cross-process singleton against fresh disposable stores.
+5. Preserve the passing Phase 6B disposable proof binding. Reproduce it if the
+   sealed source, migrations, runner, runtime locks, or pinned images change.
+   The rolling 20-row capture ceiling still needs boundary execution before a
+   pilot even though its focused/static and adapter checks pass.
 6. Authorize any real provider/embedding validation separately; unknown
    post-dispatch outcomes remain terminal and are never automatically retried.
    Implement and authorize projection reconciliation with a sequence-safe

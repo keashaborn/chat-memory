@@ -18,6 +18,10 @@ from pathlib import Path
 import re
 import sys
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 try:
     from tools.governed_memory_release.build_candidate_runtime import (
         _source_tree_sha256,
@@ -25,8 +29,10 @@ try:
 except ModuleNotFoundError:  # Direct script execution from this directory.
     from build_candidate_runtime import _source_tree_sha256
 
+from tools.governed_memory_validation.verify_migration_manifest import (
+    verify as verify_migration_manifest,
+)
 
-ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "ops" / "governed_memory"
 BOOTSTRAP = OPS / "bootstrap_contract.json"
 PILOT = OPS / "pilot_contract.json"
@@ -34,6 +40,9 @@ RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 COMPOSE = OPS / "compose.candidate.yaml"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
 RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
+PHASE6B_DISPOSABLE_PROOF_RECEIPT = OPS / "phase6b_disposable_proof_receipt.json"
+MIGRATION_ROOT = ROOT / "governed-memory-migrations"
+MIGRATION_MANIFEST = MIGRATION_ROOT / "manifest.json"
 RUNTIME_LOCK = OPS / "runtime-requirements.lock"
 BUILD_LOCK = OPS / "build-requirements.lock"
 RUNTIME_PACKAGES = ROOT / "tools" / "governed_memory_validation" / "runtime_packages.json"
@@ -71,7 +80,6 @@ OBSERVATION_KEYS = {
 EXPECTED_CREATE_BLOCKERS = [
     "production_activation_not_authorized",
     "supabase_auth_sessions_rpc_not_installed_or_live_verified",
-    "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
     "calibration_artifact_unapproved_retrieval_off",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
@@ -84,7 +92,16 @@ EXPECTED_RUNTIME_RECEIPT_SHA256 = (
     "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
 )
 EXPECTED_RUNTIME_MANIFEST_SHA256 = (
-    "1e2d6ccb127064e449eb4f7836d58f75ffa93cb37313b60e9c6efa954d0c0276"
+    "9240cff040f09944ca181317d5bd2d07446a39d7009d7442aa87c56b66b0dca6"
+)
+EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256 = (
+    "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8"
+)
+EXPECTED_PHASE6B_PROOF_CANONICAL_SHA256 = (
+    "5872a3acfcefbcedbb6da10715dbbb7214bb833a4aa64037b4b189079273b4a5"
+)
+EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256 = (
+    "bb87fc8e585a879c07fcdff3313f1d7628fdc850edab2008e1937bf125c7cace"
 )
 EXPECTED_RUNTIME_PYTHON_SHA256 = (
     "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
@@ -138,6 +155,102 @@ EXPECTED_RUNTIME_RECEIPT_KEYS = {
     "user_site_enabled",
     "wheel_present",
 }
+EXPECTED_PHASE6B_PROOF_WRAPPER_KEYS = {
+    "schema_version",
+    "phase",
+    "attested_pre_promotion_runtime_manifest_sha256",
+    "proof_receipt_canonicalization",
+    "proof_receipt_canonical_sha256",
+    "proof_receipt",
+}
+EXPECTED_PHASE6B_PROOF_KEYS = {
+    "branch",
+    "candidate_head",
+    "candidate_tree",
+    "source_tree_sha256",
+    "runtime_build_receipt_sha256",
+    "candidate_unchanged",
+    "connect_trace_sha256",
+    "external_network_calls",
+    "loopback_application_endpoints",
+    "traced_internal_bridge_connects",
+    "published_container_ports",
+    "provider_external_calls",
+    "production_data_read",
+    "production_endpoint_calls",
+    "production_service_invoked",
+    "docker_persistent_mounts",
+    "ports_released",
+    "resources_removed",
+    "result",
+    "run_id",
+    "invocation_id",
+    "network_id",
+    "postgres_container_id",
+    "qdrant_container_id",
+    "postgres_image_id",
+    "qdrant_image_id",
+    "qdrant_image_digest",
+    "postgres_server_version",
+    "qdrant_server_version",
+    "manifest_sha256",
+    "runtime_packages_sha256",
+    "runtime_lock_sha256",
+    "foundation_logical_dump_sha256",
+    "bridge_logical_dump_sha256",
+    "integration_receipt_sha256",
+    "rollback_reapply",
+    "semantic_threshold_calibrated",
+    "schema_version",
+}
+EXPECTED_DISPOSABLE_VALIDATION = {
+    "scope": "successor_disposable_only",
+    "evidence_status": "phase6b_disposable_proof_passed_not_production_activation",
+    "current_full_proof_complete": True,
+    "validation_document": "docs/memory/clean_successor/VALIDATION.md",
+    "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
+    "current_candidate_python": EXPECTED_RUNTIME_PYTHON,
+    "postgresql_fresh_empty": True,
+    "qdrant_fresh_empty": True,
+    "migration_forward_rollback_reapply": True,
+    "normalized_catalog_equivalent_after_reapply": True,
+    "forced_rls_owner_isolation_and_direct_dml_denial": True,
+    "asymmetric_jwt_and_jwks_boundary_invoked": True,
+    "owner_http_lifecycle_invoked": True,
+    "all_owner_routes_invoked": True,
+    "alternating_owner_pool_isolation": True,
+    "owner_pool_max_size": 1,
+    "distinct_chat_a_chat_b": True,
+    "cold_extraction_reconstruction": True,
+    "cold_postgresql_projection_rebuild": True,
+    "correction_retraction_hard_delete_and_retention": True,
+    "live_supabase_user_adapter_unit_validated": True,
+    "live_supabase_session_freshness_verified": False,
+    "qdrant_v1_19_0_real_disposable_compatibility_verified": True,
+    "pilot_marker_disposable_proof_complete": True,
+    "worker_runtime_composition_validated": True,
+    "worker_runtime_composition_status": (
+        "implemented_inactive_persistently_fair_three_lane_"
+        "real_two_database_disposable_validated"
+    ),
+    "worker_cross_process_singleton_validated": True,
+    "worker_cross_process_singleton_status": (
+        "implemented_inactive_real_concurrent_lock_disposable_validated"
+    ),
+    "production_routes_installed": False,
+    "authenticated_frontend_verified": False,
+    "semantic_threshold_calibrated": False,
+    "production_data_read": False,
+    "production_endpoint_calls": 0,
+    "provider_external_calls": 0,
+    "persistent_resources_created": False,
+    "final_resources_absent": True,
+    "resource_cleanup_complete": True,
+    "current_proof_receipt": (
+        "ops/governed_memory/phase6b_disposable_proof_receipt.json"
+    ),
+    "current_proof_receipt_sha256": EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256,
+}
 EXPECTED_ACTIVATION_BLOCKERS = [
     "production_activation_not_authorized",
     "semantic_calibration_artifact_unapproved_retrieval_off",
@@ -153,7 +266,6 @@ EXPECTED_ACTIVATION_BLOCKERS = [
     "provider_adapter_real_call_validation_not_authorized_or_completed",
     "embedding_adapter_real_call_validation_not_authorized_or_completed",
     "projection_reconciliation_and_sequence_safe_qdrant_repair_not_implemented",
-    "phase6b_migration_contract_disposable_proof_pending",
     "chat_deletion_memory_cancellation_coordination_not_implemented",
     "frontend_candidate_6d80ba_undeployed_visual_qa_pending",
     "pilot_owner_and_scope_not_authorized",
@@ -199,12 +311,97 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _canonical_json_sha256(value: object) -> str:
+    material = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _verify_phase6b_proof(value: object) -> None:
+    if not isinstance(value, dict) or set(value) != EXPECTED_PHASE6B_PROOF_WRAPPER_KEYS:
+        raise ReleaseGuardError("release_disposable_proof_invalid")
+    proof = value.get("proof_receipt")
+    if not isinstance(proof, dict) or set(proof) != EXPECTED_PHASE6B_PROOF_KEYS:
+        raise ReleaseGuardError("release_disposable_proof_invalid")
+    if (
+        value.get("schema_version")
+        != "governed-memory-current-disposable-proof-v1"
+        or value.get("phase") != "phase6b"
+        or value.get("attested_pre_promotion_runtime_manifest_sha256")
+        != "1e2d6ccb127064e449eb4f7836d58f75ffa93cb37313b60e9c6efa954d0c0276"
+        or value.get("proof_receipt_canonicalization")
+        != "utf8_json_sorted_keys_compact_no_newline_v1"
+        or value.get("proof_receipt_canonical_sha256")
+        != EXPECTED_PHASE6B_PROOF_CANONICAL_SHA256
+        or _canonical_json_sha256(proof)
+        != EXPECTED_PHASE6B_PROOF_CANONICAL_SHA256
+        or proof.get("schema_version")
+        != "governed-memory-successor-disposable-run-v5"
+        or proof.get("result") != "passed"
+        or proof.get("branch")
+        != "codex/clean-memory-successor-phase6b-20260810"
+        or proof.get("candidate_head")
+        != "7693d9db459f81f4d89e680108867ce31dd4c7ed"
+        or proof.get("candidate_tree")
+        != "f62ad8e9cccffe715927fa825f24cb4312a27934"
+        or proof.get("source_tree_sha256") != EXPECTED_RUNTIME_SOURCE_SHA256
+        or proof.get("runtime_build_receipt_sha256")
+        != EXPECTED_RUNTIME_RECEIPT_SHA256
+        or proof.get("manifest_sha256")
+        != "3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66"
+        or proof.get("runtime_packages_sha256")
+        != EXPECTED_RUNTIME_PACKAGES_SHA256
+        or proof.get("runtime_lock_sha256") != EXPECTED_RUNTIME_LOCK_SHA256
+        or proof.get("candidate_unchanged") is not True
+        or proof.get("external_network_calls") != 0
+        or proof.get("loopback_application_endpoints") is not True
+        or proof.get("traced_internal_bridge_connects") is not True
+        or proof.get("published_container_ports") is not False
+        or proof.get("provider_external_calls") != 0
+        or proof.get("production_data_read") is not False
+        or proof.get("production_endpoint_calls") != 0
+        or proof.get("production_service_invoked") is not False
+        or proof.get("docker_persistent_mounts") is not False
+        or proof.get("ports_released") is not True
+        or proof.get("resources_removed") is not True
+        or proof.get("rollback_reapply") != "passed"
+        or proof.get("semantic_threshold_calibrated") is not False
+        or proof.get("postgres_server_version") != "16.14"
+        or proof.get("qdrant_server_version") != "1.19.0"
+        or proof.get("qdrant_image_digest")
+        != "qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc"
+    ):
+        raise ReleaseGuardError("release_disposable_proof_invalid")
+    for key in (
+        "connect_trace_sha256",
+        "network_id",
+        "postgres_container_id",
+        "qdrant_container_id",
+        "foundation_logical_dump_sha256",
+        "bridge_logical_dump_sha256",
+        "integration_receipt_sha256",
+    ):
+        if HASH_RE.fullmatch(str(proof.get(key, ""))) is None:
+            raise ReleaseGuardError("release_disposable_proof_invalid")
+    for key in ("postgres_image_id", "qdrant_image_id"):
+        value = proof.get(key)
+        if not isinstance(value, str) or not value.startswith("sha256:") or (
+            HASH_RE.fullmatch(value.removeprefix("sha256:")) is None
+        ):
+            raise ReleaseGuardError("release_disposable_proof_invalid")
+
+
 def verify_candidate_artifacts() -> dict[str, object]:
     bootstrap = _load_json(BOOTSTRAP)
     pilot = _load_json(PILOT)
     receipt = _load_json(RECEIPT_SCHEMA)
     runtime_manifest = _load_json(RUNTIME_MANIFEST)
     runtime_build_receipt = _load_json(RUNTIME_BUILD_RECEIPT)
+    phase6b_proof = _load_json(PHASE6B_DISPOSABLE_PROOF_RECEIPT)
     if not all(
         isinstance(value, dict)
         for value in (
@@ -213,9 +410,28 @@ def verify_candidate_artifacts() -> dict[str, object]:
             receipt,
             runtime_manifest,
             runtime_build_receipt,
+            phase6b_proof,
         )
     ):
         raise ReleaseGuardError("release_contract_invalid")
+    if _sha256(PHASE6B_DISPOSABLE_PROOF_RECEIPT) != (
+        EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256
+    ):
+        raise ReleaseGuardError("release_disposable_proof_invalid")
+    _verify_phase6b_proof(phase6b_proof)
+    try:
+        migration_receipt = verify_migration_manifest(MIGRATION_ROOT)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseGuardError("release_migration_manifest_invalid") from exc
+    if (
+        _sha256(MIGRATION_MANIFEST)
+        != EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256
+        or migration_receipt.get("manifest_sha256")
+        != EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256
+        or migration_receipt.get("validation_state") != "disposable_validated"
+        or migration_receipt.get("result") != "verified"
+    ):
+        raise ReleaseGuardError("release_migration_manifest_invalid")
     for path, expected_sha256 in (
         (RUNTIME_LOCK, EXPECTED_RUNTIME_LOCK_SHA256),
         (BUILD_LOCK, EXPECTED_BUILD_LOCK_SHA256),
@@ -344,11 +560,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
         is not False
         or runtime_validation.get("current_build_receipt_present") is not True
         or not isinstance(runtime_disposable, dict)
-        or runtime_disposable.get("current_full_proof_complete") is not False
-        or runtime_disposable.get("current_candidate_python") is not None
-        or runtime_disposable.get("current_proof_receipt") is not None
-        or runtime_disposable.get("final_resources_absent") is not False
-        or runtime_disposable.get("resource_cleanup_complete") is not False
+        or runtime_disposable != EXPECTED_DISPOSABLE_VALIDATION
         or not isinstance(runtime_activation, dict)
         or runtime_activation.get("production_authorized") is not False
         or runtime_activation.get("installed_services") != []
@@ -390,13 +602,13 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or not isinstance(implementation, dict)
         or implementation.get("session_id_required") is not True
         or implementation.get("runtime")
-        != "phase6b_source_bound_receipt_present_disposable_execution_pending"
+        != "phase6b_source_bound_disposable_proof_passed_inactive"
         or implementation.get("owner_claim_fact_detail")
-        != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
+        != "implemented_candidate_phase6b_disposable_validated_not_production_applied"
         or implementation.get("qdrant_adapter")
         != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
         or implementation.get("pilot_marker")
-        != "implemented_phase6b_disposable_revalidation_pending_not_production_applied"
+        != "implemented_phase6b_disposable_validated_not_production_applied"
         or implementation.get("calibration")
         != "independently_bound_unapproved_retrieval_off"
     ):
@@ -439,15 +651,15 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or pilot.get("provider_policy", {}).get("provider_adapter_status")
         != "strict_fake_tested_zero_real_calls"
         or pilot.get("provider_policy", {}).get("embedding_adapter_status")
-        != "strict_3072_fake_tested_durable_request_dispatch_marker_implemented_disposable_proof_pending_zero_real_calls"
+        != "strict_3072_fake_tested_durable_request_dispatch_marker_disposable_validated_zero_real_calls"
         or pilot.get("provider_policy", {}).get("calibration_status")
         != "independently_bound_unapproved_retrieval_off"
         or pilot.get("candidate_surfaces", {}).get("owner_claim_fact_detail")
-        != "implemented_candidate_phase6b_disposable_revalidation_pending_not_production_applied"
+        != "implemented_candidate_phase6b_disposable_validated_not_production_applied"
         or pilot.get("candidate_surfaces", {}).get("runtime")
-        != "phase6b_source_bound_receipt_present_disposable_execution_pending"
+        != "phase6b_source_bound_disposable_proof_passed_inactive"
         or pilot.get("candidate_surfaces", {}).get("pilot_marker")
-        != "implemented_phase6b_disposable_revalidation_pending_not_production_applied"
+        != "implemented_phase6b_disposable_validated_not_production_applied"
         or pilot.get("provider_policy", {}).get("qdrant_adapter_status")
         != "exact_fake_and_real_disposable_v1_19_0_validated_not_persistent_approved"
     ):
@@ -504,6 +716,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
             COMPOSE,
             RUNTIME_MANIFEST,
             RUNTIME_BUILD_RECEIPT,
+            PHASE6B_DISPOSABLE_PROOF_RECEIPT,
+            MIGRATION_MANIFEST,
             RUNTIME_LOCK,
             BUILD_LOCK,
             RUNTIME_PACKAGES,

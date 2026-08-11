@@ -20,9 +20,8 @@ Every installed successor module imports in isolated mode from that runtime;
 no outer `rag_engine` module or OpenAI SDK is importable or loaded. Response
 retrieval reads the successor-owned packaged predicate catalog.
 The build made zero network or provider calls, created no persistent resources,
-and changed no production state. This closes only the runtime-build blocker;
-the full Phase 6B disposable migration and two-database worker proof remain
-pending. Nothing is activated.
+and changed no production state. The full Phase 6B disposable migration and
+two-database worker run subsequently passed. Nothing is activated.
 
 PostgreSQL is canonical. Qdrant is a disposable, derived index rebuilt only
 from current PostgreSQL claims and applied projection receipts. Supabase remains
@@ -35,9 +34,8 @@ imported.
 - Owner authority comes only from the verified Supabase JWT `sub`. A signed
   `session_id` is mandatory. The exact `auth.sessions` RPC contract is staged,
   but it is not installed or live verified.
-- The owner-scoped claim-list and claim-detail routes are implemented and
-  candidate-tested. Their older Phase 5 proof is historical; fresh Phase 6B
-  disposable migration and HTTP lifecycle revalidation is pending.
+- The owner-scoped claim-list and claim-detail routes passed fresh Phase 6B
+  disposable migration, owner-isolation, and HTTP lifecycle validation.
 - Strict provider and 3072-dimension embedding adapters are fake-tested. A
   content-free durable request marker must commit before an embedding HTTP
   call; a marked request is never automatically resent. They have made zero
@@ -48,14 +46,12 @@ imported.
   digest `057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc`;
   real disposable compatibility passed. Persistent Qdrant remains unapproved.
 - The content-free monotonic pilot marker exists as migration candidate 0004
-  and is candidate-tested. Its older Phase 5 disposable proof is historical;
-  fresh Phase 6B disposable revalidation is pending, and it is not
-  production-applied.
-- The one-shot worker now has inactive two-database composition, exact
-  PostgreSQL RPC repositories, exact loopback Qdrant transport, a PostgreSQL
-  session advisory lock, and a persistent content-free three-lane fairness
-  cursor. These surfaces have focused unit/static proof only; a fresh
-  disposable two-database runtime proof is pending.
+  and passed Phase 6B disposable insert, exact-replay, conflicting-replay,
+  read, rollback, and reapply validation. It is not production-applied.
+- The one-shot worker has inactive two-database composition, exact PostgreSQL
+  RPC repositories, exact loopback Qdrant transport, a PostgreSQL session
+  advisory lock, and a persistent content-free three-lane fairness cursor.
+  These surfaces passed the Phase 6B disposable two-database runtime run.
 - Messages with an attachment row are excluded at enqueue, lease, and exact
   source read. Context-required messages perform one content-free successor
   receipt lookup for crash recovery, then terminalize by two exact marks when
@@ -64,6 +60,8 @@ imported.
 - Capture is owner-serialized and limited to 20 outbox rows across all states
   in a rolling 24-hour window. Exact replay consumes no additional slot; the
   limit returns a typed content-free result so the chat transcript can commit.
+  This limit has focused/static and adapter coverage but was not driven to the
+  20-row boundary in the disposable runtime run.
 - Qdrant failure before embedding dispatch remains retryable. Failure after a
   durable embedding marker is terminal without a second embedding call; the
   canonical PostgreSQL claim remains, and later projection for that claim is
@@ -102,20 +100,29 @@ reconstructing deleted proposal content.
 
 ## Proof boundary
 
-The historical Phase 5 harness exercised disposable PostgreSQL and Qdrant with synthetic
-identities, exact owner isolation, migration rollback/reapply, Qdrant 1.19.0,
-pilot-marker semantics, all owner HTTP routes, zero external provider calls,
-and complete invocation-resource cleanup. The attested pre-promotion candidate
-was HEAD `699c80761065d19832d2c0f3b2b50342a5a8350c`, tree
-`c5c13579ffa54da4f30fc198254c98b662c7029b`, and migration manifest
-`2174711255ba55eeb2233703a0e3813a7d9e191b275cadc5959f7aaee3ab9b45`.
-Metadata promotion changed the tree without rewriting those receipt facts.
-Those facts do not bind the Phase 6B source or migrations.
+The current Phase 6B harness passed with disposable PostgreSQL and Qdrant
+against pre-promotion HEAD
+`7693d9db459f81f4d89e680108867ce31dd4c7ed`, tree
+`f62ad8e9cccffe715927fa825f24cb4312a27934`, and migration-manifest SHA-256
+`3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66`.
+It used PostgreSQL 16.14 and Qdrant 1.19.0; proved fresh-store migration
+forward/rollback/reapply, normalized-catalog equivalence, forced-RLS and
+direct-DML denial, synthetic JWT/JWKS owner isolation, every owner lifecycle
+route, cold extraction and projection rebuild, lifecycle deletion/retention,
+pilot-marker behavior, inactive two-database worker composition, fairness-lane
+advancement, and cross-process singleton refusal. It made zero external
+provider calls, read no production data, invoked no production endpoint or
+service, and removed its exact invocation-owned resources. The checked receipt
+is `ops/governed_memory/phase6b_disposable_proof_receipt.json`.
 
-Current focused tests do not prove disposable PostgreSQL execution, real
-two-database composition, concurrent advisory locking, live Supabase session
-revocation, real provider behavior, installed production routes, authenticated
-frontend behavior, persistent Qdrant suitability, or production readiness.
+The metadata-promotion commit intentionally preserves the attested HEAD/tree
+and pre-promotion manifest hash. It changes validation metadata, guard pins,
+tests, and documentation, not successor package source or migration SQL.
+
+The proof does not establish live Supabase session revocation, real provider
+behavior, the rolling 20-row capture boundary under disposable execution,
+installed production routes, authenticated frontend behavior, persistent
+Qdrant suitability, semantic calibration, or production readiness.
 
 ## Activation and retirement
 

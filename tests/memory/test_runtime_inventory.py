@@ -39,6 +39,9 @@ RELEASE_TOOLS = ROOT / "tools" / "governed_memory_release"
 CLEAN_SUCCESSOR_DOCS = ROOT / "docs" / "memory" / "clean_successor"
 RUNTIME_PACKAGES = VALIDATION_TOOLS / "runtime_packages.json"
 RUNTIME_BUILD_RECEIPT = ROOT / "ops" / "governed_memory" / "runtime_build_receipt.json"
+PHASE6B_DISPOSABLE_PROOF_RECEIPT = (
+    ROOT / "ops" / "governed_memory" / "phase6b_disposable_proof_receipt.json"
+)
 HISTORICAL_PHASE5 = ROOT / "ops" / "governed_memory" / "history" / "phase5"
 HISTORICAL_RUNTIME_BUILD_RECEIPT = HISTORICAL_PHASE5 / "runtime_build_receipt.json"
 HISTORICAL_DISPOSABLE_PROOF_RECEIPT = (
@@ -257,7 +260,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["phase"],
-            "phase6b_inactive_worker_composed_activation_blocked",
+            "phase6b_disposable_validated_inactive_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
@@ -304,7 +307,7 @@ class RuntimeManifestTests(unittest.TestCase):
                 "pilot_capture_limit": (
                     "owner_locked_twenty_rows_all_states_rolling_24h_exact_"
                     "replay_no_new_slot_typed_limit_result_focused_static_and_"
-                    "adapter_tested_inactive_disposable_proof_pending"
+                    "adapter_tested_not_disposable_runtime_exercised"
                 ),
                 "qdrant_unavailable_policy": (
                     "predispatch_qdrant_unavailability_retryable_post_embedding_"
@@ -379,7 +382,7 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             adapters["embedding"],
             "strict_3072_fake_tested_durable_request_dispatch_marker_"
-            "implemented_disposable_proof_pending_zero_real_calls",
+            "disposable_validated_zero_real_calls",
         )
         self.assertEqual(
             adapters["qdrant"],
@@ -388,19 +391,19 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(adapters["algorithm"], "implemented_fake_tested")
         self.assertEqual(
             adapters["cli_composition"],
-            "implemented_inactive_focused_unit_tested",
+            "implemented_inactive_disposable_validated",
         )
         self.assertEqual(
             adapters["cross_process_singleton"],
-            "postgresql_session_advisory_lock_implemented_focused_unit_tested",
+            "postgresql_session_advisory_lock_disposable_validated_inactive",
         )
         self.assertEqual(
             adapters["conversation_bridge"],
-            "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_focused_unit_tested_inactive",
+            "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_disposable_validated_inactive",
         )
         self.assertEqual(
             adapters["scheduler"],
-            "private_content_free_postgresql_sequence_cyclic_three_lane_focused_unit_tested_disposable_proof_pending",
+            "private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive",
         )
 
     def test_successor_validation_is_disposable_and_not_activation_proof(self) -> None:
@@ -411,29 +414,36 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertEqual(
             validation["evidence_status"],
-            "phase6b_disposable_proof_pending",
+            "phase6b_disposable_proof_passed_not_production_activation",
         )
-        self.assertFalse(validation["current_full_proof_complete"])
-        self.assertIsNone(validation["current_candidate_python"])
-        self.assertIsNone(validation["current_proof_receipt"])
-        self.assertFalse(validation["final_resources_absent"])
-        self.assertFalse(validation["resource_cleanup_complete"])
-        self.assertFalse(validation["all_owner_routes_invoked"])
-        self.assertFalse(validation["alternating_owner_pool_isolation"])
-        self.assertEqual(validation["owner_pool_max_size"], 0)
+        self.assertTrue(validation["current_full_proof_complete"])
+        self.assertEqual(validation["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
+        self.assertEqual(
+            validation["current_proof_receipt"],
+            "ops/governed_memory/phase6b_disposable_proof_receipt.json",
+        )
+        self.assertEqual(
+            validation["current_proof_receipt_sha256"],
+            hashlib.sha256(PHASE6B_DISPOSABLE_PROOF_RECEIPT.read_bytes()).hexdigest(),
+        )
+        self.assertTrue(validation["final_resources_absent"])
+        self.assertTrue(validation["resource_cleanup_complete"])
+        self.assertTrue(validation["all_owner_routes_invoked"])
+        self.assertTrue(validation["alternating_owner_pool_isolation"])
+        self.assertEqual(validation["owner_pool_max_size"], 1)
         self.assertTrue(
             validation["qdrant_v1_19_0_real_disposable_compatibility_verified"]
         )
-        self.assertFalse(validation["pilot_marker_disposable_proof_complete"])
-        self.assertFalse(validation["worker_runtime_composition_validated"])
+        self.assertTrue(validation["pilot_marker_disposable_proof_complete"])
+        self.assertTrue(validation["worker_runtime_composition_validated"])
         self.assertEqual(
             validation["worker_runtime_composition_status"],
-            "implemented_inactive_persistently_fair_three_lane_focused_unit_tested_real_two_database_disposable_proof_pending",
+            "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
         )
-        self.assertFalse(validation["worker_cross_process_singleton_validated"])
+        self.assertTrue(validation["worker_cross_process_singleton_validated"])
         self.assertEqual(
             validation["worker_cross_process_singleton_status"],
-            "implemented_inactive_focused_unit_tested_real_concurrent_lock_disposable_proof_pending",
+            "implemented_inactive_real_concurrent_lock_disposable_validated",
         )
         self.assertFalse(validation["semantic_threshold_calibrated"])
         self.assertFalse(validation["persistent_resources_created"])
@@ -469,7 +479,7 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertFalse(http_runtime["supabase_auth_sessions_rpc_live_verified"])
         self.assertTrue(http_runtime["owner_claim_fact_detail_implemented"])
-        self.assertFalse(
+        self.assertTrue(
             http_runtime["owner_claim_fact_detail_disposable_proof_complete"]
         )
         self.assertIn(
@@ -492,7 +502,7 @@ class RuntimeManifestTests(unittest.TestCase):
             "owner_claim_fact_detail_api_not_implemented",
             manifest["activation"]["blockers"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "phase6b_migration_contract_disposable_proof_pending",
             manifest["activation"]["blockers"],
         )
@@ -657,6 +667,41 @@ class RuntimeManifestTests(unittest.TestCase):
             historical_proof["proof_receipt"]["provider_external_calls"],
             0,
         )
+        phase6b_proof = json.loads(
+            PHASE6B_DISPOSABLE_PROOF_RECEIPT.read_text(encoding="ascii")
+        )
+        self.assertEqual(
+            hashlib.sha256(PHASE6B_DISPOSABLE_PROOF_RECEIPT.read_bytes()).hexdigest(),
+            "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8",
+        )
+        self.assertEqual(phase6b_proof["phase"], "phase6b")
+        receipt = phase6b_proof["proof_receipt"]
+        canonical = json.dumps(
+            receipt,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self.assertEqual(
+            hashlib.sha256(canonical).hexdigest(),
+            phase6b_proof["proof_receipt_canonical_sha256"],
+        )
+        self.assertEqual(
+            receipt["candidate_head"],
+            "7693d9db459f81f4d89e680108867ce31dd4c7ed",
+        )
+        self.assertEqual(
+            receipt["candidate_tree"],
+            "f62ad8e9cccffe715927fa825f24cb4312a27934",
+        )
+        self.assertEqual(
+            receipt["manifest_sha256"],
+            "3bfe6ce5f2514f642dee58416d12f0bfa938646897b70b3e3294f8e1639b2c66",
+        )
+        self.assertEqual(receipt["result"], "passed")
+        self.assertEqual(receipt["provider_external_calls"], 0)
+        self.assertFalse(receipt["production_data_read"])
+        self.assertTrue(receipt["resources_removed"])
 
     def test_schema_validation_scope_is_versionless_and_exact(self) -> None:
         contract = json.loads(SCHEMA_CONTRACT.read_text(encoding="utf-8"))
