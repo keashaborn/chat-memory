@@ -1,4 +1,4 @@
-# Governed Memory clean successor — Phase 6D inactive candidate
+# Governed Memory clean successor — Phase 6E sealed inactive candidate
 
 This repository contains the single current governed-Memory successor source
 candidate. It is not production activated: no successor service, listener,
@@ -10,11 +10,15 @@ Supabase remains account authority; accounts are not copied into Memory. Legacy
 claims, cards, vectors, jobs, reviews, preferences, compatibility state, and
 attachment content are not imported.
 
-The successor requires CPython 3.12.x. A new source-bound CPython 3.12.3
-runtime build is pending. Phase 6D made zero external provider calls, and no
-semantic retrieval-score threshold is activated.
+The successor requires CPython 3.12.x. Its current source-bound CPython 3.12.3
+runtime is built for source inventory
+`b3824dc589c858bfb27f149f0ed85c9c6e1ce2207fd52ad3ae24e129ead03fef`;
+the current runtime receipt SHA-256 is
+`cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86`.
+The build made zero external provider calls, and no semantic retrieval-score
+threshold is activated.
 
-## Phase 6D addition: chat-source erasure
+## Phase 6E deletion coordination: chat-source erasure
 
 The inactive deletion coordinator is a fenced, replay-safe two-database saga.
 It accepts only these conversation selectors:
@@ -105,17 +109,19 @@ proposal content.
 
 ## Proof boundary
 
-The checked Phase 6B runtime-build and disposable proof receipts are preserved
-as historical evidence. They attest the earlier Phase 6B source and migration
-bytes only. Phase 6D changed runtime and migration source, so neither receipt is
-current proof and neither may be reused for activation.
+The Phase 6B runtime-build receipt is preserved at
+`ops/governed_memory/history/phase6b/runtime_build_receipt.json`; its disposable
+proof receipt remains immutable historical evidence. They attest the earlier
+Phase 6B source and migration bytes only and may not be reused for activation.
 
-Phase 6E must build a new source-bound runtime and run the full disposable
-PostgreSQL/Qdrant harness. It must prove exact target selection, cancellation of
-matching ingest work, verified claim/vector deletion, absence checks, chat and
-attachment deletion, empty-thread rules, replay, retry, crash recovery,
-owner-isolation, closed foreign-key/trigger/rule/inheritance scope,
-structured-LifeSwitch preservation, and content-free receipts.
+The Phase 6E source-bound runtime and full disposable PostgreSQL/Qdrant harness
+are now implemented and sealed, but the live disposable run has not yet passed.
+The harness is bound to exact target selection, cancellation of matching ingest
+work, verified claim/vector deletion including Qdrant unknown-outcome readback,
+absence checks, chat and attachment deletion, empty-thread rules, 501-target
+paging, replay, retry, nine crash-recovery boundaries, owner isolation, closed
+foreign-key/trigger/rule/inheritance scope, structured-LifeSwitch preservation,
+and content-free receipts.
 Until that proof passes, all migration packages remain
 `isolated_candidate_not_yet_disposable_validated_not_production_applied`.
 
@@ -134,6 +140,6 @@ Until that proof passes, all migration packages remain
   quiescent.
 
 Production remains unchanged. Old services, stores, source, tests, and
-compatibility routes are not deleted by Phase 6D. Retirement remains a later,
+compatibility routes are not deleted by Phase 6E. Retirement remains a later,
 explicitly authorized sequence with exact targets, recovery evidence, an
 observation window, and a content-free deletion receipt.

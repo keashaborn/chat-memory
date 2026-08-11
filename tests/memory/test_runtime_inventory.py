@@ -47,6 +47,14 @@ HISTORICAL_RUNTIME_BUILD_RECEIPT = HISTORICAL_PHASE5 / "runtime_build_receipt.js
 HISTORICAL_DISPOSABLE_PROOF_RECEIPT = (
     HISTORICAL_PHASE5 / "disposable_proof_receipt.json"
 )
+HISTORICAL_PHASE6B_RUNTIME_BUILD_RECEIPT = (
+    ROOT
+    / "ops"
+    / "governed_memory"
+    / "history"
+    / "phase6b"
+    / "runtime_build_receipt.json"
+)
 
 EXPECTED_PACKAGE_FILES = {
     "__init__.py",
@@ -157,6 +165,7 @@ EXPECTED_TEST_FILES = {
 EXPECTED_INTEGRATION_FILES = {
     "__init__.py",
     "local_jwks_server.py",
+    "test_conversation_deletion_disposable.py",
     "test_governed_memory_http_vertical_slice.py",
 }
 
@@ -241,9 +250,12 @@ EXPECTED_PROJECT_WHEEL_SHA256 = (
     "58146af4097400097b1312011c591d1878904f7ac5709b0fdecd57da3fc0f8e4"
 )
 CURRENT_PROJECT_WHEEL_SHA256 = (
-    "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db"
+    "7f086b2687d1daf8f687ef4c4b97777096d9b337045be1a8d307f2ba659af412"
 )
 CURRENT_RUNTIME_BUILD_RECEIPT_SHA256 = (
+    "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86"
+)
+PHASE6B_RUNTIME_BUILD_RECEIPT_SHA256 = (
     "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
 )
 
@@ -274,8 +286,8 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["phase"],
-            "phase6d_inactive_static_candidate_"
-            "phase6e_disposable_deletion_proof_pending",
+            "phase6e_inactive_sealed_candidate_"
+            "disposable_deletion_proof_pending",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertEqual(
@@ -588,10 +600,11 @@ class RuntimeManifestTests(unittest.TestCase):
                     "ops/governed_memory/history/phase5/disposable_proof_receipt.json"
                 ),
                 "phase6b_runtime_build_receipt": (
-                    "ops/governed_memory/runtime_build_receipt.json"
+                    "ops/governed_memory/history/phase6b/"
+                    "runtime_build_receipt.json"
                 ),
                 "phase6b_runtime_build_receipt_sha256": (
-                    CURRENT_RUNTIME_BUILD_RECEIPT_SHA256
+                    PHASE6B_RUNTIME_BUILD_RECEIPT_SHA256
                 ),
                 "phase6b_disposable_proof_receipt": (
                     "ops/governed_memory/phase6b_disposable_proof_receipt.json"
@@ -734,22 +747,28 @@ class RuntimeManifestTests(unittest.TestCase):
                 "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
                 "build_lock": "ops/governed_memory/build-requirements.lock",
                 "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-                "current_source_tree_sha256": None,
-                "current_candidate_python": None,
-                "current_candidate_python_sha256": None,
-                "current_project_wheel_sha256": None,
-                "current_source_bound": False,
-                "final_phase6d_runtime_rebuild_pending": True,
-                "current_build_receipt": None,
-                "current_build_receipt_sha256": None,
-                "current_build_receipt_present": False,
+                "current_source_tree_sha256": EXPECTED_SOURCE_TREE_SHA256,
+                "current_candidate_python": EXPECTED_CANDIDATE_PYTHON,
+                "current_candidate_python_sha256": (
+                    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+                ),
+                "current_project_wheel_sha256": CURRENT_PROJECT_WHEEL_SHA256,
+                "current_source_bound": True,
+                "final_phase6d_runtime_rebuild_pending": False,
+                "current_build_receipt": (
+                    "ops/governed_memory/runtime_build_receipt.json"
+                ),
+                "current_build_receipt_sha256": (
+                    CURRENT_RUNTIME_BUILD_RECEIPT_SHA256
+                ),
+                "current_build_receipt_present": True,
             },
         )
         self.assertNotIn(
             "candidate_owned_runtime_environment_not_built",
             manifest["activation"]["blockers"],
         )
-        self.assertFalse(manifest["validation_runtime"]["current_source_bound"])
+        self.assertTrue(manifest["validation_runtime"]["current_source_bound"])
         self.assertEqual(hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest(), EXPECTED_RUNTIME_LOCK_SHA256)
         self.assertEqual(hashlib.sha256(BUILD_LOCK.read_bytes()).hexdigest(), EXPECTED_BUILD_LOCK_SHA256)
         self.assertTrue(RUNTIME_BUILD_RECEIPT.is_file())
@@ -767,11 +786,11 @@ class RuntimeManifestTests(unittest.TestCase):
         )
         self.assertEqual(
             current_build_receipt["candidate_python"],
-            PHASE6B_CANDIDATE_PYTHON,
+            EXPECTED_CANDIDATE_PYTHON,
         )
         self.assertEqual(
             current_build_receipt["source_tree_sha256"],
-            PHASE6B_SOURCE_TREE_SHA256,
+            EXPECTED_SOURCE_TREE_SHA256,
         )
         self.assertEqual(
             current_build_receipt["project_wheel_sha256"],
@@ -1265,10 +1284,34 @@ class SourceInventoryTests(unittest.TestCase):
         )
         self.assertIn('"source_tree_sha256":"%s"', runner)
         self.assertIn('"runtime_build_receipt_sha256":"%s"', runner)
-        self.assertIn('"${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}"', runner)
-        self.assertEqual(
-            runner.count("governed-memory-successor-disposable-run-v5"), 1
+        self.assertIn('"deletion_receipt_sha256":"%s"', runner)
+        self.assertIn(
+            '"deletion_resilience_receipt_sha256":"%s"', runner
         )
+        self.assertIn('"${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}"', runner)
+        self.assertIn(
+            '"${INTEGRATION_RECEIPT_SHA256}" "${DELETION_RECEIPT_SHA256}"',
+            runner,
+        )
+        self.assertIn(
+            '"${DELETION_RESILIENCE_RECEIPT_SHA256}"', runner
+        )
+        self.assertEqual(
+            runner.count("validate_deletion_resilience_receipt() {"), 1
+        )
+        self.assertEqual(
+            runner.count("test_deletion_resilience_boundaries"), 1
+        )
+        self.assertIn(
+            "readonly PHASE6E_DELETION_INTEGRATION_READY='true'", runner
+        )
+        self.assertIn(
+            "phase6e_migration_proof_authorization_missing", runner
+        )
+        self.assertEqual(
+            runner.count("governed-memory-successor-disposable-run-v6"), 1
+        )
+        self.assertNotIn("governed-memory-successor-disposable-run-v5", runner)
         self.assertNotIn("governed-memory-successor-disposable-run-v4", runner)
 
     def test_disposable_runner_uses_successor_runtime_and_exact_provider_asset_allowlist(self) -> None:
@@ -1518,22 +1561,45 @@ class SourceInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_phase6b_runtime_receipt_is_historical_not_current(self) -> None:
+    def test_phase6e_runtime_is_current_and_phase6b_receipt_is_historical(
+        self,
+    ) -> None:
         runtime = json.loads(MANIFEST.read_text(encoding="utf-8"))[
             "validation_runtime"
         ]
         build_receipt = json.loads(
             RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
         )
-        self.assertTrue(runtime["final_phase6d_runtime_rebuild_pending"])
-        self.assertFalse(runtime["current_source_bound"])
-        self.assertIsNone(runtime["current_source_tree_sha256"])
-        self.assertIsNone(runtime["current_candidate_python"])
+        phase6b_receipt = json.loads(
+            HISTORICAL_PHASE6B_RUNTIME_BUILD_RECEIPT.read_text(
+                encoding="ascii"
+            )
+        )
+        self.assertFalse(runtime["final_phase6d_runtime_rebuild_pending"])
+        self.assertTrue(runtime["current_source_bound"])
         self.assertEqual(
-            build_receipt["source_tree_sha256"], PHASE6B_SOURCE_TREE_SHA256
+            runtime["current_source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
         )
         self.assertEqual(
-            build_receipt["candidate_python"], PHASE6B_CANDIDATE_PYTHON
+            runtime["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON
+        )
+        self.assertEqual(
+            build_receipt["source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256
+        )
+        self.assertEqual(
+            build_receipt["candidate_python"], EXPECTED_CANDIDATE_PYTHON
+        )
+        self.assertEqual(
+            phase6b_receipt["source_tree_sha256"], PHASE6B_SOURCE_TREE_SHA256
+        )
+        self.assertEqual(
+            phase6b_receipt["candidate_python"], PHASE6B_CANDIDATE_PYTHON
+        )
+        self.assertEqual(
+            hashlib.sha256(
+                HISTORICAL_PHASE6B_RUNTIME_BUILD_RECEIPT.read_bytes()
+            ).hexdigest(),
+            PHASE6B_RUNTIME_BUILD_RECEIPT_SHA256,
         )
         self.assertNotEqual(
             EXPECTED_SOURCE_TREE_SHA256, PHASE6B_SOURCE_TREE_SHA256

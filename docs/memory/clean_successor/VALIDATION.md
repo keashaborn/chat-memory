@@ -2,18 +2,20 @@
 
 ## Current state
 
-Phase 6D is an inactive static candidate. No current disposable PostgreSQL or
-Qdrant proof exists for its changed runtime and migration bytes. The prior
-Phase 6B proof receipt at
-`ops/governed_memory/phase6b_disposable_proof_receipt.json` and runtime receipt
-at `ops/governed_memory/runtime_build_receipt.json` are immutable historical
-evidence only.
+Phase 6E is a sealed inactive candidate with a source-bound runtime build. Its
+current receipt is `ops/governed_memory/runtime_build_receipt.json`; the Phase
+6B runtime receipt is preserved at
+`ops/governed_memory/history/phase6b/runtime_build_receipt.json`. The current
+candidate has not yet received a passing disposable PostgreSQL and Qdrant proof
+receipt.
 
-Do not describe Phase 6B results as proof of Phase 6D deletion coordination.
+Do not describe Phase 6B results as proof of Phase 6E deletion coordination.
 Do not run the harness against production stores or with production endpoints.
-The checked runner currently fails closed with
-`phase6e_deletion_integration_proof_not_implemented`; Phase 6E must add and
-review the exact integration cases below before changing that gate.
+The checked Phase 6E harness implements the required cases below but remains
+fail-closed unless the invocation supplies the exact proof authorization,
+sealed Git HEAD/tree, expected source-bound runtime, and fresh disposable
+resource identities. Metadata remains unpromoted until the emitted proof is
+reviewed separately.
 
 ## Phase 6E required bindings
 
@@ -33,7 +35,7 @@ checkpoint after the emitted receipt is reviewed.
 
 ## Required chat-erasure cases
 
-Phase 6E must prove:
+The Phase 6E disposable run must prove:
 
 1. Only `thread`, `message_tail`, `recent`, and `all_conversations` selectors
    are accepted.
@@ -93,7 +95,7 @@ structured LifeSwitch table.
 
 ## Existing successor coverage to rerun
 
-Because Phase 6D changes foundation and bridge migrations plus worker source,
+Because the candidate changes foundation and bridge migrations plus worker source,
 Phase 6E must rerun migration forward/rollback/reapply, normalized catalog
 equivalence, exact grants, forced RLS, direct-DML denial, owner HTTP lifecycle,
 alternating-owner isolation, cold extraction and projection rebuild, claim

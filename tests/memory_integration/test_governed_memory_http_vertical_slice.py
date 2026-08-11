@@ -179,6 +179,18 @@ OWNER_TABLES = (
     "projection_outbox",
     "proposal",
     "provider_call",
+    "source_erasure_claim",
+    "source_erasure_operation",
+    "source_erasure_receipt",
+    "source_erasure_target",
+)
+EXPECTED_TABLE_SECURITY = frozenset(
+    {(table, True, True) for table in OWNER_TABLES}
+    | {
+        ("erased_chat_message_tombstone", True, True),
+        ("pilot_marker", True, True),
+        ("predicate_catalog", False, False),
+    }
 )
 
 
@@ -1280,22 +1292,23 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(marker, RUN_MARKER)
         self.assertEqual(bridge_marker, RUN_MARKER)
-        self.assertEqual(
-            await self.admin.fetchval(
-                "SELECT pg_catalog.count(*) FROM pg_catalog.pg_class AS c "
-                "JOIN pg_catalog.pg_namespace AS n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='memory' AND c.relkind='r'"
-            ),
-            14,
+        table_rows = await self.admin.fetch(
+            "SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity "
+            "FROM pg_catalog.pg_class AS c "
+            "JOIN pg_catalog.pg_namespace AS n ON n.oid=c.relnamespace "
+            "WHERE n.nspname='memory' AND c.relkind='r' "
+            "ORDER BY c.relname"
         )
         self.assertEqual(
-            await self.admin.fetchval(
-                "SELECT pg_catalog.count(*) FROM pg_catalog.pg_class AS c "
-                "JOIN pg_catalog.pg_namespace AS n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='memory' AND c.relkind='r' "
-                "AND c.relrowsecurity AND c.relforcerowsecurity"
-            ),
-            13,
+            {
+                (
+                    row["relname"],
+                    row["relrowsecurity"],
+                    row["relforcerowsecurity"],
+                )
+                for row in table_rows
+            },
+            EXPECTED_TABLE_SECURITY,
         )
         lease_result = await self.admin.fetchval(
             "SELECT pg_catalog.pg_get_function_result(p.oid) "
@@ -1325,7 +1338,10 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
                 for table in OWNER_TABLES
                 for policy in ("owner_internal", "owner_isolation")
             }
-            | {("pilot_marker", "pilot_marker_owner_only")},
+            | {
+                ("erased_chat_message_tombstone", "owner_internal"),
+                ("pilot_marker", "pilot_marker_owner_only"),
+            },
         )
         for row in policies:
             if row["policyname"] == "owner_isolation":

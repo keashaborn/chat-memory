@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-successor-runtime-manifest-v1",
-  "phase": "phase6d_inactive_static_candidate_phase6e_disposable_deletion_proof_pending",
+  "phase": "phase6e_inactive_sealed_candidate_disposable_deletion_proof_pending",
   "python_runtime": {
     "implementation": "CPython",
     "required": "3.12.*",
@@ -13,15 +13,15 @@
     "runtime_lock_sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
     "build_lock": "ops/governed_memory/build-requirements.lock",
     "build_lock_sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
-    "current_source_tree_sha256": null,
-    "current_candidate_python": null,
-    "current_candidate_python_sha256": null,
-    "current_project_wheel_sha256": null,
-    "current_source_bound": false,
-    "final_phase6d_runtime_rebuild_pending": true,
-    "current_build_receipt": null,
-    "current_build_receipt_sha256": null,
-    "current_build_receipt_present": false
+    "current_source_tree_sha256": "b3824dc589c858bfb27f149f0ed85c9c6e1ce2207fd52ad3ae24e129ead03fef",
+    "current_candidate_python": "/tmp/governed-memory-successor-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-b3824dc589c858bfb27f149f0ed85c9c6e1ce2207fd52ad3ae24e129ead03fef/bin/python",
+    "current_candidate_python_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+    "current_project_wheel_sha256": "7f086b2687d1daf8f687ef4c4b97777096d9b337045be1a8d307f2ba659af412",
+    "current_source_bound": true,
+    "final_phase6d_runtime_rebuild_pending": false,
+    "current_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
+    "current_build_receipt_sha256": "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86",
+    "current_build_receipt_present": true
   },
   "authority": {
     "database": "governed_memory",
@@ -302,7 +302,7 @@
   "historical_evidence": {
     "phase5_runtime_build_receipt": "ops/governed_memory/history/phase5/runtime_build_receipt.json",
     "phase5_disposable_proof_receipt": "ops/governed_memory/history/phase5/disposable_proof_receipt.json",
-    "phase6b_runtime_build_receipt": "ops/governed_memory/runtime_build_receipt.json",
+    "phase6b_runtime_build_receipt": "ops/governed_memory/history/phase6b/runtime_build_receipt.json",
     "phase6b_runtime_build_receipt_sha256": "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69",
     "phase6b_disposable_proof_receipt": "ops/governed_memory/phase6b_disposable_proof_receipt.json",
     "phase6b_disposable_proof_receipt_sha256": "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8",

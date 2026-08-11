@@ -27,14 +27,14 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='51bf3f40d25b732df426498382628098d22c6d2a'
+readonly EXPECTED_BASE='6e1090fcbcd36e9d2cac277edb11227a256853bb'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PHASE6E_PROOF_AUTHORIZATION_VALUE='019fe927:PHASE6E_DELETION_PROOF_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly PHASE6E_DELETION_INTEGRATION_READY='false'
-readonly EXPECTED_MANIFEST_SHA256='d13a985e29b631be0686b854e9dc1a97c4ea59c1750e73453f6379973243dd52'
+readonly PHASE6E_DELETION_INTEGRATION_READY='true'
+readonly EXPECTED_MANIFEST_SHA256='ac6e695b64c44a8380df13cafa11e773fe334a7bcca4530976477b397357bc83'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
-readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69'
+readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
 readonly LABEL_SCOPE_VALUE='successor-disposable'
@@ -94,6 +94,10 @@ FOUNDATION_DUMP_SHA256=''
 BRIDGE_DUMP_SHA256=''
 INTEGRATION_RECEIPT_SHA256=''
 INTEGRATION_RECEIPT_JSON=''
+DELETION_RECEIPT_SHA256=''
+DELETION_RECEIPT_JSON=''
+DELETION_RESILIENCE_RECEIPT_SHA256=''
+DELETION_RESILIENCE_RECEIPT_JSON=''
 CONNECT_TRACE_SHA256=''
 POSTGRES_SERVER_VERSION=''
 QDRANT_SERVER_VERSION=''
@@ -1395,8 +1399,42 @@ apply_migrations() {
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'GRANT memory_ingest_writer TO brains_app' >/dev/null \
-    || die 'disposable_capture_membership_grant_failed'
+    -c 'GRANT memory_ingest_writer, memory_erasure_requester TO brains_app' \
+    >/dev/null || die 'disposable_bridge_membership_grant_failed'
+}
+
+verify_phase6e_mixed_catalog_migration_refusal() {
+  local refusal_log="${RUN_TMP}/phase6e-mixed-catalog-migration-refusal.log"
+  local residue
+
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c "CREATE TABLE public.disposable_legacy_project_memory(project_memory_id uuid PRIMARY KEY,thread_id uuid NOT NULL,CONSTRAINT disposable_legacy_project_memory_thread_fk FOREIGN KEY(thread_id) REFERENCES public.threads(id) ON DELETE RESTRICT); CREATE TABLE public.disposable_legacy_project_card(project_card_id uuid PRIMARY KEY,source_thread_id uuid NOT NULL,CONSTRAINT disposable_legacy_project_card_thread_fk FOREIGN KEY(source_thread_id) REFERENCES public.threads(id) ON DELETE RESTRICT)" \
+    >/dev/null || die 'phase6e_mixed_catalog_fixture_create_failed'
+
+  if run_migration memory sage governed_memory_conversation_bridge_0002 \
+      "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql" \
+      >"${refusal_log}" 2>&1
+  then
+    die 'phase6e_mixed_catalog_migration_unexpectedly_succeeded'
+  fi
+  [[ "$(<"${refusal_log}")" == \
+      *'unclassified inbound chat deletion dependency'* ]] \
+    || die 'phase6e_mixed_catalog_migration_refusal_missing'
+
+  residue="$(
+    docker exec "${POSTGRES_CONTAINER_ID}" psql \
+      -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
+      -c "SELECT CASE WHEN pg_catalog.to_regnamespace('memory_ingest_private') IS NULL THEN 'absent' ELSE 'present' END"
+  )" || die 'phase6e_mixed_catalog_migration_residue_query_failed'
+  [[ "${residue}" == 'absent' ]] \
+    || die 'phase6e_mixed_catalog_migration_left_objects'
+
+  docker exec "${POSTGRES_CONTAINER_ID}" psql \
+    -X -v ON_ERROR_STOP=1 -U postgres -d memory \
+    -c 'DROP TABLE public.disposable_legacy_project_card; DROP TABLE public.disposable_legacy_project_memory' \
+    >/dev/null || die 'phase6e_mixed_catalog_fixture_remove_failed'
+  printf 'SUCCESSOR_PHASE6E_MIGRATION_CATALOG=mixed-legacy-project-fks-refused-clean-fixture-restored\n'
 }
 
 rollback_migrations() {
@@ -1404,8 +1442,8 @@ rollback_migrations() {
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'REVOKE memory_ingest_writer FROM brains_app' >/dev/null \
-    || die 'disposable_capture_membership_revoke_failed'
+    -c 'REVOKE memory_ingest_writer, memory_erasure_requester FROM brains_app' \
+    >/dev/null || die 'disposable_bridge_membership_revoke_failed'
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql"
@@ -1488,8 +1526,8 @@ SQL
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
-    -c 'REVOKE memory_ingest_writer FROM brains_app' >/dev/null \
-    || die 'bridge_rollback_race_membership_revoke_failed'
+    -c 'REVOKE memory_ingest_writer, memory_erasure_requester FROM brains_app' \
+    >/dev/null || die 'bridge_rollback_race_membership_revoke_failed'
 
   run_migration memory sage governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql" \
@@ -1501,7 +1539,7 @@ SQL
     observed="$(
       docker exec "${POSTGRES_CONTAINER_ID}" psql \
         -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
-        -c "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='memory' AND wait_event_type='Lock' AND query LIKE '%LOCK TABLE memory_ingest_private.memory_ingest_outbox%'"
+        -c "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='memory' AND wait_event_type='Lock' AND query LIKE '%LOCK TABLE public.threads IN ACCESS EXCLUSIVE MODE%'"
     )" || die 'bridge_rollback_race_lock_wait_query_failed'
     [[ "${observed}" == '1' ]] && break
     sleep 1
@@ -1920,9 +1958,351 @@ PY
   INTEGRATION_RECEIPT_JSON="${fields[1]}"
 }
 
+validate_deletion_receipt() {
+  local receipt_json="$1" validated
+  local -a fields
+
+  validated="$(
+    "${TEST_PYTHON}" -I -B - "${receipt_json}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sys
+
+
+def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate deletion receipt key: {key}")
+        result[key] = value
+    return result
+
+
+def reject_constant(value: str) -> object:
+    raise ValueError(f"non-finite deletion receipt value: {value}")
+
+
+raw = sys.argv[1]
+if not 2 <= len(raw.encode("utf-8")) <= 32 * 1024:
+    raise ValueError("deletion receipt size invalid")
+receipt = json.loads(
+    raw,
+    object_pairs_hook=unique_object,
+    parse_constant=reject_constant,
+)
+expected_keys = {
+    "attachment_thread_bridge_absence",
+    "clean_composite_auxiliary_fk_count",
+    "claim_deletion_receipt_sha256",
+    "coordinator_final_receipt_sha256",
+    "coordinator_no_work_after_completion",
+    "crash_injection_tested",
+    "deleted_attachment_count",
+    "deleted_bridge_row_count",
+    "deleted_claim_count",
+    "deleted_message_count",
+    "deleted_thread_count",
+    "exact_completed_request_replay",
+    "governed_final_receipt_sha256",
+    "governed_message_tombstone_count",
+    "lifeswitch_snapshot_bytes",
+    "lifeswitch_snapshot_sha256",
+    "live_runtime_catalog_refusal_count",
+    "other_owner_qdrant_snapshot_bytes",
+    "other_owner_qdrant_snapshot_sha256",
+    "other_owner_snapshot_bytes",
+    "other_owner_snapshot_sha256",
+    "page_boundary_tested",
+    "production_data_read",
+    "production_endpoint_calls",
+    "production_service_invoked",
+    "provider_external_calls",
+    "qdrant_deletion_receipt_sha256",
+    "qdrant_delete_outcome_unknown_resolved_by_readback",
+    "qdrant_target_absent_alias_and_physical",
+    "schema",
+    "source_conversation_final_receipt_sha256",
+    "source_message_tombstone_count",
+    "source_thread_tombstone_count",
+    "stale_lease_injection_tested",
+    "synthetic_provider_only",
+    "target_message_count",
+    "target_thread_count",
+    "transient_targets_purged",
+    "typed_project_conflict_code",
+    "typed_project_conflict_retryable",
+    "typed_project_conflict_status",
+}
+if type(receipt) is not dict or set(receipt) != expected_keys:
+    raise ValueError("deletion receipt key set is not closed")
+
+expected_exact = {
+    "attachment_thread_bridge_absence": True,
+    "clean_composite_auxiliary_fk_count": 5,
+    "coordinator_no_work_after_completion": True,
+    "crash_injection_tested": False,
+    "deleted_attachment_count": 2,
+    "deleted_bridge_row_count": 1,
+    "deleted_claim_count": 1,
+    "deleted_message_count": 2,
+    "deleted_thread_count": 1,
+    "exact_completed_request_replay": True,
+    "governed_message_tombstone_count": 2,
+    "live_runtime_catalog_refusal_count": 4,
+    "page_boundary_tested": False,
+    "production_data_read": False,
+    "production_endpoint_calls": 0,
+    "production_service_invoked": False,
+    "provider_external_calls": 0,
+    "qdrant_delete_outcome_unknown_resolved_by_readback": True,
+    "qdrant_target_absent_alias_and_physical": True,
+    "schema": (
+        "governed-memory-successor-conversation-deletion-"
+        "disposable-receipt-v1"
+    ),
+    "source_message_tombstone_count": 2,
+    "source_thread_tombstone_count": 1,
+    "stale_lease_injection_tested": False,
+    "synthetic_provider_only": True,
+    "target_message_count": 2,
+    "target_thread_count": 1,
+    "transient_targets_purged": True,
+    "typed_project_conflict_code": (
+        "governed_project_thread_erasure_required"
+    ),
+    "typed_project_conflict_retryable": False,
+    "typed_project_conflict_status": 409,
+}
+for key, expected in expected_exact.items():
+    value = receipt[key]
+    if type(value) is not type(expected) or value != expected:
+        raise ValueError(f"deletion receipt field differs: {key}")
+
+snapshot_byte_fields = (
+    "lifeswitch_snapshot_bytes",
+    "other_owner_qdrant_snapshot_bytes",
+    "other_owner_snapshot_bytes",
+)
+for key in snapshot_byte_fields:
+    value = receipt[key]
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"deletion receipt snapshot size invalid: {key}")
+
+required_hashes = (
+    "claim_deletion_receipt_sha256",
+    "coordinator_final_receipt_sha256",
+    "governed_final_receipt_sha256",
+    "lifeswitch_snapshot_sha256",
+    "other_owner_qdrant_snapshot_sha256",
+    "other_owner_snapshot_sha256",
+    "qdrant_deletion_receipt_sha256",
+    "source_conversation_final_receipt_sha256",
+)
+for key in required_hashes:
+    value = receipt[key]
+    if type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"invalid deletion receipt digest: {key}")
+
+if not (
+    receipt["target_message_count"]
+    == receipt["deleted_message_count"]
+    == receipt["governed_message_tombstone_count"]
+    == receipt["source_message_tombstone_count"]
+):
+    raise ValueError("deletion receipt message counts disagree")
+if not (
+    receipt["target_thread_count"]
+    == receipt["deleted_thread_count"]
+    == receipt["source_thread_tombstone_count"]
+):
+    raise ValueError("deletion receipt thread counts disagree")
+
+canonical = json.dumps(
+    receipt,
+    sort_keys=True,
+    separators=(",", ":"),
+    ensure_ascii=True,
+    allow_nan=False,
+).encode("ascii")
+print(hashlib.sha256(canonical).hexdigest())
+print(canonical.decode("ascii"))
+PY
+  )" || die 'deletion_receipt_invalid'
+  mapfile -t fields <<< "${validated}"
+  [[ "${#fields[@]}" -eq 2 && "${fields[0]}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'deletion_receipt_sha256_invalid'
+  [[ "${fields[1]}" == \{*\} ]] || die 'deletion_receipt_canonical_invalid'
+  DELETION_RECEIPT_SHA256="${fields[0]}"
+  DELETION_RECEIPT_JSON="${fields[1]}"
+}
+
+validate_deletion_resilience_receipt() {
+  local receipt_json="$1" validated
+  local -a fields
+
+  validated="$(
+    "${TEST_PYTHON}" -I -B - "${receipt_json}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sys
+
+
+def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate resilience receipt key: {key}")
+        result[key] = value
+    return result
+
+
+def reject_constant(value: str) -> object:
+    raise ValueError(f"non-finite resilience receipt value: {value}")
+
+
+raw = sys.argv[1]
+if not 2 <= len(raw.encode("utf-8")) <= 32 * 1024:
+    raise ValueError("resilience receipt size invalid")
+receipt = json.loads(
+    raw,
+    object_pairs_hook=unique_object,
+    parse_constant=reject_constant,
+)
+expected_keys = {
+    "attachment_identity_reuse_refused",
+    "attachment_movement_refused",
+    "conversation_final_receipt_sha256",
+    "crash_after_conversation_completion_ack",
+    "crash_after_conversation_finalize",
+    "crash_after_governed_receipt_handoff",
+    "crash_after_source_claim_step",
+    "crash_after_source_memory_finalize",
+    "crash_after_source_register",
+    "crash_after_successor_completion_ack",
+    "crash_after_target_append",
+    "crash_after_target_seal",
+    "crash_boundary_count",
+    "crash_boundary_manifest_sha256",
+    "deleted_attachment_count",
+    "deleted_message_count",
+    "deleted_thread_count",
+    "exhausted_attempts_manual_review",
+    "final_absence_manifest_sha256",
+    "final_absence_verified",
+    "future_dated_chat_refused",
+    "pending_ack_attempt_cap_recovered",
+    "post_completion_no_work",
+    "production_data_read",
+    "production_endpoint_calls",
+    "provider_external_calls",
+    "schema",
+    "source_page_count",
+    "source_page_sizes_sha256",
+    "source_target_manifest_sha256",
+    "stale_lease_read_refused",
+    "stale_lease_release_refused",
+    "stale_lease_replaced",
+    "successor_final_receipt_sha256",
+    "successor_page_count",
+    "successor_page_replay_exact",
+    "successor_page_replay_conflict_refused",
+    "successor_page_sizes_sha256",
+    "target_count",
+}
+if type(receipt) is not dict or set(receipt) != expected_keys:
+    raise ValueError("resilience receipt key set is not closed")
+
+true_fields = (
+    "attachment_identity_reuse_refused",
+    "attachment_movement_refused",
+    "crash_after_conversation_completion_ack",
+    "crash_after_conversation_finalize",
+    "crash_after_governed_receipt_handoff",
+    "crash_after_source_claim_step",
+    "crash_after_source_memory_finalize",
+    "crash_after_source_register",
+    "crash_after_successor_completion_ack",
+    "crash_after_target_append",
+    "crash_after_target_seal",
+    "exhausted_attempts_manual_review",
+    "final_absence_verified",
+    "future_dated_chat_refused",
+    "pending_ack_attempt_cap_recovered",
+    "post_completion_no_work",
+    "stale_lease_read_refused",
+    "stale_lease_release_refused",
+    "stale_lease_replaced",
+    "successor_page_replay_exact",
+    "successor_page_replay_conflict_refused",
+)
+for key in true_fields:
+    if receipt[key] is not True:
+        raise ValueError(f"resilience receipt lacks proof: {key}")
+
+expected_exact = {
+    "crash_boundary_count": 9,
+    "deleted_attachment_count": 1,
+    "deleted_message_count": 501,
+    "deleted_thread_count": 1,
+    "production_data_read": False,
+    "production_endpoint_calls": 0,
+    "provider_external_calls": 0,
+    "schema": "governed-memory-successor-deletion-resilience-receipt-v1",
+    "source_page_count": 2,
+    "successor_page_count": 2,
+    "target_count": 501,
+}
+for key, expected in expected_exact.items():
+    value = receipt[key]
+    if type(value) is not type(expected) or value != expected:
+        raise ValueError(f"resilience receipt field differs: {key}")
+
+required_hashes = (
+    "conversation_final_receipt_sha256",
+    "crash_boundary_manifest_sha256",
+    "final_absence_manifest_sha256",
+    "source_page_sizes_sha256",
+    "source_target_manifest_sha256",
+    "successor_final_receipt_sha256",
+    "successor_page_sizes_sha256",
+)
+for key in required_hashes:
+    value = receipt[key]
+    if type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"invalid resilience receipt digest: {key}")
+
+canonical = json.dumps(
+    receipt,
+    sort_keys=True,
+    separators=(",", ":"),
+    ensure_ascii=True,
+    allow_nan=False,
+).encode("ascii")
+print(hashlib.sha256(canonical).hexdigest())
+print(canonical.decode("ascii"))
+PY
+  )" || die 'deletion_resilience_receipt_invalid'
+  mapfile -t fields <<< "${validated}"
+  [[ "${#fields[@]}" -eq 2 && "${fields[0]}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'deletion_resilience_receipt_sha256_invalid'
+  [[ "${fields[1]}" == \{*\} ]] \
+    || die 'deletion_resilience_receipt_canonical_invalid'
+  DELETION_RESILIENCE_RECEIPT_SHA256="${fields[0]}"
+  DELETION_RESILIENCE_RECEIPT_JSON="${fields[1]}"
+}
+
 run_integration() {
   local connect_trace="${RUN_TMP}/connect.trace"
-  local receipt_count receipt_json status test_log="${RUN_TMP}/integration.log"
+  local deletion_receipt_count deletion_receipt_json
+  local deletion_resilience_receipt_count deletion_resilience_receipt_json
+  local http_receipt_count http_receipt_json status
+  local test_log="${RUN_TMP}/integration.log"
 
   assert_candidate_binding
   assert_container_identity \
@@ -1969,32 +2349,70 @@ run_integration() {
       GM_VALIDATION_SERVICE_TOKEN="${SERVICE_TOKEN}" \
       "${TEST_PYTHON}" -B -P -m unittest \
         tests.memory_integration.test_governed_memory_http_vertical_slice.GovernedMemoryHttpVerticalSliceTests.test_http_chat_a_to_chat_b_rebuild_and_deletion \
+        tests.memory_integration.test_conversation_deletion_disposable.ConversationDeletionDisposableTests.test_deletion_resilience_boundaries \
+        tests.memory_integration.test_conversation_deletion_disposable.ConversationDeletionDisposableTests.test_exact_chat_only_deletion_and_protected_store_retention \
         -v
   ) > "${test_log}" 2>&1
   status=$?
   set -e
 
   if [[ "${status}" -ne 0 ]]; then
-    sed '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' "${test_log}" >&2
+    sed \
+      -e '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' \
+      -e '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/d' \
+      -e '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/d' \
+      "${test_log}" >&2
     die "integration_failed:${status}"
   fi
 
   validate_connect_trace \
     "${connect_trace}" "${POSTGRES_CONTAINER_IP}" "${QDRANT_CONTAINER_IP}"
-  receipt_count="$(
+  http_receipt_count="$(
     awk '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/{count += 1} END{print count + 0}' \
       "${test_log}"
   )"
-  [[ "${receipt_count}" == '1' ]] || die 'integration_receipt_count_invalid'
-  receipt_json="$(
+  [[ "${http_receipt_count}" == '1' ]] \
+    || die 'integration_receipt_count_invalid'
+  http_receipt_json="$(
     awk -F= '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
       "${test_log}"
   )"
-  validate_integration_receipt "${receipt_json}"
-  sed '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' "${test_log}"
+  deletion_receipt_count="$(
+    awk '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/{count += 1} END{print count + 0}' \
+      "${test_log}"
+  )"
+  [[ "${deletion_receipt_count}" == '1' ]] \
+    || die 'deletion_receipt_count_invalid'
+  deletion_receipt_json="$(
+    awk -F= '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
+      "${test_log}"
+  )"
+  deletion_resilience_receipt_count="$(
+    awk '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/{count += 1} END{print count + 0}' \
+      "${test_log}"
+  )"
+  [[ "${deletion_resilience_receipt_count}" == '1' ]] \
+    || die 'deletion_resilience_receipt_count_invalid'
+  deletion_resilience_receipt_json="$(
+    awk -F= '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
+      "${test_log}"
+  )"
+  validate_integration_receipt "${http_receipt_json}"
+  validate_deletion_receipt "${deletion_receipt_json}"
+  validate_deletion_resilience_receipt \
+    "${deletion_resilience_receipt_json}"
+  sed \
+    -e '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' \
+    -e '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/d' \
+    -e '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/d' \
+    "${test_log}"
   printf 'SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=%s\n' \
     "${INTEGRATION_RECEIPT_JSON}"
-  printf 'SUCCESSOR_INTEGRATION=passed loopback_application_endpoints=true traced_internal_bridge_connects=true synthetic_provider_external_calls=0 production_data_read=false production_endpoint_calls=0\n'
+  printf 'SUCCESSOR_PHASE6E_DELETION_RECEIPT=%s\n' \
+    "${DELETION_RECEIPT_JSON}"
+  printf 'SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=%s\n' \
+    "${DELETION_RESILIENCE_RECEIPT_JSON}"
+  printf 'SUCCESSOR_INTEGRATION=passed loopback_application_endpoints=true traced_internal_bridge_connects=true chat_only_deletion=true protected_lifeswitch_unchanged=true synthetic_provider_external_calls=0 production_data_read=false production_endpoint_calls=0\n'
 }
 
 assert_temp_identity() {
@@ -2023,6 +2441,9 @@ preflight() {
   [[ "${ROOT}" == "${EXPECTED_ROOT}" ]] || die 'wrong_candidate_root'
   [[ "${GM_VALIDATION_DISPOSABLE_AUTHORIZATION:-}" == "${AUTHORIZATION_VALUE}" ]] \
     || die 'explicit_disposable_authorization_missing'
+  [[ "${PHASE6E_PROOF_AUTHORIZATION}" == \
+     "${PHASE6E_PROOF_AUTHORIZATION_VALUE}" ]] \
+    || die 'phase6e_migration_proof_authorization_missing'
   [[ "${PHASE6E_DELETION_INTEGRATION_READY}" == 'true' ]] \
     || die 'phase6e_deletion_integration_proof_not_implemented'
   [[ "${POSTGRES_PORT}" != '5432' && "${QDRANT_PORT}" != '6333' \
@@ -2066,6 +2487,7 @@ full() {
 
   create_resources
   bootstrap_postgres
+  verify_phase6e_mixed_catalog_migration_refusal
   verify_apply_rollback_reapply
   run_integration
 
@@ -2080,9 +2502,13 @@ full() {
     || die 'final_source_tree_sha256_invalid'
   [[ "${RUNTIME_BUILD_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'final_runtime_build_receipt_sha256_invalid'
+  [[ "${DELETION_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'final_deletion_receipt_sha256_invalid'
+  [[ "${DELETION_RESILIENCE_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'final_deletion_resilience_receipt_sha256_invalid'
 
   trap - EXIT INT TERM HUP
-  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","source_tree_sha256":"%s","runtime_build_receipt_sha256":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v5"}\n' \
+  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","source_tree_sha256":"%s","runtime_build_receipt_sha256":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","deletion_receipt_sha256":"%s","deletion_resilience_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v6"}\n' \
     "${EXPECTED_BRANCH}" "${EXPECTED_HEAD}" "${EXPECTED_TREE}" \
     "${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}" \
     "${CONNECT_TRACE_SHA256}" "${RUN_ID}" "${INVOCATION_ID}" "${NETWORK_ID}" \
@@ -2092,7 +2518,8 @@ full() {
     "${MIGRATION_MANIFEST_SHA256}" "${RUNTIME_PACKAGES_SHA256}" \
     "${RUNTIME_LOCK_SHA256}" \
     "${FOUNDATION_DUMP_SHA256}" "${BRIDGE_DUMP_SHA256}" \
-    "${INTEGRATION_RECEIPT_SHA256}"
+    "${INTEGRATION_RECEIPT_SHA256}" "${DELETION_RECEIPT_SHA256}" \
+    "${DELETION_RESILIENCE_RECEIPT_SHA256}"
 }
 
 full "$@"

@@ -3529,18 +3529,18 @@ SECURITY DEFINER
 SET search_path TO pg_catalog
 AS $function$
 BEGIN
-  IF TG_TABLE_SCHEMA = 'memory' AND TG_TABLE_NAME = 'evidence'
-     AND NEW.source_kind = 'conversation_message' THEN
-    PERFORM memory_private.assert_chat_messages_not_erased(
-      NEW.source_message_id, NEW.context_message_id
-    );
+  IF TG_TABLE_SCHEMA = 'memory' AND TG_TABLE_NAME = 'evidence' THEN
+    IF NEW.source_kind = 'conversation_message' THEN
+      PERFORM memory_private.assert_chat_messages_not_erased(
+        NEW.source_message_id, NEW.context_message_id
+      );
+    END IF;
   ELSIF TG_TABLE_SCHEMA = 'memory'
         AND TG_TABLE_NAME = 'answer_binding' THEN
     PERFORM memory_private.assert_chat_messages_not_erased(
       NEW.response_id, NULL::uuid
     );
-  ELSIF TG_TABLE_SCHEMA <> 'memory'
-        OR TG_TABLE_NAME NOT IN ('evidence', 'answer_binding') THEN
+  ELSE
     RAISE EXCEPTION 'erased chat replay guard attached to wrong table'
       USING ERRCODE = '55000';
   END IF;

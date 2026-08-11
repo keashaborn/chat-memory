@@ -233,6 +233,37 @@ READ_SUCCESSOR_SOURCE_ERASURE_RECEIPT_FIELDS = (
 )
 
 _TARGET_PAGE_SIZE = 500
+_LEGACY_PROJECT_THREAD_CATALOG_SQLSTATE = "P0001"
+_LEGACY_PROJECT_THREAD_CATALOG_MESSAGES = frozenset(
+    {
+        (
+            "unclassified inbound chat deletion dependency: "
+            "memory.project_thread_binding_event -> public.threads"
+        ),
+        (
+            "unclassified inbound chat deletion dependency: "
+            "memory.project_thread_component_binding_event_v5 -> "
+            "public.threads"
+        ),
+    }
+)
+
+
+def _conversation_database_failure(
+    error: Exception,
+) -> DeletionRepositoryFailure:
+    """Translate only the two sealed legacy project catalog conflicts."""
+
+    sqlstate = getattr(error, "sqlstate", None)
+    message = getattr(error, "message", None)
+    if (
+        type(sqlstate) is str
+        and sqlstate == _LEGACY_PROJECT_THREAD_CATALOG_SQLSTATE
+        and type(message) is str
+        and message in _LEGACY_PROJECT_THREAD_CATALOG_MESSAGES
+    ):
+        return DeletionRepositoryFailure.LEGACY_PROJECT_THREAD_DEPENDENCY
+    return DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
 
 
 def _uuid(value: object, code: str) -> UUID:
@@ -398,9 +429,9 @@ class PostgresConversationDeletionRepository:
                 return status
         except ContractViolation:
             raise
-        except Exception:
+        except Exception as error:
             raise DeletionRepositoryError(
-                DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
+                _conversation_database_failure(error)
             ) from None
 
     async def read_erasure_status(

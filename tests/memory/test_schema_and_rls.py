@@ -1503,6 +1503,26 @@ class StaticSQLPolicyTests(unittest.TestCase):
             "memory_private.assert_source_erasure_deletion_catalog",
         ):
             self.assertIn(required_function, definitions)
+        replay_guard = definitions[
+            "memory_private.guard_erased_chat_message_replay"
+        ]
+        self.assertRegex(
+            replay_guard,
+            r"(?s)IF\s+TG_TABLE_SCHEMA\s*=\s*'memory'\s+AND\s+"
+            r"TG_TABLE_NAME\s*=\s*'evidence'\s+THEN\s+IF\s+"
+            r"NEW\.source_kind\s*=\s*'conversation_message'\s+THEN\s+"
+            r"PERFORM\s+memory_private\.assert_chat_messages_not_erased\(\s*"
+            r"NEW\.source_message_id,\s*NEW\.context_message_id\s*\);\s*"
+            r"END\s+IF;\s+ELSIF\s+TG_TABLE_SCHEMA\s*=\s*'memory'\s+AND\s+"
+            r"TG_TABLE_NAME\s*=\s*'answer_binding'\s+THEN\s+PERFORM\s+"
+            r"memory_private\.assert_chat_messages_not_erased\(\s*"
+            r"NEW\.response_id,\s*NULL::uuid\s*\);\s+ELSE\s+RAISE\s+"
+            r"EXCEPTION\s+'erased chat replay guard attached to wrong table'",
+        )
+        self.assertNotRegex(
+            replay_guard,
+            r"TG_TABLE_NAME\s*=\s*'evidence'\s+AND\s+NEW\.source_kind",
+        )
         tombstone_assertion = definitions[
             "memory_private.assert_source_erasure_tombstones"
         ]
@@ -3579,6 +3599,33 @@ class StaticSQLPolicyTests(unittest.TestCase):
             with self.subTest(composite_lineage=composite_lineage):
                 self.assertRegex(catalog, composite_lineage)
         self.assertNotIn("project_thread", catalog)
+        self.assertNotRegex(catalog, r"<>\s+CASE\s+WHEN")
+        self.assertNotRegex(
+            self.bridge,
+            r"(?m)^\s*IF[^\n]*[+<>=]\s+CASE\s+WHEN",
+        )
+        self.assertRegex(
+            self.bridge,
+            r"observed_count\s*<>\s*6\s*\+\s*\(\s*CASE\s+WHEN\s+"
+            r"pg_catalog\.to_regclass\(\s*"
+            r"'trusted_web\.response_transcript_v1'\s*\)\s+IS\s+NULL\s+"
+            r"THEN\s+0\s+ELSE\s+1\s+END\s*\)",
+        )
+        for counter, relation in (
+            ("active_edge_count", "public.active_thread_selection"),
+            ("trusted_user_edge_count", "trusted_web.response_transcript_v1"),
+            (
+                "trusted_assistant_edge_count",
+                "trusted_web.response_transcript_v1",
+            ),
+        ):
+            with self.subTest(parenthesized_case=counter):
+                self.assertRegex(
+                    catalog,
+                    rf"{counter}\s*<>\s*\(\s*CASE\s+WHEN\s+"
+                    rf"pg_catalog\.to_regclass\('{relation}'\)\s+IS\s+NULL\s+"
+                    r"THEN\s+0\s+ELSE\s+1\s+END\s*\)",
+                )
 
         begin = definitions["memory_ingest_private.begin_source_erasure"]
         self.assertLess(

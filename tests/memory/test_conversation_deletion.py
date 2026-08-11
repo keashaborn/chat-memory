@@ -7,6 +7,7 @@ from uuid import UUID
 
 from rag_engine.governed_memory.contracts import ContractViolation
 from rag_engine.governed_memory.conversation_deletion import (
+    DeletionRepositoryError,
     DeletionRepositoryFailure,
     require_finalization_receipt_binding,
     validate_erasure_targets,
@@ -281,9 +282,11 @@ class _OwnerConnection:
         *,
         forced_owner: str | None = None,
         forced_auth_context: str | None = None,
+        begin_error: Exception | None = None,
     ) -> None:
         self.forced_owner = forced_owner
         self.forced_auth_context = forced_auth_context
+        self.begin_error = begin_error
         self.local_owner: str | None = None
         self.local_auth_context: str | None = None
         self.in_transaction = False
@@ -335,6 +338,8 @@ class _OwnerConnection:
         self.deletion_queries += 1
         if "begin_source_erasure" in query:
             self.log.append("deletion.begin")
+            if self.begin_error is not None:
+                raise self.begin_error
             return {
                 "outcome": "fenced",
                 "operation_id": OPERATION,
@@ -361,6 +366,82 @@ class _OwnerConnection:
 
 
 class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_legacy_project_catalog_conflicts_are_owner_409(
+        self,
+    ) -> None:
+        class PostgresFailure(Exception):
+            def __init__(self, message: str) -> None:
+                super().__init__(message)
+                self.sqlstate = "P0001"
+                self.message = message
+
+        for table_name in (
+            "memory.project_thread_binding_event",
+            "memory.project_thread_component_binding_event_v5",
+        ):
+            with self.subTest(table_name=table_name):
+                connection = _OwnerConnection(
+                    begin_error=PostgresFailure(
+                        "unclassified inbound chat deletion dependency: "
+                        f"{table_name} -> public.threads"
+                    )
+                )
+                with self.assertRaises(DeletionRepositoryError) as raised:
+                    await PostgresConversationDeletionRepository(
+                        connection
+                    ).request_erasure(bound_command())
+                self.assertEqual(
+                    raised.exception.failure,
+                    DeletionRepositoryFailure.LEGACY_PROJECT_THREAD_DEPENDENCY,
+                )
+                self.assertEqual(
+                    raised.exception.code,
+                    "governed_project_thread_erasure_required",
+                )
+                self.assertEqual(raised.exception.status_code, 409)
+                self.assertFalse(raised.exception.retryable)
+                self.assertEqual(connection.log[-1], "transaction.exit")
+
+    async def test_near_miss_catalog_failures_remain_generic_retryable(
+        self,
+    ) -> None:
+        class PostgresFailure(Exception):
+            def __init__(self, sqlstate: str, message: str) -> None:
+                super().__init__(message)
+                self.sqlstate = sqlstate
+                self.message = message
+
+        exact_message = (
+            "unclassified inbound chat deletion dependency: "
+            "memory.project_thread_binding_event -> public.threads"
+        )
+        cases = (
+            PostgresFailure(
+                "P0001",
+                "unclassified inbound chat deletion dependency: "
+                "memory.project_thread_binding_event_v2 -> public.threads",
+            ),
+            PostgresFailure("XX000", exact_message),
+            PostgresFailure("P0001", exact_message + " "),
+            RuntimeError("sensitive catalog failure"),
+        )
+        for failure in cases:
+            with self.subTest(failure=repr(failure)):
+                with self.assertRaises(DeletionRepositoryError) as raised:
+                    await PostgresConversationDeletionRepository(
+                        _OwnerConnection(begin_error=failure)
+                    ).request_erasure(bound_command())
+                self.assertEqual(
+                    raised.exception.failure,
+                    DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE,
+                )
+                self.assertEqual(
+                    raised.exception.code, "conversation_unavailable"
+                )
+                self.assertEqual(raised.exception.status_code, 503)
+                self.assertTrue(raised.exception.retryable)
+                self.assertNotIn("sensitive", str(raised.exception))
+
     async def test_register_replay_accepts_partial_page_count(self) -> None:
         value = replace(
             lease_for(()),

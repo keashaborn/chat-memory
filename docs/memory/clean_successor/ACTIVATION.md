@@ -1,16 +1,19 @@
-# Governed Memory Phase 6D activation boundary
+# Governed Memory Phase 6E activation boundary
 
 ## Current state
 
-Phase 6D is inactive and not authorized. No production successor database,
-Qdrant collection, service, timer, listener, route, firewall rule, capture
-membership, erasure-requester membership, provider request, or pilot marker row
-has been created. The release guard must continue to refuse creation with
+Phase 6E is inactive and not authorized. A source-bound candidate runtime has
+been built, but its disposable proof has not yet been run or promoted. No
+production successor database, Qdrant collection, service, timer, listener,
+route, firewall rule, capture membership, erasure-requester membership,
+provider request, or pilot marker row has been created. The release guard must
+continue to refuse creation with
 `activation_blockers_open` and cleanup with `authorization_missing`.
 
-The Phase 6B proof and runtime receipts are historical and noncurrent after the
-Phase 6D source and migration changes. Phase 6E disposable deletion proof and a
-new source-bound runtime receipt are mandatory before activation review.
+The Phase 6B proof and runtime receipts are historical and noncurrent for this
+candidate. A passing Phase 6E disposable deletion proof, separate proof-metadata
+promotion, and explicit production authorization are mandatory before
+activation review.
 
 ## Exact future targets
 
@@ -71,7 +74,7 @@ The machine-readable runtime manifest is authoritative. At minimum:
 9. Install HTTP and worker units dormant, then prove exact source,
    configuration, disabled state, and zero listeners.
 10. Add and prove a narrowly scoped authenticated chat-deletion route; no route
-    is mounted in Phase 6D.
+    is mounted in Phase 6E.
 11. Deploy and visually validate the authenticated frontend.
 12. Prove legacy owner-scoped read, write, and shadow paths quiescent.
 13. Separately authorize and install the exact trusted-web transcript composite

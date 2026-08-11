@@ -111,13 +111,17 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(result["external_calls"], 0)
         self.assertFalse(result["production_state_changed"])
-        self.assertEqual(len(result["artifact_sha256"]), 13)
+        self.assertEqual(len(result["artifact_sha256"]), 14)
         self.assertIn(
             "ops/governed_memory/systemd/governed-memory-worker.service.in",
             result["artifact_sha256"],
         )
         self.assertIn(
             "ops/governed_memory/runtime_build_receipt.json",
+            result["artifact_sha256"],
+        )
+        self.assertIn(
+            "ops/governed_memory/history/phase6b/runtime_build_receipt.json",
             result["artifact_sha256"],
         )
         self.assertIn(
@@ -369,7 +373,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     ),
                     mock.patch.object(
                         release_guard,
-                        "EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256",
+                        "EXPECTED_PHASE6E_RUNTIME_RECEIPT_SHA256",
                         receipt_sha256,
                     ),
                     mock.patch.object(

@@ -474,7 +474,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='51bf3f40d25b732df426498382628098d22c6d2a'",
+            "readonly EXPECTED_BASE='6e1090fcbcd36e9d2cac277edb11227a256853bb'",
             runner,
         )
         qdrant_digest = (
@@ -529,13 +529,37 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertIn("pilot_marker_not_empty_before_rollback", rollback)
         self.assertIn("--phase6e-disposable-deletion-proof", runner)
         self.assertIn(
-            "readonly PHASE6E_DELETION_INTEGRATION_READY='false'",
+            "readonly PHASE6E_DELETION_INTEGRATION_READY='true'",
             runner,
         )
         self.assertIn(
-            "phase6e_deletion_integration_proof_not_implemented",
+            "phase6e_migration_proof_authorization_missing",
             runner,
         )
+        rollback_race = runner.split(
+            "verify_rollback_refuses_inflight_enqueue() {", 1
+        )[1].split("bootstrap_postgres() {", 1)[0]
+        self.assertIn(
+            "query LIKE '%LOCK TABLE public.threads IN ACCESS EXCLUSIVE MODE%'",
+            rollback_race,
+        )
+        self.assertNotIn(
+            "query LIKE '%LOCK TABLE memory_ingest_private.memory_ingest_outbox%'",
+            rollback_race,
+        )
+        for exact_binding in (
+            "test_http_chat_a_to_chat_b_rebuild_and_deletion",
+            "test_deletion_resilience_boundaries",
+            "test_exact_chat_only_deletion_and_protected_store_retention",
+            "SUCCESSOR_PHASE6E_DELETION_RECEIPT=",
+            "SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=",
+            "validate_deletion_receipt",
+            "validate_deletion_resilience_receipt",
+            '"deletion_receipt_sha256":"%s"',
+            '"deletion_resilience_receipt_sha256":"%s"',
+        ):
+            with self.subTest(exact_binding=exact_binding):
+                self.assertIn(exact_binding, runner)
         absence = runner.split("assert_rollback_absence() {", 1)[1].split(
             "verify_apply_rollback_reapply() {", 1
         )[0]

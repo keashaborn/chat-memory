@@ -1365,15 +1365,21 @@ BEGIN
      OR thread_target_operation_edge_count <> 1
      OR message_tombstone_operation_edge_count <> 1
      OR thread_tombstone_operation_edge_count <> 1
-     OR active_edge_count <> CASE WHEN
-          pg_catalog.to_regclass('public.active_thread_selection') IS NULL
-        THEN 0 ELSE 1 END
-     OR trusted_user_edge_count <> CASE WHEN
-          pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
-        THEN 0 ELSE 1 END
-     OR trusted_assistant_edge_count <> CASE WHEN
-          pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
-        THEN 0 ELSE 1 END THEN
+     OR active_edge_count <> (
+          CASE WHEN
+            pg_catalog.to_regclass('public.active_thread_selection') IS NULL
+          THEN 0 ELSE 1 END
+        )
+     OR trusted_user_edge_count <> (
+          CASE WHEN
+            pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
+          THEN 0 ELSE 1 END
+        )
+     OR trusted_assistant_edge_count <> (
+          CASE WHEN
+            pg_catalog.to_regclass('trusted_web.response_transcript_v1') IS NULL
+          THEN 0 ELSE 1 END
+        ) THEN
     RAISE EXCEPTION 'chat deletion dependency inventory differs';
   END IF;
   IF EXISTS (
@@ -5955,9 +5961,11 @@ BEGIN
         AND trigger_row.tgname =
           'source_erasure_thread_tombstone_immutable')
     );
-  IF observed_count <> 6 + CASE WHEN pg_catalog.to_regclass(
-       'trusted_web.response_transcript_v1'
-     ) IS NULL THEN 0 ELSE 1 END THEN
+  IF observed_count <> 6 + (
+       CASE WHEN pg_catalog.to_regclass(
+         'trusted_web.response_transcript_v1'
+       ) IS NULL THEN 0 ELSE 1 END
+     ) THEN
     RAISE EXCEPTION 'source erasure trigger inventory differs';
   END IF;
 

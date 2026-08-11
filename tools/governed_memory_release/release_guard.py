@@ -33,6 +33,9 @@ RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 COMPOSE = OPS / "compose.candidate.yaml"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
 RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
+PHASE6B_RUNTIME_BUILD_RECEIPT = (
+    OPS / "history" / "phase6b" / "runtime_build_receipt.json"
+)
 PHASE6B_DISPOSABLE_PROOF_RECEIPT = OPS / "phase6b_disposable_proof_receipt.json"
 MIGRATION_ROOT = ROOT / "governed-memory-migrations"
 MIGRATION_MANIFEST = MIGRATION_ROOT / "manifest.json"
@@ -87,8 +90,14 @@ EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256 = (
 EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256 = (
     "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69"
 )
+EXPECTED_PHASE6E_RUNTIME_SOURCE_SHA256 = (
+    "b3824dc589c858bfb27f149f0ed85c9c6e1ce2207fd52ad3ae24e129ead03fef"
+)
+EXPECTED_PHASE6E_RUNTIME_RECEIPT_SHA256 = (
+    "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86"
+)
 EXPECTED_RUNTIME_MANIFEST_SHA256 = (
-    "af1ca49f4298a696456d57aacdc12bfc563733115d9922773b89bfd0c3bf32d5"
+    "06d48a409f7cf4b6e68dbf2a23160a8ea31678fa490cd0616f45db8bfbc5cda2"
 )
 EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256 = (
     "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8"
@@ -97,13 +106,19 @@ EXPECTED_PHASE6B_PROOF_CANONICAL_SHA256 = (
     "5872a3acfcefbcedbb6da10715dbbb7214bb833a4aa64037b4b189079273b4a5"
 )
 EXPECTED_PHASE6D_MIGRATION_MANIFEST_SHA256 = (
-    "d13a985e29b631be0686b854e9dc1a97c4ea59c1750e73453f6379973243dd52"
+    "ac6e695b64c44a8380df13cafa11e773fe334a7bcca4530976477b397357bc83"
 )
 EXPECTED_PHASE6B_RUNTIME_PYTHON_SHA256 = (
     "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 )
 EXPECTED_PHASE6B_RUNTIME_WHEEL_SHA256 = (
     "c1605f2a572dfde4d1c5b6246d331a88413f3db051cbb8a3c24ffdf6be98c5db"
+)
+EXPECTED_PHASE6E_RUNTIME_PYTHON_SHA256 = (
+    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+)
+EXPECTED_PHASE6E_RUNTIME_WHEEL_SHA256 = (
+    "7f086b2687d1daf8f687ef4c4b97777096d9b337045be1a8d307f2ba659af412"
 )
 EXPECTED_RUNTIME_LOCK_SHA256 = (
     "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365"
@@ -122,6 +137,16 @@ EXPECTED_PHASE6B_RUNTIME_PYTHON = (
 EXPECTED_PHASE6B_RUNTIME_WHEEL = (
     "/tmp/governed-memory-successor-build-"
     f"{EXPECTED_BUILD_LOCK_SHA256}-{EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256}/dist/"
+    "governed_memory_successor-0.0.0-py3-none-any.whl"
+)
+EXPECTED_PHASE6E_RUNTIME_PYTHON = (
+    "/tmp/governed-memory-successor-runtime-"
+    f"{EXPECTED_RUNTIME_LOCK_SHA256}-"
+    f"{EXPECTED_PHASE6E_RUNTIME_SOURCE_SHA256}/bin/python"
+)
+EXPECTED_PHASE6E_RUNTIME_WHEEL = (
+    "/tmp/governed-memory-successor-build-"
+    f"{EXPECTED_BUILD_LOCK_SHA256}-{EXPECTED_PHASE6E_RUNTIME_SOURCE_SHA256}/dist/"
     "governed_memory_successor-0.0.0-py3-none-any.whl"
 )
 EXPECTED_RUNTIME_RECEIPT_KEYS = {
@@ -406,6 +431,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
     receipt = _load_json(RECEIPT_SCHEMA)
     runtime_manifest = _load_json(RUNTIME_MANIFEST)
     runtime_build_receipt = _load_json(RUNTIME_BUILD_RECEIPT)
+    phase6b_runtime_build_receipt = _load_json(
+        PHASE6B_RUNTIME_BUILD_RECEIPT
+    )
     phase6b_proof = _load_json(PHASE6B_DISPOSABLE_PROOF_RECEIPT)
     if not all(
         isinstance(value, dict)
@@ -415,6 +443,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
             receipt,
             runtime_manifest,
             runtime_build_receipt,
+            phase6b_runtime_build_receipt,
             phase6b_proof,
         )
     ):
@@ -423,6 +452,18 @@ def verify_candidate_artifacts() -> dict[str, object]:
         EXPECTED_PHASE6B_PROOF_RECEIPT_SHA256
     ):
         raise ReleaseGuardError("release_disposable_proof_invalid")
+    if (
+        set(phase6b_runtime_build_receipt) != EXPECTED_RUNTIME_RECEIPT_KEYS
+        or _sha256(PHASE6B_RUNTIME_BUILD_RECEIPT)
+        != EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
+        or phase6b_runtime_build_receipt.get("source_tree_sha256")
+        != EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256
+        or phase6b_runtime_build_receipt.get("candidate_python")
+        != EXPECTED_PHASE6B_RUNTIME_PYTHON
+        or phase6b_runtime_build_receipt.get("project_wheel")
+        != EXPECTED_PHASE6B_RUNTIME_WHEEL
+    ):
+        raise ReleaseGuardError("release_historical_runtime_invalid")
     _verify_historical_phase6b_proof(phase6b_proof)
     try:
         migration_receipt = verify_migration_manifest(
@@ -490,15 +531,12 @@ def verify_candidate_artifacts() -> dict[str, object]:
     if (
         set(runtime_build_receipt) != EXPECTED_RUNTIME_RECEIPT_KEYS
         or _sha256(RUNTIME_BUILD_RECEIPT)
-        != EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
+        != EXPECTED_PHASE6E_RUNTIME_RECEIPT_SHA256
         or _sha256(RUNTIME_MANIFEST) != EXPECTED_RUNTIME_MANIFEST_SHA256
         or runtime_manifest.get("schema_version")
         != "governed-memory-successor-runtime-manifest-v1"
         or runtime_manifest.get("phase")
-        != (
-            "phase6d_inactive_static_candidate_"
-            "phase6e_disposable_deletion_proof_pending"
-        )
+        != "phase6e_inactive_sealed_candidate_disposable_deletion_proof_pending"
         or runtime_manifest.get("production_state_changed") is not False
         or runtime_build_receipt.get("schema_version")
         != "governed-memory-runtime-build-receipt-v1"
@@ -511,19 +549,19 @@ def verify_candidate_artifacts() -> dict[str, object]:
         or runtime_build_receipt.get("project_distribution")
         != {"name": "governed-memory-successor", "version": "0.0.0"}
         or runtime_build_receipt.get("source_tree_sha256")
-        != EXPECTED_PHASE6B_RUNTIME_SOURCE_SHA256
+        != EXPECTED_PHASE6E_RUNTIME_SOURCE_SHA256
         or runtime_build_receipt.get("candidate_python")
-        != EXPECTED_PHASE6B_RUNTIME_PYTHON
+        != EXPECTED_PHASE6E_RUNTIME_PYTHON
         or runtime_build_receipt.get("candidate_python_sha256")
-        != EXPECTED_PHASE6B_RUNTIME_PYTHON_SHA256
+        != EXPECTED_PHASE6E_RUNTIME_PYTHON_SHA256
         or runtime_build_receipt.get("runtime_lock_sha256")
         != EXPECTED_RUNTIME_LOCK_SHA256
         or runtime_build_receipt.get("build_lock_sha256")
         != EXPECTED_BUILD_LOCK_SHA256
         or runtime_build_receipt.get("project_wheel")
-        != EXPECTED_PHASE6B_RUNTIME_WHEEL
+        != EXPECTED_PHASE6E_RUNTIME_WHEEL
         or runtime_build_receipt.get("project_wheel_sha256")
-        != EXPECTED_PHASE6B_RUNTIME_WHEEL_SHA256
+        != EXPECTED_PHASE6E_RUNTIME_WHEEL_SHA256
         or type(runtime_build_receipt.get("runtime_package_count")) is not int
         or runtime_build_receipt["runtime_package_count"] != 19
         or not isinstance(runtime_build_receipt.get("runtime_packages"), dict)
@@ -550,20 +588,28 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "runtime_lock_sha256": EXPECTED_RUNTIME_LOCK_SHA256,
             "build_lock": "ops/governed_memory/build-requirements.lock",
             "build_lock_sha256": EXPECTED_BUILD_LOCK_SHA256,
-            "current_source_tree_sha256": None,
-            "current_candidate_python": None,
-            "current_candidate_python_sha256": None,
-            "current_project_wheel_sha256": None,
-            "current_source_bound": False,
-            "final_phase6d_runtime_rebuild_pending": True,
-            "current_build_receipt": None,
-            "current_build_receipt_sha256": None,
-            "current_build_receipt_present": False,
+            "current_source_tree_sha256": EXPECTED_PHASE6E_RUNTIME_SOURCE_SHA256,
+            "current_candidate_python": EXPECTED_PHASE6E_RUNTIME_PYTHON,
+            "current_candidate_python_sha256": (
+                EXPECTED_PHASE6E_RUNTIME_PYTHON_SHA256
+            ),
+            "current_project_wheel_sha256": (
+                EXPECTED_PHASE6E_RUNTIME_WHEEL_SHA256
+            ),
+            "current_source_bound": True,
+            "final_phase6d_runtime_rebuild_pending": False,
+            "current_build_receipt": (
+                "ops/governed_memory/runtime_build_receipt.json"
+            ),
+            "current_build_receipt_sha256": (
+                EXPECTED_PHASE6E_RUNTIME_RECEIPT_SHA256
+            ),
+            "current_build_receipt_present": True,
         }
-        or runtime_validation.get("current_source_bound") is not False
+        or runtime_validation.get("current_source_bound") is not True
         or runtime_validation.get("final_phase6d_runtime_rebuild_pending")
-        is not True
-        or runtime_validation.get("current_build_receipt_present") is not False
+        is not False
+        or runtime_validation.get("current_build_receipt_present") is not True
         or not isinstance(runtime_disposable, dict)
         or runtime_disposable != EXPECTED_DISPOSABLE_VALIDATION
         or not isinstance(runtime_activation, dict)
@@ -721,7 +767,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "ops/governed_memory/history/phase5/disposable_proof_receipt.json"
         ),
         "phase6b_runtime_build_receipt": (
-            "ops/governed_memory/runtime_build_receipt.json"
+            "ops/governed_memory/history/phase6b/runtime_build_receipt.json"
         ),
         "phase6b_runtime_build_receipt_sha256": (
             EXPECTED_PHASE6B_RUNTIME_RECEIPT_SHA256
@@ -1173,6 +1219,7 @@ def verify_candidate_artifacts() -> dict[str, object]:
             COMPOSE,
             RUNTIME_MANIFEST,
             RUNTIME_BUILD_RECEIPT,
+            PHASE6B_RUNTIME_BUILD_RECEIPT,
             PHASE6B_DISPOSABLE_PROOF_RECEIPT,
             MIGRATION_MANIFEST,
             RUNTIME_LOCK,

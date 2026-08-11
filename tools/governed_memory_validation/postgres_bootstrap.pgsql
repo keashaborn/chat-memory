@@ -133,6 +133,72 @@ CREATE TABLE public.chat_attachments (
     REFERENCES public.chat_log(id, owner_user_id, thread_id) ON DELETE CASCADE
 );
 
+-- Exact clean chat auxiliaries. The bridge migration must reject the weak
+-- single-column transcript FKs seen in production and accept only these
+-- owner/thread-bound ON DELETE CASCADE edges.
+CREATE TABLE public.active_thread_selection (
+  owner_user_id uuid PRIMARY KEY,
+  thread_id uuid NOT NULL,
+  selected_at timestamptz NOT NULL DEFAULT pg_catalog.transaction_timestamp(),
+  CONSTRAINT active_thread_selection_owner_thread_fk
+    FOREIGN KEY (owner_user_id, thread_id)
+    REFERENCES public.threads(owner_user_id, id) ON DELETE CASCADE
+);
+
+CREATE SCHEMA trusted_web AUTHORIZATION sage;
+CREATE TABLE trusted_web.response_transcript_v1 (
+  response_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  thread_id uuid NOT NULL,
+  user_chat_log_id uuid NOT NULL,
+  assistant_chat_log_id uuid NOT NULL,
+  transcript_sha256 text NOT NULL CHECK (
+    transcript_sha256 ~ '^[0-9a-f]{64}$'
+  ),
+  created_at timestamptz NOT NULL DEFAULT pg_catalog.transaction_timestamp(),
+  CONSTRAINT response_transcript_v1_user_chat_log_id_fkey
+    FOREIGN KEY (user_chat_log_id, owner_user_id, thread_id)
+    REFERENCES public.chat_log(id, owner_user_id, thread_id)
+    ON DELETE CASCADE,
+  CONSTRAINT response_transcript_v1_assistant_chat_log_id_fkey
+    FOREIGN KEY (assistant_chat_log_id, owner_user_id, thread_id)
+    REFERENCES public.chat_log(id, owner_user_id, thread_id)
+    ON DELETE CASCADE
+);
+
+-- Inert structured LifeSwitch sentinels. Chat erasure has no authority over
+-- these tables; Phase 6E hashes every row before and after deletion.
+CREATE SCHEMA lifeswitch_fixture AUTHORIZATION sage;
+CREATE TABLE lifeswitch_fixture.accounts (
+  owner_user_id uuid PRIMARY KEY,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE TABLE lifeswitch_fixture.libraries (
+  row_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE TABLE lifeswitch_fixture.workouts (
+  row_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE TABLE lifeswitch_fixture.weightlifting_sessions (
+  row_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE TABLE lifeswitch_fixture.daily_food_logs (
+  row_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE TABLE lifeswitch_fixture.measurements (
+  row_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$')
+);
+
 CREATE FUNCTION public.guard_canonical_owner()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -205,6 +271,14 @@ ALTER TABLE public.chat_log
 ALTER TABLE public.chat_log OWNER TO sage;
 ALTER TABLE public.threads OWNER TO sage;
 ALTER TABLE public.chat_attachments OWNER TO sage;
+ALTER TABLE public.active_thread_selection OWNER TO sage;
+ALTER TABLE trusted_web.response_transcript_v1 OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.accounts OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.libraries OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.workouts OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.weightlifting_sessions OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.daily_food_logs OWNER TO sage;
+ALTER TABLE lifeswitch_fixture.measurements OWNER TO sage;
 ALTER FUNCTION memory.current_actor_user_id() OWNER TO sage;
 ALTER FUNCTION public.guard_canonical_owner() OWNER TO sage;
 ALTER FUNCTION public.guard_chat_log_immutable() OWNER TO sage;

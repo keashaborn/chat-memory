@@ -38,11 +38,11 @@
     },
     {
       "path": "0001_foundation/package.json",
-      "sha256": "674b9751e291458dea2b2c4aee346adc01613113292c359273f03026c43077dd"
+      "sha256": "bca9f972c9615e293c1d399a0fd4b3c9653a10c7bf815320049147a974d034a2"
     },
     {
       "path": "0001_foundation/forward.pgsql",
-      "sha256": "61db7568e132945f913ccdb899664f2492e1f22cffd67f36c047855298f8cee7"
+      "sha256": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91"
     },
     {
       "path": "0001_foundation/rollback.pgsql",
@@ -74,11 +74,11 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "5fec424e60e99efe2525da33fcd688e22a2e52de71bb9ac2b7db77b01a8080c4"
+      "sha256": "7cb4aa634f906a75363ee073c4d9ae0806edd02e07dcf6271529ab042144afb6"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-      "sha256": "8e82b523740a31b3151ed71de321a9507d62c33027cdfcab564088fddaa68f3b"
+      "sha256": "1501c1995dd9a37b3711f9da489e37e3aef304fd7c2d5a07e175222c6528444d"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",

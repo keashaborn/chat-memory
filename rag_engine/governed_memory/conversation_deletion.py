@@ -31,6 +31,9 @@ class DeletionRepositoryFailure(str, Enum):
     SUCCESSOR_UNAVAILABLE = "successor_unavailable"
     LEASE_LOST = "lease_lost"
     RECEIPT_INVALID = "receipt_invalid"
+    LEGACY_PROJECT_THREAD_DEPENDENCY = (
+        "legacy_project_memory_thread_dependencies_not_separated"
+    )
 
 
 class DeletionRepositoryError(RuntimeError):
@@ -38,6 +41,18 @@ class DeletionRepositoryError(RuntimeError):
         if not isinstance(failure, DeletionRepositoryFailure):
             failure = DeletionRepositoryFailure.RECEIPT_INVALID
         self.failure = failure
+        if failure is DeletionRepositoryFailure.LEGACY_PROJECT_THREAD_DEPENDENCY:
+            self.code = "governed_project_thread_erasure_required"
+            self.status_code = 409
+            self.retryable = False
+        elif failure is DeletionRepositoryFailure.RECEIPT_INVALID:
+            self.code = failure.value
+            self.status_code = 500
+            self.retryable = False
+        else:
+            self.code = failure.value
+            self.status_code = 503
+            self.retryable = True
         super().__init__(failure.value)
 
 
