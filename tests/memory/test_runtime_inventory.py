@@ -37,8 +37,8 @@ OPS = ROOT / "ops" / "governed_memory"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
 PHASE8F_DISPOSITION = OPS / "phase8f_component_disposition.json"
 RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
-HISTORICAL_PHASE6E_RUNTIME_BUILD_RECEIPT = (
-    OPS / "history" / "phase6e" / "runtime_build_receipt.json"
+HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT = (
+    OPS / "history" / "phase7c" / "runtime_build_receipt.json"
 )
 DISPOSABLE_RUNNER = VALIDATION_TOOLS / "run_disposable_successor.sh"
 PHASE7C_DISPOSABLE_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
@@ -46,14 +46,26 @@ POSTGRES_BOOTSTRAP = VALIDATION_TOOLS / "postgres_bootstrap.pgsql"
 SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
 README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
 
-EXPECTED_SOURCE_TREE_SHA256 = (
+EXPECTED_CURRENT_SOURCE_TREE_SHA256 = (
+    "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
+)
+EXPECTED_HISTORICAL_PHASE7C_SOURCE_TREE_SHA256 = (
     "610d07f6e65a4b9648b7887a47d040658b6e08f9b14f627fdb6957cab4d9a8cd"
 )
-EXPECTED_RUNTIME_RECEIPT_SHA256 = (
+EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
+    "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
+)
+EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
 )
+EXPECTED_CURRENT_PROJECT_WHEEL_SHA256 = (
+    "1a13ebf4d686e5d3ddb7a04979042f0751f78cc97722a733a193bb83bcef23d2"
+)
+EXPECTED_CURRENT_CANDIDATE_PYTHON_SHA256 = (
+    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+)
 EXPECTED_DISPOSABLE_RUNNER_SHA256 = (
-    "60f7af04aec131b4b51beb43cea176a6fa5df94da71ee1b581f722a480db614c"
+    "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee"
 )
 EXPECTED_PROOF_EXECUTION_RUNNER_SHA256 = (
     "bd591188d0afaf4d7a65753e54648241fc1aa5ff3289f194d76d6aa07dfe449f"
@@ -72,7 +84,7 @@ EXPECTED_BUILD_LOCK_SHA256 = (
 )
 EXPECTED_CANDIDATE_PYTHON = (
     "/tmp/governed-memory-successor-runtime-"
-    f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_SOURCE_TREE_SHA256}/bin/python"
+    f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_CURRENT_SOURCE_TREE_SHA256}/bin/python"
 )
 
 EXPECTED_PACKAGE_FILES = {
@@ -289,20 +301,25 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             self.assertFalse(safety[field], field)
         self.assertTrue(safety["repository_only"])
 
-    def test_current_source_is_not_bound_to_historical_phase7c_runtime(self) -> None:
+    def test_current_source_and_rebuilt_runtime_are_exactly_bound(self) -> None:
         current_source_sha256 = _source_tree_sha256(ROOT)
-        self.assertRegex(current_source_sha256, r"^[0-9a-f]{64}$")
-        self.assertNotEqual(current_source_sha256, EXPECTED_SOURCE_TREE_SHA256)
+        self.assertEqual(current_source_sha256, EXPECTED_CURRENT_SOURCE_TREE_SHA256)
         receipt = json.loads(RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii"))
         self.assertEqual(
             hashlib.sha256(RUNTIME_BUILD_RECEIPT.read_bytes()).hexdigest(),
-            EXPECTED_RUNTIME_RECEIPT_SHA256,
+            EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256,
         )
         self.assertEqual(
             receipt["schema_version"], "governed-memory-runtime-build-receipt-v1"
         )
-        self.assertEqual(receipt["source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256)
+        self.assertEqual(
+            receipt["source_tree_sha256"], EXPECTED_CURRENT_SOURCE_TREE_SHA256
+        )
         self.assertEqual(receipt["candidate_python"], EXPECTED_CANDIDATE_PYTHON)
+        self.assertEqual(
+            receipt["project_wheel_sha256"],
+            EXPECTED_CURRENT_PROJECT_WHEEL_SHA256,
+        )
         self.assertFalse(receipt["candidate_python_is_symlink"])
         self.assertEqual(receipt["network_calls"], 0)
         self.assertEqual(receipt["provider_calls"], 0)
@@ -314,8 +331,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
-            "revalidation_required_activation_blocked",
+            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
+            "pending_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
@@ -371,7 +388,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             validation["current_runner_post_proof_change_scope"],
-            "phase8f_runtime_sql_http_transport_and_deletion_contract_changes",
+            "phase8g_current_runtime_candidate_binding_and_image_digest_"
+            "rebinding",
         )
         self.assertTrue(
             validation["current_runner_proof_execution_semantics_changed"]
@@ -494,17 +512,37 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
 
     def test_current_validation_runtime_is_exact(self) -> None:
         runtime = self.load_manifest()["validation_runtime"]
-        self.assertIsNone(runtime["current_source_tree_sha256"])
-        self.assertIsNone(runtime["current_candidate_python"])
-        self.assertIsNone(runtime["current_candidate_python_sha256"])
-        self.assertIsNone(runtime["current_project_wheel_sha256"])
-        self.assertIsNone(runtime["current_build_receipt"])
-        self.assertIsNone(runtime["current_build_receipt_sha256"])
-        self.assertFalse(runtime["current_build_receipt_present"])
+        self.assertEqual(
+            runtime["current_source_tree_sha256"],
+            EXPECTED_CURRENT_SOURCE_TREE_SHA256,
+        )
+        self.assertEqual(runtime["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
+        self.assertEqual(
+            runtime["current_candidate_python_sha256"],
+            EXPECTED_CURRENT_CANDIDATE_PYTHON_SHA256,
+        )
+        self.assertEqual(
+            runtime["current_project_wheel_sha256"],
+            EXPECTED_CURRENT_PROJECT_WHEEL_SHA256,
+        )
+        self.assertEqual(
+            runtime["current_build_receipt"],
+            "ops/governed_memory/runtime_build_receipt.json",
+        )
+        self.assertEqual(
+            runtime["current_build_receipt_sha256"],
+            EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256,
+        )
+        self.assertTrue(runtime["current_build_receipt_present"])
+        self.assertEqual(
+            runtime["historical_phase7c_build_receipt"],
+            "ops/governed_memory/history/phase7c/runtime_build_receipt.json",
+        )
         self.assertEqual(
             runtime["historical_phase7c_build_receipt_sha256"],
-            EXPECTED_RUNTIME_RECEIPT_SHA256,
+            EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256,
         )
+        self.assertTrue(runtime["historical_phase7c_build_receipt_present"])
         self.assertFalse(
             runtime[
                 "historical_phase7c_build_receipt_reusable_for_current_candidate"
@@ -514,8 +552,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             runtime["runtime_lock_sha256"], EXPECTED_RUNTIME_LOCK_SHA256
         )
         self.assertEqual(runtime["build_lock_sha256"], EXPECTED_BUILD_LOCK_SHA256)
-        self.assertFalse(runtime["current_source_bound"])
-        self.assertTrue(runtime["current_runtime_rebuild_pending"])
+        self.assertTrue(runtime["current_source_bound"])
+        self.assertFalse(runtime["current_runtime_rebuild_pending"])
 
     def test_chat_only_deletion_scope_is_exact(self) -> None:
         ingestion = self.load_manifest()["ingestion"]
@@ -602,13 +640,20 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
     ) -> None:
         current_sha256 = hashlib.sha256(RUNTIME_BUILD_RECEIPT.read_bytes()).hexdigest()
         historical_sha256 = hashlib.sha256(
-            HISTORICAL_PHASE6E_RUNTIME_BUILD_RECEIPT.read_bytes()
+            HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT.read_bytes()
         ).hexdigest()
+        historical_receipt = json.loads(
+            HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii")
+        )
         runner = DISPOSABLE_RUNNER.read_text(encoding="utf-8")
-        self.assertEqual(current_sha256, EXPECTED_RUNTIME_RECEIPT_SHA256)
+        self.assertEqual(current_sha256, EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256)
         self.assertEqual(
             historical_sha256,
-            "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86",
+            EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256,
+        )
+        self.assertEqual(
+            historical_receipt["source_tree_sha256"],
+            EXPECTED_HISTORICAL_PHASE7C_SOURCE_TREE_SHA256,
         )
         self.assertNotEqual(current_sha256, historical_sha256)
         self.assertIn(
@@ -884,15 +929,17 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
     def test_docs_describe_current_inactive_boundary(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
+            "Phase 8G",
             "Phase 8F",
             "Phase 8D",
             "Phase 7C",
             "phase8b/package_manifest.json",
             "structured LifeSwitch data",
-            "performed no installation or activation",
-            "did not re-establish current live absence",
+            "installed no service, activated no route",
+            "changed no live service, PostgreSQL database, or Qdrant collection",
             "not live proof",
-            "disposable revalidation is required",
+            "Current disposable revalidation against fresh empty PostgreSQL and "
+            "Qdrant resources is still required",
         ):
             self.assertIn(required, normalized)
         self.assertNotIn("successor remains inactive, uninstalled", normalized)
@@ -901,7 +948,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256='"
-            "5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'",
+            "cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'",
             runner,
         )
         self.assertIn(
@@ -911,6 +958,10 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertNotIn(
             "phase7b_static_unit_validated_disposable_revalidation_required",
+            runner,
+        )
+        self.assertIn(
+            '"schema_version":"governed-memory-successor-disposable-run-v7"',
             runner,
         )
         self.assertIn("retired_phase6e_preliminary_proof_mode_refused", runner)

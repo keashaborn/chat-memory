@@ -5,8 +5,8 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. They never satisfy the current Phase 8F build,
-disposable-proof, installation, or activation requirements.
+historical evidence only. The current Phase 8G build is verified separately;
+release remains refused until its disposable proof is promoted.
 """
 
 from collections.abc import Mapping, Sequence
@@ -31,7 +31,10 @@ from tools.governed_memory_validation import (
 
 OPS = ROOT / "ops" / "governed_memory"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
-RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
+CURRENT_RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
+HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT = (
+    OPS / "history" / "phase7c" / "runtime_build_receipt.json"
+)
 RUNTIME_LOCK = OPS / "runtime-requirements.lock"
 BUILD_LOCK = OPS / "build-requirements.lock"
 RUNTIME_PACKAGES = (
@@ -112,11 +115,35 @@ EXPECTED_PHASE7C_RUNTIME_WHEEL = (
     "governed_memory_successor-0.0.0-py3-none-any.whl"
 )
 
+EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
+    "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
+)
+EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
+    "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
+)
+EXPECTED_CURRENT_RUNTIME_PYTHON_SHA256 = (
+    "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+)
+EXPECTED_CURRENT_RUNTIME_WHEEL_SHA256 = (
+    "1a13ebf4d686e5d3ddb7a04979042f0751f78cc97722a733a193bb83bcef23d2"
+)
+EXPECTED_CURRENT_RUNTIME_PYTHON = (
+    "/tmp/governed-memory-successor-runtime-"
+    f"{EXPECTED_PHASE7C_RUNTIME_LOCK_SHA256}-"
+    f"{EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256}/bin/python"
+)
+EXPECTED_CURRENT_RUNTIME_WHEEL = (
+    "/tmp/governed-memory-successor-build-"
+    f"{EXPECTED_PHASE7C_BUILD_LOCK_SHA256}-"
+    f"{EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256}/dist/"
+    "governed_memory_successor-0.0.0-py3-none-any.whl"
+)
+
 EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES = {
     "ops/governed_memory/phase7c_disposable_proof_receipt.json": (
         EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
     ),
-    "ops/governed_memory/runtime_build_receipt.json": (
+    "ops/governed_memory/history/phase7c/runtime_build_receipt.json": (
         EXPECTED_PHASE7C_RUNTIME_RECEIPT_SHA256
     ),
 }
@@ -134,7 +161,6 @@ REQUIRED_ACTIVATION_BLOCKERS = frozenset(
             "implemented_or_verified"
         ),
         "successor_answer_binding_chat_transaction_recovery_not_implemented",
-        "phase8f_current_runtime_rebuild_not_completed",
         "phase8f_current_candidate_disposable_revalidation_not_completed",
     }
 )
@@ -265,8 +291,16 @@ def _require(condition: bool, code: str) -> None:
         raise ReleaseGuardError(code)
 
 
-def _verify_historical_phase7c_runtime_receipt(receipt: object) -> None:
-    error = "release_historical_phase7c_runtime_contract_invalid"
+def _verify_runtime_receipt(
+    receipt: object,
+    *,
+    expected_source_sha256: str,
+    expected_python: str,
+    expected_python_sha256: str,
+    expected_wheel: str,
+    expected_wheel_sha256: str,
+    error: str,
+) -> None:
     _require(
         isinstance(receipt, dict) and set(receipt) == EXPECTED_RUNTIME_RECEIPT_KEYS,
         error,
@@ -275,15 +309,12 @@ def _verify_historical_phase7c_runtime_receipt(receipt: object) -> None:
     runtime_packages = receipt.get("runtime_packages")
     _require(
         receipt.get("schema_version") == "governed-memory-runtime-build-receipt-v1"
-        and receipt.get("source_tree_sha256")
-        == EXPECTED_PHASE7C_RUNTIME_SOURCE_SHA256
-        and receipt.get("candidate_python") == EXPECTED_PHASE7C_RUNTIME_PYTHON
-        and receipt.get("candidate_python_sha256")
-        == EXPECTED_PHASE7C_RUNTIME_PYTHON_SHA256
+        and receipt.get("source_tree_sha256") == expected_source_sha256
+        and receipt.get("candidate_python") == expected_python
+        and receipt.get("candidate_python_sha256") == expected_python_sha256
         and receipt.get("candidate_python_is_symlink") is False
-        and receipt.get("project_wheel") == EXPECTED_PHASE7C_RUNTIME_WHEEL
-        and receipt.get("project_wheel_sha256")
-        == EXPECTED_PHASE7C_RUNTIME_WHEEL_SHA256
+        and receipt.get("project_wheel") == expected_wheel
+        and receipt.get("project_wheel_sha256") == expected_wheel_sha256
         and receipt.get("runtime_lock")
         == "ops/governed_memory/runtime-requirements.lock"
         and receipt.get("runtime_lock_sha256")
@@ -315,6 +346,30 @@ def _verify_historical_phase7c_runtime_receipt(receipt: object) -> None:
         and receipt.get("wheel_present") is False
         and receipt.get("user_site_enabled") is False,
         error,
+    )
+
+
+def _verify_historical_phase7c_runtime_receipt(receipt: object) -> None:
+    _verify_runtime_receipt(
+        receipt,
+        expected_source_sha256=EXPECTED_PHASE7C_RUNTIME_SOURCE_SHA256,
+        expected_python=EXPECTED_PHASE7C_RUNTIME_PYTHON,
+        expected_python_sha256=EXPECTED_PHASE7C_RUNTIME_PYTHON_SHA256,
+        expected_wheel=EXPECTED_PHASE7C_RUNTIME_WHEEL,
+        expected_wheel_sha256=EXPECTED_PHASE7C_RUNTIME_WHEEL_SHA256,
+        error="release_historical_phase7c_runtime_contract_invalid",
+    )
+
+
+def _verify_current_runtime_receipt(receipt: object) -> None:
+    _verify_runtime_receipt(
+        receipt,
+        expected_source_sha256=EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256,
+        expected_python=EXPECTED_CURRENT_RUNTIME_PYTHON,
+        expected_python_sha256=EXPECTED_CURRENT_RUNTIME_PYTHON_SHA256,
+        expected_wheel=EXPECTED_CURRENT_RUNTIME_WHEEL,
+        expected_wheel_sha256=EXPECTED_CURRENT_RUNTIME_WHEEL_SHA256,
+        error="release_current_runtime_contract_invalid",
     )
 
 
@@ -541,8 +596,8 @@ def _verify_runtime_manifest(
         == "governed-memory-successor-runtime-manifest-v2"
         and runtime.get("phase")
         == (
-            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
-            "revalidation_required_activation_blocked"
+            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
+            "pending_activation_blocked"
         )
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
@@ -553,17 +608,23 @@ def _verify_runtime_manifest(
         and validation.get("build_lock")
         == "ops/governed_memory/build-requirements.lock"
         and validation.get("build_lock_sha256") == _sha256(BUILD_LOCK)
-        and validation.get("current_source_tree_sha256") is None
-        and validation.get("current_candidate_python") is None
-        and validation.get("current_candidate_python_sha256") is None
-        and validation.get("current_project_wheel_sha256") is None
-        and validation.get("current_source_bound") is False
-        and validation.get("current_runtime_rebuild_pending") is True
-        and validation.get("current_build_receipt") is None
-        and validation.get("current_build_receipt_sha256") is None
-        and validation.get("current_build_receipt_present") is False
-        and validation.get("historical_phase7c_build_receipt")
+        and validation.get("current_source_tree_sha256")
+        == EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256
+        and validation.get("current_candidate_python")
+        == EXPECTED_CURRENT_RUNTIME_PYTHON
+        and validation.get("current_candidate_python_sha256")
+        == EXPECTED_CURRENT_RUNTIME_PYTHON_SHA256
+        and validation.get("current_project_wheel_sha256")
+        == EXPECTED_CURRENT_RUNTIME_WHEEL_SHA256
+        and validation.get("current_source_bound") is True
+        and validation.get("current_runtime_rebuild_pending") is False
+        and validation.get("current_build_receipt")
         == "ops/governed_memory/runtime_build_receipt.json"
+        and validation.get("current_build_receipt_sha256")
+        == EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256
+        and validation.get("current_build_receipt_present") is True
+        and validation.get("historical_phase7c_build_receipt")
+        == "ops/governed_memory/history/phase7c/runtime_build_receipt.json"
         and validation.get("historical_phase7c_build_receipt_sha256")
         == EXPECTED_PHASE7C_RUNTIME_RECEIPT_SHA256
         and validation.get("historical_phase7c_build_receipt_present") is True
@@ -734,6 +795,8 @@ def _verify_governance_refusals(
     create = bootstrap.get("create_policy")
     cleanup = bootstrap.get("cleanup_policy")
     bridge = bootstrap.get("conversation_bridge")
+    candidate = bootstrap.get("candidate_implementation_status")
+    pilot_validation = pilot.get("validation_state")
     source_erasure = pilot.get("source_erasure")
     _require(
         bootstrap.get("schema_version") == "governed-memory-bootstrap-contract-v1"
@@ -754,9 +817,24 @@ def _verify_governance_refusals(
         )
         is False
         and bridge.get("source_erasure_legacy_project_rows_deleted") is False
+        and isinstance(candidate, dict)
+        and candidate.get("runtime")
+        == (
+            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
+            "revalidation_required_inactive"
+        )
+        and candidate.get("current_runtime_rebuild_pending") is False
+        and candidate.get("current_candidate_disposable_validation_complete")
+        is False
         and pilot.get("schema_version") == "governed-memory-pilot-contract-v1"
         and pilot.get("state") == "inactive_candidate_blocked_not_authorized"
         and pilot.get("production_state_changed") is False
+        and isinstance(pilot_validation, dict)
+        and pilot_validation.get("current_runtime_rebuild_pending") is False
+        and pilot_validation.get(
+            "current_candidate_disposable_validation_complete"
+        )
+        is False
         and pilot.get("start_blockers") == list(blockers)
         and pilot.get("eligible_input", {}).get("old_conversations") is False
         and pilot.get("eligible_input", {}).get("historical_backfill") is False
@@ -764,6 +842,11 @@ def _verify_governance_refusals(
         and pilot.get("required_start_state", {}).get("legacy_import_count") == 0
         and pilot.get("required_start_state", {}).get("unprocessed_prefill_count")
         == 0
+        and pilot.get("candidate_surfaces", {}).get("runtime")
+        == (
+            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
+            "revalidation_required_inactive"
+        )
         and isinstance(source_erasure, dict)
         and source_erasure.get("structured_lifeswitch_data_deleted") is False
         and source_erasure.get("accounts_deleted") is False
@@ -829,13 +912,17 @@ def verify_candidate_artifacts() -> dict[str, object]:
         package_receipt,
         store_receipt,
     )
-    historical_runtime_receipt = _load_json(RUNTIME_BUILD_RECEIPT)
+    current_runtime_receipt = _load_json(CURRENT_RUNTIME_BUILD_RECEIPT)
+    historical_runtime_receipt = _load_json(
+        HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT
+    )
     phase7c = _load_json(PHASE7C_APPLICATION_PROOF)
     runtime = _load_json(RUNTIME_MANIFEST)
     bootstrap = _load_json(BOOTSTRAP)
     pilot = _load_json(PILOT)
     schema_contract = _load_json(SCHEMA_CONTRACT)
     _verify_historical_phase7c_runtime_receipt(historical_runtime_receipt)
+    _verify_current_runtime_receipt(current_runtime_receipt)
     _verify_phase7c_application_proof(phase7c)
     blockers = _verify_runtime_manifest(runtime, package_receipt, store_receipt)
     _verify_governance_refusals(bootstrap, pilot, schema_contract, blockers)
@@ -872,6 +959,12 @@ def verify_candidate_artifacts() -> dict[str, object]:
                 SCHEMA_CONTRACT
             ),
             "ops/governed_memory/bootstrap_contract.json": _sha256(BOOTSTRAP),
+            "ops/governed_memory/runtime_build_receipt.json": _sha256(
+                CURRENT_RUNTIME_BUILD_RECEIPT
+            ),
+            "ops/governed_memory/history/phase7c/runtime_build_receipt.json": _sha256(
+                HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT
+            ),
             "ops/governed_memory/runtime_manifest.json": _sha256(
                 RUNTIME_MANIFEST
             ),
@@ -906,14 +999,14 @@ def verify_candidate_artifacts() -> dict[str, object]:
     return {
         "schema_version": "governed-memory-release-artifact-verification-v4",
         "phase": (
-            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
-            "revalidation_required_activation_blocked"
+            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
+            "pending_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
         "historical_phase7c_runtime_build_evidence_verified": True,
-        "current_runtime_build_evidence_verified": False,
-        "current_runtime_rebuild_required": True,
+        "current_runtime_build_evidence_verified": True,
+        "current_runtime_rebuild_required": False,
         "historical_phase7c_application_proof_verified": True,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
         "historical_phase7c_proof_is_live_proof": False,

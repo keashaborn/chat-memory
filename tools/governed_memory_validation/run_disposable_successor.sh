@@ -27,22 +27,25 @@ export PATH
 
 readonly EXPECTED_HOST='ip-172-31-32-171'
 readonly EXPECTED_USER='ubuntu'
-readonly EXPECTED_BASE='6116d5c57fb298d929153eba977ae59e1cf2aeb4'
+readonly EXPECTED_BASE='42e81cb9230873c8027cd805b6ebe84608cfea5e'
+readonly REQUIRED_CANDIDATE_ROOT='/tmp/chat-memory-governed-phase8d-retirement-20260812'
+readonly REQUIRED_CANDIDATE_BRANCH='codex/governed-memory-phase8d-retirement-20260812'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
-readonly PHASE6E_DELETION_INTEGRATION_READY='true'
-readonly EXPECTED_MANIFEST_SHA256='5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'
+readonly CURRENT_DELETION_INTEGRATION_READY='true'
+readonly EXPECTED_MANIFEST_SHA256='cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'
 readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256='9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
-readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2'
+readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108'
 
 readonly LABEL_SCOPE_KEY='com.verbalsage.governed-memory.scope'
 readonly LABEL_SCOPE_VALUE='successor-disposable'
 readonly LABEL_RUN_KEY='com.verbalsage.governed-memory.run-id'
 readonly LABEL_INVOCATION_KEY='com.verbalsage.governed-memory.invocation-id'
 
-readonly POSTGRES_IMAGE='postgres:16-alpine'
+readonly POSTGRES_IMAGE='postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'
 readonly POSTGRES_IMAGE_ID='sha256:de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28'
+readonly POSTGRES_IMAGE_DIGEST='postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'
 readonly QDRANT_IMAGE='qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc'
 readonly QDRANT_IMAGE_ID='sha256:92c4050629efe895f87dafd2830f1cd4d0532bc9967b777cab979ebda71612b3'
 readonly QDRANT_IMAGE_DIGEST='qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc'
@@ -731,9 +734,9 @@ PY
 assert_candidate_binding() {
   local actual_branch actual_head actual_root actual_status actual_tree commit_count
 
-  [[ "${EXPECTED_ROOT}" =~ ^/tmp/chat-memory-clean-successor-[A-Za-z0-9._-]+$ ]] \
+  [[ "${EXPECTED_ROOT}" == "${REQUIRED_CANDIDATE_ROOT}" ]] \
     || die 'expected_root_invalid'
-  [[ "${EXPECTED_BRANCH}" =~ ^codex/clean-memory-successor-[a-z0-9._/-]+$ ]] \
+  [[ "${EXPECTED_BRANCH}" == "${REQUIRED_CANDIDATE_BRANCH}" ]] \
     || die 'expected_branch_invalid'
   [[ "${EXPECTED_HEAD}" =~ ^[0-9a-f]{40}$ ]] || die 'expected_head_invalid'
   [[ "${EXPECTED_TREE}" =~ ^[0-9a-f]{40}$ ]] || die 'expected_tree_invalid'
@@ -844,23 +847,34 @@ PY
 }
 
 assert_image_binding() {
-  local actual_id repo_digests
+  local actual_id postgres_repo_digests qdrant_repo_digests
 
   actual_id="$(docker image inspect "${POSTGRES_IMAGE}" --format '{{.Id}}')" \
     || die 'postgres_image_missing'
   [[ "${actual_id}" == "${POSTGRES_IMAGE_ID}" ]] || die 'postgres_image_drift'
   docker image inspect "${POSTGRES_IMAGE_ID}" >/dev/null \
     || die 'postgres_image_id_missing'
+  postgres_repo_digests="$(
+    docker image inspect "${POSTGRES_IMAGE_ID}" --format '{{json .RepoDigests}}'
+  )" || die 'postgres_repo_digests_unreadable'
+  "${TEST_PYTHON}" -I -B - "${postgres_repo_digests}" "${POSTGRES_IMAGE_DIGEST}" <<'PY' \
+    || die 'postgres_image_digest_mismatch'
+import json
+import sys
+
+if sys.argv[2] not in json.loads(sys.argv[1]):
+    raise SystemExit(1)
+PY
 
   actual_id="$(docker image inspect "${QDRANT_IMAGE}" --format '{{.Id}}')" \
     || die 'qdrant_image_missing'
   [[ "${actual_id}" == "${QDRANT_IMAGE_ID}" ]] || die 'qdrant_image_drift'
   docker image inspect "${QDRANT_IMAGE_ID}" >/dev/null \
     || die 'qdrant_image_id_missing'
-  repo_digests="$(
+  qdrant_repo_digests="$(
     docker image inspect "${QDRANT_IMAGE_ID}" --format '{{json .RepoDigests}}'
   )" || die 'qdrant_repo_digests_unreadable'
-  "${TEST_PYTHON}" -I -B - "${repo_digests}" "${QDRANT_IMAGE_DIGEST}" <<'PY' \
+  "${TEST_PYTHON}" -I -B - "${qdrant_repo_digests}" "${QDRANT_IMAGE_DIGEST}" <<'PY' \
     || die 'qdrant_image_digest_mismatch'
 import json
 import sys
@@ -1470,38 +1484,38 @@ verify_disposable_bridge_memberships() {
     || die 'disposable_bridge_membership_postflight_failed'
 }
 
-verify_phase6e_mixed_catalog_migration_refusal() {
-  local refusal_log="${RUN_TMP}/phase6e-mixed-catalog-migration-refusal.log"
+verify_mixed_catalog_migration_refusal() {
+  local refusal_log="${RUN_TMP}/mixed-catalog-migration-refusal.log"
   local residue
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
     -c "CREATE TABLE public.disposable_legacy_project_memory(project_memory_id uuid PRIMARY KEY,thread_id uuid NOT NULL,CONSTRAINT disposable_legacy_project_memory_thread_fk FOREIGN KEY(thread_id) REFERENCES public.threads(id) ON DELETE RESTRICT); CREATE TABLE public.disposable_legacy_project_card(project_card_id uuid PRIMARY KEY,source_thread_id uuid NOT NULL,CONSTRAINT disposable_legacy_project_card_thread_fk FOREIGN KEY(source_thread_id) REFERENCES public.threads(id) ON DELETE RESTRICT)" \
-    >/dev/null || die 'phase6e_mixed_catalog_fixture_create_failed'
+    >/dev/null || die 'mixed_catalog_fixture_create_failed'
 
   if run_migration memory sage governed_memory_conversation_bridge_0002 \
       "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql" \
       >"${refusal_log}" 2>&1
   then
-    die 'phase6e_mixed_catalog_migration_unexpectedly_succeeded'
+    die 'mixed_catalog_migration_unexpectedly_succeeded'
   fi
   [[ "$(<"${refusal_log}")" == \
       *'unclassified inbound chat deletion dependency'* ]] \
-    || die 'phase6e_mixed_catalog_migration_refusal_missing'
+    || die 'mixed_catalog_migration_refusal_missing'
 
   residue="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -A -t -v ON_ERROR_STOP=1 -U postgres -d memory \
       -c "SELECT CASE WHEN pg_catalog.to_regnamespace('memory_ingest_private') IS NULL THEN 'absent' ELSE 'present' END"
-  )" || die 'phase6e_mixed_catalog_migration_residue_query_failed'
+  )" || die 'mixed_catalog_migration_residue_query_failed'
   [[ "${residue}" == 'absent' ]] \
-    || die 'phase6e_mixed_catalog_migration_left_objects'
+    || die 'mixed_catalog_migration_left_objects'
 
   docker exec "${POSTGRES_CONTAINER_ID}" psql \
     -X -v ON_ERROR_STOP=1 -U postgres -d memory \
     -c 'DROP TABLE public.disposable_legacy_project_card; DROP TABLE public.disposable_legacy_project_memory' \
-    >/dev/null || die 'phase6e_mixed_catalog_fixture_remove_failed'
-  printf 'SUCCESSOR_PHASE6E_MIGRATION_CATALOG=mixed-legacy-project-fks-refused-clean-fixture-restored\n'
+    >/dev/null || die 'mixed_catalog_fixture_remove_failed'
+  printf 'SUCCESSOR_MIGRATION_CATALOG=mixed-legacy-project-fks-refused-clean-fixture-restored\n'
 }
 
 rollback_migrations() {
@@ -2555,8 +2569,8 @@ run_integration() {
   if [[ "${status}" -ne 0 ]]; then
     sed \
       -e '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' \
-      -e '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/d' \
-      -e '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/d' \
+      -e '/^SUCCESSOR_DELETION_RECEIPT=/d' \
+      -e '/^SUCCESSOR_DELETION_RESILIENCE_RECEIPT=/d' \
       "${test_log}" >&2
     die "integration_failed:${status}"
   fi
@@ -2574,23 +2588,23 @@ run_integration() {
       "${test_log}"
   )"
   deletion_receipt_count="$(
-    awk '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/{count += 1} END{print count + 0}' \
+    awk '/^SUCCESSOR_DELETION_RECEIPT=/{count += 1} END{print count + 0}' \
       "${test_log}"
   )"
   [[ "${deletion_receipt_count}" == '1' ]] \
     || die 'deletion_receipt_count_invalid'
   deletion_receipt_json="$(
-    awk -F= '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
+    awk -F= '/^SUCCESSOR_DELETION_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
       "${test_log}"
   )"
   deletion_resilience_receipt_count="$(
-    awk '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/{count += 1} END{print count + 0}' \
+    awk '/^SUCCESSOR_DELETION_RESILIENCE_RECEIPT=/{count += 1} END{print count + 0}' \
       "${test_log}"
   )"
   [[ "${deletion_resilience_receipt_count}" == '1' ]] \
     || die 'deletion_resilience_receipt_count_invalid'
   deletion_resilience_receipt_json="$(
-    awk -F= '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
+    awk -F= '/^SUCCESSOR_DELETION_RESILIENCE_RECEIPT=/{sub(/^[^=]*=/, ""); print}' \
       "${test_log}"
   )"
   validate_integration_receipt "${http_receipt_json}"
@@ -2599,14 +2613,14 @@ run_integration() {
     "${deletion_resilience_receipt_json}"
   sed \
     -e '/^SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=/d' \
-    -e '/^SUCCESSOR_PHASE6E_DELETION_RECEIPT=/d' \
-    -e '/^SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=/d' \
+    -e '/^SUCCESSOR_DELETION_RECEIPT=/d' \
+    -e '/^SUCCESSOR_DELETION_RESILIENCE_RECEIPT=/d' \
     "${test_log}"
   printf 'SUCCESSOR_HTTP_VERTICAL_SLICE_RECEIPT=%s\n' \
     "${INTEGRATION_RECEIPT_JSON}"
-  printf 'SUCCESSOR_PHASE6E_DELETION_RECEIPT=%s\n' \
+  printf 'SUCCESSOR_DELETION_RECEIPT=%s\n' \
     "${DELETION_RECEIPT_JSON}"
-  printf 'SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=%s\n' \
+  printf 'SUCCESSOR_DELETION_RESILIENCE_RECEIPT=%s\n' \
     "${DELETION_RESILIENCE_RECEIPT_JSON}"
   printf 'SUCCESSOR_INTEGRATION=passed loopback_application_endpoints=true traced_internal_bridge_connects=true chat_only_deletion=true protected_lifeswitch_unchanged=true synthetic_provider_external_calls=0 production_data_read=false production_endpoint_calls=0\n'
 }
@@ -2639,8 +2653,8 @@ preflight() {
     || die 'explicit_disposable_authorization_missing'
   [[ -z "${GM_VALIDATION_PHASE6E_MIGRATION_PROOF:-}" ]] \
     || die 'retired_phase6e_preliminary_proof_mode_refused'
-  [[ "${PHASE6E_DELETION_INTEGRATION_READY}" == 'true' ]] \
-    || die 'phase6e_deletion_integration_proof_not_implemented'
+  [[ "${CURRENT_DELETION_INTEGRATION_READY}" == 'true' ]] \
+    || die 'current_deletion_integration_proof_not_implemented'
   [[ "${POSTGRES_PORT}" != '5432' && "${QDRANT_PORT}" != '6333' \
      && "${JWKS_PORT}" != '8088' && "${API_PORT}" != '8088' ]] \
     || die 'production_port_constant_detected'
@@ -2683,7 +2697,7 @@ full() {
 
   create_resources
   bootstrap_postgres
-  verify_phase6e_mixed_catalog_migration_refusal
+  verify_mixed_catalog_migration_refusal
   verify_apply_rollback_reapply
   run_integration
 
@@ -2704,12 +2718,13 @@ full() {
     || die 'final_deletion_resilience_receipt_sha256_invalid'
 
   trap - EXIT INT TERM HUP
-  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","source_tree_sha256":"%s","runtime_build_receipt_sha256":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","deletion_receipt_sha256":"%s","deletion_resilience_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v6"}\n' \
+  printf 'SUCCESSOR_DISPOSABLE_RECEIPT={"branch":"%s","candidate_head":"%s","candidate_tree":"%s","source_tree_sha256":"%s","runtime_build_receipt_sha256":"%s","candidate_unchanged":true,"connect_trace_sha256":"%s","external_network_calls":0,"loopback_application_endpoints":true,"traced_internal_bridge_connects":true,"published_container_ports":false,"provider_external_calls":0,"production_data_read":false,"production_endpoint_calls":0,"production_service_invoked":false,"docker_persistent_mounts":false,"ports_released":true,"resources_removed":true,"result":"passed","run_id":"%s","invocation_id":"%s","network_id":"%s","postgres_container_id":"%s","qdrant_container_id":"%s","postgres_image_id":"%s","postgres_image_digest":"%s","qdrant_image_id":"%s","qdrant_image_digest":"%s","postgres_server_version":"%s","qdrant_server_version":"%s","manifest_sha256":"%s","runtime_packages_sha256":"%s","runtime_lock_sha256":"%s","foundation_logical_dump_sha256":"%s","bridge_logical_dump_sha256":"%s","integration_receipt_sha256":"%s","deletion_receipt_sha256":"%s","deletion_resilience_receipt_sha256":"%s","rollback_reapply":"passed","semantic_threshold_calibrated":false,"schema_version":"governed-memory-successor-disposable-run-v7"}\n' \
     "${EXPECTED_BRANCH}" "${EXPECTED_HEAD}" "${EXPECTED_TREE}" \
     "${SOURCE_TREE_SHA256}" "${RUNTIME_BUILD_RECEIPT_SHA256}" \
     "${CONNECT_TRACE_SHA256}" "${RUN_ID}" "${INVOCATION_ID}" "${NETWORK_ID}" \
     "${POSTGRES_CONTAINER_ID}" "${QDRANT_CONTAINER_ID}" \
-    "${POSTGRES_IMAGE_ID}" "${QDRANT_IMAGE_ID}" "${QDRANT_IMAGE_DIGEST}" \
+    "${POSTGRES_IMAGE_ID}" "${POSTGRES_IMAGE_DIGEST}" \
+    "${QDRANT_IMAGE_ID}" "${QDRANT_IMAGE_DIGEST}" \
     "${POSTGRES_SERVER_VERSION}" "${QDRANT_SERVER_VERSION}" \
     "${MIGRATION_MANIFEST_SHA256}" "${RUNTIME_PACKAGES_SHA256}" \
     "${RUNTIME_LOCK_SHA256}" \

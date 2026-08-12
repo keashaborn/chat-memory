@@ -2,8 +2,9 @@
 
 ## Current decision
 
-Do not install or activate the successor. Phase 8F produces a cleaner inactive
-repository candidate; it does not produce a functioning memory service.
+Do not install or activate the successor. Phase 8G has successfully rebuilt the
+current source-bound runtime from hash-locked offline wheels, but it has not
+produced a functioning memory service or current disposable store proof.
 
 The package still lacks a complete claim-bound live installation composition,
 live rollback executor, live activation executor, promoted live proof, and
@@ -12,17 +13,20 @@ blocker list is in
 `ops/governed_memory/runtime_manifest.json` and is synchronized with the
 bootstrap, pilot, and schema contracts.
 
-The current source is intentionally not bound to the historical Phase 7C build
-receipt. A new runtime build and authorized disposable revalidation are required
-before any installation decision.
+The current source is bound to
+`ops/governed_memory/runtime_build_receipt.json`. The Phase 7C runtime receipt is
+archived at `ops/governed_memory/history/phase7c/runtime_build_receipt.json` and
+is not reusable for the current candidate. Current disposable PostgreSQL/Qdrant
+revalidation remains pending; no Docker proof has run yet. Release therefore
+remains refused with `current_candidate_disposable_proof_missing`.
 
 ## Before a dormant stores-only installation
 
 A later approval must bind one reviewed commit and tree, the exact package and
-contracts, controller runtime receipt, trusted authority substrate, local image
-identities and staging receipt, exact targets, and a fresh read-only preflight.
-It must also provide fresh store credentials without reading or reusing legacy
-or provider credentials.
+contracts, current build and controller receipts, trusted authority substrate,
+local image identities and staging receipt, exact targets, and a fresh
+read-only preflight. It must also provide fresh store credentials without
+reading or reusing legacy or provider credentials.
 
 The live composition must close these implementation gaps before authorization:
 
@@ -34,10 +38,11 @@ The live composition must close these implementation gaps before authorization:
 - lock-bound and durably anchored resource-identity ledger;
 - complete image-baseline, hardening, and external-readiness checks.
 
-After implementation, a separately authorized disposable live run must prove
-process-crash recovery, cold restart, empty rollback, exact cleanup, and absence
-of effects outside its invocation-owned resources. Synthetic proof cannot
-substitute for this.
+After implementation, the authorized disposable live run must use fresh empty
+PostgreSQL and Qdrant resources and prove process-crash recovery, cold restart,
+empty rollback, exact cleanup, and absence of effects outside its
+invocation-owned resources. Build and synthetic proof cannot substitute for
+this.
 
 ## Before application activation
 
@@ -61,7 +66,9 @@ jobs, review artifacts, or unprocessed data is imported.
 
 Only chat-owned conversations, transcripts, attachments, and conversational
 memory participate in chat deletion. Account identities and structured
-LifeSwitch records remain outside that deletion graph.
+LifeSwitch records—including libraries, food logs, workouts, weightlifting
+sessions, measurements, plans, and people data—remain outside that deletion
+graph.
 
 ## Separate source preparation
 

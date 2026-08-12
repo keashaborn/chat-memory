@@ -44,7 +44,7 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase8FReleaseArtifactTests(unittest.TestCase):
+class Phase8GReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
@@ -53,15 +53,15 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             result["phase"],
-            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
-            "revalidation_required_activation_blocked",
+            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
+            "pending_activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
             result["historical_phase7c_runtime_build_evidence_verified"]
         )
-        self.assertFalse(result["current_runtime_build_evidence_verified"])
-        self.assertTrue(result["current_runtime_rebuild_required"])
+        self.assertTrue(result["current_runtime_build_evidence_verified"])
+        self.assertFalse(result["current_runtime_rebuild_required"])
         self.assertTrue(
             result["historical_phase7c_application_proof_verified"]
         )
@@ -115,6 +115,10 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
             "ops/governed_memory/phase8f_component_disposition.json",
             result["artifact_sha256"],
         )
+        self.assertIn(
+            "ops/governed_memory/runtime_build_receipt.json",
+            result["artifact_sha256"],
+        )
         self.assertEqual(
             {
                 path: result["artifact_sha256"][path]
@@ -154,7 +158,13 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
                 {"current_phase8f_disposable_proof_complete": True}
             ),
             lambda value: value["validation_runtime"].update(
-                {"current_source_bound": True}
+                {"current_source_bound": False}
+            ),
+            lambda value: value["validation_runtime"].update(
+                {"current_runtime_rebuild_pending": True}
+            ),
+            lambda value: value["validation_runtime"].update(
+                {"current_build_receipt_sha256": "0" * 64}
             ),
             lambda value: value["inactive_store_package"].update(
                 {"synthetic_proof_executed_for_current_package": True}
@@ -299,26 +309,42 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
             ):
                 verify_candidate_artifacts()
 
-    def test_historical_phase7c_runtime_receipt_drift_is_rejected(self) -> None:
-        original = json.loads(
+    def test_current_and_historical_runtime_receipt_drift_are_rejected(self) -> None:
+        current = json.loads(
             (OPS / "runtime_build_receipt.json").read_text(encoding="ascii")
         )
-        for key, value in (
-            ("network_calls", 1),
-            ("provider_calls", 1),
-            ("legacy_environment_imported", True),
-            ("source_tree_sha256", "0" * 64),
-            ("project_wheel_sha256", "0" * 64),
-        ):
-            variant = json.loads(json.dumps(original))
-            variant[key] = value
-            with self.subTest(key=key), self.assertRaisesRegex(
-                ReleaseGuardError,
+        historical = json.loads(
+            (
+                OPS / "history" / "phase7c" / "runtime_build_receipt.json"
+            ).read_text(encoding="ascii")
+        )
+        verifiers = (
+            (
+                current,
+                release_guard._verify_current_runtime_receipt,
+                "release_current_runtime_contract_invalid",
+            ),
+            (
+                historical,
+                release_guard._verify_historical_phase7c_runtime_receipt,
                 "release_historical_phase7c_runtime_contract_invalid",
+            ),
+        )
+        for original, verifier, error in verifiers:
+            for key, value in (
+                ("network_calls", 1),
+                ("provider_calls", 1),
+                ("legacy_environment_imported", True),
+                ("source_tree_sha256", "0" * 64),
+                ("project_wheel_sha256", "0" * 64),
             ):
-                release_guard._verify_historical_phase7c_runtime_receipt(
-                    variant
-                )
+                variant = json.loads(json.dumps(original))
+                variant[key] = value
+                with self.subTest(error=error, key=key), self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    error,
+                ):
+                    verifier(variant)
 
     def test_phase7c_application_proof_is_closed_and_safety_bound(self) -> None:
         original = json.loads(
@@ -361,7 +387,7 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
                 ):
                     release_guard._load_json(path)
 
-    def test_phase8f_blockers_and_chat_only_scope_remain_aligned(self) -> None:
+    def test_phase8g_blockers_and_chat_only_scope_remain_aligned(self) -> None:
         runtime = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
@@ -390,6 +416,28 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
             schema["hard_requirements"]["production_activation_blockers"],
             blockers,
         )
+        bootstrap_candidate = bootstrap["candidate_implementation_status"]
+        self.assertEqual(
+            bootstrap_candidate["runtime"],
+            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
+            "revalidation_required_inactive",
+        )
+        self.assertFalse(bootstrap_candidate["current_runtime_rebuild_pending"])
+        self.assertFalse(
+            bootstrap_candidate["current_candidate_disposable_validation_complete"]
+        )
+        self.assertEqual(
+            pilot["candidate_surfaces"]["runtime"],
+            bootstrap_candidate["runtime"],
+        )
+        self.assertFalse(
+            pilot["validation_state"]["current_runtime_rebuild_pending"]
+        )
+        self.assertFalse(
+            pilot["validation_state"][
+                "current_candidate_disposable_validation_complete"
+            ]
+        )
         for required in (
             "governed_memory_proxy_group_and_brains_membership_not_provisioned_or_verified",
             "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure_not_implemented_or_verified",
@@ -398,11 +446,11 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
             "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
             "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
             "successor_answer_binding_chat_transaction_recovery_not_implemented",
-            "phase8f_current_runtime_rebuild_not_completed",
             "phase8f_current_candidate_disposable_revalidation_not_completed",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, blockers)
+        self.assertNotIn("phase8f_current_runtime_rebuild_not_completed", blockers)
         self.assertNotIn(
             "loopback_tcp_endpoint_identity_not_proved_permissioned_unix_socket_or_mtls_required",
             blockers,
@@ -427,6 +475,60 @@ class Phase8FReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             pilot["source_erasure"]["lifeswitch_usage_and_audit_records_retained"]
         )
+
+    def test_phase8g_governance_runtime_state_drift_is_rejected(self) -> None:
+        runtime = json.loads(
+            (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
+        )
+        original_bootstrap = json.loads(
+            (OPS / "bootstrap_contract.json").read_text(encoding="utf-8")
+        )
+        original_pilot = json.loads(
+            (OPS / "pilot_contract.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (
+                ROOT / "governed-memory-migrations" / "schema_contract.json"
+            ).read_text(encoding="utf-8")
+        )
+        blockers = runtime["activation"]["blockers"]
+        variants: list[tuple[dict[str, object], dict[str, object]]] = []
+        for target, key, value in (
+            ("bootstrap", "runtime", "phase8f_runtime_rebuild_pending"),
+            ("bootstrap", "current_runtime_rebuild_pending", True),
+            (
+                "bootstrap",
+                "current_candidate_disposable_validation_complete",
+                True,
+            ),
+            ("pilot_surface", "runtime", "phase8f_runtime_rebuild_pending"),
+            ("pilot_validation", "current_runtime_rebuild_pending", True),
+            (
+                "pilot_validation",
+                "current_candidate_disposable_validation_complete",
+                True,
+            ),
+        ):
+            bootstrap = json.loads(json.dumps(original_bootstrap))
+            pilot = json.loads(json.dumps(original_pilot))
+            if target == "bootstrap":
+                bootstrap["candidate_implementation_status"][key] = value
+            elif target == "pilot_surface":
+                pilot["candidate_surfaces"][key] = value
+            else:
+                pilot["validation_state"][key] = value
+            variants.append((bootstrap, pilot))
+        for index, (bootstrap, pilot) in enumerate(variants):
+            with self.subTest(index=index), self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_governance_contract_invalid",
+            ):
+                release_guard._verify_governance_refusals(
+                    bootstrap,
+                    pilot,
+                    schema,
+                    blockers,
+                )
 
     def test_receipt_schema_is_closed_and_content_free(self) -> None:
         schema = json.loads(

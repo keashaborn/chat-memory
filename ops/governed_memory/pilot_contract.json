@@ -3,7 +3,7 @@
   "state": "inactive_candidate_blocked_not_authorized",
   "pilot_id": "governed_memory_pilot_9a54cf123493_000001",
   "validation_state": {
-    "current_runtime_rebuild_pending": true,
+    "current_runtime_rebuild_pending": false,
     "current_candidate_disposable_validation_complete": false,
     "historical_phase7c_evidence_retained": true
   },
@@ -215,7 +215,7 @@
     "profile_metadata_authority": false
   },
   "candidate_surfaces": {
-    "runtime": "phase8f_repository_candidate_runtime_rebuild_and_disposable_revalidation_required_inactive",
+    "runtime": "phase8g_current_source_bound_runtime_rebuilt_disposable_revalidation_required_inactive",
     "owner_claim_fact_detail": "implemented_candidate_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
     "pilot_marker": "implemented_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
     "deletion_coordinator": "phase8f_exact_chat_targets_repository_candidate_current_disposable_revalidation_required_not_routed_not_production_applied",
@@ -252,7 +252,6 @@
     "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
     "retained_legacy_chat_clean_start_empty_root_not_proved",
     "successor_answer_binding_chat_transaction_recovery_not_implemented",
-    "phase8f_current_runtime_rebuild_not_completed",
     "phase8f_current_candidate_disposable_revalidation_not_completed",
     "frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified",
     "source_erasure_requester_membership_not_granted_or_verified",

@@ -16,6 +16,9 @@ RUNNER = ROOT / "tools/governed_memory_validation/run_disposable_successor.sh"
 DELETION_INTEGRATION = (
     ROOT / "tests/memory_integration/test_conversation_deletion_disposable.py"
 )
+HTTP_VERTICAL_SLICE = (
+    ROOT / "tests/memory_integration/test_governed_memory_http_vertical_slice.py"
+)
 CURRENT_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
 ROOT_STATUS = (
     "phase8f_repository_candidate_disposable_revalidation_required_"
@@ -483,12 +486,37 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
     def test_runner_applies_and_rolls_back_exact_package_order(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(
-            "readonly EXPECTED_BASE='6116d5c57fb298d929153eba977ae59e1cf2aeb4'",
+            "readonly EXPECTED_BASE='42e81cb9230873c8027cd805b6ebe84608cfea5e'",
+            runner,
+        )
+        self.assertIn(
+            "readonly REQUIRED_CANDIDATE_ROOT="
+            "'/tmp/chat-memory-governed-phase8d-retirement-20260812'",
+            runner,
+        )
+        self.assertIn(
+            "readonly REQUIRED_CANDIDATE_BRANCH="
+            "'codex/governed-memory-phase8d-retirement-20260812'",
             runner,
         )
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256="
-            "'5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'",
+            "'cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'",
+            runner,
+        )
+        postgres_digest = (
+            "postgres:16-alpine@sha256:"
+            "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+        )
+        self.assertIn(f"readonly POSTGRES_IMAGE='{postgres_digest}'", runner)
+        self.assertIn(
+            "readonly POSTGRES_IMAGE_DIGEST='postgres@sha256:"
+            "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777'",
+            runner,
+        )
+        self.assertIn(
+            "readonly POSTGRES_IMAGE_ID='sha256:"
+            "de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28'",
             runner,
         )
         qdrant_digest = (
@@ -537,7 +565,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertLess(full.index("preflight"), full.index("create_resources"))
         self.assertLess(
             full.index("bootstrap_postgres"),
-            full.index("verify_phase6e_mixed_catalog_migration_refusal"),
+            full.index("verify_mixed_catalog_migration_refusal"),
         )
         for exact_membership_binding in (
             "postgres_canonical_membership_preflight_query_failed",
@@ -569,7 +597,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         bridge_membership = runner.split(
             "verify_disposable_bridge_memberships() {", 1
         )[1].split(
-            "verify_phase6e_mixed_catalog_migration_refusal() {", 1
+            "verify_mixed_catalog_migration_refusal() {", 1
         )[0]
         exact_grant = (
             "GRANT memory_ingest_writer TO brains_app; "
@@ -651,7 +679,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertIn("pilot_marker_not_empty_before_rollback", rollback)
         self.assertNotIn("--phase6e-disposable-deletion-proof", runner)
         self.assertIn(
-            "readonly PHASE6E_DELETION_INTEGRATION_READY='true'",
+            "readonly CURRENT_DELETION_INTEGRATION_READY='true'",
             runner,
         )
         self.assertIn(
@@ -673,8 +701,8 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             "test_http_chat_a_to_chat_b_rebuild_and_deletion",
             "test_deletion_resilience_boundaries",
             "test_exact_chat_only_deletion_and_protected_store_retention",
-            "SUCCESSOR_PHASE6E_DELETION_RECEIPT=",
-            "SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=",
+            "SUCCESSOR_DELETION_RECEIPT=",
+            "SUCCESSOR_DELETION_RESILIENCE_RECEIPT=",
             "validate_deletion_receipt",
             "validate_deletion_resilience_receipt",
             '"deletion_receipt_sha256":"%s"',
@@ -682,6 +710,12 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         ):
             with self.subTest(exact_binding=exact_binding):
                 self.assertIn(exact_binding, runner)
+        self.assertNotIn("SUCCESSOR_PHASE6E_DELETION_RECEIPT=", runner)
+        self.assertNotIn("SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=", runner)
+        self.assertIn(
+            '"schema_version":"governed-memory-successor-disposable-run-v7"',
+            runner,
+        )
         absence = runner.split("assert_rollback_absence() {", 1)[1].split(
             "verify_apply_rollback_reapply() {", 1
         )[0]
@@ -699,6 +733,19 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self,
     ) -> None:
         integration = DELETION_INTEGRATION.read_text(encoding="utf-8")
+        self.assertEqual(
+            integration.count("SUCCESSOR_DELETION_RECEIPT="),
+            1,
+        )
+        self.assertEqual(
+            integration.count("SUCCESSOR_DELETION_RESILIENCE_RECEIPT="),
+            1,
+        )
+        self.assertNotIn("SUCCESSOR_PHASE6E_DELETION_RECEIPT=", integration)
+        self.assertNotIn(
+            "SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT=",
+            integration,
+        )
         self.assertIn(
             "self.conversation_api = await self._connect(\n"
             "            \"governed_memory_api\",\n"
@@ -745,6 +792,26 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             "            self.conversation_worker\n"
             "        )",
             integration,
+        )
+
+    def test_disposable_worker_invocation_binds_exclusive_successor_mode(
+        self,
+    ) -> None:
+        integration = HTTP_VERTICAL_SLICE.read_text(encoding="utf-8")
+        runtime_proof = integration.split(
+            "async def prove_inactive_worker_runtime(self) -> str:", 1
+        )[1].split(
+            "async def assert_bridge_source_snapshot", 1
+        )[0]
+        self.assertEqual(
+            runtime_proof.count(
+                '"GOVERNED_MEMORY_EXCLUSIVE_MODE": "successor_pilot"'
+            ),
+            1,
+        )
+        self.assertEqual(
+            runtime_proof.count('"GOVERNED_MEMORY_WORKER_MODE": "on"'),
+            1,
         )
 
     def test_runner_proves_marker_semantics_only_after_reapply(self) -> None:

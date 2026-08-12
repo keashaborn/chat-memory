@@ -981,7 +981,10 @@ class GovernedMemoryHttpVerticalSliceTests(unittest.IsolatedAsyncioTestCase):
             exit_code = await asyncio.to_thread(
                 worker_main,
                 ["--once"],
-                environment={"GOVERNED_MEMORY_WORKER_MODE": "on"},
+                environment={
+                    "GOVERNED_MEMORY_WORKER_MODE": "on",
+                    "GOVERNED_MEMORY_EXCLUSIVE_MODE": "successor_pilot",
+                },
                 once_runner=runtime_runner,
             )
             self.assertEqual(exit_code, 0)

@@ -107,7 +107,6 @@ EXPECTED_PACKAGE_CONTRACTS = {
                 "conversation_erasure_auxiliary_deleted_object_counts_not_"
                 "implemented_or_verified",
                 "successor_answer_binding_chat_transaction_recovery_not_implemented",
-                "phase8f_current_runtime_rebuild_not_completed",
                 "phase8f_current_candidate_disposable_revalidation_not_completed",
             ],
         },

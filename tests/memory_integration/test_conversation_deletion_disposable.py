@@ -2004,7 +2004,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             "target_count": initial.target_count,
         }
         print(
-            "SUCCESSOR_PHASE6E_DELETION_RESILIENCE_RECEIPT="
+            "SUCCESSOR_DELETION_RESILIENCE_RECEIPT="
             + json.dumps(receipt, sort_keys=True)
         )
 
@@ -2321,6 +2321,6 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             "typed_project_conflict_status": 409,
         }
         print(
-            "SUCCESSOR_PHASE6E_DELETION_RECEIPT="
+            "SUCCESSOR_DELETION_RECEIPT="
             + json.dumps(receipt, sort_keys=True)
         )

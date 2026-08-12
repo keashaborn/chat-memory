@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -169,6 +170,10 @@ class SuccessorRouterImportTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, "-c", script],
             cwd=ROOT,
+            env={
+                **os.environ,
+                "GOVERNED_MEMORY_EXCLUSIVE_MODE": "successor_pilot",
+            },
             check=False,
             capture_output=True,
             text=True,

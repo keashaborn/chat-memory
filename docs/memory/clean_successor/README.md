@@ -26,11 +26,16 @@ stores-only package.
 
 ## Current state
 
-Phase 8F performed no installation or activation, and the repository candidate
-remains activation-blocked. The repository packages an offline verifier, an
-in-process synthetic proof harness, and stores-only controller primitives. It
-does not package a complete live installation executor, rollback executor, or
-activation executor.
+Phase 8G successfully rebuilt the current source-bound application runtime from
+hash-locked offline wheels. The current build evidence is
+`ops/governed_memory/runtime_build_receipt.json`; it binds the current source
+tree and project wheel. It is build evidence only, not PostgreSQL, Qdrant,
+Docker, installation, or activation proof. The repository candidate remains
+activation-blocked.
+
+The repository packages an offline verifier, an in-process synthetic proof
+harness, and stores-only controller primitives. It does not package a complete
+live installation executor, rollback executor, or activation executor.
 
 The active chat response path is successor-only. It no longer accepts the old
 Memory V1 prompt object, stored assistant-response preferences, or a fallback
@@ -38,15 +43,17 @@ legacy memory provider. Neutral chat-integrity attestation is separate from
 governed-memory claims. The canonical chat-erasure path is limited to chat
 records and their conversational derivatives.
 
-Phase 8F created no persistent successor PostgreSQL or Qdrant store. It staged
-or pulled no image, read or generated no secret, installed or changed no
-service, and activated no application route. This repository-only phase did not
-re-establish current live absence of previously created resources. A synthetic
+No current disposable PostgreSQL/Qdrant proof exists yet, and no Docker proof
+has run in Phase 8G. The rebuild installed no service, activated no route,
+touched no secret, made no provider call, read no production data, and changed
+no live service, PostgreSQL database, or Qdrant collection. A build or synthetic
 receipt is not live proof and is not installation authority.
 
-Phase 7C application and chat-deletion evidence remains separate historical
-evidence. Changed Phase 8F SQL and runtime bytes are not attested by that proof;
-current disposable revalidation is required.
+The Phase 7C runtime build receipt is archived at
+`ops/governed_memory/history/phase7c/runtime_build_receipt.json`. Phase 7C
+application and chat-deletion evidence remains separate historical evidence and
+cannot attest the current candidate. Current disposable revalidation against
+fresh empty PostgreSQL and Qdrant resources is still required.
 
 ## Retired repository material
 
@@ -105,12 +112,15 @@ timer or cron quiescence alone does not prove exclusivity.
 
 ## Next gate
 
-Before dormant installation, rebuild and bind the current runtime, execute an
-authorized disposable Phase 8F revalidation, and resolve the remaining blockers in
-`ops/governed_memory/installation/phase8b/contract.json` must be resolved and
-re-proved. Source PostgreSQL preparation is governed by a separate, phase-neutral
-source-preparation authorization. It is not authorized by repository cleanup or
-by a future stores-only install signature.
+Before dormant installation, complete the authorized current-candidate
+disposable revalidation against fresh empty PostgreSQL and Qdrant resources,
+then resolve and re-prove the remaining blockers in
+`ops/governed_memory/installation/phase8b/contract.json`. Until a current proof
+receipt exists, release must remain refused with
+`current_candidate_disposable_proof_missing`. Source PostgreSQL preparation is
+governed by a separate, phase-neutral source-preparation authorization. It is
+not authorized by this disposable proof or by a future stores-only install
+signature.
 
 The retired Phase 8A source-role template and service-account contract have no
 current replacement package. Rebuilding and independently governing the source
