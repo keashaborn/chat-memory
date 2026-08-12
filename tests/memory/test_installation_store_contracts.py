@@ -35,6 +35,7 @@ from tools.governed_memory_install.linux_plan import (
 from tools.governed_memory_install.resource_identity import (
     ResourceIdentityError,
     ResourceIdentityLedger,
+    resource_ledger_binding_sha256,
     load_ledger,
     parse_ledger_bytes,
 )
@@ -53,6 +54,8 @@ STORE_SPEC = INSTALLATION / "store_spec.json"
 STORE_UNIT = INSTALLATION / "systemd" / "governed-memory-stores.service.in"
 BINDING = "a" * 64
 NONCE_SHA256 = "b" * 64
+EXECUTION_ID = "c" * 64
+PACKAGE_MANIFEST_SHA256 = "d" * 64
 POSTGRES_ID = "1" * 64
 QDRANT_ID = "2" * 64
 POSTGRES_IMAGE_ID = "sha256:" + "3" * 64
@@ -158,15 +161,17 @@ class _SupervisorRunner:
             raise AssertionError("unexpected inspect argv")
 
 
-class Phase8BStorePackageTests(unittest.TestCase):
+class DormantStoreInstallStorePackageTests(unittest.TestCase):
     def _bound_spec(self) -> dict[str, object]:
         static = load_store_spec(STORE_SPEC)
         return bind_store_spec(
             static,
             ExecutionBinding(
                 binding_sha256=BINDING,
-                authorization_id="phase8b-auth-0001",
+                authorization_id="dormant_store_install-auth-0001",
                 authorization_nonce_sha256=NONCE_SHA256,
+                execution_id=EXECUTION_ID,
+                package_manifest_sha256=PACKAGE_MANIFEST_SHA256,
             ),
         )
 
@@ -254,7 +259,8 @@ class Phase8BStorePackageTests(unittest.TestCase):
                 wait=mock.Mock(return_value=0),
             )
 
-        popen.return_value = fake_process(b"ok\n")
+        first_process = fake_process(b"ok\n")
+        popen.return_value = first_process
         reference = "postgres:16-alpine@sha256:" + "5" * 64
         result = CommandRunner().run(
             (DOCKER_BINARY, "image", "inspect", "--format", "{{json .}}", reference)
@@ -265,7 +271,10 @@ class Phase8BStorePackageTests(unittest.TestCase):
         self.assertEqual(kwargs["env"], FIXED_ENVIRONMENT)
         self.assertEqual(kwargs["cwd"], "/")
         self.assertEqual(CommandRunner()._timeout_seconds, 20)
-        popen.return_value = fake_process(b"x" * 17)
+        self.assertEqual(first_process.stdout.fileno(), -1)
+        self.assertEqual(first_process.stderr.fileno(), -1)
+        second_process = fake_process(b"x" * 17)
+        popen.return_value = second_process
         with self.assertRaisesRegex(HostBoundaryError, "output_limit"):
             CommandRunner(max_output_bytes=16).run(
                 (
@@ -277,6 +286,8 @@ class Phase8BStorePackageTests(unittest.TestCase):
                     reference,
                 )
             )
+        self.assertEqual(second_process.stdout.fileno(), -1)
+        self.assertEqual(second_process.stderr.fileno(), -1)
 
     def test_image_preflight_is_inspect_only_and_requires_exact_local_identity(self) -> None:
         digest_one = "sha256:" + "5" * 64
@@ -428,6 +439,23 @@ class Phase8BStorePackageTests(unittest.TestCase):
             },
             {spec["candidate_id"]},
         )
+        self.assertEqual(
+            {
+                item["labels"][
+                    "lifeswitch.governed-memory.package-generation"
+                ]
+                for item in (
+                    spec["resources"]["network"],
+                    spec["resources"]["volumes"]["postgres"],
+                    spec["resources"]["volumes"]["qdrant"],
+                    postgres,
+                    qdrant,
+                )
+            },
+            {"dormant-store-install-v1"},
+        )
+        self.assertNotIn("lifeswitch.governed-memory.phase", rendered)
+        self.assertNotIn('"8B"', rendered)
         for item in (postgres, qdrant):
             self.assertEqual(
                 item["healthcheck"],
@@ -466,7 +494,7 @@ class Phase8BStorePackageTests(unittest.TestCase):
                     validate_store_spec(candidate)
 
     def test_identity_ledger_is_closed_canonical_and_hash_chained(self) -> None:
-        labels_sha256 = "c" * 64
+        ownership_sha256 = "c" * 64
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "identities.jsonl"
             ledger = ResourceIdentityLedger(path, binding_sha256=BINDING)
@@ -477,7 +505,8 @@ class Phase8BStorePackageTests(unittest.TestCase):
                 resource_id=POSTGRES_ID,
                 image_id=POSTGRES_IMAGE_ID,
                 image_repo_digest="postgres@sha256:" + "5" * 64,
-                labels_sha256=labels_sha256,
+                ownership_sha256=ownership_sha256,
+                resource_labels_sha256="d" * 64,
             )
             second = ledger.append(
                 event="started",
@@ -486,7 +515,8 @@ class Phase8BStorePackageTests(unittest.TestCase):
                 resource_id=POSTGRES_ID,
                 image_id=POSTGRES_IMAGE_ID,
                 image_repo_digest="postgres@sha256:" + "5" * 64,
-                labels_sha256=labels_sha256,
+                ownership_sha256=ownership_sha256,
+                resource_labels_sha256="d" * 64,
             )
             self.assertEqual(second.previous_entry_sha256, first.entry_sha256)
             self.assertEqual(load_ledger(path, expected_binding_sha256=BINDING), (
@@ -510,7 +540,8 @@ class Phase8BStorePackageTests(unittest.TestCase):
                     resource_kind="volume",
                     resource_name="password-cache",
                     resource_id="volume-0001",
-                    labels_sha256=labels_sha256,
+                    ownership_sha256=ownership_sha256,
+                    resource_labels_sha256="d" * 64,
                 )
 
     def test_supervisor_uses_only_two_recorded_ids_and_three_operations(self) -> None:
@@ -600,7 +631,10 @@ class Phase8BStorePackageTests(unittest.TestCase):
                 encoding="ascii",
             )
             spec_path.chmod(0o600)
-            ledger = ResourceIdentityLedger(ledger_path, binding_sha256=BINDING)
+            ledger = ResourceIdentityLedger(
+                ledger_path,
+                binding_sha256=resource_ledger_binding_sha256(BINDING),
+            )
             for logical_name, container_id, image_id in (
                 ("postgres", POSTGRES_ID, POSTGRES_IMAGE_ID),
                 ("qdrant", QDRANT_ID, QDRANT_IMAGE_ID),
@@ -613,7 +647,12 @@ class Phase8BStorePackageTests(unittest.TestCase):
                     resource_id=container_id,
                     image_id=image_id,
                     image_repo_digest=item["image"]["repo_digest"],
-                    labels_sha256=canonical_labels_sha256(item["labels"]),
+                    ownership_sha256=hashlib.sha256(
+                        (logical_name + ":owned").encode("ascii")
+                    ).hexdigest(),
+                    resource_labels_sha256=canonical_labels_sha256(
+                        item["labels"]
+                    ),
                 )
             loaded = exact_containers_from_files(
                 spec_path=spec_path,
@@ -634,8 +673,11 @@ class Phase8BStorePackageTests(unittest.TestCase):
             "Group=root",
             "RestrictAddressFamilies=AF_UNIX",
             "IPAddressDeny=any",
-            "ExecStart=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor start",
-            "ExecStop=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor stop",
+            "ExecStart=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ start",
+            "ExecStop=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ stop",
+            "WorkingDirectory=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@",
+            "executions/@EXECUTION_ID@/resources.jsonl",
+            "ConditionPathExists=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python",
         ):
             self.assertIn(required, unit)
         for forbidden in (
@@ -645,6 +687,10 @@ class Phase8BStorePackageTests(unittest.TestCase):
             "OPENAI",
             "SUPABASE",
             "AF_INET",
+            "/var/lib/governed-memory-controller/resource-identities.jsonl",
+            "${PACKAGE_MANIFEST_SHA256}",
+            "/usr/bin/python3.12",
+            " -m tools.governed_memory_install.store_supervisor",
         ):
             self.assertNotIn(forbidden, unit)
 

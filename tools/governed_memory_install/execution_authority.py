@@ -219,6 +219,7 @@ def claim_execution_authority(
             authorization_sha256=evidence.authorization_sha256,
             scope_sha256=evidence.scope_sha256,
             trust_bundle_sha256=evidence.trust_bundle_sha256,
+            held_lock=held_lock,
             allow_new_claim=allow_new_claim,
         )
         validate_held_execution_lock(held_lock)

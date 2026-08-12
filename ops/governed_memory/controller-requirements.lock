@@ -1,4 +1,4 @@
-# Phase 8B controller-only runtime lock for CPython 3.12 on Linux x86_64.
+# dormant-store installation controller-only runtime lock for CPython 3.12 on Linux x86_64.
 # A later authorized build must install from an invocation-owned offline
 # wheelhouse with --require-hashes and produce a separate build receipt.
 cffi==2.1.0 \

@@ -7,7 +7,7 @@ The verifier accepts only canonical ASCII JSON supplied by the caller.  It
 does not read or write files, invoke commands, contact a network service, use
 the wall clock, consume a nonce, or execute an installation.  A successful
 result proves only that an externally trusted Ed25519 key signed the exact
-Phase 8B scope and that the caller reports its nonce as unused.
+dormant-store installation scope and that the caller reports its nonce as unused.
 """
 
 from collections.abc import Callable, Mapping
@@ -18,13 +18,13 @@ import binascii
 import hashlib
 import json
 import re
-from typing import Final
+from typing import Final, TYPE_CHECKING
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+if TYPE_CHECKING:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
-SCOPE_SCHEMA_VERSION: Final = "governed-memory-dormant-install-scope-v1"
+SCOPE_SCHEMA_VERSION: Final = "governed-memory-dormant-install-scope-v2"
 AUTHORIZATION_SCHEMA_VERSION: Final = (
     "governed-memory-external-authorization-envelope-v1"
 )
@@ -35,7 +35,6 @@ TRUST_BUNDLE_SCHEMA_VERSION: Final = (
     "governed-memory-ed25519-public-key-trust-bundle-v1"
 )
 AUTHORIZATION_OPERATION: Final = "dormant_install"
-AUTHORIZATION_PHASE: Final = "8B"
 RESULT_TYPE: Final = "cryptographically_valid_scope_not_execution"
 MAX_AUTHORIZATION_LIFETIME_SECONDS: Final = 15 * 60
 MAX_DOCUMENT_BYTES: Final = 64 * 1024
@@ -64,7 +63,6 @@ _TIMESTAMP_RE = re.compile(
 
 _SCOPE_KEYS = {
     "schema_version",
-    "phase",
     "operation",
     "authorization_namespace",
     "thread_id",
@@ -75,6 +73,7 @@ _SCOPE_KEYS = {
     "controller_contract_sha256",
     "execution_plan_sha256",
     "exact_targets_sha256",
+    "controller_runtime_receipt_sha256",
     "source_boundary",
     "store_policy",
     "secret_policy",
@@ -170,6 +169,7 @@ class DormantInstallExpectedBindings:
     controller_contract_sha256: str
     execution_plan_sha256: str
     exact_targets_sha256: str
+    controller_runtime_receipt_sha256: str
 
     def __post_init__(self) -> None:
         if (
@@ -182,6 +182,7 @@ class DormantInstallExpectedBindings:
                     self.controller_contract_sha256,
                     self.execution_plan_sha256,
                     self.exact_targets_sha256,
+                    self.controller_runtime_receipt_sha256,
                 )
             )
         ):
@@ -377,7 +378,6 @@ def _verify_scope(
     _require(set(scope) == _SCOPE_KEYS, "dormant_install_scope_invalid")
     _require(
         scope.get("schema_version") == SCOPE_SCHEMA_VERSION
-        and scope.get("phase") == AUTHORIZATION_PHASE
         and scope.get("operation") == AUTHORIZATION_OPERATION,
         "dormant_install_scope_invalid",
     )
@@ -408,6 +408,7 @@ def _verify_scope(
                 "controller_contract_sha256",
                 "execution_plan_sha256",
                 "exact_targets_sha256",
+                "controller_runtime_receipt_sha256",
             )
         ),
         "dormant_install_scope_binding_invalid",
@@ -416,15 +417,15 @@ def _verify_scope(
         _strict_structure_equal(
             scope.get("source_boundary"), _SOURCE_BOUNDARY
         ),
-        "phase8b_source_boundary_invalid",
+        "dormant_store_install_source_boundary_invalid",
     )
     _require(
         _strict_structure_equal(scope.get("store_policy"), _STORE_POLICY),
-        "phase8b_fresh_store_policy_invalid",
+        "dormant_store_install_fresh_store_policy_invalid",
     )
     _require(
         _strict_structure_equal(scope.get("secret_policy"), _SECRET_POLICY),
-        "phase8b_secret_policy_invalid",
+        "dormant_store_install_secret_policy_invalid",
     )
 
 
@@ -474,6 +475,14 @@ def _public_key_from_trust_bundle(
     )
     _require(selected is not None, "authorization_key_id_mismatch")
     assert selected is not None
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+    except ImportError as error:
+        raise AuthorityVerificationError(
+            "authority_crypto_backend_unavailable"
+        ) from error
     return Ed25519PublicKey.from_public_bytes(selected)
 
 
@@ -556,7 +565,7 @@ def _verify_dormant_install_signature_evidence(
         and signature.get("key_id") == payload.get("key_id"),
         "authorization_key_id_mismatch",
     )
-    expected_phrase = f"APPROVE PHASE 8B DORMANT INSTALL {scope_sha256}"
+    expected_phrase = f"APPROVE GOVERNED MEMORY DORMANT STORE INSTALL {scope_sha256}"
     _require(
         payload.get("approval_phrase") == expected_phrase,
         "authorization_approval_phrase_invalid",
@@ -586,7 +595,12 @@ def _verify_dormant_install_signature_evidence(
         invalid_code="authorization_signature_invalid",
     )
     try:
+        from cryptography.exceptions import InvalidSignature
         public_key.verify(signature_bytes, canonical_json_bytes(payload))
+    except ImportError as error:
+        raise AuthorityVerificationError(
+            "authority_crypto_backend_unavailable"
+        ) from error
     except InvalidSignature as error:
         raise AuthorityVerificationError("authorization_signature_invalid") from error
 
@@ -667,6 +681,9 @@ def _verify_expected_scope_bindings(
         "controller_contract_sha256": expected.controller_contract_sha256,
         "execution_plan_sha256": expected.execution_plan_sha256,
         "exact_targets_sha256": expected.exact_targets_sha256,
+        "controller_runtime_receipt_sha256": (
+            expected.controller_runtime_receipt_sha256
+        ),
     }
     if any(scope.get(key) != value for key, value in exact.items()):
         raise AuthorityVerificationError("authority_local_binding_mismatch")
@@ -716,7 +733,6 @@ def verify_dormant_install_execution_capability(
 __all__ = [
     "ALLOWED_SECRET_NAMES",
     "AUTHORIZATION_OPERATION",
-    "AUTHORIZATION_PHASE",
     "AuthorityVerificationError",
     "CryptographicallyValidScopeNotExecution",
     "DormantInstallExpectedBindings",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Guarded synthetic-only disposable proof for the Phase 8B controller.
+"""Guarded synthetic-only disposable proof for the dormant-store installation controller.
 
 The public entry point constructs the exact sealed in-memory backend itself.
 It accepts no backend, command runner, host adapter, credentials, environment,
@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+import gc
 import hashlib
 import json
 import os
@@ -25,7 +26,7 @@ from .controller import (
     CompletedStateError,
     ControllerReceipt,
     InstallationCompensatedError,
-    Phase8BStoresController,
+    DormantStoreInstallController,
     STORES_ONLY_PLAN,
     StepState,
     validate_plan,
@@ -51,21 +52,21 @@ from .synthetic_backend import (
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[2]
 CONTRACT_PATH: Final = (
     REPOSITORY_ROOT
-    / "ops/governed_memory/installation/phase8b/"
+    / "ops/governed_memory/installation/current/"
     "disposable_proof_contract.json"
 )
 RECEIPT_SCHEMA_PATH: Final = (
     REPOSITORY_ROOT
-    / "ops/governed_memory/installation/phase8b/"
+    / "ops/governed_memory/installation/current/"
     "disposable_proof_receipt.schema.json"
 )
 PACKAGE_MANIFEST_PATH: Final = (
     REPOSITORY_ROOT
-    / "ops/governed_memory/installation/phase8b/package_manifest.json"
+    / "ops/governed_memory/installation/current/package_manifest.json"
 )
 CONTROLLER_PLAN_PATH: Final = (
     REPOSITORY_ROOT
-    / "ops/governed_memory/installation/phase8b/controller_plan.json"
+    / "ops/governed_memory/installation/current/controller_plan.json"
 )
 BACKEND_SOURCE_PATH: Final = (
     REPOSITORY_ROOT
@@ -80,23 +81,23 @@ EXECUTION_LOCK_SOURCE_PATH: Final = (
 HARNESS_SOURCE_PATH: Final = Path(__file__).resolve()
 RUNNER_SOURCE_PATH: Final = (
     REPOSITORY_ROOT
-    / "tools/governed_memory_validation/run_phase8b_disposable_proof.py"
+    / "tools/governed_memory_validation/run_installation_synthetic_proof.py"
 )
 
 PROOF_SCHEMA_VERSION: Final = (
-    "governed-memory-phase8b-disposable-synthetic-proof-v1"
+    "governed-memory-dormant-store-install-disposable-synthetic-proof-v2"
 )
 RECEIPT_SCHEMA_VERSION: Final = (
-    "governed-memory-phase8b-disposable-proof-receipt-v1"
+    "governed-memory-dormant-store-install-disposable-proof-receipt-v2"
 )
 CONTRACT_SCHEMA_VERSION: Final = (
-    "governed-memory-phase8b-disposable-proof-contract-v1"
+    "governed-memory-dormant-store-install-disposable-proof-contract-v2"
 )
 PROOF_SCOPE: Final = "synthetic_in_process_model_only"
 PROOF_OUTCOME: Final = "synthetic_matrix_passed"
-EXPECTED_PLAN_STEP_COUNT: Final = 20
-EXPECTED_COMPENSABLE_STEP_COUNT: Final = 15
-EXPECTED_SCENARIO_COUNT: Final = 131
+EXPECTED_PLAN_STEP_COUNT: Final = 19
+EXPECTED_COMPENSABLE_STEP_COUNT: Final = 14
+EXPECTED_SCENARIO_COUNT: Final = 124
 HASH_ZERO: Final = "0" * 64
 
 FAMILY_HAPPY_PATH: Final = "happy_path"
@@ -114,18 +115,18 @@ FAMILY_INTERRUPT_AFTER_COMPENSATION: Final = (
 
 EXPECTED_FAMILY_COUNTS: Final = {
     FAMILY_HAPPY_PATH: 1,
-    FAMILY_FAIL_BEFORE_EFFECT: 20,
-    FAMILY_FAIL_AFTER_EFFECT: 20,
-    FAMILY_INTERRUPT_BEFORE_EFFECT: 20,
-    FAMILY_INTERRUPT_AFTER_EFFECT: 20,
-    FAMILY_INTERRUPT_AFTER_APPLIED: 20,
-    FAMILY_INTERRUPT_BEFORE_COMPENSATION: 15,
-    FAMILY_INTERRUPT_AFTER_COMPENSATION: 15,
+    FAMILY_FAIL_BEFORE_EFFECT: 19,
+    FAMILY_FAIL_AFTER_EFFECT: 19,
+    FAMILY_INTERRUPT_BEFORE_EFFECT: 19,
+    FAMILY_INTERRUPT_AFTER_EFFECT: 19,
+    FAMILY_INTERRUPT_AFTER_APPLIED: 19,
+    FAMILY_INTERRUPT_BEFORE_COMPENSATION: 14,
+    FAMILY_INTERRUPT_AFTER_COMPENSATION: 14,
 }
 EXPECTED_OUTCOME_COUNTS: Final = {
-    "inactive_complete": 59,
-    "same_attempt_compensated": 69,
-    "sealed_state_refused": 3,
+    "inactive_complete": 58,
+    "same_attempt_compensated": 65,
+    "terminal_postflight_failure_blocks_compensation": 1,
 }
 
 
@@ -371,6 +372,13 @@ def _runtime_fence(disposable_root: Path) -> Iterator[None]:
     original_environ = os.environ
     original_environb = getattr(os, "environb", None)
     forbidden_environment = _ForbiddenEnvironment()
+    garbage_collection_was_enabled = gc.isenabled()
+    if garbage_collection_was_enabled:
+        # Finalize cycles created by earlier in-process tests before the audit
+        # fence is active. Otherwise an unrelated delayed finalizer can access
+        # the environment during this proof and contaminate its scoped counts.
+        gc.collect()
+        gc.disable()
     try:
         _RUNTIME_AUDIT.active = True
         _RUNTIME_AUDIT.repository_root = repository_root
@@ -398,6 +406,8 @@ def _runtime_fence(disposable_root: Path) -> Iterator[None]:
         _RUNTIME_AUDIT.repository_root = None
         _RUNTIME_AUDIT.disposable_root = None
         _RUNTIME_AUDIT.trusted_internal_openat_lock = False
+        if garbage_collection_was_enabled:
+            gc.enable()
 
 
 def _validate_disposable_root(root: Path) -> Path:
@@ -410,7 +420,7 @@ def _validate_disposable_root(root: Path) -> Path:
         raise DisposableProofError("proof_disposable_root_invalid") from error
     if (
         resolved != root
-        or not root.name.startswith("phase8b-disposable-proof-")
+        or not root.name.startswith("dormant_store_install-disposable-proof-")
         or not stat.S_ISDIR(metadata.st_mode)
         or stat.S_IMODE(metadata.st_mode) != 0o700
         or metadata.st_uid != os.geteuid()
@@ -570,7 +580,7 @@ def _run_case(
     case_root.mkdir(mode=0o700)
     os.chmod(case_root, 0o700)
     backend = _construct_exact_synthetic_backend(scenario)
-    attempt_id = f"phase8b-proof-{case_index:03d}"
+    attempt_id = f"dormant_store_install-proof-{case_index:03d}"
     outcome: str
     applied: tuple[str, ...]
     compensated: tuple[str, ...]
@@ -580,7 +590,7 @@ def _run_case(
     finally:
         _RUNTIME_AUDIT.trusted_internal_openat_lock = False
     with execution_lock:
-        controller = Phase8BStoresController(
+        controller = DormantStoreInstallController(
             plan=STORES_ONLY_PLAN,
             backend=backend,
             held_lock=execution_lock.held_capability(),
@@ -605,11 +615,13 @@ def _run_case(
                 try:
                     controller.run(attempt_id=attempt_id)
                 except CompletedStateError:
-                    outcome = "sealed_state_refused"
+                    outcome = "terminal_postflight_failure_blocks_compensation"
                     applied = tuple(step.step_id for step in STORES_ONLY_PLAN)
                     compensated = ()
                 else:
-                    raise DisposableProofError("proof_seal_failure_not_refused")
+                    raise DisposableProofError(
+                        "proof_terminal_postflight_failure_not_refused"
+                    )
             else:
                 try:
                     controller.run(attempt_id=attempt_id)
@@ -650,7 +662,7 @@ def _run_case(
                 pass
             else:
                 raise DisposableProofError("proof_interruption_not_observed")
-            is_seal_refusal = (
+            is_terminal_postflight_resume = (
                 scenario.target_step_id == STORES_ONLY_PLAN[-1].step_id
                 and scenario.family
                 in {
@@ -658,15 +670,12 @@ def _run_case(
                     FAMILY_INTERRUPT_AFTER_APPLIED,
                 }
             )
-            if is_seal_refusal:
-                try:
-                    controller.run(attempt_id=attempt_id)
-                except CompletedStateError:
-                    outcome = "sealed_state_refused"
-                    applied = tuple(step.step_id for step in STORES_ONLY_PLAN)
-                    compensated = ()
-                else:
-                    raise DisposableProofError("proof_seal_resume_not_refused")
+            if is_terminal_postflight_resume:
+                receipt = controller.run(attempt_id=attempt_id)
+                _verify_complete_receipt(receipt)
+                outcome = "inactive_complete"
+                applied = receipt.applied_step_ids
+                compensated = receipt.compensated_step_ids
             else:
                 receipt = controller.run(attempt_id=attempt_id)
                 _verify_complete_receipt(receipt)
@@ -733,8 +742,8 @@ def _verify_contract_and_schema(
     _require(
         contract.get("state")
         == (
-            "inactive_synthetic_harness_packaged_unit_executable_"
-            "no_promoted_receipt_no_live_execution"
+            "repository-only-synthetic-harness-packaged-"
+            "no-promoted-receipt-no-live-execution"
         ),
         "proof_contract_state_invalid",
     )
@@ -771,7 +780,7 @@ def _verify_contract_and_schema(
         _require(claims.get(key) is False, "proof_contract_claims_invalid")
     _require(
         schema.get("$id")
-        == "urn:governed-memory:phase8b:disposable-proof-receipt:v1",
+        == "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2",
         "proof_receipt_schema_invalid",
     )
     properties = schema.get("properties")

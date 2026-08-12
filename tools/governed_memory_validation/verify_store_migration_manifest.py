@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the exact stores-only Phase 8B migration subset."""
+"""Verify the exact stores-only dormant-store installation migration subset."""
 
 from __future__ import annotations
 
@@ -14,17 +14,17 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "governed-memory-migrations"
-MANIFEST_RELATIVE = "ops/governed_memory/installation/phase8b/migration_manifest.json"
+MANIFEST_RELATIVE = "ops/governed_memory/installation/current/migration_manifest.json"
 BINDINGS_RELATIVE = (
-    "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json"
+    "ops/governed_memory/installation/current/postgres/migration_bindings.json"
 )
 PREFLIGHT_RELATIVE = (
-    "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql"
+    "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql"
 )
 MANIFEST = ROOT / MANIFEST_RELATIVE
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 EXPECTED_BINDINGS_CANONICAL_SHA256 = (
-    "0068a7b9aca51c35185bad33607574c3cc108c0f3b384aa1742e09f4329102cb"
+    "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
 )
 EXPECTED_FILES = frozenset(
     {
@@ -186,12 +186,9 @@ def _verify_bindings(
         raise StoreMigrationManifestError("migration_bindings_shape_invalid")
     if (
         bindings.get("schema_version")
-        != "governed-memory-phase8b-store-migration-bindings-v1"
+        != "governed-memory-dormant-store-install-store-migration-bindings-v2"
         or bindings.get("state")
-        != (
-            "phase8b_local_execution_authority_proof_pending_not_installed_"
-            "not_authorized"
-        )
+        != "repository-only-current-store-migration-bindings-not-installed-not-authorized"
         or bindings.get("historical_package_descriptors_are_execution_authority")
         is not False
         or _canonical_sha256(bindings) != EXPECTED_BINDINGS_CANONICAL_SHA256
@@ -216,8 +213,8 @@ def _verify_bindings(
         "governed_memory_pilot_marker_0004",
     )
     expected_dependencies = (
-        ["phase8b_roles_preflight"],
-        ["phase8b_roles_preflight", "governed_memory_foundation_0001"],
+        ["dormant_store_install_roles_preflight"],
+        ["dormant_store_install_roles_preflight", "governed_memory_foundation_0001"],
         ["governed_memory_foundation_0001"],
     )
     expected_rollback_metadata = (
@@ -276,10 +273,10 @@ def verify() -> dict[str, object]:
         raise StoreMigrationManifestError("manifest_shape_invalid")
     if (
         manifest.get("schema_version")
-        != "governed-memory-phase8b-store-migration-manifest-v1"
+        != "governed-memory-dormant-store-install-store-migration-manifest-v2"
         or manifest.get("candidate_id") != "governed_memory_9a54cf123493_000001"
         or manifest.get("state")
-        != "phase8b_stores_only_remediation_proof_pending_not_installed_not_authorized"
+        != "repository-only-current-stores-only-migration-set-not-installed-not-authorized"
         or manifest.get("execution_order") != EXECUTION_ORDER
         or manifest.get("rollback_order") != ROLLBACK_ORDER
     ):
@@ -332,7 +329,7 @@ def verify() -> dict[str, object]:
     ):
         raise StoreMigrationManifestError("roles_preflight_not_fail_closed")
     return {
-        "schema_version": "governed-memory-phase8b-store-migration-verification-v2",
+        "schema_version": "governed-memory-dormant-store-install-store-migration-verification-v3",
         "state": str(manifest["state"]),
         "file_count": len(observed),
         "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
@@ -347,13 +344,13 @@ def verify() -> dict[str, object]:
 
 def main() -> int:
     if sys.argv[1:]:
-        print("PHASE8B_STORE_MIGRATION_MANIFEST_INVALID=arguments", file=sys.stderr)
+        print("DORMANT_STORE_INSTALL_STORE_MIGRATION_MANIFEST_INVALID=arguments", file=sys.stderr)
         return 2
     try:
         receipt = verify()
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(
-            "PHASE8B_STORE_MIGRATION_MANIFEST_INVALID=" + str(error),
+            "DORMANT_STORE_INSTALL_STORE_MIGRATION_MANIFEST_INVALID=" + str(error),
             file=sys.stderr,
         )
         return 1

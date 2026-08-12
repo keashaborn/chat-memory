@@ -1,0 +1,118 @@
+{
+  "schema_version": "governed-memory-current-component-disposition-v1",
+  "status": "single_current_successor_and_single_current_dormant_store_controller_package_inactive",
+  "authority": {
+    "accounts": "supabase_auth_retained",
+    "canonical_governed_memory": "fresh_successor_postgresql_only",
+    "derived_vectors": "fresh_successor_qdrant_only_rebuildable",
+    "conversation_source": "existing_owner_scoped_chat_tables",
+    "structured_lifeswitch": "outside_memory_install_rollback_and_chat_erasure_authority"
+  },
+  "current_successor": {
+    "application_root": "app.py",
+    "memory_runtime": "rag_engine/governed_memory",
+    "chat_integrity": "rag_engine/chat_integrity.py",
+    "chat_erasure_proxy": "rag_engine/governed_memory_erasure_proxy_v1.py",
+    "package_manifest": "ops/governed_memory/installation/current/package_manifest.json",
+    "package_verifier": "tools/governed_memory_install/package.py",
+    "install_entrypoint": "tools/governed_memory_install/install_entrypoint.py",
+    "empty_rollback_entrypoint": "tools/governed_memory_install/rollback_entrypoint.py",
+    "synthetic_proof_entrypoint": "tools/governed_memory_validation/run_installation_synthetic_proof.py",
+    "legacy_memory_fallback_allowed": false,
+    "stored_assistant_preferences_allowed": false,
+    "legacy_memory_prompt_object_allowed": false
+  },
+  "current_dormant_store_controller": {
+    "state": "repository_packaged_not_built_not_installed_not_authorized_not_activated",
+    "server_target": "seebx",
+    "install_and_empty_rollback_are_distinct_signed_operations": true,
+    "exact_controller_process_is_trusted": true,
+    "hostile_same_process_python_isolation_claimed": false,
+    "claim_bound_install_controller_composition_packaged": true,
+    "claim_bound_empty_rollback_controller_composition_packaged": true,
+    "controller_runtime_verification_capability_packaged": true,
+    "full_controller_release_tree_verification_packaged": true,
+    "exact_locked_controller_distribution_set_verification_packaged": true,
+    "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": true,
+    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": true,
+    "supervisor_launcher_source_packaged": true,
+    "controller_runtime_built_or_installed": false,
+    "controller_release_staged": false,
+    "controller_runtime_and_release_require_separate_future_build_and_install_authority": true,
+    "stores_install_owns_or_removes_controller_substrate": false,
+    "resolved_store_spec_and_exact_docker_labels_bound": true,
+    "resource_identity_ledger_v2_packaged": true,
+    "empty_rollback_writer_fence_packaged": true,
+    "retained_audit_artifact_hashes_bound": true,
+    "install_receipt_binds_fresh_terminal_canonical_store_readiness": true,
+    "empty_rollback_requires_opaque_verified_install_receipt_and_ledger": true,
+    "completed_install_and_empty_rollback_replay_reverification_packaged": true,
+    "concrete_install_store_effect_adapters_packaged": false,
+    "concrete_empty_rollback_store_effect_adapters_packaged": false,
+    "activation_entrypoint_packaged": false,
+    "validation_scope": "synthetic_in_process_only",
+    "live_linux_execution_proven": false,
+    "live_installation_proof_complete": false,
+    "installation_performed": false,
+    "empty_rollback_performed": false,
+    "production_state_changed": false
+  },
+  "historical_only": {
+    "documentation_root": "docs/history/governed_memory",
+    "operational_metadata_root": "ops/governed_memory/history",
+    "may_be_imported_or_executed": false,
+    "may_be_used_as_current_release_authority": false
+  },
+  "quarantined_legacy": [
+    {
+      "component": "memory_v1_v5_runtime",
+      "path_families": [
+        "rag_engine/memory_v1*",
+        "rag_engine/governed_memory_provider_v1.py",
+        "rag_engine/memory_prompt_*"
+      ],
+      "current_role": "not_imported_by_current_application_or_response_graph_pending_separate_retirement_authority"
+    },
+    {
+      "component": "legacy_preferences_identity_admin_and_vantage",
+      "path_families": [
+        "rag_engine/assistant_response_preference*",
+        "rag_engine/assistant_response_preferences*",
+        "rag_engine/admin_memory_*",
+        "rag_engine/vantage_*"
+      ],
+      "current_role": "not_consumed_by_current_successor_pending_precise_retirement"
+    },
+    {
+      "component": "legacy_live_services_and_store_state",
+      "path_families": [
+        "legacy_memory_systemd_timers_and_services",
+        "legacy_memory_scripts_and_cron",
+        "legacy_postgresql_memory_objects",
+        "legacy_qdrant_memory_collections"
+      ],
+      "current_role": "outside_repository_only_candidate_unchanged"
+    }
+  ],
+  "future_deletion_gates": [
+    "zero_current_import_and_dynamic_load_closure",
+    "legacy_services_timers_cron_and_admin_paths_quiescent",
+    "legacy_postgresql_and_qdrant_zero_reader_zero_writer_observation_window",
+    "rollback_retention_receipt_complete",
+    "separate_exact_deletion_batch_authorized"
+  ],
+  "safety": {
+    "repository_only": true,
+    "dormant_store_controller_runtime_built_or_installed": false,
+    "dormant_store_controller_release_staged": false,
+    "services_changed": false,
+    "secrets_read_or_changed": false,
+    "docker_or_images_used": false,
+    "postgresql_read_or_changed": false,
+    "qdrant_read_or_changed": false,
+    "provider_calls": 0,
+    "structured_lifeswitch_data_in_scope": false,
+    "accounts_in_scope": false,
+    "activation_authorized": false
+  }
+}

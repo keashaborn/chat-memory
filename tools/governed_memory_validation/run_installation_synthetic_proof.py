@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Run exactly one guarded Phase 8B synthetic disposable proof.
+"""Run exactly one guarded dormant-store installation synthetic disposable proof.
 
 There is no live, Docker, systemd, image, secret, install, rollback, network,
 or activation option.  The import audit fence is installed before any local
@@ -38,7 +38,7 @@ class RunnerRefusal(RuntimeError):
 
 class _ForbiddenImportEnvironment(collections.abc.MutableMapping):
     def _deny(self) -> None:
-        raise RunnerRefusal("phase8b_import_environment_access_forbidden")
+        raise RunnerRefusal("dormant_store_install_import_environment_access_forbidden")
 
     def __getitem__(self, key: object) -> object:
         self._deny()
@@ -104,7 +104,7 @@ def _import_audit_hook(event: str, args: tuple[object, ...]) -> None:
         or event.startswith("os.spawn")
         or event.startswith("os.posix_spawn")
     ):
-        _block_import_effect("phase8b_import_process_effect_forbidden")
+        _block_import_effect("dormant_store_install_import_process_effect_forbidden")
     if (
         event
         in {
@@ -122,9 +122,9 @@ def _import_audit_hook(event: str, args: tuple[object, ...]) -> None:
         or event.startswith("http.client")
         or event.startswith("urllib")
     ):
-        _block_import_effect("phase8b_import_network_effect_forbidden")
+        _block_import_effect("dormant_store_install_import_network_effect_forbidden")
     if event.startswith("ctypes.") or event in {"os.putenv", "os.unsetenv"}:
-        _block_import_effect("phase8b_import_dynamic_effect_forbidden")
+        _block_import_effect("dormant_store_install_import_dynamic_effect_forbidden")
     if event == "open" and args:
         mode = args[1] if len(args) > 1 else None
         flags = args[2] if len(args) > 2 else 0
@@ -133,9 +133,9 @@ def _import_audit_hook(event: str, args: tuple[object, ...]) -> None:
             isinstance(mode, str) and any(token in mode for token in "wax+")
         ) or (isinstance(flags, int) and bool(flags & write_mask))
         if write:
-            _block_import_effect("phase8b_import_filesystem_write_forbidden")
+            _block_import_effect("dormant_store_install_import_filesystem_write_forbidden")
         if not _repository_read_allowed(args[0]):
-            _block_import_effect("phase8b_import_filesystem_read_forbidden")
+            _block_import_effect("dormant_store_install_import_filesystem_read_forbidden")
     if event in {
         "os.chmod",
         "os.chown",
@@ -153,7 +153,7 @@ def _import_audit_hook(event: str, args: tuple[object, ...]) -> None:
         "os.truncate",
         "os.utime",
     }:
-        _block_import_effect("phase8b_import_filesystem_write_forbidden")
+        _block_import_effect("dormant_store_install_import_filesystem_write_forbidden")
 
 
 sys.addaudithook(_import_audit_hook)
@@ -177,7 +177,7 @@ finally:
 
 
 if _IMPORT_GUARD_BLOCKED_EFFECT_COUNT != 0:
-    raise RunnerRefusal("phase8b_import_guard_not_clean")
+    raise RunnerRefusal("dormant_store_install_import_guard_not_clean")
 
 IMPORT_PHASE_GUARD_COMPLETED = True
 
@@ -186,7 +186,7 @@ def run_synthetic_proof() -> dict[str, object]:
     """Create one private disposable root and run the sole synthetic proof."""
 
     with tempfile.TemporaryDirectory(
-        prefix="phase8b-disposable-proof-"
+        prefix="dormant_store_install-disposable-proof-"
     ) as temporary:
         root = Path(temporary).resolve(strict=True)
         os.chmod(root, 0o700)
@@ -196,7 +196,7 @@ def run_synthetic_proof() -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments:
-        raise RunnerRefusal("phase8b_runner_accepts_no_arguments")
+        raise RunnerRefusal("dormant_store_install_runner_accepts_no_arguments")
     receipt = run_synthetic_proof()
     sys.stdout.buffer.write(
         json.dumps(

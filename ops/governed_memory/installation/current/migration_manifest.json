@@ -1,9 +1,9 @@
 {
-  "schema_version": "governed-memory-phase8b-store-migration-manifest-v1",
+  "schema_version": "governed-memory-dormant-store-install-store-migration-manifest-v2",
   "candidate_id": "governed_memory_9a54cf123493_000001",
-  "state": "phase8b_stores_only_remediation_proof_pending_not_installed_not_authorized",
+  "state": "repository-only-current-stores-only-migration-set-not-installed-not-authorized",
   "execution_order": [
-    "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
+    "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
     "0001_foundation/forward.pgsql",
     "0003_owner_claim_detail/forward.pgsql",
     "0004_pilot_marker/forward.pgsql"
@@ -15,11 +15,11 @@
   ],
   "files": [
     {
-      "path": "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json",
-      "sha256": "0bcf99e21c8f8f2af884da69e666cf32265006099b7cbc1240663d3f6794ad70"
+      "path": "ops/governed_memory/installation/current/postgres/migration_bindings.json",
+      "sha256": "cc9c1905bb24c32e000238add8c09dcfdd71ffa2a672e1d09d218743881fec15"
     },
     {
-      "path": "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
+      "path": "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
       "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e"
     },
     {

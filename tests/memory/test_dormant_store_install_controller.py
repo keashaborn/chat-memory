@@ -16,7 +16,7 @@ from tools.governed_memory_install.controller import (
     JournalEvent,
     JournalRecord,
     JournalValidationError,
-    Phase8BStoresController,
+    DormantStoreInstallController,
     PlanStep,
     PlanValidationError,
     StateDriftError,
@@ -100,7 +100,7 @@ class _HermeticBackend:
             self.inject_after_compensate = None
 
 
-class Phase8BControllerTests(unittest.TestCase):
+class DormantStoreInstallControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary = tempfile.TemporaryDirectory()
         lock_directory = Path(self._temporary.name) / "controller-lock"
@@ -116,10 +116,10 @@ class Phase8BControllerTests(unittest.TestCase):
 
     def _controller(
         self, backend: _HermeticBackend | None = None
-    ) -> tuple[Phase8BStoresController, _HermeticBackend]:
+    ) -> tuple[DormantStoreInstallController, _HermeticBackend]:
         selected = backend or _HermeticBackend()
         return (
-            Phase8BStoresController(
+            DormantStoreInstallController(
                 plan=STORES_ONLY_PLAN,
                 backend=selected,
                 held_lock=self.execution_lock.held_capability(),
@@ -127,14 +127,26 @@ class Phase8BControllerTests(unittest.TestCase):
             selected,
         )
 
-    def test_exact_20_step_stores_only_plan_and_no_live_executor(self) -> None:
-        self.assertEqual(len(STORES_ONLY_PLAN), 20)
+    def test_exact_19_step_stores_only_plan_and_no_live_executor(self) -> None:
+        self.assertEqual(len(STORES_ONLY_PLAN), 19)
         self.assertEqual(
             tuple(step.step_id[:3] for step in STORES_ONLY_PLAN),
-            tuple(f"I{position:02d}" for position in range(1, 21)),
+            tuple(f"I{position:02d}" for position in range(1, 20)),
         )
-        self.assertTrue(STORES_ONLY_PLAN[-1].seals)
+        self.assertTrue(STORES_ONLY_PLAN[-1].terminal_postflight)
         self.assertFalse(STORES_ONLY_PLAN[-1].compensable)
+        self.assertEqual(
+            STORES_ONLY_PLAN[3],
+            PlanStep(
+                "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
+                "write_resolved_store_spec_and_generate_fresh_store_secrets",
+                "remove_resolved_store_spec_and_fresh_store_secrets",
+            ),
+        )
+        self.assertEqual(
+            STORES_ONLY_PLAN[-1].step_id,
+            "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT",
+        )
         joined = "\n".join(step.effect for step in STORES_ONLY_PLAN)
         for forbidden in (
             "legacy",
@@ -146,13 +158,15 @@ class Phase8BControllerTests(unittest.TestCase):
             "provider",
             "route",
             "supabase",
+            "controller_release",
+            "stage_immutable_controller_release",
         ):
             self.assertNotIn(forbidden, joined)
 
         plan_document = json.loads(
             (
                 ROOT
-                / "ops/governed_memory/installation/phase8b/controller_plan.json"
+                / "ops/governed_memory/installation/current/controller_plan.json"
             ).read_text(encoding="ascii")
         )
         self.assertEqual(
@@ -178,22 +192,37 @@ class Phase8BControllerTests(unittest.TestCase):
         self.assertEqual(
             plan_document["live_execution"],
             {
-                "installation_composition_callable_packaged": False,
-                "live_install_entrypoint_packaged": False,
-                "generic_docker_host_runner_primitive_packaged": True,
+                "claim_bound_install_controller_composition_packaged": True,
+                "non_cli_install_entrypoint_packaged": True,
+                "claim_bound_empty_rollback_controller_composition_packaged": True,
+                "non_cli_empty_rollback_entrypoint_packaged": True,
+                "operation_specific_install_and_empty_rollback_receipts_packaged": True,
+                "install_controller_emits_canonical_receipt": True,
+                "empty_rollback_controller_emits_canonical_receipt": True,
+                "typed_operation_specific_boundary_packaged": True,
+                "generic_store_mutation_argv_surface_packaged": False,
+                "concrete_install_store_effect_adapters_packaged": False,
+                "concrete_empty_rollback_store_effect_adapters_packaged": False,
+                "activation_entrypoint_packaged": False,
+                "bounded_image_inspect_runner_primitive_packaged": True,
                 "local_image_inspect_adapter_packaged": True,
-                "claim_bound_installation_runner_composition_packaged": False,
-                "claim_bound_installation_store_effect_adapters_packaged": False,
-                "live_rollback_entrypoint_packaged": False,
-                "live_activation_entrypoint_packaged": False,
-                "claim_bound_installation_typed_command_boundary_packaged": False,
+                "controller_runtime_verification_capability_packaged": True,
+                "full_controller_release_tree_verification_packaged": True,
+                "exact_locked_controller_distribution_set_verification_packaged": True,
+                "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
+                "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+                "controller_release_and_runtime_require_separate_future_build_and_install_authority": True,
+                "supervisor_launcher_source_packaged": True,
+                "controller_runtime_built_or_installed": False,
+                "controller_release_staged": False,
+                "stores_install_owns_or_removes_controller_substrate": False,
                 "stores_supervisor_cli_packaged": True,
                 "stores_supervisor_cli_docker_surface": [
                     "container_inspect",
                     "container_start",
                     "container_stop",
                 ],
-                "stores_supervisor_is_installer": False,
+                "stores_supervisor_is_installer_or_rollback_adapter": False,
                 "stores_supervisor_requires_preexisting_exact_ledger_container_ids": True,
             },
         )
@@ -213,9 +242,9 @@ class Phase8BControllerTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, source)
 
-    def test_install_runs_exact_order_and_refuses_completed_state(self) -> None:
+    def test_install_runs_exact_order_and_exact_completed_resume_is_idempotent(self) -> None:
         controller, backend = self._controller()
-        receipt = controller.run(attempt_id="phase8b-happy")
+        receipt = controller.run(attempt_id="dormant_store_install-happy")
         expected = tuple(step.step_id for step in STORES_ONLY_PLAN)
         self.assertEqual(receipt.applied_step_ids, expected)
         self.assertEqual(receipt.compensated_step_ids, ())
@@ -223,19 +252,17 @@ class Phase8BControllerTests(unittest.TestCase):
             tuple(step_id for action, step_id in backend.actions if action == "apply"),
             expected,
         )
-        self.assertEqual(receipt.journal_sequence, 40)
-        with self.assertRaisesRegex(
-            CompletedStateError, "inactive_postflight_already_sealed"
-        ):
-            controller.run(attempt_id="phase8b-happy")
-        self.assertEqual(len(backend.actions), 20)
+        self.assertEqual(receipt.journal_sequence, 38)
+        resumed = controller.run(attempt_id="dormant_store_install-happy")
+        self.assertEqual(resumed, receipt)
+        self.assertEqual(len(backend.actions), 19)
 
     def test_failure_compensates_owned_effects_in_exact_reverse_order(self) -> None:
         backend = _HermeticBackend()
         backend.fail_after_step = STORES_ONLY_PLAN[7].step_id
         controller, backend = self._controller(backend)
         with self.assertRaises(InstallationCompensatedError) as raised:
-            controller.run(attempt_id="phase8b-compensate")
+            controller.run(attempt_id="dormant_store_install-compensate")
         expected_applied = tuple(step.step_id for step in STORES_ONLY_PLAN[:8])
         expected_reverse = tuple(
             step.step_id
@@ -261,7 +288,7 @@ class Phase8BControllerTests(unittest.TestCase):
             self.assertIs(backend.states[step.step_id], expected_state)
         self.assertEqual(
             {record.attempt_id for record in backend.records},
-            {"phase8b-compensate"},
+            {"dormant_store_install-compensate"},
         )
         self.assertEqual(
             backend.records[-1].event,
@@ -293,9 +320,9 @@ class Phase8BControllerTests(unittest.TestCase):
         backend.fail_compensation_once_step = STORES_ONLY_PLAN[3].step_id
         controller, backend = self._controller(backend)
         with self.assertRaises(CompensationFailedError):
-            controller.run(attempt_id="phase8b-resume-compensation")
+            controller.run(attempt_id="dormant_store_install-resume-compensation")
 
-        receipt = controller.run(attempt_id="phase8b-resume-compensation")
+        receipt = controller.run(attempt_id="dormant_store_install-resume-compensation")
         expected_applied = tuple(step.step_id for step in STORES_ONLY_PLAN[:5])
         self.assertEqual(receipt.outcome, "same_attempt_compensation_complete")
         self.assertEqual(receipt.applied_step_ids, expected_applied)
@@ -310,7 +337,7 @@ class Phase8BControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(
             CompletedStateError, "attempt_already_compensated"
         ):
-            controller.run(attempt_id="phase8b-resume-compensation")
+            controller.run(attempt_id="dormant_store_install-resume-compensation")
 
     def test_drift_and_unowned_state_refuse_before_any_journal_write(self) -> None:
         for state in (StepState.AFTER, StepState.DRIFT):
@@ -319,7 +346,7 @@ class Phase8BControllerTests(unittest.TestCase):
                 backend.states[STORES_ONLY_PLAN[3].step_id] = state
                 controller, backend = self._controller(backend)
                 with self.assertRaises(StateDriftError):
-                    controller.run(attempt_id="phase8b-drift")
+                    controller.run(attempt_id="dormant_store_install-drift")
                 self.assertEqual(backend.records, [])
                 self.assertEqual(backend.actions, [])
 
@@ -373,18 +400,18 @@ class Phase8BControllerTests(unittest.TestCase):
             "applied_step_not_after:" + first,
         ):
             controller.run(attempt_id="late-prior-step-drift")
-        seal = STORES_ONLY_PLAN[-1].step_id
-        self.assertNotIn(("apply", seal), backend.actions)
-        self.assertFalse(any(record.step_id == seal for record in backend.records))
+        terminal = STORES_ONLY_PLAN[-1].step_id
+        self.assertNotIn(("apply", terminal), backend.actions)
+        self.assertFalse(any(record.step_id == terminal for record in backend.records))
 
-    def test_seal_effect_after_failure_blocks_compensation(self) -> None:
+    def test_terminal_postflight_after_failure_blocks_compensation(self) -> None:
         backend = _HermeticBackend()
         backend.fail_after_step = STORES_ONLY_PLAN[-1].step_id
         controller, backend = self._controller(backend)
         with self.assertRaisesRegex(
-            CompletedStateError, "seal_effect_present_after_failure"
+            CompletedStateError, "terminal_postflight_present_after_failure"
         ):
-            controller.run(attempt_id="phase8b-seal-failure")
+            controller.run(attempt_id="dormant_store_install-terminal-failure")
         self.assertFalse(
             any(action == "compensate" for action, unused in backend.actions)
         )
@@ -396,7 +423,7 @@ class Phase8BControllerTests(unittest.TestCase):
     def test_plan_or_journal_tampering_fails_closed(self) -> None:
         invalid_plan = STORES_ONLY_PLAN[:-1]
         with self.assertRaises(PlanValidationError):
-            Phase8BStoresController(
+            DormantStoreInstallController(
                 plan=invalid_plan,
                 backend=_HermeticBackend(),
                 held_lock=self.execution_lock.held_capability(),
@@ -408,20 +435,20 @@ class Phase8BControllerTests(unittest.TestCase):
             validate_plan(tuple(reordered))
 
         controller, backend = self._controller()
-        controller.run(attempt_id="phase8b-tamper")
+        controller.run(attempt_id="dormant_store_install-tamper")
         backend.records[0] = replace(
             backend.records[0], event=JournalEvent.APPLIED.value
         )
         actions = tuple(backend.actions)
         with self.assertRaises(JournalValidationError):
-            controller.run(attempt_id="phase8b-tamper")
+            controller.run(attempt_id="dormant_store_install-tamper")
         self.assertEqual(tuple(backend.actions), actions)
 
     def test_closed_lock_capability_refuses_before_journal_access(self) -> None:
         controller, backend = self._controller()
         self.execution_lock.close()
         with self.assertRaisesRegex(ControllerLockError, "global_lock_not_held"):
-            controller.run(attempt_id="phase8b-lock-closed")
+            controller.run(attempt_id="dormant_store_install-lock-closed")
         self.assertEqual(backend.records, [])
         self.assertEqual(backend.actions, [])
 

@@ -9,15 +9,17 @@ five exact Docker create operations in deterministic order.
 
 from copy import deepcopy
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
+from types import MappingProxyType
 from typing import Final, Mapping, Sequence
 
 from .host_boundary import DOCKER_BINARY, validate_argv
 
 
-SCHEMA_VERSION: Final = "governed-memory-phase8b-store-spec-v1"
+SCHEMA_VERSION: Final = "governed-memory-dormant-store-install-store-spec-v2"
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _SAFE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}\Z", re.ASCII)
 _CANDIDATE_ID_RE = re.compile(
@@ -35,8 +37,10 @@ _REPO_DIGEST_RE = re.compile(
 )
 _PLACEHOLDERS = {
     "${EXECUTION_BINDING_SHA256}",
+    "${EXECUTION_ID}",
     "${AUTHORIZATION_ID}",
     "${AUTHORIZATION_NONCE_SHA256}",
+    "${PACKAGE_MANIFEST_SHA256}",
 }
 
 
@@ -49,11 +53,25 @@ class ExecutionBinding:
     binding_sha256: str
     authorization_id: str
     authorization_nonce_sha256: str
+    execution_id: str
+    package_manifest_sha256: str
 
     def __post_init__(self) -> None:
         if (
-            _HASH_RE.fullmatch(self.binding_sha256) is None
+            any(
+                type(value) is not str
+                for value in (
+                    self.binding_sha256,
+                    self.authorization_id,
+                    self.authorization_nonce_sha256,
+                    self.execution_id,
+                    self.package_manifest_sha256,
+                )
+            )
+            or _HASH_RE.fullmatch(self.binding_sha256) is None
             or _HASH_RE.fullmatch(self.authorization_nonce_sha256) is None
+            or _HASH_RE.fullmatch(self.execution_id) is None
+            or _HASH_RE.fullmatch(self.package_manifest_sha256) is None
             or _AUTHORIZATION_ID_RE.fullmatch(self.authorization_id) is None
         ):
             raise LinuxPlanError("execution_binding_invalid")
@@ -63,6 +81,49 @@ class ExecutionBinding:
 class PlanStep:
     step_id: str
     argv: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExactStoreEnvironment:
+    """Validated environment names; values remain opaque to the planner."""
+
+    logical_name: str
+    present_keys: frozenset[str]
+    secret_value_sha256: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        expected = {
+            "postgres": frozenset(
+                {"POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_USER"}
+            ),
+            "qdrant": frozenset({"QDRANT__SERVICE__API_KEY"}),
+        }
+        secret_names = {
+            "postgres": frozenset({"POSTGRES_PASSWORD"}),
+            "qdrant": frozenset({"QDRANT__SERVICE__API_KEY"}),
+        }
+        if (
+            self.logical_name not in expected
+            or self.present_keys != expected[self.logical_name]
+            or set(self.secret_value_sha256) != secret_names[self.logical_name]
+            or any(_HASH_RE.fullmatch(value) is None for value in self.secret_value_sha256.values())
+        ):
+            raise LinuxPlanError("store_environment_readiness_invalid")
+        object.__setattr__(
+            self,
+            "secret_value_sha256",
+            MappingProxyType(dict(self.secret_value_sha256)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ExactStoreEnvironmentSet:
+    postgres: ExactStoreEnvironment
+    qdrant: ExactStoreEnvironment
+
+    def __post_init__(self) -> None:
+        if self.postgres.logical_name != "postgres" or self.qdrant.logical_name != "qdrant":
+            raise LinuxPlanError("store_environment_set_invalid")
 
 
 def _require_closed_keys(
@@ -90,7 +151,7 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
     )
     if root["schema_version"] != SCHEMA_VERSION:
         raise LinuxPlanError("store_spec_schema_invalid")
-    if root["state"] != "inactive_package_only_not_installed_not_authorized":
+    if root["state"] != "repository-only-current-store-spec-not-installed-not-authorized":
         raise LinuxPlanError("store_spec_state_invalid")
     candidate_id = root["candidate_id"]
     if type(candidate_id) is not str:
@@ -133,17 +194,32 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
         raise LinuxPlanError("store_spec_docker_policy_invalid")
     execution = _require_closed_keys(
         root["execution_binding"],
-        {"authorization_id", "authorization_nonce_sha256", "binding_sha256"},
+        {
+            "authorization_id",
+            "authorization_nonce_sha256",
+            "binding_sha256",
+            "execution_id",
+            "package_manifest_sha256",
+        },
         code="store_spec_execution_binding_invalid",
     )
     if allow_placeholders:
-        if set(execution.values()) != _PLACEHOLDERS:
+        if execution != {
+            "authorization_id": "${AUTHORIZATION_ID}",
+            "authorization_nonce_sha256": "${AUTHORIZATION_NONCE_SHA256}",
+            "binding_sha256": "${EXECUTION_BINDING_SHA256}",
+            "execution_id": "${EXECUTION_ID}",
+            "package_manifest_sha256": "${PACKAGE_MANIFEST_SHA256}",
+        }:
             raise LinuxPlanError("store_spec_placeholders_invalid")
+        execution_binding = None
     else:
-        ExecutionBinding(
+        execution_binding = ExecutionBinding(
             binding_sha256=execution["binding_sha256"],  # type: ignore[arg-type]
             authorization_id=execution["authorization_id"],  # type: ignore[arg-type]
             authorization_nonce_sha256=execution["authorization_nonce_sha256"],  # type: ignore[arg-type]
+            execution_id=execution["execution_id"],  # type: ignore[arg-type]
+            package_manifest_sha256=execution["package_manifest_sha256"],  # type: ignore[arg-type]
         )
 
     resources = _require_closed_keys(
@@ -176,6 +252,7 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
             item["labels"],
             allow_placeholders=allow_placeholders,
             candidate_id=candidate_id,
+            execution_binding=execution_binding,
         )
         all_names.append(name)
     expected_resource_names = {
@@ -340,6 +417,7 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
             item["labels"],
             allow_placeholders=allow_placeholders,
             candidate_id=candidate_id,
+            execution_binding=execution_binding,
         )
     if len(all_names) != len(set(all_names)):
         raise LinuxPlanError("store_spec_resource_names_not_distinct")
@@ -347,25 +425,73 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
 
 
 def _validate_labels(
-    value: object, *, allow_placeholders: bool, candidate_id: str
+    value: object,
+    *,
+    allow_placeholders: bool,
+    candidate_id: str,
+    execution_binding: ExecutionBinding | None,
 ) -> dict[str, str]:
     required = {
         "lifeswitch.governed-memory.authorization-id",
         "lifeswitch.governed-memory.authorization-nonce-sha256",
         "lifeswitch.governed-memory.candidate",
         "lifeswitch.governed-memory.execution-binding-sha256",
-        "lifeswitch.governed-memory.phase",
+        "lifeswitch.governed-memory.execution-id",
+        "lifeswitch.governed-memory.package-generation",
+        "lifeswitch.governed-memory.package-manifest-sha256",
     }
     if type(value) is not dict or set(value) != required:
         raise LinuxPlanError("store_spec_labels_invalid")
-    if value["lifeswitch.governed-memory.phase"] != "8B":
-        raise LinuxPlanError("store_spec_label_phase_invalid")
+    if (
+        value["lifeswitch.governed-memory.package-generation"]
+        != "dormant-store-install-v1"
+    ):
+        raise LinuxPlanError("store_spec_label_generation_invalid")
     if value["lifeswitch.governed-memory.candidate"] != candidate_id:
         raise LinuxPlanError("store_spec_label_candidate_invalid")
+    if allow_placeholders:
+        expected_dynamic = {
+            "lifeswitch.governed-memory.authorization-id": "${AUTHORIZATION_ID}",
+            "lifeswitch.governed-memory.authorization-nonce-sha256": (
+                "${AUTHORIZATION_NONCE_SHA256}"
+            ),
+            "lifeswitch.governed-memory.execution-binding-sha256": (
+                "${EXECUTION_BINDING_SHA256}"
+            ),
+            "lifeswitch.governed-memory.execution-id": "${EXECUTION_ID}",
+            "lifeswitch.governed-memory.package-manifest-sha256": (
+                "${PACKAGE_MANIFEST_SHA256}"
+            ),
+        }
+    else:
+        if execution_binding is None:
+            raise LinuxPlanError("store_spec_execution_binding_invalid")
+        expected_dynamic = {
+            "lifeswitch.governed-memory.authorization-id": (
+                execution_binding.authorization_id
+            ),
+            "lifeswitch.governed-memory.authorization-nonce-sha256": (
+                execution_binding.authorization_nonce_sha256
+            ),
+            "lifeswitch.governed-memory.execution-binding-sha256": (
+                execution_binding.binding_sha256
+            ),
+            "lifeswitch.governed-memory.execution-id": (
+                execution_binding.execution_id
+            ),
+            "lifeswitch.governed-memory.package-manifest-sha256": (
+                execution_binding.package_manifest_sha256
+            ),
+        }
+    if any(value[key] != expected for key, expected in expected_dynamic.items()):
+        raise LinuxPlanError("store_spec_label_execution_binding_invalid")
     for label_value in value.values():
         if type(label_value) is not str or not label_value:
             raise LinuxPlanError("store_spec_label_value_invalid")
-        if not allow_placeholders and label_value in _PLACEHOLDERS:
+        if not allow_placeholders and (
+            label_value in _PLACEHOLDERS
+            or ("${" in label_value or "}" in label_value)
+        ):
             raise LinuxPlanError("store_spec_label_unresolved")
     return value  # type: ignore[return-value]
 
@@ -408,8 +534,10 @@ def bind_store_spec(
     bound = deepcopy(static_spec)
     replacements = {
         "${EXECUTION_BINDING_SHA256}": binding.binding_sha256,
+        "${EXECUTION_ID}": binding.execution_id,
         "${AUTHORIZATION_ID}": binding.authorization_id,
         "${AUTHORIZATION_NONCE_SHA256}": binding.authorization_nonce_sha256,
+        "${PACKAGE_MANIFEST_SHA256}": binding.package_manifest_sha256,
     }
 
     def replace(value: object) -> object:
@@ -423,6 +551,27 @@ def bind_store_spec(
 
     bound = replace(bound)  # type: ignore[assignment]
     return validate_store_spec(bound, allow_placeholders=False)
+
+
+def canonical_labels_sha256(labels: Mapping[str, str]) -> str:
+    """Hash one exact, resolved Docker-label mapping."""
+
+    if type(labels) is not dict or any(
+        type(key) is not str or type(value) is not str
+        for key, value in labels.items()
+    ):
+        raise LinuxPlanError("store_spec_labels_invalid")
+    try:
+        encoded = json.dumps(
+            labels,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise LinuxPlanError("store_spec_labels_invalid") from error
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _label_args(labels: Mapping[str, str]) -> tuple[str, ...]:

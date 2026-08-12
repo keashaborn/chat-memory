@@ -1,0 +1,60 @@
+{
+  "schema_version": "governed-memory-dormant-store-install-controller-runtime-contract-v2",
+  "state": "runtime-identity-specified-not-built-not-installed-not-authorized",
+  "platform": {
+    "implementation": "CPython",
+    "python_version": "3.12",
+    "os": "linux",
+    "architecture": "x86_64"
+  },
+  "dependency_policy": {
+    "lock_file": "ops/governed_memory/controller-requirements.lock",
+    "require_hashes": true,
+    "locked_distribution_set_must_exactly_equal_installed_normalized_distribution_set": true,
+    "offline_wheelhouse_required": true,
+    "network_install_allowed": false,
+    "reuse_successor_application_runtime": false,
+    "reuse_system_python_site_packages": false
+  },
+  "build_policy": {
+    "isolated_controller_environment_required": true,
+    "runtime_build_receipt_required": true,
+    "interpreter_sha256_required": true,
+    "installed_distribution_inventory_sha256_required": true,
+    "package_manifest_sha256_binding_required": true,
+    "full_release_tree_sha256_required": true,
+    "controller_runtime_and_release_are_separately_authorized_preinstall_substrate": true,
+    "current_runtime_built": false,
+    "current_runtime_installed": false,
+    "current_release_staged": false,
+    "runtime_build_or_install_performed_by_repository_phase": false
+  },
+  "verification_policy": {
+    "secure_receipt_bound_no_follow_verifier_packaged": true,
+    "runtime_and_release_tree_hash_verification_required": true,
+    "full_release_tree_must_exactly_match_package_manifest_with_no_extra_members": true,
+    "release_symlink_special_file_hardlink_or_writable_member_allowed": false,
+    "static_launcher_local_module_closure_verification_required": true,
+    "controller_runtime_receipt_binds_full_release_tree_sha256": true,
+    "release_tree_sha256_propagates_through_claim_journal_host_ownership_and_install_receipt": true,
+    "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_writer_fence_and_receipt": true,
+    "interpreter_prefix_import_stdlib_and_site_paths_confined_to_runtime_root": true,
+    "interpreter_path_facts_sha256_required": true,
+    "controller_runtime_verifier_executed_in_current_phase": false,
+    "current_runtime_build_receipt_present": false
+  },
+  "entrypoint_policy": {
+    "repository_source_execution_allowed": false,
+    "unisolated_module_search_path_allowed": false,
+    "systemd_execstart_must_bind_runtime_receipt": true,
+    "exact_release_path_supervisor_launcher_packaged": true,
+    "stores_install_may_create_or_remove_controller_runtime_or_release": false,
+    "module_search_launcher_allowed": false,
+    "claim_bound_install_composition_module_packaged": true,
+    "claim_bound_empty_rollback_composition_module_packaged": true,
+    "install_or_empty_rollback_cli_included": false,
+    "activation_entrypoint_included": false,
+    "exact_controller_process_is_trusted": true,
+    "opaque_python_capabilities_resist_hostile_same_process_code": false
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gc
 import inspect
 import json
 import os
@@ -17,7 +18,7 @@ from tools.governed_memory_install.synthetic_backend import (
     SyntheticBackendError,
     SyntheticScenario,
 )
-from tools.governed_memory_validation import run_phase8b_disposable_proof as runner
+from tools.governed_memory_validation import run_installation_synthetic_proof as runner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +37,7 @@ HASH_KEYS = {
 }
 
 
-class Phase8BDisposableHarnessTests(unittest.TestCase):
+class DormantStoreInstallDisposableHarnessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.receipt = runner.run_synthetic_proof()
@@ -45,20 +46,20 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         receipt = self.receipt
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-phase8b-disposable-proof-receipt-v1",
+            "governed-memory-dormant-store-install-disposable-proof-receipt-v2",
         )
         self.assertEqual(receipt["proof_scope"], "synthetic_in_process_model_only")
         self.assertEqual(receipt["outcome"], "synthetic_matrix_passed")
-        self.assertEqual(receipt["scenario_count"], 131)
-        self.assertEqual(receipt["plan_step_count"], 20)
-        self.assertEqual(receipt["compensable_step_count"], 15)
+        self.assertEqual(receipt["scenario_count"], 124)
+        self.assertEqual(receipt["plan_step_count"], 19)
+        self.assertEqual(receipt["compensable_step_count"], 14)
         self.assertEqual(
             receipt["scenario_family_counts"],
             harness.EXPECTED_FAMILY_COUNTS,
         )
         self.assertEqual(receipt["outcome_counts"], harness.EXPECTED_OUTCOME_COUNTS)
-        self.assertEqual(receipt["operation_counts"]["interruption"], 90)
-        self.assertEqual(receipt["operation_counts"]["ordinary_failure"], 70)
+        self.assertEqual(receipt["operation_counts"]["interruption"], 85)
+        self.assertEqual(receipt["operation_counts"]["ordinary_failure"], 66)
         for key in HASH_KEYS:
             self.assertRegex(receipt[key], r"^[0-9a-f]{64}$")
         self.assertEqual(
@@ -143,7 +144,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
 
     def test_scenario_matrix_has_exact_full_step_and_compensation_coverage(self) -> None:
         scenarios = harness._scenario_matrix()
-        self.assertEqual(len(scenarios), 131)
+        self.assertEqual(len(scenarios), 124)
         family_counts = harness._verify_scenario_matrix(scenarios)
         self.assertEqual(family_counts, harness.EXPECTED_FAMILY_COUNTS)
         self.assertEqual(
@@ -164,7 +165,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
                 scenario.trigger_failure_step_id is not None
                 for scenario in scenarios
             ),
-            30,
+            28,
         )
         self.assertEqual(
             sum(
@@ -176,7 +177,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
                     harness.FAMILY_INTERRUPT_AFTER_COMPENSATION,
                 }
             ),
-            30,
+            28,
         )
 
     def test_contract_and_schema_pin_false_live_claims_and_exact_counts(self) -> None:
@@ -184,7 +185,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         schema = json.loads(
             harness.RECEIPT_SCHEMA_PATH.read_text(encoding="ascii")
         )
-        self.assertEqual(contract["scenario_matrix"]["scenario_count"], 131)
+        self.assertEqual(contract["scenario_matrix"]["scenario_count"], 124)
         self.assertEqual(
             contract["scenario_matrix"]["family_counts"],
             harness.EXPECTED_FAMILY_COUNTS,
@@ -197,7 +198,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
                 self.assertIs(value, False, key)
         self.assertEqual(
             schema["properties"]["scenario_count"]["const"],
-            131,
+            124,
         )
         self.assertEqual(
             schema["properties"]["claims"]["properties"]
@@ -214,7 +215,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
             runner.main(["--live"])
         source = runner.RUNNER_SOURCE_PATH.read_text(encoding="utf-8") if hasattr(runner, "RUNNER_SOURCE_PATH") else (
             ROOT
-            / "tools/governed_memory_validation/run_phase8b_disposable_proof.py"
+            / "tools/governed_memory_validation/run_installation_synthetic_proof.py"
         ).read_text(encoding="utf-8")
         hook_position = source.index("sys.addaudithook(_import_audit_hook)")
         local_import_position = source.index(
@@ -228,7 +229,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         self.assertFalse(harness._resolved_allowed(3, write=False))
         self.assertFalse(harness._resolved_allowed("execution.lock", write=True))
         with tempfile.TemporaryDirectory(
-            prefix="phase8b-disposable-proof-"
+            prefix="dormant_store_install-disposable-proof-"
         ) as temporary:
             root = Path(temporary).resolve(strict=True)
             os.chmod(root, 0o700)
@@ -239,7 +240,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
                 with harness._runtime_fence(root):
                     unused = os.environ["PATH"]
         with tempfile.TemporaryDirectory(
-            prefix="phase8b-disposable-proof-"
+            prefix="dormant_store_install-disposable-proof-"
         ) as temporary:
             root = Path(temporary).resolve(strict=True)
             os.chmod(root, 0o700)
@@ -254,11 +255,12 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
             self.assertFalse(escape.exists())
 
     def test_fence_setup_failures_restore_process_state(self) -> None:
+        garbage_collection_was_enabled = gc.isenabled()
         original_environ = os.environ
         original_environb = getattr(os, "environb", None)
         missing = (
             Path(tempfile.gettempdir())
-            / "phase8b-disposable-proof-nonexistent-fence-root"
+            / "dormant_store_install-disposable-proof-nonexistent-fence-root"
         )
         self.assertFalse(missing.exists())
         with self.assertRaisesRegex(
@@ -271,9 +273,10 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         self.assertIsNone(harness._RUNTIME_AUDIT.disposable_root)
         self.assertIs(os.environ, original_environ)
         self.assertIs(getattr(os, "environb", None), original_environb)
+        self.assertEqual(gc.isenabled(), garbage_collection_was_enabled)
 
         with tempfile.TemporaryDirectory(
-            prefix="phase8b-disposable-proof-"
+            prefix="dormant_store_install-disposable-proof-"
         ) as temporary:
             root = Path(temporary).resolve(strict=True)
             os.chmod(root, 0o700)
@@ -293,6 +296,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         self.assertIsNone(harness._RUNTIME_AUDIT.disposable_root)
         self.assertIs(os.environ, original_environ)
         self.assertIs(getattr(os, "environb", None), original_environb)
+        self.assertEqual(gc.isenabled(), garbage_collection_was_enabled)
 
     def test_sources_do_not_import_retired_versioned_or_live_execution_stack(
         self,
@@ -301,7 +305,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
             ROOT / "tools/governed_memory_install/synthetic_backend.py",
             ROOT / "tools/governed_memory_install/disposable_proof_harness.py",
             ROOT
-            / "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
+            / "tools/governed_memory_validation/run_installation_synthetic_proof.py",
         )
         joined = "\n".join(path.read_text(encoding="utf-8") for path in source_paths)
         for forbidden in (
@@ -322,7 +326,7 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
 
     def test_disposable_root_must_be_exact_empty_owned_mode_0700(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="phase8b-disposable-proof-"
+            prefix="dormant_store_install-disposable-proof-"
         ) as temporary:
             root = Path(temporary).resolve(strict=True)
             os.chmod(root, 0o755)

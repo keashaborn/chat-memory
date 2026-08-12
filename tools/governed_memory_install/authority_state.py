@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Durable, content-free authority state for a future Phase 8B executor.
+"""Durable, content-free authority state for a future dormant-store installation executor.
 
 Only SHA-256 bindings and journal sequence numbers are persisted.  Raw
 nonces, authorization documents, scope documents, credentials, and journal
@@ -18,8 +18,14 @@ import sqlite3
 import stat
 from typing import Final
 
+from .execution_lock import (
+    ExecutionLockError,
+    HeldExecutionLockCapability,
+    validate_held_execution_lock,
+)
 
-STATE_SCHEMA_VERSION: Final = 1
+
+STATE_SCHEMA_VERSION: Final = 2
 STATE_APPLICATION_ID: Final = 0x474D4153
 ZERO_HEAD: Final = "0" * 64
 HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -48,6 +54,28 @@ _ANCHOR_COLUMNS: Final = (
     "sequence",
     "head_sha256",
 )
+_RESOURCE_ANCHOR_COLUMNS: Final = (
+    "binding_sha256",
+    "sequence",
+    "head_sha256",
+)
+_FILESYSTEM_IDENTITY_COLUMNS: Final = (
+    "binding_sha256",
+    "artifact_kind",
+    "path_sha256",
+    "directory_device",
+    "directory_inode",
+    "file_device",
+    "file_inode",
+)
+_STATE_IDENTITY_COLUMNS: Final = (
+    "singleton",
+    "path_sha256",
+    "directory_device",
+    "directory_inode",
+    "database_device",
+    "database_inode",
+)
 _NONCE_TABLE_SQL: Final = """
 CREATE TABLE nonce_claim_v1 (
     nonce_sha256 TEXT PRIMARY KEY NOT NULL,
@@ -64,6 +92,37 @@ CREATE TABLE journal_anchor_v1 (
     binding_sha256 TEXT PRIMARY KEY NOT NULL,
     sequence INTEGER NOT NULL CHECK (sequence >= 1),
     head_sha256 TEXT NOT NULL
+) WITHOUT ROWID
+""".strip()
+_RESOURCE_ANCHOR_TABLE_SQL: Final = """
+CREATE TABLE resource_ledger_anchor_v1 (
+    binding_sha256 TEXT PRIMARY KEY NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    head_sha256 TEXT NOT NULL
+) WITHOUT ROWID
+""".strip()
+_FILESYSTEM_IDENTITY_TABLE_SQL: Final = """
+CREATE TABLE filesystem_identity_seal_v1 (
+    binding_sha256 TEXT NOT NULL,
+    artifact_kind TEXT NOT NULL CHECK (
+        artifact_kind IN ('journal', 'resource_ledger')
+    ),
+    path_sha256 TEXT NOT NULL,
+    directory_device INTEGER NOT NULL CHECK (directory_device >= 0),
+    directory_inode INTEGER NOT NULL CHECK (directory_inode > 0),
+    file_device INTEGER NOT NULL CHECK (file_device >= 0),
+    file_inode INTEGER NOT NULL CHECK (file_inode > 0),
+    PRIMARY KEY (binding_sha256, artifact_kind)
+) WITHOUT ROWID
+""".strip()
+_STATE_IDENTITY_TABLE_SQL: Final = """
+CREATE TABLE authority_state_identity_v1 (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+    path_sha256 TEXT NOT NULL,
+    directory_device INTEGER NOT NULL CHECK (directory_device >= 0),
+    directory_inode INTEGER NOT NULL CHECK (directory_inode > 0),
+    database_device INTEGER NOT NULL CHECK (database_device >= 0),
+    database_inode INTEGER NOT NULL CHECK (database_inode > 0)
 ) WITHOUT ROWID
 """.strip()
 
@@ -96,6 +155,14 @@ class JournalAnchorError(AuthorityStateError):
     """A journal cannot be reconciled with its durable anchor."""
 
 
+class ResourceLedgerAnchorError(AuthorityStateError):
+    """A resource ledger cannot be reconciled with its durable anchor."""
+
+
+class FilesystemIdentitySealError(AuthorityStateError):
+    """A durable file or its containing directory changed identity."""
+
+
 @dataclass(frozen=True, slots=True)
 class NonceClaim:
     result: str
@@ -116,10 +183,41 @@ class JournalAnchor:
     head_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class ResourceLedgerAnchor:
+    result: str
+    binding_sha256: str
+    sequence: int
+    head_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class FilesystemIdentitySeal:
+    result: str
+    binding_sha256: str
+    artifact_kind: str
+    path_sha256: str
+    directory_device: int
+    directory_inode: int
+    file_device: int
+    file_inode: int
+
+
 def _require_hash(value: object, code: str) -> str:
     if not isinstance(value, str) or HASH_RE.fullmatch(value) is None:
         raise AuthorityStateIntegrityError(code)
     return value
+
+
+def _require_held_lock(
+    held_lock: HeldExecutionLockCapability,
+    *,
+    code: str,
+) -> None:
+    try:
+        validate_held_execution_lock(held_lock)
+    except ExecutionLockError as error:
+        raise AuthorityStateSecurityError(code) from error
 
 
 def _domain_hash(domain: bytes, value: str) -> str:
@@ -202,7 +300,11 @@ class AuthorityState:
             or not 0 < float(busy_timeout_seconds) <= 30
         ):
             raise AuthorityStateSecurityError("authority_state_timeout_invalid")
-        if not self.path.name or self.path.name in {".", ".."}:
+        if (
+            not self.path.is_absolute()
+            or not self.path.name
+            or self.path.name in {".", ".."}
+        ):
             raise AuthorityStateSecurityError("authority_state_path_invalid")
         if not isinstance(create, bool):
             raise AuthorityStateSecurityError("authority_state_create_invalid")
@@ -449,15 +551,43 @@ class AuthorityState:
                 and user_version == 0
                 and not objects
             ):
+                if self._directory_inode is None or self._database_inode is None:
+                    raise AuthorityStateSecurityError(
+                        "authority_state_identity_unavailable"
+                    )
+                identity_values = (
+                    1,
+                    hashlib.sha256(str(self.path).encode("utf-8")).hexdigest(),
+                    self._directory_inode[0],
+                    self._directory_inode[1],
+                    self._database_inode[0],
+                    self._database_inode[1],
+                )
+                connection.execute(_FILESYSTEM_IDENTITY_TABLE_SQL)
                 connection.execute(_NONCE_TABLE_SQL)
                 connection.execute(_ANCHOR_TABLE_SQL)
+                connection.execute(_RESOURCE_ANCHOR_TABLE_SQL)
+                connection.execute(_STATE_IDENTITY_TABLE_SQL)
+                connection.execute(
+                    """
+                    INSERT INTO authority_state_identity_v1 (
+                        singleton, path_sha256,
+                        directory_device, directory_inode,
+                        database_device, database_inode
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    identity_values,
+                )
             elif (
                 application_id != STATE_APPLICATION_ID
                 or user_version != STATE_SCHEMA_VERSION
                 or objects
                 != [
+                    ("table", "authority_state_identity_v1"),
+                    ("table", "filesystem_identity_seal_v1"),
                     ("table", "journal_anchor_v1"),
                     ("table", "nonce_claim_v1"),
+                    ("table", "resource_ledger_anchor_v1"),
                 ]
             ):
                 raise AuthorityStateIntegrityError(
@@ -493,8 +623,23 @@ class AuthorityState:
             """
         ).fetchall()
         expected_rows = [
+            (
+                "table",
+                "authority_state_identity_v1",
+                _STATE_IDENTITY_TABLE_SQL,
+            ),
+            (
+                "table",
+                "filesystem_identity_seal_v1",
+                _FILESYSTEM_IDENTITY_TABLE_SQL,
+            ),
             ("table", "journal_anchor_v1", _ANCHOR_TABLE_SQL),
             ("table", "nonce_claim_v1", _NONCE_TABLE_SQL),
+            (
+                "table",
+                "resource_ledger_anchor_v1",
+                _RESOURCE_ANCHOR_TABLE_SQL,
+            ),
         ]
         if len(rows) != len(expected_rows) or any(
             actual_type != expected_type
@@ -515,6 +660,9 @@ class AuthorityState:
         for table, expected in (
             ("nonce_claim_v1", _NONCE_COLUMNS),
             ("journal_anchor_v1", _ANCHOR_COLUMNS),
+            ("resource_ledger_anchor_v1", _RESOURCE_ANCHOR_COLUMNS),
+            ("filesystem_identity_seal_v1", _FILESYSTEM_IDENTITY_COLUMNS),
+            ("authority_state_identity_v1", _STATE_IDENTITY_COLUMNS),
         ):
             columns = tuple(
                 row[1]
@@ -529,6 +677,30 @@ class AuthorityState:
         integrity = connection.execute("PRAGMA quick_check").fetchall()
         if integrity != [("ok",)]:
             raise AuthorityStateIntegrityError("authority_state_integrity_invalid")
+        state_identity_rows = connection.execute(
+            """
+            SELECT singleton, path_sha256,
+                   directory_device, directory_inode,
+                   database_device, database_inode
+            FROM authority_state_identity_v1
+            """
+        ).fetchall()
+        if self._directory_inode is None or self._database_inode is None:
+            raise AuthorityStateSecurityError(
+                "authority_state_identity_unavailable"
+            )
+        expected_state_identity = (
+            1,
+            hashlib.sha256(str(self.path).encode("utf-8")).hexdigest(),
+            self._directory_inode[0],
+            self._directory_inode[1],
+            self._database_inode[0],
+            self._database_inode[1],
+        )
+        if state_identity_rows != [expected_state_identity]:
+            raise AuthorityStateSecurityError(
+                "authority_state_cross_process_identity_mismatch"
+            )
         nonce_rows = connection.execute(
             """
             SELECT nonce_sha256, operation_sha256, execution_sha256,
@@ -577,6 +749,57 @@ class AuthorityState:
                 raise AuthorityStateIntegrityError(
                     "authority_state_anchor_row_invalid"
                 )
+        resource_anchor_rows = connection.execute(
+            """
+            SELECT binding_sha256, sequence, head_sha256
+            FROM resource_ledger_anchor_v1
+            """
+        ).fetchall()
+        for binding, sequence, head in resource_anchor_rows:
+            if (
+                not isinstance(binding, str)
+                or HASH_RE.fullmatch(binding) is None
+                or not isinstance(sequence, int)
+                or isinstance(sequence, bool)
+                or sequence < 1
+                or not isinstance(head, str)
+                or HASH_RE.fullmatch(head) is None
+            ):
+                raise AuthorityStateIntegrityError(
+                    "authority_state_resource_anchor_row_invalid"
+                )
+        identity_rows = connection.execute(
+            """
+            SELECT binding_sha256, artifact_kind, path_sha256,
+                   directory_device, directory_inode,
+                   file_device, file_inode
+            FROM filesystem_identity_seal_v1
+            """
+        ).fetchall()
+        for row in identity_rows:
+            if (
+                len(row) != len(_FILESYSTEM_IDENTITY_COLUMNS)
+                or not isinstance(row[0], str)
+                or HASH_RE.fullmatch(row[0]) is None
+                or row[1] not in {"journal", "resource_ledger"}
+                or not isinstance(row[2], str)
+                or HASH_RE.fullmatch(row[2]) is None
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value < 0
+                    for value in (row[3], row[5])
+                )
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in (row[4], row[6])
+                )
+            ):
+                raise AuthorityStateIntegrityError(
+                    "authority_state_filesystem_identity_row_invalid"
+                )
 
     @staticmethod
     def _finish(connection: sqlite3.Connection) -> None:
@@ -600,10 +823,15 @@ class AuthorityState:
         authorization_sha256: str,
         scope_sha256: str,
         trust_bundle_sha256: str,
+        held_lock: HeldExecutionLockCapability,
         allow_new_claim: bool = True,
     ) -> NonceClaim:
         """Atomically claim a nonce or resume its exact execution binding."""
 
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_claim_lock_not_held",
+        )
         if not isinstance(allow_new_claim, bool):
             raise AuthorityStateIntegrityError(
                 "authority_new_claim_policy_invalid"
@@ -675,6 +903,10 @@ class AuthorityState:
                 result = "exact_execution_resumed"
             else:
                 raise AuthorityReplayError("authority_nonce_replayed")
+            _require_held_lock(
+                held_lock,
+                code="authority_nonce_claim_lock_not_held",
+            )
             self._finish(connection)
         except AuthorityStateError:
             connection.rollback()
@@ -692,6 +924,10 @@ class AuthorityState:
             ) from error
         finally:
             connection.close()
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_claim_lock_not_held",
+        )
         self._validate_path()
         return NonceClaim(result=result, **dict(zip(_NONCE_COLUMNS, expected)))
 
@@ -729,6 +965,362 @@ class AuthorityState:
             raise AuthorityStateIntegrityError("journal_anchor_row_invalid")
         return JournalAnchor("anchor_current", binding, sequence, head)
 
+    def seal_filesystem_identity(
+        self,
+        binding_sha256: str,
+        *,
+        artifact_kind: str,
+        path: Path,
+        directory_fd: int,
+        file_fd: int,
+        held_lock: HeldExecutionLockCapability,
+    ) -> FilesystemIdentitySeal:
+        """Persist and compare exact directory/file identity across processes.
+
+        The caller must pass the already securely opened descriptors.  Their
+        identities are compared with the named path before the content-free
+        seal is committed.  Reopening a byte-identical replacement therefore
+        refuses rather than silently establishing a new identity.
+        """
+
+        _require_held_lock(
+            held_lock,
+            code="filesystem_identity_lock_not_held",
+        )
+        binding = _require_hash(
+            binding_sha256,
+            "filesystem_identity_binding_invalid",
+        )
+        if artifact_kind not in {"journal", "resource_ledger"}:
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_artifact_invalid"
+            )
+        target = Path(path)
+        if (
+            not target.is_absolute()
+            or not target.name
+            or target.name in {".", ".."}
+            or type(directory_fd) is not int
+            or type(file_fd) is not int
+            or directory_fd < 0
+            or file_fd < 0
+        ):
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_input_invalid"
+            )
+        try:
+            opened_directory = os.fstat(directory_fd)
+            named_directory = target.parent.stat(follow_symlinks=False)
+            opened_file = os.fstat(file_fd)
+            named_file = os.stat(
+                target.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_path_invalid"
+            ) from error
+        if (
+            not stat.S_ISDIR(opened_directory.st_mode)
+            or not stat.S_ISDIR(named_directory.st_mode)
+            or (opened_directory.st_dev, opened_directory.st_ino)
+            != (named_directory.st_dev, named_directory.st_ino)
+            or not stat.S_ISREG(opened_file.st_mode)
+            or not stat.S_ISREG(named_file.st_mode)
+            or opened_file.st_nlink != 1
+            or (opened_file.st_dev, opened_file.st_ino)
+            != (named_file.st_dev, named_file.st_ino)
+        ):
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_path_invalid"
+            )
+        identities = (
+            opened_directory.st_dev,
+            opened_directory.st_ino,
+            opened_file.st_dev,
+            opened_file.st_ino,
+        )
+        if any(
+            type(value) is not int or value < 0 or value > 0x7FFF_FFFF_FFFF_FFFF
+            for value in identities
+        ) or opened_directory.st_ino == 0 or opened_file.st_ino == 0:
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_value_invalid"
+            )
+        path_hash = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
+        expected = (
+            binding,
+            artifact_kind,
+            path_hash,
+            *identities,
+        )
+        _require_held_lock(
+            held_lock,
+            code="filesystem_identity_lock_not_held",
+        )
+        connection = self._connect()
+        try:
+            self._begin_immediate(connection)
+            row = connection.execute(
+                """
+                SELECT binding_sha256, artifact_kind, path_sha256,
+                       directory_device, directory_inode,
+                       file_device, file_inode
+                FROM filesystem_identity_seal_v1
+                WHERE binding_sha256 = ? AND artifact_kind = ?
+                """,
+                (binding, artifact_kind),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """
+                    INSERT INTO filesystem_identity_seal_v1 (
+                        binding_sha256, artifact_kind, path_sha256,
+                        directory_device, directory_inode,
+                        file_device, file_inode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    expected,
+                )
+                result = "filesystem_identity_sealed"
+            elif tuple(row) == expected:
+                result = "filesystem_identity_exact_resume"
+            else:
+                raise FilesystemIdentitySealError(
+                    "filesystem_identity_replaced"
+                )
+            _require_held_lock(
+                held_lock,
+                code="filesystem_identity_lock_not_held",
+            )
+            self._finish(connection)
+        except AuthorityStateError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as error:
+            connection.rollback()
+            raise FilesystemIdentitySealError(
+                "filesystem_identity_compare_failed"
+            ) from error
+        except sqlite3.OperationalError as error:
+            connection.rollback()
+            raise AuthorityStateBusyError("authority_state_busy") from error
+        except sqlite3.DatabaseError as error:
+            connection.rollback()
+            raise AuthorityStateIntegrityError(
+                "authority_state_database_invalid"
+            ) from error
+        finally:
+            connection.close()
+        _require_held_lock(
+            held_lock,
+            code="filesystem_identity_lock_not_held",
+        )
+        self._validate_path()
+        return FilesystemIdentitySeal(result, *expected)
+
+    def read_resource_ledger_anchor(
+        self,
+        binding_sha256: str,
+        *,
+        held_lock: HeldExecutionLockCapability,
+    ) -> ResourceLedgerAnchor:
+        _require_held_lock(
+            held_lock,
+            code="resource_ledger_anchor_lock_not_held",
+        )
+        binding = _require_hash(
+            binding_sha256,
+            "resource_ledger_anchor_binding_invalid",
+        )
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT sequence, head_sha256
+                FROM resource_ledger_anchor_v1
+                WHERE binding_sha256 = ?
+                """,
+                (binding,),
+            ).fetchone()
+        except sqlite3.OperationalError as error:
+            raise AuthorityStateBusyError("authority_state_busy") from error
+        except sqlite3.DatabaseError as error:
+            raise AuthorityStateIntegrityError(
+                "authority_state_database_invalid"
+            ) from error
+        finally:
+            connection.close()
+        _require_held_lock(
+            held_lock,
+            code="resource_ledger_anchor_lock_not_held",
+        )
+        self._validate_path()
+        if row is None:
+            return ResourceLedgerAnchor(
+                "resource_anchor_empty", binding, 0, ZERO_HEAD
+            )
+        sequence, head = row
+        if (
+            not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+            or sequence < 1
+            or not isinstance(head, str)
+            or HASH_RE.fullmatch(head) is None
+        ):
+            raise AuthorityStateIntegrityError(
+                "resource_ledger_anchor_row_invalid"
+            )
+        return ResourceLedgerAnchor(
+            "resource_anchor_current", binding, sequence, head
+        )
+
+    def advance_resource_ledger_anchor(
+        self,
+        binding_sha256: str,
+        *,
+        ledger_sequence: int,
+        ledger_head_sha256: str,
+        ledger_prior_head_sha256: str,
+        held_lock: HeldExecutionLockCapability,
+    ) -> ResourceLedgerAnchor:
+        """CAS a resource-ledger head with one-entry crash repair only."""
+
+        _require_held_lock(
+            held_lock,
+            code="resource_ledger_anchor_lock_not_held",
+        )
+        binding = _require_hash(
+            binding_sha256,
+            "resource_ledger_anchor_binding_invalid",
+        )
+        head = _require_hash(
+            ledger_head_sha256,
+            "resource_ledger_anchor_head_invalid",
+        )
+        prior = _require_hash(
+            ledger_prior_head_sha256,
+            "resource_ledger_anchor_prior_invalid",
+        )
+        if (
+            not isinstance(ledger_sequence, int)
+            or isinstance(ledger_sequence, bool)
+            or ledger_sequence < 0
+        ):
+            raise ResourceLedgerAnchorError(
+                "resource_ledger_anchor_sequence_invalid"
+            )
+        if ledger_sequence == 0 and (head != ZERO_HEAD or prior != ZERO_HEAD):
+            raise ResourceLedgerAnchorError(
+                "resource_ledger_anchor_zero_state_invalid"
+            )
+        connection = self._connect()
+        try:
+            self._begin_immediate(connection)
+            row = connection.execute(
+                """
+                SELECT sequence, head_sha256
+                FROM resource_ledger_anchor_v1
+                WHERE binding_sha256 = ?
+                """,
+                (binding,),
+            ).fetchone()
+            current_sequence, current_head = (0, ZERO_HEAD) if row is None else row
+            if (
+                not isinstance(current_sequence, int)
+                or isinstance(current_sequence, bool)
+                or current_sequence < 0
+                or not isinstance(current_head, str)
+                or HASH_RE.fullmatch(current_head) is None
+            ):
+                raise AuthorityStateIntegrityError(
+                    "resource_ledger_anchor_row_invalid"
+                )
+            if ledger_sequence < current_sequence:
+                raise ResourceLedgerAnchorError(
+                    "resource_ledger_anchor_ahead_of_file"
+                )
+            if ledger_sequence == current_sequence:
+                if head != current_head:
+                    raise ResourceLedgerAnchorError(
+                        "resource_ledger_anchor_head_mismatch"
+                    )
+                result = "resource_anchor_exact_resume"
+            elif ledger_sequence > current_sequence + 1:
+                raise ResourceLedgerAnchorError(
+                    "resource_ledger_anchor_suffix_too_long"
+                )
+            else:
+                if prior != current_head:
+                    raise ResourceLedgerAnchorError(
+                        "resource_ledger_anchor_compare_failed"
+                    )
+                if head == current_head:
+                    raise ResourceLedgerAnchorError(
+                        "resource_ledger_anchor_head_not_advanced"
+                    )
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO resource_ledger_anchor_v1 (
+                            binding_sha256, sequence, head_sha256
+                        ) VALUES (?, ?, ?)
+                        """,
+                        (binding, ledger_sequence, head),
+                    )
+                else:
+                    changed = connection.execute(
+                        """
+                        UPDATE resource_ledger_anchor_v1
+                        SET sequence = ?, head_sha256 = ?
+                        WHERE binding_sha256 = ?
+                          AND sequence = ?
+                          AND head_sha256 = ?
+                        """,
+                        (
+                            ledger_sequence,
+                            head,
+                            binding,
+                            current_sequence,
+                            current_head,
+                        ),
+                    ).rowcount
+                    if changed != 1:
+                        raise ResourceLedgerAnchorError(
+                            "resource_ledger_anchor_compare_failed"
+                        )
+                result = "resource_anchor_advanced_one_entry"
+            _require_held_lock(
+                held_lock,
+                code="resource_ledger_anchor_lock_not_held",
+            )
+            self._finish(connection)
+        except AuthorityStateError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as error:
+            connection.rollback()
+            raise ResourceLedgerAnchorError(
+                "resource_ledger_anchor_compare_failed"
+            ) from error
+        except sqlite3.OperationalError as error:
+            connection.rollback()
+            raise AuthorityStateBusyError("authority_state_busy") from error
+        except sqlite3.DatabaseError as error:
+            connection.rollback()
+            raise AuthorityStateIntegrityError(
+                "authority_state_database_invalid"
+            ) from error
+        finally:
+            connection.close()
+        _require_held_lock(
+            held_lock,
+            code="resource_ledger_anchor_lock_not_held",
+        )
+        self._validate_path()
+        return ResourceLedgerAnchor(result, binding, ledger_sequence, head)
+
     def advance_anchor(
         self,
         binding_sha256: str,
@@ -736,6 +1328,7 @@ class AuthorityState:
         journal_sequence: int,
         journal_head_sha256: str,
         journal_prior_head_sha256: str,
+        held_lock: HeldExecutionLockCapability,
     ) -> JournalAnchor:
         """Compare-and-set an anchor, allowing at most one journal entry.
 
@@ -745,6 +1338,10 @@ class AuthorityState:
         predecessor.
         """
 
+        _require_held_lock(
+            held_lock,
+            code="journal_anchor_lock_not_held",
+        )
         binding = _require_hash(binding_sha256, "journal_anchor_binding_invalid")
         head = _require_hash(journal_head_sha256, "journal_anchor_head_invalid")
         prior = _require_hash(
@@ -823,6 +1420,10 @@ class AuthorityState:
                     if changed != 1:
                         raise JournalAnchorError("journal_anchor_compare_failed")
                 result = "anchor_advanced_one_entry"
+            _require_held_lock(
+                held_lock,
+                code="journal_anchor_lock_not_held",
+            )
             self._finish(connection)
         except AuthorityStateError:
             connection.rollback()
@@ -840,5 +1441,9 @@ class AuthorityState:
             ) from error
         finally:
             connection.close()
+        _require_held_lock(
+            held_lock,
+            code="journal_anchor_lock_not_held",
+        )
         self._validate_path()
         return JournalAnchor(result, binding, journal_sequence, head)

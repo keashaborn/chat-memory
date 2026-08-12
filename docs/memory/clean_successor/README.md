@@ -2,10 +2,10 @@
 
 ## Current repository authority
 
-Phase 8G validates one current successor path. The retained Phase 8B-named
-installation-controller package is the only current stores-only package:
+Phase 9B retains one current successor path and one canonical dormant-store
+controller package. The repository-only package is the only current stores-only package:
 
-- package manifest: `ops/governed_memory/installation/phase8b/package_manifest.json`;
+- package manifest: `ops/governed_memory/installation/current/package_manifest.json`;
 - offline package verifier: `tools/governed_memory_install/package.py`;
 - store-migration verifier:
   `tools/governed_memory_validation/verify_store_migration_manifest.py`;
@@ -14,13 +14,12 @@ installation-controller package is the only current stores-only package:
 - durable journal: `tools/governed_memory_install/journal.py`;
 - synthetic proof backend: `tools/governed_memory_install/synthetic_backend.py`.
 
-The `phase8b` directory and schema-version strings are retained protocol
-identities. They do not identify a second current Phase 8B successor source
-generation. Phase 8D removed the parallel Phase 8A successor-install
-implementation and canonicalized the surviving module names.
+Phase 8D removed the parallel Phase 8A successor-install implementation. Phase
+9B moved the surviving package to the phase-neutral `installation/current/`
+identity and moved prior phase material under the non-executable history roots.
 
 The current store manifest contains nine store artifacts. The current package
-contains 43 artifacts. The global `schema_contract.json` is verified by the
+contains 56 artifacts. The global `schema_contract.json` is verified by the
 full-chain migration manifest and is intentionally excluded from the
 stores-only package.
 
@@ -38,8 +37,28 @@ commit `c8691f0bef993b8e2edda982fe634c4b83e68590`, tree
 manifest. The repository candidate remains inactive and activation-blocked.
 
 The repository packages an offline verifier, an in-process synthetic proof
-harness, and stores-only controller primitives. It does not package a complete
-live installation executor, rollback executor, or activation executor.
+harness, and claim-bound non-CLI install and empty-rollback controller
+compositions with durable journals, an anchored resource ledger, and canonical
+operation receipts. Install receipt creation and replay require a fresh
+post-migration readiness proof; empty rollback requires an opaque exact
+install-receipt/ledger binding, holds one writer fence through every destructive
+effect and receipt emission, and binds the retained audit-artifact hashes. The
+separate rollback signature also binds the verified controller-runtime receipt;
+the exact runtime and complete release-tree identities continue through the
+rollback claim, journal, every operation request and observation, writer fence,
+retained install-receipt check, and final rollback receipt. The
+package includes a secure runtime-verification capability and exact release-path
+supervisor launcher source. The verifier requires the complete 56-member
+release tree to match the package manifest with no extra, linked, special, or
+writable members, and requires the installed normalized distribution set to
+exactly equal the hash-locked controller dependency set. The release-tree hash
+is carried through the install execution claim, durable journal, host ownership
+requests, and final install receipt. No controller runtime has been built or
+installed and no controller release has been staged. Those are separately
+authorized preinstallation substrate; the stores transaction cannot create or
+remove them. It does not package the concrete Linux, Docker,
+PostgreSQL, or Qdrant effect adapters, a built controller runtime, a live
+installation proof, or an activation executor.
 
 The active chat response path is successor-only. It no longer accepts the old
 Memory V1 prompt object, stored assistant-response preferences, or a fallback
@@ -91,7 +110,7 @@ application-runtime validator remain. They are not part of the retired
 installation-controller generation and require separate audits before any later
 retirement.
 
-Four shared Phase 8B store inputs also remain current: the canonical-cluster
+Four shared dormant-store installation store inputs also remain current: the canonical-cluster
 forward and rollback SQL templates, `installation/store_spec.json`, and the
 stores-only systemd template.
 
@@ -128,11 +147,14 @@ timer or cron quiescence alone does not prove exclusivity.
 
 ## Next gate
 
-The current disposable-proof gate is closed. Dormant installation remains a
+The current disposable-proof gate is closed. The next gate is a separate,
+reviewed build and installation of the exact controller runtime and immutable
+release substrate, followed by concrete store-effect adapters and disposable
+Linux proof. Dormant installation remains a
 separate ungranted authority, so release remains refused with
 `inactive_installation_package_not_authorized`. Before any installation,
 resolve and re-prove the remaining blockers in
-`ops/governed_memory/installation/phase8b/contract.json`. Source PostgreSQL preparation is
+`ops/governed_memory/installation/current/contract.json`. Source PostgreSQL preparation is
 governed by a separate, phase-neutral source-preparation authorization. It is
 not authorized by this disposable proof or by a stores-only install signature.
 

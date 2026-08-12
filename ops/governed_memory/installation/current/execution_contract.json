@@ -1,0 +1,132 @@
+{
+  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-v2",
+  "state": "repository-only-claim-bound-controller-compositions-packaged-not-installed-not-activated",
+  "server": "seebx",
+  "package_manifest_relationship": {
+    "this_contract_is_hash_bound_by_package_manifest": true,
+    "contract_embeds_package_manifest_hash": false,
+    "circular_self_hash_claimed": false
+  },
+  "authority_sequences": {
+    "install": [
+      "A01_ACQUIRE_AND_VERIFY_GLOBAL_LOCK",
+      "A02_VERIFY_SIGNED_INSTALL_SCOPE_CLOCK_AND_PACKAGE",
+      "A03_CLAIM_INSTALL_NONCE_AND_DERIVE_EXECUTION_BINDING",
+      "A04_OPEN_EXACT_ANCHORED_INSTALL_JOURNAL"
+    ],
+    "empty_rollback": [
+      "B01_ACQUIRE_AND_VERIFY_GLOBAL_LOCK",
+      "B02_VERIFY_SEPARATE_SIGNED_EMPTY_ROLLBACK_SCOPE_CLOCK_AND_PACKAGE",
+      "B03_CLAIM_ROLLBACK_NONCE_AND_DERIVE_EXECUTION_BINDING",
+      "B04_OPEN_EXACT_ANCHORED_ROLLBACK_JOURNAL"
+    ]
+  },
+  "execution_boundary": {
+    "approval_authorizes_execution": false,
+    "claim_bound_install_controller_composition_callable_non_cli": true,
+    "claim_bound_empty_rollback_controller_composition_callable_non_cli": true,
+    "concrete_live_install_store_effect_adapter_implemented": false,
+    "concrete_live_empty_rollback_store_effect_adapter_implemented": false,
+    "activation_executor_implemented": false,
+    "host_commands_executed_in_this_repository_phase": 0,
+    "docker_calls_in_this_repository_phase": 0,
+    "systemd_calls_in_this_repository_phase": 0,
+    "postgresql_calls_in_this_repository_phase": 0,
+    "qdrant_calls_in_this_repository_phase": 0,
+    "network_calls_in_this_repository_phase": 0,
+    "secret_reads_or_writes_in_this_repository_phase": 0
+  },
+  "binding_policy": {
+    "opaque_verified_package_capability_required": true,
+    "opaque_verified_controller_runtime_capability_required": true,
+    "opaque_claimed_install_execution_capability_required": true,
+    "opaque_claimed_empty_rollback_capability_required": true,
+    "caller_selected_attempt_id_allowed": false,
+    "execution_id_derived_from_authority_claim": true,
+    "journal_binds_package_contract_plan_spec_resource_identity_implementation_and_exact_paths": true,
+    "journal_binds_verified_full_controller_release_tree_sha256": true,
+    "empty_rollback_claim_journal_requests_observations_and_writer_fence_bind_verified_runtime_and_full_release_tree": true,
+    "per_execution_resource_identity_ledger_path_bound": true,
+    "resource_identity_ledger_head_anchored_and_required_for_empty_rollback": true,
+    "empty_rollback_requires_opaque_verified_install_receipt_and_ledger_capability": true,
+    "resolved_store_spec_hash_and_exact_docker_label_hashes_bound": true,
+    "exact_controller_process_is_trusted": true,
+    "hostile_same_process_capability_forgery_resisted": false
+  },
+  "durability_policy": {
+    "canonical_jsonl": true,
+    "file_and_directory_fsync_required": true,
+    "authority_state_anchor_compare_and_set_required": true,
+    "install_and_rollback_journal_anchors_packaged": true,
+    "per_execution_resource_ledger_anchor_packaged": true,
+    "filesystem_identity_guards_packaged": true,
+    "exact_equality_resume_allowed": true,
+    "exact_one_file_entry_ahead_repair_allowed": true,
+    "one_final_partial_json_line_beyond_exact_anchor_recoverable": true,
+    "tampered_complete_record_middle_corruption_and_multiple_complete_suffix_refused": true,
+    "same_open_instance_inode_and_directory_replacement_refused": true,
+    "cross_process_same_content_inode_or_directory_replacement_refused": true,
+    "compensation_effect_before_receipt_resume_supported": true,
+    "terminal_postflight_effect_present_blocks_compensation_and_exact_resume_completes": true,
+    "composite_step_recoverable_state_protocol_implemented": true,
+    "install_receipt_replay_requires_fresh_terminal_store_readiness_probe": true,
+    "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger": true,
+    "completed_empty_rollback_replay_reproves_exact_resource_absence": true,
+    "empty_rollback_writer_fence_held_from_r06_through_receipt": true,
+    "destructive_rollback_steps_atomically_recheck_empty_under_fence": true,
+    "retained_audit_artifact_hashes_bound_to_rollback_receipt": true,
+    "end_to_end_live_process_crash_recovery_claimed": false
+  },
+  "host_action_policy": {
+    "typed_operation_specific_boundaries_only": true,
+    "arbitrary_store_mutation_argv_surface": false,
+    "shell_allowed": false,
+    "image_pull_build_load_import_or_run_allowed_by_repository_phase": false,
+    "source_postgresql_allowed": false,
+    "provider_endpoint_allowed": false,
+    "legacy_store_or_secret_path_allowed": false,
+    "separate_postgres_and_qdrant_secret_files_required_for_future_execution": true,
+    "secret_values_in_argv_output_journal_ledger_or_receipt_allowed": false,
+    "bounded_image_inspection_command_primitive_packaged": true,
+    "controller_runtime_secure_verifier_packaged": true,
+    "exact_release_path_supervisor_launcher_packaged": true,
+    "each_host_request_and_ownership_receipt_binds_verified_full_release_tree_sha256": true,
+    "concrete_store_effect_adapters_packaged": false
+  },
+  "receipt_policy": {
+    "install_and_empty_rollback_use_distinct_schemas": true,
+    "closed_content_free_builders_and_verifiers_packaged": true,
+    "empty_rollback_controller_emits_canonical_receipt": true,
+    "install_controller_emits_canonical_receipt": true,
+    "install_receipt_binds_terminal_canonical_store_readiness": true,
+    "install_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
+    "empty_rollback_receipt_binds_verified_install_receipt_and_exact_ledger": true,
+    "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
+    "receipt_schema_files_hash_bound_by_package": true,
+    "activation_receipt_packaged": false
+  },
+  "proof_boundary": {
+    "harness_type": "guarded-synthetic-only",
+    "live_linux_proof": false,
+    "docker_or_systemd_proof": false,
+    "postgresql_or_qdrant_execution_proof": false,
+    "kernel_confinement_proof": false,
+    "no_argument_runner_uses_private_temporary_directory": true,
+    "direct_test_helper_accepts_caller_owned_disposable_root": true,
+    "synthetic_unit_exercise_requires_signed_live_authority": false,
+    "synthetic_unit_receipt_is_promotable_live_proof": false,
+    "future_live_disposable_linux_proof_requires_distinct_authority": "disposable_proof"
+  },
+  "remaining_blockers": [
+    "controller_runtime_and_release_substrate_not_separately_built_installed_or_receipted",
+    "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged",
+    "live_disposable_linux_proof_not_run",
+    "images_not_staged_or_receipted",
+    "authority_substrate_and_trusted_clock_not_installed",
+    "current_live_preflight_absent",
+    "final_commit_tree_package_contract_plan_runtime_and_images_not_signed",
+    "dormant_install_execution_approval_absent",
+    "empty_rollback_execution_approval_absent",
+    "activation_not_authorized"
+  ]
+}

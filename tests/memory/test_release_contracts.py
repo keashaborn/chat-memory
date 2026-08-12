@@ -44,17 +44,17 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase8GReleaseArtifactTests(unittest.TestCase):
+class Phase9BReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
-            "governed-memory-release-artifact-verification-v5",
+            "governed-memory-release-artifact-verification-v6",
         )
         self.assertEqual(
             result["phase"],
-            "phase8g_current_candidate_disposable_validated_inactive_"
-            "activation_blocked",
+            "phase9b_canonical_dormant_store_install_and_empty_rollback_"
+            "controllers_packaged_inactive_activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
@@ -83,12 +83,12 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertGreater(result["current_store_package_artifact_count"], 0)
+        self.assertEqual(result["current_store_package_artifact_count"], 56)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
         self.assertFalse(result["current_store_synthetic_proof_complete"])
         self.assertFalse(
             result[
-                "historical_phase8b_synthetic_proof_reusable_for_current_candidate"
+                "historical_dormant_store_install_synthetic_proof_reusable_for_current_candidate"
             ]
         )
         self.assertFalse(result["synthetic_proof_executed_by_release_guard"])
@@ -99,8 +99,29 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             result["release_refusal_code"], CURRENT_CREATE_REFUSAL_CODE
         )
         self.assertFalse(result["live_installation_proof_complete"])
-        self.assertFalse(result["installation_executor_packaged"])
-        self.assertFalse(result["rollback_executor_packaged"])
+        self.assertTrue(result["installation_executor_packaged"])
+        self.assertTrue(result["rollback_executor_packaged"])
+        for field in (
+            "controller_runtime_verification_capability_packaged",
+            "full_controller_release_tree_verification_packaged",
+            "exact_locked_controller_distribution_set_verification_packaged",
+            "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt",
+            "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+            "supervisor_launcher_source_packaged",
+            "resolved_store_spec_and_exact_docker_labels_bound",
+            "resource_identity_ledger_v2_packaged",
+            "empty_rollback_writer_fence_packaged",
+            "retained_audit_artifact_hashes_bound",
+        ):
+            self.assertTrue(result[field], field)
+        self.assertFalse(result["controller_runtime_built_or_installed"])
+        self.assertFalse(result["controller_release_staged"])
+        self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
+        self.assertFalse(result["concrete_install_store_effect_adapters_packaged"])
+        self.assertFalse(
+            result["concrete_empty_rollback_store_effect_adapters_packaged"]
+        )
         self.assertFalse(result["activation_executor_packaged"])
         self.assertFalse(result["installation_authorized"])
         self.assertFalse(result["activation_authorized"])
@@ -108,11 +129,11 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         self.assertEqual(result["commands_executed"], 0)
         self.assertFalse(result["production_state_changed"])
         self.assertIn(
-            "ops/governed_memory/installation/phase8b/package_manifest.json",
+            "ops/governed_memory/installation/current/package_manifest.json",
             result["artifact_sha256"],
         )
         self.assertIn(
-            "ops/governed_memory/phase8f_component_disposition.json",
+            "ops/governed_memory/current_component_disposition.json",
             result["artifact_sha256"],
         )
         self.assertIn(
@@ -179,10 +200,43 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
                 {"live_installation_proof_complete": True}
             ),
             lambda value: value["inactive_store_package"].update(
-                {"installation_executor_packaged": True}
+                {"installation_executor_packaged": False}
             ),
             lambda value: value["inactive_store_package"].update(
                 {"package_manifest_sha256": "0" * 64}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"controller_runtime_verification_capability_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"full_controller_release_tree_verification_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"exact_locked_controller_distribution_set_verification_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"supervisor_launcher_source_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"controller_runtime_built_or_installed": True}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"resolved_store_spec_and_exact_docker_labels_bound": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"resource_identity_ledger_v2_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"empty_rollback_writer_fence_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"retained_audit_artifact_hashes_bound": False}
             ),
             lambda value: value["infrastructure"].update(
                 {
@@ -232,7 +286,45 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             ("artifact_count", current_package["artifact_count"] + 1),
             ("synthetic_proof_executed_by_verifier", True),
             ("synthetic_proof_receipt_promoted", True),
-            ("installation_executor_packaged", True),
+            ("claim_bound_install_controller_composition_packaged", False),
+            ("claim_bound_empty_rollback_controller_composition_packaged", False),
+            ("controller_runtime_verification_capability_packaged", False),
+            ("full_controller_release_tree_verification_packaged", False),
+            ("exact_locked_controller_distribution_set_verification_packaged", False),
+            (
+                "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
+                False,
+            ),
+            (
+                "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt",
+                False,
+            ),
+            ("supervisor_launcher_source_packaged", False),
+            ("controller_runtime_built_or_installed", True),
+            ("controller_release_staged", True),
+            (
+                "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+                False,
+            ),
+            ("stores_install_owns_or_removes_controller_substrate", True),
+            ("resolved_store_spec_and_exact_docker_labels_bound", False),
+            ("resource_identity_ledger_v2_packaged", False),
+            ("empty_rollback_writer_fence_packaged", False),
+            ("retained_audit_artifact_hashes_bound", False),
+            (
+                "install_receipt_binds_fresh_terminal_canonical_store_readiness",
+                False,
+            ),
+            (
+                "empty_rollback_requires_opaque_verified_install_receipt_and_ledger",
+                False,
+            ),
+            (
+                "completed_install_and_empty_rollback_replay_reverification_packaged",
+                False,
+            ),
+            ("concrete_install_store_effect_adapters_packaged", True),
+            ("concrete_empty_rollback_store_effect_adapters_packaged", True),
             ("images_staged_by_verifier", True),
             ("secrets_touched_by_verifier", True),
         ):
@@ -254,6 +346,47 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             release_guard._verify_current_package_receipts(
                 current_package, bad_store
             )
+
+    def test_current_component_disposition_is_closed_and_exact(self) -> None:
+        original = json.loads(
+            (OPS / "current_component_disposition.json").read_text(
+                encoding="ascii"
+            )
+        )
+        release_guard._verify_current_component_disposition(original)
+        mutations = (
+            lambda value: value["current_dormant_store_controller"].update(
+                {"installation_performed": True}
+            ),
+            lambda value: value["current_dormant_store_controller"].update(
+                {"activation_entrypoint_packaged": True}
+            ),
+            lambda value: value["current_dormant_store_controller"].update(
+                {"production_state_changed": True}
+            ),
+            lambda value: value["current_dormant_store_controller"].update(
+                {"controller_runtime_built_or_installed": True}
+            ),
+            lambda value: value["historical_only"].update(
+                {"may_be_used_as_current_release_authority": True}
+            ),
+            lambda value: value["safety"].update(
+                {"activation_authorized": True}
+            ),
+            lambda value: value["safety"].update({"provider_calls": 9}),
+            lambda value: value["authority"].update(
+                {"structured_lifeswitch": "inside_memory_authority"}
+            ),
+            lambda value: value.update({"unexpected": False}),
+        )
+        for index, mutate in enumerate(mutations):
+            variant = json.loads(json.dumps(original))
+            mutate(variant)
+            with self.subTest(index=index), self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_component_disposition_invalid",
+            ):
+                release_guard._verify_current_component_disposition(variant)
 
     def test_release_guard_calls_all_current_static_verifiers(self) -> None:
         current_migration = release_guard.verify_migration_manifest.verify(

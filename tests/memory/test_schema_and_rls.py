@@ -1485,7 +1485,7 @@ class PackageIntegrityTests(unittest.TestCase):
         receipt = verifier["verify"]()
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-phase8b-store-migration-verification-v2",
+            "governed-memory-dormant-store-install-store-migration-verification-v3",
         )
         self.assertEqual(receipt["file_count"], 9)
         self.assertEqual(receipt["source_bridge_artifact_count"], 0)

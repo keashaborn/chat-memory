@@ -16,7 +16,7 @@ from tools.governed_memory_install.controller import (
     EXECUTION_MODE,
     JournalEvent,
     JournalRecord,
-    Phase8BStoresController,
+    DormantStoreInstallController,
     StateDriftError,
     StepState,
     STORES_ONLY_PLAN,
@@ -31,9 +31,18 @@ from tools.governed_memory_install.journal import (
 from tools.governed_memory_install.execution_capability import (
     ClaimedExecutionBindingError,
     _claimed_execution_binding_evidence,
-    claim_phase8b_execution_binding,
+    claim_dormant_store_install_execution_binding,
 )
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
+from tools.governed_memory_install.controller_runtime import (
+    VerifiedControllerRuntimeEvidence,
+    _RUNTIME_TOKEN,
+    _VerifiedControllerRuntimeCapability,
+)
+from tools.governed_memory_install.package_capability import (
+    PackageCapabilityError,
+    verify_install_package_capability,
+)
 
 
 HASH_A = "a" * 64
@@ -44,6 +53,8 @@ HASH_E = "e" * 64
 HASH_F = "f" * 64
 COMMIT_A = "1" * 40
 TREE_A = "2" * 40
+RUNTIME_RECEIPT_SHA256 = "9" * 64
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class _Clock:
@@ -83,8 +94,18 @@ class _Fixture:
         self.execution_lock = GlobalExecutionLock(
             self.lock_directory / "execution.lock"
         )
-        self.store_spec_json = _canonical({"schema_version": "test-store-spec-v1"})
+        self.store_spec_json = _canonical(
+            json.loads(
+                (
+                    REPO_ROOT
+                    / "ops/governed_memory/installation/store_spec.json"
+                ).read_text(encoding="ascii")
+            )
+        )
         self.resource_ledger_source = b"# test resource identity ledger\n"
+        self.controller_runtime_contract_json = _canonical({})
+        self.controller_requirements_lock = b"runtime-lock\n"
+        self.supervisor_launcher_source = b"# synthetic launcher\n"
         self.execution_plan_json = _canonical(
             {
                 "schema_version": "test-plan-v1",
@@ -101,7 +122,9 @@ class _Fixture:
         exact_targets = {
             "global_lock": str(self.execution_lock.path),
             "nonce_state": str(self.state.path),
-            "resource_identity_ledger": str(root / "resource-identities.jsonl"),
+            "resource_identity_ledger": str(
+                root / "executions" / "{execution_id}" / "resources.jsonl"
+            ),
             "execution_journal": str(
                 root / "executions" / "{execution_id}" / "journal.jsonl"
             ),
@@ -123,21 +146,36 @@ class _Fixture:
         self.exact_targets_sha256 = hashlib.sha256(
             _canonical(exact_targets)
         ).hexdigest()
+        self.artifact_bytes = {
+            "ops/governed_memory/installation/current/contract.json": (
+                self.controller_contract_json
+            ),
+            "ops/governed_memory/installation/current/controller_plan.json": (
+                self.execution_plan_json
+            ),
+            "ops/governed_memory/installation/store_spec.json": (
+                self.store_spec_json
+            ),
+            "ops/governed_memory/installation/current/"
+            "controller_runtime_contract.json": (
+                self.controller_runtime_contract_json
+            ),
+            "ops/governed_memory/controller-requirements.lock": (
+                self.controller_requirements_lock
+            ),
+            "tools/governed_memory_install/resource_identity.py": (
+                self.resource_ledger_source
+            ),
+            "tools/governed_memory_install/store_supervisor_launcher.py": (
+                self.supervisor_launcher_source
+            ),
+        }
         manifest = {
-            "schema_version": "test-phase8b-package-v1",
+            "schema_version": "test-dormant_store_install-package-v1",
+            "state": "test_only",
             "artifacts": {
-                "ops/governed_memory/installation/phase8b/contract.json": (
-                    self.contract_sha256
-                ),
-                "ops/governed_memory/installation/phase8b/controller_plan.json": (
-                    self.plan_sha256
-                ),
-                "ops/governed_memory/installation/store_spec.json": (
-                    self.store_spec_sha256
-                ),
-                "tools/governed_memory_install/resource_identity.py": (
-                    self.resource_ledger_sha256
-                ),
+                path: hashlib.sha256(raw).hexdigest()
+                for path, raw in self.artifact_bytes.items()
             },
         }
         self.package_manifest_json = _canonical(manifest)
@@ -151,12 +189,13 @@ class _Fixture:
             "controller_contract_sha256": self.contract_sha256,
             "execution_plan_sha256": self.plan_sha256,
             "exact_targets_sha256": self.exact_targets_sha256,
+            "controller_runtime_receipt_sha256": RUNTIME_RECEIPT_SHA256,
         }
         self.scope_json = _canonical(self.scope)
         evidence = authority.CryptographicallyValidScopeNotExecution(
             result_type="cryptographically_valid_scope_not_execution",
             operation="dormant_install",
-            authorization_namespace="test.phase8b",
+            authorization_namespace="test.dormant_store_install",
             thread_id="test-thread",
             scope_id="test-scope",
             authorization_id="test-authorization",
@@ -173,15 +212,68 @@ class _Fixture:
             authority._EXECUTION_CAPABILITY_TOKEN,
         )
 
+    def synthetic_runtime_capability(self) -> object:
+        runtime_root = (
+            "/opt/governed-memory-controller/runtimes/"
+            + RUNTIME_RECEIPT_SHA256
+        )
+        launcher_path = (
+            "/opt/governed-memory-controller/releases/"
+            + self.package_manifest_sha256
+            + "/tools/governed_memory_install/store_supervisor_launcher.py"
+        )
+        release_root = (
+            "/opt/governed-memory-controller/releases/"
+            + self.package_manifest_sha256
+        )
+        evidence = VerifiedControllerRuntimeEvidence(
+            result_type="verified_controller_runtime_v1",
+            controller_runtime_receipt_sha256=RUNTIME_RECEIPT_SHA256,
+            package_manifest_sha256=self.package_manifest_sha256,
+            controller_runtime_contract_sha256=hashlib.sha256(
+                self.controller_runtime_contract_json
+            ).hexdigest(),
+            controller_requirements_lock_sha256=hashlib.sha256(
+                self.controller_requirements_lock
+            ).hexdigest(),
+            runtime_root=runtime_root,
+            runtime_tree_sha256="3" * 64,
+            release_root=release_root,
+            release_tree_sha256="8" * 64,
+            package_manifest_path=(
+                release_root
+                + "/ops/governed_memory/installation/current/package_manifest.json"
+            ),
+            interpreter_path=runtime_root + "/bin/python",
+            interpreter_sha256="4" * 64,
+            inventory_path=runtime_root + "/controller-distributions.json",
+            installed_distribution_inventory_sha256="5" * 64,
+            interpreter_path_facts_sha256="6" * 64,
+            supervisor_launcher_path=launcher_path,
+            supervisor_launcher_sha256=hashlib.sha256(
+                self.supervisor_launcher_source
+            ).hexdigest(),
+            launcher_help_probe_sha256="7" * 64,
+            python_implementation="CPython",
+            python_version="3.12.11",
+            platform_os="linux",
+            platform_architecture="x86_64",
+        )
+        return _VerifiedControllerRuntimeCapability(evidence, _RUNTIME_TOKEN)
+
     def claimed_binding(self) -> object:
-        return claim_phase8b_execution_binding(
+        package_capability = verify_install_package_capability(
             self.verified_capability,
             signed_scope_json=self.scope_json,
             package_manifest_json=self.package_manifest_json,
-            controller_contract_json=self.controller_contract_json,
-            execution_plan_json=self.execution_plan_json,
-            store_spec_json=self.store_spec_json,
-            resource_identity_ledger_source=self.resource_ledger_source,
+            artifact_bytes=self.artifact_bytes,
+        )
+        return claim_dormant_store_install_execution_binding(
+            self.verified_capability,
+            verified_package_capability=package_capability,
+            verified_controller_runtime_capability=(
+                self.synthetic_runtime_capability()
+            ),
             state=self.state,
             clock=_Clock(),
             held_lock=self.execution_lock.held_capability(),
@@ -194,7 +286,7 @@ class _Fixture:
 def _encoded_record(record: JournalRecord) -> bytes:
     return _canonical(
         {
-            "schema_version": "governed-memory-phase8b-journal-v1",
+            "schema_version": "governed-memory-dormant_store_install-journal-v1",
             "plan_sha256": record.plan_sha256,
             "attempt_id": record.attempt_id,
             "sequence": record.sequence,
@@ -206,7 +298,7 @@ def _encoded_record(record: JournalRecord) -> bytes:
     ) + b"\n"
 
 
-class Phase8BDurableJournalTests(unittest.TestCase):
+class DormantStoreInstallDurableJournalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.fixture = _Fixture(Path(self.temporary.name))
@@ -258,9 +350,20 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             first.journal_binding_sha256,
             resumed.journal_binding_sha256,
         )
-        self.assertEqual(first.package_manifest_sha256, self.fixture.package_manifest_sha256)
-        self.assertEqual(first.controller_contract_sha256, self.fixture.contract_sha256)
+        self.assertEqual(
+            first.package_manifest_sha256,
+            self.fixture.package_manifest_sha256,
+        )
+        self.assertEqual(
+            first.controller_contract_sha256,
+            self.fixture.contract_sha256,
+        )
         self.assertEqual(first.execution_plan_sha256, self.fixture.plan_sha256)
+        self.assertEqual(
+            first.controller_runtime_receipt_sha256,
+            RUNTIME_RECEIPT_SHA256,
+        )
+        self.assertEqual(len(self.fixture.artifact_bytes), 7)
         self.assertEqual(
             first.controller_model_sha256,
             validate_plan(STORES_ONLY_PLAN),
@@ -271,55 +374,60 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             self.fixture.resource_ledger_sha256,
         )
         self.assertRegex(first.execution_id, r"^[0-9a-f]{64}$")
-        self.assertRegex(first.attempt_id, r"^phase8b-[0-9a-f]{40}$")
+        self.assertRegex(first.attempt_id, r"^install-[0-9a-f]{40}$")
 
     def test_forged_scope_package_and_artifact_refuse_before_new_claim(self) -> None:
         alternate = _Fixture(Path(self.temporary.name) / "alternate")
         try:
             with self.assertRaisesRegex(
-                ClaimedExecutionBindingError,
-                "claimed_execution_scope_mismatch",
+                PackageCapabilityError,
+                "package_scope_mismatch",
             ):
-                claim_phase8b_execution_binding(
+                verify_install_package_capability(
                     alternate.verified_capability,
                     signed_scope_json=alternate.scope_json + b" ",
                     package_manifest_json=alternate.package_manifest_json,
-                    controller_contract_json=alternate.controller_contract_json,
-                    execution_plan_json=alternate.execution_plan_json,
-                    store_spec_json=alternate.store_spec_json,
-                    resource_identity_ledger_source=alternate.resource_ledger_source,
-                    state=alternate.state,
-                    clock=_Clock(),
-                    held_lock=alternate.execution_lock.held_capability(),
+                    artifact_bytes=alternate.artifact_bytes,
                 )
             with self.assertRaisesRegex(
-                ClaimedExecutionBindingError,
-                "claimed_execution_package_manifest_mismatch",
+                PackageCapabilityError,
+                "package_manifest_scope_mismatch",
             ):
-                claim_phase8b_execution_binding(
+                verify_install_package_capability(
                     alternate.verified_capability,
                     signed_scope_json=alternate.scope_json,
                     package_manifest_json=alternate.package_manifest_json + b" ",
-                    controller_contract_json=alternate.controller_contract_json,
-                    execution_plan_json=alternate.execution_plan_json,
-                    store_spec_json=alternate.store_spec_json,
-                    resource_identity_ledger_source=alternate.resource_ledger_source,
-                    state=alternate.state,
-                    clock=_Clock(),
-                    held_lock=alternate.execution_lock.held_capability(),
+                    artifact_bytes=alternate.artifact_bytes,
                 )
             with self.assertRaisesRegex(
-                ClaimedExecutionBindingError,
-                "claimed_execution_package_artifact_mismatch",
+                PackageCapabilityError,
+                "package_artifact_hash_mismatch",
             ):
-                claim_phase8b_execution_binding(
+                verify_install_package_capability(
                     alternate.verified_capability,
                     signed_scope_json=alternate.scope_json,
                     package_manifest_json=alternate.package_manifest_json,
-                    controller_contract_json=alternate.controller_contract_json,
-                    execution_plan_json=alternate.execution_plan_json,
-                    store_spec_json=alternate.store_spec_json + b" ",
-                    resource_identity_ledger_source=alternate.resource_ledger_source,
+                    artifact_bytes={
+                        **alternate.artifact_bytes,
+                        "ops/governed_memory/installation/store_spec.json": (
+                            alternate.store_spec_json + b" "
+                        ),
+                    },
+                )
+            package_capability = verify_install_package_capability(
+                alternate.verified_capability,
+                signed_scope_json=alternate.scope_json,
+                package_manifest_json=alternate.package_manifest_json,
+                artifact_bytes=alternate.artifact_bytes,
+            )
+            with self.assertRaisesRegex(
+                ClaimedExecutionBindingError,
+                "claimed_execution_controller_runtime_invalid",
+            ):
+                claim_dormant_store_install_execution_binding(
+                    alternate.verified_capability,
+                    verified_package_capability=package_capability,
+                    verified_controller_runtime_capability=object(),
                     state=alternate.state,
                     clock=_Clock(),
                     held_lock=alternate.execution_lock.held_capability(),
@@ -536,6 +644,78 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         ) as repaired:
             self.assertEqual(repaired.anchor_result, "anchor_advanced_one_entry")
             self.assertEqual(repaired.journal_records(), (first,))
+
+    def test_process_death_partial_tail_after_exact_anchor_is_truncated(self) -> None:
+        with DurableJournal(
+            self.path,
+            claimed_execution_binding=self.binding,
+            authority_state=self.fixture.state,
+            held_lock=self.fixture.execution_lock.held_capability(),
+            create=True,
+        ) as journal:
+            first = self._record(journal, sequence=1, prior="0" * 64)
+            journal.append_journal(first)
+            second = self._record(
+                journal,
+                sequence=2,
+                prior=first.record_sha256,
+                event=JournalEvent.APPLIED,
+            )
+        anchored = self.path.read_bytes()
+        torn = _encoded_record(second)[:73]
+        with self.path.open("ab", buffering=0) as stream:
+            stream.write(torn)
+            os.fsync(stream.fileno())
+
+        with DurableJournal(
+            self.path,
+            claimed_execution_binding=self.binding,
+            authority_state=self.fixture.state,
+            held_lock=self.fixture.execution_lock.held_capability(),
+        ) as recovered:
+            self.assertEqual(recovered.anchor_result, "anchor_exact_resume")
+            self.assertEqual(recovered.journal_records(), (first,))
+        self.assertEqual(self.path.read_bytes(), anchored)
+
+    def test_partial_tail_after_complete_unanchored_suffix_is_refused(self) -> None:
+        with DurableJournal(
+            self.path,
+            claimed_execution_binding=self.binding,
+            authority_state=self.fixture.state,
+            held_lock=self.fixture.execution_lock.held_capability(),
+            create=True,
+        ) as journal:
+            first = self._record(journal, sequence=1, prior="0" * 64)
+            journal.append_journal(first)
+            second = self._record(
+                journal,
+                sequence=2,
+                prior=first.record_sha256,
+                event=JournalEvent.APPLIED,
+            )
+            third = self._record(
+                journal,
+                sequence=3,
+                prior=second.record_sha256,
+                step_index=1,
+            )
+        unauthenticated = _encoded_record(second) + _encoded_record(third)[:71]
+        with self.path.open("ab", buffering=0) as stream:
+            stream.write(unauthenticated)
+            os.fsync(stream.fileno())
+        before = self.path.read_bytes()
+
+        with self.assertRaisesRegex(
+            DurableJournalIntegrityError,
+            "truncated_tail_not_exact_anchor",
+        ):
+            DurableJournal(
+                self.path,
+                claimed_execution_binding=self.binding,
+                authority_state=self.fixture.state,
+                held_lock=self.fixture.execution_lock.held_capability(),
+            )
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_anchor_ahead_and_multi_entry_gap_are_refused(self) -> None:
         with DurableJournal(
@@ -768,7 +948,7 @@ class _RecoveryBackend:
         )
 
 
-class Phase8BControllerRecoveryTests(unittest.TestCase):
+class DormantStoreInstallControllerRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         directory = Path(self.temporary.name) / "lock"
@@ -780,8 +960,8 @@ class Phase8BControllerRecoveryTests(unittest.TestCase):
         self.lock.close()
         self.temporary.cleanup()
 
-    def _controller(self, backend: _RecoveryBackend) -> Phase8BStoresController:
-        return Phase8BStoresController(
+    def _controller(self, backend: _RecoveryBackend) -> DormantStoreInstallController:
+        return DormantStoreInstallController(
             plan=STORES_ONLY_PLAN,
             backend=backend,
             held_lock=self.lock.held_capability(),

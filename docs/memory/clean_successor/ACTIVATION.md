@@ -7,10 +7,27 @@ source-bound runtime and passed its isolated disposable application, store, and
 chat-deletion proof. It has not installed or activated a functioning live
 memory service.
 
-The package still lacks a complete claim-bound live installation composition,
-live rollback executor, live activation executor, promoted live proof, and
-several durability and resource-ownership guarantees. The authoritative exact
-blocker list is in
+Phase 9B packages claim-bound non-CLI install and empty-rollback controller
+compositions, durable journals, exact resource-ledger provenance, and canonical
+receipts. It also packages a secure controller-runtime verifier that closes the
+complete 56-member release tree with no extras and requires the exact locked
+distribution set, an exact release-path supervisor launcher, resolved-spec
+Docker-label binding, and a
+single empty-rollback writer fence held through terminal absence, retained
+audit-hash verification, and receipt emission. Receipt replay is fail-closed on
+fresh terminal readiness or exact rollback receipt/ledger/absence drift. The
+full release-tree hash is bound through the install claim, journal, host
+ownership, and install receipt. Empty rollback independently requires the exact
+verified controller runtime and release identity in its signed scope, claim,
+journal, operation requests and observations, writer fence, retained install
+receipt, and final rollback receipt. No controller runtime was built or
+installed and no release
+was staged. These are separately authorized preinstallation substrate and are
+retained by empty rollback; the stores transaction cannot create or remove
+them. It still lacks concrete live Linux,
+Docker, PostgreSQL, Qdrant,
+secret, and readiness adapters, a built controller runtime, a live activation
+executor, and promoted live proof. The authoritative exact blocker list is in
 `ops/governed_memory/runtime_manifest.json` and is synchronized with the
 bootstrap, pilot, and schema contracts.
 
@@ -23,20 +40,19 @@ reusable for the current candidate. Release remains refused with
 
 ## Before a dormant stores-only installation
 
-A later approval must bind one reviewed commit and tree, the exact package and
+A separate approval must first build and install the controller runtime and
+immutable release substrate, binding the exact dependency lock, complete
+release-tree hash, and runtime receipt. A later stores approval must bind one
+reviewed commit and tree, the exact package and
 contracts, current build and controller receipts, trusted authority substrate,
 local image identities and staging receipt, exact targets, and a fresh
 read-only preflight. It must also provide fresh store credentials without
 reading or reusing legacy or provider credentials.
 
-The live composition must close these implementation gaps before authorization:
+The live adapter and deployment layer must close these implementation gaps
+before authorization:
 
-- opaque verified-package capability at the claim boundary;
-- atomic attempt-bound resource ownership between pre-probe and apply;
 - complete command, secret, migration, readiness, and store-effect adapters;
-- terminal-seal and composite-step crash recovery;
-- cross-process durable file identity or an equivalent seal;
-- lock-bound and durably anchored resource-identity ledger;
 - complete image-baseline, hardening, and external-readiness checks.
 
 After implementation, a separately authorized installation proof must use fresh empty

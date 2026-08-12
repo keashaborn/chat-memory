@@ -4,16 +4,18 @@ After=docker.service
 Requires=docker.service
 ConditionPathIsReadWrite=/var/lib/governed-memory-controller
 ConditionPathExists=/etc/governed-memory-controller/store_spec.json
-ConditionPathExists=/var/lib/governed-memory-controller/resource-identities.jsonl
+ConditionPathExists=/var/lib/governed-memory-controller/executions/@EXECUTION_ID@/resources.jsonl
+ConditionPathExists=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python
+ConditionPathExists=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 User=root
 Group=root
-WorkingDirectory=/opt/governed-memory-controller/releases/${PACKAGE_MANIFEST_SHA256}
-ExecStart=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor start --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/resource-identities.jsonl
-ExecStop=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor stop --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/resource-identities.jsonl
+WorkingDirectory=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@
+ExecStart=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ start --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/executions/@EXECUTION_ID@/resources.jsonl
+ExecStop=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ stop --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/executions/@EXECUTION_ID@/resources.jsonl
 TimeoutStartSec=90
 TimeoutStopSec=90
 NoNewPrivileges=yes

@@ -1,9 +1,9 @@
 {
-  "schema_version": "governed-memory-phase8b-disposable-proof-contract-v1",
-  "state": "inactive_synthetic_harness_packaged_unit_executable_no_promoted_receipt_no_live_execution",
+  "schema_version": "governed-memory-dormant-store-install-disposable-proof-contract-v2",
+  "state": "repository-only-synthetic-harness-packaged-no-promoted-receipt-no-live-execution",
   "server_target_if_separately_authorized_later": "seebx",
   "proof_scope": "synthetic_in_process_model_only",
-  "entrypoint": "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
+  "entrypoint": "tools/governed_memory_validation/run_installation_synthetic_proof.py",
   "execution_boundary": {
     "backend": "sealed_in_memory_synthetic_backend_api_boundary",
     "backend_is_constructed_internally": true,
@@ -17,6 +17,8 @@
     "systemd_adapter_exists": false,
     "installation_adapter_exists": false,
     "activation_adapter_exists": false,
+    "claim_bound_install_composition_exercised": false,
+    "claim_bound_empty_rollback_composition_exercised": false,
     "runner_accepts_arguments": false
   },
   "disposable_root_policy": {
@@ -34,31 +36,31 @@
     "disposable_root_must_be_empty_owned_mode_0700_non_symlink": true
   },
   "scenario_matrix": {
-    "scenario_count": 131,
-    "plan_step_count": 20,
-    "compensable_step_count": 15,
+    "scenario_count": 124,
+    "plan_step_count": 19,
+    "compensable_step_count": 14,
     "maximum_injected_events_per_scenario": 2,
     "maximum_interruptions_per_scenario": 1,
     "family_counts": {
       "happy_path": 1,
-      "ordinary_failure_before_effect": 20,
-      "ordinary_failure_after_effect": 20,
-      "interrupt_before_effect": 20,
-      "interrupt_after_effect": 20,
-      "interrupt_after_applied_journal": 20,
-      "interrupt_before_compensation": 15,
-      "interrupt_after_compensation": 15
+      "ordinary_failure_before_effect": 19,
+      "ordinary_failure_after_effect": 19,
+      "interrupt_before_effect": 19,
+      "interrupt_after_effect": 19,
+      "interrupt_after_applied_journal": 19,
+      "interrupt_before_compensation": 14,
+      "interrupt_after_compensation": 14
     },
-    "all_twenty_steps_targeted_by_each_effect_fault_family": true,
-    "all_fifteen_compensable_steps_targeted_by_each_compensation_interruption_family": true,
-    "seal_effect_interruption_is_refused_not_repaired": true,
+    "all_nineteen_steps_targeted_by_each_effect_fault_family": true,
+    "all_fourteen_compensable_steps_targeted_by_each_compensation_interruption_family": true,
+    "terminal_postflight_failure_blocks_compensation_and_interruption_exact_resume_completes": true,
     "interruptions_are_baseexception_markers_in_one_process": true,
     "compensation_interruption_scenarios_include_one_trigger_failure_and_one_interruption": true,
     "operating_system_process_kills_performed": 0,
     "composite_step_partial_failure_scenarios_performed": 0
   },
   "receipt_policy": {
-    "schema": "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
+    "schema": "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json",
     "content_free": true,
     "timestamps_recorded": false,
     "hostnames_recorded": false,
@@ -86,6 +88,15 @@
     "external_store_readiness_proven": false,
     "activation_proven": false
   },
+  "package_context": {
+    "claim_bound_non_cli_install_composition_packaged_separately": true,
+    "claim_bound_non_cli_empty_rollback_composition_packaged_separately": true,
+    "durable_anchored_install_and_rollback_journals_packaged_separately": true,
+    "durable_anchored_resource_identity_ledger_packaged_separately": true,
+    "concrete_live_store_effect_adapters_packaged": false,
+    "exact_controller_process_is_trusted": true,
+    "hostile_same_process_capability_forgery_resisted": false
+  },
   "prohibitions": {
     "run_docker": true,
     "stage_or_pull_images": true,
@@ -100,7 +111,7 @@
   "remaining_live_proof_requirements": [
     "separately_authorized_exact_image_staging",
     "separately_authorized_disposable_linux_execution",
-    "durable_fsynced_journal_and_anchor_recovery",
+    "live_process_use_of_fsynced_journal_and_anchor_recovery",
     "real_process_termination_recovery",
     "composite_crash_recovery",
     "external_postgresql_and_qdrant_readiness",

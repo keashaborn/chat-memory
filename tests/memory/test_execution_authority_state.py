@@ -42,10 +42,10 @@ SCOPE = "4" * 64
 TRUST_BUNDLE = "5" * 64
 HEAD_ONE = "6" * 64
 HEAD_TWO = "7" * 64
-NONCE = "phase8b_nonce_000000000000000000000099"
-NAMESPACE = "governed-memory.installation.phase8b.v1"
+NONCE = "dormant_store_install_nonce_000000000000000000000099"
+NAMESPACE = "governed-memory.installation.dormant_store_install.v1"
 THREAD_ID = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-SCOPE_ID = "phase8b-fresh-stores-000001"
+SCOPE_ID = "dormant_store_install-fresh-stores-000001"
 
 
 class FixedClock:
@@ -113,8 +113,7 @@ def execution_capability() -> object:
     )
     key_id = hashlib.sha256(public_key).hexdigest()
     scope = {
-        "schema_version": "governed-memory-dormant-install-scope-v1",
-        "phase": "8B",
+        "schema_version": "governed-memory-dormant-install-scope-v2",
         "operation": "dormant_install",
         "authorization_namespace": NAMESPACE,
         "thread_id": THREAD_ID,
@@ -125,6 +124,7 @@ def execution_capability() -> object:
         "controller_contract_sha256": "d" * 64,
         "execution_plan_sha256": "e" * 64,
         "exact_targets_sha256": "f" * 64,
+        "controller_runtime_receipt_sha256": "9" * 64,
         "source_boundary": {
             "source_postgres_connection_count": 0,
             "source_postgres_read_count": 0,
@@ -163,13 +163,15 @@ def execution_capability() -> object:
     scope_sha256 = authority.canonical_json_sha256(scope)
     payload = {
         "schema_version": "governed-memory-dormant-install-authorization-v1",
-        "authorization_id": "phase8b-auth-000099",
+        "authorization_id": "dormant_store_install-auth-000099",
         "authorization_namespace": NAMESPACE,
         "thread_id": THREAD_ID,
         "scope_id": SCOPE_ID,
         "scope_sha256": scope_sha256,
         "key_id": key_id,
-        "approval_phrase": f"APPROVE PHASE 8B DORMANT INSTALL {scope_sha256}",
+        "approval_phrase": (
+            f"APPROVE GOVERNED MEMORY DORMANT STORE INSTALL {scope_sha256}"
+        ),
         "nonce": NONCE,
         "issued_at": "2026-08-11T12:00:00Z",
         "not_before": "2026-08-11T12:00:00Z",
@@ -214,6 +216,7 @@ def execution_capability() -> object:
             controller_contract_sha256="d" * 64,
             execution_plan_sha256="e" * 64,
             exact_targets_sha256="f" * 64,
+            controller_runtime_receipt_sha256="9" * 64,
         ),
     )
 
@@ -225,22 +228,25 @@ class AuthorityStateTests(unittest.TestCase):
             state = AuthorityState(database, create=True)
             worker_count = 8
             barrier = threading.Barrier(worker_count)
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
 
-            def claim() -> str:
-                barrier.wait()
-                return state.claim_nonce(
-                    NONCE,
-                    operation="dormant_install",
-                    execution_sha256=EXECUTION,
-                    authorization_sha256=AUTHORIZATION,
-                    scope_sha256=SCOPE,
-                    trust_bundle_sha256=TRUST_BUNDLE,
-                ).result
+                def claim() -> str:
+                    barrier.wait()
+                    return state.claim_nonce(
+                        NONCE,
+                        operation="dormant_install",
+                        execution_sha256=EXECUTION,
+                        authorization_sha256=AUTHORIZATION,
+                        scope_sha256=SCOPE,
+                        trust_bundle_sha256=TRUST_BUNDLE,
+                        held_lock=held,
+                    ).result
 
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                results = list(
-                    executor.map(lambda _index: claim(), range(worker_count))
-                )
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    results = list(
+                        executor.map(lambda _index: claim(), range(worker_count))
+                    )
 
             self.assertEqual(results.count("nonce_claimed"), 1)
             self.assertEqual(results.count("exact_execution_resumed"), 7)
@@ -256,49 +262,54 @@ class AuthorityStateTests(unittest.TestCase):
                 directory / "authority.sqlite3",
                 create=True,
             )
-            claimed = state.claim_nonce(
-                NONCE,
-                operation="dormant_install",
-                execution_sha256=EXECUTION,
-                authorization_sha256=AUTHORIZATION,
-                scope_sha256=SCOPE,
-                trust_bundle_sha256=TRUST_BUNDLE,
-            )
-            reopened = AuthorityState(directory / "authority.sqlite3")
-            resumed = reopened.claim_nonce(
-                NONCE,
-                operation="dormant_install",
-                execution_sha256=EXECUTION,
-                authorization_sha256=AUTHORIZATION,
-                scope_sha256=SCOPE,
-                trust_bundle_sha256=TRUST_BUNDLE,
-            )
-            self.assertEqual(claimed.result, "nonce_claimed")
-            self.assertEqual(resumed.result, "exact_execution_resumed")
-            self.assertEqual(claimed.claim_sha256, resumed.claim_sha256)
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                claimed = state.claim_nonce(
+                    NONCE,
+                    operation="dormant_install",
+                    execution_sha256=EXECUTION,
+                    authorization_sha256=AUTHORIZATION,
+                    scope_sha256=SCOPE,
+                    trust_bundle_sha256=TRUST_BUNDLE,
+                    held_lock=held,
+                )
+                reopened = AuthorityState(directory / "authority.sqlite3")
+                resumed = reopened.claim_nonce(
+                    NONCE,
+                    operation="dormant_install",
+                    execution_sha256=EXECUTION,
+                    authorization_sha256=AUTHORIZATION,
+                    scope_sha256=SCOPE,
+                    trust_bundle_sha256=TRUST_BUNDLE,
+                    held_lock=held,
+                )
+                self.assertEqual(claimed.result, "nonce_claimed")
+                self.assertEqual(resumed.result, "exact_execution_resumed")
+                self.assertEqual(claimed.claim_sha256, resumed.claim_sha256)
 
-            cases = (
-                {"operation": "rollback"},
-                {"execution_sha256": "9" * 64},
-                {"authorization_sha256": "a" * 64},
-                {"scope_sha256": "b" * 64},
-                {"trust_bundle_sha256": "e" * 64},
-            )
-            baseline = {
-                "operation": "dormant_install",
-                "execution_sha256": EXECUTION,
-                "authorization_sha256": AUTHORIZATION,
-                "scope_sha256": SCOPE,
-                "trust_bundle_sha256": TRUST_BUNDLE,
-            }
-            for replacement in cases:
-                arguments = {**baseline, **replacement}
-                with self.subTest(replacement=replacement):
-                    with self.assertRaisesRegex(
-                        AuthorityReplayError,
-                        "authority_nonce_replayed",
-                    ):
-                        state.claim_nonce(NONCE, **arguments)
+                cases = (
+                    {"operation": "rollback"},
+                    {"execution_sha256": "9" * 64},
+                    {"authorization_sha256": "a" * 64},
+                    {"scope_sha256": "b" * 64},
+                    {"trust_bundle_sha256": "e" * 64},
+                )
+                baseline = {
+                    "operation": "dormant_install",
+                    "execution_sha256": EXECUTION,
+                    "authorization_sha256": AUTHORIZATION,
+                    "scope_sha256": SCOPE,
+                    "trust_bundle_sha256": TRUST_BUNDLE,
+                    "held_lock": held,
+                }
+                for replacement in cases:
+                    arguments = {**baseline, **replacement}
+                    with self.subTest(replacement=replacement):
+                        with self.assertRaisesRegex(
+                            AuthorityReplayError,
+                            "authority_nonce_replayed",
+                        ):
+                            state.claim_nonce(NONCE, **arguments)
 
     def test_state_creation_is_explicit_and_existing_state_is_not_recreated(
         self,
@@ -321,65 +332,72 @@ class AuthorityStateTests(unittest.TestCase):
             )
             empty = state.read_anchor(BINDING)
             self.assertEqual((empty.sequence, empty.head_sha256), (0, ZERO_HEAD))
-
-            first = state.advance_anchor(
-                BINDING,
-                journal_sequence=1,
-                journal_head_sha256=HEAD_ONE,
-                journal_prior_head_sha256=ZERO_HEAD,
-            )
-            self.assertEqual(first.result, "anchor_advanced_one_entry")
-            exact = state.advance_anchor(
-                BINDING,
-                journal_sequence=1,
-                journal_head_sha256=HEAD_ONE,
-                journal_prior_head_sha256=ZERO_HEAD,
-            )
-            self.assertEqual(exact.result, "anchor_exact_resume")
-
-            second = state.advance_anchor(
-                BINDING,
-                journal_sequence=2,
-                journal_head_sha256=HEAD_TWO,
-                journal_prior_head_sha256=HEAD_ONE,
-            )
-            self.assertEqual(second.sequence, 2)
-            self.assertEqual(state.read_anchor(BINDING).head_sha256, HEAD_TWO)
-
-            with self.assertRaisesRegex(
-                JournalAnchorError,
-                "journal_anchor_ahead_of_journal",
-            ):
-                state.advance_anchor(
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                first = state.advance_anchor(
                     BINDING,
                     journal_sequence=1,
                     journal_head_sha256=HEAD_ONE,
                     journal_prior_head_sha256=ZERO_HEAD,
+                    held_lock=held,
                 )
+                self.assertEqual(first.result, "anchor_advanced_one_entry")
+                exact = state.advance_anchor(
+                    BINDING,
+                    journal_sequence=1,
+                    journal_head_sha256=HEAD_ONE,
+                    journal_prior_head_sha256=ZERO_HEAD,
+                    held_lock=held,
+                )
+                self.assertEqual(exact.result, "anchor_exact_resume")
 
-            unanchored = "c" * 64
-            with self.assertRaisesRegex(
-                JournalAnchorError,
-                "journal_anchor_suffix_too_long",
-            ):
-                state.advance_anchor(
-                    unanchored,
+                second = state.advance_anchor(
+                    BINDING,
                     journal_sequence=2,
                     journal_head_sha256=HEAD_TWO,
                     journal_prior_head_sha256=HEAD_ONE,
+                    held_lock=held,
                 )
+                self.assertEqual(second.sequence, 2)
+                self.assertEqual(state.read_anchor(BINDING).head_sha256, HEAD_TWO)
 
-            mismatch = "d" * 64
-            with self.assertRaisesRegex(
-                JournalAnchorError,
-                "journal_anchor_compare_failed",
-            ):
-                state.advance_anchor(
-                    mismatch,
-                    journal_sequence=1,
-                    journal_head_sha256=HEAD_ONE,
-                    journal_prior_head_sha256=HEAD_TWO,
-                )
+                with self.assertRaisesRegex(
+                    JournalAnchorError,
+                    "journal_anchor_ahead_of_journal",
+                ):
+                    state.advance_anchor(
+                        BINDING,
+                        journal_sequence=1,
+                        journal_head_sha256=HEAD_ONE,
+                        journal_prior_head_sha256=ZERO_HEAD,
+                        held_lock=held,
+                    )
+
+                unanchored = "c" * 64
+                with self.assertRaisesRegex(
+                    JournalAnchorError,
+                    "journal_anchor_suffix_too_long",
+                ):
+                    state.advance_anchor(
+                        unanchored,
+                        journal_sequence=2,
+                        journal_head_sha256=HEAD_TWO,
+                        journal_prior_head_sha256=HEAD_ONE,
+                        held_lock=held,
+                    )
+
+                mismatch = "d" * 64
+                with self.assertRaisesRegex(
+                    JournalAnchorError,
+                    "journal_anchor_compare_failed",
+                ):
+                    state.advance_anchor(
+                        mismatch,
+                        journal_sequence=1,
+                        journal_head_sha256=HEAD_ONE,
+                        journal_prior_head_sha256=HEAD_TWO,
+                        held_lock=held,
+                    )
 
 
 class TrustedClockAndExecutionAuthorityTests(unittest.TestCase):

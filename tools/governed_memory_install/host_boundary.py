@@ -8,13 +8,14 @@ arguments.  Higher-level adapters must narrow the allowed argv further.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 import os
 from pathlib import PurePath
 import re
 import selectors
 import subprocess
 import time
-from typing import Final, Sequence
+from typing import Final, Protocol, Sequence
 
 
 DOCKER_BINARY: Final = "/usr/bin/docker"
@@ -65,6 +66,25 @@ _IMAGE_REFERENCE_RE = re.compile(
     re.ASCII,
 )
 _COMMAND_PROFILES: Final = frozenset({"image_inspect", "store_supervisor"})
+_HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z", re.ASCII)
+_SAFE_RESOURCE_RE = re.compile(
+    r"/?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z", re.ASCII
+)
+_RESOURCE_KINDS = frozenset(
+    {
+        "container",
+        "database",
+        "migration",
+        "network",
+        "qdrant_alias",
+        "qdrant_collection",
+        "resolved_store_spec",
+        "secret_file",
+        "systemd_unit",
+        "volume",
+    }
+)
 
 
 class HostBoundaryError(RuntimeError):
@@ -77,6 +97,273 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
+
+
+class HostOperationProfile(str, Enum):
+    """The complete stores-only effect/compensation vocabulary."""
+
+    REVERIFY_PRECLAIMED_EXECUTION_LOCK = "reverify_preclaimed_execution_lock"
+    VERIFY_CLAIMED_EXECUTION_BINDING = "verify_claimed_execution_binding"
+    VERIFY_LIVE_PREFLIGHT = "verify_live_preflight"
+    WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS = (
+        "write_resolved_store_spec_and_generate_fresh_store_secrets"
+    )
+    CREATE_EXACT_NETWORK = "create_exact_network"
+    CREATE_EXACT_POSTGRES_VOLUME = "create_exact_postgres_volume"
+    CREATE_EXACT_QDRANT_VOLUME = "create_exact_qdrant_volume"
+    CREATE_EXACT_POSTGRES_CONTAINER = "create_exact_postgres_container"
+    CREATE_EXACT_QDRANT_CONTAINER = "create_exact_qdrant_container"
+    START_AND_VERIFY_EMPTY_STORES = "start_and_verify_empty_stores"
+    BOOTSTRAP_CANONICAL_DATABASE = "bootstrap_canonical_database"
+    APPLY_FOUNDATION_0001 = "apply_foundation_0001"
+    APPLY_OWNER_CLAIM_DETAIL_0003 = "apply_owner_claim_detail_0003"
+    APPLY_PILOT_MARKER_0004 = "apply_pilot_marker_0004_without_marker"
+    CREATE_EMPTY_QDRANT_COLLECTION = "create_empty_qdrant_collection"
+    CREATE_QDRANT_ALIAS = "create_qdrant_alias"
+    VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES = (
+        "verify_pre_supervisor_resource_identities"
+    )
+    INSTALL_AND_ENABLE_STORES_SUPERVISOR = "install_and_enable_stores_supervisor"
+    COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT = (
+        "cold_restart_and_verify_terminal_postflight"
+    )
+    REMOVE_RESOLVED_STORE_SPEC_AND_FRESH_STORE_SECRETS = (
+        "remove_resolved_store_spec_and_fresh_store_secrets"
+    )
+    REMOVE_EXACT_UNUSED_NETWORK = "remove_exact_unused_network"
+    REMOVE_EXACT_EMPTY_POSTGRES_VOLUME = "remove_exact_empty_postgres_volume"
+    REMOVE_EXACT_EMPTY_QDRANT_VOLUME = "remove_exact_empty_qdrant_volume"
+    REMOVE_EXACT_POSTGRES_CONTAINER = "remove_exact_postgres_container"
+    REMOVE_EXACT_QDRANT_CONTAINER = "remove_exact_qdrant_container"
+    STOP_EXACT_STORES = "stop_exact_stores"
+    DROP_EMPTY_CANONICAL_DATABASE_AND_ROLES = (
+        "drop_empty_canonical_database_and_roles"
+    )
+    ROLLBACK_EMPTY_FOUNDATION_0001 = "rollback_empty_foundation_0001"
+    ROLLBACK_OWNER_CLAIM_DETAIL_0003 = "rollback_owner_claim_detail_0003"
+    ROLLBACK_EMPTY_PILOT_MARKER_0004 = "rollback_empty_pilot_marker_0004"
+    REMOVE_EXACT_EMPTY_QDRANT_COLLECTION = (
+        "remove_exact_empty_qdrant_collection"
+    )
+    REMOVE_EXACT_QDRANT_ALIAS = "remove_exact_qdrant_alias"
+    DISABLE_AND_REMOVE_STORES_SUPERVISOR = (
+        "disable_and_remove_stores_supervisor"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class HostResourceTarget:
+    resource_kind: str
+    resource_name: str
+    resource_labels_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.resource_kind not in _RESOURCE_KINDS
+            or _SAFE_RESOURCE_RE.fullmatch(self.resource_name) is None
+            or "//" in self.resource_name
+            or any(part in {".", ".."} for part in self.resource_name.split("/"))
+            or (
+                self.resource_kind in {"container", "network", "volume"}
+                and (
+                    self.resource_labels_sha256 is None
+                    or _HASH_RE.fullmatch(self.resource_labels_sha256) is None
+                )
+            )
+            or (
+                self.resource_kind not in {"container", "network", "volume"}
+                and self.resource_labels_sha256 is not None
+            )
+        ):
+            raise HostBoundaryError("typed_host_resource_target_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class HostResourceIdentityReceipt:
+    resource_kind: str
+    resource_name: str
+    resource_id: str
+    ownership_sha256: str
+    resource_labels_sha256: str | None = None
+    image_id: str | None = None
+    image_repo_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        HostResourceTarget(
+            self.resource_kind,
+            self.resource_name,
+            self.resource_labels_sha256,
+        )
+        if (
+            _SAFE_RESOURCE_RE.fullmatch(self.resource_id) is None
+            or "//" in self.resource_id
+            or any(part in {".", ".."} for part in self.resource_id.split("/"))
+            or _HASH_RE.fullmatch(self.ownership_sha256) is None
+            or (
+                self.resource_kind in {"container", "network", "volume"}
+                and (
+                    self.resource_labels_sha256 is None
+                    or _HASH_RE.fullmatch(self.resource_labels_sha256) is None
+                )
+            )
+            or (
+                self.resource_kind not in {"container", "network", "volume"}
+                and self.resource_labels_sha256 is not None
+            )
+        ):
+            raise HostBoundaryError("typed_host_resource_identity_invalid")
+        if self.resource_kind == "container":
+            if (
+                _CONTAINER_ID_RE.fullmatch(self.resource_id) is None
+                or self.image_id is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", self.image_id) is None
+                or self.image_repo_digest is None
+                or re.fullmatch(
+                    r"[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}",
+                    self.image_repo_digest,
+                )
+                is None
+            ):
+                raise HostBoundaryError("typed_host_container_identity_invalid")
+        elif self.image_id is not None or self.image_repo_digest is not None:
+            raise HostBoundaryError("typed_host_resource_image_identity_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class HostApplyResult:
+    identities: tuple[HostResourceIdentityReceipt, ...]
+    postflight_receipt_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.identities) is not tuple
+            or any(
+                type(identity) is not HostResourceIdentityReceipt
+                for identity in self.identities
+            )
+            or len(
+                {
+                    (identity.resource_kind, identity.resource_name)
+                    for identity in self.identities
+                }
+            )
+            != len(self.identities)
+            or (
+                self.postflight_receipt_sha256 is not None
+                and _HASH_RE.fullmatch(self.postflight_receipt_sha256) is None
+            )
+        ):
+            raise HostBoundaryError("typed_host_apply_result_invalid")
+@dataclass(frozen=True, slots=True)
+class HostOperationRequest:
+    """Attempt-bound typed request; contains no argv or endpoint."""
+
+    profile: HostOperationProfile
+    step_id: str
+    execution_id: str
+    attempt_id: str
+    execution_binding_sha256: str
+    package_manifest_sha256: str
+    resolved_store_spec_sha256: str
+    controller_runtime_receipt_sha256: str
+    controller_runtime_root: str
+    controller_runtime_tree_sha256: str
+    controller_release_root: str
+    controller_release_tree_sha256: str
+    controller_release_package_manifest_path: str
+    controller_runtime_interpreter_path: str
+    controller_runtime_interpreter_sha256: str
+    controller_runtime_inventory_path: str
+    controller_runtime_inventory_sha256: str
+    controller_requirements_lock_sha256: str
+    supervisor_launcher_path: str
+    supervisor_launcher_sha256: str
+    resource_targets: tuple[HostResourceTarget, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.profile) is not HostOperationProfile
+            or not self.step_id.startswith("I")
+            or _HASH_RE.fullmatch(self.execution_id) is None
+            or _ATTEMPT_RE.fullmatch(self.attempt_id) is None
+            or _HASH_RE.fullmatch(self.execution_binding_sha256) is None
+            or _HASH_RE.fullmatch(self.package_manifest_sha256) is None
+            or any(
+                _HASH_RE.fullmatch(value) is None
+                for value in (
+                    self.resolved_store_spec_sha256,
+                    self.controller_runtime_receipt_sha256,
+                    self.controller_runtime_tree_sha256,
+                    self.controller_release_tree_sha256,
+                    self.controller_runtime_interpreter_sha256,
+                    self.controller_runtime_inventory_sha256,
+                    self.controller_requirements_lock_sha256,
+                    self.supervisor_launcher_sha256,
+                )
+            )
+            or self.controller_runtime_root
+            != (
+                "/opt/governed-memory-controller/runtimes/"
+                + self.controller_runtime_receipt_sha256
+            )
+            or self.controller_runtime_interpreter_path
+            != self.controller_runtime_root + "/bin/python"
+            or self.controller_runtime_inventory_path
+            != self.controller_runtime_root + "/controller-distributions.json"
+            or self.controller_release_root
+            != (
+                "/opt/governed-memory-controller/releases/"
+                + self.package_manifest_sha256
+            )
+            or self.controller_release_package_manifest_path
+            != self.controller_release_root
+            + "/ops/governed_memory/installation/current/package_manifest.json"
+            or self.supervisor_launcher_path
+            != self.controller_release_root
+            + "/tools/governed_memory_install/store_supervisor_launcher.py"
+            or type(self.resource_targets) is not tuple
+            or any(type(target) is not HostResourceTarget for target in self.resource_targets)
+            or len(set(self.resource_targets)) != len(self.resource_targets)
+        ):
+            raise HostBoundaryError("typed_host_operation_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class HostObservation:
+    """One revision-stamped observation consumed by a matching mutation."""
+
+    state: str
+    revision_sha256: str
+    ownership_sha256: str
+    identities: tuple[HostResourceIdentityReceipt, ...] = ()
+    postflight_receipt_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state not in {"before", "after", "recoverable", "drift"} or any(
+            _HASH_RE.fullmatch(value) is None
+            for value in (self.revision_sha256, self.ownership_sha256)
+        ) or type(self.identities) is not tuple or any(
+            type(identity) is not HostResourceIdentityReceipt
+            for identity in self.identities
+        ) or (
+            self.postflight_receipt_sha256 is not None
+            and _HASH_RE.fullmatch(self.postflight_receipt_sha256) is None
+        ):
+            raise HostBoundaryError("typed_host_observation_invalid")
+
+
+class TypedHostOperations(Protocol):
+    """Closed adapter boundary used by the inactive install backend."""
+
+    def observe(self, request: HostOperationRequest) -> HostObservation: ...
+
+    def apply(
+        self, request: HostOperationRequest, expected: HostObservation
+    ) -> HostApplyResult: ...
+
+    def compensate(
+        self, request: HostOperationRequest, expected: HostObservation
+    ) -> HostApplyResult: ...
 
 
 def validate_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -195,6 +482,8 @@ class CommandRunner:
             raise
         finally:
             selector.close()
+            for stream in (process.stdout, process.stderr):
+                stream.close()
 
         try:
             stdout = bytes(streams["stdout"]).decode("utf-8", errors="strict")
@@ -234,7 +523,7 @@ class CommandRunner:
             )
             stop = (
                 len(argv) == 4
-                and argv[1:3] == ("stop", "--time=30")
+                and argv[1:3] == ("stop", "--time=10")
                 and _CONTAINER_ID_RE.fullmatch(argv[3]) is not None
             )
             if not (inspect or start or stop):

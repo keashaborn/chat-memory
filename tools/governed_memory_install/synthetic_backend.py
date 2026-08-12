@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Sealed, in-memory backend for the Phase 8B disposable proof.
+"""Sealed, in-memory backend for the dormant-store installation disposable proof.
 
 This backend has no host adapter, command runner, socket, environment, secret,
 installation, or activation surface.  It models one deterministic fault at a
-time so the Phase 8B controller algorithm can be exercised without claiming a
+time so the dormant-store installation controller algorithm can be exercised without claiming a
 process-crash, durable-recovery, composite-fault, or live-system proof.
 """
 
@@ -23,7 +23,7 @@ from .controller import (
 
 
 SYNTHETIC_BACKEND_SCHEMA_VERSION: Final = (
-    "governed-memory-phase8b-sealed-synthetic-backend-v1"
+    "governed-memory-dormant_store_install-sealed-synthetic-backend-v1"
 )
 
 FAULT_NONE: Final = "none"

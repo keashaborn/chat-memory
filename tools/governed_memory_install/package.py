@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Offline verifier for the current inactive Phase 8B execution package.
+"""Offline verifier for the current inactive dormant-store installation execution package.
 
 The verifier reads repository files only. It has no command runner, live
 executor, network client, secret reader, installation, rollback, or activation
@@ -22,24 +22,24 @@ from typing import Final
 
 ROOT: Final = Path(__file__).resolve().parents[2]
 INSTALLATION: Final = ROOT / "ops" / "governed_memory" / "installation"
-PHASE8B: Final = INSTALLATION / "phase8b"
-MANIFEST: Path = PHASE8B / "package_manifest.json"
-CONTRACT: Final = PHASE8B / "contract.json"
-PLAN: Final = PHASE8B / "controller_plan.json"
+CURRENT: Final = INSTALLATION / "current"
+MANIFEST: Path = CURRENT / "package_manifest.json"
+CONTRACT: Final = CURRENT / "contract.json"
+PLAN: Final = CURRENT / "controller_plan.json"
 HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 MANIFEST_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/package_manifest.json"
+    "ops/governed_memory/installation/current/package_manifest.json"
 )
-CONTRACT_RELATIVE: Final = "ops/governed_memory/installation/phase8b/contract.json"
+CONTRACT_RELATIVE: Final = "ops/governed_memory/installation/current/contract.json"
 PLAN_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/controller_plan.json"
+    "ops/governed_memory/installation/current/controller_plan.json"
 )
 MIGRATION_MANIFEST_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/migration_manifest.json"
+    "ops/governed_memory/installation/current/migration_manifest.json"
 )
 MIGRATION_BINDINGS_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json"
+    "ops/governed_memory/installation/current/postgres/migration_bindings.json"
 )
 MIGRATION_VERIFIER_RELATIVE: Final = (
     "tools/governed_memory_validation/verify_store_migration_manifest.py"
@@ -48,69 +48,104 @@ CONTROLLER_MODEL_RELATIVE: Final = (
     "tools/governed_memory_install/controller.py"
 )
 EXECUTION_CONTRACT_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/execution_contract.json"
+    "ops/governed_memory/installation/current/execution_contract.json"
 )
 CONTROLLER_RUNTIME_CONTRACT_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/controller_runtime_contract.json"
+    "ops/governed_memory/installation/current/controller_runtime_contract.json"
 )
 PROOF_CONTRACT_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/disposable_proof_contract.json"
+    "ops/governed_memory/installation/current/disposable_proof_contract.json"
 )
 PROOF_SCHEMA_RELATIVE: Final = (
-    "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json"
+    "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json"
+)
+INSTALL_RECEIPT_SCHEMA_RELATIVE: Final = (
+    "ops/governed_memory/installation/current/install_receipt.schema.json"
+)
+EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
+    "ops/governed_memory/installation/current/empty_rollback_receipt.schema.json"
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "a6b145e5c6e9f53aabe180d8ca78ee499ed97353c1d9d69677873ae802fa8455"
+    "684dba3b7953f3d62143529e0c7ad507cc4f373be688328dcbb493c8c197b822"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "65f9be1d974bfeb6f047b6c33c3fd5a2c4df1a7eeec3df274e75488168de75e2"
+    "e2ece3b54477a63eb0ecc42f6aab0f4ae99c18f669bd23ea32576d109207de86"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
-    "41215dd2676c8b8cee8e62ff7c83af83ddadaec4dbe72aae5001635cf231353e"
+    "e3f5f1e121f8ac5365d785abb25458da2050c96263e9d4c7f4ad4e316e2f0254"
 )
 EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
-    "601288e31fd1b485e57ef5fd4676f9477942db0c3aa3c911de1d002361c49243"
+    "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "b092c15dbd713b74226ca08fdd98071e88808141e359960e9e7f1705bca84165"
+    "e0cd2c6eda4909ef2b09f104223687650507eb4a4ecd30e75963f7a4d48e9216"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
-    "f12c9e52bfd4adacaff9715ea7b9a3b097286df5bcc613344c47cb80ff84a315"
+    "ecf8fc1276dbf19c8ed8c3f259eac14660ce82885e9f8c00f6c4e7213e16fd2d"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
-    "48b2b6ebd9edf7ed8d60bc52df5df363b583da52c33567b7eaf08db8c7ff4a3f"
+    "147bb8fe4893ea5492d3298c1f48029c174c02aade04ccb36b7468c5c832292a"
 )
 EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256: Final = (
-    "3dbc0e9a3e927ec3a17734fae67f02dd0d1567c0c4220f3ae61954a4ee301d67"
+    "5fa4b98974b7c1652c931abd7b630bbca11fd92fde15ee4d099ae6132f3dfe1d"
+)
+EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
+    "6a76bcf802ba72257bb5fa524010de5182f85c6dbee2b490d46f92faf159a395"
+)
+EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
+    "fd245777b1d45b944aa2ac19fcdb2284faf66aa99a2d045698bb7098ce1ddcd6"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "d5c3a75839e4d0443a46a760f892d3fe277b375644d42826ad6aeba880e45e29"
+    "6cc1b361363b0ef2299310b236bd4cef62a792ff211b43349cfa41fbd59ddd9b"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
-    "0068a7b9aca51c35185bad33607574c3cc108c0f3b384aa1742e09f4329102cb"
+    "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
 )
 EXPECTED_CONTROLLER_STEP_IDS: Final = (
     "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
     "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
     "I03_VERIFY_LIVE_PREFLIGHT",
-    "I04_STAGE_IMMUTABLE_CONTROLLER_RELEASE",
-    "I05_GENERATE_FRESH_STORE_SECRETS",
-    "I06_CREATE_EXACT_NETWORK",
-    "I07_CREATE_EXACT_POSTGRES_VOLUME",
-    "I08_CREATE_EXACT_QDRANT_VOLUME",
-    "I09_CREATE_EXACT_POSTGRES_CONTAINER",
-    "I10_CREATE_EXACT_QDRANT_CONTAINER",
-    "I11_START_AND_VERIFY_EMPTY_STORES",
-    "I12_BOOTSTRAP_CANONICAL_DATABASE",
-    "I13_APPLY_FOUNDATION_0001",
-    "I14_APPLY_OWNER_CLAIM_DETAIL_0003",
-    "I15_APPLY_PILOT_MARKER_0004",
-    "I16_CREATE_EMPTY_QDRANT_COLLECTION",
-    "I17_CREATE_QDRANT_ALIAS",
-    "I18_SEAL_RESOURCE_IDENTITY_LEDGER",
-    "I19_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
-    "I20_COLD_RESTART_AND_SEAL_INACTIVE_POSTFLIGHT",
+    "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
+    "I05_CREATE_EXACT_NETWORK",
+    "I06_CREATE_EXACT_POSTGRES_VOLUME",
+    "I07_CREATE_EXACT_QDRANT_VOLUME",
+    "I08_CREATE_EXACT_POSTGRES_CONTAINER",
+    "I09_CREATE_EXACT_QDRANT_CONTAINER",
+    "I10_START_AND_VERIFY_EMPTY_STORES",
+    "I11_BOOTSTRAP_CANONICAL_DATABASE",
+    "I12_APPLY_FOUNDATION_0001",
+    "I13_APPLY_OWNER_CLAIM_DETAIL_0003",
+    "I14_APPLY_PILOT_MARKER_0004",
+    "I15_CREATE_EMPTY_QDRANT_COLLECTION",
+    "I16_CREATE_QDRANT_ALIAS",
+    "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
+    "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
+    "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT",
+)
+EXPECTED_EMPTY_ROLLBACK_STEP_IDS: Final = (
+    "R01_REVERIFY_GLOBAL_LOCK",
+    "R02_VERIFY_CLAIMED_ROLLBACK_AUTHORITY",
+    "R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER",
+    "R04_VERIFY_EMPTY_ELIGIBILITY",
+    "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+    "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE",
+    "R07_REMOVE_EXACT_QDRANT_ALIAS",
+    "R08_REMOVE_EXACT_EMPTY_QDRANT_COLLECTION",
+    "R09_ROLLBACK_EMPTY_PILOT_MARKER_0004",
+    "R10_ROLLBACK_OWNER_CLAIM_DETAIL_0003",
+    "R11_ROLLBACK_EMPTY_FOUNDATION_0001",
+    "R12_DROP_EMPTY_CANONICAL_DATABASE_AND_ROLES",
+    "R13_STOP_EXACT_STORES",
+    "R14_REMOVE_EXACT_QDRANT_CONTAINER",
+    "R15_REMOVE_EXACT_POSTGRES_CONTAINER",
+    "R16_REMOVE_EXACT_EMPTY_QDRANT_VOLUME",
+    "R17_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME",
+    "R18_REMOVE_EXACT_UNUSED_NETWORK",
+    "R19_REMOVE_FRESH_QDRANT_STORE_SECRET",
+    "R20_REMOVE_FRESH_POSTGRES_STORE_SECRET",
+    "R21_REMOVE_RESOLVED_STORE_SPEC",
+    "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT",
 )
 
 EXPECTED_CONTRACT_KEYS: Final = frozenset(
@@ -131,6 +166,7 @@ EXPECTED_CONTRACT_KEYS: Final = frozenset(
         "identity_policy",
         "supervisor_policy",
         "proof_harness_policy",
+        "receipt_policy",
         "excluded_components",
         "remaining_blockers",
     }
@@ -145,34 +181,50 @@ EXPECTED_PLAN_KEYS: Final = frozenset(
         "execution_invariants",
         "install_steps",
         "same_attempt_compensation_order",
+        "empty_rollback_steps",
         "later_rollback",
         "live_execution",
         "synthetic_proof",
     }
 )
 EXPECTED_LIVE_EXECUTION: Final = {
-    "installation_composition_callable_packaged": False,
-    "live_install_entrypoint_packaged": False,
-    "generic_docker_host_runner_primitive_packaged": True,
+    "claim_bound_install_controller_composition_packaged": True,
+    "non_cli_install_entrypoint_packaged": True,
+    "claim_bound_empty_rollback_controller_composition_packaged": True,
+    "non_cli_empty_rollback_entrypoint_packaged": True,
+    "operation_specific_install_and_empty_rollback_receipts_packaged": True,
+    "install_controller_emits_canonical_receipt": True,
+    "empty_rollback_controller_emits_canonical_receipt": True,
+    "typed_operation_specific_boundary_packaged": True,
+    "generic_store_mutation_argv_surface_packaged": False,
+    "concrete_install_store_effect_adapters_packaged": False,
+    "concrete_empty_rollback_store_effect_adapters_packaged": False,
+    "activation_entrypoint_packaged": False,
+    "bounded_image_inspect_runner_primitive_packaged": True,
     "local_image_inspect_adapter_packaged": True,
-    "claim_bound_installation_runner_composition_packaged": False,
-    "claim_bound_installation_store_effect_adapters_packaged": False,
-    "live_rollback_entrypoint_packaged": False,
-    "live_activation_entrypoint_packaged": False,
-    "claim_bound_installation_typed_command_boundary_packaged": False,
+    "controller_runtime_verification_capability_packaged": True,
+    "full_controller_release_tree_verification_packaged": True,
+    "exact_locked_controller_distribution_set_verification_packaged": True,
+    "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
+    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+    "controller_release_and_runtime_require_separate_future_build_and_install_authority": True,
+    "supervisor_launcher_source_packaged": True,
+    "controller_runtime_built_or_installed": False,
+    "controller_release_staged": False,
+    "stores_install_owns_or_removes_controller_substrate": False,
     "stores_supervisor_cli_packaged": True,
     "stores_supervisor_cli_docker_surface": [
         "container_inspect",
         "container_start",
         "container_stop",
     ],
-    "stores_supervisor_is_installer": False,
+    "stores_supervisor_is_installer_or_rollback_adapter": False,
     "stores_supervisor_requires_preexisting_exact_ledger_container_ids": True,
 }
 EXPECTED_MIGRATION_ARTIFACTS: Final = frozenset(
     {
         MIGRATION_BINDINGS_RELATIVE,
-        "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
+        "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "governed-memory-migrations/predicate_catalog.json",
         "governed-memory-migrations/0001_foundation/forward.pgsql",
         "governed-memory-migrations/0001_foundation/rollback.pgsql",
@@ -192,15 +244,17 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
         "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
         "governed-memory-migrations/predicate_catalog.json",
-        "ops/governed_memory/installation/phase8b/contract.json",
-        "ops/governed_memory/installation/phase8b/controller_plan.json",
-        "ops/governed_memory/installation/phase8b/controller_runtime_contract.json",
-        "ops/governed_memory/installation/phase8b/disposable_proof_contract.json",
-        "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
-        "ops/governed_memory/installation/phase8b/execution_contract.json",
-        "ops/governed_memory/installation/phase8b/migration_manifest.json",
-        "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json",
-        "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
+        "ops/governed_memory/installation/current/contract.json",
+        "ops/governed_memory/installation/current/controller_plan.json",
+        "ops/governed_memory/installation/current/controller_runtime_contract.json",
+        "ops/governed_memory/installation/current/disposable_proof_contract.json",
+        "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json",
+        "ops/governed_memory/installation/current/install_receipt.schema.json",
+        "ops/governed_memory/installation/current/empty_rollback_receipt.schema.json",
+        "ops/governed_memory/installation/current/execution_contract.json",
+        "ops/governed_memory/installation/current/migration_manifest.json",
+        "ops/governed_memory/installation/current/postgres/migration_bindings.json",
+        "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
         "ops/governed_memory/installation/store_spec.json",
@@ -212,6 +266,7 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/authority.py",
         "tools/governed_memory_install/authority_state.py",
         "tools/governed_memory_install/controller.py",
+        "tools/governed_memory_install/controller_runtime.py",
         "tools/governed_memory_install/disposable_proof_harness.py",
         "tools/governed_memory_install/journal.py",
         "tools/governed_memory_install/execution_authority.py",
@@ -219,16 +274,40 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/execution_lock.py",
         "tools/governed_memory_install/host_boundary.py",
         "tools/governed_memory_install/image_preflight.py",
+        "tools/governed_memory_install/install_backend.py",
+        "tools/governed_memory_install/install_entrypoint.py",
         "tools/governed_memory_install/linux_plan.py",
         "tools/governed_memory_install/package.py",
+        "tools/governed_memory_install/package_capability.py",
+        "tools/governed_memory_install/receipts.py",
         "tools/governed_memory_install/resource_identity.py",
+        "tools/governed_memory_install/rollback.py",
+        "tools/governed_memory_install/rollback_authority.py",
+        "tools/governed_memory_install/rollback_entrypoint.py",
+        "tools/governed_memory_install/rollback_journal.py",
         "tools/governed_memory_install/secure_file.py",
         "tools/governed_memory_install/store_supervisor.py",
+        "tools/governed_memory_install/store_readiness.py",
+        "tools/governed_memory_install/store_supervisor_launcher.py",
         "tools/governed_memory_install/synthetic_backend.py",
-        "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
-        "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
+        "tools/governed_memory_validation/generate_installation_package_manifest.py",
+        "tools/governed_memory_validation/run_installation_synthetic_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
     }
+)
+
+EXPECTED_INSTALLATION_DIRECTORY_FILES: Final = frozenset(
+    {MANIFEST_RELATIVE}
+    | {
+        relative
+        for relative in EXPECTED_ARTIFACTS
+        if relative.startswith("ops/governed_memory/installation/")
+    }
+)
+EXPECTED_INSTALL_TOOL_DIRECTORY_FILES: Final = frozenset(
+    relative
+    for relative in EXPECTED_ARTIFACTS
+    if relative.startswith("tools/governed_memory_install/")
 )
 
 FORBIDDEN_ARTIFACT_MARKERS: Final = (
@@ -259,7 +338,7 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise PackageError("phase8b_package_duplicate_json_key")
+            raise PackageError("dormant_store_install_package_duplicate_json_key")
         result[key] = value
     return result
 
@@ -270,7 +349,7 @@ def _reject_nonfinite(value: str) -> None:
 
 def _relative_parts(relative: object) -> tuple[str, ...]:
     if type(relative) is not str or not relative or "\\" in relative:
-        raise PackageError("phase8b_package_artifact_path_invalid")
+        raise PackageError("dormant_store_install_package_artifact_path_invalid")
     pure = PurePosixPath(relative)
     parts = pure.parts
     if (
@@ -279,14 +358,91 @@ def _relative_parts(relative: object) -> tuple[str, ...]:
         or str(pure) != relative
         or any(part in {"", ".", ".."} for part in parts)
     ):
-        raise PackageError("phase8b_package_artifact_path_invalid")
+        raise PackageError("dormant_store_install_package_artifact_path_invalid")
     return parts
+
+
+def _repository_regular_file_inventory(relative_root: str) -> frozenset[str]:
+    """Return a no-symlink, regular-file-only inventory below one directory."""
+
+    parts = _relative_parts(relative_root)
+    directory_flags = os.O_RDONLY | os.O_CLOEXEC | _nofollow()
+    directory_flags |= getattr(os, "O_DIRECTORY", 0)
+    descriptors: list[int] = []
+    observed: set[str] = set()
+
+    def visit(directory_fd: int, prefix: PurePosixPath) -> None:
+        try:
+            entries = sorted(os.scandir(directory_fd), key=lambda entry: entry.name)
+        except OSError as error:
+            raise PackageError(
+                "dormant_store_install_package_directory_inventory_invalid"
+            ) from error
+        for entry in entries:
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError as error:
+                raise PackageError(
+                    "dormant_store_install_package_directory_inventory_invalid"
+                ) from error
+            member = prefix / entry.name
+            if stat.S_ISREG(info.st_mode):
+                observed.add(member.as_posix())
+                continue
+            if not stat.S_ISDIR(info.st_mode):
+                raise PackageError(
+                    "dormant_store_install_package_directory_inventory_invalid"
+                )
+            try:
+                child_fd = os.open(
+                    entry.name,
+                    directory_flags,
+                    dir_fd=directory_fd,
+                )
+            except OSError as error:
+                raise PackageError(
+                    "dormant_store_install_package_directory_inventory_invalid"
+                ) from error
+            try:
+                visit(child_fd, member)
+            finally:
+                os.close(child_fd)
+
+    try:
+        directory_fd = os.open(ROOT, directory_flags)
+        descriptors.append(directory_fd)
+        for part in parts:
+            directory_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+            descriptors.append(directory_fd)
+        visit(directory_fd, PurePosixPath(relative_root))
+        return frozenset(observed)
+    except OSError as error:
+        raise PackageError(
+            "dormant_store_install_package_directory_inventory_invalid"
+        ) from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _verify_current_directory_closure() -> None:
+    if (
+        _repository_regular_file_inventory(
+            "ops/governed_memory/installation"
+        )
+        != EXPECTED_INSTALLATION_DIRECTORY_FILES
+        or _repository_regular_file_inventory("tools/governed_memory_install")
+        != EXPECTED_INSTALL_TOOL_DIRECTORY_FILES
+    ):
+        raise PackageError(
+            "dormant_store_install_package_directory_closure_invalid"
+        )
 
 
 def _nofollow() -> int:
     flag = getattr(os, "O_NOFOLLOW", 0)
     if flag == 0:
-        raise PackageError("phase8b_package_nofollow_unavailable")
+        raise PackageError("dormant_store_install_package_nofollow_unavailable")
     return flag
 
 
@@ -308,7 +464,7 @@ def _read_repository_file(relative: str) -> bytes:
         descriptors.append(file_fd)
         info = os.fstat(file_fd)
         if not stat.S_ISREG(info.st_mode):
-            raise PackageError("phase8b_package_artifact_path_invalid")
+            raise PackageError("dormant_store_install_package_artifact_path_invalid")
         chunks: list[bytes] = []
         while True:
             block = os.read(file_fd, 1024 * 1024)
@@ -317,7 +473,7 @@ def _read_repository_file(relative: str) -> bytes:
             chunks.append(block)
         return b"".join(chunks)
     except OSError as error:
-        raise PackageError("phase8b_package_artifact_path_invalid") from error
+        raise PackageError("dormant_store_install_package_artifact_path_invalid") from error
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
@@ -333,10 +489,10 @@ def _read_path(path: Path) -> bytes:
         try:
             descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | _nofollow())
         except OSError as error:
-            raise PackageError("phase8b_package_document_path_invalid") from error
+            raise PackageError("dormant_store_install_package_document_path_invalid") from error
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise PackageError("phase8b_package_document_path_invalid")
+                raise PackageError("dormant_store_install_package_document_path_invalid")
             chunks: list[bytes] = []
             while True:
                 block = os.read(descriptor, 1024 * 1024)
@@ -361,9 +517,9 @@ def _parse_json(raw: bytes) -> dict[str, object]:
         json.JSONDecodeError,
         _NonFiniteJsonValue,
     ) as error:
-        raise PackageError("phase8b_package_json_invalid") from error
+        raise PackageError("dormant_store_install_package_json_invalid") from error
     if type(value) is not dict:
-        raise PackageError("phase8b_package_json_root_invalid")
+        raise PackageError("dormant_store_install_package_json_root_invalid")
     return value
 
 
@@ -374,7 +530,7 @@ def _load(path: Path) -> dict[str, object]:
 def _load_verified_json(relative: str, expected_sha256: str) -> dict[str, object]:
     raw = _read_repository_file(relative)
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        raise PackageError("phase8b_package_member_changed_after_hash")
+        raise PackageError("dormant_store_install_package_member_changed_after_hash")
     return _parse_json(raw)
 
 
@@ -388,7 +544,7 @@ def _canonical_sha256(value: object) -> str:
             allow_nan=False,
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError) as error:
-        raise PackageError("phase8b_package_json_invalid") from error
+        raise PackageError("dormant_store_install_package_json_invalid") from error
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -398,35 +554,36 @@ def artifact_sha256(relative: str) -> str:
 
 def _verify_contract(contract: dict[str, object]) -> None:
     if set(contract) != EXPECTED_CONTRACT_KEYS:
-        raise PackageError("phase8b_contract_shape_invalid")
+        raise PackageError("dormant_store_install_contract_shape_invalid")
     if _canonical_sha256(contract) != EXPECTED_CONTRACT_CANONICAL_SHA256:
-        raise PackageError("phase8b_contract_semantics_invalid")
+        raise PackageError("dormant_store_install_contract_semantics_invalid")
     if (
         contract.get("schema_version")
-        != "governed-memory-phase8b-inactive-execution-contract-v2"
+        != "governed-memory-dormant-store-install-inactive-execution-contract-v3"
         or contract.get("state")
-        != (
-            "phase8b_inactive_execution_and_synthetic_proof_harness_packaged_"
-            "proof_pending_not_staged_not_installed_not_authorized"
-        )
+        != "repository-only-dormant-install-and-empty-rollback-controllers-packaged-not-installed-not-activated"
         or contract.get("server") != "seebx"
     ):
-        raise PackageError("phase8b_contract_identity_invalid")
+        raise PackageError("dormant_store_install_contract_identity_invalid")
     scope = contract.get("scope")
-    if type(scope) is not dict or any(
-        scope.get(key) is not False
-        for key in (
-            "current_phase_executes_live_steps",
-            "current_phase_promotes_disposable_proof_receipt",
-            "current_phase_stages_images",
-            "current_phase_reads_writes_or_generates_secrets",
-            "current_phase_installs_or_activates",
-            "current_approval_is_future_install_authority",
-            "current_approval_is_future_rollback_authority",
-            "current_approval_is_future_live_proof_authority",
+    if (
+        type(scope) is not dict
+        or scope.get("current_phase_repository_only") is not True
+        or any(
+            scope.get(key) is not False
+            for key in (
+                "current_phase_executes_live_steps",
+                "current_phase_promotes_disposable_proof_receipt",
+                "current_phase_stages_images",
+                "current_phase_reads_writes_or_generates_secrets",
+                "current_phase_installs_or_activates",
+                "current_approval_is_future_install_authority",
+                "current_approval_is_future_rollback_authority",
+                "current_approval_is_future_live_proof_authority",
+            )
         )
     ):
-        raise PackageError("phase8b_contract_authority_boundary_invalid")
+        raise PackageError("dormant_store_install_contract_authority_boundary_invalid")
     migration = contract.get("migration_policy")
     if (
         type(migration) is not dict
@@ -435,77 +592,226 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or migration.get("source_postgresql_reads") != 0
         or migration.get("source_postgresql_writes") != 0
     ):
-        raise PackageError("phase8b_contract_migration_boundary_invalid")
+        raise PackageError("dormant_store_install_contract_migration_boundary_invalid")
     secret = contract.get("secret_policy")
     if (
         type(secret) is not dict
         or secret.get("legacy_pilot_env_may_be_read_stat_hashed_renamed_or_deleted")
         is not False
     ):
-        raise PackageError("phase8b_contract_secret_boundary_invalid")
+        raise PackageError("dormant_store_install_contract_secret_boundary_invalid")
     authority = contract.get("authority_policy")
     recovery = contract.get("recovery_policy")
+    identity = contract.get("identity_policy")
+    supervisor = contract.get("supervisor_policy")
+    receipts = contract.get("receipt_policy")
     blockers = contract.get("remaining_blockers")
     if (
         type(authority) is not dict
-        or authority.get("opaque_verified_package_capability_required") is not False
+        or authority.get("opaque_verified_package_capability_required") is not True
+        or authority.get(
+            "opaque_verified_controller_runtime_capability_required"
+        )
+        is not True
+        or authority.get(
+            "signed_scope_binds_controller_runtime_receipt_sha256"
+        )
+        is not True
+        or authority.get(
+            "empty_rollback_signed_scope_binds_controller_runtime_receipt_sha256"
+        )
+        is not True
         or authority.get("opaque_claimed_execution_binding_required") is not True
+        or authority.get("exact_controller_process_is_trusted") is not True
+        or authority.get("hostile_same_process_capability_forgery_resisted")
+        is not False
         or type(recovery) is not dict
         or recovery.get("same_open_instance_inode_and_directory_replacement_refused")
         is not True
         or recovery.get(
             "cross_process_same_content_inode_or_directory_replacement_refused"
         )
-        is not False
+        is not True
+        or recovery.get("one_final_partial_line_beyond_exact_anchor_may_be_truncated")
+        is not True
+        or recovery.get(
+            "install_receipt_replay_requires_fresh_terminal_store_readiness_probe"
+        )
+        is not True
+        or recovery.get(
+            "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger"
+        )
+        is not True
+        or recovery.get(
+            "completed_empty_rollback_replay_reproves_exact_resource_absence"
+        )
+        is not True
+        or recovery.get(
+            "empty_rollback_writer_fence_held_from_post_quiescence_through_receipt"
+        )
+        is not True
+        or recovery.get(
+            "destructive_rollback_steps_apply_only_if_still_empty_under_fence"
+        )
+        is not True
+        or recovery.get(
+            "retained_audit_artifact_hashes_bound_to_rollback_receipt"
+        )
+        is not True
+        or recovery.get(
+            "empty_rollback_claim_journal_requests_observations_writer_fence_and_receipt_bind_verified_runtime_and_full_release_tree"
+        )
+        is not True
+        or type(identity) is not dict
+        or identity.get("resource_identity_ledger_requires_global_lock") is not True
+        or identity.get("resource_identity_ledger_has_durable_compare_and_set_anchor")
+        is not True
+        or identity.get(
+            "resource_identity_ledger_has_cross_process_filesystem_identity_guard"
+        )
+        is not True
+        or identity.get("rollback_targets_are_derived_from_verified_ledger_records")
+        is not True
+        or identity.get(
+            "empty_rollback_requires_opaque_install_receipt_and_ledger_capability"
+        )
+        is not True
+        or identity.get(
+            "resolved_store_spec_binds_execution_authority_and_exact_docker_labels"
+        )
+        is not True
+        or identity.get(
+            "resource_ledger_separates_ownership_and_resource_label_hashes"
+        )
+        is not True
+        or type(supervisor) is not dict
+        or supervisor.get(
+            "unit_template_requires_exact_package_manifest_runtime_receipt_and_execution_id_rendering"
+        )
+        is not True
+        or supervisor.get("unit_template_uses_isolated_runtime_python") is not True
+        or supervisor.get("unit_template_disables_user_site_and_bytecode_writes")
+        is not True
+        or supervisor.get(
+            "unit_template_uses_exact_release_launcher_not_module_search"
+        )
+        is not True
+        or type(receipts) is not dict
+        or receipts.get("install_receipt_schema_packaged") is not True
+        or receipts.get("empty_rollback_receipt_schema_packaged") is not True
+        or receipts.get("empty_rollback_controller_emits_canonical_receipt")
+        is not True
+        or receipts.get("install_controller_emits_canonical_receipt") is not True
+        or receipts.get(
+            "install_receipt_binds_fresh_terminal_canonical_store_readiness"
+        )
+        is not True
+        or receipts.get(
+            "install_receipt_binds_verified_controller_runtime_identity"
+        )
+        is not True
+        or receipts.get(
+            "empty_rollback_receipt_binds_verified_install_receipt_and_exact_ledger"
+        )
+        is not True
+        or receipts.get(
+            "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity"
+        )
+        is not True
         or type(blockers) is not list
         or (
-            "opaque_verified_package_capability_and_claim_boundary_not_implemented"
+            "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged"
             not in blockers
         )
-        or (
-            "cross_process_durable_file_identity_or_equivalent_seal_not_implemented"
-            not in blockers
-        )
+        or "canonical_install_receipt_emission_not_integrated" in blockers
     ):
-        raise PackageError("phase8b_contract_package_claim_boundary_invalid")
+        raise PackageError("dormant_store_install_contract_package_claim_boundary_invalid")
 
 
 def _verify_plan(plan: dict[str, object]) -> None:
     if set(plan) != EXPECTED_PLAN_KEYS:
-        raise PackageError("phase8b_plan_shape_invalid")
+        raise PackageError("dormant_store_install_plan_shape_invalid")
     if _canonical_sha256(plan) != EXPECTED_PLAN_CANONICAL_SHA256:
-        raise PackageError("phase8b_plan_semantics_invalid")
+        raise PackageError("dormant_store_install_plan_semantics_invalid")
     if (
         plan.get("schema_version")
-        != "governed-memory-phase8b-stores-controller-plan-v3"
+        != "governed-memory-dormant-store-install-stores-controller-plan-v4"
         or plan.get("state")
-        != (
-            "inactive_execution_components_and_synthetic_harness_packaged_"
-            "no_complete_live_executor_not_installed_not_authorized"
-        )
+        != "repository-only-claim-bound-install-and-empty-rollback-controller-compositions-packaged-not-installed-not-authorized"
         or plan.get("server") != "seebx"
     ):
-        raise PackageError("phase8b_plan_identity_invalid")
+        raise PackageError("dormant_store_install_plan_identity_invalid")
     steps = plan.get("install_steps")
     if type(steps) is not list or len(steps) != len(EXPECTED_CONTROLLER_STEP_IDS):
-        raise PackageError("phase8b_plan_step_count_invalid")
+        raise PackageError("dormant_store_install_plan_step_count_invalid")
     observed_ids: list[str] = []
     for expected_id, step in zip(EXPECTED_CONTROLLER_STEP_IDS, steps, strict=True):
         if type(step) is not dict or set(step) != {"id", "effect", "rollback"}:
-            raise PackageError("phase8b_plan_step_shape_invalid")
+            raise PackageError("dormant_store_install_plan_step_shape_invalid")
         if step.get("id") != expected_id:
-            raise PackageError("phase8b_plan_step_order_invalid")
+            raise PackageError("dormant_store_install_plan_step_order_invalid")
         if any(
             type(step.get(key)) is not str or not step.get(key)
             for key in ("effect", "rollback")
         ):
-            raise PackageError("phase8b_plan_step_shape_invalid")
+            raise PackageError("dormant_store_install_plan_step_shape_invalid")
         observed_ids.append(expected_id)
     if tuple(observed_ids) != EXPECTED_CONTROLLER_STEP_IDS:
-        raise PackageError("phase8b_plan_step_order_invalid")
+        raise PackageError("dormant_store_install_plan_step_order_invalid")
+    rollback_steps = plan.get("empty_rollback_steps")
+    if (
+        type(rollback_steps) is not list
+        or len(rollback_steps) != len(EXPECTED_EMPTY_ROLLBACK_STEP_IDS)
+    ):
+        raise PackageError("dormant_store_install_rollback_plan_step_count_invalid")
+    for expected_id, step in zip(
+        EXPECTED_EMPTY_ROLLBACK_STEP_IDS,
+        rollback_steps,
+        strict=True,
+    ):
+        if (
+            type(step) is not dict
+            or set(step) != {"id", "operation", "resource_key"}
+            or step.get("id") != expected_id
+            or type(step.get("operation")) is not str
+            or not step.get("operation")
+            or (
+                step.get("resource_key") is not None
+                and (
+                    type(step.get("resource_key")) is not str
+                    or not step.get("resource_key")
+                )
+            )
+        ):
+            raise PackageError("dormant_store_install_rollback_plan_step_invalid")
     live = plan.get("live_execution")
     if live != EXPECTED_LIVE_EXECUTION:
-        raise PackageError("phase8b_plan_live_surface_invalid")
+        raise PackageError("dormant_store_install_plan_live_surface_invalid")
+    invariants = plan.get("execution_invariants")
+    later_rollback = plan.get("later_rollback")
+    if (
+        type(invariants) is not dict
+        or invariants.get("prebootstrap_fresh_empty_readiness_probe_required")
+        is not True
+        or invariants.get(
+            "fresh_terminal_canonical_store_readiness_probe_required_for_install_receipt_and_replay"
+        )
+        is not True
+        or type(later_rollback) is not dict
+        or later_rollback.get(
+            "opaque_verified_install_receipt_and_ledger_capability_required"
+        )
+        is not True
+        or later_rollback.get(
+            "resume_revalidates_verified_install_receipt_and_ledger"
+        )
+        is not True
+        or later_rollback.get(
+            "completed_replay_reproves_exact_resource_absence"
+        )
+        is not True
+    ):
+        raise PackageError("dormant_store_install_plan_replay_boundary_invalid")
 
 
 def _verify_extension_contracts(observed: dict[str, str]) -> None:
@@ -525,41 +831,90 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         PROOF_SCHEMA_RELATIVE,
         observed[PROOF_SCHEMA_RELATIVE],
     )
+    install_receipt_schema = _load_verified_json(
+        INSTALL_RECEIPT_SCHEMA_RELATIVE,
+        observed[INSTALL_RECEIPT_SCHEMA_RELATIVE],
+    )
+    empty_rollback_receipt_schema = _load_verified_json(
+        EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE,
+        observed[EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE],
+    )
     exact = (
         (execution, EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256),
         (runtime, EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256),
         (proof, EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256),
         (proof_schema, EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256),
+        (
+            install_receipt_schema,
+            EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256,
+        ),
+        (
+            empty_rollback_receipt_schema,
+            EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256,
+        ),
     )
     if any(_canonical_sha256(value) != wanted for value, wanted in exact):
-        raise PackageError("phase8b_extension_contract_semantics_invalid")
+        raise PackageError("dormant_store_install_extension_contract_semantics_invalid")
 
     boundary = execution.get("execution_boundary")
     binding = execution.get("binding_policy")
     durability = execution.get("durability_policy")
     host = execution.get("host_action_policy")
+    receipt = execution.get("receipt_policy")
     proof_boundary = execution.get("proof_boundary")
+    dependency = runtime.get("dependency_policy")
     build = runtime.get("build_policy")
     entrypoint = runtime.get("entrypoint_policy")
     proof_execution = proof.get("execution_boundary")
     proof_claims = proof.get("claims")
     if (
         execution.get("schema_version")
-        != "governed-memory-phase8b-inactive-execution-package-v1"
+        != "governed-memory-dormant-store-install-inactive-execution-package-v2"
         or type(boundary) is not dict
-        or any(
-            boundary.get(key) is not False
-            for key in (
-                "approval_authorizes_execution",
-                "installation_executor_implemented",
-                "rollback_executor_implemented",
-                "activation_executor_implemented",
-                "live_entrypoint_callable_but_not_cli_exposed",
-            )
+        or boundary.get("approval_authorizes_execution") is not False
+        or boundary.get(
+            "claim_bound_install_controller_composition_callable_non_cli"
         )
+        is not True
+        or boundary.get(
+            "claim_bound_empty_rollback_controller_composition_callable_non_cli"
+        )
+        is not True
+        or boundary.get("concrete_live_install_store_effect_adapter_implemented")
+        is not False
+        or boundary.get(
+            "concrete_live_empty_rollback_store_effect_adapter_implemented"
+        )
+        is not False
+        or boundary.get("activation_executor_implemented") is not False
         or type(binding) is not dict
-        or binding.get("opaque_verified_package_capability_required") is not False
-        or binding.get("opaque_claimed_execution_capability_required") is not True
+        or binding.get("opaque_verified_package_capability_required") is not True
+        or binding.get(
+            "opaque_verified_controller_runtime_capability_required"
+        )
+        is not True
+        or binding.get("opaque_claimed_install_execution_capability_required")
+        is not True
+        or binding.get("opaque_claimed_empty_rollback_capability_required")
+        is not True
+        or binding.get(
+            "empty_rollback_requires_opaque_verified_install_receipt_and_ledger_capability"
+        )
+        is not True
+        or binding.get(
+            "resolved_store_spec_hash_and_exact_docker_label_hashes_bound"
+        )
+        is not True
+        or binding.get(
+            "journal_binds_verified_full_controller_release_tree_sha256"
+        )
+        is not True
+        or binding.get(
+            "empty_rollback_claim_journal_requests_observations_and_writer_fence_bind_verified_runtime_and_full_release_tree"
+        )
+        is not True
+        or binding.get("exact_controller_process_is_trusted") is not True
+        or binding.get("hostile_same_process_capability_forgery_resisted") is not False
         or type(durability) is not dict
         or durability.get(
             "same_open_instance_inode_and_directory_replacement_refused"
@@ -568,24 +923,114 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or durability.get(
             "cross_process_same_content_inode_or_directory_replacement_refused"
         )
-        is not False
+        is not True
+        or durability.get("one_final_partial_json_line_beyond_exact_anchor_recoverable")
+        is not True
+        or durability.get("per_execution_resource_ledger_anchor_packaged") is not True
+        or durability.get(
+            "install_receipt_replay_requires_fresh_terminal_store_readiness_probe"
+        )
+        is not True
+        or durability.get(
+            "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger"
+        )
+        is not True
+        or durability.get(
+            "completed_empty_rollback_replay_reproves_exact_resource_absence"
+        )
+        is not True
+        or durability.get(
+            "empty_rollback_writer_fence_held_from_r06_through_receipt"
+        )
+        is not True
+        or durability.get(
+            "destructive_rollback_steps_atomically_recheck_empty_under_fence"
+        )
+        is not True
+        or durability.get(
+            "retained_audit_artifact_hashes_bound_to_rollback_receipt"
+        )
+        is not True
+        or durability.get(
+            "terminal_postflight_effect_present_blocks_compensation_and_exact_resume_completes"
+        )
+        is not True
         or type(execution.get("remaining_blockers")) is not list
         or (
-            "opaque_verified_package_capability_and_claim_boundary_not_implemented"
+            "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged"
             not in execution["remaining_blockers"]
         )
         or (
-            "cross_process_durable_file_identity_or_equivalent_seal_not_implemented"
-            not in execution["remaining_blockers"]
+            "canonical_install_receipt_emission_not_integrated"
+            in execution["remaining_blockers"]
         )
         or type(host) is not dict
-        or host.get("typed_operation_specific_boundaries_only") is not False
+        or host.get("typed_operation_specific_boundaries_only") is not True
+        or host.get("controller_runtime_secure_verifier_packaged") is not True
+        or host.get("exact_release_path_supervisor_launcher_packaged") is not True
+        or host.get(
+            "each_host_request_and_ownership_receipt_binds_verified_full_release_tree_sha256"
+        )
+        is not True
+        or host.get("concrete_store_effect_adapters_packaged") is not False
+        or type(receipt) is not dict
+        or receipt.get(
+            "install_receipt_binds_verified_runtime_and_full_release_tree_identity"
+        )
+        is not True
+        or receipt.get(
+            "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity"
+        )
+        is not True
         or type(proof_boundary) is not dict
         or proof_boundary.get("harness_type")
-        != "guarded_synthetic_only"
+        != "guarded-synthetic-only"
+        or type(dependency) is not dict
+        or dependency.get(
+            "locked_distribution_set_must_exactly_equal_installed_normalized_distribution_set"
+        )
+        is not True
         or type(build) is not dict
         or build.get("current_runtime_built") is not False
         or build.get("current_runtime_installed") is not False
+        or build.get("current_release_staged") is not False
+        or build.get(
+            "controller_runtime_and_release_are_separately_authorized_preinstall_substrate"
+        )
+        is not True
+        or type(runtime.get("verification_policy")) is not dict
+        or runtime["verification_policy"].get(
+            "secure_receipt_bound_no_follow_verifier_packaged"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "interpreter_prefix_import_stdlib_and_site_paths_confined_to_runtime_root"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "full_release_tree_must_exactly_match_package_manifest_with_no_extra_members"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "static_launcher_local_module_closure_verification_required"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "release_tree_sha256_propagates_through_claim_journal_host_ownership_and_install_receipt"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_writer_fence_and_receipt"
+        )
+        is not True
+        or runtime["verification_policy"].get(
+            "controller_runtime_verifier_executed_in_current_phase"
+        )
+        is not False
+        or runtime["verification_policy"].get(
+            "current_runtime_build_receipt_present"
+        )
+        is not False
         or type(entrypoint) is not dict
         or entrypoint.get("opaque_python_capabilities_resist_hostile_same_process_code")
         is not False
@@ -602,6 +1047,8 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
                 "secret_adapter_exists",
                 "installation_adapter_exists",
                 "activation_adapter_exists",
+                "claim_bound_install_composition_exercised",
+                "claim_bound_empty_rollback_composition_exercised",
             )
         )
         or type(proof_claims) is not dict
@@ -620,8 +1067,32 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             )
         )
         or proof_schema.get("additionalProperties") is not False
+        or proof_schema.get("$id")
+        != "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2"
+        or install_receipt_schema.get("additionalProperties") is not False
+        or empty_rollback_receipt_schema.get("additionalProperties") is not False
+        or install_receipt_schema.get("$id")
+        != "urn:governed-memory:dormant-store-install-receipt:v1"
+        or empty_rollback_receipt_schema.get("$id")
+        != "urn:governed-memory:empty-store-rollback-receipt:v2"
+        or not {
+            "controller_runtime_receipt_sha256",
+            "controller_runtime_root",
+            "controller_runtime_tree_sha256",
+            "controller_release_root",
+            "controller_release_tree_sha256",
+            "controller_release_package_manifest_path",
+            "controller_runtime_interpreter_path",
+            "controller_runtime_interpreter_sha256",
+            "controller_runtime_inventory_path",
+            "controller_runtime_inventory_sha256",
+            "controller_requirements_lock_sha256",
+            "supervisor_launcher_path",
+            "supervisor_launcher_sha256",
+        }
+        <= set(empty_rollback_receipt_schema.get("required", ()))
     ):
-        raise PackageError("phase8b_extension_contract_boundary_invalid")
+        raise PackageError("dormant_store_install_extension_contract_boundary_invalid")
 
 
 def _load_verified_module(
@@ -634,17 +1105,17 @@ def _load_verified_module(
 
     raw = _read_repository_file(relative)
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        raise PackageError("phase8b_verified_module_changed_after_hash")
+        raise PackageError("dormant_store_install_verified_module_changed_after_hash")
     module = ModuleType(module_name)
     module.__file__ = str(ROOT / relative)
     module.__package__ = module_name.rpartition(".")[0]
     if module_name in sys.modules:
-        raise PackageError("phase8b_verified_module_namespace_collision")
+        raise PackageError("dormant_store_install_verified_module_namespace_collision")
     sys.modules[module_name] = module
     try:
         exec(compile(raw, module.__file__, "exec"), module.__dict__)
     except Exception as error:
-        raise PackageError("phase8b_verified_module_invalid") from error
+        raise PackageError("dormant_store_install_verified_module_invalid") from error
     finally:
         sys.modules.pop(module_name, None)
     return module
@@ -664,7 +1135,7 @@ def _load_verified_controller_module(
     become a controller execution surface.
     """
 
-    package_name = "_phase8b_verified_controller_package"
+    package_name = "_dormant_store_install_verified_controller_package"
     module_name = package_name + ".controller"
     lock_name = package_name + ".execution_lock"
 
@@ -675,7 +1146,7 @@ def _load_verified_controller_module(
         pass
 
     def _refuse_lock_use(unused: object) -> None:
-        raise _ExecutionLockError("phase8b_verifier_lock_surface_unavailable")
+        raise _ExecutionLockError("dormant_store_install_verifier_lock_surface_unavailable")
 
     package = ModuleType(package_name)
     package.__path__ = []  # type: ignore[attr-defined]
@@ -688,7 +1159,7 @@ def _load_verified_controller_module(
         lock_name: lock_module,
     }
     if any(name in sys.modules for name in inserted):
-        raise PackageError("phase8b_verified_module_namespace_collision")
+        raise PackageError("dormant_store_install_verified_module_namespace_collision")
     sys.modules.update(inserted)
     try:
         return _load_verified_module(
@@ -712,14 +1183,14 @@ def _verify_controller_binding(
             controller_plan
         )
     except Exception as error:
-        raise PackageError("phase8b_controller_model_invalid") from error
+        raise PackageError("dormant_store_install_controller_model_invalid") from error
     if (
         controller_hash != EXPECTED_CONTROLLER_MODEL_SHA256
         or tuple(step["id"] for step in controller_projection)
         != EXPECTED_CONTROLLER_STEP_IDS
         or plan["install_steps"] != controller_projection
     ):
-        raise PackageError("phase8b_controller_plan_binding_invalid")
+        raise PackageError("dormant_store_install_controller_plan_binding_invalid")
     return controller_hash
 
 
@@ -729,7 +1200,7 @@ def _verify_migration_binding(
     try:
         receipt = module.verify()
     except Exception as error:
-        raise PackageError("phase8b_migration_verifier_failed") from error
+        raise PackageError("dormant_store_install_migration_verifier_failed") from error
     expected_keys = {
         "schema_version",
         "state",
@@ -743,15 +1214,12 @@ def _verify_migration_binding(
         "production_state_changed",
     }
     if type(receipt) is not dict or set(receipt) != expected_keys:
-        raise PackageError("phase8b_migration_receipt_invalid")
+        raise PackageError("dormant_store_install_migration_receipt_invalid")
     if (
         receipt.get("schema_version")
-        != "governed-memory-phase8b-store-migration-verification-v2"
+        != "governed-memory-dormant-store-install-store-migration-verification-v3"
         or receipt.get("state")
-        != (
-            "phase8b_stores_only_remediation_proof_pending_not_installed_"
-            "not_authorized"
-        )
+        != "repository-only-current-stores-only-migration-set-not-installed-not-authorized"
         or receipt.get("file_count") != len(EXPECTED_MIGRATION_ARTIFACTS)
         or receipt.get("source_bridge_artifact_count") != 0
         or receipt.get("historical_package_descriptor_count") != 0
@@ -763,49 +1231,46 @@ def _verify_migration_binding(
         or receipt.get("migration_bindings_canonical_sha256")
         != EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256
     ):
-        raise PackageError("phase8b_migration_receipt_invalid")
+        raise PackageError("dormant_store_install_migration_receipt_invalid")
     migration_artifacts = receipt.get("artifact_sha256")
     if type(migration_artifacts) is not dict:
-        raise PackageError("phase8b_migration_receipt_invalid")
+        raise PackageError("dormant_store_install_migration_receipt_invalid")
     package_migration_artifacts: set[str] = set()
     for relative, digest in migration_artifacts.items():
         if type(relative) is not str or type(digest) is not str:
-            raise PackageError("phase8b_migration_receipt_invalid")
+            raise PackageError("dormant_store_install_migration_receipt_invalid")
         package_relative = (
             relative
             if relative.startswith("ops/")
             else "governed-memory-migrations/" + relative
         )
         if observed.get(package_relative) != digest:
-            raise PackageError("phase8b_migration_package_binding_invalid")
+            raise PackageError("dormant_store_install_migration_package_binding_invalid")
         package_migration_artifacts.add(package_relative)
     if package_migration_artifacts != EXPECTED_MIGRATION_ARTIFACTS:
-        raise PackageError("phase8b_migration_package_binding_invalid")
+        raise PackageError("dormant_store_install_migration_package_binding_invalid")
     return receipt
 
 
 def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
     if set(manifest) != {"schema_version", "state", "artifacts"}:
-        raise PackageError("phase8b_package_manifest_shape_invalid")
+        raise PackageError("dormant_store_install_package_manifest_shape_invalid")
     if (
         manifest.get("schema_version")
-        != "governed-memory-phase8b-inactive-execution-package-manifest-v2"
+        != "governed-memory-dormant-store-install-inactive-execution-package-manifest-v3"
         or manifest.get("state")
-        != (
-            "inactive_execution_and_synthetic_proof_harness_packaged_proof_"
-            "pending_not_staged_not_installed_not_authorized"
-        )
+        != "repository-only-claim-bound-install-and-empty-rollback-controllers-packaged-not-installed-not-activated"
     ):
-        raise PackageError("phase8b_package_manifest_identity_invalid")
+        raise PackageError("dormant_store_install_package_manifest_identity_invalid")
     artifacts = manifest.get("artifacts")
     if type(artifacts) is not dict or set(artifacts) != EXPECTED_ARTIFACTS:
-        raise PackageError("phase8b_package_artifact_set_invalid")
+        raise PackageError("dormant_store_install_package_artifact_set_invalid")
     if any(
         marker in relative
         for relative in artifacts
         for marker in FORBIDDEN_ARTIFACT_MARKERS
     ):
-        raise PackageError("phase8b_package_forbidden_artifact")
+        raise PackageError("dormant_store_install_package_forbidden_artifact")
     observed: dict[str, str] = {}
     for relative, wanted in artifacts.items():
         if (
@@ -813,15 +1278,16 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
             or type(wanted) is not str
             or HASH_RE.fullmatch(wanted) is None
         ):
-            raise PackageError("phase8b_package_artifact_entry_invalid")
+            raise PackageError("dormant_store_install_package_artifact_entry_invalid")
         actual = artifact_sha256(relative)
         if actual != wanted:
-            raise PackageError("phase8b_package_hash_mismatch:" + relative)
+            raise PackageError("dormant_store_install_package_hash_mismatch:" + relative)
         observed[relative] = actual
     return observed
 
 
 def verify() -> dict[str, object]:
+    _verify_current_directory_closure()
     manifest_raw = _read_path(MANIFEST)
     manifest = _parse_json(manifest_raw)
     observed = _verify_manifest(manifest)
@@ -844,13 +1310,13 @@ def verify() -> dict[str, object]:
     controller_model_sha256 = _verify_controller_binding(plan, controller)
     migration_verifier = _load_verified_module(
         MIGRATION_VERIFIER_RELATIVE,
-        "_phase8b_verified_migration_manifest",
+        "_dormant_store_install_verified_migration_manifest",
         expected_sha256=EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256,
     )
     migration_receipt = _verify_migration_binding(observed, migration_verifier)
 
     return {
-        "schema_version": "governed-memory-phase8b-package-verification-v3",
+        "schema_version": "governed-memory-dormant-store-install-package-verification-v4",
         "state": str(manifest["state"]),
         "artifact_count": len(observed),
         "artifact_sha256": dict(sorted(observed.items())),
@@ -867,21 +1333,48 @@ def verify() -> dict[str, object]:
             EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256
         ),
         "proof_schema_canonical_sha256": EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
+        "install_receipt_schema_canonical_sha256": (
+            EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256
+        ),
+        "empty_rollback_receipt_schema_canonical_sha256": (
+            EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256
+        ),
         "controller_source_sha256": observed[CONTROLLER_MODEL_RELATIVE],
         "controller_model_sha256": controller_model_sha256,
         "migration_verifier_source_sha256": observed[MIGRATION_VERIFIER_RELATIVE],
         "migration_manifest_sha256": migration_receipt["manifest_sha256"],
-        "durable_journal_adapter_packaged": True,
+        "durable_install_and_rollback_journal_adapters_packaged": True,
+        "durable_resource_identity_ledger_and_anchor_packaged": True,
         "guarded_synthetic_proof_harness_packaged": True,
         "synthetic_proof_executed_by_verifier": False,
         "synthetic_proof_receipt_promoted": False,
-        "generic_docker_host_runner_primitive_packaged": True,
+        "bounded_image_inspect_runner_primitive_packaged": True,
         "local_image_inspect_adapter_packaged": True,
-        "claim_bound_installation_runner_composition_packaged": False,
-        "claim_bound_installation_store_effect_adapters_packaged": False,
-        "installation_executor_packaged": False,
-        "rollback_executor_packaged": False,
-        "activation_executor_packaged": False,
+        "controller_runtime_verification_capability_packaged": True,
+        "full_controller_release_tree_verification_packaged": True,
+        "exact_locked_controller_distribution_set_verification_packaged": True,
+        "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
+        "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+        "supervisor_launcher_source_packaged": True,
+        "controller_runtime_built_or_installed": False,
+        "controller_release_staged": False,
+        "controller_runtime_and_release_require_separate_future_build_and_install_authority": True,
+        "stores_install_owns_or_removes_controller_substrate": False,
+        "resolved_store_spec_and_exact_docker_labels_bound": True,
+        "resource_identity_ledger_v2_packaged": True,
+        "empty_rollback_writer_fence_packaged": True,
+        "retained_audit_artifact_hashes_bound": True,
+        "claim_bound_install_controller_composition_packaged": True,
+        "claim_bound_empty_rollback_controller_composition_packaged": True,
+        "concrete_install_store_effect_adapters_packaged": False,
+        "concrete_empty_rollback_store_effect_adapters_packaged": False,
+        "operation_specific_install_and_empty_rollback_receipts_packaged": True,
+        "install_controller_emits_canonical_receipt": True,
+        "empty_rollback_controller_emits_canonical_receipt": True,
+        "install_receipt_binds_fresh_terminal_canonical_store_readiness": True,
+        "empty_rollback_requires_opaque_verified_install_receipt_and_ledger": True,
+        "completed_install_and_empty_rollback_replay_reverification_packaged": True,
+        "activation_entrypoint_packaged": False,
         "stores_supervisor_cli_packaged": True,
         "stores_supervisor_cli_docker_surface": list(
             EXPECTED_LIVE_EXECUTION["stores_supervisor_cli_docker_surface"]
@@ -900,7 +1393,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         receipt = verify()
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        print("PHASE8B_PACKAGE_INVALID=" + str(error))
+        print("DORMANT_STORE_INSTALL_PACKAGE_INVALID=" + str(error))
         return 1
     if arguments.command == "verify-package":
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))

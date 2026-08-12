@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -23,7 +24,8 @@ from tools.governed_memory_install.secure_file import (
 
 
 BINDING = "a" * 64
-LABELS = "b" * 64
+OWNERSHIP = "b" * 64
+RESOURCE_LABELS = "c" * 64
 CONTAINER_ID = "1" * 64
 OTHER_CONTAINER_ID = "2" * 64
 IMAGE_ID = "sha256:" + "3" * 64
@@ -39,12 +41,13 @@ def _append_created(path: Path) -> ResourceIdentityLedger:
         resource_id=CONTAINER_ID,
         image_id=IMAGE_ID,
         image_repo_digest=REPO_DIGEST,
-        labels_sha256=LABELS,
+        ownership_sha256=OWNERSHIP,
+        resource_labels_sha256=RESOURCE_LABELS,
     )
     return ledger
 
 
-class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
+class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
     def test_secure_authority_file_rejects_mode_hardlink_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -102,7 +105,7 @@ class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
             )
         )
         supervisor._validate_profile(
-            (DOCKER_BINARY, "stop", "--time=30", CONTAINER_ID)
+            (DOCKER_BINARY, "stop", "--time=10", CONTAINER_ID)
         )
         with self.assertRaisesRegex(HostBoundaryError, "profile_refused"):
             supervisor._validate_profile((DOCKER_BINARY, "rm", CONTAINER_ID))
@@ -124,7 +127,8 @@ class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
                     resource_id=CONTAINER_ID,
                     image_id=IMAGE_ID,
                     image_repo_digest=REPO_DIGEST,
-                    labels_sha256=LABELS,
+                    ownership_sha256=OWNERSHIP,
+                    resource_labels_sha256=RESOURCE_LABELS,
                 )
 
             ledger_path.chmod(0o600)
@@ -158,7 +162,47 @@ class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
                     resource_id=OTHER_CONTAINER_ID,
                     image_id=IMAGE_ID,
                     image_repo_digest=REPO_DIGEST,
-                    labels_sha256=LABELS,
+                    ownership_sha256=OWNERSHIP,
+                    resource_labels_sha256=RESOURCE_LABELS,
+                )
+            with self.assertRaisesRegex(ResourceIdentityError, "resource_drift"):
+                ledger.append(
+                    event="observed",
+                    resource_kind="container",
+                    resource_name="governed-memory-postgres-security-test",
+                    resource_id=CONTAINER_ID,
+                    image_id=IMAGE_ID,
+                    image_repo_digest=REPO_DIGEST,
+                    ownership_sha256=OWNERSHIP,
+                    resource_labels_sha256="d" * 64,
+                )
+
+    def test_labels_are_required_only_for_docker_backed_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = ResourceIdentityLedger(
+                Path(directory) / "ledger.jsonl",
+                binding_sha256=BINDING,
+            )
+            with self.assertRaisesRegex(
+                ResourceIdentityError, "resource_labels_invalid"
+            ):
+                ledger.append(
+                    event="created",
+                    resource_kind="network",
+                    resource_name="governed-memory-net-9a54cf123493-000001",
+                    resource_id="network-id-001",
+                    ownership_sha256=OWNERSHIP,
+                )
+            with self.assertRaisesRegex(
+                ResourceIdentityError, "resource_labels_forbidden"
+            ):
+                ledger.append(
+                    event="created",
+                    resource_kind="database",
+                    resource_name="governed_memory",
+                    resource_id="database-id-001",
+                    ownership_sha256=OWNERSHIP,
+                    resource_labels_sha256=RESOURCE_LABELS,
                 )
 
     def test_removed_identity_cannot_be_resurrected(self) -> None:
@@ -171,7 +215,8 @@ class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
                 "resource_id": CONTAINER_ID,
                 "image_id": IMAGE_ID,
                 "image_repo_digest": REPO_DIGEST,
-                "labels_sha256": LABELS,
+                "ownership_sha256": OWNERSHIP,
+                "resource_labels_sha256": RESOURCE_LABELS,
             }
             ledger.append(event="removed", **common)
             with self.assertRaisesRegex(ResourceIdentityError, "transition_invalid"):
@@ -199,6 +244,57 @@ class Phase8BResourceIdentitySecurityTests(unittest.TestCase):
                 parse_ledger_bytes(
                     b"\n".join(lines) + b"\n",
                     expected_binding_sha256=BINDING,
+                )
+
+    def test_exact_install_and_rollback_resource_kinds_are_secret_free(self) -> None:
+        cases = (
+            ("database", "governed_memory"),
+            ("migration", "0001_foundation"),
+            ("network", "governed-memory-net-9a54cf123493-000001"),
+            ("qdrant_alias", "governed_memory_active"),
+            ("qdrant_collection", "governed_memory_9a54cf123493_000001"),
+            ("resolved_store_spec", "/etc/governed-memory-controller/store_spec.json"),
+            ("secret_file", "/etc/governed-memory-stores/9a54cf123493-000001/postgres.env"),
+            ("systemd_unit", "/etc/systemd/system/governed-memory-stores.service"),
+            ("volume", "governed-memory-postgres-data-9a54cf123493-000001"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.jsonl"
+            ledger = ResourceIdentityLedger(path, binding_sha256=BINDING)
+            for index, (kind, name) in enumerate(cases, start=1):
+                ledger.append(
+                    event="created",
+                    resource_kind=kind,
+                    resource_name=name,
+                    resource_id=f"resource-{index}",
+                    ownership_sha256=hashlib.sha256(
+                        f"owner-{index}".encode("ascii")
+                    ).hexdigest(),
+                    resource_labels_sha256=(
+                        hashlib.sha256(
+                            f"labels-{index}".encode("ascii")
+                        ).hexdigest()
+                        if kind in {"network", "volume"}
+                        else None
+                    ),
+                )
+            records = load_ledger(path, expected_binding_sha256=BINDING)
+            self.assertEqual(
+                {record.resource_kind for record in records},
+                {kind for kind, _name in cases},
+            )
+            self.assertNotIn("secret_value", path.read_text().lower())
+
+            with self.assertRaisesRegex(
+                ResourceIdentityError, "forbidden_content"
+            ):
+                ledger.append(
+                    event="created",
+                    resource_kind="volume",
+                    resource_name="governed-memory-extra-volume",
+                    resource_id="tokenmaterialmustnotenterledger",
+                    ownership_sha256=OWNERSHIP,
+                    resource_labels_sha256=RESOURCE_LABELS,
                 )
 
 

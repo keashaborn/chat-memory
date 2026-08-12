@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""One-entry file/anchor recovery journal for the Phase 8B controller.
+"""One-entry file/anchor recovery journal for the dormant-store installation controller.
 
 The file is append-and-fsync first; the content-free ``AuthorityState`` anchor
 is advanced second.  Reopening accepts only equality or exactly one complete
@@ -26,6 +26,7 @@ from .controller import (
     ATTEMPT_STEP_ID,
     JournalEvent,
     JournalRecord,
+    STORES_ONLY_PLAN,
 )
 from .execution_capability import (
     ClaimedExecutionBindingError,
@@ -38,7 +39,7 @@ from .execution_lock import (
 )
 
 
-JOURNAL_SCHEMA_VERSION: Final = "governed-memory-phase8b-journal-v1"
+JOURNAL_SCHEMA_VERSION: Final = "governed-memory-dormant_store_install-journal-v1"
 _JOURNAL_KEYS: Final = frozenset(
     {
         "schema_version",
@@ -53,6 +54,10 @@ _JOURNAL_KEYS: Final = frozenset(
 )
 MAX_JOURNAL_BYTES: Final = 16 * 1024 * 1024
 MAX_RECORD_BYTES: Final = 4096
+# Before any install effect, reserve a conservative complete recovery tail:
+# an APPLIED/terminal marker plus intent/receipt pairs for every compensable
+# step.  Compensation effects separately reserve their exact receipt slot.
+MAX_EFFECT_RECOVERY_RECORDS: Final = 2 + (2 * len(STORES_ONLY_PLAN))
 
 
 class DurableJournalError(RuntimeError):
@@ -86,7 +91,7 @@ def _canonical_bytes(value: object) -> bytes:
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError) as error:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_json_invalid"
+            "dormant_store_install_durable_journal_json_invalid"
         ) from error
 
 
@@ -95,7 +100,7 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     for key, value in pairs:
         if key in result:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_duplicate_key"
+                "dormant_store_install_durable_journal_duplicate_key"
             )
         result[key] = value
     return result
@@ -103,7 +108,7 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _reject_constant(value: str) -> None:
     raise DurableJournalIntegrityError(
-        "phase8b_durable_journal_json_invalid"
+        "dormant_store_install_durable_journal_json_invalid"
     )
 
 
@@ -128,30 +133,30 @@ def _record_from_document(
 ) -> JournalRecord:
     if set(document) != _JOURNAL_KEYS:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_record_shape_invalid"
+            "dormant_store_install_durable_journal_record_shape_invalid"
         )
     if document.get("schema_version") != JOURNAL_SCHEMA_VERSION:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_schema_invalid"
+            "dormant_store_install_durable_journal_schema_invalid"
         )
     if document.get("plan_sha256") != expected_plan_sha256:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_plan_mismatch"
+            "dormant_store_install_durable_journal_plan_mismatch"
         )
     if document.get("attempt_id") != expected_attempt_id:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_attempt_mismatch"
+            "dormant_store_install_durable_journal_attempt_mismatch"
         )
     sequence = document.get("sequence")
     if type(sequence) is not int or sequence < 1:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_sequence_invalid"
+            "dormant_store_install_durable_journal_sequence_invalid"
         )
     for key in ("prior_record_sha256", "record_sha256"):
         value = document.get(key)
         if not isinstance(value, str) or HASH_RE.fullmatch(value) is None:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_hash_invalid"
+                "dormant_store_install_durable_journal_hash_invalid"
             )
     step_id = document.get("step_id")
     if not isinstance(step_id, str) or not (
@@ -166,13 +171,13 @@ def _record_from_document(
         )
     ):
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_step_invalid"
+            "dormant_store_install_durable_journal_step_invalid"
         )
     try:
         event = JournalEvent(document.get("event"))
     except (TypeError, ValueError) as error:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_event_invalid"
+            "dormant_store_install_durable_journal_event_invalid"
         ) from error
     asserted = JournalRecord(
         plan_sha256=expected_plan_sha256,
@@ -193,7 +198,7 @@ def _record_from_document(
     )
     if asserted != calculated:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_record_hash_invalid"
+            "dormant_store_install_durable_journal_record_hash_invalid"
         )
     return asserted
 
@@ -208,22 +213,22 @@ def parse_durable_journal_bytes(
         expected_plan_sha256
     ) is None:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_plan_invalid"
+            "dormant_store_install_durable_journal_plan_invalid"
         )
     if len(content) > MAX_JOURNAL_BYTES:
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_too_large"
+            "dormant_store_install_durable_journal_too_large"
         )
     if content and not content.endswith(b"\n"):
         raise DurableJournalIntegrityError(
-            "phase8b_durable_journal_truncated"
+            "dormant_store_install_durable_journal_truncated"
         )
     records: list[JournalRecord] = []
     prior = ZERO_HEAD
     for sequence, raw_line in enumerate(content.splitlines(), start=1):
         if not raw_line or len(raw_line) > MAX_RECORD_BYTES:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_record_size_invalid"
+                "dormant_store_install_durable_journal_record_size_invalid"
             )
         try:
             document = json.loads(
@@ -235,11 +240,11 @@ def parse_durable_journal_bytes(
             raise
         except (UnicodeError, json.JSONDecodeError) as error:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_json_invalid"
+                "dormant_store_install_durable_journal_json_invalid"
             ) from error
         if type(document) is not dict or _canonical_bytes(document) != raw_line:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_json_not_canonical"
+                "dormant_store_install_durable_journal_json_not_canonical"
             )
         record = _record_from_document(
             document,
@@ -248,11 +253,11 @@ def parse_durable_journal_bytes(
         )
         if record.sequence != sequence:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_sequence_mismatch"
+                "dormant_store_install_durable_journal_sequence_mismatch"
             )
         if record.prior_record_sha256 != prior:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_chain_mismatch"
+                "dormant_store_install_durable_journal_chain_mismatch"
             )
         records.append(record)
         prior = record.record_sha256
@@ -279,40 +284,40 @@ class DurableJournal:
             )
         except ClaimedExecutionBindingError as error:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_binding_invalid"
+                "dormant_store_install_durable_journal_binding_invalid"
             ) from error
         if type(authority_state) is not AuthorityState:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_authority_state_invalid"
+                "dormant_store_install_durable_journal_authority_state_invalid"
             )
         try:
             validate_held_execution_lock(held_lock)
         except ExecutionLockError as error:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_lock_not_held"
+                "dormant_store_install_durable_journal_lock_not_held"
             ) from error
         lock_path_sha256 = hashlib.sha256(
             str(held_lock._owner.path).encode("utf-8")
         ).hexdigest()
         if lock_path_sha256 != binding.global_lock_path_sha256:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_lock_binding_mismatch"
+                "dormant_store_install_durable_journal_lock_binding_mismatch"
             )
         state_path_sha256 = hashlib.sha256(
             str(authority_state.path).encode("utf-8")
         ).hexdigest()
         if state_path_sha256 != binding.authority_state_path_sha256:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_authority_state_binding_mismatch"
+                "dormant_store_install_durable_journal_authority_state_binding_mismatch"
             )
         uid = os.geteuid() if expected_uid is None else expected_uid
         if type(uid) is not int or uid < 0:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_uid_invalid"
+                "dormant_store_install_durable_journal_uid_invalid"
             )
         if type(create) is not bool:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_create_invalid"
+                "dormant_store_install_durable_journal_create_invalid"
             )
         self.path = Path(path)
         if (
@@ -321,7 +326,7 @@ class DurableJournal:
             or str(self.path) != binding.execution_journal_path
         ):
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_path_invalid"
+                "dormant_store_install_durable_journal_path_invalid"
             )
         self.expected_uid = uid
         self.authority_state = authority_state
@@ -342,7 +347,7 @@ class DurableJournal:
             validate_held_execution_lock(self.held_lock)
         except ExecutionLockError as error:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_lock_not_held"
+                "dormant_store_install_durable_journal_lock_not_held"
             ) from error
 
     @staticmethod
@@ -350,7 +355,7 @@ class DurableJournal:
         value = getattr(os, "O_NOFOLLOW", 0)
         if value == 0:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_nofollow_unavailable"
+                "dormant_store_install_durable_journal_nofollow_unavailable"
             )
         return value
 
@@ -362,7 +367,7 @@ class DurableJournal:
             directory_fd = os.open(self.path.parent, flags)
         except OSError as error:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_directory_invalid"
+                "dormant_store_install_durable_journal_directory_invalid"
             ) from error
         try:
             opened = os.fstat(directory_fd)
@@ -376,12 +381,12 @@ class DurableJournal:
                 != (named.st_dev, named.st_ino)
             ):
                 raise DurableJournalSecurityError(
-                    "phase8b_durable_journal_directory_invalid"
+                    "dormant_store_install_durable_journal_directory_invalid"
                 )
             inode = (opened.st_dev, opened.st_ino)
             if self._directory_inode is not None and inode != self._directory_inode:
                 raise DurableJournalSecurityError(
-                    "phase8b_durable_journal_directory_replaced"
+                    "dormant_store_install_durable_journal_directory_replaced"
                 )
             self._directory_inode = inode
             self._require_lock()
@@ -401,7 +406,7 @@ class DurableJournal:
             )
         except OSError as error:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_file_invalid"
+                "dormant_store_install_durable_journal_file_invalid"
             ) from error
         if (
             not stat.S_ISREG(opened.st_mode)
@@ -412,14 +417,31 @@ class DurableJournal:
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
         ):
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_file_invalid"
+                "dormant_store_install_durable_journal_file_invalid"
             )
         inode = (opened.st_dev, opened.st_ino)
         if self._file_inode is not None and inode != self._file_inode:
             raise DurableJournalSecurityError(
-                "phase8b_durable_journal_file_replaced"
+                "dormant_store_install_durable_journal_file_replaced"
             )
         self._file_inode = inode
+        self._require_lock()
+
+    def _seal_filesystem_identity(self, directory_fd: int) -> None:
+        self._require_lock()
+        try:
+            self.authority_state.seal_filesystem_identity(
+                self.binding_sha256,
+                artifact_kind="journal",
+                path=self.path,
+                directory_fd=directory_fd,
+                file_fd=self._fd,
+                held_lock=self.held_lock,
+            )
+        except AuthorityStateError as error:
+            raise DurableJournalSecurityError(
+                "dormant_store_install_durable_journal_cross_process_identity_mismatch"
+            ) from error
         self._require_lock()
 
     def _open(self, *, create: bool) -> None:
@@ -443,19 +465,20 @@ class DurableJournal:
                     )
             except OSError as error:
                 raise DurableJournalSecurityError(
-                    "phase8b_durable_journal_file_invalid"
+                    "dormant_store_install_durable_journal_file_invalid"
                 ) from error
             try:
                 fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except (BlockingIOError, OSError) as error:
                 raise DurableJournalBusyError(
-                    "phase8b_durable_journal_locked"
+                    "dormant_store_install_durable_journal_locked"
                 ) from error
             if create:
                 os.fchmod(self._fd, 0o600)
                 os.fsync(self._fd)
                 os.fsync(directory_fd)
             self._validate_file(directory_fd)
+            self._seal_filesystem_identity(directory_fd)
             self._require_lock()
         except BaseException:
             self.close()
@@ -463,13 +486,17 @@ class DurableJournal:
         finally:
             os.close(directory_fd)
         try:
-            self._records = self._read_validated()
+            self._records = self._read_validated(recover_torn_tail=True)
             self._reconcile_anchor()
         except BaseException:
             self.close()
             raise
 
-    def _read_validated(self) -> tuple[JournalRecord, ...]:
+    def _read_validated(
+        self,
+        *,
+        recover_torn_tail: bool = False,
+    ) -> tuple[JournalRecord, ...]:
         self._require_lock()
         directory_fd = self._open_directory()
         try:
@@ -477,7 +504,7 @@ class DurableJournal:
             size = os.fstat(self._fd).st_size
             if size > MAX_JOURNAL_BYTES:
                 raise DurableJournalIntegrityError(
-                    "phase8b_durable_journal_too_large"
+                    "dormant_store_install_durable_journal_too_large"
                 )
             os.lseek(self._fd, 0, os.SEEK_SET)
             remaining = size
@@ -486,21 +513,103 @@ class DurableJournal:
                 chunk = os.read(self._fd, min(remaining, 65536))
                 if not chunk:
                     raise DurableJournalIntegrityError(
-                        "phase8b_durable_journal_short_read"
+                        "dormant_store_install_durable_journal_short_read"
                     )
                 chunks.append(chunk)
                 remaining -= len(chunk)
         except OSError as error:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_read_failed"
+                "dormant_store_install_durable_journal_read_failed"
             ) from error
         finally:
             os.close(directory_fd)
+        raw = b"".join(chunks)
+        if raw and not raw.endswith(b"\n") and recover_torn_tail:
+            records = self._recover_torn_tail(raw)
+        else:
+            records = parse_durable_journal_bytes(
+                raw,
+                expected_plan_sha256=self.plan_sha256,
+                expected_attempt_id=self.attempt_id,
+            )
+        self._require_lock()
+        return records
+
+    def _recover_torn_tail(self, raw: bytes) -> tuple[JournalRecord, ...]:
+        """Discard one final partial line only after an exact anchor match."""
+
+        self._require_lock()
+        final_newline = raw.rfind(b"\n")
+        complete_length = final_newline + 1
+        complete = raw[:complete_length]
+        partial = raw[complete_length:]
+        expected_prefix = (
+            b'{"attempt_id":"' + self.attempt_id.encode("ascii") + b'"'
+        )
+        shared = min(len(partial), len(expected_prefix))
+        if (
+            not partial
+            or len(partial) > MAX_RECORD_BYTES
+            or partial[:shared] != expected_prefix[:shared]
+        ):
+            raise DurableJournalIntegrityError(
+                "dormant_store_install_durable_journal_truncated"
+            )
         records = parse_durable_journal_bytes(
-            b"".join(chunks),
+            complete,
             expected_plan_sha256=self.plan_sha256,
             expected_attempt_id=self.attempt_id,
         )
+        head = records[-1].record_sha256 if records else ZERO_HEAD
+        try:
+            anchor = self.authority_state.read_anchor(self.binding_sha256)
+            self._require_lock()
+        except AuthorityStateError as error:
+            raise DurableJournalAnchorError(
+                "dormant_store_install_durable_journal_anchor_mismatch"
+            ) from error
+        if anchor.sequence != len(records) or anchor.head_sha256 != head:
+            raise DurableJournalIntegrityError(
+                "dormant_store_install_durable_journal_truncated_tail_not_exact_anchor"
+            )
+
+        directory_fd = self._open_directory()
+        try:
+            opened = os.fstat(self._fd)
+            self._validate_file(directory_fd)
+            self._seal_filesystem_identity(directory_fd)
+            if opened.st_size != len(raw):
+                raise DurableJournalIntegrityError(
+                    "dormant_store_install_durable_journal_changed_during_tail_recovery"
+                )
+            os.lseek(self._fd, 0, os.SEEK_SET)
+            observed = bytearray()
+            while len(observed) < len(raw):
+                chunk = os.read(self._fd, len(raw) - len(observed))
+                if not chunk:
+                    break
+                observed.extend(chunk)
+            if bytes(observed) != raw:
+                raise DurableJournalIntegrityError(
+                    "dormant_store_install_durable_journal_changed_during_tail_recovery"
+                )
+            self._require_lock()
+            os.ftruncate(self._fd, complete_length)
+            os.fsync(self._fd)
+            self._require_lock()
+            self._validate_file(directory_fd)
+            truncated = os.fstat(self._fd)
+            self._seal_filesystem_identity(directory_fd)
+            if truncated.st_size != complete_length:
+                raise DurableJournalIntegrityError(
+                    "dormant_store_install_durable_journal_tail_recovery_failed"
+                )
+        except OSError as error:
+            raise DurableJournalIntegrityError(
+                "dormant_store_install_durable_journal_tail_recovery_failed"
+            ) from error
+        finally:
+            os.close(directory_fd)
         self._require_lock()
         return records
 
@@ -519,11 +628,12 @@ class DurableJournal:
                 journal_sequence=sequence,
                 journal_head_sha256=head,
                 journal_prior_head_sha256=prior,
+                held_lock=self.held_lock,
             )
             self._require_lock()
         except AuthorityStateError as error:
             raise DurableJournalAnchorError(
-                "phase8b_durable_journal_anchor_mismatch"
+                "dormant_store_install_durable_journal_anchor_mismatch"
             ) from error
         self._last_anchor_result = result.result
 
@@ -536,7 +646,7 @@ class DurableJournal:
         observed = self._read_validated()
         if observed != self._records:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_changed_while_locked"
+                "dormant_store_install_durable_journal_changed_while_locked"
             )
         self._reconcile_anchor()
         return observed
@@ -546,14 +656,14 @@ class DurableJournal:
         before = self.journal_records()
         if type(record) is not JournalRecord:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_record_type_invalid"
+                "dormant_store_install_durable_journal_record_type_invalid"
             )
         expected_prior = before[-1].record_sha256 if before else ZERO_HEAD
         try:
             event = JournalEvent(record.event)
         except (TypeError, ValueError) as error:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_event_invalid"
+                "dormant_store_install_durable_journal_event_invalid"
             ) from error
         expected = JournalRecord.create(
             plan_sha256=self.plan_sha256,
@@ -565,17 +675,25 @@ class DurableJournal:
         )
         if record != expected:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_append_binding_invalid"
+                "dormant_store_install_durable_journal_append_binding_invalid"
             )
         encoded = _canonical_bytes(_record_document(record)) + b"\n"
         if len(encoded) > MAX_RECORD_BYTES:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_record_size_invalid"
+                "dormant_store_install_durable_journal_record_size_invalid"
             )
         current_size = os.fstat(self._fd).st_size
-        if current_size + len(encoded) > MAX_JOURNAL_BYTES:
+        if event is JournalEvent.INTENT:
+            reserved_after_append = (
+                MAX_EFFECT_RECOVERY_RECORDS * MAX_RECORD_BYTES
+            )
+        elif event is JournalEvent.COMPENSATION_INTENT:
+            reserved_after_append = MAX_RECORD_BYTES
+        else:
+            reserved_after_append = 0
+        if current_size + len(encoded) + reserved_after_append > MAX_JOURNAL_BYTES:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_too_large"
+                "dormant_store_install_durable_journal_effect_recovery_capacity_not_reserved"
             )
         try:
             self._require_lock()
@@ -589,12 +707,12 @@ class DurableJournal:
             self._require_lock()
         except OSError as error:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_append_failed"
+                "dormant_store_install_durable_journal_append_failed"
             ) from error
         self._records = (*before, record)
         if self._read_validated() != self._records:
             raise DurableJournalIntegrityError(
-                "phase8b_durable_journal_post_append_mismatch"
+                "dormant_store_install_durable_journal_post_append_mismatch"
             )
         self._reconcile_anchor()
 

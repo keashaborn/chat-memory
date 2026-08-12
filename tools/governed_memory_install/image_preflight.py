@@ -3,6 +3,7 @@ from __future__ import annotations
 """Inspect-only validation for already-local immutable store images."""
 
 from dataclasses import dataclass
+import hashlib
 import json
 import re
 from typing import Final, Mapping, Protocol, Sequence
@@ -69,6 +70,39 @@ class LocalImageIdentity:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class LocalImageSetReadiness:
+    """Closed identity receipt for the two already-local store images."""
+
+    postgres: LocalImageIdentity
+    qdrant: LocalImageIdentity
+    receipt_sha256: str
+
+    @classmethod
+    def create(
+        cls, identities: Sequence[LocalImageIdentity]
+    ) -> LocalImageSetReadiness:
+        if (
+            len(identities) != 2
+            or tuple(item.name for item in identities) != ("postgres", "qdrant")
+            or len({item.image_id for item in identities}) != 2
+        ):
+            raise ImagePreflightError("image_set_not_exact")
+        document = {
+            "schema_version": "governed-memory-local-image-set-v1",
+            "images": [item.as_dict() for item in identities],
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                document,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("ascii")
+        ).hexdigest()
+        return cls(identities[0], identities[1], digest)
+
+
 def _inspect_one(runner: Runner, expected: ImageExpectation) -> LocalImageIdentity:
     result = runner.run(
         (
@@ -125,6 +159,31 @@ def inspect_local_images(
     if len({item.image_id for item in identities}) != len(identities):
         raise ImagePreflightError("image_ids_not_distinct")
     return identities
+
+
+def inspect_exact_store_image_set(
+    runner: Runner,
+    expectations: Sequence[ImageExpectation],
+) -> LocalImageSetReadiness:
+    return LocalImageSetReadiness.create(
+        inspect_local_images(runner, expectations)
+    )
+
+
+def validate_image_set_against_expectations(
+    readiness: LocalImageSetReadiness,
+    expectations: Sequence[ImageExpectation],
+) -> None:
+    if type(readiness) is not LocalImageSetReadiness or len(expectations) != 2:
+        raise ImagePreflightError("image_set_binding_invalid")
+    observed = (readiness.postgres, readiness.qdrant)
+    for identity, expected in zip(observed, expectations, strict=True):
+        if (
+            identity.name != expected.name
+            or identity.reference != expected.reference
+            or identity.repo_digest != expected.repo_digest
+        ):
+            raise ImagePreflightError("image_set_binding_mismatch")
 
 
 def expectations_from_store_spec(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Emit, but never write, the exact Phase 8B package manifest JSON."""
+"""Emit, but never write, the exact dormant-store installation package manifest JSON."""
 
 import json
 from pathlib import Path
@@ -19,11 +19,11 @@ from tools.governed_memory_install.package import (  # noqa: E402
 def generate() -> dict[str, object]:
     return {
         "schema_version": (
-            "governed-memory-phase8b-inactive-execution-package-manifest-v2"
+            "governed-memory-dormant-store-install-inactive-execution-package-manifest-v3"
         ),
         "state": (
-            "inactive_execution_and_synthetic_proof_harness_packaged_proof_"
-            "pending_not_staged_not_installed_not_authorized"
+            "repository-only-claim-bound-install-and-empty-rollback-"
+            "controllers-packaged-not-installed-not-activated"
         ),
         "artifacts": {
             relative: artifact_sha256(relative)

@@ -15,7 +15,9 @@ resources only; it is not installation or live-production evidence.
 
 ## Canonical repository checks
 
-Run on **seebx** from the isolated candidate worktree:
+Run first on **Local Mac** from the isolated Phase 9B candidate. After the exact
+patch is transferred, repeat the same checks on **seebx** from its isolated
+candidate worktree:
 
 ```bash
 python3 -I -B tools/governed_memory_install/package.py verify-package
@@ -52,9 +54,25 @@ not rewritten merely to make filenames shorter.
 - Current runtime build: successfully rebuilt from hash-locked offline wheels;
   source-bound receipt current; not Docker, store, installation, or activation
   proof.
-- Current installation package: statically verified and synthetic-proof capable;
-  no installation occurred, and current live installation state was not
-  reverified.
+- Current installation package: 56 artifacts statically verified; claim-bound
+  non-CLI install and empty-rollback compositions, durable journals, an anchored
+  identity ledger, canonical operation receipts, fresh terminal-readiness
+  replay checks, opaque rollback receipt/ledger binding, a secure runtime
+  verifier, an exact release-path launcher, resolved-spec Docker-label binding,
+  one empty-rollback writer fence, and retained audit hashes are packaged. The
+  verifier closes the complete 56-member release tree with no extras and
+  requires exact equality between the locked and installed normalized
+  distribution sets. Its release-tree hash is bound through the claim, journal,
+  host ownership, and install receipt. Empty rollback separately requires the
+  verified runtime capability and binds the exact runtime/release identity
+  through signed authority, claim, journal, operation requests and observations,
+  writer fence, retained install receipt, and rollback receipt. The runtime
+  verifier was not executed,
+  no controller runtime was built or installed, and no release was staged.
+  Runtime and release are separate preinstallation substrate retained by empty
+  rollback, not resources owned by the stores transaction. Concrete live
+  effect adapters are absent; no installation occurred, and current live
+  installation state was not reverified.
 - Current full-chain migration: artifact integrity and Phase 8G disposable
   apply/rollback/absence/reapply verified; not production-applied.
 - Current disposable PostgreSQL/Qdrant validation: passed against commit
@@ -62,8 +80,8 @@ not rewritten merely to make filenames shorter.
   `9d95027a736a44d394c0f859821daa1554c88e22`, PostgreSQL 16.14, and Qdrant
   1.19.0. The proof log SHA-256 is
   `9ff51264aff1c56d2c8570311ba116b64e1adae8d0282bae2cd395a745a400c1`.
-- Synthetic controller receipt: unit/model evidence only; not promoted as live
-  installation proof.
+- Synthetic controller and in-process composition tests: repository evidence
+  only; not promoted as live installation or rollback proof.
 - Release: refused with `inactive_installation_package_not_authorized`.
 - Production: no successor installation or activation evidence; no production
   data read and no provider call made.

@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import stat
+from dataclasses import dataclass
+import re
+from typing import Protocol
 
 
 MAX_AUTHORITY_FILE_BYTES = 4 * 1024 * 1024
@@ -12,6 +15,63 @@ MAX_AUTHORITY_FILE_BYTES = 4 * 1024 * 1024
 
 class SecureFileError(RuntimeError):
     """Content-free refusal for unsafe root-owned authority input."""
+
+
+_SECRET_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{2,95}\Z", re.ASCII)
+_HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+
+
+@dataclass(frozen=True, slots=True)
+class SecretWriteRequest:
+    """Exact destination metadata; secret bytes are deliberately separate."""
+
+    secret_name: str
+    destination: Path
+    expected_parent_mode: int = 0o700
+    expected_file_mode: int = 0o600
+    expected_uid: int = 0
+
+    def __post_init__(self) -> None:
+        if (
+            _SECRET_NAME_RE.fullmatch(self.secret_name) is None
+            or not self.destination.is_absolute()
+            or self.destination.name in {"", ".", ".."}
+            or self.expected_parent_mode != 0o700
+            or self.expected_file_mode != 0o600
+            or type(self.expected_uid) is not int
+            or self.expected_uid < 0
+        ):
+            raise SecureFileError("secret_write_request_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretReadiness:
+    secret_name: str
+    destination_sha256: str
+    content_sha256: str
+    root_owned: bool
+    parent_mode: int
+    file_mode: int
+
+    def __post_init__(self) -> None:
+        if (
+            _SECRET_NAME_RE.fullmatch(self.secret_name) is None
+            or _HASH_RE.fullmatch(self.destination_sha256) is None
+            or _HASH_RE.fullmatch(self.content_sha256) is None
+            or self.root_owned is not True
+            or self.parent_mode != 0o700
+            or self.file_mode != 0o600
+        ):
+            raise SecureFileError("secret_readiness_invalid")
+
+class SecretMaterialSource(Protocol):
+    def generate(self, secret_name: str) -> bytes: ...
+
+
+class SecretFileWriter(Protocol):
+    def write(
+        self, request: SecretWriteRequest, secret_value: bytes
+    ) -> SecretReadiness: ...
 
 
 def _nofollow() -> int:

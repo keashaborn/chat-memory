@@ -17,11 +17,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from tools.governed_memory_install import authority
 
 
-NAMESPACE = "governed-memory.installation.phase8b.v1"
+NAMESPACE = "governed-memory.installation.dormant_store_install.v1"
 THREAD_ID = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-SCOPE_ID = "phase8b-fresh-stores-000001"
+SCOPE_ID = "dormant_store_install-fresh-stores-000001"
 NOW = datetime(2026, 8, 11, 12, 5, 0, tzinfo=timezone.utc)
-NONCE = "phase8b_nonce_000000000000000000000001"
+NONCE = "dormant_store_install_nonce_000000000000000000000001"
 
 
 class InstallationAuthorityTests(unittest.TestCase):
@@ -42,8 +42,7 @@ class InstallationAuthorityTests(unittest.TestCase):
 
     def _scope(self) -> dict[str, object]:
         return {
-            "schema_version": "governed-memory-dormant-install-scope-v1",
-            "phase": "8B",
+            "schema_version": "governed-memory-dormant-install-scope-v2",
             "operation": "dormant_install",
             "authorization_namespace": NAMESPACE,
             "thread_id": THREAD_ID,
@@ -54,6 +53,7 @@ class InstallationAuthorityTests(unittest.TestCase):
             "controller_contract_sha256": "d" * 64,
             "execution_plan_sha256": "e" * 64,
             "exact_targets_sha256": "f" * 64,
+            "controller_runtime_receipt_sha256": "9" * 64,
             "source_boundary": {
                 "source_postgres_connection_count": 0,
                 "source_postgres_read_count": 0,
@@ -126,14 +126,14 @@ class InstallationAuthorityTests(unittest.TestCase):
             "schema_version": (
                 "governed-memory-dormant-install-authorization-v1"
             ),
-            "authorization_id": "phase8b-auth-000001",
+            "authorization_id": "dormant_store_install-auth-000001",
             "authorization_namespace": NAMESPACE,
             "thread_id": THREAD_ID,
             "scope_id": SCOPE_ID,
             "scope_sha256": scope_sha256,
             "key_id": signing_key_id,
             "approval_phrase": (
-                f"APPROVE PHASE 8B DORMANT INSTALL {scope_sha256}"
+                f"APPROVE GOVERNED MEMORY DORMANT STORE INSTALL {scope_sha256}"
                 if approval_phrase is None
                 else approval_phrase
             ),
@@ -203,6 +203,9 @@ class InstallationAuthorityTests(unittest.TestCase):
             ),
             execution_plan_sha256=str(self.scope["execution_plan_sha256"]),
             exact_targets_sha256=str(self.scope["exact_targets_sha256"]),
+            controller_runtime_receipt_sha256=str(
+                self.scope["controller_runtime_receipt_sha256"]
+            ),
         )
 
     def _execution_capability(
@@ -288,6 +291,7 @@ class InstallationAuthorityTests(unittest.TestCase):
             controller_contract_sha256="d" * 64,
             execution_plan_sha256="e" * 64,
             exact_targets_sha256="f" * 64,
+            controller_runtime_receipt_sha256="9" * 64,
         )
         with self.assertRaisesRegex(
             authority.AuthorityVerificationError,
@@ -492,7 +496,7 @@ class InstallationAuthorityTests(unittest.TestCase):
         ):
             self._verify(nonce_used=lambda _nonce: True)
 
-    def test_phase8b_scope_cannot_include_source_prep_or_runtime_secrets(self) -> None:
+    def test_dormant_store_install_scope_cannot_include_source_prep_or_runtime_secrets(self) -> None:
         source_connected = copy.deepcopy(self.scope)
         source_connected["source_boundary"][
             "source_postgres_connection_count"

@@ -5,8 +5,9 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G build and disposable proof are
-verified separately; installation and activation remain refused.
+historical evidence only. The current Phase 8G application proof and Phase 9B
+repository-only dormant-store controller package are verified separately;
+installation and activation remain refused.
 """
 
 from collections.abc import Mapping, Sequence
@@ -43,7 +44,7 @@ RUNTIME_PACKAGES = (
 BOOTSTRAP = OPS / "bootstrap_contract.json"
 PILOT = OPS / "pilot_contract.json"
 RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
-PHASE8F_DISPOSITION = OPS / "phase8f_component_disposition.json"
+CURRENT_COMPONENT_DISPOSITION = OPS / "current_component_disposition.json"
 HISTORICAL_PHASE7C_APPLICATION_PROOF = (
     OPS / "history" / "phase7c" / "disposable_proof_receipt.json"
 )
@@ -214,6 +215,150 @@ EXACT_TARGETS = {
     "database": "governed_memory",
     "collection": "governed_memory_9a54cf123493_000001",
     "alias": "governed_memory_active",
+}
+
+EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
+    "schema_version": "governed-memory-current-component-disposition-v1",
+    "status": (
+        "single_current_successor_and_single_current_dormant_store_"
+        "controller_package_inactive"
+    ),
+    "authority": {
+        "accounts": "supabase_auth_retained",
+        "canonical_governed_memory": "fresh_successor_postgresql_only",
+        "derived_vectors": "fresh_successor_qdrant_only_rebuildable",
+        "conversation_source": "existing_owner_scoped_chat_tables",
+        "structured_lifeswitch": (
+            "outside_memory_install_rollback_and_chat_erasure_authority"
+        ),
+    },
+    "current_successor": {
+        "application_root": "app.py",
+        "memory_runtime": "rag_engine/governed_memory",
+        "chat_integrity": "rag_engine/chat_integrity.py",
+        "chat_erasure_proxy": "rag_engine/governed_memory_erasure_proxy_v1.py",
+        "package_manifest": (
+            "ops/governed_memory/installation/current/package_manifest.json"
+        ),
+        "package_verifier": "tools/governed_memory_install/package.py",
+        "install_entrypoint": (
+            "tools/governed_memory_install/install_entrypoint.py"
+        ),
+        "empty_rollback_entrypoint": (
+            "tools/governed_memory_install/rollback_entrypoint.py"
+        ),
+        "synthetic_proof_entrypoint": (
+            "tools/governed_memory_validation/"
+            "run_installation_synthetic_proof.py"
+        ),
+        "legacy_memory_fallback_allowed": False,
+        "stored_assistant_preferences_allowed": False,
+        "legacy_memory_prompt_object_allowed": False,
+    },
+    "current_dormant_store_controller": {
+        "state": (
+            "repository_packaged_not_built_not_installed_not_authorized_"
+            "not_activated"
+        ),
+        "server_target": "seebx",
+        "install_and_empty_rollback_are_distinct_signed_operations": True,
+        "exact_controller_process_is_trusted": True,
+        "hostile_same_process_python_isolation_claimed": False,
+        "claim_bound_install_controller_composition_packaged": True,
+        "claim_bound_empty_rollback_controller_composition_packaged": True,
+        "controller_runtime_verification_capability_packaged": True,
+        "full_controller_release_tree_verification_packaged": True,
+        "exact_locked_controller_distribution_set_verification_packaged": True,
+        "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
+        "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+        "supervisor_launcher_source_packaged": True,
+        "controller_runtime_built_or_installed": False,
+        "controller_release_staged": False,
+        "controller_runtime_and_release_require_separate_future_build_and_install_authority": True,
+        "stores_install_owns_or_removes_controller_substrate": False,
+        "resolved_store_spec_and_exact_docker_labels_bound": True,
+        "resource_identity_ledger_v2_packaged": True,
+        "empty_rollback_writer_fence_packaged": True,
+        "retained_audit_artifact_hashes_bound": True,
+        "install_receipt_binds_fresh_terminal_canonical_store_readiness": True,
+        "empty_rollback_requires_opaque_verified_install_receipt_and_ledger": True,
+        "completed_install_and_empty_rollback_replay_reverification_packaged": True,
+        "concrete_install_store_effect_adapters_packaged": False,
+        "concrete_empty_rollback_store_effect_adapters_packaged": False,
+        "activation_entrypoint_packaged": False,
+        "validation_scope": "synthetic_in_process_only",
+        "live_linux_execution_proven": False,
+        "live_installation_proof_complete": False,
+        "installation_performed": False,
+        "empty_rollback_performed": False,
+        "production_state_changed": False,
+    },
+    "historical_only": {
+        "documentation_root": "docs/history/governed_memory",
+        "operational_metadata_root": "ops/governed_memory/history",
+        "may_be_imported_or_executed": False,
+        "may_be_used_as_current_release_authority": False,
+    },
+    "quarantined_legacy": [
+        {
+            "component": "memory_v1_v5_runtime",
+            "path_families": [
+                "rag_engine/memory_v1*",
+                "rag_engine/governed_memory_provider_v1.py",
+                "rag_engine/memory_prompt_*",
+            ],
+            "current_role": (
+                "not_imported_by_current_application_or_response_graph_"
+                "pending_separate_retirement_authority"
+            ),
+        },
+        {
+            "component": "legacy_preferences_identity_admin_and_vantage",
+            "path_families": [
+                "rag_engine/assistant_response_preference*",
+                "rag_engine/assistant_response_preferences*",
+                "rag_engine/admin_memory_*",
+                "rag_engine/vantage_*",
+            ],
+            "current_role": (
+                "not_consumed_by_current_successor_pending_precise_retirement"
+            ),
+        },
+        {
+            "component": "legacy_live_services_and_store_state",
+            "path_families": [
+                "legacy_memory_systemd_timers_and_services",
+                "legacy_memory_scripts_and_cron",
+                "legacy_postgresql_memory_objects",
+                "legacy_qdrant_memory_collections",
+            ],
+            "current_role": "outside_repository_only_candidate_unchanged",
+        },
+    ],
+    "future_deletion_gates": [
+        "zero_current_import_and_dynamic_load_closure",
+        "legacy_services_timers_cron_and_admin_paths_quiescent",
+        (
+            "legacy_postgresql_and_qdrant_zero_reader_zero_writer_"
+            "observation_window"
+        ),
+        "rollback_retention_receipt_complete",
+        "separate_exact_deletion_batch_authorized",
+    ],
+    "safety": {
+        "repository_only": True,
+        "dormant_store_controller_runtime_built_or_installed": False,
+        "dormant_store_controller_release_staged": False,
+        "services_changed": False,
+        "secrets_read_or_changed": False,
+        "docker_or_images_used": False,
+        "postgresql_read_or_changed": False,
+        "qdrant_read_or_changed": False,
+        "provider_calls": 0,
+        "structured_lifeswitch_data_in_scope": False,
+        "accounts_in_scope": False,
+        "activation_authorized": False,
+    },
 }
 OBSERVATION_KEYS = {
     "schema_version",
@@ -625,6 +770,15 @@ def _verify_chat_only_scope(value: Mapping[str, object]) -> None:
     )
 
 
+def _verify_current_component_disposition(value: object) -> None:
+    _require(
+        type(value) is dict
+        and _canonical_json_sha256(value)
+        == _canonical_json_sha256(EXPECTED_CURRENT_COMPONENT_DISPOSITION),
+        "release_component_disposition_invalid",
+    )
+
+
 def _verify_current_package_receipts(
     package_receipt: object,
     store_receipt: object,
@@ -638,22 +792,64 @@ def _verify_current_package_receipts(
     store_artifacts = store_receipt.get("artifact_sha256")
     _require(
         package_receipt.get("schema_version")
-        == "governed-memory-phase8b-package-verification-v3"
+        == "governed-memory-dormant-store-install-package-verification-v4"
         and isinstance(package_artifacts, dict)
         and bool(package_artifacts)
         and package_receipt.get("artifact_count") == len(package_artifacts)
         and package_receipt.get("guarded_synthetic_proof_harness_packaged") is True
         and package_receipt.get("synthetic_proof_executed_by_verifier") is False
         and package_receipt.get("synthetic_proof_receipt_promoted") is False
-        and package_receipt.get("installation_executor_packaged") is False
-        and package_receipt.get("rollback_executor_packaged") is False
-        and package_receipt.get("activation_executor_packaged") is False
+        and package_receipt.get("claim_bound_install_controller_composition_packaged") is True
+        and package_receipt.get("claim_bound_empty_rollback_controller_composition_packaged") is True
+        and package_receipt.get("controller_runtime_verification_capability_packaged") is True
+        and package_receipt.get("full_controller_release_tree_verification_packaged") is True
+        and package_receipt.get("exact_locked_controller_distribution_set_verification_packaged") is True
+        and package_receipt.get(
+            "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt"
+        )
+        is True
+        and package_receipt.get(
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt"
+        )
+        is True
+        and package_receipt.get("supervisor_launcher_source_packaged") is True
+        and package_receipt.get("controller_runtime_built_or_installed") is False
+        and package_receipt.get("controller_release_staged") is False
+        and package_receipt.get(
+            "controller_runtime_and_release_require_separate_future_build_and_install_authority"
+        )
+        is True
+        and package_receipt.get("stores_install_owns_or_removes_controller_substrate") is False
+        and package_receipt.get(
+            "resolved_store_spec_and_exact_docker_labels_bound"
+        )
+        is True
+        and package_receipt.get("resource_identity_ledger_v2_packaged") is True
+        and package_receipt.get("empty_rollback_writer_fence_packaged") is True
+        and package_receipt.get("retained_audit_artifact_hashes_bound") is True
+        and package_receipt.get("install_controller_emits_canonical_receipt") is True
+        and package_receipt.get("empty_rollback_controller_emits_canonical_receipt") is True
+        and package_receipt.get(
+            "install_receipt_binds_fresh_terminal_canonical_store_readiness"
+        )
+        is True
+        and package_receipt.get(
+            "empty_rollback_requires_opaque_verified_install_receipt_and_ledger"
+        )
+        is True
+        and package_receipt.get(
+            "completed_install_and_empty_rollback_replay_reverification_packaged"
+        )
+        is True
+        and package_receipt.get("concrete_install_store_effect_adapters_packaged") is False
+        and package_receipt.get("concrete_empty_rollback_store_effect_adapters_packaged") is False
+        and package_receipt.get("activation_entrypoint_packaged") is False
         and package_receipt.get("installation_performed_by_verifier") is False
         and package_receipt.get("images_staged_by_verifier") is False
         and package_receipt.get("secrets_touched_by_verifier") is False
         and package_receipt.get("activation_performed_by_verifier") is False
         and store_receipt.get("schema_version")
-        == "governed-memory-phase8b-store-migration-verification-v2"
+        == "governed-memory-dormant-store-install-store-migration-verification-v3"
         and isinstance(store_artifacts, dict)
         and bool(store_artifacts)
         and store_receipt.get("file_count") == len(store_artifacts)
@@ -734,9 +930,9 @@ def _verify_runtime_manifest(
     current_state = current.get("state") if isinstance(current, dict) else None
     _require(
         runtime.get("schema_version")
-        == "governed-memory-successor-runtime-manifest-v2"
+        == "governed-memory-successor-runtime-manifest-v3"
         and runtime.get("phase")
-        == "phase8g_current_candidate_disposable_validated_inactive_activation_blocked"
+        == "phase9b_canonical_dormant_store_install_and_empty_rollback_controllers_packaged_inactive_activation_blocked"
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
         and isinstance(validation, dict)
@@ -825,11 +1021,11 @@ def _verify_runtime_manifest(
         and isinstance(current, dict)
         and current.get("scope") == "current_inactive_stores_only_package"
         and current_state
-        == "phase8f_static_package_rebound_and_verified_not_authorized"
+        == "phase9b_repository_only_install_and_empty_rollback_controllers_packaged_not_authorized"
         and current.get("package_manifest")
-        == "ops/governed_memory/installation/phase8b/package_manifest.json"
+        == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
-        == "governed-memory-phase8b-inactive-execution-package-manifest-v2"
+        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v3"
         and current.get("package_manifest_sha256")
         == package_receipt.get("package_manifest_sha256")
         and current.get("package_artifact_count")
@@ -837,36 +1033,79 @@ def _verify_runtime_manifest(
         and current.get("contract_canonical_sha256")
         == package_receipt.get("contract_canonical_sha256")
         and current.get("contract")
-        == "ops/governed_memory/installation/phase8b/contract.json"
+        == "ops/governed_memory/installation/current/contract.json"
         and current.get("controller_plan_canonical_sha256")
         == package_receipt.get("plan_canonical_sha256")
         and current.get("controller_plan")
-        == "ops/governed_memory/installation/phase8b/controller_plan.json"
+        == "ops/governed_memory/installation/current/controller_plan.json"
         and current.get("store_migration_manifest_sha256")
         == store_receipt.get("manifest_sha256")
         and current.get("store_migration_manifest")
-        == "ops/governed_memory/installation/phase8b/migration_manifest.json"
+        == "ops/governed_memory/installation/current/migration_manifest.json"
         and current.get("store_migration_file_count")
         == store_receipt.get("file_count")
         and current.get("static_package_verification_complete") is True
-        and current.get("historical_phase8b_static_package_verification_complete")
+        and current.get("historical_dormant_store_install_static_package_verification_complete")
         is True
         and current.get("synthetic_proof_harness_packaged") is True
         and current.get("synthetic_proof_executed_for_current_package") is False
-        and current.get("historical_phase8b_synthetic_proof_executed") is True
+        and current.get("historical_dormant_store_install_synthetic_proof_executed") is True
         and current.get("synthetic_proof_outcome")
-        == (
-            "historical_synthetic_matrix_passed_repository_only_not_current_"
-            "phase8f_package_proof"
-        )
+        == "in_process_test_evidence_only_not_promoted_current_package_proof"
         and current.get("synthetic_proof_executed_by_release_guard") is False
         and current.get("synthetic_proof_receipt_promoted") is False
         and current.get("live_installation_proof_complete") is False
-        and current.get("installation_executor_packaged") is False
-        and current.get("rollback_executor_packaged") is False
+        and current.get("installation_executor_packaged") is True
+        and current.get("rollback_executor_packaged") is True
+        and current.get("controller_runtime_verification_capability_packaged")
+        is True
+        and current.get("full_controller_release_tree_verification_packaged")
+        is True
+        and current.get(
+            "exact_locked_controller_distribution_set_verification_packaged"
+        )
+        is True
+        and current.get(
+            "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt"
+        )
+        is True
+        and current.get(
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt"
+        )
+        is True
+        and current.get("supervisor_launcher_source_packaged") is True
+        and current.get("controller_runtime_built_or_installed") is False
+        and current.get("controller_release_staged") is False
+        and current.get(
+            "controller_runtime_and_release_require_separate_future_build_and_install_authority"
+        )
+        is True
+        and current.get("stores_install_owns_or_removes_controller_substrate")
+        is False
+        and current.get("resolved_store_spec_and_exact_docker_labels_bound")
+        is True
+        and current.get("resource_identity_ledger_v2_packaged") is True
+        and current.get("empty_rollback_writer_fence_packaged") is True
+        and current.get("retained_audit_artifact_hashes_bound") is True
+        and current.get("concrete_install_store_effect_adapters_packaged") is False
+        and current.get("concrete_empty_rollback_store_effect_adapters_packaged") is False
+        and current.get("install_controller_emits_canonical_receipt") is True
+        and current.get("empty_rollback_controller_emits_canonical_receipt") is True
+        and current.get(
+            "install_receipt_binds_fresh_terminal_canonical_store_readiness"
+        )
+        is True
+        and current.get(
+            "empty_rollback_requires_opaque_verified_install_receipt_and_ledger"
+        )
+        is True
+        and current.get(
+            "completed_install_and_empty_rollback_replay_reverification_packaged"
+        )
+        is True
         and current.get("activation_executor_packaged") is False
-        and current.get("phase8d_installation_performed") is False
-        and current.get("live_installation_state_reverified_by_phase8d") is False
+        and current.get("installation_performed") is False
+        and current.get("live_installation_state_reverified_for_current_candidate") is False
         and current.get("installation_authorized") is False
         and current.get("activation_authorized") is False
         and current.get("production_state_changed") is False
@@ -1090,26 +1329,13 @@ def verify_candidate_artifacts() -> dict[str, object]:
     blockers = _verify_runtime_manifest(runtime, package_receipt, store_receipt)
     _verify_governance_refusals(bootstrap, pilot, schema_contract, blockers)
     receipt_schema = _load_json(RECEIPT_SCHEMA)
-    phase8f_disposition = _load_json(PHASE8F_DISPOSITION)
+    current_disposition = _load_json(CURRENT_COMPONENT_DISPOSITION)
     _require(
         isinstance(receipt_schema, dict)
         and receipt_schema.get("additionalProperties") is False,
         "release_receipt_schema_invalid",
     )
-    disposition_safety = (
-        phase8f_disposition.get("safety")
-        if isinstance(phase8f_disposition, dict)
-        else None
-    )
-    _require(
-        isinstance(phase8f_disposition, dict)
-        and phase8f_disposition.get("schema_version")
-        == "governed-memory-phase8f-component-disposition-v1"
-        and isinstance(disposition_safety, dict)
-        and disposition_safety.get("repository_only") is True
-        and disposition_safety.get("production_state_changed") is False,
-        "release_component_disposition_invalid",
-    )
+    _verify_current_component_disposition(current_disposition)
 
     package_artifacts = package_receipt["artifact_sha256"]
     assert isinstance(package_artifacts, dict)
@@ -1135,8 +1361,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
                 CURRENT_PHASE8G_APPLICATION_PROOF
             ),
             "ops/governed_memory/pilot_contract.json": _sha256(PILOT),
-            "ops/governed_memory/phase8f_component_disposition.json": _sha256(
-                PHASE8F_DISPOSITION
+            "ops/governed_memory/current_component_disposition.json": _sha256(
+                CURRENT_COMPONENT_DISPOSITION
             ),
             "ops/governed_memory/release_receipt.schema.json": _sha256(
                 RECEIPT_SCHEMA
@@ -1148,10 +1374,10 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "tools/governed_memory_validation/runtime_packages.json": _sha256(
                 RUNTIME_PACKAGES
             ),
-            "ops/governed_memory/installation/phase8b/package_manifest.json": str(
+            "ops/governed_memory/installation/current/package_manifest.json": str(
                 package_receipt["package_manifest_sha256"]
             ),
-            "ops/governed_memory/installation/phase8b/migration_manifest.json": str(
+            "ops/governed_memory/installation/current/migration_manifest.json": str(
                 store_receipt["manifest_sha256"]
             ),
             "tools/governed_memory_validation/postgres_bootstrap.pgsql": _sha256(
@@ -1163,10 +1389,10 @@ def verify_candidate_artifacts() -> dict[str, object]:
         }
     )
     return {
-        "schema_version": "governed-memory-release-artifact-verification-v5",
+        "schema_version": "governed-memory-release-artifact-verification-v6",
         "phase": (
-            "phase8g_current_candidate_disposable_validated_inactive_"
-            "activation_blocked"
+            "phase9b_canonical_dormant_store_install_and_empty_rollback_"
+            "controllers_packaged_inactive_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
@@ -1190,15 +1416,31 @@ def verify_candidate_artifacts() -> dict[str, object]:
         ],
         "synthetic_proof_harness_packaged": True,
         "current_store_synthetic_proof_complete": False,
-        "historical_phase8b_synthetic_proof_reusable_for_current_candidate": False,
+        "historical_dormant_store_install_synthetic_proof_reusable_for_current_candidate": False,
         "synthetic_proof_executed_by_release_guard": False,
         "synthetic_proof_receipt_promoted": False,
         "current_candidate_disposable_proof_complete": True,
         "release_allowed": False,
         "release_refusal_code": CURRENT_CREATE_REFUSAL_CODE,
         "live_installation_proof_complete": False,
-        "installation_executor_packaged": False,
-        "rollback_executor_packaged": False,
+        "installation_executor_packaged": True,
+        "rollback_executor_packaged": True,
+        "controller_runtime_verification_capability_packaged": True,
+        "full_controller_release_tree_verification_packaged": True,
+        "exact_locked_controller_distribution_set_verification_packaged": True,
+        "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
+        "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+        "supervisor_launcher_source_packaged": True,
+        "controller_runtime_built_or_installed": False,
+        "controller_release_staged": False,
+        "controller_runtime_and_release_require_separate_future_build_and_install_authority": True,
+        "stores_install_owns_or_removes_controller_substrate": False,
+        "resolved_store_spec_and_exact_docker_labels_bound": True,
+        "resource_identity_ledger_v2_packaged": True,
+        "empty_rollback_writer_fence_packaged": True,
+        "retained_audit_artifact_hashes_bound": True,
+        "concrete_install_store_effect_adapters_packaged": False,
+        "concrete_empty_rollback_store_effect_adapters_packaged": False,
         "activation_executor_packaged": False,
         "installation_authorized": False,
         "activation_authorized": False,

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:governed-memory:phase8b:disposable-proof-receipt:v1",
-  "title": "Governed Memory Phase 8B Disposable Synthetic Proof Receipt",
+  "$id": "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2",
+  "title": "Governed Memory dormant-store installation Disposable Synthetic Proof Receipt",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -31,13 +31,13 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "governed-memory-phase8b-disposable-proof-receipt-v1"
+      "const": "governed-memory-dormant-store-install-disposable-proof-receipt-v2"
     },
     "proof_scope": {"const": "synthetic_in_process_model_only"},
     "outcome": {"const": "synthetic_matrix_passed"},
-    "scenario_count": {"const": 131},
-    "plan_step_count": {"const": 20},
-    "compensable_step_count": {"const": 15},
+    "scenario_count": {"const": 124},
+    "plan_step_count": {"const": 19},
+    "compensable_step_count": {"const": 14},
     "scenario_family_counts": {
       "type": "object",
       "additionalProperties": false,
@@ -53,13 +53,13 @@
       ],
       "properties": {
         "happy_path": {"const": 1},
-        "ordinary_failure_before_effect": {"const": 20},
-        "ordinary_failure_after_effect": {"const": 20},
-        "interrupt_before_effect": {"const": 20},
-        "interrupt_after_effect": {"const": 20},
-        "interrupt_after_applied_journal": {"const": 20},
-        "interrupt_before_compensation": {"const": 15},
-        "interrupt_after_compensation": {"const": 15}
+        "ordinary_failure_before_effect": {"const": 19},
+        "ordinary_failure_after_effect": {"const": 19},
+        "interrupt_before_effect": {"const": 19},
+        "interrupt_after_effect": {"const": 19},
+        "interrupt_after_applied_journal": {"const": 19},
+        "interrupt_before_compensation": {"const": 14},
+        "interrupt_after_compensation": {"const": 14}
       }
     },
     "outcome_counts": {
@@ -68,12 +68,12 @@
       "required": [
         "inactive_complete",
         "same_attempt_compensated",
-        "sealed_state_refused"
+        "terminal_postflight_failure_blocks_compensation"
       ],
       "properties": {
-        "inactive_complete": {"const": 59},
-        "same_attempt_compensated": {"const": 69},
-        "sealed_state_refused": {"const": 3}
+        "inactive_complete": {"const": 58},
+        "same_attempt_compensated": {"const": 65},
+        "terminal_postflight_failure_blocks_compensation": {"const": 1}
       }
     },
     "operation_counts": {
@@ -90,9 +90,9 @@
       "properties": {
         "apply": {"type": "integer", "minimum": 1},
         "compensate": {"type": "integer", "minimum": 1},
-        "interruption": {"const": 90},
+        "interruption": {"const": 85},
         "journal_append": {"type": "integer", "minimum": 1},
-        "ordinary_failure": {"const": 70},
+        "ordinary_failure": {"const": 66},
         "probe": {"type": "integer", "minimum": 1}
       }
     },

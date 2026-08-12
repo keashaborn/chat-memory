@@ -9,14 +9,17 @@ resource ledger.
 
 import argparse
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 from .host_boundary import CommandResult, CommandRunner, DOCKER_BINARY
-from .linux_plan import load_store_spec
-from .resource_identity import load_ledger, latest_exact_resources
+from .linux_plan import canonical_labels_sha256, load_store_spec
+from .resource_identity import (
+    load_ledger,
+    latest_exact_resources,
+    resource_ledger_binding_sha256,
+)
 
 
 class StoreSupervisorError(RuntimeError):
@@ -66,18 +69,6 @@ class ContainerState:
     status: str
 
 
-def canonical_labels_sha256(labels: Mapping[str, str]) -> str:
-    if type(labels) is not dict or any(
-        type(key) is not str or type(value) is not str
-        for key, value in labels.items()
-    ):
-        raise StoreSupervisorError("container_labels_invalid")
-    encoded = json.dumps(
-        labels, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("ascii")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def exact_containers_from_files(
     *, spec_path: Path, ledger_path: Path, expected_uid: int = 0
 ) -> tuple[ExactContainer, ExactContainer]:
@@ -88,7 +79,9 @@ def exact_containers_from_files(
         secure_expected_uid=expected_uid,
     )
     execution = spec["execution_binding"]
-    binding_sha256 = execution["binding_sha256"]
+    binding_sha256 = resource_ledger_binding_sha256(
+        execution["binding_sha256"]
+    )
     records = load_ledger(
         ledger_path,
         expected_binding_sha256=binding_sha256,
@@ -112,7 +105,7 @@ def exact_containers_from_files(
         security = expected["security"]
         logging = expected["logging"]
         labels_sha256 = canonical_labels_sha256(labels)
-        if record.labels_sha256 != labels_sha256:
+        if record.resource_labels_sha256 != labels_sha256:
             raise StoreSupervisorError("container_labels_identity_mismatch")
         if record.image_id is None or record.image_repo_digest is None:
             raise StoreSupervisorError("container_image_identity_absent")
@@ -329,7 +322,7 @@ class StoreSupervisor:
             before = self._inspect(container)
             if before.running:
                 self._runner.run(
-                    (DOCKER_BINARY, "stop", "--time=30", container.container_id)
+                    (DOCKER_BINARY, "stop", "--time=10", container.container_id)
                 )
             after = self._inspect(container)
             if after.running:

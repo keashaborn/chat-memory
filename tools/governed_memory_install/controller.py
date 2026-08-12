@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Hermetic Phase 8B stores-only controller state machine.
+"""Hermetic dormant-store installation stores-only controller state machine.
 
 This module contains no host executor. It models an
-exact twenty-step plan against an injected hermetic backend so ordering,
+exact nineteen-step plan against an injected hermetic backend so ordering,
 journal interpretation, drift refusal, and compensation algorithms can be
-tested without touching a host. A separate packaged backend may supply the
-durable journal adapter. This module is not end-to-end crash-recovery proof.
+tested without touching a host. A separate claim-bound backend supplies the
+durable journal and typed host-operation adapters.
 """
 
 from dataclasses import dataclass
@@ -23,8 +23,9 @@ from .execution_lock import (
 )
 
 
-EXECUTION_MODE: Final = "phase8b_hermetic_contract_only"
-JOURNAL_SCHEMA_VERSION: Final = "governed-memory-phase8b-journal-v1"
+EXECUTION_MODE: Final = "dormant_store_install_hermetic_contract_only"
+CLAIM_BOUND_EXECUTION_MODE: Final = "dormant_store_claim_bound_v1"
+JOURNAL_SCHEMA_VERSION: Final = "governed-memory-dormant_store_install-journal-v1"
 ATTEMPT_STEP_ID: Final = "I00_ATTEMPT"
 ZERO_HEAD: Final = "0" * 64
 HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -35,7 +36,7 @@ ACTION_RE: Final = re.compile(r"[a-z][a-z0-9_]{0,95}\Z", re.ASCII)
 
 
 class ControllerError(RuntimeError):
-    """Base class for fail-closed Phase 8B controller errors."""
+    """Base class for fail-closed dormant-store installation controller errors."""
 
 
 class PlanValidationError(ControllerError):
@@ -70,14 +71,14 @@ class CompensationFailedError(ControllerError):
     def __init__(self, cause: Exception, compensation_error: Exception) -> None:
         self.cause = cause
         self.compensation_error = compensation_error
-        super().__init__("phase8b_same_attempt_compensation_failed")
+        super().__init__("dormant_store_install_same_attempt_compensation_failed")
 
 
 class InstallationCompensatedError(ControllerError):
     def __init__(self, cause: Exception, receipt: ControllerReceipt) -> None:
         self.cause = cause
         self.receipt = receipt
-        super().__init__("phase8b_install_failed_and_same_attempt_compensated")
+        super().__init__("dormant_store_install_install_failed_and_same_attempt_compensated")
 
 
 class StepState(str, Enum):
@@ -103,8 +104,10 @@ class PlanStep:
     rollback: str
 
     @property
-    def seals(self) -> bool:
-        return self.rollback == "requires_separate_signed_rollback_after_seal"
+    def terminal_postflight(self) -> bool:
+        return self.rollback == (
+            "requires_separate_signed_rollback_after_terminal_postflight"
+        )
 
     @property
     def compensable(self) -> bool:
@@ -112,7 +115,7 @@ class PlanStep:
             "none",
             "retain_single_use_nonce_claim",
             "retain_attempt_resource_identity_ledger",
-            "requires_separate_signed_rollback_after_seal",
+            "requires_separate_signed_rollback_after_terminal_postflight",
         }
 
 
@@ -133,89 +136,84 @@ STORES_ONLY_PLAN: Final = (
         "none",
     ),
     PlanStep(
-        "I04_STAGE_IMMUTABLE_CONTROLLER_RELEASE",
-        "stage_immutable_controller_release",
-        "remove_immutable_controller_release",
+        "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
+        "write_resolved_store_spec_and_generate_fresh_store_secrets",
+        "remove_resolved_store_spec_and_fresh_store_secrets",
     ),
     PlanStep(
-        "I05_GENERATE_FRESH_STORE_SECRETS",
-        "generate_fresh_store_secrets",
-        "remove_fresh_store_secrets",
-    ),
-    PlanStep(
-        "I06_CREATE_EXACT_NETWORK",
+        "I05_CREATE_EXACT_NETWORK",
         "create_exact_network",
         "remove_exact_unused_network",
     ),
     PlanStep(
-        "I07_CREATE_EXACT_POSTGRES_VOLUME",
+        "I06_CREATE_EXACT_POSTGRES_VOLUME",
         "create_exact_postgres_volume",
         "remove_exact_empty_postgres_volume",
     ),
     PlanStep(
-        "I08_CREATE_EXACT_QDRANT_VOLUME",
+        "I07_CREATE_EXACT_QDRANT_VOLUME",
         "create_exact_qdrant_volume",
         "remove_exact_empty_qdrant_volume",
     ),
     PlanStep(
-        "I09_CREATE_EXACT_POSTGRES_CONTAINER",
+        "I08_CREATE_EXACT_POSTGRES_CONTAINER",
         "create_exact_postgres_container",
         "remove_exact_postgres_container",
     ),
     PlanStep(
-        "I10_CREATE_EXACT_QDRANT_CONTAINER",
+        "I09_CREATE_EXACT_QDRANT_CONTAINER",
         "create_exact_qdrant_container",
         "remove_exact_qdrant_container",
     ),
     PlanStep(
-        "I11_START_AND_VERIFY_EMPTY_STORES",
+        "I10_START_AND_VERIFY_EMPTY_STORES",
         "start_and_verify_empty_stores",
         "stop_exact_stores",
     ),
     PlanStep(
-        "I12_BOOTSTRAP_CANONICAL_DATABASE",
+        "I11_BOOTSTRAP_CANONICAL_DATABASE",
         "bootstrap_canonical_database",
         "drop_empty_canonical_database_and_roles",
     ),
     PlanStep(
-        "I13_APPLY_FOUNDATION_0001",
+        "I12_APPLY_FOUNDATION_0001",
         "apply_foundation_0001",
         "rollback_empty_foundation_0001",
     ),
     PlanStep(
-        "I14_APPLY_OWNER_CLAIM_DETAIL_0003",
+        "I13_APPLY_OWNER_CLAIM_DETAIL_0003",
         "apply_owner_claim_detail_0003",
         "rollback_owner_claim_detail_0003",
     ),
     PlanStep(
-        "I15_APPLY_PILOT_MARKER_0004",
+        "I14_APPLY_PILOT_MARKER_0004",
         "apply_pilot_marker_0004_without_marker",
         "rollback_empty_pilot_marker_0004",
     ),
     PlanStep(
-        "I16_CREATE_EMPTY_QDRANT_COLLECTION",
+        "I15_CREATE_EMPTY_QDRANT_COLLECTION",
         "create_empty_qdrant_collection",
         "remove_exact_empty_qdrant_collection",
     ),
     PlanStep(
-        "I17_CREATE_QDRANT_ALIAS",
+        "I16_CREATE_QDRANT_ALIAS",
         "create_qdrant_alias",
         "remove_exact_qdrant_alias",
     ),
     PlanStep(
-        "I18_SEAL_RESOURCE_IDENTITY_LEDGER",
-        "seal_resource_identity_ledger",
+        "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
+        "verify_pre_supervisor_resource_identities",
         "retain_attempt_resource_identity_ledger",
     ),
     PlanStep(
-        "I19_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
+        "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
         "install_and_enable_stores_supervisor",
         "disable_and_remove_stores_supervisor",
     ),
     PlanStep(
-        "I20_COLD_RESTART_AND_SEAL_INACTIVE_POSTFLIGHT",
-        "cold_restart_and_seal_inactive_postflight",
-        "requires_separate_signed_rollback_after_seal",
+        "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT",
+        "cold_restart_and_verify_terminal_postflight",
+        "requires_separate_signed_rollback_after_terminal_postflight",
     ),
 )
 
@@ -231,42 +229,42 @@ def _sha256(value: bytes) -> str:
 
 
 def validate_plan(plan: tuple[PlanStep, ...]) -> str:
-    if not isinstance(plan, tuple) or len(plan) != 20:
-        raise PlanValidationError("phase8b_plan_requires_exactly_20_steps")
+    if not isinstance(plan, tuple) or len(plan) != 19:
+        raise PlanValidationError("dormant_store_install_plan_requires_exactly_19_steps")
     for position, step in enumerate(plan, start=1):
         if type(step) is not PlanStep:
-            raise PlanValidationError("phase8b_plan_step_type_invalid")
+            raise PlanValidationError("dormant_store_install_plan_step_type_invalid")
         if not step.step_id.startswith(f"I{position:02d}_"):
-            raise PlanValidationError("phase8b_plan_step_order_invalid")
+            raise PlanValidationError("dormant_store_install_plan_step_order_invalid")
         if ACTION_RE.fullmatch(step.effect) is None:
-            raise PlanValidationError("phase8b_plan_action_invalid")
+            raise PlanValidationError("dormant_store_install_plan_action_invalid")
         if ACTION_RE.fullmatch(step.rollback) is None:
-            raise PlanValidationError("phase8b_plan_compensation_invalid")
-        if position < 20 and step.seals:
-            raise PlanValidationError("phase8b_plan_compensation_invalid")
-        if position == 20 and not step.seals:
-            raise PlanValidationError("phase8b_plan_seal_invalid")
+            raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
+        if position < 19 and step.terminal_postflight:
+            raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
+        if position == 19 and not step.terminal_postflight:
+            raise PlanValidationError("dormant_store_install_plan_terminal_postflight_invalid")
     expected_noncompensable = {
         "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK": "none",
         "I02_VERIFY_CLAIMED_EXECUTION_BINDING": (
             "retain_single_use_nonce_claim"
         ),
         "I03_VERIFY_LIVE_PREFLIGHT": "none",
-        "I18_SEAL_RESOURCE_IDENTITY_LEDGER": (
+        "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES": (
             "retain_attempt_resource_identity_ledger"
         ),
-        "I20_COLD_RESTART_AND_SEAL_INACTIVE_POSTFLIGHT": (
-            "requires_separate_signed_rollback_after_seal"
+        "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT": (
+            "requires_separate_signed_rollback_after_terminal_postflight"
         ),
     }
     for step in plan:
         if step.step_id in expected_noncompensable:
             if step.rollback != expected_noncompensable[step.step_id]:
-                raise PlanValidationError("phase8b_plan_compensation_invalid")
+                raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
         elif not step.compensable:
-            raise PlanValidationError("phase8b_plan_compensation_invalid")
-    if len({step.step_id for step in plan}) != 20:
-        raise PlanValidationError("phase8b_plan_step_id_duplicate")
+            raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
+    if len({step.step_id for step in plan}) != 19:
+        raise PlanValidationError("dormant_store_install_plan_step_id_duplicate")
     document = plan_install_steps_projection(plan)
     return _sha256(_canonical_bytes(document))
 
@@ -365,7 +363,7 @@ class _History:
     compensation_complete: bool
 
 
-class Phase8BStoresController:
+class DormantStoreInstallController:
     """Exact-order stores-only controller with no concrete executor."""
 
     def __init__(
@@ -379,8 +377,11 @@ class Phase8BStoresController:
         self.plan_sha256 = validate_plan(plan)
         self.held_lock = held_lock
         self._require_lock()
-        if getattr(backend, "execution_mode", None) != EXECUTION_MODE:
-            raise BackendProtocolError("phase8b_hermetic_backend_required")
+        if getattr(backend, "execution_mode", None) not in {
+            EXECUTION_MODE,
+            CLAIM_BOUND_EXECUTION_MODE,
+        }:
+            raise BackendProtocolError("dormant_store_install_hermetic_backend_required")
         for method in (
             "journal_records",
             "append_journal",
@@ -389,28 +390,36 @@ class Phase8BStoresController:
             "compensate",
         ):
             if not callable(getattr(backend, method, None)):
-                raise BackendProtocolError("phase8b_backend_protocol_invalid")
+                raise BackendProtocolError("dormant_store_install_backend_protocol_invalid")
         self.backend = backend
 
     def _require_lock(self) -> None:
         try:
             validate_held_execution_lock(self.held_lock)
         except (AttributeError, ExecutionLockError) as error:
-            raise ControllerLockError("phase8b_global_lock_not_held") from error
+            raise ControllerLockError("dormant_store_install_global_lock_not_held") from error
 
     def run(self, *, attempt_id: str) -> ControllerReceipt:
         self._require_lock()
         if not isinstance(attempt_id, str) or ATTEMPT_RE.fullmatch(attempt_id) is None:
-            raise JournalValidationError("phase8b_attempt_id_invalid")
+            raise JournalValidationError("dormant_store_install_attempt_id_invalid")
         history = self._load_history(attempt_id)
         self._verify_known_states(history)
         if history.compensation_complete:
-            raise CompletedStateError("phase8b_attempt_already_compensated")
+            raise CompletedStateError("dormant_store_install_attempt_already_compensated")
         if history.compensation_started:
             return self._compensate(attempt_id, history)
-        seal_id = self.plan[-1].step_id
-        if seal_id in history.applied_step_ids:
-            raise CompletedStateError("phase8b_inactive_postflight_already_sealed")
+        terminal_step_id = self.plan[-1].step_id
+        if terminal_step_id in history.applied_step_ids:
+            if history.applied_step_ids == tuple(
+                step.step_id for step in self.plan
+            ):
+                return self._receipt(
+                    attempt_id, "inactive_stores_installation_complete"
+                )
+            raise CompletedStateError(
+                "dormant_store_install_terminal_postflight_already_complete"
+            )
         history = self._recover_intent_after_effect(attempt_id, history)
         self._verify_untouched_states(history)
 
@@ -425,12 +434,12 @@ class Phase8BStoresController:
                 if history.intent_only_step_id != step.step_id:
                     fresh_state = self._probe(step)
                     if fresh_state is not StepState.BEFORE:
-                        if step.seals and fresh_state is StepState.AFTER:
+                        if step.terminal_postflight and fresh_state is StepState.AFTER:
                             raise CompletedStateError(
-                                "phase8b_unowned_inactive_postflight_seal_present"
+                                "dormant_store_install_unowned_terminal_postflight_present"
                             )
                         raise StateDriftError(
-                            "phase8b_fresh_step_not_before:" + step.step_id
+                            "dormant_store_install_fresh_step_not_before:" + step.step_id
                         )
                     self._append(attempt_id, step.step_id, JournalEvent.INTENT)
                 self._require_lock()
@@ -439,7 +448,7 @@ class Phase8BStoresController:
                 state = self._probe(step)
                 if state is not StepState.AFTER:
                     raise StateDriftError(
-                        "phase8b_step_effect_not_after:" + step.step_id
+                        "dormant_store_install_step_effect_not_after:" + step.step_id
                     )
                 self._append(attempt_id, step.step_id, JournalEvent.APPLIED)
                 history = self._load_history(attempt_id)
@@ -454,16 +463,16 @@ class Phase8BStoresController:
             state = self._probe(current)
             if state is StepState.DRIFT:
                 raise StateDriftError(
-                    "phase8b_failed_step_state_drift:" + current.step_id
+                    "dormant_store_install_failed_step_state_drift:" + current.step_id
                 ) from cause
             if state is StepState.RECOVERABLE:
                 raise StateDriftError(
-                    "phase8b_failed_step_recoverable_requires_exact_resume:"
+                    "dormant_store_install_failed_step_recoverable_requires_exact_resume:"
                     + current.step_id
                 ) from cause
-            if current.seals and state is StepState.AFTER:
+            if current.terminal_postflight and state is StepState.AFTER:
                 raise CompletedStateError(
-                    "phase8b_seal_effect_present_after_failure"
+                    "dormant_store_install_terminal_postflight_present_after_failure"
                 ) from cause
             if state is StepState.AFTER:
                 refreshed = self._load_history(attempt_id)
@@ -498,7 +507,7 @@ class Phase8BStoresController:
         self._require_lock()
         if type(state) is not StepState:
             raise BackendProtocolError(
-                "phase8b_backend_probe_state_invalid:" + step.step_id
+                "dormant_store_install_backend_probe_state_invalid:" + step.step_id
             )
         return state
 
@@ -509,7 +518,7 @@ class Phase8BStoresController:
         if not isinstance(records, tuple) or any(
             type(record) is not JournalRecord for record in records
         ):
-            raise JournalValidationError("phase8b_journal_record_type_invalid")
+            raise JournalValidationError("dormant_store_install_journal_record_type_invalid")
         return records
 
     def _append(
@@ -530,7 +539,7 @@ class Phase8BStoresController:
         self._require_lock()
         after = self._records()
         if after != before + (record,):
-            raise JournalValidationError("phase8b_journal_append_not_atomic")
+            raise JournalValidationError("dormant_store_install_journal_append_not_atomic")
 
     def _load_history(self, attempt_id: str) -> _History:
         records = self._records()
@@ -538,24 +547,24 @@ class Phase8BStoresController:
         valid_step_ids = {step.step_id for step in self.plan}
         for sequence, record in enumerate(records, start=1):
             if record.plan_sha256 != self.plan_sha256:
-                raise JournalValidationError("phase8b_journal_plan_mismatch")
+                raise JournalValidationError("dormant_store_install_journal_plan_mismatch")
             if record.attempt_id != attempt_id:
-                raise JournalValidationError("phase8b_journal_attempt_mismatch")
+                raise JournalValidationError("dormant_store_install_journal_attempt_mismatch")
             if record.sequence != sequence:
-                raise JournalValidationError("phase8b_journal_sequence_invalid")
+                raise JournalValidationError("dormant_store_install_journal_sequence_invalid")
             if record.prior_record_sha256 != prior:
-                raise JournalValidationError("phase8b_journal_chain_invalid")
+                raise JournalValidationError("dormant_store_install_journal_chain_invalid")
             if _sha256(_canonical_bytes(record.hash_input())) != record.record_sha256:
-                raise JournalValidationError("phase8b_journal_record_hash_invalid")
+                raise JournalValidationError("dormant_store_install_journal_record_hash_invalid")
             if HASH_RE.fullmatch(record.record_sha256) is None:
-                raise JournalValidationError("phase8b_journal_record_hash_invalid")
+                raise JournalValidationError("dormant_store_install_journal_record_hash_invalid")
             if record.step_id not in valid_step_ids | {ATTEMPT_STEP_ID}:
-                raise JournalValidationError("phase8b_journal_step_invalid")
+                raise JournalValidationError("dormant_store_install_journal_step_invalid")
             try:
                 JournalEvent(record.event)
             except ValueError as error:
                 raise JournalValidationError(
-                    "phase8b_journal_event_invalid"
+                    "dormant_store_install_journal_event_invalid"
                 ) from error
             prior = record.record_sha256
 
@@ -566,7 +575,7 @@ class Phase8BStoresController:
             if index >= len(records) or records[index].event != JournalEvent.INTENT.value:
                 break
             if records[index].step_id != step.step_id:
-                raise JournalValidationError("phase8b_install_step_order_invalid")
+                raise JournalValidationError("dormant_store_install_install_step_order_invalid")
             index += 1
             if (
                 index < len(records)
@@ -574,7 +583,7 @@ class Phase8BStoresController:
             ):
                 if records[index].step_id != step.step_id:
                     raise JournalValidationError(
-                        "phase8b_install_event_step_mismatch"
+                        "dormant_store_install_install_event_step_mismatch"
                     )
                 applied.append(step.step_id)
                 index += 1
@@ -589,9 +598,11 @@ class Phase8BStoresController:
                 marker.step_id != ATTEMPT_STEP_ID
                 or marker.event != JournalEvent.COMPENSATION_STARTED.value
             ):
-                raise JournalValidationError("phase8b_journal_phase_order_invalid")
+                raise JournalValidationError("dormant_store_install_journal_phase_order_invalid")
             if self.plan[-1].step_id in applied:
-                raise JournalValidationError("phase8b_compensation_after_seal")
+                raise JournalValidationError(
+                    "dormant_store_install_compensation_after_terminal_postflight"
+                )
             compensation_started = True
             index += 1
 
@@ -611,7 +622,7 @@ class Phase8BStoresController:
                     break
                 if record.step_id != step_id:
                     raise JournalValidationError(
-                        "phase8b_compensation_step_order_invalid"
+                        "dormant_store_install_compensation_step_order_invalid"
                     )
                 index += 1
                 if (
@@ -620,7 +631,7 @@ class Phase8BStoresController:
                 ):
                     if records[index].step_id != step_id:
                         raise JournalValidationError(
-                            "phase8b_compensation_event_step_mismatch"
+                            "dormant_store_install_compensation_event_step_mismatch"
                         )
                     compensated.append(step_id)
                     index += 1
@@ -641,11 +652,11 @@ class Phase8BStoresController:
                     if step.step_id in applied and step.compensable
                 )
             ):
-                raise JournalValidationError("phase8b_compensation_terminal_invalid")
+                raise JournalValidationError("dormant_store_install_compensation_terminal_invalid")
             compensation_complete = True
             index += 1
         if index != len(records):
-            raise JournalValidationError("phase8b_journal_trailing_records")
+            raise JournalValidationError("dormant_store_install_journal_trailing_records")
         return _History(
             applied_step_ids=tuple(applied),
             intent_only_step_id=intent_only,
@@ -660,7 +671,7 @@ class Phase8BStoresController:
         for step in self.plan:
             state = self._probe(step)
             if state is StepState.DRIFT:
-                raise StateDriftError("phase8b_step_state_drift:" + step.step_id)
+                raise StateDriftError("dormant_store_install_step_state_drift:" + step.step_id)
             if state is StepState.RECOVERABLE:
                 exact_install_intent = (
                     not history.compensation_started
@@ -673,13 +684,13 @@ class Phase8BStoresController:
                 if exact_install_intent or exact_compensation_intent:
                     continue
                 raise StateDriftError(
-                    "phase8b_recoverable_without_exact_current_intent:"
+                    "dormant_store_install_recoverable_without_exact_current_intent:"
                     + step.step_id
                 )
             if step.step_id in compensated:
                 if state is not StepState.BEFORE:
                     raise StateDriftError(
-                        "phase8b_compensated_step_not_before:" + step.step_id
+                        "dormant_store_install_compensated_step_not_before:" + step.step_id
                     )
             elif (
                 history.compensation_started
@@ -689,13 +700,13 @@ class Phase8BStoresController:
                 # and the crash occurred before COMPENSATED was appended.
                 if state not in {StepState.AFTER, StepState.BEFORE}:
                     raise StateDriftError(
-                        "phase8b_compensation_intent_state_invalid:"
+                        "dormant_store_install_compensation_intent_state_invalid:"
                         + step.step_id
                     )
             elif step.step_id in history.applied_step_ids:
                 if state is not StepState.AFTER:
                     raise StateDriftError(
-                        "phase8b_applied_step_not_after:" + step.step_id
+                        "dormant_store_install_applied_step_not_after:" + step.step_id
                     )
             elif (
                 history.compensation_started
@@ -703,7 +714,7 @@ class Phase8BStoresController:
                 and state is not StepState.BEFORE
             ):
                 raise StateDriftError(
-                    "phase8b_failed_unapplied_step_not_before:" + step.step_id
+                    "dormant_store_install_failed_unapplied_step_not_before:" + step.step_id
                 )
             elif (
                 history.compensation_started
@@ -711,7 +722,7 @@ class Phase8BStoresController:
                 and state is not StepState.BEFORE
             ):
                 raise StateDriftError(
-                    "phase8b_unowned_effect_during_compensation:" + step.step_id
+                    "dormant_store_install_unowned_effect_during_compensation:" + step.step_id
                 )
 
     def _recover_intent_after_effect(
@@ -724,8 +735,9 @@ class Phase8BStoresController:
         )
         state = self._probe(step)
         if state is StepState.AFTER:
-            if step.seals:
-                raise CompletedStateError("phase8b_unjournaled_seal_effect_present")
+            # Exact durable intent owns this effect.  This applies equally to
+            # the terminal postflight: a crash after the effect but before
+            # APPLIED must be recoverable without repeating the operation.
             self._append(attempt_id, step.step_id, JournalEvent.APPLIED)
             return self._load_history(attempt_id)
         if state is StepState.RECOVERABLE:
@@ -734,7 +746,7 @@ class Phase8BStoresController:
             # or partially observed effect.
             return history
         if state is not StepState.BEFORE:
-            raise StateDriftError("phase8b_intent_state_invalid:" + step.step_id)
+            raise StateDriftError("dormant_store_install_intent_state_invalid:" + step.step_id)
         return history
 
     def _verify_untouched_states(self, history: _History) -> None:
@@ -746,36 +758,36 @@ class Phase8BStoresController:
                 continue
             state = self._probe(step)
             if state is StepState.DRIFT:
-                raise StateDriftError("phase8b_step_state_drift:" + step.step_id)
+                raise StateDriftError("dormant_store_install_step_state_drift:" + step.step_id)
             if state is not StepState.BEFORE:
-                if step.seals:
+                if step.terminal_postflight:
                     raise CompletedStateError(
-                        "phase8b_unowned_inactive_postflight_seal_present"
+                        "dormant_store_install_unowned_terminal_postflight_present"
                     )
                 raise StateDriftError(
-                    "phase8b_unowned_preexisting_effect:" + step.step_id
+                    "dormant_store_install_unowned_preexisting_effect:" + step.step_id
                 )
 
     def _compensate(
         self, attempt_id: str, history: _History
     ) -> ControllerReceipt:
         if not history.compensation_started:
-            raise CompensationBlockedError("phase8b_compensation_not_started")
+            raise CompensationBlockedError("dormant_store_install_compensation_not_started")
         history = self._load_history(attempt_id)
         self._verify_known_states(history)
-        seal_state = self._probe(self.plan[-1])
-        if seal_state is not StepState.BEFORE:
+        terminal_state = self._probe(self.plan[-1])
+        if terminal_state is not StepState.BEFORE:
             raise CompensationBlockedError(
-                "phase8b_compensation_blocked_by_seal_or_drift"
+                "dormant_store_install_compensation_blocked_by_terminal_postflight_or_drift"
             )
         compensated = set(history.compensated_step_ids)
         step_by_id = {step.step_id: step for step in self.plan}
         for step_id in reversed(history.applied_step_ids):
             self._verify_known_states(history)
             step = step_by_id[step_id]
-            if step.seals:
+            if step.terminal_postflight:
                 raise CompensationBlockedError(
-                    "phase8b_compensation_after_seal_refused"
+                    "dormant_store_install_compensation_after_terminal_postflight_refused"
                 )
             if not step.compensable:
                 continue
@@ -784,7 +796,7 @@ class Phase8BStoresController:
             state = self._probe(step)
             if state is StepState.DRIFT:
                 raise CompensationBlockedError(
-                    "phase8b_compensation_state_drift:" + step_id
+                    "dormant_store_install_compensation_state_drift:" + step_id
                 )
             if history.compensation_intent_step_id != step_id:
                 self._append(
@@ -797,7 +809,7 @@ class Phase8BStoresController:
                 state = self._probe(step)
             if state is not StepState.BEFORE:
                 raise CompensationBlockedError(
-                    "phase8b_compensation_effect_not_before:" + step_id
+                    "dormant_store_install_compensation_effect_not_before:" + step_id
                 )
             self._append(attempt_id, step_id, JournalEvent.COMPENSATED)
             history = self._load_history(attempt_id)

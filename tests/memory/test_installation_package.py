@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from tools.governed_memory_install import controller, package
+from tools.governed_memory_install import controller, package, rollback
 from tools.governed_memory_validation import (
-    generate_phase8b_package_manifest,
+    generate_installation_package_manifest,
     verify_store_migration_manifest,
 )
 
@@ -19,9 +19,9 @@ from tools.governed_memory_validation import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class Phase8BPackageTests(unittest.TestCase):
+class DormantStoreInstallPackageTests(unittest.TestCase):
     def _verify_generated_manifest(self) -> dict[str, object]:
-        manifest = generate_phase8b_package_manifest.generate()
+        manifest = generate_installation_package_manifest.generate()
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "package_manifest.json"
             path.write_text(
@@ -34,25 +34,66 @@ class Phase8BPackageTests(unittest.TestCase):
     def test_current_members_verify_as_inactive_execution_package(self) -> None:
         receipt = self._verify_generated_manifest()
         self.assertEqual(receipt["schema_version"], (
-            "governed-memory-phase8b-package-verification-v3"
+            "governed-memory-dormant-store-install-package-verification-v4"
         ))
-        self.assertEqual(receipt["artifact_count"], 43)
-        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 43)
-        self.assertTrue(receipt["durable_journal_adapter_packaged"])
+        self.assertEqual(receipt["artifact_count"], 56)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 56)
+        self.assertTrue(
+            receipt["durable_install_and_rollback_journal_adapters_packaged"]
+        )
+
+        self.assertTrue(
+            receipt["durable_resource_identity_ledger_and_anchor_packaged"]
+        )
         self.assertTrue(receipt["guarded_synthetic_proof_harness_packaged"])
         self.assertFalse(receipt["synthetic_proof_executed_by_verifier"])
         self.assertFalse(receipt["synthetic_proof_receipt_promoted"])
-        self.assertTrue(receipt["generic_docker_host_runner_primitive_packaged"])
+        self.assertTrue(receipt["bounded_image_inspect_runner_primitive_packaged"])
         self.assertTrue(receipt["local_image_inspect_adapter_packaged"])
-        self.assertFalse(
-            receipt["claim_bound_installation_runner_composition_packaged"]
+        self.assertTrue(
+            receipt["controller_runtime_verification_capability_packaged"]
         )
-        self.assertFalse(
-            receipt["claim_bound_installation_store_effect_adapters_packaged"]
+        self.assertTrue(receipt["supervisor_launcher_source_packaged"])
+        self.assertFalse(receipt["controller_runtime_built_or_installed"])
+        for field in (
+            "resolved_store_spec_and_exact_docker_labels_bound",
+            "resource_identity_ledger_v2_packaged",
+            "empty_rollback_writer_fence_packaged",
+            "retained_audit_artifact_hashes_bound",
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt",
+        ):
+            self.assertTrue(receipt[field], field)
+        self.assertTrue(
+            receipt["claim_bound_install_controller_composition_packaged"]
         )
-        self.assertFalse(receipt["installation_executor_packaged"])
-        self.assertFalse(receipt["rollback_executor_packaged"])
-        self.assertFalse(receipt["activation_executor_packaged"])
+        self.assertTrue(
+            receipt[
+                "install_receipt_binds_fresh_terminal_canonical_store_readiness"
+            ]
+        )
+        self.assertTrue(
+            receipt[
+                "empty_rollback_requires_opaque_verified_install_receipt_and_ledger"
+            ]
+        )
+        self.assertTrue(
+            receipt[
+                "completed_install_and_empty_rollback_replay_reverification_packaged"
+            ]
+        )
+        self.assertTrue(
+            receipt["claim_bound_empty_rollback_controller_composition_packaged"]
+        )
+        self.assertFalse(receipt["concrete_install_store_effect_adapters_packaged"])
+        self.assertFalse(
+            receipt["concrete_empty_rollback_store_effect_adapters_packaged"]
+        )
+        self.assertTrue(
+            receipt["operation_specific_install_and_empty_rollback_receipts_packaged"]
+        )
+        self.assertTrue(receipt["install_controller_emits_canonical_receipt"])
+        self.assertTrue(receipt["empty_rollback_controller_emits_canonical_receipt"])
+        self.assertFalse(receipt["activation_entrypoint_packaged"])
         self.assertTrue(receipt["stores_supervisor_cli_packaged"])
         self.assertEqual(
             receipt["stores_supervisor_cli_docker_surface"],
@@ -95,6 +136,14 @@ class Phase8BPackageTests(unittest.TestCase):
             package.EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
         )
         self.assertEqual(
+            receipt["install_receipt_schema_canonical_sha256"],
+            package.EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt["empty_rollback_receipt_schema_canonical_sha256"],
+            package.EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256,
+        )
+        self.assertEqual(
             receipt["migration_verifier_source_sha256"],
             package.EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256,
         )
@@ -107,34 +156,103 @@ class Phase8BPackageTests(unittest.TestCase):
         for forbidden in package.FORBIDDEN_ARTIFACT_MARKERS:
             self.assertFalse(any(forbidden in path for path in artifacts))
 
+    def test_current_installation_and_controller_directories_are_closed(self) -> None:
+        package._verify_current_directory_closure()
+        self.assertEqual(
+            package._repository_regular_file_inventory(
+                "ops/governed_memory/installation"
+            ),
+            package.EXPECTED_INSTALLATION_DIRECTORY_FILES,
+        )
+        self.assertEqual(
+            package._repository_regular_file_inventory(
+                "tools/governed_memory_install"
+            ),
+            package.EXPECTED_INSTALL_TOOL_DIRECTORY_FILES,
+        )
+
+    def test_directory_closure_rejects_unlisted_file_and_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / "ops/governed_memory/installation"
+            tools = root / "tools/governed_memory_install"
+            installation.mkdir(parents=True)
+            tools.mkdir(parents=True)
+            (installation / "stale.py").write_text("stale\n", encoding="ascii")
+            (tools / "current.py").write_text("current\n", encoding="ascii")
+            with (
+                patch.object(package, "ROOT", root),
+                patch.object(
+                    package,
+                    "EXPECTED_INSTALLATION_DIRECTORY_FILES",
+                    frozenset(),
+                ),
+                patch.object(
+                    package,
+                    "EXPECTED_INSTALL_TOOL_DIRECTORY_FILES",
+                    frozenset({"tools/governed_memory_install/current.py"}),
+                ),
+                self.assertRaisesRegex(
+                    package.PackageError,
+                    "directory_closure_invalid",
+                ),
+            ):
+                package._verify_current_directory_closure()
+
+            (installation / "stale.py").unlink()
+            (installation / "linked.py").symlink_to(tools / "current.py")
+            with (
+                patch.object(package, "ROOT", root),
+                self.assertRaisesRegex(
+                    package.PackageError,
+                    "directory_inventory_invalid",
+                ),
+            ):
+                package._repository_regular_file_inventory(
+                    "ops/governed_memory/installation"
+                )
+
     def test_checked_in_manifest_is_exact_generated_manifest(self) -> None:
         checked_in = json.loads(
             package.MANIFEST.read_text(encoding="ascii")
         )
-        self.assertEqual(checked_in, generate_phase8b_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], 43)
+        self.assertEqual(checked_in, generate_installation_package_manifest.generate())
+        self.assertEqual(package.verify()["artifact_count"], 56)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
     ) -> None:
-        generated = generate_phase8b_package_manifest.generate()
+        generated = generate_installation_package_manifest.generate()
         artifacts = generated["artifacts"]
         required = {
-            "ops/governed_memory/installation/phase8b/controller_runtime_contract.json",
-            "ops/governed_memory/installation/phase8b/disposable_proof_contract.json",
-            "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
-            "ops/governed_memory/installation/phase8b/execution_contract.json",
+            "ops/governed_memory/installation/current/controller_runtime_contract.json",
+            "ops/governed_memory/installation/current/disposable_proof_contract.json",
+            "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json",
+            "ops/governed_memory/installation/current/install_receipt.schema.json",
+            "ops/governed_memory/installation/current/empty_rollback_receipt.schema.json",
+            "ops/governed_memory/installation/current/execution_contract.json",
             "tools/governed_memory_install/package.py",
             "tools/governed_memory_install/disposable_proof_harness.py",
             "tools/governed_memory_install/journal.py",
+            "tools/governed_memory_install/install_backend.py",
+            "tools/governed_memory_install/install_entrypoint.py",
             "tools/governed_memory_install/execution_capability.py",
+            "tools/governed_memory_install/package_capability.py",
+            "tools/governed_memory_install/controller_runtime.py",
+            "tools/governed_memory_install/receipts.py",
+            "tools/governed_memory_install/rollback.py",
+            "tools/governed_memory_install/rollback_authority.py",
+            "tools/governed_memory_install/rollback_entrypoint.py",
+            "tools/governed_memory_install/rollback_journal.py",
             "tools/governed_memory_install/secure_file.py",
+            "tools/governed_memory_install/store_readiness.py",
+            "tools/governed_memory_install/store_supervisor_launcher.py",
             "tools/governed_memory_install/synthetic_backend.py",
             "tools/governed_memory_install/authority.py",
-            "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
-            "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
+            "tools/governed_memory_validation/generate_installation_package_manifest.py",
+            "tools/governed_memory_validation/run_installation_synthetic_proof.py",
             "tools/governed_memory_validation/verify_store_migration_manifest.py",
-            "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json",
+            "ops/governed_memory/installation/current/postgres/migration_bindings.json",
         }
         self.assertTrue(required.issubset(artifacts))
         for historical in (
@@ -201,7 +319,7 @@ class Phase8BPackageTests(unittest.TestCase):
         )
 
     def test_manifest_rejects_extra_forbidden_or_hash_tampering(self) -> None:
-        manifest = generate_phase8b_package_manifest.generate()
+        manifest = generate_installation_package_manifest.generate()
         cases = []
         extra = copy.deepcopy(manifest)
         extra["artifacts"][
@@ -244,6 +362,10 @@ class Phase8BPackageTests(unittest.TestCase):
         package._verify_plan(plan)
         model_hash = package._verify_controller_binding(plan, controller)
         self.assertEqual(model_hash, package.EXPECTED_CONTROLLER_MODEL_SHA256)
+        self.assertEqual(
+            tuple(step["id"] for step in plan["empty_rollback_steps"]),
+            tuple(step.step_id for step in rollback.EMPTY_ROLLBACK_STEPS),
+        )
         plan["live_execution"]["install_command_exposed"] = True
         with self.assertRaisesRegex(
             package.PackageError,
@@ -269,7 +391,7 @@ class Phase8BPackageTests(unittest.TestCase):
         projection = controller.plan_install_steps_projection(
             controller.STORES_ONLY_PLAN
         )
-        self.assertEqual(len(projection), 20)
+        self.assertEqual(len(projection), 19)
         self.assertEqual(
             tuple(step["id"] for step in projection),
             package.EXPECTED_CONTROLLER_STEP_IDS,
@@ -317,7 +439,11 @@ class Phase8BPackageTests(unittest.TestCase):
         receipt = verify_store_migration_manifest.verify()
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-phase8b-store-migration-verification-v2",
+            "governed-memory-dormant-store-install-store-migration-verification-v3",
+        )
+        self.assertEqual(
+            receipt["state"],
+            "repository-only-current-stores-only-migration-set-not-installed-not-authorized",
         )
         self.assertEqual(receipt["file_count"], 9)
         self.assertNotIn("schema_contract.json", receipt["artifact_sha256"])
@@ -341,7 +467,7 @@ class Phase8BPackageTests(unittest.TestCase):
             )
 
     def test_package_rejects_nested_migration_receipt_drift(self) -> None:
-        observed = generate_phase8b_package_manifest.generate()["artifacts"]
+        observed = generate_installation_package_manifest.generate()["artifacts"]
         receipt = verify_store_migration_manifest.verify()
         accepted = package._verify_migration_binding(
             observed,
@@ -409,14 +535,14 @@ class Phase8BPackageTests(unittest.TestCase):
         ):
             verify_store_migration_manifest.verify()
 
-    def test_phase8b_preflight_is_fail_closed_without_numeric_quit(self) -> None:
-        phase8b = (
+    def test_dormant_store_install_preflight_is_fail_closed_without_numeric_quit(self) -> None:
+        dormant_store_install = (
             ROOT
-            / "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql"
+            / "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql"
         ).read_text(encoding="utf-8")
-        self.assertIn("\\set ON_ERROR_STOP on", phase8b)
-        self.assertIn("ERRCODE = '22023'", phase8b)
-        self.assertNotIn("\\quit", phase8b)
+        self.assertIn("\\set ON_ERROR_STOP on", dormant_store_install)
+        self.assertIn("ERRCODE = '22023'", dormant_store_install)
+        self.assertNotIn("\\quit", dormant_store_install)
 
 
 if __name__ == "__main__":
