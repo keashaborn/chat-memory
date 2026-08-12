@@ -1,13 +1,16 @@
-# Governed Memory clean successor - Phase 8A proof-pending inactive controller package
+# Governed Memory clean successor - Phase 8A promoted proof metadata
 
-Phase 8A packages an offline installation-controller candidate whose disposable
-controller proof is pending. Its Linux execution backend is hard-disabled and
-it exposes no install, rollback, activation, or cleanup command. It has not
-installed, enabled, or started a successor service, timer, listener, route,
-PostgreSQL database, Qdrant collection, role membership, credential, or
-firewall rule. It has not changed production data or called a provider. The
-package, authority verifier, controller, synthetic backend, and observation
-evaluator do not authorize installation, rollback, activation, or cleanup.
+Phase 8A disposable proof passed and its external proof metadata is promoted.
+The proved installation package remains byte-for-byte unchanged: all 59 package
+artifacts and the package-embedded `proof-pending` fields are the frozen
+at-execution snapshot, not the current external evidence state. The Linux
+execution backend remains hard-disabled and exposes no live install, rollback,
+activation, or cleanup command. Nothing installed, enabled, or started a
+successor service, timer, listener, route, PostgreSQL database, Qdrant
+collection, role membership, credential, or firewall rule. Production data was
+not read or changed and no provider was called. The package, proof, authority
+verifier, controller, synthetic backend, and observation evaluator do not
+authorize installation, rollback, activation, or cleanup.
 
 PostgreSQL remains the canonical Memory store. Qdrant is derived and
 rebuildable. Both successor stores must start fresh and isolated; no legacy
@@ -66,14 +69,48 @@ purge. After purge, exact replay is unavailable and the API returns
 `proposal_retention_purged` from content-free audit evidence; deleted proposal
 content is never reconstructed.
 
+## Phase 8A controller proof
+
+The external wrapper is
+`ops/governed_memory/phase8a_disposable_proof_receipt.json`, SHA-256
+`7aaa5f1d0ec21c8a714d4d72280b838026cb0e2d1bfc011f9933a7e0757c7a71`.
+It binds branch
+`codex/governed-memory-phase8a-installer-controller-20260811`, commit
+`fe1bd715ed9fcb86d5085ab80efc9782935c09a3`, tree
+`5010e2664ac56b0558ce4c79fee9d62dead0d276`, parent
+`5c5253099e0350d79e68c0d1c09c46c25f8b54b6`, and package manifest SHA-256
+`5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e`.
+
+The hermetic controller receipt is retained under
+`ops/governed_memory/history/phase8a/`, with raw SHA-256
+`56a9d17616a459f969a0a1ab1f7794b353955708e68e4e5f31b5994e53faaecf`
+and canonical JSON SHA-256
+`65b1ffd6250bc7c3a7545c8ca5d731ac3b0d5e44b27b428d7feab3d3e7193b37`.
+All 336 closed controller scenarios passed, the exact 59-artifact map matched,
+all external and live effect counters were zero, the synthetic account, chat,
+and LifeSwitch sentinels were unchanged, and its temporary root was removed.
+
+The self-bound PostgreSQL 16.14 receipt is retained beside it, with raw SHA-256
+`99d9a1571c17da198c2995d97f816cc30a695ab4a21695de5272e56beab0e242`
+and canonical JSON SHA-256
+`68cb15de75cd885e8b6b09b5106f1ff238e7d7517e1746d49c90547f5c0c0726`.
+Its 21 positive and 5 refusal scenarios passed against the exact canonical
+forward and rollback templates. The archived harness SHA-256 is
+`3e1245ad420b053c2762abcb2fd8fb01c2f68db880f5a9610ddf7e5101d615bd`;
+the receipt self-binds that harness. Invocation-owned container and network
+resources were removed. The pinned PostgreSQL proof image was intentionally
+retained and is not a successor persistent resource.
+
 ## Inactive installation package
 
-The Phase 8A package adds an Ed25519 scope verifier, an append-only
+The unchanged Phase 8A package adds an Ed25519 scope verifier, an append-only
 intent-before-effect controller journal, a fail-closed state machine, a
 synthetic disposable backend, a hard-disabled Linux backend, an exact ordered
-install/rollback plan, and the hermetic controller proof runner. The Phase 8A
-controller proof requires exactly 336 closed synthetic scenarios and has not yet
-executed, so none of those artifacts is described as disposable-proved.
+install/rollback plan, and the hermetic controller proof runner. Its exact 336
+closed synthetic scenarios are now attested by the retained receipt external to
+the package. That receipt is not an external signature. The package-embedded
+pending label is preserved because rewriting any package member after proof
+would invalidate the attested artifact map.
 
 The package also contains:
 
@@ -96,14 +133,27 @@ Retirement requires a separate tested administrator/recovery login and a
 separately approved operation. API and worker passwords and LOGIN capability
 remain absent.
 
-The persistent descriptors are intentionally not restart-supervised. Phase 8B
-remains blocked on a packaged stores-only supervisor and boot recovery,
+The persistent descriptors are intentionally not restart-supervised. The
+package-embedded Phase 8B blocker
+`canonical_cluster_rollback_not_disposable_postgresql_executed` is also a
+frozen at-execution snapshot; the promoted external PostgreSQL 16 proof supplies
+that evidence without rewriting the package. Phase 8B remains blocked on a
+packaged stores-only supervisor and boot recovery,
 encrypted PostgreSQL backup/restore, a persistent Qdrant digest, a trusted clock
 with atomic one-use nonce claims, a canonical global execution lock, an external
 journal-seal anchor, exact live probes, a same-filesystem quarantine preflight,
-and real disposable-PostgreSQL execution of the canonical cluster rollback.
+and remediation of the known PostgreSQL 16 failure-path issue described below.
 The Linux execution backend remains hard-disabled. Disposable proof did not
 create or authorize the persistent package targets.
+
+PostgreSQL 16 `psql` ignores the numeric argument in `\quit 3`. The frozen
+package therefore has ineffective invalid-mode failure exits at
+`governed-memory-migrations/roles_preflight.pgsql:39` and
+`governed-memory-migrations/0002_conversation_bridge/forward.pgsql:20`.
+The first is a Phase 8B remediation; the second remains in the separate Phase
+8C source-integration boundary. Neither file is changed by this promotion.
+Both fixes require fresh Phase 7C failure-path revalidation before their bytes
+can be accepted.
 
 Phase 8B, if separately authorized later, is limited to fresh dormant
 successor stores. Every Phase 8B observation stage requires zero source

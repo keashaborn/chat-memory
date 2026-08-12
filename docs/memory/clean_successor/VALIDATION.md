@@ -1,12 +1,37 @@
-# Governed Memory Phase 8A proof-pending validation contract
+# Governed Memory Phase 8A promoted-proof validation contract
 
 ## Current result
 
-Phase 8A packages the inactive installation controller, exact plan, authority
-schemas, journal, synthetic backend, hard-disabled Linux backend, and hermetic
-proof runner. The Phase 8A controller proof has not executed. There is no
-current Phase 8A proof receipt, no live execution surface, and no installation
-or activation authority.
+Phase 8A disposable proof passed and its external metadata is promoted. The
+proof wrapper is `ops/governed_memory/phase8a_disposable_proof_receipt.json`.
+Its SHA-256 is
+`7aaa5f1d0ec21c8a714d4d72280b838026cb0e2d1bfc011f9933a7e0757c7a71`.
+It binds the exact pre-promotion commit
+`fe1bd715ed9fcb86d5085ab80efc9782935c09a3`, tree
+`5010e2664ac56b0558ce4c79fee9d62dead0d276`, parent
+`5c5253099e0350d79e68c0d1c09c46c25f8b54b6`, and the unchanged 59-artifact
+package manifest SHA-256
+`5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e`.
+The package/runtime manifest still says proof pending because those bytes are
+the immutable at-execution snapshot. There is no live execution surface and no
+installation or activation authority.
+
+The hermetic controller proof passed all 336 closed scenarios. Its retained raw
+receipt SHA-256 is
+`56a9d17616a459f969a0a1ab1f7794b353955708e68e4e5f31b5994e53faaecf`
+and canonical JSON SHA-256 is
+`65b1ffd6250bc7c3a7545c8ca5d731ac3b0d5e44b27b428d7feab3d3e7193b37`.
+The isolated PostgreSQL 16.14 proof passed 21 positive and 5 refusal scenarios.
+Its retained raw receipt SHA-256 is
+`99d9a1571c17da198c2995d97f816cc30a695ab4a21695de5272e56beab0e242`
+and canonical JSON SHA-256 is
+`68cb15de75cd885e8b6b09b5106f1ff238e7d7517e1746d49c90547f5c0c0726`.
+That receipt self-binds harness SHA-256
+`3e1245ad420b053c2762abcb2fd8fb01c2f68db880f5a9610ddf7e5101d615bd`.
+All live, source-database, Qdrant, and provider effect counters were zero;
+protected synthetic account, chat, and LifeSwitch sentinels were unchanged;
+and invocation-owned resources were cleaned. The pinned proof image was
+retained.
 
 ## Retained Phase 7C result
 
@@ -93,14 +118,16 @@ PostgreSQL steps and migration 0002. Observation profiles describe externally
 observed state, not work performed by the evaluator.
 
 The Phase 8A controller runner is separately scoped to the synthetic backend.
-Its closed matrix requires exactly 336 scenarios proving crash/resume,
+Its closed matrix passed exactly 336 scenarios proving crash/resume,
 compensation, rollback, tamper refusal, empty-only gates, sentinel preservation,
 zero source PostgreSQL connections, catalog
 reads, application-row reads, and writes at every observation stage, and zero
-live effects before Phase 8A metadata can be promoted. It must cover every
-exact target, distinguish the active stores-only supervisor from disabled and
-inactive HTTP/worker units, and prove empty rollback retains every named root
-and the nonce-bound quarantine path. Even a passing result cannot authorize
+live effects. It covered every exact target, distinguished the active
+stores-only supervisor from disabled and inactive HTTP/worker units, and proved
+empty rollback retains every named root
+and the nonce-bound quarantine path. The separate PostgreSQL 16 proof passed 21
+positive and 5 refusal cases for the canonical cluster forward/rollback
+templates. Even these passing results cannot authorize
 Phase 8B installation.
 
 The Phase 8B target, unit, source-I/O, and retained-root values recorded in the
@@ -111,8 +138,17 @@ Before Phase 8B can be considered, separate artifacts and proof are still
 required for the trusted clock and atomic nonce claim, global execution lock,
 external journal-seal anchor, exact live probes, same-filesystem quarantine
 preflight, stores-only supervisor/boot recovery, encrypted backup/restore, and
-real disposable-PostgreSQL execution of the canonical cluster rollback. The
-Linux backend stays hard-disabled in Phase 8A.
+the remaining installation surfaces. The external PostgreSQL 16 proof now
+closes the canonical cluster rollback evidence gap recorded in the immutable
+package snapshot. The Linux backend stays hard-disabled in Phase 8A.
+
+PostgreSQL 16 `psql` ignores the numeric argument to `\quit 3`. The unchanged
+package contains that ineffective failure exit at
+`governed-memory-migrations/roles_preflight.pgsql:39` and
+`governed-memory-migrations/0002_conversation_bridge/forward.pgsql:20`.
+Remediation is deferred to Phase 8B and Phase 8C respectively, is not authorized
+by this promotion, and must be followed by fresh Phase 7C failure-path
+revalidation.
 
 ## Required inactive migration mode
 
@@ -175,8 +211,8 @@ the promoted migration-manifest hash and `disposable_validated` label. The
 release guard pins both runner hashes and classifies that exact two-line change
 as metadata-only; the current runner is not described as executed by attempt 4.
 Metadata and documentation changes that bind the retained Phase 7C receipt or
-record the Phase 8A proof-pending package do not authorize installation or
-activation. Phase 8B remains a separate fresh-store authority boundary with
+promote the external Phase 8A proof do not authorize installation or activation.
+Phase 8B remains a separate audit/remediation and fresh-store authority boundary with
 zero source PostgreSQL connections, reads, or writes at every stage and retained
 named roots/quarantine after empty rollback; Phase 8C separately governs source
 logging and inactive bridge preparation.

@@ -1,4 +1,4 @@
-"""Phase 8A proof-pending controller and inactive-runtime identity checks."""
+"""Phase 8A promoted proof and immutable inactive-runtime identity checks."""
 
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ HISTORICAL_PHASE6E_RUNTIME_BUILD_RECEIPT = (
 )
 DISPOSABLE_RUNNER = VALIDATION_TOOLS / "run_disposable_successor.sh"
 PHASE7C_DISPOSABLE_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
+PHASE8A_DISPOSABLE_PROOF = OPS / "phase8a_disposable_proof_receipt.json"
 POSTGRES_BOOTSTRAP = VALIDATION_TOOLS / "postgres_bootstrap.pgsql"
 SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
 README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
@@ -248,7 +249,7 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(receipt["production_state_changed"])
         self.assertFalse(receipt["legacy_environment_imported"])
 
-    def test_runtime_manifest_is_phase8a_controller_proof_pending(self) -> None:
+    def test_runtime_manifest_preserves_phase8a_at_execution_snapshot(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
@@ -436,6 +437,36 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(controller["live_execution_surface_exposed"])
         self.assertFalse(controller["installation_authorized"])
         self.assertFalse(controller["activation_authorized"])
+
+    def test_external_phase8a_proof_is_promoted_without_package_rewrite(self) -> None:
+        wrapper = json.loads(PHASE8A_DISPOSABLE_PROOF.read_text(encoding="utf-8"))
+        self.assertEqual(
+            wrapper["state"],
+            "disposable_proof_passed_metadata_promoted_inactive_not_"
+            "installed_not_authorized",
+        )
+        self.assertEqual(
+            wrapper["immutable_package_snapshot"]["package_artifact_count"], 59
+        )
+        self.assertTrue(
+            wrapper["immutable_package_snapshot"][
+                "embedded_proof_pending_labels_are_frozen_execution_snapshot"
+            ]
+        )
+        self.assertEqual(wrapper["proof_summary"]["controller_scenario_count"], 336)
+        self.assertEqual(
+            wrapper["proof_summary"]["postgresql16_positive_scenario_count"], 21
+        )
+        self.assertEqual(
+            wrapper["proof_summary"]["postgresql16_refusal_scenario_count"], 5
+        )
+        self.assertFalse(wrapper["authority"]["installation_authorized"])
+        self.assertFalse(wrapper["authority"]["activation_authorized"])
+        self.assertTrue(
+            wrapper["deferred_revalidation"][
+                "phase7c_failure_path_revalidation_required"
+            ]
+        )
 
     def test_current_validation_runtime_is_exact(self) -> None:
         runtime = self.load_manifest()["validation_runtime"]
@@ -748,16 +779,20 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_docs_describe_phase8a_pending_and_phase7c_retained_proof(self) -> None:
+    def test_docs_describe_phase8a_promoted_and_phase7c_retained_proof(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
-            "Phase 8A proof-pending inactive controller package",
+            "Phase 8A promoted proof metadata",
             "Retained Phase 7C successor proof",
             "CPython 3.12.3 Linux runtime",
             "Attempt 4 passed against pre-promotion candidate commit",
             "structured LifeSwitch data",
             "do not authorize installation, rollback, activation, or cleanup",
             "zero source PostgreSQL connections",
+            "All 336 closed controller scenarios passed",
+            "21 positive and 5 refusal scenarios passed",
+            "roles_preflight.pgsql:39",
+            "0002_conversation_bridge/forward.pgsql:20",
         ):
             self.assertIn(required, normalized)
         runner = (

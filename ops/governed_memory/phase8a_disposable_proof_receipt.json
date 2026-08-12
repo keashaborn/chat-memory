@@ -1,0 +1,84 @@
+{
+  "schema_version": "governed-memory-phase8a-installation-controller-proof-wrapper-v1",
+  "phase": "phase8a",
+  "state": "disposable_proof_passed_metadata_promoted_inactive_not_installed_not_authorized",
+  "subject": {
+    "branch": "codex/governed-memory-phase8a-installer-controller-20260811",
+    "head": "fe1bd715ed9fcb86d5085ab80efc9782935c09a3",
+    "tree": "5010e2664ac56b0558ce4c79fee9d62dead0d276",
+    "parent": "5c5253099e0350d79e68c0d1c09c46c25f8b54b6",
+    "worktree_clean_before_and_after": true
+  },
+  "immutable_package_snapshot": {
+    "package_manifest_sha256": "5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e",
+    "runtime_manifest_sha256": "e4c851e6cba93bf79835d0f7abd4708ca53e3471fe315caf16a7c0fadfe0d9a1",
+    "migration_manifest_sha256": "57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150",
+    "controller_contract_sha256": "5a9412ce71066c13f62dcf1fc7c72032de747c5d314405c3bebe6400aaa05564",
+    "controller_plan_sha256": "7fa38bc1d7ee416e6349a59fe5eec22d1b62682fec883350b4fe5cfe1735943d",
+    "synthetic_controller_runner_sha256": "9f40830c7b3b0bb0ee263eb9a78b095e690fe1452853785f8f15059335b01125",
+    "canonical_cluster_forward_sha256": "5e3238856349ca9928d9a20d7658959effdaf6472a795d959ad0707fa9bbbae0",
+    "canonical_cluster_rollback_sha256": "5adec472f5b3277b5a2137fc5e7e8f1d50e587a54302246f6b87cef28442d277",
+    "exact_targets_sha256": "77e7899af8132fbbd2aca6dc7e38776eb2ea2f7cd520904a5a44e8b530b941c9",
+    "package_artifact_count": 59,
+    "all_package_artifacts_unchanged_since_proof": true,
+    "embedded_proof_pending_labels_are_frozen_execution_snapshot": true
+  },
+  "evidence": {
+    "canonicalization": "utf8_json_sorted_keys_compact_no_newline_v1",
+    "controller_receipt_path": "ops/governed_memory/history/phase8a/controller_disposable_proof_receipt.json",
+    "controller_receipt_raw_sha256": "56a9d17616a459f969a0a1ab1f7794b353955708e68e4e5f31b5994e53faaecf",
+    "controller_receipt_canonical_sha256": "65b1ffd6250bc7c3a7545c8ca5d731ac3b0d5e44b27b428d7feab3d3e7193b37",
+    "postgresql16_receipt_path": "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_receipt.json",
+    "postgresql16_receipt_raw_sha256": "99d9a1571c17da198c2995d97f816cc30a695ab4a21695de5272e56beab0e242",
+    "postgresql16_receipt_canonical_sha256": "68cb15de75cd885e8b6b09b5106f1ff238e7d7517e1746d49c90547f5c0c0726",
+    "postgresql16_harness_path": "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_harness.sh",
+    "postgresql16_harness_sha256": "3e1245ad420b053c2762abcb2fd8fb01c2f68db880f5a9610ddf7e5101d615bd",
+    "postgresql16_harness_mode": "0644",
+    "postgresql16_receipt_self_binds_harness": true
+  },
+  "proof_summary": {
+    "controller_scenario_count": 336,
+    "postgresql16_positive_scenario_count": 21,
+    "postgresql16_refusal_scenario_count": 5,
+    "package_artifact_map_exact": true,
+    "external_and_live_effects_zero": true,
+    "source_postgresql_reads": 0,
+    "source_postgresql_writes": 0,
+    "qdrant_operations": 0,
+    "provider_calls": 0,
+    "production_data_read": false,
+    "persistent_resources_created": false,
+    "cleanup_complete": true,
+    "accounts_chat_and_lifeswitch_sentinels_unchanged": true,
+    "linux_execution_backend_available": false
+  },
+  "deferred_revalidation": {
+    "migration_execution_authorized": false,
+    "phase7c_failure_path_revalidation_required": true,
+    "postgresql16_psql_quit_argument_issue_confirmed": true,
+    "package_migration_bytes_changed": false,
+    "affected_paths": [
+      {
+        "path": "governed-memory-migrations/roles_preflight.pgsql",
+        "line": 39,
+        "sha256": "f823b0f6815a669084dd88e5c4650317a36cf786e64a15317421a76c0091f02b",
+        "scheduled_phase": "phase8b"
+      },
+      {
+        "path": "governed-memory-migrations/0002_conversation_bridge/forward.pgsql",
+        "line": 20,
+        "sha256": "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355",
+        "scheduled_phase": "phase8c"
+      }
+    ]
+  },
+  "authority": {
+    "installation_authorized": false,
+    "activation_authorized": false,
+    "production_state_changed": false,
+    "persistent_resources_created": false,
+    "provider_calls": 0,
+    "production_data_read": false,
+    "next_gate": "separate_phase8b_audit_and_remediation_approval"
+  }
+}

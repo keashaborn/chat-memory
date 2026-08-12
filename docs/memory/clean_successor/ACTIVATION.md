@@ -1,13 +1,18 @@
-# Governed Memory Phase 8A proof-pending activation boundary
+# Governed Memory Phase 8A promoted-proof activation boundary
 
-The retained Phase 7C disposable revalidation passed. Phase 8A now packages an
-inactive installation controller, but its synthetic proof is pending and its
-Linux backend is hard-disabled. The candidate remains uninstalled and is not
-authorized for installation or activation. No persistent successor store,
-service, timer, route, listener, role credential, role membership, firewall
-rule, provider call, or pilot marker exists. The release guard must continue to
-refuse creation with `activation_blockers_open` and cleanup with
-`authorization_missing`.
+The retained Phase 7C disposable revalidation passed. The Phase 8A controller
+proof now also passed all 336 synthetic cases plus 21 positive and 5 refusal
+PostgreSQL 16 cases, and its external metadata is promoted. The proved
+59-artifact package remains byte-for-byte unchanged, including its frozen
+proof-pending snapshot. Its Linux backend is hard-disabled. The candidate
+remains uninstalled and is not authorized for installation or activation. The
+Phase 8A operation did not create a persistent successor store; install, enable,
+or start a service, timer, route, or listener; provision a role credential,
+membership, or firewall rule; call a provider; or create a pilot marker. It
+made no production-state change. This proof is not a new live-state inventory;
+current absence must be re-established by a separate read-only audit before any
+later operation. The release guard must continue to refuse creation with
+`activation_blockers_open` and cleanup with `authorization_missing`.
 
 ## Exact future targets
 
@@ -27,7 +32,8 @@ the successor.
 
 ## Authoritative blockers
 
-The exact ordered blocker set in `runtime_manifest.json` is:
+The exact ordered blocker set in the immutable at-execution
+`runtime_manifest.json` snapshot is:
 
 1. `production_activation_not_authorized`
 2. `inactive_installation_package_not_authorized`
@@ -67,19 +73,23 @@ The exact ordered blocker set in `runtime_manifest.json` is:
 
 Each item is a separate approval checkpoint:
 
-1. retain the completed Phase 7C proof unless its proof-critical bytes change;
-2. complete all 336 closed Phase 8A synthetic controller scenarios and
-   separately promote that proof;
-3. package and approve the persistent Qdrant digest, stores-only supervisor and
+1. retain the completed Phase 7C and externally promoted Phase 8A proofs unless
+   their proof-critical bytes change;
+2. separately authorize Phase 8B audit/remediation; no installation authority
+   follows from that approval;
+3. under that bounded authority, fix the PostgreSQL 16 ineffective `\quit 3`
+   failure exit at
+   `governed-memory-migrations/roles_preflight.pgsql:39`, then run fresh Phase
+   7C failure-path revalidation;
+4. package and approve the persistent Qdrant digest, stores-only supervisor and
    boot recovery, encrypted PostgreSQL backup/restore, runtime wheel, offline
    dependency wheelhouse, trusted clock with atomic nonce claim, global
    execution lock, external journal-seal anchor, exact live probes, and
-   same-filesystem quarantine preflight; execute the canonical cluster rollback
-   against real disposable PostgreSQL and keep the Linux backend disabled until
+   same-filesystem quarantine preflight; keep the Linux backend disabled until
    those gates pass;
-4. authorize Phase 8B with an externally signed final commit, tree, package,
-   controller, and plan scope;
-5. in Phase 8B, create only the exact fresh empty dormant successor stores;
+5. require an externally signed final commit, tree, package, controller, and
+   plan scope before any separate installation authority;
+6. in Phase 8B, create only the exact fresh empty dormant successor stores;
    require zero source PostgreSQL connections, catalog reads, application-row
    reads, and writes at every stage; observe every exact target; keep HTTP and
    worker disabled and inactive while treating the stores-only supervisor as a
@@ -89,20 +99,22 @@ Each item is a separate approval checkpoint:
    migration 0002, with no provider credentials or API/worker LOGIN roles;
    treat every listed state as a required future observation, not current/live
    evidence;
-6. separately authorize Phase 8C, remediate and re-prove source logging, then
-   install only the inactive source roles and conversation bridge with no
-   runtime memberships;
-7. rotate the exposed provider key and mint distinct successor runtime
+7. separately authorize Phase 8C, remediate and re-prove source logging, fix the
+   ineffective `\quit 3` failure exit at
+   `governed-memory-migrations/0002_conversation_bridge/forward.pgsql:20`, run
+   fresh Phase 7C failure-path revalidation, then install only the inactive
+   source roles and conversation bridge with no runtime memberships;
+8. rotate the exposed provider key and mint distinct successor runtime
    credentials only under a later activation authorization;
-8. prove pg_hba, private transport/firewall, live Supabase account/session
+9. prove pg_hba, private transport/firewall, live Supabase account/session
    authority, chat-only route behavior, and frontend semantics;
-9. authorize credential provisioning, enable only exact API/worker LOGIN roles,
+10. authorize credential provisioning, enable only exact API/worker LOGIN roles,
    and grant only exact runtime memberships;
-10. recompute and seal the full post-membership conversation catalog hash;
-11. start the successor alone, prove exact routing and owner isolation, and
+11. recompute and seal the full post-membership conversation catalog hash;
+12. start the successor alone, prove exact routing and owner isolation, and
     complete authenticated visual QA;
-12. authorize one bounded pilot; and
-13. only after an observation window and rollback proof, consider legacy
+13. authorize one bounded pilot; and
+14. only after an observation window and rollback proof, consider legacy
     retirement as separately authorized exact batches.
 
 The inactive install-postflight catalog hash cannot be reused after LOGIN or

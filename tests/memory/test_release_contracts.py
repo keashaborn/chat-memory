@@ -64,7 +64,7 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
 
 
 class Phase8AReleaseArtifactTests(unittest.TestCase):
-    def test_phase8a_proof_pending_artifacts_verify_offline(self) -> None:
+    def test_phase8a_promoted_proof_artifacts_verify_offline(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
@@ -72,7 +72,8 @@ class Phase8AReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             result["phase"],
-            "phase8a_inactive_installation_controller_packaged_proof_pending",
+            "phase8a_inactive_installation_controller_proof_promoted_"
+            "activation_blocked",
         )
         self.assertEqual(result["installation_package_artifact_count"], 59)
         self.assertEqual(result["external_calls"], 0)
@@ -80,11 +81,23 @@ class Phase8AReleaseArtifactTests(unittest.TestCase):
         self.assertFalse(result["production_state_changed"])
         self.assertFalse(result["installation_authorized"])
         self.assertFalse(result["activation_authorized"])
-        self.assertFalse(result["disposable_revalidation_required"])
-        self.assertFalse(
+        self.assertTrue(result["disposable_revalidation_required"])
+        self.assertTrue(
             result["installation_controller_disposable_proof_complete"]
         )
-        self.assertIsNone(result["installation_controller_proof_receipt"])
+        self.assertEqual(
+            result["installation_controller_proof_receipt"],
+            "ops/governed_memory/phase8a_disposable_proof_receipt.json",
+        )
+        self.assertEqual(
+            result["installation_controller_proof_receipt_sha256"],
+            release_guard.EXPECTED_PHASE8A_PROOF_RECEIPT_SHA256,
+        )
+        self.assertEqual(
+            result["package_embedded_controller_state"],
+            "packaged_proof_pending_not_installed_not_authorized",
+        )
+        self.assertFalse(result["linux_execution_backend_available"])
         self.assertIn(
             "ops/governed_memory/installation/package_manifest.json",
             result["artifact_sha256"],
@@ -97,6 +110,22 @@ class Phase8AReleaseArtifactTests(unittest.TestCase):
             "ops/governed_memory/phase7c_disposable_proof_receipt.json",
             result["artifact_sha256"],
         )
+        for path in (
+            "ops/governed_memory/phase8a_disposable_proof_receipt.json",
+            (
+                "ops/governed_memory/history/phase8a/"
+                "controller_disposable_proof_receipt.json"
+            ),
+            (
+                "ops/governed_memory/history/phase8a/"
+                "postgresql16_disposable_proof_receipt.json"
+            ),
+            (
+                "ops/governed_memory/history/phase8a/"
+                "postgresql16_disposable_proof_harness.sh"
+            ),
+        ):
+            self.assertIn(path, result["artifact_sha256"])
         self.assertNotIn(
             "ops/governed_memory/phase6e_disposable_proof_receipt.json",
             result["artifact_sha256"],
@@ -418,6 +447,176 @@ class Phase8AReleaseArtifactTests(unittest.TestCase):
         self.assertFalse(
             pilot["source_erasure"]["structured_lifeswitch_data_deleted"]
         )
+
+    def _load_phase8a_proof_parts(
+        self,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        wrapper = json.loads(
+            (OPS / "phase8a_disposable_proof_receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        history = OPS / "history" / "phase8a"
+        controller = json.loads(
+            (history / "controller_disposable_proof_receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        postgresql = json.loads(
+            (history / "postgresql16_disposable_proof_receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        return wrapper, controller, postgresql
+
+    def _assert_phase8a_proof_rejected(
+        self,
+        wrapper: dict[str, object],
+        controller: dict[str, object],
+        postgresql: dict[str, object],
+        **expected_constants: object,
+    ) -> None:
+        package = release_guard.verify_installation_package()
+        context = (
+            mock.patch.multiple(release_guard, **expected_constants)
+            if expected_constants
+            else nullcontext()
+        )
+        with context:
+            with self.assertRaisesRegex(
+                ReleaseGuardError,
+                "release_phase8a_disposable_proof_invalid",
+            ):
+                release_guard._verify_phase8a_proof(
+                    wrapper, controller, postgresql, package
+                )
+
+    def test_phase8a_proof_is_closed_cross_bound_and_self_bound(self) -> None:
+        wrapper, controller, postgresql = self._load_phase8a_proof_parts()
+        package = release_guard.verify_installation_package()
+        release_guard._verify_phase8a_proof(
+            wrapper, controller, postgresql, package
+        )
+        self.assertEqual(
+            controller["package_artifact_sha256"], package["artifact_sha256"]
+        )
+        self.assertEqual(len(controller["package_artifact_sha256"]), 59)
+        self.assertEqual(controller["scenario_counts"]["total"], 336)
+        self.assertEqual(postgresql["execution"]["positive_scenario_count"], 21)
+        self.assertEqual(postgresql["execution"]["refusal_scenario_count"], 5)
+        self.assertTrue(postgresql["bindings"]["proof_harness_self_bound"])
+        harness = (
+            OPS
+            / "history"
+            / "phase8a"
+            / "postgresql16_disposable_proof_harness.sh"
+        )
+        self.assertTrue(harness.is_file())
+        self.assertFalse(harness.is_symlink())
+        self.assertEqual(harness.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(
+            hashlib.sha256(harness.read_bytes()).hexdigest(),
+            release_guard.EXPECTED_PHASE8A_POSTGRESQL16_HARNESS_SHA256,
+        )
+
+    def test_phase8a_proof_shapes_are_closed(self) -> None:
+        original = self._load_phase8a_proof_parts()
+        variants: list[
+            tuple[str, dict[str, object], dict[str, object], dict[str, object]]
+        ] = []
+        for label, section, nested in (
+            ("wrapper", 0, None),
+            ("wrapper_subject", 0, "subject"),
+            ("controller", 1, None),
+            ("postgresql_candidate", 2, "candidate"),
+        ):
+            values = json.loads(json.dumps(original))
+            target = values[section] if nested is None else values[section][nested]
+            target["unexpected"] = True
+            variants.append((label, *values))
+        for label, wrapper, controller, postgresql in variants:
+            with self.subTest(label=label):
+                self._assert_phase8a_proof_rejected(
+                    wrapper, controller, postgresql
+                )
+
+    def test_phase8a_proof_semantic_tamper_is_rejected_after_rebinding(self) -> None:
+        mutations = (
+            ("controller_total", "controller", ("scenario_counts", "total"), 335),
+            (
+                "controller_external_effect",
+                "controller",
+                ("external_effect_counts", "provider_calls"),
+                1,
+            ),
+            (
+                "controller_boolean_as_integer",
+                "controller",
+                ("local_import_guard", "installed_before_local_artifact_imports"),
+                1,
+            ),
+            ("postgresql_candidate", "postgresql", ("candidate", "head"), "a" * 40),
+            (
+                "postgresql_refusal_state",
+                "postgresql",
+                ("execution", "refusal_state_unchanged"),
+                False,
+            ),
+            (
+                "postgresql_authority",
+                "postgresql",
+                ("authority", "installation_authorized"),
+                True,
+            ),
+            (
+                "postgresql_boolean_as_integer",
+                "postgresql",
+                ("cleanup", "exact_owned_resources_removed"),
+                1,
+            ),
+            (
+                "postgresql_harness_self_bind",
+                "postgresql",
+                ("bindings", "proof_harness_self_bound"),
+                False,
+            ),
+            (
+                "postgresql_harness_hash",
+                "postgresql",
+                ("bindings", "proof_harness_sha256"),
+                "0" * 64,
+            ),
+        )
+        for label, target_name, path, replacement in mutations:
+            wrapper, controller, postgresql = json.loads(
+                json.dumps(self._load_phase8a_proof_parts())
+            )
+            target = controller if target_name == "controller" else postgresql
+            target[path[0]][path[1]] = replacement
+            if target_name == "controller":
+                canonical = release_guard._canonical_json_sha256(controller)
+                wrapper["evidence"]["controller_receipt_canonical_sha256"] = canonical
+                constants = {
+                    "EXPECTED_PHASE8A_CONTROLLER_PROOF_CANONICAL_SHA256": canonical
+                }
+            else:
+                canonical = release_guard._canonical_json_sha256(postgresql)
+                wrapper["evidence"]["postgresql16_receipt_canonical_sha256"] = canonical
+                constants = {
+                    "EXPECTED_PHASE8A_POSTGRESQL16_PROOF_CANONICAL_SHA256": canonical
+                }
+            with self.subTest(label=label):
+                self._assert_phase8a_proof_rejected(
+                    wrapper,
+                    controller,
+                    postgresql,
+                    **constants,
+                )
+
+    def test_phase8a_wrapper_boolean_as_integer_is_rejected(self) -> None:
+        wrapper, controller, postgresql = self._load_phase8a_proof_parts()
+        wrapper["proof_summary"]["cleanup_complete"] = 1
+        self._assert_phase8a_proof_rejected(wrapper, controller, postgresql)
 
     def _assert_phase7c_proof_rejected(
         self,
