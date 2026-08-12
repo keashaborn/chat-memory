@@ -2,10 +2,32 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import ValidationError
+
+from rag_engine.lifeswitch_prompt_integration_v2 import (
+    ContextKindV3,
+    PromptReferenceContextBlockV3,
+)
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import new_plan
 
 
 class LifeSwitchPromptIntegrationV2Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_memory_block_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            PromptReferenceContextBlockV3(
+                block_id="governed_memory_v1",
+                kind=ContextKindV3.MEMORY,
+                source_contract_version="retired",
+                source_manifest_sha256="a" * 64,
+                request_id_sha256="b" * 64,
+                query_sha256="c" * 64,
+                content="retired",
+                content_sha256="d" * 64,
+                content_bytes=7,
+                estimated_tokens=2,
+                block_manifest_sha256="e" * 64,
+            )
+
     async def test_prior_provenance_follows_current_lifeswitch_context(self) -> None:
         plan = await new_plan(
             "Did you access my LifeSwitch nutrition day for Monday?", with_prior=True

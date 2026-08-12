@@ -31,7 +31,7 @@ from rag_engine.response_policy_v0_2 import (
     ResponsePolicySignalsV0_2,
     SafetyAssessmentV0_2,
 )
-from tests.test_prompt_assembler_v1 import governed_memory
+from tests.test_prompt_assembler_v1 import successor_memory_block
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -408,24 +408,18 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
                 trusted_policy_signals_envelope=stale_envelope,
             )
 
-    def test_memory_must_bind_actor_thread_request_and_current_query(self) -> None:
-        current = "What do you remember about Dahlia and this project?"
-        memory_input, memory_application = governed_memory(current)
+    def test_successor_memory_must_bind_request_and_current_query(self) -> None:
+        current = "What is the relevant project constraint?"
+        memory_block = successor_memory_block(current)
         valid = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id="request-123",
             conversation=messages(current),
-            memory_input=memory_input,
-            memory_application=memory_application,
+            successor_memory_context_block=memory_block,
         )
-        self.assertEqual(valid.memory_input, memory_input)
+        self.assertEqual(valid.successor_memory_context_block, memory_block)
 
         for update in (
-            {
-                "thread_id": OTHER_ACTOR,
-                "request_id": "request-123",
-                "current_message": current,
-            },
             {
                 "thread_id": THREAD,
                 "request_id": "another-request",
@@ -453,8 +447,7 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
                                 conversation_snapshot=snapshot,
                             )
                         ),
-                        memory_input=memory_input,
-                        memory_application=memory_application,
+                        successor_memory_context_block=memory_block,
                     )
 
     async def test_trace_manifest_rejects_semantic_tampering(self) -> None:

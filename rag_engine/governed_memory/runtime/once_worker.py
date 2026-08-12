@@ -13,7 +13,11 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 from uuid import UUID
 
 from ..contracts import ContractViolation, canonical_sha256, require_uuid
-from ..exclusive_cutover import EXCLUSIVE_MEMORY_MODE, ExclusiveMemoryMode
+from ..exclusive_cutover import (
+    ExclusiveMemoryConfigurationError,
+    ExclusiveMemoryMode,
+    exclusive_memory_mode,
+)
 from ..projection import build_projection_point, render_projection_surface
 from .qdrant_adapter import (
     QdrantDeleteReceipt,
@@ -280,7 +284,12 @@ def main(
     if values.get(WORKER_MODE_ENV, "off") != "on":
         _refusal("governed_memory_worker_disabled")
         return 1
-    if EXCLUSIVE_MEMORY_MODE is not ExclusiveMemoryMode.SUCCESSOR_PILOT:
+    try:
+        mode = exclusive_memory_mode(values)
+    except ExclusiveMemoryConfigurationError:
+        _refusal("governed_memory_worker_exclusive_mode_required")
+        return 1
+    if mode is not ExclusiveMemoryMode.SUCCESSOR_PILOT:
         _refusal("governed_memory_worker_exclusive_mode_required")
         return 1
     runtime_refusal_type: type[Exception] | None = None

@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 import re
+from types import MappingProxyType
 from typing import Mapping
 from uuid import UUID
 
-from .auth import ActorRole, VerifiedActor
+from .auth import ActorRole, ActorScope, VerifiedActor, require_scope
 from .contracts import (
     ContractViolation,
     canonical_sha256,
@@ -33,6 +34,9 @@ DELETION_REQUEST_CONTRACT_VERSION = (
 CONVERSATIONAL_ERASURE_DOMAIN = (
     "chat_source_and_derived_governed_conversational_memory_v1"
 )
+DELETION_CONFIRMATION_DOMAIN = (
+    "governed_memory.conversation_deletion_confirmation.v1"
+)
 MIN_RECENT_WINDOW_SECONDS = 60
 MAX_RECENT_WINDOW_SECONDS = 31 * 24 * 60 * 60
 ALLOWED_RECENT_WINDOW_SECONDS = (3600, 86400, 604800, 2592000)
@@ -45,6 +49,68 @@ class DeletionSelectorKind(str, Enum):
     THREAD = "thread"
     RECENT = "recent"
     ALL_CONVERSATIONS = "all_conversations"
+
+
+DELETION_CONFIRMATION_PHRASES = MappingProxyType(
+    {
+        DeletionSelectorKind.MESSAGE_TAIL: "DELETE MESSAGE AND FOLLOWING",
+        DeletionSelectorKind.THREAD: "DELETE CHAT",
+        DeletionSelectorKind.RECENT: "FORGET RECENT CONVERSATIONS",
+        DeletionSelectorKind.ALL_CONVERSATIONS: "DELETE CHAT DATA",
+    }
+)
+
+
+def conversation_deletion_confirmation_sha256(
+    *,
+    operation_id: UUID,
+    selector_kind: DeletionSelectorKind,
+    thread_id: UUID | None = None,
+    anchor_message_id: UUID | None = None,
+    recent_window_seconds: int | None = None,
+) -> str:
+    """Bind one fixed confirmation phrase to one exact selector request."""
+
+    require_uuid(operation_id, "invalid_deletion_operation")
+    if not isinstance(selector_kind, DeletionSelectorKind):
+        raise ContractViolation("invalid_deletion_selector_kind")
+    if thread_id is not None:
+        require_uuid(thread_id, "invalid_deletion_thread")
+    if anchor_message_id is not None:
+        require_uuid(
+            anchor_message_id, "invalid_deletion_anchor_message"
+        )
+    if recent_window_seconds is not None:
+        require_exact_int(
+            recent_window_seconds,
+            code="invalid_deletion_recent_window",
+            minimum=MIN_RECENT_WINDOW_SECONDS,
+            maximum=MAX_RECENT_WINDOW_SECONDS,
+        )
+    return framed_sha256(
+        DELETION_CONFIRMATION_DOMAIN,
+        (
+            ("operation_id", str(operation_id)),
+            ("selector_kind", selector_kind.value),
+            ("thread_id", str(thread_id) if thread_id is not None else None),
+            (
+                "anchor_message_id",
+                str(anchor_message_id)
+                if anchor_message_id is not None
+                else None,
+            ),
+            (
+                "recent_seconds",
+                str(recent_window_seconds)
+                if recent_window_seconds is not None
+                else None,
+            ),
+            (
+                "confirmation_phrase",
+                DELETION_CONFIRMATION_PHRASES[selector_kind],
+            ),
+        ),
+    )
 
 
 class ConversationErasureState(str, Enum):
@@ -165,6 +231,15 @@ class ConversationDeletionRequestV1:
         }
         if shapes[self.selector_kind] is not True:
             raise ContractViolation("invalid_deletion_selector_shape")
+        expected_confirmation = conversation_deletion_confirmation_sha256(
+            operation_id=self.operation_id,
+            selector_kind=self.selector_kind,
+            thread_id=self.thread_id,
+            anchor_message_id=self.anchor_message_id,
+            recent_window_seconds=self.recent_window_seconds,
+        )
+        if self.confirmation_sha256 != expected_confirmation:
+            raise ContractViolation("deletion_confirmation_sha256_mismatch")
 
     @property
     def request_sha256(self) -> str:
@@ -270,6 +345,7 @@ class DeletionAuthority:
             raise ContractViolation("unverified_deletion_actor")
         if actor.role is not ActorRole.OWNER:
             raise ContractViolation("deletion_owner_authority_required")
+        require_scope(actor, ActorScope.ERASE_CONVERSATIONS)
         return cls(
             owner_user_id=actor.owner_user_id,
             actor_id=actor.actor_id,
@@ -608,6 +684,8 @@ class ConversationFinalizationReceipt:
     deleted_thread_count: int
     deleted_attachment_count: int
     deleted_bridge_row_count: int
+    message_tombstone_count: int
+    thread_tombstone_count: int
     completed_at: datetime
 
     def __post_init__(self) -> None:
@@ -636,6 +714,16 @@ class ConversationFinalizationReceipt:
         require_exact_int(
             self.deleted_bridge_row_count,
             code="invalid_deleted_bridge_row_count",
+            maximum=MAX_ERASURE_TARGETS,
+        )
+        require_exact_int(
+            self.message_tombstone_count,
+            code="invalid_message_tombstone_count",
+            maximum=MAX_ERASURE_TARGETS,
+        )
+        require_exact_int(
+            self.thread_tombstone_count,
+            code="invalid_thread_tombstone_count",
             maximum=MAX_ERASURE_TARGETS,
         )
         require_utc(self.completed_at, "invalid_finalization_completed_at")
@@ -907,6 +995,8 @@ __all__ = [
     "BoundConversationDeletion",
     "ALLOWED_RECENT_WINDOW_SECONDS",
     "CONVERSATIONAL_ERASURE_DOMAIN",
+    "DELETION_CONFIRMATION_DOMAIN",
+    "DELETION_CONFIRMATION_PHRASES",
     "ClaimDeletionStepOutcome",
     "ClaimDeletionStepReceipt",
     "ConversationDeletionRequestV1",
@@ -930,6 +1020,7 @@ __all__ = [
     "SourceErasureReceipt",
     "bind_conversation_deletion",
     "conversation_deletion_request_from_body",
+    "conversation_deletion_confirmation_sha256",
     "deletion_binding_sha256",
     "deletion_coordinator_receipt_sha256",
     "erasure_target_manifest_sha256",

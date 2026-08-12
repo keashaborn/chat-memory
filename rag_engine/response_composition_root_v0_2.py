@@ -3,9 +3,9 @@ from __future__ import annotations
 """Inactive production composition root for RESSE response orchestration.
 
 Nothing imports this module from the live request path.  It demonstrates and
-tests the only intended authority flow: authenticated route values, an owner-
-scoped database snapshot, backend safety and mode classifiers, independently
-governed Memory, typed prompt assembly, provider execution, and final binding.
+tests the intended authority flow: authenticated route values, an owner-scoped
+database snapshot, backend safety and mode classifiers, governed-Memory
+successor context, typed prompt assembly, provider execution, and final binding.
 """
 
 import hashlib
@@ -17,14 +17,9 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.assistant_response_preferences_v1 import (
-    AssistantResponsePreferencesV1,
-)
 from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryAnswerProvenanceV1,
 )
-from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
-from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatCompletionsAdapterV1,
     OpenAIChatGenerationConfigV1,
@@ -101,10 +96,6 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
-    assistant_response_preferences: AssistantResponsePreferencesV1 | None = Field(
-        default=None,
-        repr=False,
-    )
     response_language: str = DEFAULT_VOICE_LANGUAGE
     attachment_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
@@ -138,14 +129,6 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
     def bounded_message_bytes(self) -> "AuthenticatedResponseCommandV0_2":
         if len(self.current_message.encode("utf-8")) > 32_768:
             raise ValueError("current message exceeds the byte limit")
-        if (
-            self.assistant_response_preferences is not None
-            and self.assistant_response_preferences.owner_user_id
-            != self.authenticated_actor_user_id
-        ):
-            raise ValueError(
-                "assistant response preference owner differs from authenticated actor"
-            )
         if self.attachment_context_block is not None:
             if (
                 self.attachment_context_block.request_id_sha256
@@ -158,11 +141,6 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
 
 
 class GovernedMemoryAssemblyV1(_StrictFrozenModel):
-    memory_input: MemoryPromptAssemblyInputV1 | None = Field(default=None, repr=False)
-    memory_application: MemoryPromptApplicationResultV1 | None = Field(
-        default=None,
-        repr=False,
-    )
     successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
         repr=False,
@@ -170,11 +148,7 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
     )
 
     @model_validator(mode="after")
-    def paired(self) -> "GovernedMemoryAssemblyV1":
-        if (self.memory_input is None) != (self.memory_application is None):
-            raise ValueError("Memory input and application must be paired")
-        if self.memory_input is not None and self.successor_memory_context_block is not None:
-            raise ValueError("legacy and successor Memory contexts are mutually exclusive")
+    def successor_context_only(self) -> "GovernedMemoryAssemblyV1":
         if self.successor_memory_context_block is not None and (
             self.successor_memory_context_block.block_id
             != "governed_memory_successor_v1"
@@ -268,8 +242,6 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
         if self.successor_memory_provenance is not None:
             if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
                 raise ValueError("successor provenance differs from finalized answer")
-            if self.finalized.memory_binding is not None:
-                raise ValueError("successor and legacy Memory bindings cannot coexist")
         return self
 
 
@@ -278,7 +250,7 @@ def _elapsed_ms(start_ns: int) -> int:
 
 
 class GovernedMemoryAssemblyProviderV1(Protocol):
-    """Independent Memory V1 intent, selection, render, and control boundary."""
+    """Independent governed-Memory successor context boundary."""
 
     def prepare(
         self,
@@ -592,8 +564,6 @@ class InactiveResponseCompositionRootV0_2:
                 conversation_snapshot=snapshot,
                 request_field_names=command.request_field_names,
                 trusted_policy_signals_envelope=signal_envelope,
-                memory_input=memory.memory_input,
-                memory_application=memory.memory_application,
                 successor_memory_context_block=(
                     memory.successor_memory_context_block
                 ),
@@ -601,9 +571,6 @@ class InactiveResponseCompositionRootV0_2:
                 attachment_context_block=command.attachment_context_block,
                 fm_token_budget=command.fm_token_budget,
                 search_capability_manifest=command.search_capability_manifest,
-                assistant_response_preferences=(
-                    command.assistant_response_preferences
-                ),
                 response_language=command.response_language,
             )
             stage_timings["trusted_request_ms"] = _elapsed_ms(stage_started_ns)

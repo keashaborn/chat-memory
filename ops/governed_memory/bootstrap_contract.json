@@ -7,13 +7,17 @@
     "private_ipv4": "172.31.32.171"
   },
   "api": {
-    "bind": "172.31.32.171:8091",
-    "allowed_source_ipv4": [
-      "172.31.43.160/32"
-    ],
+    "transport": "permissioned_unix_socket",
+    "socket_path": "/run/governed-memory/http.sock",
+    "socket_group": "governed-memory-proxy",
+    "runtime_directory_mode": "0750",
+    "umask": "0007",
+    "socket_group_provisioned": false,
+    "same_host_brains_proxy_group_member_provisioned": false,
+    "tcp_listener_allowed": false,
+    "caller": "same_host_brains_proxy_group_member",
     "other_source_action": "deny",
-    "source_firewall_proof_required_before_activation": true,
-    "tls_termination_decision_required_before_activation": true
+    "socket_identity_and_permission_proof_required_before_activation": true
   },
   "postgresql": {
     "authority": "canonical",
@@ -111,7 +115,8 @@
     "pilot_capture_limit_per_owner_rolling_24h": 20,
     "pilot_capture_limit_enforcement": "owner_scoped_transaction_advisory_lock_all_outbox_states",
     "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
-    "source_erasure_status": "phase7c_real_disposable_validated_inactive_not_routed_not_production_applied",
+    "source_erasure_status": "phase8f_repository_candidate_disposable_revalidation_required_not_routed_not_production_applied",
+    "source_erasure_historical_phase7c_status": "real_disposable_validated_inactive_not_routed_not_production_applied_not_current_candidate_proof",
     "source_erasure_requester_role": "memory_erasure_requester",
     "source_erasure_requester_membership_granted_in_production": false,
     "source_erasure_selectors": [
@@ -146,7 +151,8 @@
     "source_erasure_runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
     "source_erasure_allowed_auxiliary_effects": [
       "public.active_thread_selection",
-      "trusted_web.response_transcript_v1"
+      "trusted_web.response_transcript_v1",
+      "chat_integrity.assistant_transcript_attestation_v1"
     ],
     "source_erasure_auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
     "source_erasure_validated_auxiliary_foreign_keys": {
@@ -199,14 +205,38 @@
           "validated": true,
           "delete_action": "cascade"
         }
+      ],
+      "chat_integrity.assistant_transcript_attestation_v1": [
+        {
+          "constraint_name": "assistant_transcript_attestation_chat_log_fk",
+          "child_columns": [
+            "chat_log_id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "parent_table": "public.chat_log",
+          "parent_columns": [
+            "id",
+            "owner_user_id",
+            "thread_id"
+          ],
+          "validated": true,
+          "delete_action": "cascade",
+          "current_disposable_revalidation_required": true
+        }
       ]
     },
     "source_erasure_weak_single_column_transcript_foreign_keys_allowed": false,
     "source_erasure_unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
     "source_erasure_unclassified_side_effects_allowed": false,
     "source_erasure_legacy_capture_trigger_required": false,
-    "source_erasure_legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "source_erasure_legacy_capture_trigger_if_present": "forbidden_after_forward_exact_disabled_identity_restored_by_empty_only_rollback",
     "source_erasure_structured_lifeswitch_tables_or_accounts_deleted": false,
+    "source_erasure_lifeswitch_usage_and_audit_records_retained": true,
+    "source_erasure_lifeswitch_chat_artifact_status": "erasure_and_prior_view_migration_required_before_activation",
+    "source_erasure_vantage_answer_trace_disposition": "undecided_activation_blocker",
+    "source_erasure_telemetry_payload_disposition": "undecided_activation_blocker",
+    "source_erasure_auxiliary_deleted_object_count_status": "not_implemented_or_current_disposable_validated",
     "source_erasure_legacy_project_rows_deleted": false,
     "source_erasure_content_free_consent_security_audit_receipts_retained": true
   },
@@ -222,20 +252,23 @@
     "import_legacy_vectors": false
   },
   "candidate_implementation_status": {
-    "runtime": "phase7c_source_bound_offline_build_sealed_disposable_validated_inactive",
+    "runtime": "phase8f_repository_candidate_runtime_rebuild_and_disposable_revalidation_required_inactive",
+    "current_runtime_rebuild_pending": true,
+    "current_candidate_disposable_validation_complete": false,
+    "historical_phase7c_evidence_retained": true,
     "session_id_required": true,
     "supabase_auth_sessions_rpc": "staged_candidate_not_installed_or_live_verified",
-    "owner_claim_fact_detail": "implemented_candidate_disposable_validated_not_production_applied",
+    "owner_claim_fact_detail": "implemented_candidate_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
     "provider_adapter": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter": "strict_3072_fake_unit_validated_durable_request_dispatch_marker_disposable_validated_zero_real_calls",
-    "qdrant_adapter": "exact_fake_unit_and_real_disposable_v1_19_0_validated_not_persistent_approved",
-    "pilot_marker": "implemented_disposable_validated_not_production_applied",
+    "embedding_adapter": "strict_3072_fake_unit_validated_durable_request_dispatch_marker_current_disposable_revalidation_required_zero_real_calls",
+    "qdrant_adapter": "exact_fake_unit_and_historical_phase7c_real_disposable_v1_19_0_validated_not_current_candidate_proof_not_persistent_approved",
+    "pilot_marker": "implemented_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
     "worker_algorithm": "implemented_fake_tested",
-    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated",
-    "deletion_coordinator": "phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied",
+    "worker_runtime_composition": "implemented_inactive_persistently_fair_three_lane_real_two_database_current_disposable_revalidation_required",
+    "deletion_coordinator": "phase8f_exact_chat_targets_repository_candidate_current_disposable_revalidation_required_not_routed_not_production_applied",
     "worker_context_required_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
-    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive",
-    "worker_cross_process_singleton": "postgresql_session_advisory_lock_real_concurrent_disposable_validated_inactive",
+    "worker_scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_current_disposable_revalidation_required_inactive",
+    "worker_cross_process_singleton": "postgresql_session_advisory_lock_current_disposable_revalidation_required_inactive",
     "calibration": "independently_bound_unapproved_retrieval_off",
     "frontend_candidate": "71377a_built_undeployed_visual_qa_pending_operation_id_confirmation_semantics_unverified"
   },
@@ -263,13 +296,23 @@
       "fresh_isolated_persistent_qdrant_not_created_or_approved",
       "persistent_store_restart_supervision_and_boot_recovery_not_implemented_or_verified",
       "canonical_postgresql_encrypted_backup_and_restore_not_proven",
-      "private_frontend_source_firewall_not_proved",
-      "tls_termination_or_private_transport_not_decided",
+      "same_host_brains_proxy_service_token_not_provisioned_or_verified",
+      "governed_memory_proxy_group_and_brains_membership_not_provisioned_or_verified",
+      "brains_proxy_and_successor_http_coordinated_deployment_rollback_not_packaged",
       "production_store_runtime_credentials_and_role_activation_not_authorized_or_executed",
       "successor_http_service_not_installed",
       "successor_worker_service_not_installed",
       "successor_conversation_capture_not_activated",
       "successor_chat_deletion_route_candidate_not_installed_or_live_verified",
+      "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure_not_implemented_or_verified",
+      "lifeswitch_prior_provenance_view_not_migrated_to_chat_integrity",
+      "vantage_answer_trace_erasure_or_retention_disposition_not_decided_or_verified",
+      "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
+      "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
+      "retained_legacy_chat_clean_start_empty_root_not_proved",
+      "successor_answer_binding_chat_transaction_recovery_not_implemented",
+      "phase8f_current_runtime_rebuild_not_completed",
+      "phase8f_current_candidate_disposable_revalidation_not_completed",
       "frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified",
       "source_erasure_requester_membership_not_granted_or_verified",
       "provider_adapter_real_call_validation_not_authorized_or_completed",

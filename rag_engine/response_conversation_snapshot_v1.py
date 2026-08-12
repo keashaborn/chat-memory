@@ -18,6 +18,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from rag_engine.chat_integrity import (
+    ATTESTED_ASSISTANT_SOURCE,
+    validate_assistant_transcript_attestation_row_v1,
+)
 from rag_engine.response_policy_v0_2 import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
@@ -32,7 +36,6 @@ SNAPSHOT_VERSION = "response_conversation_snapshot_v1"
 USER_SOURCE = "frontend/chat:user"
 VOICE_REALTIME_USER_SOURCE = "voice/realtime-preview:user"
 ASSISTANT_SOURCE = "frontend/chat:assistant"
-ATTESTED_ASSISTANT_SOURCE = "backend/resse:assistant:v1"
 SOURCE_ROLE = {
     USER_SOURCE: ConversationRole.USER,
     VOICE_REALTIME_USER_SOURCE: ConversationRole.USER,
@@ -400,13 +403,32 @@ async def load_response_conversation_snapshot_v1(
                     """
                     SELECT log.id,log.owner_user_id,log.thread_id,log.source,
                            log.text,log.request_id,log.created_at,
-                           attestation.assistant_text_sha256,
+                           attestation.answer_id AS attestation_answer_id,
+                           attestation.owner_user_id AS attestation_owner_user_id,
+                           attestation.thread_id AS attestation_thread_id,
+                           attestation.chat_log_id AS attestation_chat_log_id,
+                           attestation.request_id_sha256 AS attestation_request_id_sha256,
+                           attestation.conversation_snapshot_sha256
+                             AS attestation_conversation_snapshot_sha256,
+                           attestation.trusted_plan_sha256
+                             AS attestation_trusted_plan_sha256,
+                           attestation.provider_request_sha256
+                             AS attestation_provider_request_sha256,
+                           attestation.provider_response_sha256
+                             AS attestation_provider_response_sha256,
+                           attestation.provider_response_id
+                             AS attestation_provider_response_id,
+                           attestation.output_kind AS attestation_output_kind,
+                           attestation.assistant_text_sha256
+                             AS attestation_assistant_text_sha256,
                            attestation.attestation_sha256,
+                           attestation.created_at AS attestation_created_at,
                            web_binding.response_id AS web_response_id,
                            web_binding.query_sha256 AS web_query_sha256,
                            web_binding.answer_sha256 AS web_answer_sha256
                     FROM public.chat_log AS log
-                    LEFT JOIN memory.assistant_transcript_attestation_v1 AS attestation
+                    LEFT JOIN chat_integrity.assistant_transcript_attestation_v1
+                      AS attestation
                       ON attestation.owner_user_id=log.owner_user_id
                      AND attestation.thread_id=log.thread_id
                      AND attestation.chat_log_id=log.id
@@ -504,16 +526,20 @@ async def load_response_conversation_snapshot_v1(
         if not isinstance(text, str) or not text:
             raise ConversationSnapshotError("prior transcript text is empty")
         if source == ATTESTED_ASSISTANT_SOURCE:
-            expected_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            if row.get("assistant_text_sha256") != expected_text_hash:
+            try:
+                validate_assistant_transcript_attestation_row_v1(
+                    row,
+                    owner_user_id=owner,
+                    thread_id=row_thread,
+                    chat_log_id=row_id,
+                    request_id=prior_request_id,
+                    assistant_text=text,
+                    chat_created_at=created_at,
+                )
+            except Exception:
                 raise ConversationSnapshotError(
                     "assistant transcript differs from its attestation"
-                )
-            attestation_hash = str(row.get("attestation_sha256") or "")
-            if len(attestation_hash) != 64 or any(
-                char not in "0123456789abcdef" for char in attestation_hash
-            ):
-                raise ConversationSnapshotError("assistant attestation is invalid")
+                ) from None
         elif source in {WEB_USER_SOURCE, WEB_ASSISTANT_SOURCE}:
             if row.get("web_response_id") is None:
                 raise ConversationSnapshotError(

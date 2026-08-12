@@ -3,8 +3,8 @@ from __future__ import annotations
 """Trusted, side-effect-free composition of the RESSE response plan.
 
 This module is not imported by the live route.  It is the backend-owned seam
-between authenticated request handling, safety assessment, governed Memory,
-canonical FM selection, and provider-neutral prompt assembly.  Browser values
+between authenticated request handling, safety assessment, governed-Memory
+successor context, canonical FM selection, and provider-neutral prompt assembly. Browser values
 can be represented only by their field names for legacy-audit purposes; their
 values have no input path here.
 """
@@ -17,17 +17,12 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.assistant_response_preferences_v1 import (
-    AssistantResponsePreferencesV1,
-)
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 from rag_engine.fm_selection_envelope_v0_2 import (
     FMSelectionEnvelopeV02,
     FMSelectionRequestV02,
     select_fm_v0_2,
 )
-from rag_engine.memory_prompt_renderer_v1 import MemoryPromptApplicationResultV1
-from rag_engine.memory_v1_selection_envelope import MemoryPromptAssemblyInputV1
 from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.prompt_assembler_v1 import (
     AssembledPromptV1,
@@ -186,14 +181,6 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
     trusted_policy_signals_envelope: TrustedPolicySignalsEnvelopeV0_2 = Field(
         repr=False,
     )
-    memory_input: MemoryPromptAssemblyInputV1 | None = Field(
-        default=None,
-        repr=False,
-    )
-    memory_application: MemoryPromptApplicationResultV1 | None = Field(
-        default=None,
-        repr=False,
-    )
     successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
         repr=False,
@@ -209,10 +196,6 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
     )
     fm_token_budget: int | None = Field(default=None, ge=0, le=1600)
     search_capability_manifest: SearchCapabilityManifestV1 | None = Field(
-        default=None,
-        repr=False,
-    )
-    assistant_response_preferences: AssistantResponsePreferencesV1 | None = Field(
         default=None,
         repr=False,
     )
@@ -248,23 +231,6 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             raise ValueError(
                 "policy-signal envelope differs from the conversation snapshot"
             )
-        if (self.memory_input is None) != (self.memory_application is None):
-            raise ValueError("Memory input and application must be supplied together")
-        if self.memory_input is not None and self.successor_memory_context_block is not None:
-            raise ValueError("legacy and successor Memory contexts are mutually exclusive")
-        if self.memory_input is not None:
-            context = self.memory_input.context
-            if context.authenticated_actor_user_id != self.authenticated_actor_user_id:
-                raise ValueError("Memory actor differs from authenticated request actor")
-            if context.owner_user_id != self.authenticated_actor_user_id:
-                raise ValueError("Memory owner differs from authenticated request actor")
-            if context.thread_id != self.thread_id:
-                raise ValueError("Memory thread differs from trusted request thread")
-            if context.request_id_sha256 != _text_sha256(self.request_id):
-                raise ValueError("Memory request differs from trusted response request")
-            current_message_sha256 = _text_sha256(self.conversation[-1].content)
-            if context.query_sha256 != current_message_sha256:
-                raise ValueError("Memory query differs from the current user message")
         if self.successor_memory_context_block is not None:
             context_block = self.successor_memory_context_block
             if (
@@ -304,14 +270,6 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
                 raise ValueError(
                     "Attachment context differs from the trusted response request"
                 )
-        if (
-            self.assistant_response_preferences is not None
-            and self.assistant_response_preferences.owner_user_id
-            != self.authenticated_actor_user_id
-        ):
-            raise ValueError(
-                "Assistant response preference owner differs from authenticated actor"
-            )
         return self
 
     @property
@@ -346,14 +304,11 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         trusted_policy_signals_envelope: (
             TrustedPolicySignalsEnvelopeV0_2 | None
         ) = None,
-        memory_input: MemoryPromptAssemblyInputV1 | None = None,
-        memory_application: MemoryPromptApplicationResultV1 | None = None,
         successor_memory_context_block: PromptReferenceContextBlockV1 | None = None,
         prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
         attachment_context_block: PromptReferenceContextBlockV1 | None = None,
         fm_token_budget: int | None = None,
         search_capability_manifest: SearchCapabilityManifestV1 | None = None,
-        assistant_response_preferences: AssistantResponsePreferencesV1 | None = None,
         response_language: str = DEFAULT_VOICE_LANGUAGE,
     ) -> "TrustedResponseRequestV0_2":
         """Create from trusted values; request values are deliberately absent."""
@@ -397,14 +352,11 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             conversation_snapshot=snapshot,
             legacy_request_field_names=tuple(sorted(set(request_field_names))),
             trusted_policy_signals_envelope=signal_envelope,
-            memory_input=memory_input,
-            memory_application=memory_application,
             successor_memory_context_block=successor_memory_context_block,
             prior_web_provenance=prior_web_provenance,
             attachment_context_block=attachment_context_block,
             fm_token_budget=fm_token_budget,
             search_capability_manifest=search_capability_manifest,
-            assistant_response_preferences=assistant_response_preferences,
             response_language=response_language,
         )
 
@@ -610,11 +562,8 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             ),
             (
                 self.shadow_trace.memory_present,
-                (
-                    self.assembled_prompt.source_request.memory_input is not None
-                    or self.assembled_prompt.source_request.successor_memory_context_block
-                    is not None
-                ),
+                self.assembled_prompt.source_request.successor_memory_context_block
+                is not None,
             ),
             (
                 self.shadow_trace.context_block_count,
@@ -750,8 +699,7 @@ def _shadow_trace(
         "fm_selection_status": fm.status,
         "fm_selected_record_count": len(fm.selected_record_ids),
         "memory_present": (
-            request.memory_input is not None
-            or request.successor_memory_context_block is not None
+            request.successor_memory_context_block is not None
         ),
         "context_block_count": manifest.context_block_count,
         "total_input_bytes": manifest.total_input_bytes,
@@ -841,8 +789,6 @@ class TrustedResponseOrchestratorV0_2:
                     policy_signals=request.trusted_policy_signals,
                     policy_decision=decision,
                     policy_prompt=prompt,
-                    memory_input=request.memory_input,
-                    memory_application=request.memory_application,
                     successor_memory_context_block=(
                         request.successor_memory_context_block
                     ),
@@ -851,9 +797,6 @@ class TrustedResponseOrchestratorV0_2:
                     attachment_context_block=request.attachment_context_block,
                     search_capability_manifest=(
                         request.search_capability_manifest
-                    ),
-                    assistant_response_preferences=(
-                        request.assistant_response_preferences
                     ),
                     response_language=request.response_language,
                 )

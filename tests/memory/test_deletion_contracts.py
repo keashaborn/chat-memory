@@ -21,6 +21,7 @@ from rag_engine.governed_memory.deletion_contracts import (
     ConversationErasureTarget,
     DeletionSelectorKind,
     bind_conversation_deletion,
+    conversation_deletion_confirmation_sha256,
     conversation_deletion_request_from_body,
     erasure_target_manifest_sha256,
     source_erasure_target_sha256,
@@ -33,26 +34,42 @@ OPERATION = UUID("33333333-3333-4333-8333-333333333333")
 MESSAGE = UUID("44444444-4444-4444-8444-444444444444")
 THREAD = UUID("55555555-5555-4555-8555-555555555555")
 NOW = datetime(2030, 1, 2, 12, 0, tzinfo=timezone.utc)
-CONFIRMATION_SHA256 = "c" * 64
-
-
 def actor() -> VerifiedActor:
     return VerifiedActor(
         owner_user_id=OWNER,
         actor_id=OWNER,
         session_id=SESSION,
         role=ActorRole.OWNER,
-        scopes=(ActorScope.MUTATE_CLAIMS,),
+        scopes=(ActorScope.ERASE_CONVERSATIONS,),
         authentication_manifest_sha256="a" * 64,
         authenticated_at=NOW,
     )
 
 
 def body(kind: str, **values: object) -> dict[str, object]:
+    try:
+        selector_kind = DeletionSelectorKind(kind)
+        confirmation = conversation_deletion_confirmation_sha256(
+            operation_id=OPERATION,
+            selector_kind=selector_kind,
+            thread_id=(
+                UUID(str(values["thread_id"]))
+                if "thread_id" in values
+                else None
+            ),
+            anchor_message_id=(
+                UUID(str(values["anchor_message_id"]))
+                if "anchor_message_id" in values
+                else None
+            ),
+            recent_window_seconds=values.get("recent_window_seconds"),
+        )
+    except (ContractViolation, ValueError):
+        confirmation = "c" * 64
     return {
         "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
         "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
-        "confirmation_sha256": CONFIRMATION_SHA256,
+        "confirmation_sha256": confirmation,
         "operation_id": str(OPERATION),
         "selector_kind": kind,
         **values,
@@ -169,15 +186,62 @@ class DeletionRequestContractTests(unittest.TestCase):
         )
         command = bind_conversation_deletion(actor=actor(), request=request)
         self.assertEqual(command.authority.owner_user_id, OWNER)
-        self.assertEqual(command.request.confirmation_sha256, "c" * 64)
-        drifted = conversation_deletion_request_from_body(
-            {**body("all_conversations"), "confirmation_sha256": "d" * 64}
+        expected = conversation_deletion_confirmation_sha256(
+            operation_id=OPERATION,
+            selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
         )
-        self.assertNotEqual(request.request_sha256, drifted.request_sha256)
+        self.assertEqual(command.request.confirmation_sha256, expected)
+        self.assertNotIn("DELETE CHAT DATA", expected)
+        with self.assertRaises(ContractViolation) as raised:
+            conversation_deletion_request_from_body(
+                {
+                    **body("all_conversations"),
+                    "confirmation_sha256": "d" * 64,
+                }
+            )
+        self.assertEqual(
+            raised.exception.code, "deletion_confirmation_sha256_mismatch"
+        )
+
+    def test_confirmation_binds_operation_selector_targets_and_phrase(self) -> None:
+        values = {
+            "operation_id": OPERATION,
+            "selector_kind": DeletionSelectorKind.MESSAGE_TAIL,
+            "thread_id": THREAD,
+            "anchor_message_id": MESSAGE,
+        }
+        exact = conversation_deletion_confirmation_sha256(**values)
         self.assertNotEqual(
-            command.binding_sha256,
-            bind_conversation_deletion(actor=actor(), request=drifted).binding_sha256,
+            exact,
+            conversation_deletion_confirmation_sha256(
+                **{**values, "operation_id": UUID(int=1)}
+            ),
         )
+        self.assertNotEqual(
+            exact,
+            conversation_deletion_confirmation_sha256(
+                operation_id=OPERATION,
+                selector_kind=DeletionSelectorKind.THREAD,
+                thread_id=THREAD,
+            ),
+        )
+
+    def test_owner_without_erasure_scope_cannot_become_authority(self) -> None:
+        denied = VerifiedActor(
+            owner_user_id=OWNER,
+            actor_id=OWNER,
+            session_id=SESSION,
+            role=ActorRole.OWNER,
+            scopes=(ActorScope.MUTATE_CLAIMS,),
+            authentication_manifest_sha256="a" * 64,
+            authenticated_at=NOW,
+        )
+        request = conversation_deletion_request_from_body(
+            body("all_conversations")
+        )
+        with self.assertRaises(ContractViolation) as raised:
+            bind_conversation_deletion(actor=denied, request=request)
+        self.assertEqual(raised.exception.code, "actor_scope_denied")
 
     def test_worker_actor_cannot_become_deletion_authority(self) -> None:
         worker = VerifiedActor(

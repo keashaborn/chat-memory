@@ -219,7 +219,6 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
     def reference_names_are_lower_authority(self) -> "OpenAIChatMessageV1":
         if self.name is not None:
             if self.role != "user" or self.name not in {
-                "governed_memory_v1",
                 "governed_memory_successor_v1",
                 "fractal_monism_v0_2",
                 "chat_attachments_v1",

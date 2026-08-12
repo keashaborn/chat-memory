@@ -15,7 +15,7 @@ import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rag_engine.openai_chat_provider_v1 import OpenAIChatResponseV1
-from rag_engine.openai_chat_request_v3 import OpenAIChatResponseV3
+from rag_engine.openai_chat_request_v4 import OpenAIChatResponseV3
 
 
 LEGACY_USAGE_SCHEMA = "admin_usage_summary_v1"

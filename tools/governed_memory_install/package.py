@@ -85,7 +85,7 @@ EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256: Final = (
     "3dbc0e9a3e927ec3a17734fae67f02dd0d1567c0c4220f3ae61954a4ee301d67"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "a5c21c48d692040fefc13473c37d3a5e8e652455a0484cf7a72f73904bd0eac0"
+    "d5c3a75839e4d0443a46a760f892d3fe277b375644d42826ad6aeba880e45e29"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "0068a7b9aca51c35185bad33607574c3cc108c0f3b384aa1742e09f4329102cb"
@@ -173,7 +173,6 @@ EXPECTED_MIGRATION_ARTIFACTS: Final = frozenset(
     {
         MIGRATION_BINDINGS_RELATIVE,
         "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
-        "governed-memory-migrations/schema_contract.json",
         "governed-memory-migrations/predicate_catalog.json",
         "governed-memory-migrations/0001_foundation/forward.pgsql",
         "governed-memory-migrations/0001_foundation/rollback.pgsql",
@@ -193,7 +192,6 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
         "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
         "governed-memory-migrations/predicate_catalog.json",
-        "governed-memory-migrations/schema_contract.json",
         "ops/governed_memory/installation/phase8b/contract.json",
         "ops/governed_memory/installation/phase8b/controller_plan.json",
         "ops/governed_memory/installation/phase8b/controller_runtime_contract.json",

@@ -179,6 +179,76 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
             postflight.count("governed_memory.inactive_installation"), 2
         )
 
+    def test_brains_app_delete_authority_is_exclusive_and_rollback_exact(
+        self,
+    ) -> None:
+        preflight = self.forward.split("DO $preflight$", 1)[1].split(
+            "$preflight$;", 1
+        )[0]
+        expected_legacy_acl = (
+            "'DELETE:false', 'INSERT:false', 'SELECT:false', "
+            "'UPDATE:false'"
+        )
+        self.assertIn(expected_legacy_acl, preflight)
+        self.assertIn(
+            "RAISE EXCEPTION 'brains_app legacy chat-root authority differs'",
+            preflight,
+        )
+
+        revoke = (
+            "REVOKE DELETE ON TABLE\n"
+            "  public.chat_log, public.threads, public.chat_attachments\n"
+            "FROM brains_app;"
+        )
+        self.assertEqual(self.forward.count(revoke), 1)
+        self.assertLess(
+            self.forward.index("$preflight$;"), self.forward.index(revoke)
+        )
+
+        catalog = self.forward.split(
+            "CREATE FUNCTION memory_ingest_private."
+            "assert_chat_deletion_catalog()",
+            1,
+        )[1].split("$function$;", 1)[0]
+        self.assertIn(
+            "pg_catalog.has_table_privilege(\n"
+            "            'brains_app', expected.relation_oid, 'DELETE'",
+            catalog,
+        )
+        self.assertIn(
+            "'INSERT:false', 'SELECT:false', 'UPDATE:false'", catalog
+        )
+        self.assertIn(
+            "RAISE EXCEPTION 'brains_app retains direct chat deletion authority'",
+            catalog,
+        )
+        postflight = self.forward.split("DO $postflight$", 1)[1].split(
+            "$postflight$;", 1
+        )[0]
+        self.assertIn(
+            "PERFORM memory_ingest_private.assert_chat_deletion_catalog();",
+            postflight,
+        )
+
+        restore = (
+            "GRANT DELETE ON TABLE\n"
+            "  public.chat_log, public.threads, public.chat_attachments\n"
+            "TO brains_app;"
+        )
+        self.assertEqual(self.rollback.count(restore), 1)
+        self.assertLess(
+            self.rollback.index("DO $empty_only$"), self.rollback.index(restore)
+        )
+        rollback_postflight = self.rollback.split("DO $postflight$", 1)[1].split(
+            "$postflight$;", 1
+        )[0]
+        self.assertIn(expected_legacy_acl, rollback_postflight)
+        self.assertIn(
+            "RAISE EXCEPTION 'conversation bridge rollback did not restore "
+            "exact chat grants'",
+            rollback_postflight,
+        )
+
     def test_every_source_runtime_membership_edge_is_rejected_both_directions(
         self,
     ) -> None:

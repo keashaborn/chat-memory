@@ -131,7 +131,9 @@ class WorkerEntrypointRefusalTests(unittest.TestCase):
                 (
                     "from rag_engine.governed_memory.runtime.once_worker "
                     "import main; raise SystemExit(main(['--once'], "
-                    "environment={'GOVERNED_MEMORY_WORKER_MODE': 'on'}))"
+                    "environment={'GOVERNED_MEMORY_WORKER_MODE': 'on', "
+                    "'GOVERNED_MEMORY_EXCLUSIVE_MODE': "
+                    "'successor_pilot'}))"
                 ),
             ],
             cwd=Path(__file__).resolve().parents[2],

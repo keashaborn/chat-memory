@@ -9,6 +9,10 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from rag_engine.chat_integrity import (
+    AssistantOutputKind,
+    AssistantTranscriptAttestationV1,
+)
 from rag_engine.response_conversation_snapshot_v1 import (
     ASSISTANT_SOURCE,
     ATTESTED_ASSISTANT_SOURCE,
@@ -147,8 +151,58 @@ def prior_row(
         "created_at": NOW - timedelta(minutes=number),
     }
     if source == ATTESTED_ASSISTANT_SOURCE:
-        row["assistant_text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        row["attestation_sha256"] = "a" * 64
+        attestation = AssistantTranscriptAttestationV1.create(
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            answer_id=row["id"],
+            request_id_sha256=hashlib.sha256(
+                row["request_id"].encode("utf-8")
+            ).hexdigest(),
+            conversation_snapshot_sha256="1" * 64,
+            trusted_plan_sha256="2" * 64,
+            provider_request_sha256="3" * 64,
+            provider_response_sha256="4" * 64,
+            provider_response_id=f"provider-{number}",
+            output_kind=AssistantOutputKind.CONTENT,
+            assistant_text_sha256=hashlib.sha256(
+                text.encode("utf-8")
+            ).hexdigest(),
+            created_at=row["created_at"],
+        )
+        row.update(
+            {
+                "attestation_answer_id": attestation.answer_id,
+                "attestation_owner_user_id": (
+                    attestation.authenticated_actor_user_id
+                ),
+                "attestation_thread_id": attestation.thread_id,
+                "attestation_chat_log_id": attestation.answer_id,
+                "attestation_request_id_sha256": (
+                    attestation.request_id_sha256
+                ),
+                "attestation_conversation_snapshot_sha256": (
+                    attestation.conversation_snapshot_sha256
+                ),
+                "attestation_trusted_plan_sha256": (
+                    attestation.trusted_plan_sha256
+                ),
+                "attestation_provider_request_sha256": (
+                    attestation.provider_request_sha256
+                ),
+                "attestation_provider_response_sha256": (
+                    attestation.provider_response_sha256
+                ),
+                "attestation_provider_response_id": (
+                    attestation.provider_response_id
+                ),
+                "attestation_output_kind": attestation.output_kind.value,
+                "attestation_assistant_text_sha256": (
+                    attestation.assistant_text_sha256
+                ),
+                "attestation_sha256": attestation.attestation_sha256,
+                "attestation_created_at": attestation.created_at,
+            }
+        )
     elif source in {WEB_USER_SOURCE, WEB_ASSISTANT_SOURCE}:
         row["web_response_id"] = UUID("49c59ba0-e188-40f8-932d-51fa6b84e157")
         row["web_query_sha256"] = (
@@ -234,7 +288,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.messages[0].content, "Current message")
         self.assertEqual(len(conn.fetch_calls), 1)
 
-    async def test_bound_snapshot_uses_only_legacy_user_rows_in_chronological_order(self) -> None:
+    async def test_bound_snapshot_uses_owner_rows_in_chronological_order(self) -> None:
         # The production query returns descending order; the snapshot reverses it.
         conn = FakeConnection(
             current_rows=[current_row()],
@@ -263,6 +317,11 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         history_query, args = conn.fetch_calls[1]
+        self.assertIn(
+            "chat_integrity.assistant_transcript_attestation_v1",
+            history_query,
+        )
+        self.assertNotIn("memory.assistant_transcript_attestation", history_query)
         self.assertIn("request_id IS DISTINCT FROM $3", history_query)
         self.assertEqual(args[2], REQUEST_ID)
         self.assertEqual(
@@ -292,6 +351,28 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             current_message="Current message",
         )
         self.assertEqual(snapshot.messages[0].role, ConversationRole.ASSISTANT)
+
+    async def test_assistant_history_rejects_incomplete_manifest_tampering(self) -> None:
+        assistant = prior_row(
+            number=1,
+            source=ATTESTED_ASSISTANT_SOURCE,
+            text="server answer",
+        )
+        assistant["attestation_trusted_plan_sha256"] = "f" * 64
+        with self.assertRaisesRegex(
+            ConversationSnapshotError,
+            "assistant transcript differs from its attestation",
+        ):
+            await load_response_conversation_snapshot_v1(
+                FakeConnection(
+                    current_rows=[current_row()],
+                    prior_rows=[assistant],
+                ),
+                authenticated_actor_user_id=ACTOR,
+                thread_id=THREAD,
+                current_request_id=REQUEST_ID,
+                current_message="Current message",
+            )
 
     async def test_voice_turn_admits_bound_web_exchange_from_text(self) -> None:
         conn = FakeConnection(

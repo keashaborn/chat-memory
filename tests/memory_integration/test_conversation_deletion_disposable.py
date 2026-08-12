@@ -35,6 +35,7 @@ from rag_engine.governed_memory.deletion_contracts import (
     DeletionAuthority,
     DeletionCoordinatorOutcome,
     DeletionSelectorKind,
+    conversation_deletion_confirmation_sha256,
     deletion_binding_sha256,
 )
 from rag_engine.governed_memory.eligibility import EligibilityPolicy
@@ -389,13 +390,17 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
     ) -> BoundConversationDeletion:
         request = ConversationDeletionRequestV1(
             operation_id=operation_id,
-            selector_kind=(
+            selector_kind=(selector_kind := (
                 DeletionSelectorKind.ALL_CONVERSATIONS
                 if thread_id is None
                 else DeletionSelectorKind.THREAD
-            ),
+            )),
             thread_id=thread_id,
-            confirmation_sha256="c" * 64,
+            confirmation_sha256=conversation_deletion_confirmation_sha256(
+                operation_id=operation_id,
+                selector_kind=selector_kind,
+                thread_id=thread_id,
+            ),
         )
         authority = DeletionAuthority(
             owner_user_id=owner_user_id,
@@ -1380,6 +1385,31 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(retained, r"^[0-9a-f]{64}$")
         return qdrant_receipt.verification_receipt_sha256, retained
 
+    async def test_brains_app_cannot_bypass_coordinated_chat_erasure(
+        self,
+    ) -> None:
+        assert asyncpg is not None
+        for relation in (
+            "public.chat_log",
+            "public.threads",
+            "public.chat_attachments",
+        ):
+            with self.subTest(relation=relation):
+                self.assertFalse(
+                    await self.conversation_admin.fetchval(
+                        "SELECT pg_catalog.has_table_privilege("
+                        "'brains_app',$1::text,'DELETE')",
+                        relation,
+                    )
+                )
+                with self.assertRaises(
+                    asyncpg.exceptions.InsufficientPrivilegeError
+                ):
+                    async with self._owner_context(self.brains, OWNER_A):
+                        await self.brains.execute(
+                            f"DELETE FROM {relation} WHERE false"
+                        )
+
     async def test_deletion_resilience_boundaries(self) -> None:
         assert asyncpg is not None
 
@@ -1397,7 +1427,11 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
                     "$1::uuid,'recent'::text,NULL::uuid,NULL::uuid,"
                     "3600::integer,$2::text)",
                     FUTURE_OPERATION,
-                    "c" * 64,
+                    conversation_deletion_confirmation_sha256(
+                        operation_id=FUTURE_OPERATION,
+                        selector_kind=DeletionSelectorKind.RECENT,
+                        recent_window_seconds=3600,
+                    ),
                 )
         self.assertEqual(future_failure.exception.sqlstate, "23514")
         self.assertEqual(

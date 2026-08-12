@@ -265,7 +265,10 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
             "ffffffff-ffff-4fff-8fff-ffffffffffff",
         )
         self.assertEqual(len(provenance.provenance_sha256), 64)
-        self.assertIsNone(execution.finalized.memory_binding)
+        self.assertNotIn(
+            "memory_binding",
+            execution.finalized.model_dump(mode="json"),
+        )
 
         persistence = FakeConnection()
         await persist_finalized_response_v1(
@@ -279,7 +282,7 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
             query for query, _args in persistence.execute_calls
         )
         self.assertIn(
-            "memory.assistant_transcript_attestation_v1",
+            "chat_integrity.assistant_transcript_attestation_v1",
             persistence_sql,
         )
         self.assertNotIn(
@@ -319,7 +322,10 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(provenance.references, ())
         self.assertIsNone(provenance.binding_manifest_sha256)
-        self.assertIsNone(execution.finalized.memory_binding)
+        self.assertNotIn(
+            "memory_binding",
+            execution.finalized.model_dump(mode="json"),
+        )
 
     async def test_lifeswitch_v4_dispatches_and_clears_successor_lifecycle(
         self,
@@ -369,7 +375,10 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
         assert provenance is not None
         self.assertEqual(provenance.binding_outcome, "exposed")
         self.assertEqual(len(provenance.references), 1)
-        self.assertIsNone(execution.finalized.memory_binding)
+        self.assertNotIn(
+            "memory_binding",
+            execution.finalized.model_dump(mode="json"),
+        )
 
 
 if __name__ == "__main__":

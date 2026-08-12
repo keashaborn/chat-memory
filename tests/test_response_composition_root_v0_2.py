@@ -10,10 +10,6 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.assistant_response_preferences_v1 import (
-    AssistantResponsePreferencesV1,
-    PreferenceSource,
-)
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     GovernedMemoryAssemblyV1,
@@ -262,22 +258,11 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
 
 
 class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
-    def test_authenticated_command_rejects_cross_owner_preferences(self) -> None:
-        other = UUID("2240822d-ac9a-4096-95aa-e2b24d36ef50")
+    def test_authenticated_command_rejects_retired_preferences_field(self) -> None:
+        payload = command("Hello").model_dump(mode="json")
+        payload["assistant_response_preferences"] = None
         with self.assertRaises(ValidationError):
-            AuthenticatedResponseCommandV0_2(
-                authenticated_actor_user_id=ACTOR,
-                thread_id=THREAD,
-                request_id="composition-request",
-                current_message="Hello",
-                assistant_response_preferences=AssistantResponsePreferencesV1(
-                    owner_user_id=other,
-                    revision=1,
-                    source=PreferenceSource.POSTGRES,
-                    updated_at=NOW,
-                    assistant_name="Sage",
-                ),
-            )
+            AuthenticatedResponseCommandV0_2.model_validate(payload)
 
     async def test_source_followup_uses_prior_provenance_without_new_search(self) -> None:
         client = CombinedOpenAIClient()

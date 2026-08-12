@@ -3,18 +3,20 @@ from __future__ import annotations
 """Atomic persistence for a versioned response with separate context bindings."""
 
 import hashlib
-import json
 from typing import Any
 from uuid import UUID
 
 from rag_engine.active_thread_selection_v1 import promote_resume_thread_v1
+from rag_engine.chat_integrity import (
+    ATTESTED_ASSISTANT_SOURCE,
+    insert_assistant_transcript_attestation_v1,
+)
 from rag_engine.lifeswitch_answer_binding_store_v1 import (
     persist_lifeswitch_binding_on_connection_v1,
 )
 from rag_engine.lifeswitch_answer_provenance_store_v1 import (
     persist_lifeswitch_provenance_receipt_on_connection_v1,
 )
-from rag_engine.response_conversation_snapshot_v1 import ATTESTED_ASSISTANT_SOURCE
 from rag_engine.response_finalization_v3 import FinalizedTrustedResponseV3
 
 
@@ -36,10 +38,12 @@ async def persist_finalized_response_v3(
     request_id: str,
     finalized: FinalizedTrustedResponseV3,
 ) -> None:
-    """Persist transcript, attestation, Memory, and LifeSwitch atomically.
+    """Persist transcript, neutral attestation, and LifeSwitch atomically.
 
-    LifeSwitch remains in its own table and RLS domain. The transaction assumes
-    the application role may SET ROLE to the narrowly granted binding writer.
+    Governed Memory is persisted in its separate successor store before this
+    conversation transaction and is never written here. LifeSwitch remains in
+    its own table and RLS domain. The transaction assumes the application role
+    may SET ROLE to the narrowly granted binding writer.
     """
 
     stage = "validation"
@@ -103,53 +107,7 @@ async def persist_finalized_response_v3(
                 attestation.created_at,
             )
             stage = "attestation_insert"
-            await conn.execute(
-                """
-                INSERT INTO memory.assistant_transcript_attestation_v1(
-                  answer_id,owner_user_id,thread_id,chat_log_id,
-                  request_id_sha256,conversation_snapshot_sha256,
-                  trusted_plan_sha256,provider_request_sha256,
-                  provider_response_sha256,provider_response_id,output_kind,
-                  assistant_text_sha256,attestation_sha256,created_at
-                )
-                VALUES($1,$2,$3,$1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                """,
-                value.answer_id,
-                owner_user_id,
-                thread_id,
-                attestation.request_id_sha256,
-                attestation.conversation_snapshot_sha256,
-                attestation.trusted_plan_sha256,
-                attestation.provider_request_sha256,
-                attestation.provider_response_sha256,
-                attestation.provider_response_id,
-                attestation.output_kind.value,
-                attestation.assistant_text_sha256,
-                attestation.attestation_sha256,
-                attestation.created_at,
-            )
-            if value.memory_binding is not None:
-                stage = "memory_binding_insert"
-                binding = value.memory_binding
-                await conn.execute(
-                    """
-                    INSERT INTO memory.final_answer_memory_binding_v1(
-                      answer_id,owner_user_id,thread_id,
-                      binding_manifest_sha256,binding,created_at
-                    )
-                    VALUES($1,$2,$3,$4,$5::jsonb,$6)
-                    """,
-                    value.answer_id,
-                    owner_user_id,
-                    thread_id,
-                    binding.binding_manifest_sha256,
-                    json.dumps(
-                        binding.model_dump(mode="json"),
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ),
-                    binding.created_at,
-                )
+            await insert_assistant_transcript_attestation_v1(conn, attestation)
             if value.lifeswitch_binding is not None:
                 stage = "lifeswitch_binding_insert"
                 await persist_lifeswitch_binding_on_connection_v1(

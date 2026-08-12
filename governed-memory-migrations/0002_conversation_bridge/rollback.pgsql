@@ -32,6 +32,37 @@ BEGIN
     RAISE EXCEPTION
       'source runtime membership graph must be empty before rollback';
   END IF;
+  IF pg_catalog.to_regnamespace('memory') IS NULL
+     OR pg_catalog.to_regprocedure(
+          'memory.current_actor_user_id()'
+        ) IS NULL
+     OR pg_catalog.to_regprocedure(
+          'memory.enqueue_chat_log_consolidation()'
+        ) IS NULL THEN
+    RAISE EXCEPTION 'legacy rollback authority functions are absent';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('memory.current_actor_user_id()'::text, 's'::"char", false,
+       'sql'::text),
+      ('memory.enqueue_chat_log_consolidation()'::text, 'v'::"char", true,
+       'plpgsql'::text)
+    ) AS expected(signature, volatility, security_definer, language_name)
+    LEFT JOIN pg_catalog.pg_proc AS routine
+      ON routine.oid = pg_catalog.to_regprocedure(expected.signature)
+    LEFT JOIN pg_catalog.pg_language AS language
+      ON language.oid = routine.prolang
+    WHERE routine.oid IS NULL
+       OR routine.proowner <> 'sage'::regrole
+       OR routine.provolatile <> expected.volatility
+       OR routine.prosecdef <> expected.security_definer
+       OR routine.proconfig IS DISTINCT FROM
+            ARRAY['search_path=pg_catalog']::text[]
+       OR language.lanname <> expected.language_name
+  ) THEN
+    RAISE EXCEPTION 'legacy rollback authority function definitions differ';
+  END IF;
 END;
 $preflight$;
 
@@ -41,6 +72,8 @@ $preflight$;
 LOCK TABLE public.threads IN ACCESS EXCLUSIVE MODE;
 LOCK TABLE public.chat_log IN ACCESS EXCLUSIVE MODE;
 LOCK TABLE public.chat_attachments IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+  IN ACCESS EXCLUSIVE MODE;
 DO $catalog_lock$
 BEGIN
   IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
@@ -78,6 +111,14 @@ $catalog_assert$;
 
 DO $empty_only$
 BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM chat_integrity.assistant_transcript_attestation_v1
+    LIMIT 1
+  ) THEN
+    RAISE EXCEPTION
+      'conversation bridge rollback is empty-only; chat attestations exist';
+  END IF;
   IF EXISTS (
     SELECT 1
     FROM memory_ingest_private.source_erasure_operation
@@ -203,12 +244,61 @@ DROP FUNCTION memory_ingest_private.ingest_window_sha256(
 );
 DROP FUNCTION memory_ingest_private.assert_chat_deletion_catalog();
 DROP FUNCTION memory_ingest_private.timestamp_utc_text(timestamptz);
+DROP FUNCTION memory_ingest_private.deletion_confirmation_sha256(
+  uuid,text,uuid,uuid,integer
+);
 DROP FUNCTION memory_ingest_private.framed_utf8_field(text,text);
 DROP SCHEMA memory_ingest_private;
+
+-- Return the chat roots to the exact pre-migration authority only while the
+-- legacy Memory schema is still present.  The empty-only guard above prevents
+-- this rollback after any neutral assistant attestation has been written.
+DROP POLICY chat_log_owner_isolation ON public.chat_log;
+CREATE POLICY raw_owner_isolation ON public.chat_log
+  USING (owner_user_id = memory.current_actor_user_id())
+  WITH CHECK (owner_user_id = memory.current_actor_user_id());
+DROP POLICY threads_owner_isolation ON public.threads;
+CREATE POLICY raw_owner_isolation ON public.threads
+  USING (owner_user_id = memory.current_actor_user_id())
+  WITH CHECK (owner_user_id = memory.current_actor_user_id());
+DROP POLICY chat_attachments_owner_isolation ON public.chat_attachments;
+CREATE POLICY chat_attachments_owner_isolation ON public.chat_attachments
+  USING (owner_user_id = memory.current_actor_user_id())
+  WITH CHECK (owner_user_id = memory.current_actor_user_id());
+DO $restore_active_thread_policy$
+BEGIN
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY active_thread_selection_owner_isolation '
+      'ON public.active_thread_selection';
+    EXECUTE 'CREATE POLICY active_thread_owner_isolation '
+      'ON public.active_thread_selection '
+      'USING (owner_user_id = memory.current_actor_user_id()) '
+      'WITH CHECK (owner_user_id = memory.current_actor_user_id())';
+  END IF;
+END;
+$restore_active_thread_policy$;
+
+DROP TABLE chat_integrity.assistant_transcript_attestation_v1;
+DROP SCHEMA chat_integrity;
+
+CREATE TRIGGER chat_log_enqueue_memory_v1_consolidation
+AFTER INSERT ON public.chat_log
+FOR EACH ROW
+EXECUTE FUNCTION memory.enqueue_chat_log_consolidation();
+ALTER TABLE public.chat_log
+  DISABLE TRIGGER chat_log_enqueue_memory_v1_consolidation;
+
+-- Restore the exact direct privilege removed by the forward migration. The
+-- forward preflight sealed SELECT/INSERT/UPDATE/DELETE without grant options,
+-- and the empty-only guard prevents rollback after successor state exists.
+GRANT DELETE ON TABLE
+  public.chat_log, public.threads, public.chat_attachments
+TO brains_app;
 
 DO $postflight$
 BEGIN
   IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL
+     OR pg_catalog.to_regnamespace('chat_integrity') IS NOT NULL
      OR pg_catalog.to_regprocedure(
           'memory_ingest_private.assert_chat_deletion_catalog()'
         ) IS NOT NULL
@@ -230,6 +320,88 @@ BEGIN
       AND NOT tgisinternal
   ) THEN
     RAISE EXCEPTION 'conversation bridge rollback left private objects';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid, 'raw_owner_isolation'::text),
+      ('public.threads'::regclass::oid, 'raw_owner_isolation'::text),
+      ('public.chat_attachments'::regclass::oid,
+       'chat_attachments_owner_isolation'::text),
+      (pg_catalog.to_regclass('public.active_thread_selection')::oid,
+       'active_thread_owner_isolation'::text)
+    ) AS expected(relation_oid, policy_name)
+    WHERE expected.relation_oid IS NOT NULL
+      AND (
+        (
+          SELECT pg_catalog.count(*)
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+        ) <> 1
+        OR NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+            AND policy.polname = expected.policy_name
+            AND pg_catalog.strpos(
+              COALESCE(
+                pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), ''
+              ) || COALESCE(
+                pg_catalog.pg_get_expr(
+                  policy.polwithcheck, policy.polrelid
+                ), ''
+              ),
+              'memory.current_actor_user_id'
+            ) > 0
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'conversation bridge rollback did not restore chat policies';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid),
+      ('public.threads'::regclass::oid),
+      ('public.chat_attachments'::regclass::oid)
+    ) AS expected(relation_oid)
+    WHERE NOT pg_catalog.has_table_privilege(
+                'brains_app', expected.relation_oid, 'DELETE'
+              )
+       OR (
+         SELECT pg_catalog.array_agg(
+           acl.privilege_type || ':' || acl.is_grantable::text
+           ORDER BY acl.privilege_type
+         )
+         FROM pg_catalog.pg_class AS relation
+         CROSS JOIN LATERAL pg_catalog.aclexplode(
+           COALESCE(
+             relation.relacl,
+             pg_catalog.acldefault('r', relation.relowner)
+           )
+         ) AS acl
+         WHERE relation.oid = expected.relation_oid
+           AND acl.grantee = 'brains_app'::regrole::oid
+       ) IS DISTINCT FROM ARRAY[
+         'DELETE:false', 'INSERT:false', 'SELECT:false', 'UPDATE:false'
+       ]::text[]
+  ) THEN
+    RAISE EXCEPTION 'conversation bridge rollback did not restore exact chat grants';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_trigger AS trigger_row
+    WHERE trigger_row.tgrelid = 'public.chat_log'::regclass
+      AND trigger_row.tgname =
+          'chat_log_enqueue_memory_v1_consolidation'
+      AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled = 'D'
+      AND trigger_row.tgtype = 5
+      AND trigger_row.tgfoid = pg_catalog.to_regprocedure(
+        'memory.enqueue_chat_log_consolidation()'
+      )
+  ) THEN
+    RAISE EXCEPTION 'conversation bridge rollback did not restore enqueue trigger';
   END IF;
   IF EXISTS (
     SELECT 1

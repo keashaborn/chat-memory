@@ -29,10 +29,8 @@ from rag_engine.governed_memory.conversation_capture import (
     normalize_capture_text,
 )
 from rag_engine.governed_memory.eligibility import EligibilityPolicy
-from rag_engine.governed_memory import exclusive_cutover
 from rag_engine.governed_memory.exclusive_cutover import (
     EXCLUSIVE_MODE_ENV,
-    ExclusiveMemoryMode,
 )
 
 
@@ -339,7 +337,7 @@ class CaptureGateTests(unittest.TestCase):
         enqueue_at = route.index("await enqueue_captured_chat_log_message(")
         attachment_binding_at = route.index("UPDATE public.chat_attachments")
         commit_at = route.index("await transaction.commit()", enqueue_at)
-        identity_return_at = route.index('"note": "identity_card"')
+        identity_return_at = route.index("legacy_identity_memory_retired")
         decision_at = route.index("capture_decision_for_owner(")
         attachment_replay_at = route.index('"replayed": True')
         self.assertLess(identity_return_at, decision_at)
@@ -549,11 +547,6 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
                     CAPTURE_OWNER_ALLOWLIST_ENV: str(OWNER_A),
                 },
                 clear=False,
-            ),
-            patch.object(
-                exclusive_cutover,
-                "EXCLUSIVE_MEMORY_MODE",
-                ExclusiveMemoryMode.SUCCESSOR_PILOT,
             ),
         ):
             cls.backend_app = importlib.import_module("app")

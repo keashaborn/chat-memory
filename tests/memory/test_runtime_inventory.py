@@ -35,6 +35,7 @@ RELEASE_TOOLS = ROOT / "tools" / "governed_memory_release"
 INSTALL_TOOLS = ROOT / "tools" / "governed_memory_install"
 OPS = ROOT / "ops" / "governed_memory"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
+PHASE8F_DISPOSITION = OPS / "phase8f_component_disposition.json"
 RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
 HISTORICAL_PHASE6E_RUNTIME_BUILD_RECEIPT = (
     OPS / "history" / "phase6e" / "runtime_build_receipt.json"
@@ -52,7 +53,7 @@ EXPECTED_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
 )
 EXPECTED_DISPOSABLE_RUNNER_SHA256 = (
-    "2acd2fb134d834b04f9b41448a2cfead7712ce846dab38b001c1a8647eb9796b"
+    "60f7af04aec131b4b51beb43cea176a6fa5df94da71ee1b581f722a480db614c"
 )
 EXPECTED_PROOF_EXECUTION_RUNNER_SHA256 = (
     "bd591188d0afaf4d7a65753e54648241fc1aa5ff3289f194d76d6aa07dfe449f"
@@ -61,7 +62,7 @@ EXPECTED_PHASE7C_PROOF_SHA256 = (
     "d4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0"
 )
 EXPECTED_POSTGRES_BOOTSTRAP_SHA256 = (
-    "0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857"
+    "9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb"
 )
 EXPECTED_RUNTIME_LOCK_SHA256 = (
     "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365"
@@ -98,7 +99,6 @@ EXPECTED_PACKAGE_FILES = {
     "projection.py",
     "repository.py",
     "response_contracts.py",
-    "response_defaults.py",
     "response_postgres.py",
     "response_provenance.py",
     "response_provider.py",
@@ -152,6 +152,7 @@ EXPECTED_TEST_FILES = {
     "test_eligibility.py",
     "test_exclusive_cutover.py",
     "test_extraction.py",
+    "test_governed_memory_erasure_proxy_v1.py",
     "test_http_api.py",
     "test_http_auth.py",
     "test_http_live_auth_mapping.py",
@@ -175,7 +176,6 @@ EXPECTED_TEST_FILES = {
     "test_qdrant_adapter.py",
     "test_qdrant_transport.py",
     "test_release_contracts.py",
-    "test_response_defaults.py",
     "test_response_provenance.py",
     "test_response_provider.py",
     "test_response_runtime.py",
@@ -202,6 +202,7 @@ EXPECTED_ROUTES = [
     "DELETE /memory/claims/{claim_id}",
     "GET /memory/operations/{operation_id}",
     "POST /memory/conversations/erasure-requests",
+    "GET /memory/conversations/erasure-requests/{operation_id}",
 ]
 
 
@@ -235,8 +236,63 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
     def load_manifest(self) -> dict[str, object]:
         return json.loads(RUNTIME_MANIFEST.read_text(encoding="utf-8"))
 
-    def test_source_inventory_and_runtime_identity_are_exact(self) -> None:
-        self.assertEqual(_source_tree_sha256(ROOT), EXPECTED_SOURCE_TREE_SHA256)
+    def test_phase8f_active_path_and_legacy_quarantine_are_exact(self) -> None:
+        disposition = json.loads(PHASE8F_DISPOSITION.read_text(encoding="utf-8"))
+        self.assertEqual(
+            disposition["schema_version"],
+            "governed-memory-phase8f-component-disposition-v1",
+        )
+        active = disposition["current_active_path"]
+        self.assertFalse(active["legacy_memory_fallback_allowed"])
+        self.assertFalse(active["stored_assistant_preferences_allowed"])
+        self.assertFalse(active["legacy_memory_prompt_object_allowed"])
+        active_paths = {
+            active["application_root"],
+            active["response_router"],
+            active["neutral_chat_integrity"],
+            active["chat_erasure_proxy"],
+            *active["response_roots"],
+            *active["provider_request"],
+            *active["finalization_and_persistence"],
+        }
+        for relative in active_paths:
+            self.assertTrue((ROOT / relative).is_file(), relative)
+        retired = disposition["retired_in_phase8f"]
+        for relative in (*retired["deleted_code"], *retired["deleted_tests"]):
+            self.assertFalse((ROOT / relative).exists(), relative)
+        relocation = retired["historical_relocation"]
+        self.assertFalse((ROOT / relocation["from"]).exists())
+        self.assertTrue((ROOT / relocation["to"]).is_file())
+        self.assertEqual(
+            {item["component"] for item in disposition["quarantine"]},
+            {
+                "legacy_memory_v1_v5_runtime",
+                "legacy_preferences_identity_admin_and_vantage",
+                "legacy_tests_scripts_units_and_store_state",
+            },
+        )
+        self.assertIn(
+            "separate_exact_deletion_batch_explicitly_authorized",
+            disposition["future_physical_deletion_gates"],
+        )
+        safety = disposition["safety"]
+        for field in (
+            "production_state_changed",
+            "services_changed",
+            "secrets_read_or_changed",
+            "docker_or_images_used",
+            "postgresql_changed",
+            "qdrant_changed",
+            "structured_lifeswitch_data_in_deletion_scope",
+            "accounts_in_deletion_scope",
+        ):
+            self.assertFalse(safety[field], field)
+        self.assertTrue(safety["repository_only"])
+
+    def test_current_source_is_not_bound_to_historical_phase7c_runtime(self) -> None:
+        current_source_sha256 = _source_tree_sha256(ROOT)
+        self.assertRegex(current_source_sha256, r"^[0-9a-f]{64}$")
+        self.assertNotEqual(current_source_sha256, EXPECTED_SOURCE_TREE_SHA256)
         receipt = json.loads(RUNTIME_BUILD_RECEIPT.read_text(encoding="ascii"))
         self.assertEqual(
             hashlib.sha256(RUNTIME_BUILD_RECEIPT.read_bytes()).hexdigest(),
@@ -258,9 +314,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase8d_repository_only_phase8a_successor_installation_stack_"
-            "retired_"
-            "current_inactive_store_package_activation_blocked",
+            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
+            "revalidation_required_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
@@ -288,16 +343,17 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         validation = manifest["phase7c_application_validation"]
         self.assertEqual(
             validation["scope"],
-            "retained_phase7c_application_runtime_and_deletion_proof",
+            "historical_phase7c_application_runtime_and_deletion_proof",
         )
         self.assertEqual(
             validation["evidence_role"],
-            "application_evidence_not_current_store_installation_or_live_proof",
+            "historical_application_evidence_not_current_candidate_store_"
+            "installation_or_live_proof",
         )
         self.assertTrue(validation["phase7c_proof_complete"])
         self.assertFalse(validation["reusable_as_current_store_installation_proof"])
         self.assertFalse(validation["reusable_as_live_proof"])
-        self.assertFalse(validation["disposable_revalidation_required"])
+        self.assertTrue(validation["disposable_revalidation_required"])
         self.assertEqual(
             validation["runner_path"],
             "tools/governed_memory_validation/run_disposable_successor.sh",
@@ -315,19 +371,20 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             validation["current_runner_post_proof_change_scope"],
-            "metadata_only_expected_manifest_sha256_and_validation_state_rebind",
+            "phase8f_runtime_sql_http_transport_and_deletion_contract_changes",
         )
-        self.assertFalse(
+        self.assertTrue(
             validation["current_runner_proof_execution_semantics_changed"]
         )
         self.assertEqual(
-            validation["current_proof_receipt"],
+            validation["historical_proof_receipt"],
             "ops/governed_memory/phase7c_disposable_proof_receipt.json",
         )
         self.assertEqual(
-            validation["current_proof_receipt_sha256"],
+            validation["historical_proof_receipt_sha256"],
             EXPECTED_PHASE7C_PROOF_SHA256,
         )
+        self.assertFalse(validation["current_phase8f_disposable_proof_complete"])
         self.assertEqual(
             hashlib.sha256(PHASE7C_DISPOSABLE_PROOF.read_bytes()).hexdigest(),
             EXPECTED_PHASE7C_PROOF_SHA256,
@@ -368,18 +425,23 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["scope"], "current_inactive_stores_only_package")
         self.assertEqual(
             current["state"],
-            "static_verified_synthetic_harness_executed_separately_passed_not_"
-            "promoted_no_phase8d_installation_not_authorized",
+            "phase8f_static_package_rebound_and_verified_not_authorized",
         )
-        self.assertEqual(current["package_artifact_count"], 44)
+        self.assertEqual(current["package_artifact_count"], 43)
+        self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])
+        self.assertTrue(
+            current["historical_phase8b_static_package_verification_complete"]
+        )
         self.assertTrue(current["synthetic_proof_harness_packaged"])
-        self.assertTrue(current["synthetic_proof_executed_for_current_package"])
+        self.assertFalse(current["synthetic_proof_executed_for_current_package"])
+        self.assertTrue(current["historical_phase8b_synthetic_proof_executed"])
         self.assertFalse(current["synthetic_proof_executed_by_release_guard"])
         self.assertEqual(current["synthetic_proof_scenario_count"], 131)
         self.assertEqual(
             current["synthetic_proof_outcome"],
-            "synthetic_matrix_passed_repository_only_not_live_proof",
+            "historical_synthetic_matrix_passed_repository_only_not_current_"
+            "phase8f_package_proof",
         )
         self.assertEqual(
             current["synthetic_proof_receipt_sha256"],
@@ -432,18 +494,28 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
 
     def test_current_validation_runtime_is_exact(self) -> None:
         runtime = self.load_manifest()["validation_runtime"]
-        self.assertEqual(runtime["current_source_tree_sha256"], EXPECTED_SOURCE_TREE_SHA256)
-        self.assertEqual(runtime["current_candidate_python"], EXPECTED_CANDIDATE_PYTHON)
+        self.assertIsNone(runtime["current_source_tree_sha256"])
+        self.assertIsNone(runtime["current_candidate_python"])
+        self.assertIsNone(runtime["current_candidate_python_sha256"])
+        self.assertIsNone(runtime["current_project_wheel_sha256"])
+        self.assertIsNone(runtime["current_build_receipt"])
+        self.assertIsNone(runtime["current_build_receipt_sha256"])
+        self.assertFalse(runtime["current_build_receipt_present"])
         self.assertEqual(
-            runtime["current_build_receipt_sha256"],
+            runtime["historical_phase7c_build_receipt_sha256"],
             EXPECTED_RUNTIME_RECEIPT_SHA256,
+        )
+        self.assertFalse(
+            runtime[
+                "historical_phase7c_build_receipt_reusable_for_current_candidate"
+            ]
         )
         self.assertEqual(
             runtime["runtime_lock_sha256"], EXPECTED_RUNTIME_LOCK_SHA256
         )
         self.assertEqual(runtime["build_lock_sha256"], EXPECTED_BUILD_LOCK_SHA256)
-        self.assertTrue(runtime["current_source_bound"])
-        self.assertFalse(runtime["current_runtime_rebuild_pending"])
+        self.assertFalse(runtime["current_source_bound"])
+        self.assertTrue(runtime["current_runtime_rebuild_pending"])
 
     def test_chat_only_deletion_scope_is_exact(self) -> None:
         ingestion = self.load_manifest()["ingestion"]
@@ -465,6 +537,17 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "source_erasure_structured_lifeswitch_data_or_accounts_deleted"
             ]
         )
+        self.assertTrue(
+            ingestion["source_erasure_lifeswitch_usage_and_audit_records_retained"]
+        )
+        self.assertEqual(
+            ingestion["source_erasure_vantage_answer_trace_disposition"],
+            "undecided_activation_blocker",
+        )
+        self.assertEqual(
+            ingestion["source_erasure_telemetry_payload_disposition"],
+            "undecided_activation_blocker",
+        )
         self.assertFalse(ingestion["source_erasure_legacy_project_rows_deleted"])
         self.assertFalse(ingestion["source_erasure_unclassified_side_effects_allowed"])
 
@@ -472,6 +555,14 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         manifest = self.load_manifest()
         http = manifest["http_runtime"]
         self.assertEqual(http["default_mode"], "off")
+        self.assertEqual(http["transport"], "permissioned_unix_socket")
+        self.assertEqual(
+            http["unix_socket_path"], "/run/governed-memory/http.sock"
+        )
+        self.assertEqual(http["unix_socket_group"], "governed-memory-proxy")
+        self.assertFalse(http["unix_socket_group_provisioned"])
+        self.assertFalse(http["same_host_brains_proxy_group_member_provisioned"])
+        self.assertFalse(http["tcp_listener_allowed"])
         self.assertFalse(http["source_logging_policy_live_verified"])
         self.assertEqual(http["source_log_duration_observed"], "off")
         self.assertEqual(
@@ -569,30 +660,67 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             1,
         )
 
-    def test_schema_scope_records_current_disposable_validation(self) -> None:
+    def test_disposable_bootstrap_preserves_legacy_delete_baseline(self) -> None:
+        bootstrap = POSTGRES_BOOTSTRAP.read_text(encoding="utf-8")
+        self.assertEqual(
+            bootstrap.count(
+                "GRANT SELECT, INSERT, UPDATE, DELETE\n"
+                "  ON public.chat_log, public.threads, public.chat_attachments "
+                "TO brains_app;"
+            ),
+            1,
+            "the disposable fixture must preserve the exact legacy DELETE "
+            "baseline that migration 0002 revokes and empty-only rollback "
+            "restores",
+        )
+
+    def test_schema_scope_requires_current_phase8f_disposable_revalidation(self) -> None:
         schema = json.loads(SCHEMA_CONTRACT.read_text(encoding="utf-8"))
         self.assertEqual(
             schema["validation_scope"],
             {
-                "scope": "successor_disposable_only",
-                "environment": "disposable_only",
+                "scope": "phase8f_repository_candidate",
+                "environment": "repository_only",
+                "current_candidate_disposable_validated": False,
+                "historical_phase7c_disposable_proof_retained": True,
+                "disposable_revalidation_required": True,
                 "production_data_read": False,
                 "provider_external_calls": 0,
                 "production_state_changed": False,
             },
         )
         requirements = schema["hard_requirements"]
-        self.assertTrue(requirements["current_disposable_successor_validation_complete"])
-        self.assertNotIn("phase7b_disposable_revalidation_required", requirements)
-        self.assertTrue(schema["claim_detail"]["disposable_validated"])
-        self.assertTrue(schema["pilot_marker"]["disposable_validated"])
+        self.assertFalse(requirements["current_disposable_successor_validation_complete"])
+        self.assertFalse(schema["claim_detail"]["disposable_validated"])
+        self.assertTrue(
+            schema["claim_detail"]["historical_phase7c_disposable_validated"]
+        )
+        self.assertFalse(schema["pilot_marker"]["disposable_validated"])
+        self.assertTrue(
+            schema["pilot_marker"]["historical_phase7c_disposable_validated"]
+        )
+        self.assertEqual(schema["schemas"], ["memory", "memory_private"])
+        self.assertEqual(
+            schema["conversation_database"],
+            {
+                "database": "memory",
+                "schemas": ["memory_ingest_private", "chat_integrity"],
+                "authority": "separate_existing_conversation_database_only",
+            },
+        )
+        self.assertTrue(
+            all(
+                name.startswith("memory_private.")
+                for name in schema["internal_functions"]
+            )
+        )
         self.assertEqual(
             requirements["production_activation_blockers"],
             self.load_manifest()["activation"]["blockers"],
         )
         erasure_contract = schema["interface_contracts"]["chat_source_erasure"]
-        self.assertIn("Phase 7C disposable PostgreSQL and Qdrant deletion proof passed", erasure_contract)
-        self.assertIn("no production route, membership, service, or store", erasure_contract)
+        self.assertIn("Phase 7C evidence is historical", erasure_contract)
+        self.assertIn("current disposable revalidation is required", erasure_contract)
 
     def test_route_surface_is_exact_and_owner_free(self) -> None:
         observed = [
@@ -756,6 +884,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
     def test_docs_describe_current_inactive_boundary(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
+            "Phase 8F",
             "Phase 8D",
             "Phase 7C",
             "phase8b/package_manifest.json",
@@ -763,6 +892,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "performed no installation or activation",
             "did not re-establish current live absence",
             "not live proof",
+            "disposable revalidation is required",
         ):
             self.assertIn(required, normalized)
         self.assertNotIn("successor remains inactive, uninstalled", normalized)
@@ -771,10 +901,14 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256='"
-            "57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150'",
+            "5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'",
             runner,
         )
-        self.assertIn("[[ \"${fields[5]}\" == 'disposable_validated' ]]", runner)
+        self.assertIn(
+            "[[ \"${fields[5]}\" == "
+            "'phase8f_disposable_revalidation_required' ]]",
+            runner,
+        )
         self.assertNotIn(
             "phase7b_static_unit_validated_disposable_revalidation_required",
             runner,

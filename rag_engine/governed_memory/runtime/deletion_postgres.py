@@ -39,6 +39,7 @@ from ..deletion_contracts import (
     ConversationFinalizationReceipt,
     DeletionMutationOutcome,
     DeletionMutationReceipt,
+    DeletionAuthority,
     DeletionSelectorKind,
     SourceErasureReceipt,
     SuccessorErasureProgress,
@@ -182,6 +183,8 @@ FINALIZE_CONVERSATION_SOURCE_ERASURE_FIELDS = (
     "deleted_thread_count",
     "deleted_attachment_count",
     "deleted_bridge_row_count",
+    "message_tombstone_count",
+    "thread_tombstone_count",
     "completed_at",
 )
 
@@ -396,13 +399,12 @@ class PostgresConversationDeletionRepository:
     @asynccontextmanager
     async def _owner_transaction(
         self,
-        command: BoundConversationDeletion,
+        authority: DeletionAuthority,
     ) -> AsyncIterator[Any]:
         """Assume the requester role, then bind owner authority transactionally."""
 
-        if not isinstance(command, BoundConversationDeletion):
-            raise ContractViolation("invalid_deletion_command")
-        authority = command.authority
+        if not isinstance(authority, DeletionAuthority):
+            raise ContractViolation("invalid_deletion_authority")
         async with self._connection.transaction():
             await self._connection.execute(_SET_LOCAL_REQUESTER_ROLE_SQL)
             role_context = _row(
@@ -490,7 +492,7 @@ class PostgresConversationDeletionRepository:
         request = command.request
         dispatched = False
         try:
-            async with self._owner_transaction(command) as connection:
+            async with self._owner_transaction(command.authority) as connection:
                 dispatched = True
                 begin = _row(
                     await connection.fetchrow(
@@ -517,8 +519,11 @@ class PostgresConversationDeletionRepository:
                     )
                 status = await self._read_erasure_status(
                     connection,
-                    command,
+                    command.authority,
+                    command.operation_id,
                 )
+                if status is not None:
+                    status = require_request_status_binding(command, status)
                 if status is None or any(
                     (
                         status.state.value != begin["state"],
@@ -549,13 +554,17 @@ class PostgresConversationDeletionRepository:
 
     async def read_erasure_status(
         self,
-        command: BoundConversationDeletion,
+        authority: DeletionAuthority,
+        operation_id: UUID,
     ) -> ConversationErasureStatus | None:
-        if not isinstance(command, BoundConversationDeletion):
-            raise ContractViolation("invalid_deletion_command")
+        if not isinstance(authority, DeletionAuthority):
+            raise ContractViolation("invalid_deletion_authority")
+        require_uuid(operation_id, "invalid_deletion_operation")
         try:
-            async with self._owner_transaction(command) as connection:
-                return await self._read_erasure_status(connection, command)
+            async with self._owner_transaction(authority) as connection:
+                return await self._read_erasure_status(
+                    connection, authority, operation_id
+                )
         except ContractViolation:
             raise
         except Exception:
@@ -566,11 +575,12 @@ class PostgresConversationDeletionRepository:
     async def _read_erasure_status(
         self,
         connection: Any,
-        command: BoundConversationDeletion,
+        authority: DeletionAuthority,
+        operation_id: UUID,
     ) -> ConversationErasureStatus | None:
         value = await connection.fetchrow(
             _READ_SOURCE_ERASURE_SQL,
-            command.operation_id,
+            operation_id,
         )
         if value is None:
             return None
@@ -580,9 +590,11 @@ class PostgresConversationDeletionRepository:
                 READ_SOURCE_ERASURE_FIELDS,
                 "invalid_read_source_erasure_receipt",
             ),
-            owner_user_id=command.authority.owner_user_id,
+            owner_user_id=authority.owner_user_id,
         )
-        return require_request_status_binding(command, status)
+        if status.operation_id != operation_id:
+            raise ContractViolation("conversation_erasure_status_operation_mismatch")
+        return status
 
     async def lease_erasure(
         self,
@@ -780,6 +792,8 @@ class PostgresConversationDeletionRepository:
                 deleted_thread_count=row["deleted_thread_count"],
                 deleted_attachment_count=row["deleted_attachment_count"],
                 deleted_bridge_row_count=row["deleted_bridge_row_count"],
+                message_tombstone_count=row["message_tombstone_count"],
+                thread_tombstone_count=row["thread_tombstone_count"],
                 completed_at=row["completed_at"],
             )
         except ContractViolation:

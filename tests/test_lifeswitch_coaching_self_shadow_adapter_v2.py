@@ -660,12 +660,11 @@ class SelfShadowAdapterTests(unittest.TestCase):
         live_paths = (
             root / "rag_engine" / "resse_response_router.py",
             root / "rag_engine" / "response_composition_root_v0_2.py",
-            root / "rag_engine" / "response_composition_root_v0_3.py",
-            root / "rag_engine" / "response_lifeswitch_integration_v1.py",
+            root / "rag_engine" / "response_composition_root_v0_4.py",
+            root / "rag_engine" / "response_lifeswitch_integration_v2.py",
         )
         for path in live_paths:
-            if path.exists():
-                self.assertNotIn(needle, path.read_text(encoding="utf-8"), path.name)
+            self.assertNotIn(needle, path.read_text(encoding="utf-8"), path.name)
 
     def test_authorization_contract_rejects_nonself_identity(self):
         request = _request("What is my current plan?")

@@ -1,5 +1,12 @@
 # LifeSwitch Context Integration Candidate V1
 
+> Historical record only. This July 2026 candidate was never activated and
+> names response V2/V3 modules retired by the governed Memory Phase 8F
+> successor cutover. It is not a current runtime, installation, or test
+> instruction. LifeSwitch structured records remain outside chat-memory
+> erasure; a new chat-artifact integration must be designed and proven before
+> activation.
+
 Status: current-production isolated integration candidate. Memory/security
 review is green. All candidate gates pass; production activation remains
 separately approval-gated.

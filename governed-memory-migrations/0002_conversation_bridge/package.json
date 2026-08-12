@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "phase8f_repository_candidate_disposable_revalidation_required_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "memory",
@@ -22,12 +22,17 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355"
+    "sha256": "05c1f81051795b92a2e186d3f31aca043bf1d6d69312702ac1d335c27ea885c1"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "283c95879f36d1db727e15425432ec3963f8adc4861249af90817c1ab8da0158",
+    "sha256": "5ec7c3f008a3b035d26482090b50363b14931e57bbb9d0295fb8f65a760536b4",
     "empty_only": true
+  },
+  "hash_bindings": {
+    "recorded_forward_and_rollback_hashes_status": "current_phase8f_bytes_bound",
+    "current_hash_rebind_required": false,
+    "root_migration_manifest_rebind_required": false
   },
   "data_policy": {
     "stores_message_text": false,
@@ -39,6 +44,8 @@
   },
   "object_contract": {
     "schema": "memory_ingest_private",
+    "neutral_chat_integrity_schema": "chat_integrity",
+    "neutral_chat_integrity_table": "chat_integrity.assistant_transcript_attestation_v1",
     "table": "memory_ingest_private.memory_ingest_outbox",
     "tables": [
       "memory_ingest_private.memory_ingest_outbox",
@@ -82,6 +89,7 @@
       "public.chat_log",
       "public.chat_attachments",
       "public.threads",
+      "chat_integrity.assistant_transcript_attestation_v1",
       "memory_ingest_private.memory_ingest_outbox"
     ],
     "source_erasure_transient_target_tables": [
@@ -98,13 +106,14 @@
     "source_erasure_runtime_catalog_attestation": "exact_mutated_relation_schema_foreign_key_trigger_rule_and_inheritance_inventory",
     "source_erasure_allowed_auxiliary_effects": [
       "public.active_thread_selection",
-      "trusted_web.response_transcript_v1"
+      "trusted_web.response_transcript_v1",
+      "chat_integrity.assistant_transcript_attestation_v1"
     ],
     "source_erasure_auxiliary_effect_authority": "exact_named_validated_on_delete_cascade_composite_owner_thread_foreign_keys_only",
     "source_erasure_unknown_dependency_action": "fail_closed_before_delete_on_unknown_foreign_key_delete_trigger_delete_rule_or_inheritance",
     "source_erasure_unclassified_side_effects_allowed": false,
     "source_erasure_legacy_capture_trigger_required": false,
-    "source_erasure_legacy_capture_trigger_if_present": "exact_disabled_identity_only",
+    "source_erasure_legacy_capture_trigger_if_present": "forbidden_after_forward_exact_disabled_identity_restored_by_empty_only_rollback",
     "source_erasure_exact_materialized_targets_only": true,
     "source_erasure_receipts_content_free": true,
     "source_erasure_receipts_immutable": true,
@@ -114,8 +123,22 @@
       "attachments",
       "bridge_rows"
     ],
+    "source_erasure_auxiliary_deleted_object_counts_required": [
+      "active_thread_selections",
+      "trusted_web_response_transcripts",
+      "assistant_transcript_attestations",
+      "lifeswitch_answer_bindings",
+      "lifeswitch_provenance_receipts",
+      "lifeswitch_owner_contexts"
+    ],
+    "source_erasure_auxiliary_deleted_object_count_status": "not_implemented_or_current_disposable_validated",
     "accounts_deleted": false,
     "structured_lifeswitch_data_deleted": false,
+    "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure": "required_before_activation_not_yet_packaged_or_disposable_validated",
+    "lifeswitch_prior_provenance_view_migration": "required_before_activation_not_yet_packaged_or_disposable_validated",
+    "lifeswitch_usage_audit_records_retained": true,
+    "vantage_answer_trace_disposition": "undecided_activation_blocker",
+    "telemetry_payload_disposition": "undecided_activation_blocker",
     "legacy_project_rows_deleted": false
   },
   "activation": {
@@ -123,7 +146,18 @@
     "production_writer_membership_granted": false,
     "production_services_changed": false,
     "production_database_applied": false,
-    "disposable_writer_membership_validated": true,
-    "disposable_database_validated": true
+    "disposable_writer_membership_validated": false,
+    "disposable_database_validated": false,
+    "historical_phase7c_disposable_validation_retained": true,
+    "blockers": [
+      "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure_not_implemented_or_verified",
+      "lifeswitch_prior_provenance_view_not_migrated_to_chat_integrity",
+      "vantage_answer_trace_erasure_or_retention_disposition_not_decided_or_verified",
+      "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
+      "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
+      "successor_answer_binding_chat_transaction_recovery_not_implemented",
+      "phase8f_current_runtime_rebuild_not_completed",
+      "phase8f_current_candidate_disposable_revalidation_not_completed"
+    ]
   }
 }

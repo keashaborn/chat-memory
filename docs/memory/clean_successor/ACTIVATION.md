@@ -2,14 +2,19 @@
 
 ## Current decision
 
-Do not install or activate the successor. Phase 8D produces a cleaner inactive
+Do not install or activate the successor. Phase 8F produces a cleaner inactive
 repository candidate; it does not produce a functioning memory service.
 
 The package still lacks a complete claim-bound live installation composition,
 live rollback executor, live activation executor, promoted live proof, and
 several durability and resource-ownership guarantees. The authoritative exact
 blocker list is in
-`ops/governed_memory/installation/phase8b/contract.json`.
+`ops/governed_memory/runtime_manifest.json` and is synchronized with the
+bootstrap, pilot, and schema contracts.
+
+The current source is intentionally not bound to the historical Phase 7C build
+receipt. A new runtime build and authorized disposable revalidation are required
+before any installation decision.
 
 ## Before a dormant stores-only installation
 

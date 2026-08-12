@@ -17,6 +17,10 @@ DELETION_INTEGRATION = (
     ROOT / "tests/memory_integration/test_conversation_deletion_disposable.py"
 )
 CURRENT_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
+ROOT_STATUS = (
+    "phase8f_repository_candidate_disposable_revalidation_required_"
+    "not_production_applied"
+)
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -372,12 +376,12 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertFalse(package["rollback"]["data_mutation"])
 
         manifest = _load_json(MIGRATIONS / "manifest.json")
-        self.assertEqual(manifest["status"], CURRENT_STATUS)
+        self.assertEqual(manifest["status"], ROOT_STATUS)
         self.assertEqual(package["status"], CURRENT_STATUS)
-        self.assertTrue(
+        self.assertFalse(
             manifest["safety"]["disposable_database_execution_performed"]
         )
-        self.assertTrue(
+        self.assertFalse(
             manifest["authority"]["disposable_validation_authorized"]
         )
         entries = {item["path"]: item["sha256"] for item in manifest["files"]}
@@ -435,7 +439,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         schema = _load_json(MIGRATIONS / "schema_contract.json")
         package = _load_json(CLAIM_DETAIL / "package.json")
         self.assertEqual(package["status"], CURRENT_STATUS)
-        self.assertEqual(schema["status"], CURRENT_STATUS)
+        self.assertEqual(schema["status"], ROOT_STATUS)
         self.assertEqual(package["status"], CURRENT_STATUS)
         self.assertIn(
             "memory_private.read_claim(uuid)",
@@ -470,7 +474,8 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": True,
+                "disposable_validated": False,
+                "historical_phase7c_disposable_validated": True,
                 "production_applied": False,
             },
         )
@@ -483,7 +488,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         )
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256="
-            "'57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150'",
+            "'5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'",
             runner,
         )
         qdrant_digest = (
@@ -515,7 +520,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         )
         self.assertIn(
             "readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256="
-            "'0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857'",
+            "'9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb'",
             runner,
         )
         fixture_verifier = runner.split(

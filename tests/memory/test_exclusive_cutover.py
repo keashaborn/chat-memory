@@ -10,7 +10,6 @@ import textwrap
 import unittest
 
 from rag_engine.governed_memory.exclusive_cutover import (
-    EXCLUSIVE_MEMORY_MODE,
     EXCLUSIVE_MODE_ENV,
     ExclusiveMemoryConfigurationError,
     ExclusiveMemoryMode,
@@ -41,13 +40,22 @@ def _async_function_source(name: str) -> str:
 
 
 class ExclusiveCutoverContractTests(unittest.TestCase):
-    def test_process_mode_is_frozen_once_at_import(self) -> None:
-        self.assertIs(EXCLUSIVE_MEMORY_MODE, exclusive_memory_mode())
+    def test_contract_parser_is_import_safe_and_has_no_global_mode(self) -> None:
+        source = (
+            ROOT
+            / "rag_engine"
+            / "governed_memory"
+            / "exclusive_cutover.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("EXCLUSIVE_MEMORY_MODE =", source)
 
-    def test_default_is_exact_legacy_mode(self) -> None:
-        self.assertIs(exclusive_memory_mode({}), ExclusiveMemoryMode.LEGACY)
-        self.assertTrue(legacy_memory_surfaces_enabled({}))
-        self.assertFalse(successor_pilot_is_exclusive({}))
+    def test_missing_mode_fails_closed(self) -> None:
+        with self.assertRaises(ExclusiveMemoryConfigurationError):
+            exclusive_memory_mode({})
+        with self.assertRaises(ExclusiveMemoryConfigurationError):
+            legacy_memory_surfaces_enabled({})
+        with self.assertRaises(ExclusiveMemoryConfigurationError):
+            successor_pilot_is_exclusive({})
 
     def test_successor_pilot_retires_legacy_as_one_switch(self) -> None:
         values = {EXCLUSIVE_MODE_ENV: "successor_pilot"}
@@ -65,90 +73,94 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
             ):
                 exclusive_memory_mode({EXCLUSIVE_MODE_ENV: value})
 
-    def test_legacy_routers_are_registered_only_as_one_group(self) -> None:
+    def test_legacy_routers_and_imports_are_absent(self) -> None:
         source = APP.read_text(encoding="utf-8")
         self.assertIn("LEGACY_MEMORY_SURFACES_ENABLED =", source)
-        self.assertIn(
-            "if LEGACY_MEMORY_SURFACES_ENABLED:\n"
-            "    app.include_router(vantage_router, prefix=\"/vantage\")",
-            source,
-        )
-        self.assertIn(
-            "if LEGACY_MEMORY_SURFACES_ENABLED:\n"
-            "    app.include_router(\n"
-            "        memory_v1_governed_claim_lifecycle_router_v1,",
-            source,
-        )
-        self.assertIn(
-            "        assistant_response_preferences_router_v1,",
-            source,
-        )
+        for retired in (
+            "rag_engine.vantage_router",
+            "rag_engine.assistant_response_preferences_router_v1",
+            "rag_engine.memory_v1_governed_claim_lifecycle_router_v1",
+            "rag_engine.raw_memory_ownership",
+            "rag_engine.thread_deletion_v1",
+            "rag_engine.admin_memory_health_v1",
+            "rag_engine.admin_memory_workbench_v1",
+            "scripts.review_promotion_plan",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, source)
 
     def test_identity_compatibility_cannot_reach_embedding_in_successor_mode(self) -> None:
         source = _async_function_source("log_chat")
         retirement = source.index("legacy_identity_memory_retired")
         authentication = source.index("await require_memory_actor_v1")
-        identity = source.index(
-            'if source == "frontend/identity" and text.startswith("FULL_NAME:"):'
-        )
-        embedding = source.index("client.embeddings.create", identity)
+        identity = source.index('if source == "frontend/identity"')
         transcript = source.index("# Stable transcript row id.")
         self.assertLess(retirement, authentication)
-        self.assertLess(retirement, identity)
-        self.assertLess(retirement, embedding)
-        self.assertLess(embedding, transcript)
+        self.assertLess(identity, transcript)
+        self.assertNotIn("client.embeddings.create", source)
+        self.assertNotIn("memory_raw", source)
         self.assertIn("INSERT INTO chat_log(", source[transcript:])
         self.assertIn("UPDATE public.chat_attachments", source[transcript:])
 
-    def test_mutating_or_partial_legacy_operations_guard_before_store_access(self) -> None:
+    def test_retired_legacy_operations_contain_no_store_access(self) -> None:
         expectations = {
-            "admin_memory_health": (
-                "admin_memory_health",
-                "build_admin_memory_health_v1",
-            ),
-            "admin_memory_workbench": (
-                "admin_memory_workbench",
-                "list_admin_memory_workbench_v1",
-            ),
-            "admin_memory_workbench_feedback": (
-                "admin_memory_workbench_feedback",
-                "record_admin_memory_workbench_feedback_v2",
-            ),
-            "admin_memory_review_plan": (
-                "admin_memory_review_plan",
-                "build_personal_event_promotion_preview",
-            ),
-            "threads_delete": ("thread_delete", "asyncpg.connect"),
-            "cards_list": ("cards_list", "get_qdrant"),
-            "vantage_cards_list": ("vantage_cards_list", "asyncpg.connect"),
-            "cards_upsert": ("cards_upsert", "get_qdrant"),
-            "cards_delete": ("cards_delete", "get_qdrant"),
-            "delete_all_user_data": ("delete_all_user_data", "asyncpg.connect"),
-            "delete_recent_user_data": (
-                "delete_recent_user_data",
-                "asyncpg.connect",
-            ),
-            "export_user_data": ("export_user_data", "asyncpg.connect"),
+            "admin_memory_health": "admin_memory_health",
+            "admin_memory_workbench": "admin_memory_workbench",
+            "admin_memory_workbench_feedback": "admin_memory_workbench_feedback",
+            "admin_memory_review_plan": "admin_memory_review_plan",
+            "cards_list": "cards_list",
+            "vantage_cards_list": "vantage_cards_list",
+            "cards_upsert": "cards_upsert",
+            "cards_delete": "cards_delete",
+            "export_user_data": "export_user_data",
         }
-        for function_name, (operation, first_store_call) in expectations.items():
+        for function_name, operation in expectations.items():
             with self.subTest(function=function_name):
                 source = _async_function_source(function_name)
-                guard = source.index(
-                    f'_legacy_memory_retired("{operation}")'
-                )
-                store = source.index(first_store_call)
-                self.assertLess(guard, store)
+                self.assertIn(f'_legacy_memory_retired("{operation}")', source)
+                for forbidden in (
+                    "asyncpg.connect",
+                    "get_qdrant",
+                    "client.embeddings",
+                    "memory.",
+                ):
+                    self.assertNotIn(forbidden, source)
+
+    def test_legacy_chat_deletes_require_canonical_erasure_before_store(self) -> None:
+        expectations = {
+            "threads_truncate_from_message": (
+                "message_tail_delete",
+                "message_tail",
+            ),
+            "threads_delete": ("thread_delete", "thread"),
+            "delete_all_user_data": (
+                "delete_all_user_data",
+                "all_conversations",
+            ),
+            "delete_recent_user_data": (
+                "delete_recent_user_data",
+                "recent",
+            ),
+        }
+        for function_name, (operation, selector) in expectations.items():
+            with self.subTest(function=function_name):
+                source = _async_function_source(function_name)
+                guard = source.index("_conversation_erasure_required(")
+                self.assertIn(f'"{operation}"', source[guard:])
+                self.assertIn(f'"{selector}"', source[guard:])
+                for forbidden in (
+                    "parse_uuid",
+                    "_require_actor_for_user",
+                    "_require_actor_for_thread",
+                    "asyncpg.connect",
+                    "get_qdrant",
+                    "DELETE FROM",
+                ):
+                    self.assertNotIn(forbidden, source)
 
     def test_successor_log_does_not_refresh_legacy_owner_registry(self) -> None:
         source = _async_function_source("log_chat")
-        guarded_write = (
-            "if LEGACY_MEMORY_SURFACES_ENABLED:\n"
-            "            await conn.fetchval(\n"
-            "                \"\"\"\n"
-            "                SELECT memory.register_authenticated_owner_v1"
-        )
-        self.assertIn(guarded_write, source)
-        self.assertEqual(source.count("memory.register_authenticated_owner_v1"), 1)
+        self.assertNotIn("memory.register_authenticated_owner_v1", source)
 
     def test_health_separates_general_rag_from_declared_successor_identity(self) -> None:
         source = _async_function_source("health")
@@ -185,26 +197,39 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         "full Brains runtime dependencies are unavailable",
     )
     def test_successor_clean_process_never_imports_legacy_memory_graph(self) -> None:
-        blocked = (
+        blocked_exact = (
             "rag_engine.vantage_router",
-            "rag_engine.assistant_response_preferences_router_v1",
-            "rag_engine.memory_v1_governed_claim_lifecycle_router_v1",
             "rag_engine.raw_memory_ownership",
             "rag_engine.thread_deletion_v1",
-            "rag_engine.admin_memory_health_v1",
-            "rag_engine.admin_memory_workbench_v1",
+            "rag_engine.governed_memory_provider_v1",
+            "rag_engine.openai_chat_request_v3",
+            "rag_engine.response_lifeswitch_integration_v1",
+            "rag_engine.lifeswitch_prompt_integration_v1",
             "scripts.review_promotion_plan",
+        )
+        blocked_prefixes = (
+            "rag_engine.memory_v1",
+            "rag_engine.memory_prompt_",
+            "rag_engine.assistant_response_preference",
+            "rag_engine.admin_memory_",
         )
         script = textwrap.dedent(
             f"""
             import importlib.abc
             import sys
 
-            blocked = {blocked!r}
+            blocked_exact = {blocked_exact!r}
+            blocked_prefixes = {blocked_prefixes!r}
+
+            def legacy(fullname):
+                return (
+                    fullname in blocked_exact
+                    or any(fullname.startswith(prefix) for prefix in blocked_prefixes)
+                )
 
             class BlockLegacy(importlib.abc.MetaPathFinder):
                 def find_spec(self, fullname, path=None, target=None):
-                    if fullname in blocked:
+                    if legacy(fullname):
                         raise ImportError("blocked legacy memory import: " + fullname)
                     return None
 
@@ -212,7 +237,7 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
             import app
             assert app.EXCLUSIVE_MEMORY_MODE.value == "successor_pilot"
             assert app.LEGACY_MEMORY_SURFACES_ENABLED is False
-            assert not [name for name in blocked if name in sys.modules]
+            assert not [name for name in sys.modules if legacy(name)]
             """
         )
         environment = dict(os.environ)
@@ -283,12 +308,12 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
                 checks = (
                     app.admin_memory_health(request),
                     app.admin_memory_workbench(request),
-                    app.admin_memory_workbench_feedback(None, request),
+                    app.admin_memory_workbench_feedback(request),
                     app.admin_memory_review_plan(request),
                     app.threads_delete("not-a-uuid", request),
                     app.cards_list("not-a-uuid", request),
                     app.vantage_cards_list("not-a-uuid", request),
-                    app.cards_upsert("not-a-uuid", None, request),
+                    app.cards_upsert("not-a-uuid", request),
                     app.cards_delete("not-a-uuid", "card", request),
                     app.delete_all_user_data("not-a-uuid", request),
                     app.delete_recent_user_data("not-a-uuid", request),

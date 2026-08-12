@@ -7,15 +7,27 @@ import uuid
 from rag_engine.lifeswitch_answer_binding_v1 import (
     FinalAnswerLifeSwitchBindingV1,
 )
-from rag_engine.prompt_assembler_v1 import assemble_prompt
-from tests.test_lifeswitch_prompt_integration_v1 import ACTOR, augment
-from tests.test_prompt_assembler_v1 import assembly_request
+from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from rag_engine.lifeswitch_response_context_provider_v1 import (
+    LifeSwitchPreparedContextV1,
+)
+from rag_engine.response_lifeswitch_integration_v2 import (
+    TrustedLifeSwitchResponsePlanV2,
+)
+from tests.test_lifeswitch_answer_provenance_receipt_v1 import new_plan, off_prior
+from tests.test_response_orchestration_v0_2 import (
+    ACTOR,
+    FixedSafetyProvider,
+    messages,
+    orchestrator,
+    trusted_request,
+)
 
 
-class LifeSwitchAnswerBindingV1Tests(unittest.TestCase):
-    def test_selected_context_creates_separate_answer_binding(self) -> None:
+class LifeSwitchAnswerBindingV1Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_context_creates_separate_answer_binding(self) -> None:
         message = "Was I low on protein Monday?"
-        assembly = augment(assemble_prompt(assembly_request(message)), message)
+        assembly = (await new_plan(message)).assembled_prompt
 
         binding = FinalAnswerLifeSwitchBindingV1.create(
             assembly=assembly,
@@ -30,26 +42,34 @@ class LifeSwitchAnswerBindingV1Tests(unittest.TestCase):
         self.assertEqual(binding.record_refs[0].projection, "nutrition_day")
         self.assertNotIn("daily", binding.model_dump_json())
 
-    def test_no_context_creates_no_lifeswitch_binding(self) -> None:
-        base = assemble_prompt(assembly_request())
-        from rag_engine.lifeswitch_prompt_integration_v1 import (
-            LifeSwitchPromptAugmentationRequestV1,
-            assemble_prompt_with_lifeswitch_v1,
-        )
-        from tests.test_lifeswitch_prompt_integration_v1 import SNAPSHOT, THREAD
-
-        assembly = assemble_prompt_with_lifeswitch_v1(
-            LifeSwitchPromptAugmentationRequestV1.create(
-                trusted_thread_id=THREAD,
-                conversation_snapshot_sha256=SNAPSHOT,
-                base_assembly=base,
-                lifeswitch_envelope=None,
-                lifeswitch_rendered=None,
+    async def test_no_context_creates_no_lifeswitch_binding(self) -> None:
+        message = "Hello there."
+        base = await orchestrator(FixedSafetyProvider()).build_plan(
+            trusted_request(
+                authenticated_actor_user_id=ACTOR,
+                request_id="no-lifeswitch-binding",
+                conversation=messages(message),
             )
+        )
+        data_plan = create_lifeswitch_data_plan_v1(
+            message,
+            today=dt.date(2026, 7, 29),
+        )
+        self.assertFalse(data_plan.data_access)
+        context = LifeSwitchPreparedContextV1.create(
+            status="OFF",
+            timezone_source="not_requested",
+            database_accessed=False,
+            data_plan=data_plan,
+        )
+        plan = TrustedLifeSwitchResponsePlanV2.create(
+            base_response_plan=base,
+            lifeswitch_context=context,
+            prior_lifeswitch_context=off_prior(),
         )
 
         binding = FinalAnswerLifeSwitchBindingV1.create(
-            assembly=assembly,
+            assembly=plan.assembled_prompt,
             authenticated_actor_user_id=ACTOR,
             answer_id=uuid.uuid4(),
             created_at=dt.datetime.now(dt.timezone.utc),
@@ -57,9 +77,9 @@ class LifeSwitchAnswerBindingV1Tests(unittest.TestCase):
 
         self.assertIsNone(binding)
 
-    def test_cross_owner_binding_is_rejected(self) -> None:
+    async def test_cross_owner_binding_is_rejected(self) -> None:
         message = "Was I low on protein Monday?"
-        assembly = augment(assemble_prompt(assembly_request(message)), message)
+        assembly = (await new_plan(message)).assembled_prompt
 
         with self.assertRaisesRegex(ValueError, "actor differs"):
             FinalAnswerLifeSwitchBindingV1.create(

@@ -66,7 +66,6 @@ class AfterOpenAIInspectionV4(_StrictFrozenModel):
     validation: Literal["passed"] = "passed"
     answer_binding: Literal["bound"] = "bound"
     transcript_persistence: Literal["persisted", "skipped"]
-    memory_binding: Literal["bound", "none"]
     lifeswitch_binding: Literal["bound", "none"]
     lifeswitch_binding_contract_version: str | None = None
     lifeswitch_provenance_receipt: Literal["bound", "none"]
@@ -106,11 +105,15 @@ def build_response_inspection_v4(
     base = plan.base_response_plan
     trace = base.shadow_trace
     manifest = plan.assembled_prompt.manifest
-    base_source = base.assembled_prompt.source_request
-    memory_application = base_source.memory_application
-    memory_included = bool(
-        memory_application and memory_application.memory_content_included
+    memory_block = next(
+        (
+            block
+            for block in base.assembled_prompt.context_blocks
+            if block.block_id == "governed_memory_successor_v1"
+        ),
+        None,
     )
+    memory_included = memory_block is not None
     provenance = base.prior_web_provenance
     prepared = plan.lifeswitch_context
     envelope = prepared.envelope
@@ -166,14 +169,10 @@ def build_response_inspection_v4(
             fm_estimated_tokens=base.fm_selection.used_tokens,
             memory_included=memory_included,
             memory_record_count=(
-                len(memory_application.injected_record_refs)
-                if memory_application is not None
-                else 0
+                len(memory_block.fragments) if memory_block is not None else 0
             ),
             memory_estimated_tokens=(
-                memory_application.actual_prompt_tokens
-                if memory_application is not None
-                else 0
+                memory_block.estimated_tokens if memory_block is not None else 0
             ),
             prior_web_provenance_included=provenance is not None,
             prior_web_response_count=(
@@ -188,7 +187,6 @@ def build_response_inspection_v4(
             interaction=trace.interaction,
             question_policy=base.policy_decision.question_policy.value,
             interaction_reason_codes=trace.interaction_reason_codes,
-            personalization=base.assembled_prompt.manifest.personalization,
             lifeswitch_status=prepared.status,
             lifeswitch_intent=prepared.data_plan.intent,
             lifeswitch_reason_codes=prepared.data_plan.reason_codes,
@@ -227,7 +225,6 @@ def build_response_inspection_v4(
             answer_id=result.answer_id,
             output_kind=result.output_kind.value,
             transcript_persistence=transcript_persistence,
-            memory_binding="bound" if result.memory_binding is not None else "none",
             lifeswitch_binding="bound" if binding is not None else "none",
             lifeswitch_binding_contract_version=(
                 binding.contract_version if binding is not None else None

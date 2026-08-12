@@ -5,10 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
-from rag_engine.openai_chat_request_v3 import OpenAIChatCompletionsAdapterV2
-from rag_engine.response_lifeswitch_integration_v1 import (
-    TrustedLifeSwitchResponsePlanV1,
-)
+from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
 from rag_engine import usage_ledger_v1
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,
@@ -25,7 +22,7 @@ from tests.test_response_orchestration_v0_2 import (
     orchestrator,
     trusted_request,
 )
-from tests.test_response_lifeswitch_integration_v1 import selected_context
+from tests.test_lifeswitch_answer_provenance_receipt_v1 import new_plan
 
 
 ANSWER = UUID("90000000-0000-4000-8000-000000000088")
@@ -81,21 +78,11 @@ async def chat_response():
 
 async def chat_response_v3():
     message = "Was I low on protein Monday?"
-    base = await orchestrator(FixedSafetyProvider()).build_plan(
-        trusted_request(
-            authenticated_actor_user_id=ACTOR,
-            request_id="usage-ledger-request-v3",
-            conversation=messages(message),
-        )
-    )
-    plan = TrustedLifeSwitchResponsePlanV1.create(
-        base_response_plan=base,
-        lifeswitch_context=selected_context(base, message),
-    )
+    plan = await new_plan(message)
     raw = provider_response(prompt_tokens=120, completion_tokens=20)
     raw["usage"]["prompt_tokens_details"] = {"cached_tokens": 40}
     raw["usage"]["completion_tokens_details"] = {"reasoning_tokens": 12}
-    return OpenAIChatCompletionsAdapterV2(FakeClient(raw)).complete(plan)
+    return OpenAIChatCompletionsAdapterV3(FakeClient(raw)).complete(plan)
 
 
 class UsageLedgerV1Tests(unittest.IsolatedAsyncioTestCase):

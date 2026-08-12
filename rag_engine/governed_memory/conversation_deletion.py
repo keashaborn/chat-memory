@@ -9,6 +9,7 @@ HTTP body or coordinator caller.
 
 from enum import Enum
 from typing import Protocol
+from uuid import UUID
 
 from .contracts import ContractViolation, require_exact_int, require_sha256
 from .deletion_contracts import (
@@ -19,6 +20,7 @@ from .deletion_contracts import (
     ConversationErasureStatus,
     ConversationErasureTarget,
     ConversationFinalizationReceipt,
+    DeletionAuthority,
     DeletionMutationReceipt,
     SourceErasureReceipt,
     SuccessorErasureProgress,
@@ -94,7 +96,8 @@ class ConversationDeletionRepository(Protocol):
 
     async def read_erasure_status(
         self,
-        command: BoundConversationDeletion,
+        authority: DeletionAuthority,
+        operation_id: UUID,
     ) -> ConversationErasureStatus | None: ...
 
     async def lease_erasure(
@@ -293,7 +296,9 @@ def require_finalization_receipt_binding(
     if not isinstance(receipt, ConversationFinalizationReceipt) or (
         receipt.owner_user_id != lease.owner_user_id
         or receipt.operation_id != lease.operation_id
-        or receipt.deleted_message_count > lease.target_count
+        or receipt.deleted_message_count != lease.target_count
+        or receipt.message_tombstone_count != lease.target_count
+        or receipt.deleted_thread_count != receipt.thread_tombstone_count
         or receipt.deleted_bridge_row_count > lease.target_count
     ):
         raise ContractViolation("conversation_finalization_receipt_mismatch")

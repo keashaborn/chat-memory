@@ -6,12 +6,13 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_prompt_integration_v1 import AssembledPromptV2
+if TYPE_CHECKING:
+    from rag_engine.lifeswitch_prompt_integration_v2 import AssembledPromptV3
 
 
 LIFESWITCH_ANSWER_RECORD_REF_VERSION = "lifeswitch_answer_record_ref_v1"
@@ -136,7 +137,7 @@ class FinalAnswerLifeSwitchBindingV1(_StrictFrozenModel):
     def create(
         cls,
         *,
-        assembly: AssembledPromptV2,
+        assembly: AssembledPromptV3,
         authenticated_actor_user_id: UUID,
         answer_id: UUID,
         created_at: datetime,

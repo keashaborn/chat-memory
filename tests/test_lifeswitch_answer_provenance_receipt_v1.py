@@ -8,6 +8,13 @@ import uuid
 from pydantic import ValidationError
 
 from rag_engine.lifeswitch_answer_binding_v1 import FinalAnswerLifeSwitchBindingV1
+from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from rag_engine.lifeswitch_domain_context_v1 import (
+    LifeSwitchContextSectionV1,
+    TrustedLifeSwitchContextRequestV1,
+    create_lifeswitch_context_envelope_v1,
+    render_lifeswitch_context_v1,
+)
 from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
     LifeSwitchProvenanceSourceRefV1,
@@ -20,7 +27,6 @@ from rag_engine.prior_lifeswitch_provenance_v1 import (
     PriorLifeSwitchResponseV1,
 )
 from rag_engine.response_lifeswitch_integration_v2 import TrustedLifeSwitchResponsePlanV2
-from tests.test_response_lifeswitch_integration_v1 import selected_context
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     FixedSafetyProvider,
@@ -31,7 +37,49 @@ from tests.test_response_orchestration_v0_2 import (
 
 
 NOW = dt.datetime(2026, 7, 29, 12, tzinfo=dt.timezone.utc)
+TODAY = dt.date(2026, 7, 29)
 ANSWER = uuid.UUID("90000000-0000-4000-8000-000000000031")
+
+
+def selected_context(base_plan, message: str):
+    plan = create_lifeswitch_data_plan_v1(message, today=TODAY)
+    trusted = TrustedLifeSwitchContextRequestV1.create(
+        request_id=base_plan.policy_input.request_id,
+        authenticated_actor_user_id=ACTOR,
+        owner_user_id=ACTOR,
+        thread_id=base_plan.thread_id,
+        conversation_snapshot_sha256=base_plan.conversation_snapshot_sha256,
+        owner_timezone="America/Chicago",
+        query=message,
+        data_plan=plan,
+    )
+    section = LifeSwitchContextSectionV1.create(
+        projection="nutrition_day",
+        status="AVAILABLE",
+        window=plan.window,
+        record_count=1,
+        source_relations=("lifeswitch_nutrition.nutrition_day",),
+        payload={"daily": [{"date": "2026-07-27", "protein_g": 142.0}]},
+    )
+    envelope = create_lifeswitch_context_envelope_v1(
+        request=trusted,
+        plan_source="agentic_active",
+        as_of_local_date=TODAY,
+        sections=(section,),
+        generated_at=NOW,
+    )
+    from rag_engine.lifeswitch_response_context_provider_v1 import (
+        LifeSwitchPreparedContextV1,
+    )
+
+    return LifeSwitchPreparedContextV1.create(
+        status="SELECTED",
+        timezone_source="account_timezone",
+        database_accessed=True,
+        data_plan=plan,
+        envelope=envelope,
+        rendered=render_lifeswitch_context_v1(envelope),
+    )
 
 
 def sha(value: object) -> str:

@@ -147,8 +147,9 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'source runtime membership graph must be empty before migration';
   END IF;
-  IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL THEN
-    RAISE EXCEPTION 'conversation bridge schema already exists';
+  IF pg_catalog.to_regnamespace('memory_ingest_private') IS NOT NULL
+     OR pg_catalog.to_regnamespace('chat_integrity') IS NOT NULL THEN
+    RAISE EXCEPTION 'conversation bridge or chat integrity schema already exists';
   END IF;
 
   IF EXISTS (
@@ -787,6 +788,16 @@ BEGIN
       AND tgname = 'chat_log_guard_immutable'
       AND tgenabled = 'O' AND NOT tgisinternal
       AND tgfoid = 'public.guard_chat_log_immutable()'::regprocedure
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_trigger
+    WHERE tgrelid = 'public.chat_log'::regclass
+      AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
+      AND NOT tgisinternal
+      AND tgenabled = 'D'
+      AND tgtype = 5
+      AND tgfoid = pg_catalog.to_regprocedure(
+        'memory.enqueue_chat_log_consolidation()'
+      )
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_trigger
     WHERE tgrelid = 'public.chat_log'::regclass
@@ -813,6 +824,81 @@ BEGIN
     RAISE EXCEPTION 'chat_log trigger contract differs or legacy capture is enabled';
   END IF;
 
+  -- This migration replaces every chat-root policy that still calls the
+  -- legacy Memory schema.  Refuse an unknown or additional policy rather than
+  -- silently leaving a second authority path installed.
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid, 'raw_owner_isolation'::text),
+      ('public.threads'::regclass::oid, 'raw_owner_isolation'::text),
+      ('public.chat_attachments'::regclass::oid,
+       'chat_attachments_owner_isolation'::text),
+      (pg_catalog.to_regclass('public.active_thread_selection')::oid,
+       'active_thread_owner_isolation'::text)
+    ) AS expected(relation_oid, policy_name)
+    WHERE expected.relation_oid IS NOT NULL
+      AND (
+        (
+          SELECT pg_catalog.count(*)
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+        ) <> 1
+        OR NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+            AND policy.polname = expected.policy_name
+            AND policy.polcmd = '*'
+            AND policy.polpermissive
+            AND policy.polroles = ARRAY[0::oid]
+            AND pg_catalog.strpos(
+              COALESCE(
+                pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), ''
+              ) || COALESCE(
+                pg_catalog.pg_get_expr(
+                  policy.polwithcheck, policy.polrelid
+                ), ''
+              ),
+              'memory.current_actor_user_id'
+            ) > 0
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'legacy chat owner policy contract differs';
+  END IF;
+
+  -- Rollback may restore only the exact direct legacy grant removed below.
+  -- Refuse an unknown baseline rather than granting DELETE where it was not
+  -- present, or preserving broader table authority by accident.
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid),
+      ('public.threads'::regclass::oid),
+      ('public.chat_attachments'::regclass::oid)
+    ) AS expected(relation_oid)
+    WHERE (
+      SELECT pg_catalog.array_agg(
+        acl.privilege_type || ':' || acl.is_grantable::text
+        ORDER BY acl.privilege_type
+      )
+      FROM pg_catalog.pg_class AS relation
+      CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(
+          relation.relacl,
+          pg_catalog.acldefault('r', relation.relowner)
+        )
+      ) AS acl
+      WHERE relation.oid = expected.relation_oid
+        AND acl.grantee = 'brains_app'::regrole::oid
+    ) IS DISTINCT FROM ARRAY[
+      'DELETE:false', 'INSERT:false', 'SELECT:false', 'UPDATE:false'
+    ]::text[]
+  ) THEN
+    RAISE EXCEPTION 'brains_app legacy chat-root authority differs';
+  END IF;
+
   FOREACH forbidden_relation IN ARRAY ARRAY[
     'public.chat_log', 'public.threads', 'public.chat_attachments'
   ] LOOP
@@ -832,6 +918,160 @@ BEGIN
   END LOOP;
 END;
 $preflight$;
+
+-- All chat deletion now enters through the owner-bound erasure coordinator.
+-- Ordinary application SQL retains read/append/update authority but cannot
+-- bypass governed-memory coordination or its immutable receipt.
+REVOKE DELETE ON TABLE
+  public.chat_log, public.threads, public.chat_attachments
+FROM brains_app;
+
+-- Remove the final hard pg_depend edge from the active chat table to the
+-- retired Memory schema.  Rollback recreates this exact disabled trigger only
+-- while the legacy function still exists.
+DROP TRIGGER chat_log_enqueue_memory_v1_consolidation ON public.chat_log;
+
+-- Neutral chat provenance.  This table is deliberately outside both the
+-- legacy and successor Memory schemas.  It contains no claims or retrieval
+-- material and has no historical backfill path.
+CREATE SCHEMA chat_integrity AUTHORIZATION sage;
+REVOKE ALL ON SCHEMA chat_integrity FROM PUBLIC;
+GRANT USAGE ON SCHEMA chat_integrity TO brains_app;
+
+CREATE TABLE chat_integrity.assistant_transcript_attestation_v1 (
+  answer_id uuid PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  thread_id uuid NOT NULL,
+  chat_log_id uuid NOT NULL,
+  request_id_sha256 text NOT NULL,
+  conversation_snapshot_sha256 text NOT NULL,
+  trusted_plan_sha256 text NOT NULL,
+  provider_request_sha256 text NOT NULL,
+  provider_response_sha256 text NOT NULL,
+  provider_response_id text NOT NULL,
+  output_kind text NOT NULL,
+  assistant_text_sha256 text NOT NULL,
+  attestation_sha256 text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL,
+  CONSTRAINT assistant_transcript_attestation_answer_chat_ck CHECK (
+    answer_id = chat_log_id
+  ),
+  CONSTRAINT assistant_transcript_attestation_output_ck CHECK (
+    output_kind IN ('content', 'refusal')
+  ),
+  CONSTRAINT assistant_transcript_attestation_provider_id_ck CHECK (
+    pg_catalog.octet_length(provider_response_id) BETWEEN 1 AND 240
+  ),
+  CONSTRAINT assistant_transcript_attestation_hashes_ck CHECK (
+    request_id_sha256 ~ '^[0-9a-f]{64}$'
+    AND conversation_snapshot_sha256 ~ '^[0-9a-f]{64}$'
+    AND trusted_plan_sha256 ~ '^[0-9a-f]{64}$'
+    AND provider_request_sha256 ~ '^[0-9a-f]{64}$'
+    AND provider_response_sha256 ~ '^[0-9a-f]{64}$'
+    AND assistant_text_sha256 ~ '^[0-9a-f]{64}$'
+    AND attestation_sha256 ~ '^[0-9a-f]{64}$'
+  ),
+  CONSTRAINT assistant_transcript_attestation_chat_log_fk
+    FOREIGN KEY (chat_log_id, owner_user_id, thread_id)
+    REFERENCES public.chat_log(id, owner_user_id, thread_id)
+    ON DELETE CASCADE
+);
+CREATE INDEX assistant_transcript_attestation_chat_fk_idx
+  ON chat_integrity.assistant_transcript_attestation_v1(
+    chat_log_id, owner_user_id, thread_id
+  );
+ALTER TABLE chat_integrity.assistant_transcript_attestation_v1 OWNER TO sage;
+ALTER TABLE chat_integrity.assistant_transcript_attestation_v1
+  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_integrity.assistant_transcript_attestation_v1
+  FORCE ROW LEVEL SECURITY;
+CREATE POLICY assistant_transcript_attestation_owner_select
+  ON chat_integrity.assistant_transcript_attestation_v1
+  FOR SELECT TO brains_app, sage
+  USING (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  );
+CREATE POLICY assistant_transcript_attestation_owner_insert
+  ON chat_integrity.assistant_transcript_attestation_v1
+  FOR INSERT TO brains_app, sage
+  WITH CHECK (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  );
+REVOKE ALL ON chat_integrity.assistant_transcript_attestation_v1
+  FROM PUBLIC, brains_app, memory_ingest_writer, memory_erasure_requester,
+       governed_memory_worker, governed_memory_api;
+GRANT SELECT, INSERT ON chat_integrity.assistant_transcript_attestation_v1
+  TO brains_app;
+
+-- Remove the last required chat-table dependency on the legacy memory schema.
+-- These direct owner policies preserve the pre-cutover DML surface while
+-- refusing every request without an exact transaction-local actor UUID.
+DROP POLICY IF EXISTS raw_owner_isolation ON public.chat_log;
+DROP POLICY IF EXISTS chat_log_owner_isolation ON public.chat_log;
+CREATE POLICY chat_log_owner_isolation ON public.chat_log
+  FOR ALL TO brains_app, sage
+  USING (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  )
+  WITH CHECK (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  );
+DROP POLICY IF EXISTS raw_owner_isolation ON public.threads;
+DROP POLICY IF EXISTS threads_owner_isolation ON public.threads;
+CREATE POLICY threads_owner_isolation ON public.threads
+  FOR ALL TO brains_app, sage
+  USING (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  )
+  WITH CHECK (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  );
+DROP POLICY IF EXISTS chat_attachments_owner_isolation
+  ON public.chat_attachments;
+CREATE POLICY chat_attachments_owner_isolation ON public.chat_attachments
+  FOR ALL TO brains_app, sage
+  USING (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  )
+  WITH CHECK (
+    owner_user_id = (
+      SELECT NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid
+    )
+  );
+DO $active_thread_policy$
+BEGIN
+  IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE public.active_thread_selection '
+      'ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE public.active_thread_selection '
+      'FORCE ROW LEVEL SECURITY';
+    EXECUTE 'DROP POLICY IF EXISTS active_thread_owner_isolation '
+      'ON public.active_thread_selection';
+    EXECUTE 'DROP POLICY IF EXISTS active_thread_selection_owner_isolation '
+      'ON public.active_thread_selection';
+    EXECUTE 'CREATE POLICY active_thread_selection_owner_isolation '
+      'ON public.active_thread_selection FOR ALL TO brains_app, sage '
+      'USING (owner_user_id = (SELECT NULLIF('
+      'pg_catalog.current_setting(''app.user_id'', true), '''')::uuid)) '
+      'WITH CHECK (owner_user_id = (SELECT NULLIF('
+      'pg_catalog.current_setting(''app.user_id'', true), '''')::uuid))';
+  END IF;
+END;
+$active_thread_policy$;
 
 CREATE SCHEMA memory_ingest_private AUTHORIZATION sage;
 REVOKE ALL ON SCHEMA memory_ingest_private FROM PUBLIC;
@@ -862,6 +1102,53 @@ $function$;
 REVOKE ALL ON FUNCTION memory_ingest_private.framed_utf8_field(text,text)
   FROM PUBLIC;
 
+CREATE FUNCTION memory_ingest_private.deletion_confirmation_sha256(
+  p_operation_id uuid,
+  p_selector_kind text,
+  p_thread_id uuid,
+  p_anchor_message_id uuid,
+  p_recent_seconds integer
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY INVOKER
+SET search_path TO pg_catalog
+AS $function$
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    'governed_memory.conversation_deletion_confirmation.v1' || E'\n'
+      || memory_ingest_private.framed_utf8_field(
+           'operation_id', p_operation_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'selector_kind', p_selector_kind
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'thread_id', p_thread_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'anchor_message_id', p_anchor_message_id::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'recent_seconds', p_recent_seconds::text
+         )
+      || memory_ingest_private.framed_utf8_field(
+           'confirmation_phrase', CASE p_selector_kind
+             WHEN 'message_tail' THEN 'DELETE MESSAGE AND FOLLOWING'
+             WHEN 'thread' THEN 'DELETE CHAT'
+             WHEN 'recent' THEN 'FORGET RECENT CONVERSATIONS'
+             WHEN 'all_conversations' THEN 'DELETE CHAT DATA'
+             ELSE NULL::text
+           END
+         ),
+    'UTF8'
+  )), 'hex')
+$function$;
+REVOKE ALL ON FUNCTION
+  memory_ingest_private.deletion_confirmation_sha256(
+    uuid,text,uuid,uuid,integer
+  ) FROM PUBLIC;
+
 CREATE FUNCTION memory_ingest_private.timestamp_utc_text(p_value timestamptz)
 RETURNS text
 LANGUAGE sql
@@ -885,6 +1172,7 @@ SET search_path TO pg_catalog
 AS $function$
 DECLARE
   active_edge_count integer := 0;
+  attestation_message_edge_count integer := 0;
   attachment_message_edge_count integer := 0;
   attachment_thread_edge_count integer := 0;
   chat_thread_edge_count integer := 0;
@@ -909,6 +1197,7 @@ BEGIN
     'memory_ingest_private.source_erasure_message_tombstone'::regclass::oid,
     'memory_ingest_private.source_erasure_thread_tombstone'::regclass::oid,
     'memory_ingest_private.source_erasure_receipt'::regclass::oid,
+    'chat_integrity.assistant_transcript_attestation_v1'::regclass::oid,
     pg_catalog.to_regclass('public.active_thread_selection')::oid,
     pg_catalog.to_regclass('trusted_web.response_transcript_v1')::oid
   ];
@@ -921,8 +1210,52 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'chat deletion roots must be ordinary tables';
   END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid),
+      ('public.threads'::regclass::oid),
+      ('public.chat_attachments'::regclass::oid)
+    ) AS expected(relation_oid)
+    WHERE pg_catalog.has_table_privilege(
+            'brains_app', expected.relation_oid, 'DELETE'
+          )
+       OR (
+         SELECT pg_catalog.array_agg(
+           acl.privilege_type || ':' || acl.is_grantable::text
+           ORDER BY acl.privilege_type
+         )
+         FROM pg_catalog.pg_class AS relation
+         CROSS JOIN LATERAL pg_catalog.aclexplode(
+           COALESCE(
+             relation.relacl,
+             pg_catalog.acldefault('r', relation.relowner)
+           )
+         ) AS acl
+         WHERE relation.oid = expected.relation_oid
+           AND acl.grantee = 'brains_app'::regrole::oid
+       ) IS DISTINCT FROM ARRAY[
+         'INSERT:false', 'SELECT:false', 'UPDATE:false'
+       ]::text[]
+  ) THEN
+    RAISE EXCEPTION 'brains_app retains direct chat deletion authority';
+  END IF;
   FOR catalog_relation IN
     SELECT * FROM (VALUES
+      ('chat_integrity.assistant_transcript_attestation_v1'::regclass::oid,
+       ARRAY[
+         'answer_id', 'owner_user_id', 'thread_id', 'chat_log_id',
+         'request_id_sha256', 'conversation_snapshot_sha256',
+         'trusted_plan_sha256', 'provider_request_sha256',
+         'provider_response_sha256', 'provider_response_id', 'output_kind',
+         'assistant_text_sha256', 'attestation_sha256', 'created_at'
+       ]::text[], ARRAY[
+         'uuid'::regtype, 'uuid'::regtype, 'uuid'::regtype,
+         'uuid'::regtype, 'text'::regtype, 'text'::regtype,
+         'text'::regtype, 'text'::regtype, 'text'::regtype,
+         'text'::regtype, 'text'::regtype, 'text'::regtype,
+         'text'::regtype, 'timestamptz'::regtype
+       ]::oid[]),
       ('memory_ingest_private.source_erasure_target'::regclass::oid,
        ARRAY[
          'owner_user_id', 'operation_id', 'message_id', 'thread_id',
@@ -999,6 +1332,194 @@ BEGIN
         catalog_relation.relation_oid::regclass;
     END IF;
   END LOOP;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS relation
+    WHERE relation.oid =
+          'chat_integrity.assistant_transcript_attestation_v1'::regclass
+      AND relation.relkind = 'r'
+      AND relation.relowner = 'sage'::regrole
+      AND relation.relrowsecurity
+      AND relation.relforcerowsecurity
+  ) OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid =
+          'chat_integrity.assistant_transcript_attestation_v1'::regclass
+  ) <> 7 OR NOT pg_catalog.has_schema_privilege(
+    'brains_app', 'chat_integrity', 'USAGE'
+  ) OR pg_catalog.has_schema_privilege(
+    'public', 'chat_integrity', 'USAGE'
+  ) OR NOT pg_catalog.has_table_privilege(
+    'brains_app',
+    'chat_integrity.assistant_transcript_attestation_v1', 'SELECT'
+  ) OR NOT pg_catalog.has_table_privilege(
+    'brains_app',
+    'chat_integrity.assistant_transcript_attestation_v1', 'INSERT'
+  ) OR pg_catalog.has_table_privilege(
+    'brains_app',
+    'chat_integrity.assistant_transcript_attestation_v1', 'UPDATE'
+  ) OR pg_catalog.has_table_privilege(
+    'brains_app',
+    'chat_integrity.assistant_transcript_attestation_v1', 'DELETE'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index AS index_row
+    WHERE index_row.indexrelid = pg_catalog.to_regclass(
+            'chat_integrity.assistant_transcript_attestation_chat_fk_idx'
+          )
+      AND index_row.indrelid =
+          'chat_integrity.assistant_transcript_attestation_v1'::regclass
+      AND NOT index_row.indisunique
+      AND index_row.indisvalid
+      AND index_row.indisready
+      AND index_row.indnkeyatts = 3
+      AND index_row.indnatts = 3
+      AND index_row.indpred IS NULL
+      AND index_row.indexprs IS NULL
+      AND pg_catalog.pg_get_indexdef(index_row.indexrelid, 1, true) =
+          'chat_log_id'
+      AND pg_catalog.pg_get_indexdef(index_row.indexrelid, 2, true) =
+          'owner_user_id'
+      AND pg_catalog.pg_get_indexdef(index_row.indexrelid, 3, true) =
+          'thread_id'
+  ) OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_policy AS policy
+    WHERE policy.polrelid =
+          'chat_integrity.assistant_transcript_attestation_v1'::regclass
+  ) <> 2 OR (
+    SELECT pg_catalog.count(*)
+    FROM pg_catalog.pg_policy AS policy
+    WHERE policy.polrelid =
+          'chat_integrity.assistant_transcript_attestation_v1'::regclass
+      AND policy.polpermissive
+      AND pg_catalog.cardinality(policy.polroles) = 2
+      AND policy.polroles @> ARRAY[
+        'brains_app'::regrole::oid,
+        'sage'::regrole::oid
+      ]
+      AND (
+        (
+          policy.polname = 'assistant_transcript_attestation_owner_select'
+          AND policy.polcmd = 'r'
+          AND policy.polqual IS NOT NULL
+          AND policy.polwithcheck IS NULL
+        ) OR (
+          policy.polname = 'assistant_transcript_attestation_owner_insert'
+          AND policy.polcmd = 'a'
+          AND policy.polqual IS NULL
+          AND policy.polwithcheck IS NOT NULL
+        )
+      )
+      AND pg_catalog.strpos(
+        COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+        || COALESCE(
+             pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+           ),
+        'current_setting'
+      ) > 0
+      AND pg_catalog.strpos(
+        COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+        || COALESCE(
+             pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+           ),
+        'app.user_id'
+      ) > 0
+      AND pg_catalog.strpos(
+        COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+        || COALESCE(
+             pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+           ),
+        'owner_user_id'
+      ) > 0
+      AND pg_catalog.strpos(
+        COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+        || COALESCE(
+             pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+           ),
+        'memory.'
+      ) = 0
+  ) <> 2 THEN
+    RAISE EXCEPTION 'chat integrity relation or authority differs';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('public.chat_log'::regclass::oid, 'chat_log_owner_isolation'::text),
+      ('public.threads'::regclass::oid, 'threads_owner_isolation'::text),
+      ('public.chat_attachments'::regclass::oid,
+       'chat_attachments_owner_isolation'::text),
+      (pg_catalog.to_regclass('public.active_thread_selection')::oid,
+       'active_thread_selection_owner_isolation'::text)
+    ) AS expected(relation_oid, policy_name)
+    WHERE expected.relation_oid IS NOT NULL
+      AND (
+        (
+          SELECT pg_catalog.count(*)
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+        ) <> 1
+        OR NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_policy AS policy
+          WHERE policy.polrelid = expected.relation_oid
+            AND policy.polname = expected.policy_name
+            AND policy.polcmd = '*'
+            AND policy.polpermissive
+            AND pg_catalog.cardinality(policy.polroles) = 2
+            AND policy.polroles @> ARRAY[
+              'brains_app'::regrole::oid,
+              'sage'::regrole::oid
+            ]
+            AND policy.polqual IS NOT NULL
+            AND policy.polwithcheck IS NOT NULL
+            AND pg_catalog.strpos(
+              pg_catalog.pg_get_expr(policy.polqual, policy.polrelid),
+              'owner_user_id'
+            ) > 0
+            AND pg_catalog.strpos(
+              pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid),
+              'owner_user_id'
+            ) > 0
+            AND pg_catalog.strpos(
+              pg_catalog.pg_get_expr(policy.polqual, policy.polrelid),
+              'app.user_id'
+            ) > 0
+            AND pg_catalog.strpos(
+              pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid),
+              'app.user_id'
+            ) > 0
+        )
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policy AS policy
+    WHERE policy.polrelid IN (
+      'public.chat_log'::regclass,
+      'public.threads'::regclass,
+      'public.chat_attachments'::regclass,
+      pg_catalog.to_regclass('public.active_thread_selection')
+    )
+      AND (
+        pg_catalog.strpos(
+          COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+          || COALESCE(
+               pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+             ),
+          'memory.current_actor_user_id'
+        ) > 0
+        OR pg_catalog.strpos(
+          COALESCE(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '')
+          || COALESCE(
+               pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), ''
+             ),
+          'current_setting'
+        ) = 0
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat owner policy retains legacy Memory authority';
+  END IF;
   IF EXISTS (
     SELECT 1
     FROM (VALUES
@@ -1353,6 +1874,20 @@ BEGIN
        AND inbound_fk.confdeltype = 'c'
        AND inbound_fk.convalidated THEN
       active_edge_count := active_edge_count + 1;
+    ELSIF inbound_fk.child_schema = 'chat_integrity'
+       AND inbound_fk.child_table = 'assistant_transcript_attestation_v1'
+       AND inbound_fk.conname =
+           'assistant_transcript_attestation_chat_log_fk'
+       AND inbound_fk.parent_schema = 'public'
+       AND inbound_fk.parent_table = 'chat_log'
+       AND inbound_fk.child_columns =
+           ARRAY['chat_log_id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.parent_columns =
+           ARRAY['id', 'owner_user_id', 'thread_id']::text[]
+       AND inbound_fk.confdeltype = 'c'
+       AND inbound_fk.convalidated THEN
+      attestation_message_edge_count :=
+        attestation_message_edge_count + 1;
     ELSIF inbound_fk.child_schema = 'trusted_web'
        AND inbound_fk.child_table = 'response_transcript_v1'
        AND inbound_fk.conname =
@@ -1447,6 +1982,7 @@ BEGIN
   IF chat_thread_edge_count <> 1
      OR attachment_thread_edge_count <> 1
      OR attachment_message_edge_count <> 1
+     OR attestation_message_edge_count <> 1
      OR source_target_operation_edge_count <> 1
      OR thread_target_operation_edge_count <> 1
      OR message_tombstone_operation_edge_count <> 1
@@ -1539,13 +2075,6 @@ BEGIN
       AND trigger_row.tgname =
           'chat_log_enqueue_memory_v1_consolidation'
       AND NOT trigger_row.tgisinternal
-      AND (
-        trigger_row.tgenabled <> 'D'
-        OR trigger_row.tgtype <> 5
-        OR trigger_row.tgfoid IS DISTINCT FROM pg_catalog.to_regprocedure(
-             'memory.enqueue_chat_log_consolidation()'
-           )
-      )
   ) OR EXISTS (
     SELECT 1
     FROM pg_catalog.pg_trigger AS trigger_row
@@ -1558,8 +2087,6 @@ BEGIN
            'chat_log_guard_canonical_owner'::text),
           ('public.chat_log'::regclass::oid,
            'chat_log_guard_immutable'::text),
-          ('public.chat_log'::regclass::oid,
-           'chat_log_enqueue_memory_v1_consolidation'::text),
           ('public.chat_log'::regclass::oid,
            'chat_log_serialize_source_erasure'::text),
           ('public.threads'::regclass::oid,
@@ -2208,13 +2735,13 @@ CREATE TABLE memory_ingest_private.source_erasure_receipt (
   CONSTRAINT source_erasure_receipt_counts CHECK (
     target_count BETWEEN 0 AND 100000
     AND thread_target_count BETWEEN 0 AND 100000
-    AND deleted_message_count BETWEEN 0 AND target_count
+    AND deleted_message_count = target_count
     AND deleted_thread_count BETWEEN 0 AND 100000
     AND deleted_attachment_count BETWEEN 0 AND 1000000
     AND deleted_bridge_row_count BETWEEN 0 AND target_count
     AND message_tombstone_count = target_count
-    AND thread_tombstone_count BETWEEN deleted_thread_count
-      AND thread_target_count
+    AND thread_tombstone_count = deleted_thread_count
+    AND thread_tombstone_count <= thread_target_count
   )
 );
 
@@ -2975,6 +3502,8 @@ BEGIN
   LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+    IN ROW EXCLUSIVE MODE;
   IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
     EXECUTE
       'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
@@ -3068,7 +3597,12 @@ BEGIN
        pg_catalog.current_setting('app.auth_context_sha256', true), ''
      ) !~ '^[0-9a-f]{64}$'
      OR COALESCE(p_confirmation_sha256, '') !~ '^[0-9a-f]{64}$'
-     OR p_selector_kind NOT IN (
+     OR p_confirmation_sha256 IS DISTINCT FROM
+          memory_ingest_private.deletion_confirmation_sha256(
+            p_operation_id, p_selector_kind, p_thread_id,
+            p_anchor_message_id, p_recent_seconds
+          )
+     OR COALESCE(p_selector_kind, '') NOT IN (
        'thread', 'message_tail', 'recent', 'all_conversations'
      )
      OR (p_selector_kind = 'thread' AND (
@@ -3094,6 +3628,8 @@ BEGIN
   LOCK TABLE public.threads IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_log IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_attachments IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+    IN SHARE ROW EXCLUSIVE MODE;
   IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
     EXECUTE
       'LOCK TABLE public.active_thread_selection '
@@ -3859,6 +4395,8 @@ RETURNS TABLE(
   deleted_thread_count integer,
   deleted_attachment_count integer,
   deleted_bridge_row_count integer,
+  message_tombstone_count integer,
+  thread_tombstone_count integer,
   completed_at timestamptz
 )
 LANGUAGE plpgsql
@@ -3897,6 +4435,8 @@ BEGIN
   LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+    IN ROW EXCLUSIVE MODE;
   IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
     EXECUTE
       'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
@@ -3938,6 +4478,7 @@ BEGIN
     RETURN QUERY SELECT 'replayed'::text, stored.receipt_sha256,
       stored.deleted_message_count, stored.deleted_thread_count,
       stored.deleted_attachment_count, stored.deleted_bridge_row_count,
+      stored.message_tombstone_count, stored.thread_tombstone_count,
       stored.completed_at;
     RETURN;
   END IF;
@@ -4065,6 +4606,10 @@ BEGIN
     AND source.owner_user_id = target.owner_user_id
     AND source.id = target.message_id;
   GET DIAGNOSTICS removed_messages = ROW_COUNT;
+  IF removed_messages <> operation.target_count THEN
+    RAISE EXCEPTION 'conversation message deletion count drifted'
+      USING ERRCODE = '40001';
+  END IF;
 
   INSERT INTO memory_ingest_private.source_erasure_thread_tombstone(
     thread_id, owner_user_id, operation_id, erased_at
@@ -4103,7 +4648,7 @@ BEGIN
       WHERE remaining.thread_id = tombstone.thread_id
     );
   GET DIAGNOSTICS removed_threads = ROW_COUNT;
-  IF removed_threads > thread_tombstone_count THEN
+  IF removed_threads <> thread_tombstone_count THEN
     RAISE EXCEPTION 'conversation thread tombstone count drifted'
       USING ERRCODE = '40001';
   END IF;
@@ -4338,7 +4883,8 @@ BEGIN
     AND value.operation_id = operation.operation_id;
   RETURN QUERY SELECT 'conversation_deleted_pending_ack'::text, receipt_hash,
     removed_messages, removed_threads, removed_attachments,
-    removed_bridge_rows, finished_at;
+    removed_bridge_rows, message_tombstone_count, thread_tombstone_count,
+    finished_at;
 END;
 $function$;
 
@@ -4377,6 +4923,8 @@ BEGIN
   LOCK TABLE public.threads IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_log IN ROW EXCLUSIVE MODE;
   LOCK TABLE public.chat_attachments IN ROW EXCLUSIVE MODE;
+  LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+    IN ROW EXCLUSIVE MODE;
   IF pg_catalog.to_regclass('public.active_thread_selection') IS NOT NULL THEN
     EXECUTE
       'LOCK TABLE public.active_thread_selection IN ROW EXCLUSIVE MODE';
@@ -4519,7 +5067,7 @@ BEGIN
   IF observed_message_tombstone_count <> stored.message_tombstone_count
      OR observed_message_tombstone_count <> operation.target_count
      OR observed_thread_tombstone_count <> stored.thread_tombstone_count
-     OR observed_thread_tombstone_count < stored.deleted_thread_count
+     OR observed_thread_tombstone_count <> stored.deleted_thread_count
      OR observed_thread_tombstone_count > stored.thread_target_count
      OR observed_tombstone_manifest <> stored.tombstone_manifest_sha256 THEN
     RAISE EXCEPTION 'pending-ack suppression tombstone receipt drifted'
@@ -6140,12 +6688,13 @@ BEGIN
   WHERE routine.pronamespace =
         pg_catalog.to_regnamespace('memory_ingest_private')
     AND routine.prokind = 'f';
-  IF observed_count <> 29 THEN
+  IF observed_count <> 30 THEN
     RAISE EXCEPTION 'bridge function inventory differs';
   END IF;
 
   FOREACH function_signature IN ARRAY ARRAY[
     'memory_ingest_private.framed_utf8_field(text,text)',
+    'memory_ingest_private.deletion_confirmation_sha256(uuid,text,uuid,uuid,integer)',
     'memory_ingest_private.timestamp_utc_text(timestamptz)',
     'memory_ingest_private.assert_chat_deletion_catalog()',
     'memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)',
@@ -6178,6 +6727,7 @@ BEGIN
     function_oid := pg_catalog.to_regprocedure(function_signature);
     should_security_definer := function_signature NOT IN (
       'memory_ingest_private.framed_utf8_field(text,text)',
+      'memory_ingest_private.deletion_confirmation_sha256(uuid,text,uuid,uuid,integer)',
       'memory_ingest_private.timestamp_utc_text(timestamptz)',
       'memory_ingest_private.ingest_window_sha256(uuid,uuid,uuid,uuid,uuid,text)',
       'memory_ingest_private.source_binding_sha256(uuid,uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz)',
@@ -6326,15 +6876,8 @@ BEGIN
     WHERE tgrelid = 'public.chat_log'::regclass
       AND tgname = 'chat_log_enqueue_memory_v1_consolidation'
       AND NOT tgisinternal
-      AND (
-        tgenabled <> 'D'
-        OR tgtype <> 5
-        OR tgfoid IS DISTINCT FROM pg_catalog.to_regprocedure(
-             'memory.enqueue_chat_log_consolidation()'
-           )
-      )
   ) THEN
-    RAISE EXCEPTION 'legacy chat capture trigger changed during migration';
+    RAISE EXCEPTION 'legacy chat capture trigger remains after migration';
   END IF;
 END;
 $postflight$;

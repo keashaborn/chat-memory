@@ -45,6 +45,8 @@ from rag_engine.governed_memory.http_service import (
 from rag_engine.governed_memory.deletion_contracts import (
     CONVERSATIONAL_ERASURE_DOMAIN,
     DELETION_REQUEST_CONTRACT_VERSION,
+    DeletionSelectorKind,
+    conversation_deletion_confirmation_sha256,
     erasure_target_manifest_sha256,
 )
 from tests.memory.test_http_api import (
@@ -1130,7 +1132,10 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             jwks_fetcher=fetcher,
         )
         body = {
-            "confirmation_sha256": "c" * 64,
+            "confirmation_sha256": conversation_deletion_confirmation_sha256(
+                operation_id=OPERATION,
+                selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
+            ),
             "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
             "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
             "operation_id": str(OPERATION),
@@ -1216,7 +1221,10 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         body = {
-            "confirmation_sha256": "c" * 64,
+            "confirmation_sha256": conversation_deletion_confirmation_sha256(
+                operation_id=OPERATION,
+                selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
+            ),
             "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
             "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
             "operation_id": str(OPERATION),

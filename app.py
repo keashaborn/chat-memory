@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
 from qdrant_client import QdrantClient
 from rag_engine.qdrant_compat import make_qdrant_client
-from qdrant_client.http import models as qmodels
 from openai import OpenAI
 from pydantic import (
     BaseModel,
@@ -145,12 +144,17 @@ from rag_engine.governed_memory.conversation_capture import (
 )
 from rag_engine.governed_memory.exclusive_cutover import (
     EXCLUSIVE_MODE_ENV,
-    EXCLUSIVE_MEMORY_MODE,
     ExclusiveMemoryMode,
+    exclusive_memory_mode,
 )
 from rag_engine.governed_memory.successor_live_authority import (
     SuccessorLiveAuthorityConfigurationError,
     successor_live_authority_from_environment,
+)
+from rag_engine.governed_memory_erasure_proxy_v1 import (
+    ERASURE_COLLECTION_PATH,
+    create_governed_memory_erasure_proxy_router_v1,
+    governed_memory_proxy_service_token_is_valid,
 )
 from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,
@@ -195,9 +199,8 @@ from rag_engine.governed_memory.runtime.qdrant_adapter import (
 )
 
 
-LEGACY_MEMORY_SURFACES_ENABLED = (
-    EXCLUSIVE_MEMORY_MODE is ExclusiveMemoryMode.LEGACY
-)
+EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
+LEGACY_MEMORY_SURFACES_ENABLED = False
 GOVERNED_MEMORY_CAPTURE_ENVIRONMENT = MappingProxyType(
     {
         EXCLUSIVE_MODE_ENV: EXCLUSIVE_MEMORY_MODE.value,
@@ -286,33 +289,15 @@ def _conversation_bridge_identity(dsn: str) -> dict[str, object]:
         ),
     }
 
-if LEGACY_MEMORY_SURFACES_ENABLED:
-    from rag_engine.vantage_router import router as vantage_router
-    from rag_engine.assistant_response_preferences_router_v1 import (
-        router as assistant_response_preferences_router_v1,
-    )
-    from rag_engine.memory_v1_governed_claim_lifecycle_router_v1 import (
-        router as memory_v1_governed_claim_lifecycle_router_v1,
-    )
-    from rag_engine.raw_memory_ownership import (
-        RawMemoryOwnershipError,
-        assert_raw_payload_owner,
-        assert_raw_points_owner,
-        owned_raw_payload,
-    )
-    from rag_engine.thread_deletion_v1 import (
-        ThreadDeletionV1Error,
-        delete_thread_v1,
-    )
-    from rag_engine.admin_memory_health_v1 import build_admin_memory_health_v1
-    from rag_engine.admin_memory_workbench_v1 import (
-        MemoryWorkbenchError,
-        list_admin_memory_workbench_v1,
-        record_admin_memory_workbench_feedback_v2,
-    )
-    from scripts.review_promotion_plan import build_personal_event_promotion_preview
-
 SUCCESSOR_LIVE_AUTHORITY_FACTORY = successor_live_authority_from_environment
+GOVERNED_MEMORY_PROXY_SERVICE_TOKEN = os.environ.get(
+    "GOVERNED_MEMORY_SERVICE_TOKEN"
+)
+GOVERNED_MEMORY_ERASURE_PROXY_CONFIGURED = (
+    governed_memory_proxy_service_token_is_valid(
+        GOVERNED_MEMORY_PROXY_SERVICE_TOKEN
+    )
+)
 SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
     "pragma": "no-cache",
@@ -321,18 +306,12 @@ SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
 
 
 app = FastAPI(title="Brains API", version="1.0.0")
-if LEGACY_MEMORY_SURFACES_ENABLED:
-    app.include_router(vantage_router, prefix="/vantage")
 app.include_router(resse_response_router, prefix="/response")
-if LEGACY_MEMORY_SURFACES_ENABLED:
-    app.include_router(
-        memory_v1_governed_claim_lifecycle_router_v1,
-        prefix="/memory/governed/claims",
+app.include_router(
+    create_governed_memory_erasure_proxy_router_v1(
+        service_token=GOVERNED_MEMORY_PROXY_SERVICE_TOKEN,
     )
-    app.include_router(
-        assistant_response_preferences_router_v1,
-        prefix="/assistant-preferences",
-    )
+)
 app.include_router(lifeswitch_sage_router, prefix="/lifeswitch/sage")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
@@ -380,6 +359,23 @@ def _legacy_memory_retired(operation: str) -> JSONResponse:
             "operation": operation,
         },
         status_code=409,
+    )
+
+
+def _conversation_erasure_required(
+    operation: str,
+    selector_kind: str,
+) -> JSONResponse:
+    return JSONResponse(
+        {
+            "status": "conflict",
+            "detail": "conversation_erasure_coordinator_required",
+            "operation": operation,
+            "selector_kind": selector_kind,
+            "canonical_route": ERASURE_COLLECTION_PATH,
+        },
+        status_code=409,
+        headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
     )
 
 
@@ -479,6 +475,7 @@ SENSITIVE_NO_STORE_PREFIXES = (
     "/trusted-web/",
     "/threads/active",
     "/attachments",
+    "/memory/",
 )
 SENSITIVE_NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
@@ -1070,237 +1067,25 @@ async def admin_usage_user_detail(target_user_id: str, req: Request):
 # ---------- admin memory health ----------
 @app.get("/admin/memory/health")
 async def admin_memory_health(req: Request):
-    """
-    Owner-scoped governed-memory operational health.
-
-    The response contains aggregate counts and timestamps only. It never
-    exposes stored memory content, record identifiers, or owner identifiers.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("admin_memory_health")
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response()
-    if parse_uuid(actor) is None:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_actor_user_id"},
-            status_code=400,
-        )
-
-    try:
-        return await build_admin_memory_health_v1(
-            dsn=DSN,
-            actor_user_id=actor,
-            qdrant_url=QDRANT_URL,
-            collection_name=os.getenv(
-                "MEMORY_V1_COLLECTION",
-                "memory_claim_v1",
-            ),
-        )
-    except Exception:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "memory_health_unavailable",
-                "request_id": rid,
-            },
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-
-# ---------- owner memory workbench ----------
-class AdminMemoryWorkbenchFeedbackV1(BaseModel):
-    operation_id: uuid.UUID
-    packet_id: uuid.UUID
-    packet_storage_sha256: str
-    decision: Literal["correct", "not_correct"]
-    diagnostic_category: Optional[
-        Literal[
-            "context_missing",
-            "duplicate_or_repeat",
-            "missed_durable_information",
-            "incomplete_compound_extraction",
-            "incorrect_entity_or_relationship",
-            "incorrect_time_or_status",
-            "uncertainty_or_attribution_error",
-            "wrong_memory_lane",
-            "should_not_be_memory",
-            "transcription_ambiguity",
-            "other",
-        ]
-    ] = None
-    diagnostic_note: Optional[str] = None
-
-
-def _require_memory_workbench_actor(
-    req: Request,
-    required_capability: str,
-):
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response(), None
-    actor_uuid = parse_uuid(actor)
-    if actor_uuid is None:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_actor_user_id"},
-            status_code=400,
-        ), None
-    capability = (
-        req.headers.get("x-vs-authorized-capability") or ""
-    ).strip()
-    if not hmac.compare_digest(capability, required_capability):
-        return JSONResponse(
-            {"ok": False, "error": "capability_required"},
-            status_code=403,
-        ), None
-    return None, str(actor_uuid)
+    return _legacy_memory_retired("admin_memory_health")
 
 
 @app.get("/admin/memory/workbench")
 async def admin_memory_workbench(req: Request):
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("admin_memory_workbench")
-    denied, actor = _require_memory_workbench_actor(
-        req,
-        "memory_system.view",
-    )
-    if denied is not None:
-        return denied
-    params = req.query_params
-    state = (params.get("state") or "pending").strip()
-    try:
-        limit = int(params.get("limit") or 12)
-        raw_before = (params.get("before_created_at") or "").strip()
-        raw_packet = (params.get("before_packet_id") or "").strip()
-        before_created_at = (
-            datetime.fromisoformat(raw_before.replace("Z", "+00:00"))
-            if raw_before
-            else None
-        )
-        before_packet_id = uuid.UUID(raw_packet) if raw_packet else None
-        return await list_admin_memory_workbench_v1(
-            dsn=DSN,
-            actor_user_id=actor,
-            state=state,
-            limit=limit,
-            before_created_at=before_created_at,
-            before_packet_id=before_packet_id,
-        )
-    except (TypeError, ValueError, MemoryWorkbenchError):
-        return JSONResponse(
-            {"ok": False, "error": "invalid_memory_workbench_query"},
-            status_code=400,
-        )
-    except Exception:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "memory_workbench_unavailable",
-                "request_id": rid,
-            },
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
+    return _legacy_memory_retired("admin_memory_workbench")
 
 
 @app.post("/admin/memory/workbench/feedback")
 async def admin_memory_workbench_feedback(
-    payload: AdminMemoryWorkbenchFeedbackV1,
     req: Request,
 ):
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("admin_memory_workbench_feedback")
-    denied, actor = _require_memory_workbench_actor(
-        req,
-        "memory_system.manage",
-    )
-    if denied is not None:
-        return denied
-    try:
-        return await record_admin_memory_workbench_feedback_v2(
-            dsn=DSN,
-            actor_user_id=actor,
-            operation_id=payload.operation_id,
-            packet_id=payload.packet_id,
-            packet_storage_sha256=payload.packet_storage_sha256,
-            decision=payload.decision,
-            diagnostic_category=payload.diagnostic_category,
-            diagnostic_note=payload.diagnostic_note,
-        )
-    except MemoryWorkbenchError:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_memory_workbench_feedback"},
-            status_code=400,
-        )
-    except asyncpg.PostgresError as exc:
-        status = 409 if exc.sqlstate in {"22023", "23514"} else 500
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": (
-                    "memory_workbench_feedback_conflict"
-                    if status == 409
-                    else "memory_workbench_feedback_unavailable"
-                ),
-            },
-            status_code=status,
-        )
-    except Exception:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "memory_workbench_feedback_unavailable",
-                "request_id": rid,
-            },
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
+    return _legacy_memory_retired("admin_memory_workbench_feedback")
 
 
 # ---------- legacy admin memory review ----------
 @app.get("/admin/memory/review-plan")
 async def admin_memory_review_plan(req: Request):
-    """
-    Read-only memory promotion review plan.
-
-    Service-token middleware protects this route at the Brains boundary.
-    The frontend admin proxy is responsible for user/admin capability checks.
-    No writes are performed here.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("admin_memory_review_plan")
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response()
-
-    try:
-        # The planner reuses CLI/inventory code that may call asyncio.run().
-        # Execute it in a worker thread so it does not run inside FastAPI's
-        # already-running event loop.
-        plan = await asyncio.to_thread(build_personal_event_promotion_preview)
-    except Exception as e:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "review_plan_failed",
-                "detail": str(e),
-                "request_id": rid,
-            },
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-    plan = dict(plan or {})
-    plan["ok"] = True
-    plan["endpoint"] = "admin_memory_review_plan"
-    plan["read_only"] = True
-    plan["actor_user_id"] = actor
-    return plan
+    return _legacy_memory_retired("admin_memory_review_plan")
 
 
 # ---------- persistent chat memory ----------
@@ -1528,11 +1313,7 @@ async def log_chat(req: Request):
         )
     text = body.get("text") or body.get("input") or ""
     source = body.get("source") or "frontend"
-    if (
-        not LEGACY_MEMORY_SURFACES_ENABLED
-        and source == "frontend/identity"
-        and text.startswith("FULL_NAME:")
-    ):
+    if source == "frontend/identity" and text.startswith("FULL_NAME:"):
         return JSONResponse(
             {
                 "status": "retired",
@@ -1601,40 +1382,6 @@ async def log_chat(req: Request):
             if tt not in existing:
                 tags.append(tt)
                 existing.add(tt)
-
-    # Explicit compatibility-only identity-card path. This route does not
-    # create governed claim memory and returns before transcript capture.
-    if source == "frontend/identity" and text.startswith("FULL_NAME:"):
-        full_name = text.split("FULL_NAME:", 1)[1].strip()
-
-        if not full_name:
-            return {"status": "empty", "detail": "no full_name"}
-
-        created = datetime.utcnow().isoformat() + "Z"
-
-        card_payload = owned_raw_payload(user_id, {
-            "text": f"The user's preferred name is {full_name}.",
-            "user_id_alias": user_id_alias,
-            "source": "memory_card",
-            "tags": ["summary", "card", "user_identity"],
-            "kind": "user_identity",
-            "topic_key": "__singleton__", "base_importance": 0.9,
-            "created_at": created,
-            "updated_at": created,
-        })
-
-        try:
-            emb = client.embeddings.create(model=EMBED_MODEL, input=card_payload["text"])
-            vec = emb.data[0].embedding
-            rec_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}|user_identity|__singleton__"))
-            qpoint = qmodels.PointStruct(id=rec_id, vector=vec, payload=card_payload)
-            get_qdrant().upsert(collection_name="memory_raw", points=[qpoint])
-
-
-        except Exception as e:
-            print("identity upsert error:", e)
-
-        return {"status": "ok", "id": user_id, "note": "identity_card"}
 
     try:
         governed_memory_capture = capture_decision_for_owner(
@@ -1738,16 +1485,6 @@ async def log_chat(req: Request):
                 "SELECT set_config('app.auth_context_sha256',$1,true)",
                 capture_auth_context,
             )
-        if LEGACY_MEMORY_SURFACES_ENABLED:
-            await conn.fetchval(
-                """
-                SELECT memory.register_authenticated_owner_v1($1,$2,$3)
-                """,
-                uuid.UUID(user_id),
-                memory_actor_authority_v1(req),
-                request_id,
-            )
-
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.
         if thread_id:
@@ -2136,77 +1873,10 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
 
 @app.delete("/threads/{thread_id}/messages/{message_id}/truncate")
 async def threads_truncate_from_message(thread_id: str, message_id: str, req: Request):
-    tid = parse_uuid(thread_id)
-    mid = parse_uuid(message_id)
-    if not tid or not mid:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid thread_id or message_id"},
-            status_code=400,
-        )
-
-    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, _actor_uid)
-        async with conn.transaction():
-            target = await conn.fetchrow(
-                """
-                SELECT id, source, created_at
-                FROM chat_log
-                WHERE owner_user_id=$1 AND thread_id=$2 AND id=$3
-                """,
-                _actor_uid,
-                tid,
-                mid,
-            )
-            if not target:
-                return JSONResponse(
-                    {"status": "not_found", "detail": "message not found in thread"},
-                    status_code=404,
-                )
-
-            src = str(target["source"] or "")
-            if "user" not in src:
-                return JSONResponse(
-                    {"status": "bad_request", "detail": "only user messages can be edited"},
-                    status_code=400,
-                )
-
-            result = await conn.execute(
-                """
-                DELETE FROM chat_log
-                WHERE owner_user_id=$1
-                  AND thread_id=$2
-                  AND created_at >= $3
-                """,
-                _actor_uid,
-                tid,
-                target["created_at"],
-            )
-
-            await conn.execute(
-                "UPDATE threads SET updated_at=now() WHERE owner_user_id=$1 AND id=$2",
-                _actor_uid,
-                tid,
-            )
-
-        deleted = 0
-        try:
-            deleted = int(str(result).split()[-1])
-        except Exception:
-            deleted = 0
-
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "message_id": str(mid),
-            "deleted": deleted,
-        }
-    finally:
-        await conn.close()
+    return _conversation_erasure_required(
+        "message_tail_delete",
+        "message_tail",
+    )
 
 
 
@@ -2489,66 +2159,20 @@ async def threads_archive(thread_id: str, req: Request):
 
 @app.delete("/threads/{thread_id}")
 async def threads_delete(thread_id: str, req: Request):
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("thread_delete")
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_thread_id"},
-            status_code=400,
-        )
-
-    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-    conn = await asyncpg.connect(DSN)
-    try:
-        result = await delete_thread_v1(
-            conn,
-            get_qdrant(),
-            owner_user_id=_actor_uid,
-            thread_id=tid,
-        )
-    except ThreadDeletionV1Error as exc:
-        if exc.code == "thread_not_found":
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread_not_found"},
-                status_code=404,
-            )
-        status_code = 503 if exc.retryable else 409
-        return JSONResponse(
-            {
-                "status": "retry_required" if exc.retryable else "conflict",
-                "detail": exc.code,
-                "thread_id": str(tid),
-                "deleted": False,
-            },
-            status_code=status_code,
-        )
-    except Exception:
-        print(
-            "[threads_delete] deletion contract failed",
-            str(getattr(req.state, "request_id", "")),
-        )
-        return JSONResponse(
-            {
-                "status": "retry_required",
-                "detail": "thread_deletion_failed",
-                "thread_id": str(tid),
-                "deleted": False,
-            },
-            status_code=503,
-        )
-    finally:
-        await conn.close()
-
-    payload = result.as_dict()
-    payload["deleted"] = True
-    return payload
+    return _conversation_erasure_required("thread_delete", "thread")
 
 
 @app.get("/healthz")
 async def health():
+    if not GOVERNED_MEMORY_ERASURE_PROXY_CONFIGURED:
+        return JSONResponse(
+            {
+                "status": "unavailable",
+                "error": "governed_memory_erasure_proxy_unconfigured",
+            },
+            status_code=503,
+            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        )
     return {
         "status": "ok",
         "time": time.time(),
@@ -2606,91 +2230,10 @@ async def health():
         },
     }
 
-# ---------- cards (artifact console) ----------
-CARD_KINDS_DEFAULT = [
-    "user_identity",
-    "assistant_identity",
-    "user_instructions",
-    "style",
-    "style_mode",
-    "preference",
-    "persona_profile",
-    "preference_profile",
-]
+# ---------- retired legacy Memory compatibility routes ----------
 @app.get("/cards/{user_id}")
 async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
-    """
-    Lists compatibility-only card artifacts in Qdrant memory_raw for a user.
-    These records are not governed claim memory and are excluded from the
-    governed response prompt path.
-    kinds: comma-separated list. Defaults to CARD_KINDS_DEFAULT.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_list")
-    actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
-    if actor_err:
-        return actor_err
-    vid = (vantage_id or "default").strip() or "default"
-
-    klist = [k.strip() for k in (kinds.split(",") if kinds else CARD_KINDS_DEFAULT) if k.strip()]
-
-    qdrant = get_qdrant()
-
-    limit_n = int(limit)
-    scan_limit = max(limit_n * 8, 256)
-
-    flt = qmodels.Filter(
-        must=[
-            qmodels.FieldCondition(key="owner_user_id", match=qmodels.MatchValue(value=uid)),
-            qmodels.FieldCondition(key="kind", match=qmodels.MatchAny(any=klist)),
-        ]
-    )
-
-    points, _next = qdrant.scroll(
-        collection_name="memory_raw",
-        scroll_filter=flt,
-        limit=int(scan_limit),
-        with_payload=True,
-        with_vectors=False,
-    )
-    assert_raw_points_owner(points or [], uid)
-
-    items = []
-    for p in (points or []):
-        payload = p.payload or {}
-        # payload_vantage_id_filter: enforce namespace
-        pv = payload.get("vantage_id", None)
-        if not ((pv == vid) or (pv in (None, "") and vid == "default")):
-            continue
-        items.append({
-            "id": str(p.id),
-            "kind": payload.get("kind"),
-            "source": payload.get("source"),
-            "tags": payload.get("tags") or [],
-            "created_at": payload.get("created_at"),
-            "updated_at": payload.get("updated_at"),
-            "text": payload.get("text") or "",
-            "payload": payload,  # full payload for viewing weights/request_patterns/etc
-        })
-
-    # newest first if timestamps exist
-    def _ts(x):
-        return x.get("updated_at") or x.get("created_at") or ""
-
-    items.sort(key=_ts, reverse=True)
-    if limit_n > 0 and len(items) > limit_n:
-        items = items[:limit_n]
-    return {"status": "ok", "user_id": uid, "count": len(items), "items": items}
-
-class CardUpsertReq(BaseModel):
-    kind: str
-    topic_key: str | None = "__singleton__"
-    text: str | None = ""
-    tags: List[str] | None = None
-    base_importance: float | None = None
-    payload: Dict[str, Any] | None = None
-    if_match_updated_at: str | None = None
-
+    return _legacy_memory_retired("cards_list")
 
 @app.get("/vantage-cards/{user_id}")
 async def vantage_cards_list(
@@ -2700,523 +2243,37 @@ async def vantage_cards_list(
     kinds: Optional[str] = None,
     limit: int = 100,
 ):
-    """
-    List Postgres Vantage cards from vantage_card.card_head.
-
-    This is the newer Vantage-scoped card system, distinct from legacy Qdrant
-    memory cards served by /cards/{user_id}.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("vantage_cards_list")
-    vid = (vantage_id or "default").strip() or "default"
-    actor_err, uid = await _require_actor_for_user(req, user_id, vid)
-    if actor_err:
-        return actor_err
-
-    klist = [k.strip() for k in (kinds.split(",") if kinds else []) if k.strip()]
-    limit_n = max(1, min(int(limit or 100), 500))
-
-    conn = await asyncpg.connect(DSN)
-    try:
-        where = """
-          WHERE vantage_id=$1
-            AND (
-              topic_key LIKE $2
-              OR payload->>'user_id' = $3
-            )
-        """
-        args = [vid, f"user/{uid}/%", uid]
-
-        if klist:
-            where += " AND kind = ANY($4::text[])"
-            args.append(klist)
-
-        sql = f"""
-          SELECT
-            card_id,
-            vantage_id,
-            kind,
-            topic_key,
-            status::text as status,
-            summary,
-            payload,
-            strength,
-            confidence,
-            created_at,
-            updated_at
-          FROM vantage_card.card_head
-          {where}
-          ORDER BY updated_at DESC NULLS LAST, card_id DESC
-          LIMIT {limit_n}
-        """
-
-        rows = await conn.fetch(sql, *args)
-
-        items = []
-        for r in rows:
-            d = dict(r)
-            d["id"] = str(d.get("card_id"))
-            d["source"] = "vantage_card"
-            if isinstance(d.get("payload"), str):
-                try:
-                    d["payload"] = json.loads(d["payload"])
-                except Exception:
-                    pass
-            d["text"] = d.get("summary") or ""
-            payload = d.get("payload") if isinstance(d.get("payload"), dict) else {}
-            d["use_scope"] = payload.get("use_scope")
-            d["surface_policy"] = payload.get("surface_policy")
-            d["sensitivity"] = payload.get("sensitivity")
-            d["domains"] = payload.get("domains") or []
-            d["suppressed_reason"] = payload.get("suppressed_reason")
-            d["source_vantage_counts"] = payload.get("source_vantage_counts") or {}
-            d["value_counts"] = payload.get("value_counts") or {}
-            items.append(d)
-
-        return {
-            "status": "ok",
-            "source": "vantage_card",
-            "user_id": uid,
-            "vantage_id": vid,
-            "count": len(items),
-            "items": items,
-        }
-    finally:
-        await conn.close()
+    return _legacy_memory_retired("vantage_cards_list")
 
 
 @app.post("/cards/{user_id}")
-async def cards_upsert(user_id: str, req: CardUpsertReq, request: Request, vantage_id: str = "default"):
-    """
-    Idempotent compatibility-card upsert into Qdrant memory_raw.
-    This route does not create governed claim memory.
-
-    Deterministic identity:
-      card_id = uuid5(NAMESPACE_DNS, f"{user_id}|{kind}|{topic_key}")
-
-    topic_key defaults to "__singleton__" for true singletons.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_upsert")
-    actor_err, uid = await _require_actor_for_user(request, user_id, vantage_id)
-    if actor_err:
-        return actor_err
-    kind = (req.kind or "").strip()
-    if not kind:
-        return JSONResponse({"status": "bad_request", "detail": "missing kind"}, status_code=400)
-
-    topic_key = (req.topic_key or "__singleton__").strip() or "__singleton__"
-    vid = (vantage_id or "default").strip() or "default"
-    card_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{uid}|{vid}|{kind}|{topic_key}"))
-
-    qdrant = get_qdrant()
-
-    # Retrieve existing (created_at preservation + optimistic concurrency)
-    existing = qdrant.retrieve(
-        collection_name="memory_raw",
-        ids=[card_id],
-        with_payload=True,
-        with_vectors=False,
-    )
-    old = (existing[0].payload or {}) if existing else {}
-    if old:
-        assert_raw_payload_owner(old, uid)
-    old_updated_at = (old.get("updated_at") or "")
-    if req.if_match_updated_at and old_updated_at and req.if_match_updated_at != old_updated_at:
-        return JSONResponse(
-            {
-                "status": "conflict",
-                "detail": "updated_at_mismatch",
-                "card_id": card_id,
-                "current_updated_at": old_updated_at,
-            },
-            status_code=409,
-        )
-
-    now = datetime.utcnow().isoformat() + "Z"
-    created = old.get("created_at") or now
-
-    payload = owned_raw_payload(uid, {
-        "vantage_id": vid,
-        "kind": kind,
-        "topic_key": topic_key,
-        "source": "memory_card",
-        "tags": (req.tags if req.tags is not None else (old.get("tags") or ["card", kind])),
-        "base_importance": float(req.base_importance) if req.base_importance is not None else float(old.get("base_importance") or 0.7),
-        "created_at": created,
-        "updated_at": now,
-        "text": (req.text if req.text is not None else (old.get("text") or "")),
-    })
-
-    # Merge extra fields (non-destructive to identity fields)
-    extra = req.payload or {}
-    for k, v in extra.items():
-        if k in ("owner_user_id", "user_id", "kind", "topic_key", "source", "created_at"):
-            continue
-        payload[k] = v
-
-    # Embed
-    if not client:
-        return {"status": "error", "detail": "OPENAI_API_KEY missing"}
-    embed_text = payload.get("text") or f"{kind} card for {uid}"
-    emb = client.embeddings.create(model=EMBED_MODEL, input=embed_text)
-    vec = emb.data[0].embedding
-
-    point = qmodels.PointStruct(id=card_id, vector=vec, payload=payload)
-    qdrant.upsert(collection_name="memory_raw", points=[point])
-
-    return {
-        "status": "ok",
-        "user_id": uid,
-        "vantage_id": vid,
-        "card_id": card_id,
-        "kind": kind,
-        "topic_key": topic_key,
-        "created_at": created,
-        "updated_at": now,
-    }
+async def cards_upsert(user_id: str, request: Request, vantage_id: str = "default"):
+    return _legacy_memory_retired("cards_upsert")
 
 @app.delete("/cards/{user_id}/{card_id}")
 async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str = "default"):
-    """
-    Deletes a compatibility-card point from Qdrant memory_raw.
-    This route is not a governed claim lifecycle operation.
-    Safety: only delete if payload.user_id matches.
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("cards_delete")
-    actor_err, uid = await _require_actor_for_user(req, user_id, vantage_id)
-    if actor_err:
-        return actor_err
-    qdrant = get_qdrant()
-
-    # verify ownership
-    res = qdrant.retrieve(
-        collection_name="memory_raw",
-        ids=[card_id],
-        with_payload=True,
-        with_vectors=False,
-    )
-    if not res:
-        return {"status": "ok", "note": "not_found"}
-
-    payload = res[0].payload or {}
-    try:
-        assert_raw_payload_owner(payload, uid)
-    except RawMemoryOwnershipError:
-        return JSONResponse({"status":"forbidden","detail":"owner_mismatch"}, status_code=403)
-
-
-    # Lock singleton cards (system-managed). Edit/update via POST; rebuild via daemon endpoints.
-    topic_key = (payload.get("topic_key") or "").strip()
-    if topic_key == "__singleton__":
-        return JSONResponse(
-            {
-                "status": "forbidden",
-                "detail": "singleton_locked",
-                "card_id": card_id,
-                "kind": payload.get("kind"),
-                "topic_key": topic_key,
-            },
-            status_code=403,
-        )
-    qdrant.delete(
-        collection_name="memory_raw",
-        points_selector=qmodels.PointIdsList(points=[card_id]),
-    )
-
-    return {"status": "ok", "deleted": card_id}
-
-async def _has_governed_memory(conn: asyncpg.Connection, owner_user_id: str) -> bool:
-    async with conn.transaction(readonly=True):
-        await conn.execute(
-            "SELECT set_config('app.user_id', $1, true)",
-            owner_user_id,
-        )
-        return bool(
-            await conn.fetchval(
-                """
-                SELECT
-                  EXISTS(SELECT 1 FROM memory.evidence WHERE owner_user_id=$1)
-                  OR EXISTS(SELECT 1 FROM memory.claim WHERE owner_user_id=$1)
-                  OR EXISTS(SELECT 1 FROM memory.preference WHERE owner_user_id=$1)
-                  OR EXISTS(SELECT 1 FROM memory.project_space WHERE owner_user_id=$1)
-                  OR EXISTS(SELECT 1 FROM memory.consolidation_job WHERE owner_user_id=$1)
-                """,
-                owner_user_id,
-            )
-        )
-
+    return _legacy_memory_retired("cards_delete")
 
 # ---------- security/privacy: delete all user data ----------
 @app.delete("/user/{user_id}/data")
 async def delete_all_user_data(user_id: str, req: Request):
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("delete_all_user_data")
-    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
-    if actor_err:
-        return actor_err
-
-    # 1) Delete Postgres transcript + threads
-    pg_chat = None
-    pg_threads = None
-    try:
-        conn = await asyncpg.connect(DSN)
-        try:
-            await _set_connection_actor(conn, uid)
-            if await _has_governed_memory(conn, uid):
-                return JSONResponse(
-                    {
-                        "status": "conflict",
-                        "detail": "governed_account_erasure_required",
-                    },
-                    status_code=409,
-                )
-            pg_chat = await conn.execute("DELETE FROM chat_log WHERE owner_user_id=$1", uid)
-            pg_threads = await conn.execute("DELETE FROM threads WHERE owner_user_id=$1", uid)
-        finally:
-            await conn.close()
-    except Exception as e:
-        return JSONResponse({"status":"error","detail":f"pg_delete_failed: {e}"}, status_code=500)
-
-    # 2) Delete Qdrant memory points for this user (best-effort)
-    qdrant_deleted = False
-    try:
-        get_qdrant().delete(
-            collection_name="memory_raw",
-            points_selector=qmodels.FilterSelector(
-                filter=qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(
-                            key="owner_user_id",
-                            match=qmodels.MatchValue(value=uid)
-                        )
-                    ]
-                )
-            ),
-        )
-        qdrant_deleted = True
-    except Exception as e:
-        print("[delete_all_user_data] qdrant delete failed:", e)
-
-    return {
-        "status": "ok",
-        "user_id": uid,
-        "pg_chat_log": pg_chat,
-        "pg_threads": pg_threads,
-        "qdrant_deleted": qdrant_deleted
-    }
+    return _conversation_erasure_required(
+        "delete_all_user_data",
+        "all_conversations",
+    )
 
 # ---------- security/privacy: export + forget recent ----------
-from datetime import timedelta
-from fastapi.responses import Response
-
 @app.delete("/user/{user_id}/recent")
 async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60):
-    """
-    Soft-delete: remove recent chat_log rows for user_id and delete matching Qdrant points by id.
-    minutes: how far back to delete (default 60).
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("delete_recent_user_data")
-    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
-    if actor_err:
-        return actor_err
-    minutes = int(minutes or 60)
-    if minutes < 1:
-        return JSONResponse({"status":"bad_request","detail":"minutes must be >= 1"}, status_code=400)
-    if minutes > 60 * 24 * 30:
-        return JSONResponse({"status":"bad_request","detail":"minutes too large"}, status_code=400)
-
-    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
-
-    # 1) gather ids to delete (these ids match Qdrant point ids)
-    ids: List[str] = []
-    try:
-        conn = await asyncpg.connect(DSN)
-        try:
-            await _set_connection_actor(conn, uid)
-            rows = await conn.fetch(
-                "SELECT id FROM chat_log WHERE owner_user_id=$1 AND created_at >= $2",
-                uid, cutoff
-            )
-            ids = [str(r["id"]) for r in (rows or [])]
-
-            if ids:
-                async with conn.transaction(readonly=True):
-                    await conn.execute(
-                        "SELECT set_config('app.user_id', $1, true)",
-                        uid,
-                    )
-                    governed = await conn.fetchval(
-                        """
-                        SELECT
-                          EXISTS(
-                            SELECT 1 FROM memory.consolidation_job
-                            WHERE owner_user_id=$1
-                              AND source_system='public.chat_log'
-                              AND source_external_id=ANY($2::text[])
-                          )
-                          OR EXISTS(
-                            SELECT 1 FROM memory.evidence
-                            WHERE owner_user_id=$1
-                              AND source_system='public.chat_log'
-                              AND external_id=ANY($3::text[])
-                          )
-                        """,
-                        uid,
-                        ids,
-                        [f"chat_log:{record_id}" for record_id in ids],
-                    )
-                if governed:
-                    return JSONResponse(
-                        {
-                            "status": "conflict",
-                            "detail": "governed_recent_erasure_required",
-                        },
-                        status_code=409,
-                    )
-
-            pg_del = await conn.execute(
-                "DELETE FROM chat_log WHERE owner_user_id=$1 AND created_at >= $2",
-                uid, cutoff
-            )
-        finally:
-            await conn.close()
-    except Exception as e:
-        return JSONResponse({"status":"error","detail":f"pg_delete_failed: {e}"}, status_code=500)
-
-    # 2) delete matching Qdrant points by id (best-effort)
-    qdrant_deleted = 0
-    try:
-        qdrant = get_qdrant()
-        # delete in batches to avoid huge payloads
-        batch_size = 256
-        for i in range(0, len(ids), batch_size):
-            batch = ids[i:i+batch_size]
-            existing = qdrant.retrieve(
-                collection_name="memory_raw",
-                ids=batch,
-                with_payload=True,
-                with_vectors=False,
-            )
-            assert_raw_points_owner(existing or [], uid)
-            qdrant.delete(
-                collection_name="memory_raw",
-                points_selector=qmodels.PointIdsList(points=batch),
-            )
-            qdrant_deleted += len(batch)
-    except Exception as e:
-        print("[delete_recent_user_data] qdrant delete failed:", e)
-
-    return {
-        "status": "ok",
-        "user_id": uid,
-        "minutes": minutes,
-        "pg_deleted": pg_del,
-        "qdrant_deleted_points": qdrant_deleted,
-    }
+    return _conversation_erasure_required(
+        "delete_recent_user_data",
+        "recent",
+    )
 
 
 @app.get("/user/{user_id}/export")
 async def export_user_data(user_id: str, req: Request, limit: int = 20000):
-    """
-    Export: threads + chat_log transcript + latest cards.
-    limit: max chat_log rows to include (default 20k).
-    """
-    if not LEGACY_MEMORY_SURFACES_ENABLED:
-        return _legacy_memory_retired("export_user_data")
-    actor_err, uid = await _require_actor_for_user(req, user_id, "default")
-    if actor_err:
-        return actor_err
-    limit = int(limit or 20000)
-    if limit < 1:
-        return JSONResponse({"status":"bad_request","detail":"limit must be >= 1"}, status_code=400)
-    if limit > 200000:
-        return JSONResponse({"status":"bad_request","detail":"limit too large"}, status_code=400)
-
-    # Threads + transcript from Postgres
-    threads = []
-    messages = []
-    try:
-        conn = await asyncpg.connect(DSN)
-        try:
-            await _set_connection_actor(conn, uid)
-            threads = await conn.fetch(
-                "SELECT id, title, created_at, updated_at, archived FROM threads WHERE owner_user_id=$1 ORDER BY updated_at DESC",
-                uid
-            )
-            messages = await conn.fetch(
-                "SELECT id, thread_id, source, text, tags, created_at FROM chat_log WHERE owner_user_id=$1 ORDER BY created_at ASC LIMIT $2",
-                uid, limit
-            )
-        finally:
-            await conn.close()
-    except Exception as e:
-        return JSONResponse({"status":"error","detail":f"pg_export_failed: {e}"}, status_code=500)
-
-    # Cards from Qdrant (same kinds list as /cards)
-    card_kinds = CARD_KINDS_DEFAULT if "CARD_KINDS_DEFAULT" in globals() else [
-        "user_identity","persona_profile","style_profile","preference_profile"
-    ]
-
-    cards = []
-    try:
-        qdrant = get_qdrant()
-        flt = qmodels.Filter(
-            must=[
-                qmodels.FieldCondition(key="owner_user_id", match=qmodels.MatchValue(value=uid)),
-                qmodels.FieldCondition(key="kind", match=qmodels.MatchAny(any=card_kinds)),
-            ]
-        )
-        points, _next = qdrant.scroll(
-            collection_name="memory_raw",
-            scroll_filter=flt,
-            limit=200,
-            with_payload=True,
-            with_vectors=False,
-        )
-        assert_raw_points_owner(points or [], uid)
-        for p in (points or []):
-            cards.append({"id": str(p.id), "payload": (p.payload or {})})
-    except Exception as e:
-        print("[export_user_data] qdrant cards export failed:", e)
-
-    export = {
-        "status": "ok",
-        "user_id": uid,
-        "exported_at": datetime.utcnow().isoformat() + "Z",
-        "threads": [
-            {
-                "id": str(r["id"]),
-                "title": r["title"],
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
-                "archived": bool(r["archived"]),
-            }
-            for r in (threads or [])
-        ],
-        "messages": [
-            {
-                "id": str(r["id"]),
-                "thread_id": str(r["thread_id"]) if r["thread_id"] else None,
-                "source": r["source"],
-                "text": r["text"],
-                "tags": r["tags"] or [],
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-            }
-            for r in (messages or [])
-        ],
-        "cards": cards,
-    }
-
-    # Return as downloadable JSON
-    filename = f"verbalsage_export_{uid}.json"
-    return Response(
-        content=json.dumps(export, ensure_ascii=False),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
+    return _legacy_memory_retired("export_user_data")
 
 
 @app.get("/readyz", include_in_schema=False)

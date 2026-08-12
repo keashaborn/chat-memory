@@ -70,7 +70,6 @@ class AfterOpenAIInspectionV1(_StrictFrozenModel):
     validation: Literal["passed"] = "passed"
     answer_binding: Literal["bound"] = "bound"
     transcript_persistence: Literal["persisted", "skipped"]
-    memory_binding: Literal["bound", "none"]
 
 
 class VoiceDeliveryInspectionV1(_StrictFrozenModel):
@@ -113,8 +112,15 @@ def build_response_inspection_v1(
 
     trace = plan.shadow_trace
     manifest = plan.assembled_prompt.manifest
-    application = plan.assembled_prompt.source_request.memory_application
-    memory_included = bool(application and application.memory_content_included)
+    memory_block = next(
+        (
+            block
+            for block in plan.assembled_prompt.context_blocks
+            if block.block_id == "governed_memory_successor_v1"
+        ),
+        None,
+    )
+    memory_included = memory_block is not None
     provenance = plan.prior_web_provenance
 
     return ResponseInspectionV1(
@@ -137,10 +143,10 @@ def build_response_inspection_v1(
             fm_estimated_tokens=plan.fm_selection.used_tokens,
             memory_included=memory_included,
             memory_record_count=(
-                len(application.injected_record_refs) if application else 0
+                len(memory_block.fragments) if memory_block is not None else 0
             ),
             memory_estimated_tokens=(
-                application.actual_prompt_tokens if application else 0
+                memory_block.estimated_tokens if memory_block is not None else 0
             ),
             prior_web_provenance_included=provenance is not None,
             prior_web_response_count=(
@@ -165,7 +171,6 @@ def build_response_inspection_v1(
             answer_id=result.answer_id,
             output_kind=result.output_kind.value,
             transcript_persistence=transcript_persistence,
-            memory_binding="bound" if result.memory_binding is not None else "none",
         ),
     )
 

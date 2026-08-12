@@ -80,6 +80,13 @@ CONVERSATION_ERASURE_ROUTE_SPECIFICATION = RouteSpecification(
     server_time_owned=True,
 )
 
+CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION = RouteSpecification(
+    method=HttpMethod.GET,
+    path="/memory/conversations/erasure-requests/{operation_id}",
+    operation="get_conversation_erasure",
+    mutation=False,
+)
+
 
 CLAIM_OWNER_ROUTE_SPECIFICATIONS = (
     RouteSpecification(
@@ -173,6 +180,7 @@ CLAIM_OWNER_ROUTE_SPECIFICATIONS = (
 OWNER_ROUTE_SPECIFICATIONS = (
     *CLAIM_OWNER_ROUTE_SPECIFICATIONS,
     CONVERSATION_ERASURE_ROUTE_SPECIFICATION,
+    CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION,
 )
 
 
@@ -216,6 +224,7 @@ def validate_route_body(
 __all__ = [
     "CLAIM_OWNER_ROUTE_SPECIFICATIONS",
     "CONVERSATION_ERASURE_ROUTE_SPECIFICATION",
+    "CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION",
     "HttpMethod",
     "OWNER_ROUTE_SPECIFICATIONS",
     "RouteSpecification",

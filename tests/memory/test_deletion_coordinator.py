@@ -166,10 +166,12 @@ class FakeConversation:
                 else DeletionMutationOutcome.APPLIED
             ),
             receipt_sha256=CONVERSATION_RECEIPT,
-            deleted_message_count=0 if replay else 1,
+            deleted_message_count=1,
             deleted_thread_count=0,
-            deleted_attachment_count=0 if replay else 2,
-            deleted_bridge_row_count=0 if replay else 1,
+            deleted_attachment_count=2,
+            deleted_bridge_row_count=1,
+            message_tombstone_count=1,
+            thread_tombstone_count=0,
             completed_at=NOW,
         )
 

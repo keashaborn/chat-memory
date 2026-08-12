@@ -20,9 +20,8 @@ from rag_engine.governed_memory.http_service import (
     HttpServiceConfigurationError,
 )
 from rag_engine.governed_memory.runtime.application import (
-    API_BIND_HOST,
-    API_BIND_PORT,
-    FRONTEND_SOURCE_IPV4,
+    API_UNIX_SOCKET,
+    BRAINS_PROXY_TRANSPORT,
     SUPABASE_API_KEY_ENV,
     create_runtime_application,
     main,
@@ -239,17 +238,15 @@ class RuntimeCompositionTests(unittest.TestCase):
         self.assertEqual(
             calls[0][1],
             {
-                "host": API_BIND_HOST,
-                "port": API_BIND_PORT,
+                "uds": API_UNIX_SOCKET,
                 "access_log": False,
                 "proxy_headers": False,
                 "server_header": False,
                 "workers": 1,
             },
         )
-        self.assertEqual(API_BIND_HOST, "172.31.32.171")
-        self.assertEqual(API_BIND_PORT, 8091)
-        self.assertEqual(FRONTEND_SOURCE_IPV4, "172.31.43.160/32")
+        self.assertEqual(API_UNIX_SOCKET, "/run/governed-memory/http.sock")
+        self.assertEqual(BRAINS_PROXY_TRANSPORT, "permissioned_unix_socket")
 
 
 class LiveSupabaseConfigurationTests(unittest.TestCase):

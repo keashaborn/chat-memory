@@ -18,6 +18,7 @@ import json
 import os
 import re
 from typing import Any, Protocol
+from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, Request
@@ -34,6 +35,7 @@ from .conversation_erasure_http import create_conversation_erasure_router
 from .deletion_contracts import (
     BoundConversationDeletion,
     ConversationErasureStatus,
+    DeletionAuthority,
 )
 from .http_api import ActorResolver, create_owner_memory_router
 from .http_auth import HttpAuthError
@@ -1098,6 +1100,23 @@ class _ConversationErasurePoolRequester:
                 return await PostgresConversationDeletionRepository(
                     connection
                 ).request_erasure(command)
+        except DeletionRepositoryError:
+            raise
+        except Exception:
+            raise DeletionRepositoryError(
+                DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE
+            ) from None
+
+    async def read_erasure_status(
+        self,
+        authority: DeletionAuthority,
+        operation_id: UUID,
+    ) -> ConversationErasureStatus | None:
+        try:
+            async with self._pool_handle.acquire() as connection:
+                return await PostgresConversationDeletionRepository(
+                    connection
+                ).read_erasure_status(authority, operation_id)
         except DeletionRepositoryError:
             raise
         except Exception:

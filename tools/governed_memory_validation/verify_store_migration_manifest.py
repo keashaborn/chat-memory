@@ -30,7 +30,6 @@ EXPECTED_FILES = frozenset(
     {
         BINDINGS_RELATIVE,
         PREFLIGHT_RELATIVE,
-        "schema_contract.json",
         "predicate_catalog.json",
         "0001_foundation/forward.pgsql",
         "0001_foundation/rollback.pgsql",

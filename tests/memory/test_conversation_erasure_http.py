@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from rag_engine.governed_memory.api import (
     CLAIM_OWNER_ROUTE_SPECIFICATIONS,
     CONVERSATION_ERASURE_ROUTE_SPECIFICATION,
+    CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION,
     OWNER_ROUTE_SPECIFICATIONS,
     route_manifest_sha256,
 )
@@ -24,7 +25,7 @@ from rag_engine.governed_memory.conversation_deletion import (
     DeletionRepositoryError,
     DeletionRepositoryFailure,
 )
-from rag_engine.governed_memory.contracts import canonical_sha256
+from rag_engine.governed_memory.contracts import ContractViolation, canonical_sha256
 from rag_engine.governed_memory.conversation_erasure_http import (
     create_conversation_erasure_router,
 )
@@ -34,6 +35,9 @@ from rag_engine.governed_memory.deletion_contracts import (
     BoundConversationDeletion,
     ConversationErasureState,
     ConversationErasureStatus,
+    DeletionAuthority,
+    DeletionSelectorKind,
+    conversation_deletion_confirmation_sha256,
 )
 
 
@@ -61,8 +65,27 @@ def owner_actor() -> VerifiedActor:
 
 
 def request_body(selector_kind: str, **values: object) -> dict[str, object]:
+    try:
+        kind = DeletionSelectorKind(selector_kind)
+        confirmation = conversation_deletion_confirmation_sha256(
+            operation_id=OPERATION,
+            selector_kind=kind,
+            thread_id=(
+                UUID(str(values["thread_id"]))
+                if "thread_id" in values
+                else None
+            ),
+            anchor_message_id=(
+                UUID(str(values["anchor_message_id"]))
+                if "anchor_message_id" in values
+                else None
+            ),
+            recent_window_seconds=values.get("recent_window_seconds"),
+        )
+    except (ContractViolation, ValueError, TypeError):
+        confirmation = HASH_C
     return {
-        "confirmation_sha256": HASH_C,
+        "confirmation_sha256": confirmation,
         "contract_version": DELETION_REQUEST_CONTRACT_VERSION,
         "data_domain": CONVERSATIONAL_ERASURE_DOMAIN,
         "operation_id": str(OPERATION),
@@ -74,11 +97,16 @@ def request_body(selector_kind: str, **values: object) -> dict[str, object]:
 async def asgi_request(
     app: FastAPI,
     *,
-    json_body: Mapping[str, object],
+    json_body: Mapping[str, object] | None = None,
+    method: str = "POST",
+    target: str = "/memory/conversations/erasure-requests",
 ) -> tuple[int, dict[str, str], Any]:
-    target = "/memory/conversations/erasure-requests"
     parsed = urlsplit(target)
-    raw_body = json.dumps(json_body, separators=(",", ":")).encode("utf-8")
+    raw_body = (
+        json.dumps(json_body, separators=(",", ":")).encode("utf-8")
+        if json_body is not None
+        else b""
+    )
     request_headers = {
         "host": "testserver",
         "content-type": "application/json",
@@ -88,7 +116,7 @@ async def asgi_request(
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
-        "method": "POST",
+        "method": method,
         "scheme": "http",
         "path": parsed.path,
         "raw_path": parsed.path.encode("ascii"),
@@ -161,6 +189,7 @@ class FakeRequester:
         self.state = state
         self.exception = exception
         self.calls: list[BoundConversationDeletion] = []
+        self.read_calls: list[tuple[DeletionAuthority, UUID]] = []
 
     async def request_erasure(
         self,
@@ -192,6 +221,43 @@ class FakeRequester:
             completed_at=NOW if conversation_deleted else None,
         )
 
+    async def read_erasure_status(
+        self,
+        authority: DeletionAuthority,
+        operation_id: UUID,
+    ) -> ConversationErasureStatus | None:
+        self.read_calls.append((authority, operation_id))
+        if self.exception is not None:
+            raise self.exception
+        if operation_id != OPERATION:
+            return None
+        governed_deleted = self.state in {
+            ConversationErasureState.GOVERNED_DELETED,
+            ConversationErasureState.CONVERSATION_DELETED_PENDING_ACK,
+            ConversationErasureState.COMPLETED,
+        }
+        conversation_deleted = self.state in {
+            ConversationErasureState.CONVERSATION_DELETED_PENDING_ACK,
+            ConversationErasureState.COMPLETED,
+        }
+        return ConversationErasureStatus(
+            owner_user_id=authority.owner_user_id,
+            operation_id=operation_id,
+            selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
+            state=self.state,
+            target_count=2,
+            selector_sha256=HASH_A,
+            target_manifest_sha256=HASH_B,
+            governed_receipt_sha256=HASH_C if governed_deleted else None,
+            last_error_code=(
+                "coordinator_attempts_exhausted"
+                if self.state is ConversationErasureState.MANUAL_REVIEW
+                else None
+            ),
+            created_at=NOW,
+            completed_at=NOW if conversation_deleted else None,
+        )
+
 
 def app_for(
     resolver: FakeResolver | None,
@@ -211,13 +277,14 @@ def app_for(
 
 
 class ConversationErasureHttpTests(unittest.IsolatedAsyncioTestCase):
-    def test_canonical_owner_manifest_hash_binds_all_ten_routes(self) -> None:
+    def test_canonical_owner_manifest_hash_binds_all_eleven_routes(self) -> None:
         self.assertEqual(len(CLAIM_OWNER_ROUTE_SPECIFICATIONS), 9)
         self.assertEqual(
             OWNER_ROUTE_SPECIFICATIONS,
             (
                 *CLAIM_OWNER_ROUTE_SPECIFICATIONS,
                 CONVERSATION_ERASURE_ROUTE_SPECIFICATION,
+                CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION,
             ),
         )
 
@@ -238,7 +305,7 @@ class ConversationErasureHttpTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        self.assertEqual(len(OWNER_ROUTE_SPECIFICATIONS), 10)
+        self.assertEqual(len(OWNER_ROUTE_SPECIFICATIONS), 11)
         self.assertEqual(
             route_manifest_sha256(),
             manifest_hash(OWNER_ROUTE_SPECIFICATIONS),
@@ -271,6 +338,11 @@ class ConversationErasureHttpTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(status, 202)
                 self.assertEqual(headers["cache-control"], "no-store")
+                self.assertEqual(headers["retry-after"], "2")
+                self.assertEqual(
+                    headers["location"],
+                    "/memory/conversations/erasure-requests/" + str(OPERATION),
+                )
                 self.assertEqual(len(resolver.calls), 1)
                 self.assertEqual(
                     resolver.calls[0][1],
@@ -311,13 +383,16 @@ class ConversationErasureHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["governed_receipt_sha256"], HASH_C)
         self.assertEqual(response["completed_at"], NOW.isoformat())
 
-    async def test_every_nonterminal_state_returns_202(self) -> None:
+    async def test_active_states_return_202_and_manual_review_returns_409(self) -> None:
         nonterminal_states = tuple(
             state
             for state in ConversationErasureState
-            if state is not ConversationErasureState.COMPLETED
+            if state not in {
+                ConversationErasureState.COMPLETED,
+                ConversationErasureState.MANUAL_REVIEW,
+            }
         )
-        self.assertEqual(len(nonterminal_states), 6)
+        self.assertEqual(len(nonterminal_states), 5)
         for state in nonterminal_states:
             with self.subTest(state=state.value):
                 status, _, response = await asgi_request(
@@ -326,6 +401,61 @@ class ConversationErasureHttpTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(status, 202)
                 self.assertEqual(response["state"], state.value)
+        status, headers, response = await asgi_request(
+            app_for(
+                FakeResolver(),
+                FakeRequester(state=ConversationErasureState.MANUAL_REVIEW),
+            ),
+            json_body=request_body("all_conversations"),
+        )
+        self.assertEqual(status, 409)
+        self.assertNotIn("retry-after", headers)
+        self.assertEqual(response["state"], "manual_review")
+
+    async def test_get_status_is_owner_scoped_retryable_and_content_free(self) -> None:
+        resolver = FakeResolver()
+        requester = FakeRequester(state=ConversationErasureState.RETRYABLE)
+        status, headers, response = await asgi_request(
+            app_for(resolver, requester),
+            method="GET",
+            target=(
+                "/memory/conversations/erasure-requests/" + str(OPERATION)
+            ),
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(headers["retry-after"], "2")
+        self.assertEqual(response["operation_id"], str(OPERATION))
+        self.assertEqual(len(requester.read_calls), 1)
+        authority, operation_id = requester.read_calls[0]
+        self.assertEqual(authority.owner_user_id, OWNER)
+        self.assertEqual(operation_id, OPERATION)
+        self.assertEqual(
+            resolver.calls[0][1], (ActorScope.ERASE_CONVERSATIONS,)
+        )
+
+    async def test_get_status_unknown_is_404_and_invalid_uuid_is_400(self) -> None:
+        requester = FakeRequester()
+        unknown = UUID("99999999-9999-4999-8999-999999999999")
+        status, _, response = await asgi_request(
+            app_for(FakeResolver(), requester),
+            method="GET",
+            target=f"/memory/conversations/erasure-requests/{unknown}",
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(
+            response, {"error": {"code": "memory_resource_not_found"}}
+        )
+        resolver = FakeResolver()
+        status, _, response = await asgi_request(
+            app_for(resolver, requester),
+            method="GET",
+            target="/memory/conversations/erasure-requests/not-a-uuid",
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response, {"error": {"code": "memory_request_invalid"}}
+        )
+        self.assertEqual(resolver.calls, [])
 
     async def test_exact_repository_failures_are_typed(self) -> None:
         cases = (

@@ -12,22 +12,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from rag_engine.chat_integrity import (
+    AssistantOutputKind,
+    AssistantTranscriptAttestationV1,
+)
 from rag_engine.lifeswitch_answer_binding_v1 import (
     FinalAnswerLifeSwitchBindingV1,
 )
 from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
 )
-from rag_engine.memory_v1_selection_envelope import FinalAnswerMemoryBindingV1
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_chat_request_v4 import (
     OpenAIChatRequestV4,
     OpenAIChatResponseV3,
-)
-from rag_engine.response_finalization_v1 import (
-    ASSISTANT_ATTESTATION_VERSION,
-    AssistantOutputKind,
-    AssistantTranscriptAttestationV1,
 )
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
@@ -102,7 +100,6 @@ class FinalizedTrustedResponseV3(_StrictFrozenModel):
     output_kind: AssistantOutputKind
     assistant_text: str = Field(min_length=1, max_length=500_000, repr=False)
     attestation: AssistantTranscriptAttestationV1
-    memory_binding: FinalAnswerMemoryBindingV1 | None = Field(default=None, repr=False)
     lifeswitch_binding: FinalAnswerLifeSwitchBindingV1 | None = Field(
         default=None,
         repr=False,
@@ -128,9 +125,11 @@ class FinalizedTrustedResponseV3(_StrictFrozenModel):
             raise ValueError("finalization output kind differs from attestation")
         if self.attestation.assistant_text_sha256 != _text_sha256(self.assistant_text):
             raise ValueError("finalization text differs from attestation")
-        for binding in (self.memory_binding, self.lifeswitch_binding):
-            if binding is not None and binding.answer_id != self.answer_id:
-                raise ValueError("finalization answer differs from context binding")
+        if (
+            self.lifeswitch_binding is not None
+            and self.lifeswitch_binding.answer_id != self.answer_id
+        ):
+            raise ValueError("finalization answer differs from context binding")
         receipt = self.lifeswitch_provenance_receipt
         if (receipt is None) != (self.lifeswitch_binding is None):
             raise ValueError("LifeSwitch binding and provenance receipt must be paired")
@@ -147,11 +146,6 @@ class FinalizedTrustedResponseV3(_StrictFrozenModel):
             "output_kind": self.output_kind.value,
             "assistant_text_sha256": _text_sha256(self.assistant_text),
             "attestation_sha256": self.attestation.attestation_sha256,
-            "memory_binding_manifest_sha256": (
-                self.memory_binding.binding_manifest_sha256
-                if self.memory_binding is not None
-                else None
-            ),
             "lifeswitch_binding_manifest_sha256": (
                 self.lifeswitch_binding.binding_manifest_sha256
                 if self.lifeswitch_binding is not None
@@ -211,19 +205,6 @@ def finalize_trusted_response_v3(
             base_source.search_capability_manifest,
         )
 
-        memory_binding: FinalAnswerMemoryBindingV1 | None = None
-        if base_source.memory_input is not None and base_source.memory_application is not None:
-            application = base_source.memory_application
-            memory_binding = FinalAnswerMemoryBindingV1.create(
-                assembly_input=base_source.memory_input,
-                owner_user_id=base.authenticated_actor_user_id,
-                answer_id=answer_id,
-                injected=application.injected_records,
-                answer_model_exposed=application.injected_record_refs,
-                applied_controls=application.applied_control_refs,
-                created_at=occurred_at,
-            )
-
         lifeswitch_binding = FinalAnswerLifeSwitchBindingV1.create(
             assembly=plan.assembled_prompt,
             authenticated_actor_user_id=base.authenticated_actor_user_id,
@@ -231,24 +212,19 @@ def finalize_trusted_response_v3(
             created_at=occurred_at,
         )
 
-        attestation_payload: dict[str, Any] = {
-            "contract_version": ASSISTANT_ATTESTATION_VERSION,
-            "authenticated_actor_user_id": base.authenticated_actor_user_id,
-            "thread_id": base.thread_id,
-            "answer_id": answer_id,
-            "request_id_sha256": _text_sha256(base.policy_input.request_id),
-            "conversation_snapshot_sha256": base.conversation_snapshot_sha256,
-            "trusted_plan_sha256": plan.plan_sha256,
-            "provider_request_sha256": response.provider_request_sha256,
-            "provider_response_sha256": response.response_sha256,
-            "provider_response_id": response.response_id,
-            "output_kind": output_kind,
-            "assistant_text_sha256": text_hash,
-            "created_at": occurred_at,
-        }
-        attestation = AssistantTranscriptAttestationV1(
-            **attestation_payload,
-            attestation_sha256=_sha256(attestation_payload),
+        attestation = AssistantTranscriptAttestationV1.create(
+            authenticated_actor_user_id=base.authenticated_actor_user_id,
+            thread_id=base.thread_id,
+            answer_id=answer_id,
+            request_id_sha256=_text_sha256(base.policy_input.request_id),
+            conversation_snapshot_sha256=base.conversation_snapshot_sha256,
+            trusted_plan_sha256=plan.plan_sha256,
+            provider_request_sha256=response.provider_request_sha256,
+            provider_response_sha256=response.response_sha256,
+            provider_response_id=response.response_id,
+            output_kind=output_kind,
+            assistant_text_sha256=text_hash,
+            created_at=occurred_at,
         )
         provenance_receipt = (
             FinalAnswerLifeSwitchProvenanceReceiptV1.create(
@@ -266,11 +242,6 @@ def finalize_trusted_response_v3(
             "output_kind": output_kind.value,
             "assistant_text_sha256": text_hash,
             "attestation_sha256": attestation.attestation_sha256,
-            "memory_binding_manifest_sha256": (
-                memory_binding.binding_manifest_sha256
-                if memory_binding is not None
-                else None
-            ),
             "lifeswitch_binding_manifest_sha256": (
                 lifeswitch_binding.binding_manifest_sha256
                 if lifeswitch_binding is not None
@@ -287,7 +258,6 @@ def finalize_trusted_response_v3(
             output_kind=output_kind,
             assistant_text=text,
             attestation=attestation,
-            memory_binding=memory_binding,
             lifeswitch_binding=lifeswitch_binding,
             lifeswitch_provenance_receipt=provenance_receipt,
             finalization_sha256=_sha256(final_payload),

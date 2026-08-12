@@ -14,7 +14,6 @@ from rag_engine.governed_memory.response_contracts import (
 )
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_ENV,
-    EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
     SuccessorGovernedMemoryAssemblyProviderV1,
@@ -133,21 +132,14 @@ def provider(
 
 
 class SuccessorResponseModeTests(unittest.TestCase):
-    def test_default_is_legacy_and_mode_text_is_exact(self) -> None:
-        self.assertEqual(response_mode_from_environment({}), EXCLUSIVE_MODE_LEGACY)
-        self.assertEqual(
-            response_mode_from_environment({}),
-            exclusive_memory_mode({}).value,
-        )
+    def test_missing_mode_fails_closed_and_successor_text_is_exact(self) -> None:
+        with self.assertRaises(SuccessorResponseConfigurationError):
+            response_mode_from_environment({})
         self.assertEqual(
             response_mode_from_environment(
                 {EXCLUSIVE_MODE_ENV: EXCLUSIVE_MODE_SUCCESSOR}
             ),
             EXCLUSIVE_MODE_SUCCESSOR,
-        )
-        self.assertEqual(
-            EXCLUSIVE_MODE_LEGACY,
-            ExclusiveMemoryMode.LEGACY.value,
         )
         self.assertEqual(
             EXCLUSIVE_MODE_SUCCESSOR,
@@ -166,22 +158,9 @@ class SuccessorResponseModeTests(unittest.TestCase):
 
     def test_selector_constructs_exactly_one_provider_and_never_falls_back(self) -> None:
         calls: list[str] = []
-        legacy = object()
         successor = object()
-
-        selected, lifecycle = choose_response_memory_provider(
-            mode=EXCLUSIVE_MODE_LEGACY,
-            legacy_factory=lambda: calls.append("legacy") or legacy,
-            successor_factory=lambda: calls.append("successor") or successor,
-        )
-        self.assertIs(selected, legacy)
-        self.assertIsNone(lifecycle)
-        self.assertEqual(calls, ["legacy"])
-
-        calls.clear()
         selected, lifecycle = choose_response_memory_provider(
             mode=EXCLUSIVE_MODE_SUCCESSOR,
-            legacy_factory=lambda: calls.append("legacy") or legacy,
             successor_factory=lambda: calls.append("successor") or successor,
         )
         self.assertIs(selected, successor)
@@ -197,7 +176,6 @@ class SuccessorResponseModeTests(unittest.TestCase):
         with self.assertRaises(SuccessorResponseConfigurationError):
             choose_response_memory_provider(
                 mode=EXCLUSIVE_MODE_SUCCESSOR,
-                legacy_factory=lambda: calls.append("legacy") or legacy,
                 successor_factory=fail_successor,
             )
         self.assertEqual(calls, ["successor"])

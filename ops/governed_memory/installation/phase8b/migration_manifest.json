@@ -23,10 +23,6 @@
       "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e"
     },
     {
-      "path": "schema_contract.json",
-      "sha256": "1823964c8567216befd0c63aa0b4ef7676b4093ac62ccd41557bdffd3000c444"
-    },
-    {
       "path": "predicate_catalog.json",
       "sha256": "3e9e62b8281c31067c0416b33e7a2ccb12f2a6e7b5f6f88c090e9eb332c9fcdd"
     },

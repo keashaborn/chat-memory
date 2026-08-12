@@ -3,11 +3,24 @@ from __future__ import annotations
 import json
 import unittest
 
-from rag_engine.openai_chat_request_v4 import OpenAIChatRequestV4
+from pydantic import ValidationError
+
+from rag_engine.openai_chat_request_v4 import (
+    OpenAIChatMessageV2,
+    OpenAIChatRequestV4,
+)
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, new_plan
 
 
 class OpenAIChatRequestV4Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_memory_reference_name_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            OpenAIChatMessageV2(
+                role="user",
+                name="governed_memory_v1",
+                content="retired",
+            )
+
     async def test_prior_provenance_is_named_lower_authority_reference_data(self) -> None:
         plan = await new_plan(
             "Did you access my LifeSwitch nutrition day for Monday?", with_prior=True

@@ -15,7 +15,7 @@
     "authorization_scope_sha256",
     "postgresql",
     "qdrant",
-    "network",
+    "http_transport",
     "reason_code"
   ],
   "properties": {
@@ -113,22 +113,26 @@
         }
       }
     },
-    "network": {
+    "http_transport": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "api_bind",
-        "allowed_source_ipv4",
-        "firewall_proof_sha256"
+        "transport",
+        "unix_socket_path",
+        "unix_socket_group",
+        "socket_identity_and_permission_proof_sha256"
       ],
       "properties": {
-        "api_bind": {
-          "const": "172.31.32.171:8091"
+        "transport": {
+          "const": "permissioned_unix_socket"
         },
-        "allowed_source_ipv4": {
-          "const": "172.31.43.160/32"
+        "unix_socket_path": {
+          "const": "/run/governed-memory/http.sock"
         },
-        "firewall_proof_sha256": {
+        "unix_socket_group": {
+          "const": "governed-memory-proxy"
+        },
+        "socket_identity_and_permission_proof_sha256": {
           "oneOf": [
             {
               "$ref": "#/$defs/sha256"
@@ -152,8 +156,10 @@
         "postgresql_not_empty",
         "qdrant_not_empty",
         "active_clients_present",
+        "proxy_group_unavailable",
+        "unix_socket_identity_mismatch",
         "authorization_missing",
-        "activation_blockers_open",
+        "current_candidate_disposable_proof_missing",
         "durable_pilot_marker_unavailable",
         "contract_mismatch",
         "exact_empty_targets_deleted"

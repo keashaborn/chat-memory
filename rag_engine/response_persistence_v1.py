@@ -2,11 +2,14 @@ from __future__ import annotations
 
 """Atomic append-only persistence for one finalized RESSE response."""
 
-import json
 from uuid import UUID
 
 from rag_engine.active_thread_selection_v1 import promote_resume_thread_v1
-from rag_engine.response_conversation_snapshot_v1 import ATTESTED_ASSISTANT_SOURCE
+from rag_engine.chat_integrity import (
+    ATTESTED_ASSISTANT_SOURCE,
+    insert_assistant_transcript_attestation_v1,
+    text_sha256,
+)
 from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
 
 
@@ -33,7 +36,8 @@ async def persist_finalized_response_v1(
             raise ValueError("attestation owner mismatch")
         if value.attestation.thread_id != thread_id:
             raise ValueError("attestation thread mismatch")
-
+        if value.attestation.request_id_sha256 != text_sha256(request_id):
+            raise ValueError("request differs from attestation")
         stage = "transaction"
         async with conn.transaction():
             stage = "actor_scope"
@@ -73,49 +77,7 @@ async def persist_finalized_response_v1(
                 attestation.created_at,
             )
             stage = "attestation_insert"
-            await conn.execute(
-                """
-                INSERT INTO memory.assistant_transcript_attestation_v1(
-                  answer_id,owner_user_id,thread_id,chat_log_id,
-                  request_id_sha256,conversation_snapshot_sha256,
-                  trusted_plan_sha256,provider_request_sha256,
-                  provider_response_sha256,provider_response_id,output_kind,
-                  assistant_text_sha256,attestation_sha256,created_at
-                )
-                VALUES($1,$2,$3,$1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                """,
-                value.answer_id,
-                owner_user_id,
-                thread_id,
-                attestation.request_id_sha256,
-                attestation.conversation_snapshot_sha256,
-                attestation.trusted_plan_sha256,
-                attestation.provider_request_sha256,
-                attestation.provider_response_sha256,
-                attestation.provider_response_id,
-                attestation.output_kind.value,
-                attestation.assistant_text_sha256,
-                attestation.attestation_sha256,
-                attestation.created_at,
-            )
-            if value.memory_binding is not None:
-                stage = "memory_binding_insert"
-                binding = value.memory_binding
-                await conn.execute(
-                    """
-                    INSERT INTO memory.final_answer_memory_binding_v1(
-                      answer_id,owner_user_id,thread_id,
-                      binding_manifest_sha256,binding,created_at
-                    )
-                    VALUES($1,$2,$3,$4,$5::jsonb,$6)
-                    """,
-                    value.answer_id,
-                    owner_user_id,
-                    thread_id,
-                    binding.binding_manifest_sha256,
-                    json.dumps(binding.model_dump(mode="json"), separators=(",", ":"), sort_keys=True),
-                    binding.created_at,
-                )
+            await insert_assistant_transcript_attestation_v1(conn, attestation)
             stage = "thread_touch"
             await conn.execute(
                 "UPDATE public.threads SET updated_at=now() WHERE owner_user_id=$1 AND id=$2",

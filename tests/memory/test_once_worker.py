@@ -325,10 +325,6 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
 
             result = main(
                 ["--once"],
-                environment={
-                    "GOVERNED_MEMORY_WORKER_MODE": "on",
-                    "GOVERNED_MEMORY_EXCLUSIVE_MODE": "successor_pilot",
-                },
                 once_runner=run,
             )
             expected_calls = 1 if result == 0 else 0
@@ -337,6 +333,7 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
             """
         )
         environment = dict(os.environ)
+        environment["GOVERNED_MEMORY_WORKER_MODE"] = "on"
         if exclusive_mode is None:
             environment.pop("GOVERNED_MEMORY_EXCLUSIVE_MODE", None)
         else:
@@ -388,7 +385,7 @@ class OnceWorkerEntrypointTests(unittest.TestCase):
         self.assertIn("Type=oneshot", unit)
         self.assertIn("Restart=no", unit)
         self.assertIn("GOVERNED_MEMORY_WORKER_MODE=off", unit)
-        self.assertIn("GOVERNED_MEMORY_EXCLUSIVE_MODE=legacy", unit)
+        self.assertIn("GOVERNED_MEMORY_EXCLUSIVE_MODE=successor_pilot", unit)
         self.assertIn("runtime.once_worker --once", unit)
         self.assertEqual(
             tuple(

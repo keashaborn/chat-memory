@@ -15,7 +15,6 @@ from starlette.requests import Request
 
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_ENV,
-    EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
     SuccessorResponseConfigurationError,
 )
@@ -32,9 +31,6 @@ from rag_engine.governed_memory.runtime.live_supabase import (
     LiveSupabaseUserVerifier,
 )
 from rag_engine.supabase_actor_auth import VerifiedSupabaseIdentity
-from rag_engine.memory_v1_answer_provenance_v1 import (
-    build_governed_memory_answer_provenance_v1,
-)
 from rag_engine import resse_response_router as response_router
 from rag_engine.resse_response_router import (
     NO_STORE_HEADERS,
@@ -93,17 +89,10 @@ class ResseResponseRouterTests(unittest.TestCase):
                 }
             )
 
-    def test_response_preferences_are_mode_owned_and_not_public_payload(self) -> None:
+    def test_retired_response_preferences_are_absent_from_successor_route(self) -> None:
         source = (ROOT / "rag_engine/resse_response_router.py").read_text()
-        self.assertIn("await _legacy_assistant_response_preferences(", source)
-        self.assertIn(
-            "SUCCESSOR_RESPONSE_DEFAULTS.response_policy_overlay",
-            source,
-        )
-        self.assertIn(
-            "assistant_response_preferences=assistant_response_preferences",
-            source,
-        )
+        self.assertNotIn("assistant_response_preferences", source)
+        self.assertNotIn("SUCCESSOR_RESPONSE_DEFAULTS", source)
         self.assertNotIn("payload.assistant_name", source)
         with self.assertRaises(ValidationError):
             ResseResponseRequestV1.model_validate(
@@ -173,18 +162,7 @@ class ResseResponseRouterTests(unittest.TestCase):
         self.assertEqual(response.headers["pragma"], "no-cache")
         self.assertEqual(response.headers["expires"], "0")
 
-    def test_router_selects_exactly_one_mode_owned_provenance_contract(self) -> None:
-        expected_legacy = build_governed_memory_answer_provenance_v1(
-            None
-        ).model_dump(mode="json")
-        legacy = response_memory_provenance_for_mode(
-            mode=EXCLUSIVE_MODE_LEGACY,
-            legacy_binding=None,
-            successor_provenance=None,
-        )
-        self.assertEqual(legacy, expected_legacy)
-        self.assertEqual(legacy["binding_outcome"], "no_memory_binding")
-
+    def test_router_selects_only_successor_provenance_contract(self) -> None:
         exposed = build_successor_exposed_provenance_v1(
             {
                 "dispatch_state": "dispatched",
@@ -208,7 +186,6 @@ class ResseResponseRouterTests(unittest.TestCase):
         )
         successor = response_memory_provenance_for_mode(
             mode=EXCLUSIVE_MODE_SUCCESSOR,
-            legacy_binding=None,
             successor_provenance=exposed,
         )
         self.assertEqual(
@@ -224,22 +201,15 @@ class ResseResponseRouterTests(unittest.TestCase):
         )
 
         for mode, successor_value in (
-            (EXCLUSIVE_MODE_LEGACY, exposed),
+            ("legacy", exposed),
             (EXCLUSIVE_MODE_SUCCESSOR, None),
         ):
             with self.subTest(mode=mode):
                 with self.assertRaises(SuccessorResponseConfigurationError):
                     response_memory_provenance_for_mode(
                         mode=mode,
-                        legacy_binding=None,
                         successor_provenance=successor_value,
                     )
-        with self.assertRaises(SuccessorResponseConfigurationError):
-            response_memory_provenance_for_mode(
-                mode=EXCLUSIVE_MODE_SUCCESSOR,
-                legacy_binding=object(),
-                successor_provenance=exposed,
-            )
 
     def test_router_successor_no_selection_is_not_legacy_no_binding(self) -> None:
         no_selection = build_successor_no_memory_selected_provenance_v1(
@@ -249,7 +219,6 @@ class ResseResponseRouterTests(unittest.TestCase):
         )
         result = response_memory_provenance_for_mode(
             mode=EXCLUSIVE_MODE_SUCCESSOR,
-            legacy_binding=None,
             successor_provenance=no_selection,
         )
         self.assertEqual(result["binding_outcome"], "no_memory_selected")
@@ -310,7 +279,6 @@ class ResseResponseRouterTests(unittest.TestCase):
                 )
                 result = response_memory_provenance_for_mode(
                     mode=EXCLUSIVE_MODE_SUCCESSOR,
-                    legacy_binding=None,
                     successor_provenance=provenance,
                 )
                 self.assertEqual(result["binding_outcome"], "not_applicable")
@@ -502,21 +470,11 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
             result.stderr,
         )
 
-    async def test_default_legacy_mode_never_constructs_successor_resources(
-        self,
-    ) -> None:
-        legacy_stop = RuntimeError("stop after legacy authentication")
-        environment = dict(os.environ)
-        environment[EXCLUSIVE_MODE_ENV] = EXCLUSIVE_MODE_SUCCESSOR
+    async def test_non_successor_runtime_mode_refuses_before_resources(self) -> None:
         successor_factory = Mock()
         response_runtime_provider = Mock()
         with (
-            patch.dict(os.environ, environment, clear=True),
-            patch.object(
-                response_router,
-                "RESPONSE_MEMORY_MODE",
-                EXCLUSIVE_MODE_LEGACY,
-            ),
+            patch.object(response_router, "RESPONSE_MEMORY_MODE", "legacy"),
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
             patch.object(
                 response_router,
@@ -528,19 +486,15 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 "provider",
                 response_runtime_provider,
             ),
-            patch.object(
-                response_router,
-                "require_memory_actor_v1",
-                new=AsyncMock(side_effect=legacy_stop),
-            ) as legacy_auth,
         ):
-            with self.assertRaisesRegex(RuntimeError, "legacy authentication"):
+            with self.assertRaises(HTTPException) as raised:
                 await resse_response_query(
                     self.payload(),
                     successor_request(),
                     Response(),
                 )
-        legacy_auth.assert_awaited_once()
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail, "response_memory_mode_invalid")
         successor_factory.assert_not_called()
         response_runtime_provider.assert_not_called()
 
@@ -552,6 +506,9 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
         )
         blocked = (
             "rag_engine.governed_memory_provider_v1",
+            "rag_engine.memory_prompt_renderer_v1",
+            "rag_engine.memory_v1_selection_envelope",
+            "rag_engine.assistant_response_preferences_v1",
             "rag_engine.assistant_response_preferences_store_v1",
             "rag_engine.memory_v1_answer_provenance_v1",
         )
@@ -564,7 +521,7 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
             "        raise AssertionError('blocked import:'+name)\n"
             "    return original(name,*args,**kwargs)\n"
             "builtins.__import__=guarded\n"
-            "import app\n"
+            "import rag_engine.resse_response_router\n"
             "assert all(name not in sys.modules for name in blocked)\n"
         )
         result = subprocess.run(

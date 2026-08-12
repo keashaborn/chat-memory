@@ -95,7 +95,6 @@ class OpenAIChatMessageV2(_StrictFrozenModel):
             or self.name
             not in {
                 "chat_attachments_v1",
-                "governed_memory_v1",
                 "governed_memory_successor_v1",
                 "lifeswitch_domain_context_v1",
                 "prior_lifeswitch_provenance_v1",

@@ -1,0 +1,151 @@
+{
+  "schema_version": "governed-memory-phase8f-component-disposition-v1",
+  "status": "repository_candidate_active_path_separated_legacy_quarantined_not_live_activated",
+  "candidate_base": {
+    "branch": "codex/governed-memory-phase8d-retirement-20260812",
+    "commit": "79e14f7bbded80640851a55ed477c93b0341fe6d",
+    "tree": "14113ad7e5ab149ab2993900ecabe5e2acf7e511"
+  },
+  "authority": {
+    "accounts": "supabase_auth_retained",
+    "canonical_governed_memory": "fresh_successor_postgresql_when_later_installed",
+    "derived_vectors": "fresh_successor_qdrant_when_later_installed",
+    "conversation_source": "existing_owner_scoped_chat_tables",
+    "structured_lifeswitch": "outside_memory_and_chat_erasure_authority"
+  },
+  "current_active_path": {
+    "application_root": "app.py",
+    "response_router": "rag_engine/resse_response_router.py",
+    "response_roots": [
+      "rag_engine/response_composition_root_v0_2.py",
+      "rag_engine/response_composition_root_v0_4.py",
+      "rag_engine/response_orchestration_v0_2.py"
+    ],
+    "provider_request": [
+      "rag_engine/openai_chat_provider_v1.py",
+      "rag_engine/openai_chat_request_v4.py",
+      "rag_engine/prompt_assembler_v1.py",
+      "rag_engine/lifeswitch_prompt_integration_v2.py",
+      "rag_engine/lifeswitch_answer_binding_v1.py"
+    ],
+    "finalization_and_persistence": [
+      "rag_engine/response_finalization_v1.py",
+      "rag_engine/response_finalization_v3.py",
+      "rag_engine/response_inspection_v1.py",
+      "rag_engine/response_inspection_v2.py",
+      "rag_engine/response_inspection_v4.py",
+      "rag_engine/response_persistence_v1.py",
+      "rag_engine/response_persistence_v3.py",
+      "rag_engine/usage_ledger_v1.py"
+    ],
+    "successor_memory": "rag_engine/governed_memory",
+    "neutral_chat_integrity": "rag_engine/chat_integrity.py",
+    "chat_erasure_proxy": "rag_engine/governed_memory_erasure_proxy_v1.py",
+    "legacy_memory_fallback_allowed": false,
+    "stored_assistant_preferences_allowed": false,
+    "legacy_memory_prompt_object_allowed": false
+  },
+  "retired_in_phase8f": {
+    "deleted_code": [
+      "rag_engine/governed_memory/response_defaults.py",
+      "rag_engine/response_composition_root_v0_3.py",
+      "rag_engine/response_finalization_v2.py",
+      "rag_engine/response_inspection_v3.py",
+      "rag_engine/response_persistence_v2.py"
+    ],
+    "deleted_tests": [
+      "tests/memory/test_response_defaults.py",
+      "tests/test_lifeswitch_response_runtime_v1.py",
+      "tests/test_response_inspection_v3.py"
+    ],
+    "historical_relocation": {
+      "from": "docs/LIFESWITCH_CONTEXT_INTEGRATION_CANDIDATE_V1_HANDOFF.md",
+      "to": "docs/history/LIFESWITCH_CONTEXT_INTEGRATION_CANDIDATE_V1_HANDOFF.md"
+    },
+    "git_history_retains_deleted_bytes": true,
+    "working_tree_archive_copy_retained": false
+  },
+  "quarantine": [
+    {
+      "component": "legacy_memory_v1_v5_runtime",
+      "path_families": [
+        "rag_engine/memory_v1*",
+        "rag_engine/governed_memory_provider_v1.py",
+        "rag_engine/memory_prompt_*"
+      ],
+      "current_role": "not_imported_by_active_app_or_response_graph"
+    },
+    {
+      "component": "legacy_preferences_identity_admin_and_vantage",
+      "path_families": [
+        "rag_engine/assistant_response_preference*",
+        "rag_engine/assistant_response_preferences*",
+        "rag_engine/admin_memory_*",
+        "rag_engine/vantage_*",
+        "legacy_identity_card_routes_and_stores"
+      ],
+      "current_role": "legacy_data_access_not_imported_or_consumed_retirement_responses_may_remain_mounted"
+    },
+    {
+      "component": "legacy_tests_scripts_units_and_store_state",
+      "path_families": [
+        "root_test_modules_outside_current_successor_gate",
+        "legacy_memory_systemd_timers_and_services",
+        "legacy_memory_scripts_and_cron",
+        "legacy_postgresql_memory_objects",
+        "legacy_qdrant_memory_collections"
+      ],
+      "current_role": "excluded_from_current_repository_authority_pending_exact_retirement_proof"
+    }
+  ],
+  "current_default_gate": {
+    "workflow": ".github/workflows/auditability.yml",
+    "test_roots": [
+      "tests/memory",
+      "tests/test_lifeswitch_answer_binding_v1.py",
+      "tests/test_lifeswitch_answer_provenance_receipt_v1.py",
+      "tests/test_lifeswitch_coaching_self_shadow_adapter_v2.py",
+      "tests/test_lifeswitch_coaching_self_shadow_runner_v2.py",
+      "tests/test_lifeswitch_prompt_integration_v2.py",
+      "tests/test_openai_chat_provider_v1.py",
+      "tests/test_openai_chat_request_v4.py",
+      "tests/test_prompt_assembler_v1.py",
+      "tests/test_response_composition_root_v0_2.py",
+      "tests/test_response_conversation_snapshot_v1.py",
+      "tests/test_response_finalization_v1.py",
+      "tests/test_response_inspection_v1.py",
+      "tests/test_response_orchestration_v0_2.py",
+      "tests/test_response_persistence_v1.py",
+      "tests/test_response_persistence_v3.py",
+      "tests/test_resse_response_router.py",
+      "tests/test_successor_memory_chat_adapter_v1.py",
+      "tests/test_successor_response_integration_v1.py",
+      "tests/test_usage_ledger_v1.py"
+    ],
+    "retired_path_absence_enforced": true,
+    "active_response_legacy_import_absence_enforced": true,
+    "current_package_integrity_verified": true,
+    "current_disposable_proof_complete": false,
+    "live_activation_proved": false
+  },
+  "future_physical_deletion_gates": [
+    "exact_repository_legacy_path_inventory_and_hash_manifest_complete",
+    "zero_active_import_and_dynamic_load_closure_proved_from_all_live_entrypoints",
+    "legacy_services_timers_cron_admin_provider_read_write_and_shadow_paths_quiescent",
+    "legacy_postgresql_and_qdrant_zero_reader_zero_writer_observation_window_complete",
+    "successor_runtime_build_and_disposable_revalidation_complete",
+    "rollback_reference_and_exact_target_retention_receipt_complete",
+    "separate_exact_deletion_batch_explicitly_authorized"
+  ],
+  "safety": {
+    "repository_only": true,
+    "production_state_changed": false,
+    "services_changed": false,
+    "secrets_read_or_changed": false,
+    "docker_or_images_used": false,
+    "postgresql_changed": false,
+    "qdrant_changed": false,
+    "structured_lifeswitch_data_in_deletion_scope": false,
+    "accounts_in_deletion_scope": false
+  }
+}

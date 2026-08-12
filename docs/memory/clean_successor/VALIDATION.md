@@ -5,7 +5,7 @@
 The current validators read repository files and exercise a sealed synthetic
 model. They can prove exact package membership, hashes, dependency closure,
 closed contracts, deterministic controller behavior, refusal paths, and absence
-of forbidden predecessor imports from the current Phase 8B package.
+of forbidden predecessor imports from the current Phase 8F active path.
 
 They cannot prove that PostgreSQL, Qdrant, Docker, systemd, networking, secrets,
 routes, or the application consumed the package. Source code, tests, manifests,
@@ -18,15 +18,16 @@ Run on **seebx** from the isolated candidate worktree:
 ```bash
 python3 -I -B tools/governed_memory_install/package.py verify-package
 python3 -I -B tools/governed_memory_validation/verify_store_migration_manifest.py
-python3 -I -B tools/governed_memory_validation/run_phase8b_disposable_proof.py
+python3 -I -B tools/governed_memory_validation/verify_migration_manifest.py \
+  governed-memory-migrations
+python3 -I -B tools/governed_memory_release/release_guard.py verify-artifacts
 python3 -B -m unittest discover -s tests/memory -p 'test_*.py'
 git diff --check
 ```
 
-The first two commands are offline verifiers. The proof runner is restricted to
-its newly created disposable directory and a sealed in-process backend. It must
-refuse environment, process, network, and external-filesystem effects. It does
-not run Docker or connect to a store.
+These are offline checks. They verify current bytes and require the release
+guard to remain fail-closed because current runtime-build and disposable proof
+evidence do not exist. They do not run Docker or connect to a store.
 
 ## Closed current package
 
@@ -44,8 +45,10 @@ not rewritten merely to make filenames shorter.
 
 - Phase 7C: retained application/chat-deletion disposable evidence; inactive.
 - Current installation package: statically verified and synthetic-proof capable;
-  Phase 8D performed no installation, and current live installation state was
+  Phase 8F performed no installation, and current live installation state was
   not reverified by this repository-only phase.
+- Current full-chain migration: artifact integrity verified; disposable
+  revalidation required because migration 0002 and the active runtime changed.
 - Synthetic controller receipt: unit/model evidence only; not promoted as live
   installation proof.
 - Production: no successor installation or activation evidence.
@@ -67,8 +70,10 @@ Phase 8D requires all of the following:
 6. Git history, rather than an active-tree code archive, preserves old bytes;
 7. focused and full tests pass without Docker or live-store access.
 
-These checks do not assert retirement of the separate Memory v1/v5 repository
-runtime, units, or tests. That surface remains an explicitly deferred scope.
+Phase 8F additionally requires that the current app/response graph and default
+CI have no Memory V1 or stored-preference dependency. Remaining V1/v5 files are
+quarantined and are not considered current proof. Their physical deletion is a
+later, separately authorized closure.
 
 ## Safety boundary
 

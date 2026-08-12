@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import unittest
 from uuid import UUID
 
@@ -15,7 +14,7 @@ from rag_engine.search_capability_manifest_v1 import (
     SearchCapabilityManifestV1,
 )
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
-from tests.test_prompt_assembler_v1 import governed_memory
+from tests.test_prompt_assembler_v1 import successor_memory_block
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     NOW,
@@ -34,21 +33,20 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
         self,
         message: str,
         *,
-        with_memory: bool = False,
+        with_successor_memory: bool = False,
         with_search_capability: bool = False,
     ):
-        memory_input = None
-        memory_application = None
-        if with_memory:
-            memory_input, memory_application = await asyncio.to_thread(
-                governed_memory, message
-            )
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
-            request_id=("request-123" if with_memory else "finalization-request"),
+            request_id=(
+                "request-123" if with_successor_memory else "finalization-request"
+            ),
             conversation=messages(message),
-            memory_input=memory_input,
-            memory_application=memory_application,
+            successor_memory_context_block=(
+                successor_memory_block(message)
+                if with_successor_memory
+                else None
+            ),
             search_capability_manifest=(
                 SearchCapabilityManifestV1.create(
                     authorization_basis=TEXT_SEARCH_AUTHORIZATION_BASIS,
@@ -81,11 +79,11 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
             provider.response_sha256,
         )
         self.assertNotIn(finalized.assistant_text, finalized.attestation.model_dump_json())
-        self.assertIsNone(finalized.memory_binding)
+        self.assertNotIn("memory_binding", finalized.model_dump(mode="json"))
 
-    async def test_binds_injected_memory_as_answer_model_exposed(self) -> None:
+    async def test_successor_memory_context_has_no_legacy_binding(self) -> None:
         message = "What is the relevant project constraint?"
-        plan = await self.plan(message, with_memory=True)
+        plan = await self.plan(message, with_successor_memory=True)
         provider = OpenAIChatCompletionsAdapterV1(
             FakeClient(provider_response(content="Use the governed constraint."))
         ).complete(plan)
@@ -97,14 +95,7 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
             created_at=NOW,
         )
 
-        self.assertIsNotNone(finalized.memory_binding)
-        binding = finalized.memory_binding
-        assert binding is not None
-        application = plan.assembled_prompt.source_request.memory_application
-        assert application is not None
-        self.assertEqual(binding.injected_count, len(application.injected_records))
-        self.assertEqual(binding.exposed_count, len(application.injected_records))
-        self.assertEqual(binding.outcome, "exposed")
+        self.assertNotIn("memory_binding", finalized.model_dump(mode="json"))
 
     async def test_rejects_response_bound_to_another_plan(self) -> None:
         first = await self.plan("First question")

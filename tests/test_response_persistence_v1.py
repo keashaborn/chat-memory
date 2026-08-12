@@ -103,7 +103,8 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((conn.entered, conn.exited), (1, 1))
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertIn("INSERT INTO public.chat_log", sql)
-        self.assertIn("memory.assistant_transcript_attestation_v1", sql)
+        self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
+        self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.final_answer_memory_binding_v1", sql)
         self.assertIn("UPDATE public.threads", sql)
         self.assertIn("INSERT INTO public.active_thread_selection", sql)
@@ -140,6 +141,21 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
 
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertNotIn("INSERT INTO public.chat_log", sql)
+
+    async def test_request_mismatch_fails_before_transaction(self) -> None:
+        conn = FakeConnection()
+        finalized = await finalized_response()
+        with self.assertRaises(ResponsePersistenceError) as raised:
+            await persist_finalized_response_v1(
+                conn,
+                owner_user_id=ACTOR,
+                thread_id=THREAD,
+                request_id="different-request",
+                finalized=finalized,
+            )
+        self.assertEqual(raised.exception.stage, "validation")
+        self.assertEqual(conn.entered, 0)
+        self.assertEqual(conn.execute_calls, [])
 
     async def test_invisible_thread_rolls_back_response_and_promotion(self) -> None:
         conn = FakeConnection(visible_thread=False)

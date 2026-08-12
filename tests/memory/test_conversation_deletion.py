@@ -22,6 +22,7 @@ from rag_engine.governed_memory.deletion_contracts import (
     DeletionAuthority,
     DeletionMutationOutcome,
     DeletionSelectorKind,
+    conversation_deletion_confirmation_sha256,
     deletion_binding_sha256,
     erasure_target_manifest_sha256,
     source_erasure_target_sha256,
@@ -95,7 +96,10 @@ def bound_command() -> BoundConversationDeletion:
     request = ConversationDeletionRequestV1(
         operation_id=OPERATION,
         selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
-        confirmation_sha256="8" * 64,
+        confirmation_sha256=conversation_deletion_confirmation_sha256(
+            operation_id=OPERATION,
+            selector_kind=DeletionSelectorKind.ALL_CONVERSATIONS,
+        ),
     )
     authority = DeletionAuthority(
         owner_user_id=OWNER,
@@ -185,7 +189,7 @@ class ConversationDeletionBoundaryTests(unittest.TestCase):
             raised.exception.code, "erasure_target_binding_mismatch"
         )
 
-    def test_finalization_can_report_previously_absent_messages(self) -> None:
+    def test_finalization_requires_exact_message_and_thread_tombstones(self) -> None:
         targets = (
             target(MESSAGE_A, THREAD_A, NOW - timedelta(seconds=2)),
             target(MESSAGE_B, THREAD_B, NOW - timedelta(seconds=1)),
@@ -200,10 +204,12 @@ class ConversationDeletionBoundaryTests(unittest.TestCase):
             operation_id=OPERATION,
             outcome=DeletionMutationOutcome.APPLIED,
             receipt_sha256="c" * 64,
-            deleted_message_count=1,
+            deleted_message_count=2,
             deleted_thread_count=1,
             deleted_attachment_count=2,
             deleted_bridge_row_count=1,
+            message_tombstone_count=2,
+            thread_tombstone_count=1,
             completed_at=NOW,
         )
         self.assertEqual(
@@ -212,25 +218,23 @@ class ConversationDeletionBoundaryTests(unittest.TestCase):
         with self.assertRaises(ContractViolation):
             require_finalization_receipt_binding(
                 lease,
-                replace(receipt, deleted_message_count=3),
+                replace(receipt, deleted_message_count=1),
             )
         with self.assertRaises(ContractViolation):
             require_finalization_receipt_binding(
                 lease,
                 replace(receipt, deleted_bridge_row_count=3),
             )
-        empty_thread_receipt = replace(
-            receipt,
-            deleted_message_count=0,
-            deleted_thread_count=1,
-            deleted_bridge_row_count=0,
-        )
-        self.assertEqual(
+        with self.assertRaises(ContractViolation):
             require_finalization_receipt_binding(
-                lease, empty_thread_receipt
-            ),
-            empty_thread_receipt,
-        )
+                lease,
+                replace(receipt, message_tombstone_count=1),
+            )
+        with self.assertRaises(ContractViolation):
+            require_finalization_receipt_binding(
+                lease,
+                replace(receipt, thread_tombstone_count=0),
+            )
 
 
 class _AppendConnection:
@@ -744,9 +748,10 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_owner_status_read_binds_transaction_context(self) -> None:
         connection = _OwnerConnection()
+        command = bound_command()
         status = await PostgresConversationDeletionRepository(
             connection
-        ).read_erasure_status(bound_command())
+        ).read_erasure_status(command.authority, command.operation_id)
         self.assertIsNotNone(status)
         self.assertEqual(connection.deletion_queries, 1)
         self.assertEqual(connection.log[-2:], ["deletion.read", "transaction.exit"])
@@ -778,10 +783,11 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         connection = _OwnerConnection(forced_current_user="governed_memory_api")
+        command = bound_command()
         with self.assertRaises(ContractViolation) as raised:
             await PostgresConversationDeletionRepository(
                 connection
-            ).read_erasure_status(bound_command())
+            ).read_erasure_status(command.authority, command.operation_id)
         self.assertEqual(
             raised.exception.code,
             "conversation_deletion_current_user_mismatch",
@@ -818,10 +824,11 @@ class PostgresDeletionAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stale_auth_guc_fails_before_status_sql(self) -> None:
         connection = _OwnerConnection(forced_auth_context="5" * 64)
+        command = bound_command()
         with self.assertRaises(ContractViolation) as raised:
             await PostgresConversationDeletionRepository(
                 connection
-            ).read_erasure_status(bound_command())
+            ).read_erasure_status(command.authority, command.operation_id)
         self.assertEqual(
             raised.exception.code,
             "conversation_deletion_auth_context_mismatch",

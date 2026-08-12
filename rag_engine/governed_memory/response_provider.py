@@ -52,7 +52,6 @@ from rag_engine.governed_memory.response_contracts import (
 from rag_engine.governed_memory.runtime.calibration import CalibrationDecision
 
 
-EXCLUSIVE_MODE_LEGACY = ExclusiveMemoryMode.LEGACY.value
 EXCLUSIVE_MODE_SUCCESSOR = ExclusiveMemoryMode.SUCCESSOR_PILOT.value
 SUCCESSOR_CONTEXT_CONTRACT = "governed-memory-answer-context-v1"
 
@@ -159,13 +158,10 @@ def response_mode_from_environment(environment: Mapping[str, str]) -> str:
 def choose_response_memory_provider(
     *,
     mode: str,
-    legacy_factory: Callable[[], object],
     successor_factory: Callable[[], object],
 ) -> tuple[object, object | None]:
-    """Construct exactly one provider; successor failures never fall back."""
+    """Construct the successor provider; failures never fall back."""
 
-    if mode == EXCLUSIVE_MODE_LEGACY:
-        return legacy_factory(), None
     if mode == EXCLUSIVE_MODE_SUCCESSOR:
         successor = successor_factory()
         return successor, successor
@@ -466,7 +462,6 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
 
 __all__ = [
     "EXCLUSIVE_MODE_ENV",
-    "EXCLUSIVE_MODE_LEGACY",
     "EXCLUSIVE_MODE_SUCCESSOR",
     "SUCCESSOR_CONTEXT_CONTRACT",
     "InactiveSuccessorMemoryProviderV1",

@@ -9,12 +9,16 @@ LifeSwitch domain from the caller.
 """
 
 from typing import Any, Protocol
+from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from .api import CONVERSATION_ERASURE_ROUTE_SPECIFICATION
+from .api import (
+    CONVERSATION_ERASURE_ROUTE_SPECIFICATION,
+    CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION,
+)
 from .auth import ActorScope
 from .contracts import ContractViolation
 from .conversation_deletion import (
@@ -26,6 +30,7 @@ from .deletion_contracts import (
     BoundConversationDeletion,
     ConversationErasureState,
     ConversationErasureStatus,
+    DeletionAuthority,
     bind_conversation_deletion,
     conversation_deletion_request_from_body,
 )
@@ -48,6 +53,12 @@ class ConversationErasureRequester(Protocol):
         self,
         command: BoundConversationDeletion,
     ) -> ConversationErasureStatus: ...
+
+    async def read_erasure_status(
+        self,
+        authority: DeletionAuthority,
+        operation_id: UUID,
+    ) -> ConversationErasureStatus | None: ...
 
 
 def _coded_failure_response(code: str, status_code: int) -> JSONResponse:
@@ -87,18 +98,37 @@ def _status_response(status: ConversationErasureStatus) -> JSONResponse:
         "created_at": status.created_at,
         "completed_at": status.completed_at,
     }
-    return JSONResponse(
-        status_code=(
-            200
-            if status.state is ConversationErasureState.COMPLETED
-            else 202
-        ),
-        content=jsonable_encoder(content),
-        headers={
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-        },
+    location = (
+        "/memory/conversations/erasure-requests/" + str(status.operation_id)
     )
+    if status.state is ConversationErasureState.COMPLETED:
+        status_code = 200
+    elif status.state is ConversationErasureState.MANUAL_REVIEW:
+        status_code = 409
+    else:
+        status_code = 202
+    headers = {
+        "Cache-Control": "no-store",
+        "Location": location,
+        "X-Content-Type-Options": "nosniff",
+    }
+    if status_code == 202:
+        headers["Retry-After"] = "2"
+    return JSONResponse(
+        status_code=status_code,
+        content=jsonable_encoder(content),
+        headers=headers,
+    )
+
+
+def _canonical_operation_id(value: str) -> UUID:
+    try:
+        parsed = UUID(value)
+    except (AttributeError, ValueError) as exc:
+        raise ContractViolation("invalid_deletion_operation") from exc
+    if str(parsed) != value:
+        raise ContractViolation("invalid_deletion_operation")
+    return parsed
 
 
 def create_conversation_erasure_router(
@@ -174,12 +204,59 @@ def create_conversation_erasure_router(
             )
         return _status_response(status)
 
+    async def read_erasure_status_endpoint(
+        operation_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        if feature_enabled is not True:
+            return _disabled_response()
+        if actor_resolver is None or requester is None:
+            return _unconfigured_response()
+        try:
+            _prohibit_identity_assertions(request)
+            await _read_closed_body(
+                request,
+                CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION,
+            )
+            parsed_operation_id = _canonical_operation_id(operation_id)
+            actor = await _resolve_owner_actor(
+                request,
+                resolver=actor_resolver,
+                scopes=(ActorScope.ERASE_CONVERSATIONS,),
+            )
+            authority = DeletionAuthority.from_verified_actor(actor)
+            status = await requester.read_erasure_status(
+                authority,
+                parsed_operation_id,
+            )
+        except MemoryHttpError as exc:
+            return _failure_response(exc.failure)
+        except ContractViolation:
+            return _failure_response(MemoryHttpFailure.REQUEST_INVALID)
+        except DeletionRepositoryError as exc:
+            if exc.failure is DeletionRepositoryFailure.CONVERSATION_UNAVAILABLE:
+                return _coded_failure_response(exc.code, 503)
+            return _failure_response(MemoryHttpFailure.SUCCESSOR_UNAVAILABLE)
+        except Exception:
+            return _failure_response(MemoryHttpFailure.SUCCESSOR_UNAVAILABLE)
+        if status is None:
+            return _failure_response(MemoryHttpFailure.RESOURCE_NOT_FOUND)
+        return _status_response(status)
+
     specification = CONVERSATION_ERASURE_ROUTE_SPECIFICATION
     router.add_api_route(
         specification.path,
         request_erasure_endpoint,
         methods=[specification.method.value],
         name=specification.operation,
+        response_class=JSONResponse,
+    )
+    status_specification = CONVERSATION_ERASURE_STATUS_ROUTE_SPECIFICATION
+    router.add_api_route(
+        status_specification.path,
+        read_erasure_status_endpoint,
+        methods=[status_specification.method.value],
+        name=status_specification.operation,
         response_class=JSONResponse,
     )
     return router

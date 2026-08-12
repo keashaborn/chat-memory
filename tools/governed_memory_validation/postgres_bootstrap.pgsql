@@ -310,6 +310,12 @@ ALTER TABLE public.chat_attachments FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_attachments_owner_isolation ON public.chat_attachments
   USING (owner_user_id = memory.current_actor_user_id())
   WITH CHECK (owner_user_id = memory.current_actor_user_id());
+ALTER TABLE public.active_thread_selection ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.active_thread_selection FORCE ROW LEVEL SECURITY;
+CREATE POLICY active_thread_owner_isolation
+  ON public.active_thread_selection
+  USING (owner_user_id = memory.current_actor_user_id())
+  WITH CHECK (owner_user_id = memory.current_actor_user_id());
 
 REVOKE ALL ON FUNCTION public.guard_canonical_owner() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.guard_chat_log_immutable() FROM PUBLIC;

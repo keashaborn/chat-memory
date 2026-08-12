@@ -5,7 +5,10 @@ from typing import Any
 
 from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
 from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
-from rag_engine.response_persistence_v3 import persist_finalized_response_v3
+from rag_engine.response_persistence_v3 import (
+    ResponsePersistenceV3Error,
+    persist_finalized_response_v3,
+)
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, ANSWER, NOW, new_plan
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_response_orchestration_v0_2 import THREAD
@@ -78,7 +81,31 @@ class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
             sql.index("final_answer_lifeswitch_binding_v1"),
             sql.index("final_answer_lifeswitch_provenance_receipt_v1"),
         )
-        self.assertIn("assistant_transcript_attestation_v1", sql)
+        self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
+        self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
+
+    async def test_request_mismatch_fails_before_transaction(self) -> None:
+        plan = await new_plan("What were my macros Monday?")
+        response = OpenAIChatCompletionsAdapterV3(
+            FakeClient(provider_response(content="Monday used your LifeSwitch log."))
+        ).complete(plan)
+        finalized = finalize_trusted_response_v3(
+            trusted_plan=plan,
+            provider_response=response,
+            answer_id=ANSWER,
+            created_at=NOW,
+        )
+        conn = Conn()
+        with self.assertRaises(ResponsePersistenceV3Error) as raised:
+            await persist_finalized_response_v3(
+                conn,
+                owner_user_id=ACTOR,
+                thread_id=THREAD,
+                request_id="different-request",
+                finalized=finalized,
+            )
+        self.assertEqual(raised.exception.stage, "validation")
+        self.assertEqual(conn.calls, [])
 
 
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
   "candidate_id": "clean-governed-memory-successor-2026-08-10",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "phase8f_repository_candidate_disposable_revalidation_required_not_production_applied",
   "authority": {
     "production_apply_authorized": false,
     "production_service_change_authorized": false,
     "production_provider_call_authorized": false,
     "production_qdrant_change_authorized": false,
     "legacy_import_authorized": false,
-    "disposable_validation_authorized": true
+    "disposable_validation_authorized": false
   },
   "execution_order": [
     "roles_preflight.pgsql",
@@ -30,7 +30,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "1823964c8567216befd0c63aa0b4ef7676b4093ac62ccd41557bdffd3000c444"
+      "sha256": "49afc6feb433f88f3ecc2a2761c519d257c6855c078470c5f1d8e15896dfca57"
     },
     {
       "path": "predicate_catalog.json",
@@ -74,15 +74,15 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "f57a3db05c94fa39699cc26f361844352f77a5806be6939244eb04c7cd000dde"
+      "sha256": "2a6bb8cddff20482204df4211f8f7937b39e8a682248f55f18e9411dce0bab44"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-      "sha256": "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355"
+      "sha256": "05c1f81051795b92a2e186d3f31aca043bf1d6d69312702ac1d335c27ea885c1"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",
-      "sha256": "283c95879f36d1db727e15425432ec3963f8adc4861249af90817c1ab8da0158"
+      "sha256": "5ec7c3f008a3b035d26482090b50363b14931e57bbb9d0295fb8f65a760536b4"
     }
   ],
   "safety": {
@@ -93,7 +93,7 @@
     "claim_detail_rollback_data_mutation": false,
     "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
-    "disposable_database_execution_performed": true,
+    "disposable_database_execution_performed": false,
     "production_database_execution_performed": false,
     "production_checkout_files_changed": false,
     "production_data_read": false,

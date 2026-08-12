@@ -1084,10 +1084,25 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "isolated_candidate_disposable_validated_not_production_applied",
+            "phase8f_repository_candidate_disposable_revalidation_required_"
+            "not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
+        self.assertEqual(
+            self.contract["conversation_database"],
+            {
+                "database": "memory",
+                "schemas": ["memory_ingest_private", "chat_integrity"],
+                "authority": "separate_existing_conversation_database_only",
+            },
+        )
+        self.assertTrue(
+            all(
+                name.startswith("memory_private.")
+                for name in self.contract["internal_functions"]
+            )
+        )
         self.assertEqual(
             self.contract["authority"],
             {
@@ -1231,10 +1246,22 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             bridge["source_erasure_legacy_capture_trigger_if_present"],
-            "exact_disabled_identity_only",
+            "forbidden_after_forward_exact_disabled_identity_restored_by_"
+            "empty_only_rollback",
         )
         self.assertFalse(
             bridge["source_erasure_structured_lifeswitch_tables_allowed"]
+        )
+        self.assertTrue(
+            bridge["source_erasure_lifeswitch_usage_and_audit_records_retained"]
+        )
+        self.assertEqual(
+            bridge["source_erasure_vantage_answer_trace_disposition"],
+            "undecided_activation_blocker",
+        )
+        self.assertEqual(
+            bridge["source_erasure_telemetry_payload_disposition"],
+            "undecided_activation_blocker",
         )
         self.assertFalse(bridge["source_erasure_accounts_deleted"])
         self.assertTrue(bridge["source_erasure_content_free_receipts_retained"])
@@ -1339,6 +1366,20 @@ class PackageIntegrityTests(unittest.TestCase):
         self.assertFalse(contract["source_erasure_legacy_capture_trigger_required"])
         self.assertFalse(contract["accounts_deleted"])
         self.assertFalse(contract["structured_lifeswitch_data_deleted"])
+        self.assertTrue(contract["lifeswitch_usage_audit_records_retained"])
+        self.assertEqual(
+            contract["vantage_answer_trace_disposition"],
+            "undecided_activation_blocker",
+        )
+        self.assertEqual(
+            contract["telemetry_payload_disposition"],
+            "undecided_activation_blocker",
+        )
+        self.assertFalse(package["hash_bindings"]["current_hash_rebind_required"])
+        self.assertFalse(
+            package["hash_bindings"]["root_migration_manifest_rebind_required"]
+        )
+        self.assertFalse(package["activation"]["disposable_database_validated"])
         self.assertFalse(contract["legacy_project_rows_deleted"])
 
     def test_exact_migration_artifact_set_exists(self) -> None:
@@ -1410,27 +1451,32 @@ class PackageIntegrityTests(unittest.TestCase):
                 relative,
             )
 
-    def test_fail_closed_manifest_verifier_accepts_only_exact_state_v4_json(self) -> None:
+    def test_fail_closed_manifest_verifier_accepts_only_exact_phase8f_state(self) -> None:
         verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
         manifest = _load_json(ROOT_MANIFEST_PATH)
         self.assertEqual(
             manifest["status"],
-            "isolated_candidate_disposable_validated_not_production_applied",
+            "phase8f_repository_candidate_disposable_revalidation_required_"
+            "not_production_applied",
         )
         receipt = verifier["verify"](MIGRATIONS)
-        self.assertEqual(receipt["result"], "verified")
+        self.assertEqual(receipt["result"], "artifact_integrity_verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v4",
+            "governed-memory-migration-verification-v5",
         )
         self.assertEqual(
             receipt["validation_state"],
-            "disposable_validated",
+            "phase8f_disposable_revalidation_required",
         )
-        with self.assertRaisesRegex(ValueError, "unexpected migration candidate status"):
-            verifier["verify"](MIGRATIONS, phase6e_proof=True)
+        self.assertFalse(receipt["current_disposable_validation_complete"])
+        self.assertTrue(receipt["disposable_revalidation_required"])
+        self.assertFalse(
+            receipt["historical_phase7c_proof_reusable_for_current_candidate"]
+        )
+        self.assertFalse(receipt["production_state_changed"])
 
     def test_current_stores_only_manifest_is_exact_and_excludes_bridge(self) -> None:
         verifier = runpy.run_path(str(STORE_MANIFEST_VERIFIER_PATH))
@@ -1439,7 +1485,7 @@ class PackageIntegrityTests(unittest.TestCase):
             receipt["schema_version"],
             "governed-memory-phase8b-store-migration-verification-v2",
         )
-        self.assertEqual(receipt["file_count"], 10)
+        self.assertEqual(receipt["file_count"], 9)
         self.assertEqual(receipt["source_bridge_artifact_count"], 0)
         self.assertEqual(receipt["historical_package_descriptor_count"], 0)
         self.assertFalse(receipt["production_state_changed"])
@@ -3530,9 +3576,17 @@ class StaticSQLPolicyTests(unittest.TestCase):
         self.assertIn(assertion_name, definitions)
         self.assertIn(
             f"{assertion_name}()",
-            self.contract["internal_functions"],
+            self.contract["bridge"]["internal_functions"],
         )
         catalog = definitions[assertion_name]
+        self.assertIn(
+            "pg_catalog.has_table_privilege(\n"
+            "            'brains_app', expected.relation_oid, 'DELETE'",
+            catalog,
+        )
+        self.assertIn(
+            "'INSERT:false', 'SELECT:false', 'UPDATE:false'", catalog
+        )
         for relation in (
             "public.chat_log",
             "public.threads",
@@ -3585,22 +3639,14 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertIn("source_erasure_message_tombstone_immutable", catalog)
         self.assertIn("source_erasure_thread_tombstone_immutable", catalog)
-        legacy_optional = catalog.index(
-            "trigger_row.tgname =\n"
-            "          'chat_log_enqueue_memory_v1_consolidation'"
+        self.assertIn(
+            "'chat_log_enqueue_memory_v1_consolidation'",
+            catalog,
         )
-        mandatory_triggers = catalog[
-            catalog.index("AS expected("):legacy_optional
-        ]
-        self.assertNotIn(
-            "chat_log_enqueue_memory_v1_consolidation", mandatory_triggers
+        self.assertIn(
+            "legacy chat capture trigger remains after migration",
+            self.bridge,
         )
-        legacy_guard = catalog[legacy_optional:catalog.index(
-            ") OR EXISTS (", legacy_optional
-        )]
-        self.assertIn("trigger_row.tgenabled <> 'D'", legacy_guard)
-        self.assertIn("trigger_row.tgtype <> 5", legacy_guard)
-        self.assertIn("memory.enqueue_chat_log_consolidation()", legacy_guard)
         for composite_lineage in (
             r"ARRAY\[\s*'user_chat_log_id',\s*'owner_user_id',"
             r"\s*'thread_id'\s*\]::text\[\]",
@@ -3797,6 +3843,10 @@ class StaticSQLPolicyTests(unittest.TestCase):
             "tombstone_manifest_sha256",
         ):
             self.assertIn(receipt_binding, finalize)
+        self.assertIn("removed_messages <> operation.target_count", finalize)
+        self.assertIn(
+            "removed_threads <> thread_tombstone_count", finalize
+        )
         self.assertNotRegex(
             finalize,
             r"DELETE\s+FROM\s+memory_ingest_private\.source_erasure_(?:thread_)?target",
@@ -4111,35 +4161,29 @@ class StaticSQLPolicyTests(unittest.TestCase):
             r"DELETE\s+FROM\s+memory_ingest_private\.memory_ingest_outbox",
         )
 
-    def test_legacy_chat_capture_is_optional_but_if_present_exact_disabled(
+    def test_legacy_chat_capture_is_retired_and_empty_rollback_restores_it(
         self,
     ) -> None:
-        combined = f"{self.bridge}\n{self.bridge_rollback}"
-        self.assertNotRegex(
-            combined,
-            r"(?s)(?:IF|OR)\s+NOT\s+EXISTS\s*\(\s*SELECT\s+1\s+"
-            r"FROM\s+pg_catalog\.pg_trigger(?:\s+AS\s+trigger_row)?\s+"
-            r"WHERE\s+(?:trigger_row\.)?tgrelid\s*=\s*"
-            r"'public\.chat_log'::regclass[^)]*?"
-            r"(?:trigger_row\.)?tgname\s*=\s*"
-            r"'chat_log_enqueue_memory_v1_consolidation'",
+        self.assertIn(
+            "DROP TRIGGER chat_log_enqueue_memory_v1_consolidation "
+            "ON public.chat_log;",
+            self.bridge,
         )
-        optional_guards = re.findall(
-            r"(?s)(?:IF|OR)\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+"
-            r"pg_catalog\.pg_trigger(?:\s+AS\s+trigger_row)?\s+WHERE\s+"
-            r"(?:trigger_row\.)?tgrelid\s*=\s*'public\.chat_log'::regclass"
-            r".*?(?:trigger_row\.)?tgname\s*=\s*"
-            r"'chat_log_enqueue_memory_v1_consolidation'.*?"
-            r"(?:trigger_row\.)?tgenabled\s*<>\s*'D'.*?"
-            r"(?:trigger_row\.)?tgtype\s*<>\s*5.*?"
-            r"pg_catalog\.to_regprocedure\(\s*"
-            r"'memory\.enqueue_chat_log_consolidation\(\)'\s*\).*?\)",
-            combined,
+        self.assertIn(
+            "legacy chat capture trigger remains after migration",
+            self.bridge,
         )
-        self.assertEqual(len(optional_guards), 4)
-        self.assertNotRegex(
-            combined,
-            r"'memory\.enqueue_chat_log_consolidation\(\)'::regprocedure",
+        self.assertIn(
+            "CREATE TRIGGER chat_log_enqueue_memory_v1_consolidation",
+            self.bridge_rollback,
+        )
+        self.assertIn(
+            "DISABLE TRIGGER chat_log_enqueue_memory_v1_consolidation",
+            self.bridge_rollback,
+        )
+        self.assertIn(
+            "conversation bridge rollback did not restore enqueue trigger",
+            self.bridge_rollback,
         )
 
     def test_answer_binding_sql_has_exact_outcomes_limits_and_manifests(self) -> None:
@@ -4967,9 +5011,17 @@ class StaticSQLPolicyTests(unittest.TestCase):
         )
         self.assertTrue(legacy_mentions)
         self.assertEqual(set(legacy_mentions), {legacy_trigger})
-        for prohibited in ("memory_" + "raw", "vantage", " CASCADE"):
+        for prohibited in ("memory_" + "raw", "vantage"):
             with self.subTest(prohibited=prohibited):
                 self.assertNotIn(prohibited.lower(), combined.lower())
+        self.assertEqual(
+            len(re.findall(r"\bON\s+DELETE\s+CASCADE\b", combined, re.I)),
+            1,
+        )
+        self.assertNotRegex(
+            combined,
+            re.compile(r"\bDROP\b[^;]*\bCASCADE\b", re.I | re.S),
+        )
         self.assertNotRegex(combined, r"GRANT\s+EXECUTE\b[^;]*\bTO\s+PUBLIC\b")
 
 

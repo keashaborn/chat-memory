@@ -47,8 +47,9 @@ EXPECTED_ROLLBACK_ORDER = [
     "0001_foundation/rollback.pgsql",
 ]
 VALIDATED_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
-NOT_VALIDATED_STATUS = (
-    "isolated_candidate_not_yet_disposable_validated_not_production_applied"
+REVALIDATION_STATUS = (
+    "phase8f_repository_candidate_disposable_revalidation_required_"
+    "not_production_applied"
 )
 EXPECTED_PACKAGE_CONTRACTS = {
     "0001_foundation/package.json": {
@@ -85,47 +86,47 @@ EXPECTED_PACKAGE_CONTRACTS = {
         },
     },
     "0002_conversation_bridge/package.json": {
-        "status": VALIDATED_STATUS,
+        "status": REVALIDATION_STATUS,
         "rollback_empty_only": True,
         "activation": {
             "production_authorized": False,
             "production_writer_membership_granted": False,
             "production_services_changed": False,
             "production_database_applied": False,
-            "disposable_writer_membership_validated": True,
-            "disposable_database_validated": True,
+            "disposable_writer_membership_validated": False,
+            "disposable_database_validated": False,
+            "historical_phase7c_disposable_validation_retained": True,
+            "blockers": [
+                "lifeswitch_chat_answer_binding_provenance_and_owner_context_"
+                "erasure_not_implemented_or_verified",
+                "lifeswitch_prior_provenance_view_not_migrated_to_chat_integrity",
+                "vantage_answer_trace_erasure_or_retention_disposition_not_"
+                "decided_or_verified",
+                "telemetry_payload_erasure_or_retention_disposition_not_"
+                "decided_or_verified",
+                "conversation_erasure_auxiliary_deleted_object_counts_not_"
+                "implemented_or_verified",
+                "successor_answer_binding_chat_transaction_recovery_not_implemented",
+                "phase8f_current_runtime_rebuild_not_completed",
+                "phase8f_current_candidate_disposable_revalidation_not_completed",
+            ],
         },
     },
 }
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def expected_package_contracts(*, phase6e_proof: bool) -> dict[str, dict[str, object]]:
-    contracts = {
+def expected_package_contracts() -> dict[str, dict[str, object]]:
+    return {
         relative: {
             **contract,
-            "activation": dict(contract["activation"]),
+            "activation": {
+                key: list(value) if isinstance(value, list) else value
+                for key, value in contract["activation"].items()
+            },
         }
         for relative, contract in EXPECTED_PACKAGE_CONTRACTS.items()
     }
-    if phase6e_proof:
-        for relative in (
-            "0001_foundation/package.json",
-            "0003_owner_claim_detail/package.json",
-            "0004_pilot_marker/package.json",
-            "0002_conversation_bridge/package.json",
-        ):
-            contracts[relative]["status"] = NOT_VALIDATED_STATUS
-            contracts[relative]["activation"][
-                "disposable_database_validated"
-            ] = False
-        contracts["0001_foundation/package.json"]["activation"][
-            "disposable_qdrant_validated"
-        ] = False
-        contracts["0002_conversation_bridge/package.json"]["activation"][
-            "disposable_writer_membership_validated"
-        ] = False
-    return contracts
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -138,8 +139,13 @@ def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def load_json(path: Path) -> dict[str, object]:
+    def reject_nonfinite(value: str) -> object:
+        raise ValueError(f"non-finite JSON value: {value}")
+
     value = json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=reject_nonfinite,
     )
     if not isinstance(value, dict):
         raise ValueError(f"JSON root is not an object: {path}")
@@ -164,7 +170,7 @@ def checked_path(root: Path, relative: str) -> Path:
     return candidate
 
 
-def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
+def verify(root: Path) -> dict[str, object]:
     root = root.resolve(strict=True)
     manifest_path = root / "manifest.json"
     manifest = load_json(manifest_path)
@@ -173,10 +179,7 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id:
         raise ValueError("missing migration candidate id")
-    expected_manifest_status = (
-        NOT_VALIDATED_STATUS if phase6e_proof else VALIDATED_STATUS
-    )
-    if manifest.get("status") != expected_manifest_status:
+    if manifest.get("status") != REVALIDATION_STATUS:
         raise ValueError("unexpected migration candidate status")
     expected_authority = {
         "production_apply_authorized": False,
@@ -184,7 +187,7 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
         "production_provider_call_authorized": False,
         "production_qdrant_change_authorized": False,
         "legacy_import_authorized": False,
-        "disposable_validation_authorized": not phase6e_proof,
+        "disposable_validation_authorized": False,
     }
     if manifest.get("authority") != expected_authority:
         raise ValueError("unexpected migration authority contract")
@@ -200,7 +203,7 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
         "claim_detail_rollback_data_mutation": False,
         "pilot_marker_rollback_empty_only": True,
         "cascade_ddl_allowed": False,
-        "disposable_database_execution_performed": not phase6e_proof,
+        "disposable_database_execution_performed": False,
         "production_database_execution_performed": False,
         "production_checkout_files_changed": False,
         "production_data_read": False,
@@ -240,7 +243,23 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
     if observed != EXPECTED_FILES:
         raise ValueError("migration directory contains an undeclared file")
 
-    package_contracts = expected_package_contracts(phase6e_proof=phase6e_proof)
+    schema_contract = load_json(root / "schema_contract.json")
+    if schema_contract.get("status") != REVALIDATION_STATUS:
+        raise ValueError("unexpected schema contract status")
+    validation_scope = schema_contract.get("validation_scope")
+    if validation_scope != {
+        "scope": "phase8f_repository_candidate",
+        "environment": "repository_only",
+        "current_candidate_disposable_validated": False,
+        "historical_phase7c_disposable_proof_retained": True,
+        "disposable_revalidation_required": True,
+        "production_data_read": False,
+        "provider_external_calls": 0,
+        "production_state_changed": False,
+    }:
+        raise ValueError("unexpected schema validation scope")
+
+    package_contracts = expected_package_contracts()
     for package_relative in EXPECTED_PACKAGES:
         if package_relative not in expected:
             raise ValueError(f"package missing from manifest: {package_relative}")
@@ -297,8 +316,12 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
                     f"package byte mismatch: {package_relative}:{direction}"
                 )
             sql = checked_path(root, relative).read_text(encoding="utf-8")
-            if re.search(r"\bCASCADE\b", sql, flags=re.IGNORECASE):
-                raise ValueError(f"CASCADE token present: {relative}")
+            if re.search(
+                r"\bDROP\b[^;]*\bCASCADE\b",
+                sql,
+                flags=re.IGNORECASE | re.DOTALL,
+            ):
+                raise ValueError(f"CASCADE DDL present: {relative}")
 
     return {
         "file_count": len(expected),
@@ -306,31 +329,24 @@ def verify(root: Path, *, phase6e_proof: bool = False) -> dict[str, object]:
         "migration_package_id_sha256": hashlib.sha256(
             candidate_id.encode("utf-8")
         ).hexdigest(),
-        "result": "verified",
-        "schema_version": "governed-memory-migration-verification-v4",
-        "validation_state": (
-            "phase6e_disposable_deletion_proof_candidate"
-            if phase6e_proof
-            else "disposable_validated"
-        ),
+        "result": "artifact_integrity_verified",
+        "schema_version": "governed-memory-migration-verification-v5",
+        "validation_state": "phase8f_disposable_revalidation_required",
+        "current_disposable_validation_complete": False,
+        "disposable_revalidation_required": True,
+        "historical_phase7c_proof_reusable_for_current_candidate": False,
+        "production_state_changed": False,
     }
 
 
 def main() -> int:
     arguments = list(sys.argv[1:])
-    phase6e_proof = False
-    if arguments[:1] == ["--phase6e-disposable-deletion-proof"]:
-        phase6e_proof = True
-        arguments.pop(0)
     if len(arguments) > 1:
-        raise SystemExit(
-            "usage: verify_migration_manifest.py "
-            "[--phase6e-disposable-deletion-proof] [migration_root]"
-        )
+        raise SystemExit("usage: verify_migration_manifest.py [migration_root]")
     default_root = Path(__file__).resolve().parents[2] / "governed-memory-migrations"
     root = Path(arguments[0]) if arguments else default_root
     try:
-        receipt = verify(root, phase6e_proof=phase6e_proof)
+        receipt = verify(root)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"MIGRATION_MANIFEST_INVALID={error}", file=sys.stderr)
         return 1

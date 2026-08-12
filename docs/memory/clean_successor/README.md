@@ -2,8 +2,8 @@
 
 ## Current repository authority
 
-There is one current Phase 8B successor installation-controller source
-generation:
+Phase 8F defines one current successor path. The retained Phase 8B-named
+installation-controller package is the only current stores-only package:
 
 - package manifest: `ops/governed_memory/installation/phase8b/package_manifest.json`;
 - offline package verifier: `tools/governed_memory_install/package.py`;
@@ -19,22 +19,34 @@ identities. They do not identify a second current Phase 8B successor source
 generation. Phase 8D removed the parallel Phase 8A successor-install
 implementation and canonicalized the surviving module names.
 
+The current store manifest contains nine store artifacts. The current package
+contains 43 artifacts. The global `schema_contract.json` is verified by the
+full-chain migration manifest and is intentionally excluded from the
+stores-only package.
+
 ## Current state
 
-Phase 8D performed no installation or activation, and the repository candidate
+Phase 8F performed no installation or activation, and the repository candidate
 remains activation-blocked. The repository packages an offline verifier, an
 in-process synthetic proof harness, and stores-only controller primitives. It
 does not package a complete live installation executor, rollback executor, or
 activation executor.
 
-Phase 8D created no persistent successor PostgreSQL or Qdrant store. It staged
+The active chat response path is successor-only. It no longer accepts the old
+Memory V1 prompt object, stored assistant-response preferences, or a fallback
+legacy memory provider. Neutral chat-integrity attestation is separate from
+governed-memory claims. The canonical chat-erasure path is limited to chat
+records and their conversational derivatives.
+
+Phase 8F created no persistent successor PostgreSQL or Qdrant store. It staged
 or pulled no image, read or generated no secret, installed or changed no
 service, and activated no application route. This repository-only phase did not
 re-establish current live absence of previously created resources. A synthetic
 receipt is not live proof and is not installation authority.
 
 Phase 7C application and chat-deletion evidence remains separate historical
-evidence. It does not make the installation package live.
+evidence. Changed Phase 8F SQL and runtime bytes are not attested by that proof;
+current disposable revalidation is required.
 
 ## Retired repository material
 
@@ -60,9 +72,11 @@ Four shared Phase 8B store inputs also remain current: the canonical-cluster
 forward and rollback SQL templates, `installation/store_spec.json`, and the
 stores-only systemd template.
 
-The active-tree Memory v1/v5 executable, unit, and test surface also remains. It
-was not audited or retired by Phase 8D. Repository cleanup of that surface and
-live host quiescence are separate future scopes.
+The remaining Memory v1/v5 implementation is quarantined legacy material: it is
+not mounted by `app.py`, not accepted by the active response graph, and not part
+of the default current CI suite. Exact unreachable-closure proof, a retained
+rollback interval, and separate deletion authorization are still required
+before that quarantine is physically deleted.
 
 PostgreSQL remains the canonical governed-memory authority. Qdrant is a derived,
 rebuildable projection. A future installation must use fresh empty isolated
@@ -91,7 +105,8 @@ timer or cron quiescence alone does not prove exclusivity.
 
 ## Next gate
 
-Before dormant installation, the remaining blockers in
+Before dormant installation, rebuild and bind the current runtime, execute an
+authorized disposable Phase 8F revalidation, and resolve the remaining blockers in
 `ops/governed_memory/installation/phase8b/contract.json` must be resolved and
 re-proved. Source PostgreSQL preparation is governed by a separate, phase-neutral
 source-preparation authorization. It is not authorized by repository cleanup or

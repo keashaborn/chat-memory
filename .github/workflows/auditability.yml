@@ -1,93 +1,119 @@
-name: Auditability Guard (seebx)
+name: Governed Memory Successor Guard
 
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOVERNED_MEMORY_EXCLUSIVE_MODE: successor_pilot
 
 jobs:
-  audit-canary:
+  successor-static:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Legacy quarantine - validate governed-memory schema ledger
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=schema-ledger/tools python3 -B -W error::ResourceWarning -m unittest discover -s schema-ledger/tests -p test_*.py
-          python3 -B schema-ledger/tools/verify_manifest.py --root schema-ledger
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=schema-ledger/tools python3 -B schema-ledger/tools/validate_schema_ledger.py --root schema-ledger --repository . --repository-commit HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
 
-      - name: Validate governed migration full chain
-        env:
-          GOVERNED_MIGRATION_DOCKER: /usr/bin/docker
-          GOVERNED_MIGRATION_IMAGE: postgres@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
-          GOVERNED_MIGRATION_RUN_ID: gmci-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=governed-migration-ci/tools python3 -B -W error::ResourceWarning -m unittest discover -s governed-migration-ci/tests -p test_*.py
-          python3 -B governed-migration-ci/tools/verify_manifest.py --root governed-migration-ci
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=governed-migration-ci/tools python3 -B governed-migration-ci/tools/validate_repository_migrations.py --root governed-migration-ci --schema-ledger-root schema-ledger --repository . --repository-commit HEAD
-          "$GOVERNED_MIGRATION_DOCKER" pull "$GOVERNED_MIGRATION_IMAGE"
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=governed-migration-ci/tools python3 -B governed-migration-ci/tools/full_chain_harness.py --root governed-migration-ci --schema-ledger-root schema-ledger --package governed-migration-ci/fixtures/gm_ci_add_governed_record_v1 --docker "$GOVERNED_MIGRATION_DOCKER" --image "$GOVERNED_MIGRATION_IMAGE" --run-id "$GOVERNED_MIGRATION_RUN_ID"
+      - name: Install the current test runtime
+        run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
 
-      - name: Build and start CI stack
+      - name: Reject retired response paths
+        shell: bash
         run: |
-          docker compose -f docker-compose.ci.yml build
-          docker compose -f docker-compose.ci.yml up -d
-          docker compose -f docker-compose.ci.yml ps
-
-      - name: Wait for health
-        run: |
-          for i in $(seq 1 60); do
-            curl -sf -H 'x-vs-service-token: ci_only_service_token' http://127.0.0.1:8088/healthz >/dev/null && exit 0
-            sleep 2
+          set -euo pipefail
+          retired_paths=(
+            rag_engine/response_composition_root_v0_3.py
+            rag_engine/response_finalization_v2.py
+            rag_engine/response_inspection_v3.py
+            rag_engine/response_persistence_v2.py
+            rag_engine/governed_memory/response_defaults.py
+            tests/test_lifeswitch_response_runtime_v1.py
+            tests/test_response_inspection_v3.py
+            tests/memory/test_response_defaults.py
+          )
+          for path in "${retired_paths[@]}"; do
+            test ! -e "$path"
           done
-          echo "brains did not become healthy"
-          docker compose -f docker-compose.ci.yml logs brains
-          exit 1
+          if git grep -nE \
+            'response_(composition_root_v0_3|finalization_v2|inspection_v3|persistence_v2)' \
+            -- 'app.py' 'rag_engine/*.py' 'tests/*.py' 'tests/**/*.py'; then
+            exit 1
+          fi
+          if git grep -nE \
+            'governed_memory_v1|MemoryPrompt(AssemblyInput|ApplicationResult)V1|assistant_response_preferences' \
+            -- \
+              rag_engine/prompt_assembler_v1.py \
+              rag_engine/response_composition_root_v0_2.py \
+              rag_engine/response_orchestration_v0_2.py \
+              rag_engine/openai_chat_provider_v1.py \
+              rag_engine/lifeswitch_prompt_integration_v2.py \
+              rag_engine/lifeswitch_answer_binding_v1.py \
+              rag_engine/openai_chat_request_v4.py \
+              rag_engine/usage_ledger_v1.py \
+              rag_engine/response_finalization_v1.py \
+              rag_engine/response_finalization_v3.py \
+              rag_engine/response_inspection_v1.py \
+              rag_engine/response_inspection_v2.py \
+              rag_engine/response_inspection_v4.py \
+              rag_engine/resse_response_router.py; then
+            exit 1
+          fi
 
-      - name: Run audit canary
+      - name: Validate the current successor contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          docker compose -f docker-compose.ci.yml exec -T brains \
-            bash -lc 'VS_SERVICE_TOKEN=ci_only_service_token HOST=127.0.0.1 PORT=8088 PGHOST=postgres PGUSER=sage PGPASSWORD=ci_only_postgres_password PGDATABASE=memory ./tools/audit_canary.sh'
+          python -B -m unittest discover -s tests/memory -p 'test_*.py'
+          python -B -m unittest \
+            tests.test_lifeswitch_answer_binding_v1 \
+            tests.test_lifeswitch_answer_provenance_receipt_v1 \
+            tests.test_lifeswitch_coaching_self_shadow_adapter_v2 \
+            tests.test_lifeswitch_coaching_self_shadow_runner_v2 \
+            tests.test_lifeswitch_prompt_integration_v2 \
+            tests.test_openai_chat_provider_v1 \
+            tests.test_openai_chat_request_v4 \
+            tests.test_prompt_assembler_v1 \
+            tests.test_response_composition_root_v0_2 \
+            tests.test_response_conversation_snapshot_v1 \
+            tests.test_response_finalization_v1 \
+            tests.test_response_inspection_v1 \
+            tests.test_response_orchestration_v0_2 \
+            tests.test_response_persistence_v1 \
+            tests.test_response_persistence_v3 \
+            tests.test_resse_response_router \
+            tests.test_successor_memory_chat_adapter_v1 \
+            tests.test_successor_response_integration_v1 \
+            tests.test_usage_ledger_v1
+          python -B tools/governed_memory_install/package.py verify-package
+          python -B tools/governed_memory_validation/verify_store_migration_manifest.py
+          python -B tools/governed_memory_validation/verify_migration_manifest.py \
+            governed-memory-migrations
+          python -B tools/governed_memory_release/release_guard.py verify-artifacts
 
-      - name: Validate inactive clean successor contracts
+      - name: Compile current runtime entry points
         run: |
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app \
-            brains python -m unittest discover -s tests/memory -p 'test_*.py'
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app \
-            brains python tools/governed_memory_install/package.py verify-package
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app \
-            brains python tools/governed_memory_validation/verify_store_migration_manifest.py
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app \
-            brains python tools/governed_memory_validation/verify_migration_manifest.py \
-              governed-memory-migrations
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app \
-            brains python tools/governed_memory_release/release_guard.py verify-artifacts
-
-      - name: Legacy quarantine - run focused Memory V1 Python tests
-        run: |
-          docker compose -f docker-compose.ci.yml exec -T \
-            -e PYTHONPATH=/app:/app/scripts \
-            brains python -m pytest -p no:cacheprovider -q \
-              tests/test_memory_v1_v5_local_claim_projection_v2.py \
-              tests/test_admin_memory_health_v1.py \
-              tests/test_memory_v1_contextual_chat_capture_bridge_v1.py \
-              tests/test_memory_v1_v5_2_local_packet_router.py
-
-      - name: Legacy quarantine - validate memory V1 schema firewall
-        run: ./tools/memory_v1_schema_ci.sh
-
-      - name: Dump logs on failure
-        if: failure()
-        run: |
-          docker compose -f docker-compose.ci.yml logs brains
-          docker compose -f docker-compose.ci.yml logs postgres
-
-      - name: Teardown
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down -v
+          python -B -m py_compile \
+            app.py \
+            rag_engine/chat_integrity.py \
+            rag_engine/governed_memory_erasure_proxy_v1.py \
+            rag_engine/lifeswitch_answer_binding_v1.py \
+            rag_engine/response_composition_root_v0_2.py \
+            rag_engine/response_composition_root_v0_4.py \
+            rag_engine/response_finalization_v1.py \
+            rag_engine/response_finalization_v3.py \
+            rag_engine/response_inspection_v1.py \
+            rag_engine/response_inspection_v4.py \
+            rag_engine/response_persistence_v1.py \
+            rag_engine/response_persistence_v3.py \
+            rag_engine/resse_response_router.py \
+            rag_engine/usage_ledger_v1.py

@@ -116,7 +116,10 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             inspection.after_openai.transcript_persistence, "skipped"
         )
-        self.assertEqual(inspection.after_openai.memory_binding, "none")
+        self.assertNotIn(
+            "memory_binding",
+            inspection.after_openai.model_dump(mode="json"),
+        )
         self.assertIsNone(inspection.delivery)
 
 

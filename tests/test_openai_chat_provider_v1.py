@@ -15,6 +15,7 @@ from rag_engine.openai_chat_provider_v1 import (
     OPENAI_CHAT_ADAPTER_VERSION,
     OpenAIChatCompletionsAdapterV1,
     OpenAIChatGenerationConfigV1,
+    OpenAIChatMessageV1,
     OpenAIChatProviderContractError,
     OpenAIChatProviderError,
     OpenAIChatRequestV1,
@@ -214,6 +215,14 @@ class FakeClient:
 
 
 class OpenAIChatProviderV1Tests(unittest.TestCase):
+    def test_legacy_memory_reference_name_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            OpenAIChatMessageV1(
+                role="user",
+                name="governed_memory_v1",
+                content="retired",
+            )
+
     def test_prior_web_provenance_is_reference_json_before_current_turn(self) -> None:
         current = "What sources did you use for your last answer?"
         request = OpenAIChatRequestV1.create(

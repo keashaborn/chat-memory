@@ -36,7 +36,8 @@ class Phase8BPackageTests(unittest.TestCase):
         self.assertEqual(receipt["schema_version"], (
             "governed-memory-phase8b-package-verification-v3"
         ))
-        self.assertEqual(receipt["artifact_count"], len(package.EXPECTED_ARTIFACTS))
+        self.assertEqual(receipt["artifact_count"], 43)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 43)
         self.assertTrue(receipt["durable_journal_adapter_packaged"])
         self.assertTrue(receipt["guarded_synthetic_proof_harness_packaged"])
         self.assertFalse(receipt["synthetic_proof_executed_by_verifier"])
@@ -99,6 +100,10 @@ class Phase8BPackageTests(unittest.TestCase):
         )
         artifacts = set(receipt["artifact_sha256"])
         self.assertEqual(artifacts, package.EXPECTED_ARTIFACTS)
+        self.assertNotIn(
+            "governed-memory-migrations/schema_contract.json",
+            artifacts,
+        )
         for forbidden in package.FORBIDDEN_ARTIFACT_MARKERS:
             self.assertFalse(any(forbidden in path for path in artifacts))
 
@@ -107,9 +112,7 @@ class Phase8BPackageTests(unittest.TestCase):
             package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_phase8b_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], len(
-            package.EXPECTED_ARTIFACTS
-        ))
+        self.assertEqual(package.verify()["artifact_count"], 43)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
@@ -316,7 +319,8 @@ class Phase8BPackageTests(unittest.TestCase):
             receipt["schema_version"],
             "governed-memory-phase8b-store-migration-verification-v2",
         )
-        self.assertEqual(receipt["file_count"], 10)
+        self.assertEqual(receipt["file_count"], 9)
+        self.assertNotIn("schema_contract.json", receipt["artifact_sha256"])
         self.assertEqual(receipt["historical_package_descriptor_count"], 0)
         self.assertEqual(
             receipt["migration_bindings_canonical_sha256"],

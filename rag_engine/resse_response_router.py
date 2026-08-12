@@ -18,10 +18,9 @@ from rag_engine.chat_attachment_context_v1 import (
     build_attachment_context_block_v1,
 )
 from rag_engine.governed_memory.exclusive_cutover import (
-    EXCLUSIVE_MEMORY_MODE,
+    exclusive_memory_mode,
 )
 from rag_engine.governed_memory.response_provider import (
-    EXCLUSIVE_MODE_LEGACY,
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
     SuccessorGovernedMemoryAssemblyProviderV1,
@@ -33,7 +32,6 @@ from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryAnswerProvenanceV1,
     SuccessorMemoryNotApplicableReason,
 )
-from rag_engine.governed_memory.response_defaults import SUCCESSOR_RESPONSE_DEFAULTS
 from rag_engine.governed_memory.response_runtime import SuccessorResponseRuntime
 from rag_engine.governed_memory.successor_live_authority import (
     SuccessorLiveAuthorityConfigurationError,
@@ -55,16 +53,12 @@ from rag_engine.memory_actor_auth_v1 import (
     MemoryActorContextV1,
     MemoryLiveAuthorityVerifierV1,
     require_memory_actor_context_v1,
-    require_memory_actor_v1,
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     InactiveResponseCompositionRootV0_2,
-)
-from rag_engine.response_composition_root_v0_3 import (
-    IntegratedLifeSwitchResponseCompositionRootV0_3,
 )
 from rag_engine.response_composition_root_v0_4 import (
     IntegratedLifeSwitchResponseCompositionRootV0_4,
@@ -73,10 +67,8 @@ from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,
 )
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
-from rag_engine.response_inspection_v3 import build_response_inspection_v3
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
-from rag_engine.response_persistence_v2 import persist_finalized_response_v2
 from rag_engine.response_persistence_v3 import persist_finalized_response_v3
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v2
@@ -122,31 +114,19 @@ SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
 
 
 SUCCESSOR_RESPONSE_RUNTIME = SuccessorResponseRuntime()
+EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
 RESPONSE_MEMORY_MODE = EXCLUSIVE_MEMORY_MODE.value
 
 
 def response_memory_provenance_for_mode(
     *,
     mode: str,
-    legacy_binding: object | None,
     successor_provenance: SuccessorMemoryAnswerProvenanceV1 | None,
 ) -> dict[str, object]:
     """Serialize exactly one mode-owned provenance contract; never fall back."""
 
-    if mode == EXCLUSIVE_MODE_LEGACY:
-        if successor_provenance is not None:
-            raise SuccessorResponseConfigurationError(
-                "response_memory_provenance_mode_mismatch"
-            )
-        from rag_engine.memory_v1_answer_provenance_v1 import (
-            build_governed_memory_answer_provenance_v1,
-        )
-
-        return build_governed_memory_answer_provenance_v1(
-            legacy_binding
-        ).model_dump(mode="json")
     if mode == EXCLUSIVE_MODE_SUCCESSOR:
-        if legacy_binding is not None or successor_provenance is None:
+        if successor_provenance is None:
             raise SuccessorResponseConfigurationError(
                 "response_memory_provenance_mode_mismatch"
             )
@@ -195,43 +175,6 @@ def _production_successor_response_provider(
 SUCCESSOR_RESPONSE_PROVIDER_FACTORY: SuccessorResponseProviderFactory = (
     _production_successor_response_provider
 )
-
-
-def _legacy_response_memory_provider(conn: object) -> object:
-    # Keep the retired implementation out of the successor import graph.
-    from rag_engine.governed_memory_provider_v1 import (
-        LiveGovernedMemoryAssemblyProviderV1,
-    )
-
-    return LiveGovernedMemoryAssemblyProviderV1(conn)
-
-
-async def _legacy_assistant_response_preferences(
-    conn: object,
-    owner: UUID,
-    request_id: str,
-) -> object:
-    from rag_engine.assistant_response_preferences_store_v1 import (
-        load_assistant_response_preferences_v1,
-        set_preference_actor_v1,
-    )
-    from rag_engine.assistant_response_preferences_v1 import (
-        default_assistant_response_preferences_v1,
-    )
-
-    try:
-        async with conn.transaction():  # type: ignore[attr-defined]
-            await set_preference_actor_v1(conn, owner)  # type: ignore[arg-type]
-            return await load_assistant_response_preferences_v1(  # type: ignore[arg-type]
-                conn,
-                owner,
-            )
-    except Exception:
-        logger.warning(
-            "assistant response preferences unavailable request_id=%s",
-            request_id,
-        )
-        return default_assistant_response_preferences_v1(owner)
 
 
 def _inactive_successor_response_provider(
@@ -351,39 +294,37 @@ async def resse_response_query(
             (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
         ),
     )
+    if response_memory_mode != EXCLUSIVE_MODE_SUCCESSOR:
+        raise _no_store_http_exception(503, "response_memory_mode_invalid")
     tentative_successor_eligible = (
-        response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
-        and payload.thread_id is not None
+        payload.thread_id is not None
         and tentative_exclusion_reason is None
     )
-    if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
-        try:
-            live_authority_verifier = (
-                SUCCESSOR_LIVE_AUTHORITY_FACTORY()
-                if tentative_successor_eligible
-                else None
-            )
-        except SuccessorLiveAuthorityConfigurationError:
-            raise _no_store_http_exception(
-                503,
-                "successor_live_authority_unconfigured",
-            ) from None
-        try:
-            actor_context = await require_memory_actor_context_v1(
-                req,
-                str(payload.user_id),
-                live_authority_verifier=live_authority_verifier,
-                require_live_authority=tentative_successor_eligible,
-            )
-        except HTTPException as exc:
-            raise _no_store_http_exception(
-                exc.status_code,
-                str(exc.detail),
-                inherited_headers=dict(exc.headers or {}),
-            ) from None
-        owner = actor_context.owner_user_id
-    else:
-        owner = UUID(await require_memory_actor_v1(req, str(payload.user_id)))
+    try:
+        live_authority_verifier = (
+            SUCCESSOR_LIVE_AUTHORITY_FACTORY()
+            if tentative_successor_eligible
+            else None
+        )
+    except SuccessorLiveAuthorityConfigurationError:
+        raise _no_store_http_exception(
+            503,
+            "successor_live_authority_unconfigured",
+        ) from None
+    try:
+        actor_context = await require_memory_actor_context_v1(
+            req,
+            str(payload.user_id),
+            live_authority_verifier=live_authority_verifier,
+            require_live_authority=tentative_successor_eligible,
+        )
+    except HTTPException as exc:
+        raise _no_store_http_exception(
+            exc.status_code,
+            str(exc.detail),
+            inherited_headers=dict(exc.headers or {}),
+        ) from None
+    owner = actor_context.owner_user_id
     search_capability_manifest = None
     search_authorization = (
         req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or ""
@@ -464,18 +405,6 @@ async def resse_response_query(
                 request_id=request_id,
                 current_message=payload.message,
             )
-        if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR:
-            assistant_response_preferences = (
-                SUCCESSOR_RESPONSE_DEFAULTS.response_policy_overlay
-            )
-        else:
-            assistant_response_preferences = (
-                await _legacy_assistant_response_preferences(
-                    conn,
-                    owner,
-                    request_id,
-                )
-            )
         openai_client = get_openai_client()
         generation_config = OpenAIChatGenerationConfigV1()
         exclusion_reason = successor_not_applicable_reason(
@@ -485,20 +414,12 @@ async def resse_response_query(
             has_web_search=search_capability_manifest is not None,
         )
         successor_eligible = (
-            response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
-            and payload.thread_id is not None
-            and exclusion_reason is None
-        )
-        assert (
-            actor_context is not None
-            if response_memory_mode == EXCLUSIVE_MODE_SUCCESSOR
-            else actor_context is None
+            payload.thread_id is not None and exclusion_reason is None
         )
         try:
             memory_provider, successor_memory_lifecycle = (
                 choose_response_memory_provider(
                     mode=response_memory_mode,
-                    legacy_factory=lambda: _legacy_response_memory_provider(conn),
                     successor_factory=(
                         (
                             lambda: SuccessorMemoryChatAdapterV1(
@@ -516,7 +437,7 @@ async def resse_response_query(
                                 )
                             )
                         )
-                        if successor_eligible and actor_context is not None
+                        if successor_eligible
                         else lambda: SuccessorMemoryChatAdapterV1(
                             _inactive_successor_response_provider(
                                 exclusion_reason
@@ -554,7 +475,6 @@ async def resse_response_query(
             ),
             stateless=stateless,
             search_capability_manifest=search_capability_manifest,
-            assistant_response_preferences=assistant_response_preferences,
             response_language=response_language,
             attachment_context_block=attachment_context_block,
         )
@@ -590,6 +510,10 @@ async def resse_response_query(
                 timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
             )
         finalized = execution.finalized
+        memory_provenance = response_memory_provenance_for_mode(
+            mode=response_memory_mode,
+            successor_provenance=execution.successor_memory_provenance,
+        )
         persistence_started_ns = time.monotonic_ns()
         if lifeswitch_enabled:
             await persist_openai_chat_usage_v2(
@@ -631,11 +555,7 @@ async def resse_response_query(
             "answer": finalized.assistant_text,
             "answer_id": str(finalized.answer_id),
             "output_kind": finalized.output_kind.value,
-            "memory_provenance": response_memory_provenance_for_mode(
-                mode=response_memory_mode,
-                legacy_binding=finalized.memory_binding,
-                successor_provenance=execution.successor_memory_provenance,
-            ),
+            "memory_provenance": memory_provenance,
             "runtime": (
                 "resse_response_v0_4" if lifeswitch_enabled else "resse_response_v0_2"
             ),

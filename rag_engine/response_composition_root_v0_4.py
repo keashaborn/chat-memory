@@ -128,8 +128,6 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
         if self.successor_memory_provenance is not None:
             if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
                 raise ValueError("successor provenance differs from finalized answer")
-            if self.finalized.memory_binding is not None:
-                raise ValueError("successor and legacy Memory bindings cannot coexist")
         return self
 
 

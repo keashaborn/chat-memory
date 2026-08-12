@@ -10,8 +10,8 @@ from typing import Any
 
 def __getattr__(name: str) -> Any:
     if name in {
-        "API_BIND_HOST",
-        "API_BIND_PORT",
+        "API_UNIX_SOCKET",
+        "BRAINS_PROXY_TRANSPORT",
         "SUPABASE_API_KEY_ENV",
         "create_runtime_application",
     }:
@@ -30,8 +30,8 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(name)
 
 __all__ = [
-    "API_BIND_HOST",
-    "API_BIND_PORT",
+    "API_UNIX_SOCKET",
+    "BRAINS_PROXY_TRANSPORT",
     "LiveSupabaseAuthorityConfig",
     "LiveSupabaseAuthorityVerifier",
     "LiveSupabaseSessionVerifier",

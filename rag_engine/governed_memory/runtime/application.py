@@ -4,7 +4,8 @@ from __future__ import annotations
 
 Importing this module and constructing the default off-mode application do not
 open sockets, create a database pool, fetch signing keys, or contact Supabase.
-The only executable server bind is the candidate's private seebx interface.
+The executable server binds one permissioned Unix socket. Brains is the sole
+proxy; the frontend cannot address this process directly.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -31,9 +32,8 @@ from .live_supabase import (
 )
 
 
-API_BIND_HOST = "172.31.32.171"
-API_BIND_PORT = 8091
-FRONTEND_SOURCE_IPV4 = "172.31.43.160/32"
+API_UNIX_SOCKET = "/run/governed-memory/http.sock"
+BRAINS_PROXY_TRANSPORT = "permissioned_unix_socket"
 SUPABASE_API_KEY_ENV = "GOVERNED_MEMORY_SUPABASE_API_KEY"
 
 HttpServiceFactory = Callable[..., FastAPI]
@@ -103,9 +103,9 @@ def create_runtime_application(
 def _contract_json() -> str:
     return json.dumps(
         {
-            "api_bind": f"{API_BIND_HOST}:{API_BIND_PORT}",
+            "api_bind": API_UNIX_SOCKET,
             "default_mode": "off",
-            "frontend_source_ipv4": FRONTEND_SOURCE_IPV4,
+            "brains_proxy_transport": BRAINS_PROXY_TRANSPORT,
             "production_authorized": False,
             "schema_version": "governed-memory-runtime-entrypoint-v1",
         },
@@ -153,8 +153,7 @@ def main(
         server_runner = uvicorn.run
     server_runner(
         application,
-        host=API_BIND_HOST,
-        port=API_BIND_PORT,
+        uds=API_UNIX_SOCKET,
         access_log=False,
         proxy_headers=False,
         server_header=False,
@@ -164,9 +163,8 @@ def main(
 
 
 __all__ = [
-    "API_BIND_HOST",
-    "API_BIND_PORT",
-    "FRONTEND_SOURCE_IPV4",
+    "API_UNIX_SOCKET",
+    "BRAINS_PROXY_TRANSPORT",
     "SUPABASE_API_KEY_ENV",
     "create_runtime_application",
     "main",

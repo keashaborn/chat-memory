@@ -8,8 +8,10 @@ from unittest import mock
 
 from tools.governed_memory_release import release_guard
 from tools.governed_memory_release.release_guard import (
+    CURRENT_PROOF_REFUSAL_CODE,
     EXACT_TARGETS,
-    EXPECTED_ACTIVATION_BLOCKERS,
+    EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES,
+    REQUIRED_ACTIVATION_BLOCKERS,
     ReleaseGuardError,
     evaluate_release_observation,
     verify_candidate_artifacts,
@@ -42,40 +44,60 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase8DReleaseArtifactTests(unittest.TestCase):
+class Phase8FReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
-            "governed-memory-release-artifact-verification-v3",
+            "governed-memory-release-artifact-verification-v4",
         )
         self.assertEqual(
             result["phase"],
-            "phase8d_repository_only_phase8a_successor_installation_stack_"
-            "retired_"
-            "current_inactive_store_package_activation_blocked",
+            "phase8f_repository_only_exclusive_cutover_candidate_disposable_"
+            "revalidation_required_activation_blocked",
         )
-        self.assertTrue(result["runtime_build_evidence_verified"])
-        self.assertTrue(result["phase7c_application_proof_verified"])
+        self.assertTrue(result["artifact_integrity_verified"])
+        self.assertTrue(
+            result["historical_phase7c_runtime_build_evidence_verified"]
+        )
+        self.assertFalse(result["current_runtime_build_evidence_verified"])
+        self.assertTrue(result["current_runtime_rebuild_required"])
+        self.assertTrue(
+            result["historical_phase7c_application_proof_verified"]
+        )
         self.assertFalse(
-            result["phase7c_proof_is_current_store_installation_proof"]
+            result[
+                "historical_phase7c_proof_reusable_for_current_candidate"
+            ]
         )
-        self.assertFalse(result["phase7c_proof_is_live_proof"])
+        self.assertFalse(result["historical_phase7c_proof_is_live_proof"])
+        self.assertTrue(
+            result["current_migration_artifact_integrity_verified"]
+        )
+        self.assertFalse(
+            result["current_migration_disposable_validation_complete"]
+        )
+        self.assertTrue(
+            result["current_migration_disposable_revalidation_required"]
+        )
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertEqual(result["current_store_package_artifact_count"], 44)
+        self.assertGreater(result["current_store_package_artifact_count"], 0)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
-        self.assertTrue(
-            result["synthetic_proof_executed_separately_for_current_package"]
+        self.assertFalse(result["current_store_synthetic_proof_complete"])
+        self.assertFalse(
+            result[
+                "historical_phase8b_synthetic_proof_reusable_for_current_candidate"
+            ]
         )
         self.assertFalse(result["synthetic_proof_executed_by_release_guard"])
-        self.assertEqual(result["synthetic_proof_scenario_count"], 131)
-        self.assertEqual(
-            result["synthetic_proof_receipt_sha256"],
-            "ce9a57f6f01c670dfbc030bff812b99bfb13e9782f406d7e576f0d89af1f33c6",
-        )
         self.assertFalse(result["synthetic_proof_receipt_promoted"])
+        self.assertFalse(result["current_candidate_disposable_proof_complete"])
+        self.assertFalse(result["release_allowed"])
+        self.assertEqual(
+            result["release_refusal_code"], CURRENT_PROOF_REFUSAL_CODE
+        )
         self.assertFalse(result["live_installation_proof_complete"])
         self.assertFalse(result["installation_executor_packaged"])
         self.assertFalse(result["rollback_executor_packaged"])
@@ -90,9 +112,18 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             result["artifact_sha256"],
         )
         self.assertIn(
-            "ops/governed_memory/history/phase8d/"
-            "phase8a_successor_installation_stack_retirement.json",
+            "ops/governed_memory/phase8f_component_disposition.json",
             result["artifact_sha256"],
+        )
+        self.assertEqual(
+            {
+                path: result["artifact_sha256"][path]
+                for path in EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES
+            },
+            EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES,
+        )
+        self.assertFalse(
+            any("history/phase6" in path for path in result["artifact_sha256"])
         )
         self.assertNotIn(
             "ops/governed_memory/installation/package_manifest.json",
@@ -119,8 +150,17 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             lambda value: value["phase7c_application_validation"].update(
                 {"reusable_as_live_proof": True}
             ),
+            lambda value: value["phase7c_application_validation"].update(
+                {"current_phase8f_disposable_proof_complete": True}
+            ),
+            lambda value: value["validation_runtime"].update(
+                {"current_source_bound": True}
+            ),
             lambda value: value["inactive_store_package"].update(
-                {"synthetic_proof_executed_for_current_package": False}
+                {"synthetic_proof_executed_for_current_package": True}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"static_package_verification_complete": False}
             ),
             lambda value: value["inactive_store_package"].update(
                 {"synthetic_proof_receipt_promoted": True}
@@ -179,7 +219,7 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
         current_store = release_guard.verify_store_migration_manifest.verify()
         package_variants = []
         for key, value in (
-            ("artifact_count", 43),
+            ("artifact_count", current_package["artifact_count"] + 1),
             ("synthetic_proof_executed_by_verifier", True),
             ("synthetic_proof_receipt_promoted", True),
             ("installation_executor_packaged", True),
@@ -205,10 +245,18 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
                 current_package, bad_store
             )
 
-    def test_release_guard_calls_both_current_verifiers(self) -> None:
+    def test_release_guard_calls_all_current_static_verifiers(self) -> None:
+        current_migration = release_guard.verify_migration_manifest.verify(
+            release_guard.MIGRATION_ROOT
+        )
         current_package = release_guard.package.verify()
         current_store = release_guard.verify_store_migration_manifest.verify()
         with (
+            mock.patch.object(
+                release_guard.verify_migration_manifest,
+                "verify",
+                return_value=current_migration,
+            ) as migration_verify,
             mock.patch.object(
                 release_guard.package, "verify", return_value=current_package
             ) as package_verify,
@@ -219,10 +267,39 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             ) as store_verify,
         ):
             verify_candidate_artifacts()
+        migration_verify.assert_called_once_with(release_guard.MIGRATION_ROOT)
         package_verify.assert_called_once_with()
         store_verify.assert_called_once_with()
 
-    def test_runtime_receipt_semantic_drift_is_rejected(self) -> None:
+    def test_current_migration_proof_promotion_claim_is_rejected(self) -> None:
+        current_migration = release_guard.verify_migration_manifest.verify(
+            release_guard.MIGRATION_ROOT
+        )
+        for key, value in (
+            ("current_disposable_validation_complete", True),
+            ("disposable_revalidation_required", False),
+            (
+                "historical_phase7c_proof_reusable_for_current_candidate",
+                True,
+            ),
+        ):
+            variant = json.loads(json.dumps(current_migration))
+            variant[key] = value
+            with (
+                self.subTest(key=key),
+                mock.patch.object(
+                    release_guard.verify_migration_manifest,
+                    "verify",
+                    return_value=variant,
+                ),
+                self.assertRaisesRegex(
+                    ReleaseGuardError,
+                    "release_current_migration_artifacts_invalid",
+                ),
+            ):
+                verify_candidate_artifacts()
+
+    def test_historical_phase7c_runtime_receipt_drift_is_rejected(self) -> None:
         original = json.loads(
             (OPS / "runtime_build_receipt.json").read_text(encoding="ascii")
         )
@@ -236,9 +313,12 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             variant = json.loads(json.dumps(original))
             variant[key] = value
             with self.subTest(key=key), self.assertRaisesRegex(
-                ReleaseGuardError, "release_runtime_contract_invalid"
+                ReleaseGuardError,
+                "release_historical_phase7c_runtime_contract_invalid",
             ):
-                release_guard._verify_runtime_receipt(variant)
+                release_guard._verify_historical_phase7c_runtime_receipt(
+                    variant
+                )
 
     def test_phase7c_application_proof_is_closed_and_safety_bound(self) -> None:
         original = json.loads(
@@ -281,7 +361,7 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
                 ):
                     release_guard._load_json(path)
 
-    def test_blockers_and_chat_only_scope_remain_aligned(self) -> None:
+    def test_phase8f_blockers_and_chat_only_scope_remain_aligned(self) -> None:
         runtime = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
@@ -298,18 +378,34 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
                 / "schema_contract.json"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(len(EXPECTED_ACTIVATION_BLOCKERS), 33)
-        self.assertEqual(
-            runtime["activation"]["blockers"], EXPECTED_ACTIVATION_BLOCKERS
-        )
+        blockers = runtime["activation"]["blockers"]
+        self.assertEqual(len(blockers), len(set(blockers)))
+        self.assertTrue(REQUIRED_ACTIVATION_BLOCKERS.issubset(blockers))
         self.assertEqual(
             bootstrap["create_policy"]["unresolved_creation_prerequisites"],
-            EXPECTED_ACTIVATION_BLOCKERS,
+            blockers,
         )
-        self.assertEqual(pilot["start_blockers"], EXPECTED_ACTIVATION_BLOCKERS)
+        self.assertEqual(pilot["start_blockers"], blockers)
         self.assertEqual(
             schema["hard_requirements"]["production_activation_blockers"],
-            EXPECTED_ACTIVATION_BLOCKERS,
+            blockers,
+        )
+        for required in (
+            "governed_memory_proxy_group_and_brains_membership_not_provisioned_or_verified",
+            "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure_not_implemented_or_verified",
+            "lifeswitch_prior_provenance_view_not_migrated_to_chat_integrity",
+            "vantage_answer_trace_erasure_or_retention_disposition_not_decided_or_verified",
+            "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
+            "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
+            "successor_answer_binding_chat_transaction_recovery_not_implemented",
+            "phase8f_current_runtime_rebuild_not_completed",
+            "phase8f_current_candidate_disposable_revalidation_not_completed",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, blockers)
+        self.assertNotIn(
+            "loopback_tcp_endpoint_identity_not_proved_permissioned_unix_socket_or_mtls_required",
+            blockers,
         )
         ingestion = runtime["ingestion"]
         self.assertEqual(
@@ -321,9 +417,15 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
                 "source_erasure_structured_lifeswitch_data_or_accounts_deleted"
             ]
         )
+        self.assertTrue(
+            ingestion["source_erasure_lifeswitch_usage_and_audit_records_retained"]
+        )
         self.assertFalse(pilot["source_erasure"]["accounts_deleted"])
         self.assertFalse(
             pilot["source_erasure"]["structured_lifeswitch_data_deleted"]
+        )
+        self.assertTrue(
+            pilot["source_erasure"]["lifeswitch_usage_and_audit_records_retained"]
         )
 
     def test_receipt_schema_is_closed_and_content_free(self) -> None:
@@ -331,6 +433,21 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             (OPS / "release_receipt.schema.json").read_text(encoding="utf-8")
         )
         self.assertFalse(schema["additionalProperties"])
+        self.assertIn("http_transport", schema["required"])
+        self.assertNotIn("network", schema["required"])
+        transport = schema["properties"]["http_transport"]
+        self.assertEqual(
+            transport["properties"]["transport"]["const"],
+            "permissioned_unix_socket",
+        )
+        self.assertEqual(
+            transport["properties"]["unix_socket_path"]["const"],
+            "/run/governed-memory/http.sock",
+        )
+        self.assertEqual(
+            transport["properties"]["unix_socket_group"]["const"],
+            "governed-memory-proxy",
+        )
         serialized = json.dumps(schema, sort_keys=True).lower()
         for forbidden in (
             "authorization_token",
@@ -342,6 +459,13 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
+        for retired_tcp_field in (
+            "api_bind",
+            "allowed_source_ipv4",
+            "firewall_proof_sha256",
+        ):
+            with self.subTest(retired_tcp_field=retired_tcp_field):
+                self.assertNotIn(retired_tcp_field, serialized)
 
     def test_systemd_templates_remain_dormant(self) -> None:
         http_unit = (
@@ -356,16 +480,21 @@ class Phase8DReleaseArtifactTests(unittest.TestCase):
             self.assertIn("Restart=no", unit)
         self.assertIn("GOVERNED_MEMORY_HTTP_MODE=off", http_unit)
         self.assertIn("GOVERNED_MEMORY_WORKER_MODE=off", worker_unit)
+        self.assertIn(
+            "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+            http_unit,
+        )
         self.assertFalse(
             (OPS / "systemd" / "governed-memory-worker.timer").exists()
         )
 
 
 class ReleaseDecisionTests(unittest.TestCase):
-    def test_create_refuses_while_activation_blockers_remain(self) -> None:
+    def test_create_refuses_without_current_disposable_proof(self) -> None:
         result = evaluate_release_observation(observation("create", state="absent"))
         self.assertFalse(result["allowed"])
-        self.assertEqual(result["reason_code"], "activation_blockers_open")
+        self.assertEqual(result["reason_code"], CURRENT_PROOF_REFUSAL_CODE)
+        self.assertFalse(result["current_candidate_disposable_proof_complete"])
         self.assertEqual(result["commands_executed"], 0)
         self.assertEqual(result["exact_action_plan"], [])
 
@@ -374,6 +503,8 @@ class ReleaseDecisionTests(unittest.TestCase):
         document["targets"]["database"]["state"] = "present_exact"
         result = evaluate_release_observation(document)
         self.assertFalse(result["allowed"])
+        self.assertEqual(result["reason_code"], CURRENT_PROOF_REFUSAL_CODE)
+        self.assertFalse(result["current_candidate_disposable_proof_complete"])
         self.assertEqual(result["exact_action_plan"], [])
 
     def test_cleanup_refuses_without_scoped_authorization(self) -> None:

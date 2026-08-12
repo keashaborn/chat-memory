@@ -31,8 +31,8 @@ readonly EXPECTED_BASE='6116d5c57fb298d929153eba977ae59e1cf2aeb4'
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly PHASE6E_DELETION_INTEGRATION_READY='true'
-readonly EXPECTED_MANIFEST_SHA256='57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150'
-readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256='0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857'
+readonly EXPECTED_MANIFEST_SHA256='5b80d172aa2c1b5db2e57386e46c3d79711724edb48985588e804dc0e49590d5'
+readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256='9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2'
 
@@ -817,12 +817,17 @@ print(value.get("migration_package_id_sha256", ""))
 print(value.get("file_count", ""))
 print(value.get("manifest_sha256", ""))
 print(value.get("validation_state", ""))
+print(str(value.get("current_disposable_validation_complete", "")).lower())
+print(str(value.get("disposable_revalidation_required", "")).lower())
+print(str(value.get("historical_phase7c_proof_reusable_for_current_candidate", "")).lower())
+print(str(value.get("production_state_changed", "")).lower())
 PY
   )
-  [[ "${#fields[@]}" -eq 6 ]] || die 'migration_verification_receipt_invalid'
-  [[ "${fields[0]}" == 'governed-memory-migration-verification-v4' ]] \
+  [[ "${#fields[@]}" -eq 10 ]] || die 'migration_verification_receipt_invalid'
+  [[ "${fields[0]}" == 'governed-memory-migration-verification-v5' ]] \
     || die 'migration_verification_schema_invalid'
-  [[ "${fields[1]}" == 'verified' ]] || die 'migration_verification_not_verified'
+  [[ "${fields[1]}" == 'artifact_integrity_verified' ]] \
+    || die 'migration_verification_not_verified'
   [[ "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'migration_package_id_sha256_invalid'
   [[ "${fields[3]}" == '15' ]] || die 'migration_file_count_mismatch'
@@ -830,8 +835,11 @@ PY
     || die 'migration_manifest_sha256_invalid'
   [[ "${fields[4]}" == "${EXPECTED_MANIFEST_SHA256}" ]] \
     || die 'migration_manifest_sha256_mismatch'
-  [[ "${fields[5]}" == 'disposable_validated' ]] \
+  [[ "${fields[5]}" == 'phase8f_disposable_revalidation_required' ]] \
     || die 'migration_validation_state_mismatch'
+  [[ "${fields[6]}" == 'false' && "${fields[7]}" == 'true' \
+     && "${fields[8]}" == 'false' && "${fields[9]}" == 'false' ]] \
+    || die 'migration_revalidation_contract_mismatch'
   MIGRATION_MANIFEST_SHA256="${fields[4]}"
 }
 
