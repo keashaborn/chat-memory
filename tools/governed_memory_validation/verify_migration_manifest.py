@@ -47,10 +47,6 @@ EXPECTED_ROLLBACK_ORDER = [
     "0001_foundation/rollback.pgsql",
 ]
 VALIDATED_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
-REVALIDATION_STATUS = (
-    "phase8f_repository_candidate_disposable_revalidation_required_"
-    "not_production_applied"
-)
 EXPECTED_PACKAGE_CONTRACTS = {
     "0001_foundation/package.json": {
         "status": VALIDATED_STATUS,
@@ -86,15 +82,15 @@ EXPECTED_PACKAGE_CONTRACTS = {
         },
     },
     "0002_conversation_bridge/package.json": {
-        "status": REVALIDATION_STATUS,
+        "status": VALIDATED_STATUS,
         "rollback_empty_only": True,
         "activation": {
             "production_authorized": False,
             "production_writer_membership_granted": False,
             "production_services_changed": False,
             "production_database_applied": False,
-            "disposable_writer_membership_validated": False,
-            "disposable_database_validated": False,
+            "disposable_writer_membership_validated": True,
+            "disposable_database_validated": True,
             "historical_phase7c_disposable_validation_retained": True,
             "blockers": [
                 "lifeswitch_chat_answer_binding_provenance_and_owner_context_"
@@ -107,7 +103,6 @@ EXPECTED_PACKAGE_CONTRACTS = {
                 "conversation_erasure_auxiliary_deleted_object_counts_not_"
                 "implemented_or_verified",
                 "successor_answer_binding_chat_transaction_recovery_not_implemented",
-                "phase8f_current_candidate_disposable_revalidation_not_completed",
             ],
         },
     },
@@ -178,7 +173,7 @@ def verify(root: Path) -> dict[str, object]:
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id:
         raise ValueError("missing migration candidate id")
-    if manifest.get("status") != REVALIDATION_STATUS:
+    if manifest.get("status") != VALIDATED_STATUS:
         raise ValueError("unexpected migration candidate status")
     expected_authority = {
         "production_apply_authorized": False,
@@ -202,7 +197,7 @@ def verify(root: Path) -> dict[str, object]:
         "claim_detail_rollback_data_mutation": False,
         "pilot_marker_rollback_empty_only": True,
         "cascade_ddl_allowed": False,
-        "disposable_database_execution_performed": False,
+        "disposable_database_execution_performed": True,
         "production_database_execution_performed": False,
         "production_checkout_files_changed": False,
         "production_data_read": False,
@@ -243,15 +238,15 @@ def verify(root: Path) -> dict[str, object]:
         raise ValueError("migration directory contains an undeclared file")
 
     schema_contract = load_json(root / "schema_contract.json")
-    if schema_contract.get("status") != REVALIDATION_STATUS:
+    if schema_contract.get("status") != VALIDATED_STATUS:
         raise ValueError("unexpected schema contract status")
     validation_scope = schema_contract.get("validation_scope")
     if validation_scope != {
-        "scope": "phase8f_repository_candidate",
-        "environment": "repository_only",
-        "current_candidate_disposable_validated": False,
+        "scope": "phase8g_current_candidate",
+        "environment": "disposable_postgresql_qdrant_synthetic_only",
+        "current_candidate_disposable_validated": True,
         "historical_phase7c_disposable_proof_retained": True,
-        "disposable_revalidation_required": True,
+        "disposable_revalidation_required": False,
         "production_data_read": False,
         "provider_external_calls": 0,
         "production_state_changed": False,
@@ -329,10 +324,10 @@ def verify(root: Path) -> dict[str, object]:
             candidate_id.encode("utf-8")
         ).hexdigest(),
         "result": "artifact_integrity_verified",
-        "schema_version": "governed-memory-migration-verification-v5",
-        "validation_state": "phase8f_disposable_revalidation_required",
-        "current_disposable_validation_complete": False,
-        "disposable_revalidation_required": True,
+        "schema_version": "governed-memory-migration-verification-v6",
+        "validation_state": "phase8g_current_candidate_disposable_validated",
+        "current_disposable_validation_complete": True,
+        "disposable_revalidation_required": False,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
         "production_state_changed": False,
     }

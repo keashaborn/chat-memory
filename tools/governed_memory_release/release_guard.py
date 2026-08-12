@@ -5,8 +5,8 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G build is verified separately;
-release remains refused until its disposable proof is promoted.
+historical evidence only. The current Phase 8G build and disposable proof are
+verified separately; installation and activation remain refused.
 """
 
 from collections.abc import Mapping, Sequence
@@ -44,7 +44,10 @@ BOOTSTRAP = OPS / "bootstrap_contract.json"
 PILOT = OPS / "pilot_contract.json"
 RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 PHASE8F_DISPOSITION = OPS / "phase8f_component_disposition.json"
-PHASE7C_APPLICATION_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
+HISTORICAL_PHASE7C_APPLICATION_PROOF = (
+    OPS / "history" / "phase7c" / "disposable_proof_receipt.json"
+)
+CURRENT_PHASE8G_APPLICATION_PROOF = OPS / "phase8g_disposable_proof_receipt.json"
 ROOT_MIGRATION_MANIFEST = ROOT / "governed-memory-migrations" / "manifest.json"
 MIGRATION_ROOT = ROOT / "governed-memory-migrations"
 SCHEMA_CONTRACT = MIGRATION_ROOT / "schema_contract.json"
@@ -115,6 +118,42 @@ EXPECTED_PHASE7C_RUNTIME_WHEEL = (
     "governed_memory_successor-0.0.0-py3-none-any.whl"
 )
 
+EXPECTED_PHASE8G_PROOF_RECEIPT_SHA256 = (
+    "9ce44ac7d3ed08970d88f9ad40df14f82c9ad677af2629a9ff2f7d2aa9385e76"
+)
+EXPECTED_PHASE8G_PROOF_CANONICAL_SHA256 = (
+    "5d4f1fd1a92dff80e3e3a779d634c2b996886368535c7fbd1530e1e0da6d46b8"
+)
+EXPECTED_PHASE8G_HTTP_RECEIPT_SHA256 = (
+    "30105b2742079edf79a350f3e683979e70777b5334a16f683074eb65eb607229"
+)
+EXPECTED_PHASE8G_DELETION_RECEIPT_SHA256 = (
+    "5f79424751272bb0058b6fd853e83f24c55be86b435ed90fe0ef529822919f10"
+)
+EXPECTED_PHASE8G_RESILIENCE_RECEIPT_SHA256 = (
+    "37be6871ff6b2d39fba3cb82968a64ed479865d86b0ce1f191d43b2423543e68"
+)
+EXPECTED_PHASE8G_PROOF_LOG_SHA256 = (
+    "9ff51264aff1c56d2c8570311ba116b64e1adae8d0282bae2cd395a745a400c1"
+)
+EXPECTED_PHASE8G_ATTESTED_RUNTIME_MANIFEST_SHA256 = (
+    "5eb4f9e9c7a3249a8bbac86507a245c676829dbad70748b8f9cce20064754786"
+)
+EXPECTED_PHASE8G_ATTESTED_MIGRATION_MANIFEST_SHA256 = (
+    "cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c"
+)
+EXPECTED_PHASE8G_PROMOTED_MIGRATION_MANIFEST_SHA256 = (
+    "831962c268fc0f0be96d19d3186f0a26e7c60cf8f49bf28e80aa5e9d63a1bf99"
+)
+EXPECTED_PHASE8G_CANDIDATE_BRANCH = (
+    "codex/governed-memory-phase8d-retirement-20260812"
+)
+EXPECTED_PHASE8G_CANDIDATE_HEAD = "c8691f0bef993b8e2edda982fe634c4b83e68590"
+EXPECTED_PHASE8G_CANDIDATE_TREE = "9d95027a736a44d394c0f859821daa1554c88e22"
+EXPECTED_PHASE8G_POSTGRES_IMAGE_DIGEST = (
+    "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+)
+
 EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
@@ -140,7 +179,7 @@ EXPECTED_CURRENT_RUNTIME_WHEEL = (
 )
 
 EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES = {
-    "ops/governed_memory/phase7c_disposable_proof_receipt.json": (
+    "ops/governed_memory/history/phase7c/disposable_proof_receipt.json": (
         EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
     ),
     "ops/governed_memory/history/phase7c/runtime_build_receipt.json": (
@@ -161,10 +200,10 @@ REQUIRED_ACTIVATION_BLOCKERS = frozenset(
             "implemented_or_verified"
         ),
         "successor_answer_binding_chat_transaction_recovery_not_implemented",
-        "phase8f_current_candidate_disposable_revalidation_not_completed",
     }
 )
-CURRENT_PROOF_REFUSAL_CODE = "current_candidate_disposable_proof_missing"
+EXPECTED_ACTIVATION_BLOCKER_COUNT = 41
+CURRENT_CREATE_REFUSAL_CODE = "inactive_installation_package_not_authorized"
 
 EXACT_TARGETS = {
     "postgres_container": "governed-memory-postgres-9a54cf123493-000001",
@@ -373,7 +412,7 @@ def _verify_current_runtime_receipt(receipt: object) -> None:
     )
 
 
-def _verify_phase7c_application_proof(value: object) -> None:
+def _verify_historical_phase7c_application_proof(value: object) -> None:
     error = "release_phase7c_application_proof_invalid"
     wrapper_keys = {
         "schema_version",
@@ -460,6 +499,107 @@ def _verify_phase7c_application_proof(value: object) -> None:
     )
 
 
+def _verify_current_phase8g_application_proof(value: object) -> None:
+    error = "release_current_phase8g_application_proof_invalid"
+    wrapper_keys = {
+        "schema_version",
+        "phase",
+        "attested_pre_promotion_runtime_manifest_sha256",
+        "proof_log_sha256",
+        "proof_receipt_canonicalization",
+        "proof_receipt_canonical_sha256",
+        "proof_receipt",
+        "http_vertical_slice_receipt",
+        "deletion_receipt",
+        "deletion_resilience_receipt",
+    }
+    if not isinstance(value, dict) or set(value) != wrapper_keys:
+        raise ReleaseGuardError(error)
+    proof = value.get("proof_receipt")
+    http = value.get("http_vertical_slice_receipt")
+    deletion = value.get("deletion_receipt")
+    resilience = value.get("deletion_resilience_receipt")
+    if not all(isinstance(item, dict) for item in (proof, http, deletion, resilience)):
+        raise ReleaseGuardError(error)
+    assert isinstance(proof, dict)
+    assert isinstance(http, dict)
+    assert isinstance(deletion, dict)
+    assert isinstance(resilience, dict)
+    http_sha256 = _canonical_json_sha256(http)
+    deletion_sha256 = _canonical_json_sha256(deletion)
+    resilience_sha256 = _canonical_json_sha256(resilience)
+    _require(
+        value.get("schema_version") == "governed-memory-current-disposable-proof-v3"
+        and value.get("phase") == "phase8g"
+        and value.get("attested_pre_promotion_runtime_manifest_sha256")
+        == EXPECTED_PHASE8G_ATTESTED_RUNTIME_MANIFEST_SHA256
+        and value.get("proof_log_sha256") == EXPECTED_PHASE8G_PROOF_LOG_SHA256
+        and value.get("proof_receipt_canonicalization")
+        == "utf8_json_sorted_keys_compact_no_newline_v1"
+        and value.get("proof_receipt_canonical_sha256")
+        == EXPECTED_PHASE8G_PROOF_CANONICAL_SHA256
+        and _canonical_json_sha256(proof)
+        == EXPECTED_PHASE8G_PROOF_CANONICAL_SHA256
+        and http_sha256 == EXPECTED_PHASE8G_HTTP_RECEIPT_SHA256
+        and deletion_sha256 == EXPECTED_PHASE8G_DELETION_RECEIPT_SHA256
+        and resilience_sha256 == EXPECTED_PHASE8G_RESILIENCE_RECEIPT_SHA256
+        and proof.get("integration_receipt_sha256") == http_sha256
+        and proof.get("deletion_receipt_sha256") == deletion_sha256
+        and proof.get("deletion_resilience_receipt_sha256") == resilience_sha256
+        and proof.get("schema_version")
+        == "governed-memory-successor-disposable-run-v7"
+        and proof.get("branch") == EXPECTED_PHASE8G_CANDIDATE_BRANCH
+        and proof.get("candidate_head") == EXPECTED_PHASE8G_CANDIDATE_HEAD
+        and proof.get("candidate_tree") == EXPECTED_PHASE8G_CANDIDATE_TREE
+        and proof.get("result") == "passed"
+        and proof.get("source_tree_sha256")
+        == EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256
+        and proof.get("runtime_build_receipt_sha256")
+        == EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256
+        and proof.get("manifest_sha256")
+        == EXPECTED_PHASE8G_ATTESTED_MIGRATION_MANIFEST_SHA256
+        and proof.get("runtime_packages_sha256")
+        == EXPECTED_PHASE7C_RUNTIME_PACKAGES_SHA256
+        and proof.get("runtime_lock_sha256")
+        == EXPECTED_PHASE7C_RUNTIME_LOCK_SHA256
+        and proof.get("postgres_image_digest")
+        == EXPECTED_PHASE8G_POSTGRES_IMAGE_DIGEST
+        and proof.get("qdrant_image_digest")
+        == "qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc"
+        and proof.get("candidate_unchanged") is True
+        and proof.get("production_data_read") is False
+        and proof.get("production_endpoint_calls") == 0
+        and proof.get("production_service_invoked") is False
+        and proof.get("provider_external_calls") == 0
+        and proof.get("external_network_calls") == 0
+        and proof.get("published_container_ports") is False
+        and proof.get("docker_persistent_mounts") is False
+        and proof.get("resources_removed") is True
+        and proof.get("ports_released") is True
+        and proof.get("rollback_reapply") == "passed"
+        and http.get("production_data_read") is False
+        and http.get("production_endpoint_calls") == 0
+        and http.get("production_service_invoked") is False
+        and http.get("provider_external_calls") == 0
+        and http.get("synthetic_jwt_only") is True
+        and deletion.get("production_data_read") is False
+        and deletion.get("production_endpoint_calls") == 0
+        and deletion.get("production_service_invoked") is False
+        and deletion.get("provider_external_calls") == 0
+        and deletion.get("lifeswitch_snapshot_bytes") == 2765
+        and deletion.get("lifeswitch_snapshot_sha256")
+        == "6fc270d38b681af35d1db008d04ff65fd790a2e44bef5791a23119ab99fcddae"
+        and deletion.get("transient_targets_purged") is True
+        and deletion.get("qdrant_target_absent_alias_and_physical") is True
+        and resilience.get("production_data_read") is False
+        and resilience.get("production_endpoint_calls") == 0
+        and resilience.get("provider_external_calls") == 0
+        and resilience.get("final_absence_verified") is True
+        and resilience.get("post_completion_no_work") is True,
+        error,
+    )
+
+
 def _verify_chat_only_scope(value: Mapping[str, object]) -> None:
     _require(
         value.get("source_erasure_selectors")
@@ -537,6 +677,7 @@ def _checked_activation_blockers(activation: object) -> list[str]:
         and bool(blockers)
         and all(isinstance(item, str) and bool(item) for item in blockers)
         and len(blockers) == len(set(blockers))
+        and len(blockers) == EXPECTED_ACTIVATION_BLOCKER_COUNT
         and REQUIRED_ACTIVATION_BLOCKERS.issubset(blockers),
         error,
     )
@@ -562,7 +703,7 @@ def _verify_runtime_manifest(
         "ingestion",
         "worker_adapters",
         "provider_policy",
-        "phase7c_application_validation",
+        "disposable_validation",
         "inactive_store_package",
         "calibration",
         "frontend_candidate",
@@ -578,7 +719,7 @@ def _verify_runtime_manifest(
     )
     assert isinstance(runtime, dict)
     validation = runtime.get("validation_runtime")
-    phase7c = runtime.get("phase7c_application_validation")
+    disposable = runtime.get("disposable_validation")
     current = runtime.get("inactive_store_package")
     activation = runtime.get("activation")
     http = runtime.get("http_runtime")
@@ -595,10 +736,7 @@ def _verify_runtime_manifest(
         runtime.get("schema_version")
         == "governed-memory-successor-runtime-manifest-v2"
         and runtime.get("phase")
-        == (
-            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
-            "pending_activation_blocked"
-        )
+        == "phase8g_current_candidate_disposable_validated_inactive_activation_blocked"
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
         and isinstance(validation, dict)
@@ -632,41 +770,58 @@ def _verify_runtime_manifest(
             "historical_phase7c_build_receipt_reusable_for_current_candidate"
         )
         is False
-        and isinstance(phase7c, dict)
-        and phase7c.get("scope")
-        == "historical_phase7c_application_runtime_and_deletion_proof"
-        and phase7c.get("evidence_role")
+        and isinstance(disposable, dict)
+        and disposable.get("scope")
+        == "phase8g_current_candidate_successor_disposable_only"
+        and disposable.get("evidence_role")
         == (
-            "historical_application_evidence_not_current_candidate_store_"
+            "current_candidate_application_and_deletion_proof_not_"
             "installation_or_live_proof"
         )
-        and phase7c.get("evidence_status")
+        and disposable.get("evidence_status")
         == (
-            "historical_phase7c_disposable_application_validation_passed_not_"
-            "current_phase8f_candidate_proof"
+            "phase8g_current_candidate_disposable_validation_passed_inactive_"
+            "not_production_activation"
         )
-        and phase7c.get("phase7c_proof_complete") is True
-        and phase7c.get("reusable_as_current_store_installation_proof") is False
-        and phase7c.get("reusable_as_live_proof") is False
-        and phase7c.get("disposable_revalidation_required") is True
-        and phase7c.get("runner_path")
+        and disposable.get("current_proof_complete") is True
+        and disposable.get("reusable_as_current_store_installation_proof") is False
+        and disposable.get("reusable_as_live_proof") is False
+        and disposable.get("disposable_revalidation_required") is False
+        and disposable.get("runner_path")
         == "tools/governed_memory_validation/run_disposable_successor.sh"
-        and phase7c.get("runner_sha256") == _sha256(DISPOSABLE_RUNNER)
-        and phase7c.get("current_runner_execution_attested_by_phase7c_proof")
-        is False
-        and phase7c.get("current_runner_proof_execution_semantics_changed")
+        and disposable.get("runner_sha256") == _sha256(DISPOSABLE_RUNNER)
+        and disposable.get("runner_sealed") is True
+        and disposable.get("proof_execution_runner_sha256")
+        == _sha256(DISPOSABLE_RUNNER)
+        and disposable.get("current_runner_execution_attested_by_phase8g_proof")
         is True
-        and phase7c.get("historical_proof_receipt")
-        == "ops/governed_memory/phase7c_disposable_proof_receipt.json"
-        and phase7c.get("historical_proof_receipt_sha256")
-        == EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
-        and phase7c.get("current_phase8f_disposable_proof_complete") is False
-        and phase7c.get("production_routes_installed") is False
-        and phase7c.get("authenticated_frontend_verified") is False
-        and phase7c.get("production_data_read") is False
-        and phase7c.get("production_endpoint_calls") == 0
-        and phase7c.get("provider_external_calls") == 0
-        and phase7c.get("persistent_resources_created") is False
+        and disposable.get("current_runner_post_proof_change_scope") == "none"
+        and disposable.get("current_runner_proof_execution_semantics_changed")
+        is False
+        and disposable.get("current_candidate_python")
+        == EXPECTED_CURRENT_RUNTIME_PYTHON
+        and disposable.get("current_proof_receipt")
+        == "ops/governed_memory/phase8g_disposable_proof_receipt.json"
+        and disposable.get("current_proof_receipt_sha256")
+        == EXPECTED_PHASE8G_PROOF_RECEIPT_SHA256
+        and disposable.get("attested_pre_promotion_migration_manifest_sha256")
+        == EXPECTED_PHASE8G_ATTESTED_MIGRATION_MANIFEST_SHA256
+        and disposable.get("current_promoted_migration_manifest_sha256")
+        == EXPECTED_PHASE8G_PROMOTED_MIGRATION_MANIFEST_SHA256
+        and disposable.get("postgresql_fresh_empty") is True
+        and disposable.get("qdrant_fresh_empty") is True
+        and disposable.get("migration_forward_rollback_reapply") is True
+        and disposable.get("normalized_catalog_equivalent_after_reapply") is True
+        and disposable.get("deletion_coordination_disposable_proof_complete")
+        is True
+        and disposable.get("production_routes_installed") is False
+        and disposable.get("authenticated_frontend_verified") is False
+        and disposable.get("production_data_read") is False
+        and disposable.get("production_endpoint_calls") == 0
+        and disposable.get("provider_external_calls") == 0
+        and disposable.get("persistent_resources_created") is False
+        and disposable.get("final_resources_absent") is True
+        and disposable.get("resource_cleanup_complete") is True
         and isinstance(current, dict)
         and current.get("scope") == "current_inactive_stores_only_package"
         and current_state
@@ -732,7 +887,7 @@ def _verify_runtime_manifest(
         and http.get("conversation_erasure_route_routed") is False
         and http.get("conversation_erasure_route_live_verified") is False
         and http.get("conversation_erasure_route_current_disposable_integration_verified")
-        is False
+        is True
         and http.get("brains_erasure_proxy_matching_service_token_provisioned")
         is False
         and http.get("supabase_auth_sessions_rpc_live_verified") is False
@@ -756,7 +911,7 @@ def _verify_runtime_manifest(
         and infrastructure.get("legacy_snapshot_or_mount_reuse_allowed") is False
         and isinstance(release, dict)
         and release.get("create_allowed") is False
-        and release.get("create_refusal_code") == CURRENT_PROOF_REFUSAL_CODE
+        and release.get("create_refusal_code") == CURRENT_CREATE_REFUSAL_CODE
         and release.get("cleanup_allowed") is False
         and release.get("cleanup_refusal_code") == "authorization_missing"
         and release.get("commands_executed") == 0
@@ -769,6 +924,8 @@ def _verify_runtime_manifest(
         == EXPECTED_PHASE7C_RUNTIME_RECEIPT_SHA256
         and history.get("phase7c_disposable_proof_receipt_sha256")
         == EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
+        and history.get("phase7c_disposable_proof_receipt")
+        == "ops/governed_memory/history/phase7c/disposable_proof_receipt.json"
         and history.get("reusable_for_current_candidate") is False,
         error,
     )
@@ -819,13 +976,10 @@ def _verify_governance_refusals(
         and bridge.get("source_erasure_legacy_project_rows_deleted") is False
         and isinstance(candidate, dict)
         and candidate.get("runtime")
-        == (
-            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
-            "revalidation_required_inactive"
-        )
+        == "phase8g_current_source_bound_runtime_disposable_validated_inactive"
         and candidate.get("current_runtime_rebuild_pending") is False
         and candidate.get("current_candidate_disposable_validation_complete")
-        is False
+        is True
         and pilot.get("schema_version") == "governed-memory-pilot-contract-v1"
         and pilot.get("state") == "inactive_candidate_blocked_not_authorized"
         and pilot.get("production_state_changed") is False
@@ -834,7 +988,7 @@ def _verify_governance_refusals(
         and pilot_validation.get(
             "current_candidate_disposable_validation_complete"
         )
-        is False
+        is True
         and pilot.get("start_blockers") == list(blockers)
         and pilot.get("eligible_input", {}).get("old_conversations") is False
         and pilot.get("eligible_input", {}).get("historical_backfill") is False
@@ -843,19 +997,13 @@ def _verify_governance_refusals(
         and pilot.get("required_start_state", {}).get("unprocessed_prefill_count")
         == 0
         and pilot.get("candidate_surfaces", {}).get("runtime")
-        == (
-            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
-            "revalidation_required_inactive"
-        )
+        == "phase8g_current_source_bound_runtime_disposable_validated_inactive"
         and isinstance(source_erasure, dict)
         and source_erasure.get("structured_lifeswitch_data_deleted") is False
         and source_erasure.get("accounts_deleted") is False
         and source_erasure.get("legacy_project_rows_deleted") is False
         and schema_contract.get("status")
-        == (
-            "phase8f_repository_candidate_disposable_revalidation_required_"
-            "not_production_applied"
-        )
+        == "isolated_candidate_disposable_validated_not_production_applied"
         and isinstance(schema_contract.get("hard_requirements"), dict)
         and schema_contract["hard_requirements"].get(
             "production_activation_blockers"
@@ -879,6 +1027,17 @@ def verify_candidate_artifacts() -> dict[str, object]:
         _require(actual == expected, "release_artifact_hash_mismatch")
         observed_hashes[relative] = actual
 
+    _require(
+        CURRENT_PHASE8G_APPLICATION_PROOF.is_file()
+        and not CURRENT_PHASE8G_APPLICATION_PROOF.is_symlink(),
+        "release_artifact_missing_or_symlink",
+    )
+    _require(
+        _sha256(CURRENT_PHASE8G_APPLICATION_PROOF)
+        == EXPECTED_PHASE8G_PROOF_RECEIPT_SHA256,
+        "release_artifact_hash_mismatch",
+    )
+
     try:
         migration_receipt = verify_migration_manifest.verify(MIGRATION_ROOT)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -886,18 +1045,20 @@ def verify_candidate_artifacts() -> dict[str, object]:
     _require(
         isinstance(migration_receipt, dict)
         and migration_receipt.get("schema_version")
-        == "governed-memory-migration-verification-v5"
+        == "governed-memory-migration-verification-v6"
         and migration_receipt.get("result") == "artifact_integrity_verified"
         and migration_receipt.get("validation_state")
-        == "phase8f_disposable_revalidation_required"
+        == "phase8g_current_candidate_disposable_validated"
         and migration_receipt.get("current_disposable_validation_complete")
-        is False
-        and migration_receipt.get("disposable_revalidation_required") is True
+        is True
+        and migration_receipt.get("disposable_revalidation_required") is False
         and migration_receipt.get(
             "historical_phase7c_proof_reusable_for_current_candidate"
         )
         is False
         and migration_receipt.get("production_state_changed") is False
+        and migration_receipt.get("manifest_sha256")
+        == EXPECTED_PHASE8G_PROMOTED_MIGRATION_MANIFEST_SHA256
         and migration_receipt.get("manifest_sha256")
         == _sha256(ROOT_MIGRATION_MANIFEST),
         "release_current_migration_artifacts_invalid",
@@ -916,14 +1077,16 @@ def verify_candidate_artifacts() -> dict[str, object]:
     historical_runtime_receipt = _load_json(
         HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT
     )
-    phase7c = _load_json(PHASE7C_APPLICATION_PROOF)
+    historical_phase7c = _load_json(HISTORICAL_PHASE7C_APPLICATION_PROOF)
+    current_phase8g = _load_json(CURRENT_PHASE8G_APPLICATION_PROOF)
     runtime = _load_json(RUNTIME_MANIFEST)
     bootstrap = _load_json(BOOTSTRAP)
     pilot = _load_json(PILOT)
     schema_contract = _load_json(SCHEMA_CONTRACT)
     _verify_historical_phase7c_runtime_receipt(historical_runtime_receipt)
     _verify_current_runtime_receipt(current_runtime_receipt)
-    _verify_phase7c_application_proof(phase7c)
+    _verify_historical_phase7c_application_proof(historical_phase7c)
+    _verify_current_phase8g_application_proof(current_phase8g)
     blockers = _verify_runtime_manifest(runtime, package_receipt, store_receipt)
     _verify_governance_refusals(bootstrap, pilot, schema_contract, blockers)
     receipt_schema = _load_json(RECEIPT_SCHEMA)
@@ -968,6 +1131,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
             "ops/governed_memory/runtime_manifest.json": _sha256(
                 RUNTIME_MANIFEST
             ),
+            "ops/governed_memory/phase8g_disposable_proof_receipt.json": _sha256(
+                CURRENT_PHASE8G_APPLICATION_PROOF
+            ),
             "ops/governed_memory/pilot_contract.json": _sha256(PILOT),
             "ops/governed_memory/phase8f_component_disposition.json": _sha256(
                 PHASE8F_DISPOSITION
@@ -997,10 +1163,10 @@ def verify_candidate_artifacts() -> dict[str, object]:
         }
     )
     return {
-        "schema_version": "governed-memory-release-artifact-verification-v4",
+        "schema_version": "governed-memory-release-artifact-verification-v5",
         "phase": (
-            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
-            "pending_activation_blocked"
+            "phase8g_current_candidate_disposable_validated_inactive_"
+            "activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
@@ -1010,9 +1176,10 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "historical_phase7c_application_proof_verified": True,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
         "historical_phase7c_proof_is_live_proof": False,
+        "current_phase8g_application_proof_verified": True,
         "current_migration_artifact_integrity_verified": True,
-        "current_migration_disposable_validation_complete": False,
-        "current_migration_disposable_revalidation_required": True,
+        "current_migration_disposable_validation_complete": True,
+        "current_migration_disposable_revalidation_required": False,
         "current_store_package_static_verification_complete": True,
         "current_store_package_artifact_count": len(package_artifacts),
         "current_store_package_manifest_sha256": package_receipt[
@@ -1026,9 +1193,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "historical_phase8b_synthetic_proof_reusable_for_current_candidate": False,
         "synthetic_proof_executed_by_release_guard": False,
         "synthetic_proof_receipt_promoted": False,
-        "current_candidate_disposable_proof_complete": False,
+        "current_candidate_disposable_proof_complete": True,
         "release_allowed": False,
-        "release_refusal_code": CURRENT_PROOF_REFUSAL_CODE,
+        "release_refusal_code": CURRENT_CREATE_REFUSAL_CODE,
         "live_installation_proof_complete": False,
         "installation_executor_packaged": False,
         "rollback_executor_packaged": False,
@@ -1093,7 +1260,7 @@ def evaluate_release_observation(document: object) -> dict[str, object]:
     observed = _checked_observation(document)
     operation = observed["operation"]
     reason = (
-        CURRENT_PROOF_REFUSAL_CODE
+        CURRENT_CREATE_REFUSAL_CODE
         if operation == "create"
         else "authorization_missing"
     )
@@ -1102,7 +1269,7 @@ def evaluate_release_observation(document: object) -> dict[str, object]:
         "operation": operation,
         "allowed": False,
         "reason_code": reason,
-        "current_candidate_disposable_proof_complete": False,
+        "current_candidate_disposable_proof_complete": True,
         "exact_action_plan": [],
         "commands_executed": 0,
         "production_state_changed": False,
@@ -1136,8 +1303,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
-    "CURRENT_PROOF_REFUSAL_CODE",
+    "CURRENT_CREATE_REFUSAL_CODE",
     "EXACT_TARGETS",
+    "EXPECTED_ACTIVATION_BLOCKER_COUNT",
     "EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES",
     "REQUIRED_ACTIVATION_BLOCKERS",
     "ReleaseGuardError",

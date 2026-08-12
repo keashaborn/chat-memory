@@ -20,10 +20,7 @@ HTTP_VERTICAL_SLICE = (
     ROOT / "tests/memory_integration/test_governed_memory_http_vertical_slice.py"
 )
 CURRENT_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
-ROOT_STATUS = (
-    "phase8f_repository_candidate_disposable_revalidation_required_"
-    "not_production_applied"
-)
+ROOT_STATUS = CURRENT_STATUS
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -381,7 +378,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         manifest = _load_json(MIGRATIONS / "manifest.json")
         self.assertEqual(manifest["status"], ROOT_STATUS)
         self.assertEqual(package["status"], CURRENT_STATUS)
-        self.assertFalse(
+        self.assertTrue(
             manifest["safety"]["disposable_database_execution_performed"]
         )
         self.assertFalse(
@@ -477,7 +474,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "detail_literal_max_utf8_bytes": 2000,
                 "direct_runtime_table_access": False,
                 "migration": "0003_owner_claim_detail/forward.pgsql",
-                "disposable_validated": False,
+                "disposable_validated": True,
                 "historical_phase7c_disposable_validated": True,
                 "production_applied": False,
             },

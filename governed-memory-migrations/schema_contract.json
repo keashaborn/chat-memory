@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-successor-schema-contract-v1",
-  "status": "phase8f_repository_candidate_disposable_revalidation_required_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "database": "governed_memory",
   "schemas": [
     "memory",
@@ -15,11 +15,11 @@
     "authority": "separate_existing_conversation_database_only"
   },
   "validation_scope": {
-    "scope": "phase8f_repository_candidate",
-    "environment": "repository_only",
-    "current_candidate_disposable_validated": false,
+    "scope": "phase8g_current_candidate",
+    "environment": "disposable_postgresql_qdrant_synthetic_only",
+    "current_candidate_disposable_validated": true,
     "historical_phase7c_disposable_proof_retained": true,
-    "disposable_revalidation_required": true,
+    "disposable_revalidation_required": false,
     "production_data_read": false,
     "provider_external_calls": 0,
     "production_state_changed": false
@@ -247,7 +247,7 @@
     "hard_delete": "A verified applied Qdrant delete is required before content purge. Reciprocal proposal and revision foreign keys use deferred NO ACTION so the closed graph is checked at commit. The immutable claim_deletion_receipt remains content-free and is not part of retention purge.",
     "owner_claim_detail": "The owner-scoped detail function returns only the requested current claim revision after deriving authority from current_owner_id. The list surface remains content-free, direct runtime table access remains denied, and a literal is capped at 2000 UTF-8 bytes by the HTTP contract.",
     "pilot_marker": "The global marker is content-free, not owner-bearing, monotonic, append-only, and absent until an authorized pilot start. The worker may read it; only the governed database owner can execute the start transition.",
-    "chat_source_erasure": "Only exact materialized chat targets selected by thread, message_tail, recent, or all_conversations may be erased. The only direct deletion roots are public.chat_log, public.chat_attachments, and public.threads. brains_app direct DELETE is revoked; the coordinator is the only deletion authority. The permitted auxiliary cascade graph includes public.active_thread_selection, trusted_web.response_transcript_v1, and chat_integrity.assistant_transcript_attestation_v1 through exact named validated owner/thread foreign keys. Every unknown foreign key, user trigger, rewrite rule, inheritance edge, or privilege drift fails closed before deletion. Exact message and thread target inventories remain through final receipt acknowledgment. Structured LifeSwitch libraries, workouts, weightlifting sessions, food logs, measurements, accounts, usage records, and audit records remain outside deletion scope. LifeSwitch chat bindings, provenance receipts, owner read contexts, the prior-provenance view, Vantage answer traces, telemetry payloads, and exact auxiliary deleted-object counts remain activation blockers. Matching bridge rows and successor memory derived from exact chat targets participate in the fenced coordinator. Content-free consent, security, audit, and final absence receipts are retained. Phase 7C evidence is historical and does not attest the changed Phase 8F candidate; current disposable revalidation is required before activation."
+    "chat_source_erasure": "Only exact materialized chat targets selected by thread, message_tail, recent, or all_conversations may be erased. The only direct deletion roots are public.chat_log, public.chat_attachments, and public.threads. brains_app direct DELETE is revoked; the coordinator is the only deletion authority. The permitted auxiliary cascade graph includes public.active_thread_selection, trusted_web.response_transcript_v1, and chat_integrity.assistant_transcript_attestation_v1 through exact named validated owner/thread foreign keys. Every unknown foreign key, user trigger, rewrite rule, inheritance edge, or privilege drift fails closed before deletion. Exact message and thread target inventories remain through final receipt acknowledgment. Structured LifeSwitch libraries, workouts, weightlifting sessions, food logs, measurements, accounts, usage records, and audit records remain outside deletion scope. LifeSwitch chat bindings, provenance receipts, owner read contexts, the prior-provenance view, Vantage answer traces, telemetry payloads, and exact auxiliary deleted-object counts remain activation blockers. Matching bridge rows and successor memory derived from exact chat targets participate in the fenced coordinator. Content-free consent, security, audit, and final absence receipts are retained. Phase 8G validated the current candidate with synthetic disposable PostgreSQL and Qdrant only; it did not install or activate production resources."
   },
   "erased_chat_message_tombstone": {
     "table": "memory.erased_chat_message_tombstone",
@@ -285,7 +285,7 @@
     "detail_literal_max_utf8_bytes": 2000,
     "direct_runtime_table_access": false,
     "migration": "0003_owner_claim_detail/forward.pgsql",
-    "disposable_validated": false,
+    "disposable_validated": true,
     "historical_phase7c_disposable_validated": true,
     "production_applied": false
   },
@@ -303,7 +303,7 @@
     "read_function": "memory_private.read_pilot_marker()",
     "start_function": "memory_private.mark_pilot_started(text,uuid,text,text,timestamptz)",
     "migration": "0004_pilot_marker/forward.pgsql",
-    "disposable_validated": false,
+    "disposable_validated": true,
     "historical_phase7c_disposable_validated": true,
     "production_applied": false,
     "pilot_ever_started": false
@@ -417,8 +417,8 @@
       "memory_ingest_private.serialize_attachment_source_erasure()",
       "memory_ingest_private.guard_source_erasure_receipt_immutable()"
     ],
-    "writer_membership_activation": "production_membership_not_granted; historical_phase7c_disposable_membership_only; current_phase8f_revalidation_required",
-    "source_erasure_requester_membership_activation": "production_membership_not_granted; historical_phase7c_disposable_membership_only; current_phase8f_revalidation_required",
+    "writer_membership_activation": "production_membership_not_granted; phase8g_current_disposable_membership_validated_only",
+    "source_erasure_requester_membership_activation": "production_membership_not_granted; phase8g_current_disposable_membership_validated_only",
     "source_erasure_selectors": [
       "thread",
       "message_tail",
@@ -523,7 +523,7 @@
           ],
           "validated": true,
           "delete_action": "cascade",
-          "current_disposable_revalidation_required": true
+          "current_disposable_validated": true
         }
       ]
     },
@@ -541,7 +541,7 @@
     "source_erasure_legacy_project_rows_deleted": false,
     "source_erasure_accounts_deleted": false,
     "source_erasure_content_free_receipts_retained": true,
-    "source_erasure_runtime_status": "phase8f_repository_candidate_disposable_revalidation_required_inactive_not_routed_not_production_applied",
+    "source_erasure_runtime_status": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
     "source_erasure_historical_phase7c_status": "real_disposable_validated_inactive_not_routed_not_production_applied_not_current_candidate_proof"
   },
   "states": {
@@ -738,7 +738,7 @@
     "cascade_ddl_allowed": false,
     "production_schema_applied": false,
     "production_service_activation_authorized": false,
-    "current_disposable_successor_validation_complete": false,
+    "current_disposable_successor_validation_complete": true,
     "pilot_marker_content_free": true,
     "pilot_marker_global_not_owner_bearing": true,
     "pilot_marker_append_only": true,
@@ -773,7 +773,6 @@
       "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
       "retained_legacy_chat_clean_start_empty_root_not_proved",
       "successor_answer_binding_chat_transaction_recovery_not_implemented",
-      "phase8f_current_candidate_disposable_revalidation_not_completed",
       "frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified",
       "source_erasure_requester_membership_not_granted_or_verified",
       "provider_adapter_real_call_validation_not_authorized_or_completed",

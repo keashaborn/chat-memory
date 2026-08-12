@@ -8,10 +8,10 @@ closed contracts, deterministic controller behavior, refusal paths, absence of
 forbidden predecessor imports, and that the current source-bound runtime was
 rebuilt from hash-locked offline wheels.
 
-The current build receipt cannot prove PostgreSQL, Qdrant, Docker, systemd,
-networking, secrets, routes, or application consumption. Source code, tests,
-manifests, build receipts, and synthetic receipts are not disposable or live
-runtime evidence.
+The build receipt alone cannot prove PostgreSQL, Qdrant, Docker, systemd,
+networking, secrets, routes, or application consumption. The separate Phase 8G
+receipt proves the exact current candidate in invocation-owned disposable
+resources only; it is not installation or live-production evidence.
 
 ## Canonical repository checks
 
@@ -27,10 +27,10 @@ python3 -B -m unittest discover -s tests/memory -p 'test_*.py'
 git diff --check
 ```
 
-These are offline checks. They verify the current bytes and current runtime
-build receipt. They require the release guard to remain fail-closed because the
-current disposable PostgreSQL/Qdrant proof does not exist. They do not run
-Docker or connect to a store.
+These are offline checks. They verify the current bytes, current runtime build
+receipt, promoted Phase 8G proof, and archived Phase 7C evidence. They do not run
+Docker or connect to a store. The release guard remains fail-closed because
+dormant installation is not authorized and later activation blockers remain.
 
 ## Closed current package
 
@@ -46,22 +46,25 @@ not rewritten merely to make filenames shorter.
 
 ## Evidence classifications
 
-- Phase 7C: application/chat-deletion disposable evidence and runtime build
-  receipt retained as archived historical evidence; inactive and non-reusable
-  for the current candidate.
+- Phase 7C: runtime and application/chat-deletion receipts archived under
+  `ops/governed_memory/history/phase7c/`; historical and non-reusable for the
+  current candidate.
 - Current runtime build: successfully rebuilt from hash-locked offline wheels;
   source-bound receipt current; not Docker, store, installation, or activation
   proof.
 - Current installation package: statically verified and synthetic-proof capable;
   no installation occurred, and current live installation state was not
   reverified.
-- Current full-chain migration: artifact integrity verified; disposable
-  revalidation required because migration 0002 and the active runtime changed.
-- Current disposable PostgreSQL/Qdrant validation: pending; no Docker proof has
-  run yet.
+- Current full-chain migration: artifact integrity and Phase 8G disposable
+  apply/rollback/absence/reapply verified; not production-applied.
+- Current disposable PostgreSQL/Qdrant validation: passed against commit
+  `c8691f0bef993b8e2edda982fe634c4b83e68590`, tree
+  `9d95027a736a44d394c0f859821daa1554c88e22`, PostgreSQL 16.14, and Qdrant
+  1.19.0. The proof log SHA-256 is
+  `9ff51264aff1c56d2c8570311ba116b64e1adae8d0282bae2cd395a745a400c1`.
 - Synthetic controller receipt: unit/model evidence only; not promoted as live
   installation proof.
-- Release: refused with `current_candidate_disposable_proof_missing`.
+- Release: refused with `inactive_installation_package_not_authorized`.
 - Production: no successor installation or activation evidence; no production
   data read and no provider call made.
 
@@ -89,14 +92,22 @@ later, separately authorized closure.
 
 ## Safety boundary
 
-The completed rebuild used only hash-locked offline wheels. It installed or
-activated nothing, touched no secret, made no provider call, read no production
-data, and changed no live service, PostgreSQL database, or Qdrant collection.
-Phase 8G may next use only invocation-owned disposable PostgreSQL/Qdrant
-resources; no such Docker proof exists yet. Source preparation and production
+The rebuild used hash-locked offline wheels. The successful disposable run used
+only invocation-owned PostgreSQL/Qdrant resources with pinned local image
+digests, synthetic inputs, no persistent mounts, zero provider calls, and zero
+production reads or endpoint calls. Independent postflight checks found no
+owned resources or listeners and confirmed unchanged live repository, service,
+and Docker identities. Source preparation, installation, and production
 operations remain separately authorized work.
 
-Disposable chat-erasure validation must remain limited to chat-owned data and
-conversational derivatives. Accounts and structured LifeSwitch libraries, food
-logs, workouts, weightlifting sessions, measurements, plans, and people data
-remain excluded.
+An earlier failed attempt produced no terminal receipt. Its fail-closed worker
+mode exposed stale test setup and receipt labels; cleanup completed before the
+corrected canonical run. Do not combine either log or any partial receipt from
+that attempt with the successful proof.
+
+Disposable chat-erasure validation remained limited to chat-owned data and
+conversational derivatives. Representative synthetic structured LifeSwitch
+fixtures were hash-identical before and after, but production LifeSwitch data
+was not inspected. Accounts and structured LifeSwitch libraries, food logs,
+workouts, weightlifting sessions, measurements, plans, and people data remain
+excluded from deletion.

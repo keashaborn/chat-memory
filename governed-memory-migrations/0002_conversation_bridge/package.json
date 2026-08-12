@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_conversation_bridge_0002",
-  "status": "phase8f_repository_candidate_disposable_revalidation_required_not_production_applied",
+  "status": "isolated_candidate_disposable_validated_not_production_applied",
   "target": {
     "server": "seebx",
     "database": "memory",
@@ -146,8 +146,8 @@
     "production_writer_membership_granted": false,
     "production_services_changed": false,
     "production_database_applied": false,
-    "disposable_writer_membership_validated": false,
-    "disposable_database_validated": false,
+    "disposable_writer_membership_validated": true,
+    "disposable_database_validated": true,
     "historical_phase7c_disposable_validation_retained": true,
     "blockers": [
       "lifeswitch_chat_answer_binding_provenance_and_owner_context_erasure_not_implemented_or_verified",
@@ -155,8 +155,7 @@
       "vantage_answer_trace_erasure_or_retention_disposition_not_decided_or_verified",
       "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
       "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
-      "successor_answer_binding_chat_transaction_recovery_not_implemented",
-      "phase8f_current_candidate_disposable_revalidation_not_completed"
+      "successor_answer_binding_chat_transaction_recovery_not_implemented"
     ]
   }
 }

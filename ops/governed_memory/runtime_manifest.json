@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-successor-runtime-manifest-v2",
-  "phase": "phase8g_current_runtime_rebuilt_disposable_revalidation_pending_activation_blocked",
+  "phase": "phase8g_current_candidate_disposable_validated_inactive_activation_blocked",
   "python_runtime": {
     "implementation": "CPython",
     "required": "3.12.*",
@@ -87,10 +87,10 @@
     "strict_session_id_auth_sessions_policy_decided": true,
     "owner_claim_fact_detail_implemented": true,
     "owner_claim_fact_detail_candidate_tests_passed": true,
-    "owner_claim_fact_detail_disposable_proof_complete": false,
+    "owner_claim_fact_detail_disposable_proof_complete": true,
     "owner_claim_fact_detail_historical_phase7c_disposable_proof_complete": true,
     "conversation_erasure_route_candidate_implemented": true,
-    "conversation_erasure_route_current_disposable_integration_verified": false,
+    "conversation_erasure_route_current_disposable_integration_verified": true,
     "conversation_erasure_route_historical_phase7c_service_integration_verified": true,
     "conversation_erasure_route_live_supabase_verified": false,
     "conversation_erasure_route_installed": false,
@@ -163,7 +163,6 @@
       "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
       "retained_legacy_chat_clean_start_empty_root_not_proved",
       "successor_answer_binding_chat_transaction_recovery_not_implemented",
-      "phase8f_current_candidate_disposable_revalidation_not_completed",
       "frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified",
       "source_erasure_requester_membership_not_granted_or_verified",
       "provider_adapter_real_call_validation_not_authorized_or_completed",
@@ -179,7 +178,7 @@
   },
   "release_guard": {
     "create_allowed": false,
-    "create_refusal_code": "current_candidate_disposable_proof_missing",
+    "create_refusal_code": "inactive_installation_package_not_authorized",
     "cleanup_allowed": false,
     "cleanup_refusal_code": "authorization_missing",
     "commands_executed": 0
@@ -195,7 +194,7 @@
     "worker_base_conversation_table_select": false,
     "phase6b_context_required_policy": "historical_phase6b_fresh_count_zero_two_exact_marks_re_leased_count_one_one_exact_mark_then_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
     "attachment_invariant": "enqueue_lease_and_source_read_require_no_owner_thread_message_attachment_row",
-    "source_erasure_status": "phase8f_repository_candidate_disposable_revalidation_required_not_routed_not_production_applied",
+    "source_erasure_status": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
     "source_erasure_historical_phase7c_status": "real_disposable_validated_inactive_not_routed_not_production_applied_not_current_candidate_proof",
     "source_erasure_capture_application_login": "brains_app",
     "source_erasure_request_application_login": "governed_memory_api",
@@ -296,7 +295,7 @@
           ],
           "validated": true,
           "delete_action": "cascade",
-          "current_disposable_revalidation_required": true
+          "current_disposable_validated": true
         }
       ]
     },
@@ -319,17 +318,17 @@
   },
   "worker_adapters": {
     "provider": "strict_fake_unit_validated_zero_real_calls",
-    "embedding": "strict_3072_fake_unit_validated_durable_request_dispatch_marker_current_disposable_revalidation_required_zero_real_calls",
-    "qdrant": "exact_fake_unit_and_historical_phase7c_real_disposable_v1_19_0_validated_not_current_candidate_proof_not_persistent_approved",
-    "algorithm": "implemented_fake_unit_current_disposable_revalidation_required",
-    "cli_composition": "implemented_inactive_current_disposable_revalidation_required",
-    "repository": "implemented_real_two_database_current_disposable_revalidation_required_inactive",
-    "transport": "implemented_permissioned_unix_socket_repository_tested_current_disposable_revalidation_required_zero_external_calls",
-    "configuration": "implemented_fail_closed_exact_two_dsn_and_expected_pilot_identity_current_disposable_revalidation_required",
-    "conversation_bridge": "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_current_disposable_revalidation_required_inactive",
-    "deletion_coordinator": "phase8f_exact_chat_targets_repository_candidate_current_disposable_revalidation_required_not_routed_not_production_applied",
-    "scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_current_disposable_revalidation_required_inactive",
-    "cross_process_singleton": "postgresql_session_advisory_lock_current_disposable_revalidation_required_inactive"
+    "embedding": "strict_3072_fake_unit_and_phase8g_disposable_validated_durable_request_dispatch_marker_zero_real_calls",
+    "qdrant": "exact_fake_unit_and_phase8g_real_disposable_v1_19_0_validated_not_persistent_approved",
+    "algorithm": "implemented_fake_unit_and_phase8g_disposable_validated",
+    "cli_composition": "implemented_inactive_phase8g_disposable_validated",
+    "repository": "implemented_real_two_database_phase8g_disposable_validated_inactive",
+    "transport": "implemented_permissioned_unix_socket_phase8g_disposable_validated_zero_external_calls",
+    "configuration": "implemented_fail_closed_exact_two_dsn_and_expected_pilot_identity_phase8g_disposable_validated",
+    "conversation_bridge": "two_database_rpc_only_persistently_fair_one_item_context_terminal_one_receipt_only_successor_read_zero_writes_provider_embedding_vector_phase8g_disposable_validated_inactive",
+    "deletion_coordinator": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
+    "scheduler": "private_content_free_postgresql_sequence_cyclic_three_lane_phase8g_disposable_validated_inactive",
+    "cross_process_singleton": "postgresql_session_advisory_lock_phase8g_disposable_validated_inactive"
   },
   "provider_policy": {
     "import_time_calls": false,
@@ -337,24 +336,24 @@
     "disposable_external_calls": 0,
     "generation_calls_per_exact_attempt": 1
   },
-  "phase7c_application_validation": {
-    "scope": "historical_phase7c_application_runtime_and_deletion_proof",
-    "evidence_role": "historical_application_evidence_not_current_candidate_store_installation_or_live_proof",
-    "evidence_status": "historical_phase7c_disposable_application_validation_passed_not_current_phase8f_candidate_proof",
-    "phase7c_proof_complete": true,
+  "disposable_validation": {
+    "scope": "phase8g_current_candidate_successor_disposable_only",
+    "evidence_role": "current_candidate_application_and_deletion_proof_not_installation_or_live_proof",
+    "evidence_status": "phase8g_current_candidate_disposable_validation_passed_inactive_not_production_activation",
+    "current_proof_complete": true,
     "reusable_as_current_store_installation_proof": false,
     "reusable_as_live_proof": false,
-    "disposable_revalidation_required": true,
+    "disposable_revalidation_required": false,
     "validation_document": "docs/memory/clean_successor/VALIDATION.md",
     "runner_path": "tools/governed_memory_validation/run_disposable_successor.sh",
     "runner_sha256": "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee",
     "runner_sealed": true,
-    "proof_execution_runner_sha256": "bd591188d0afaf4d7a65753e54648241fc1aa5ff3289f194d76d6aa07dfe449f",
-    "current_runner_execution_attested_by_phase7c_proof": false,
-    "current_runner_post_proof_change_scope": "phase8g_current_runtime_candidate_binding_and_image_digest_rebinding",
-    "current_runner_proof_execution_semantics_changed": true,
+    "proof_execution_runner_sha256": "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee",
+    "current_runner_execution_attested_by_phase8g_proof": true,
+    "current_runner_post_proof_change_scope": "none",
+    "current_runner_proof_execution_semantics_changed": false,
     "runner_receipt": "stdout:SUCCESSOR_DISPOSABLE_RECEIPT",
-    "historical_phase7c_candidate_python": "/tmp/governed-memory-successor-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-610d07f6e65a4b9648b7887a47d040658b6e08f9b14f627fdb6957cab4d9a8cd/bin/python",
+    "current_candidate_python": "/tmp/governed-memory-successor-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20/bin/python",
     "postgresql_fresh_empty": true,
     "qdrant_fresh_empty": true,
     "migration_forward_rollback_reapply": true,
@@ -378,7 +377,7 @@
     "worker_cross_process_singleton_validated": true,
     "worker_cross_process_singleton_status": "implemented_inactive_real_concurrent_lock_disposable_validated",
     "deletion_coordination_disposable_proof_complete": true,
-    "deletion_coordination_status": "phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied",
+    "deletion_coordination_status": "phase8g_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied",
     "production_routes_installed": false,
     "authenticated_frontend_verified": false,
     "semantic_threshold_calibrated": false,
@@ -388,9 +387,10 @@
     "persistent_resources_created": false,
     "final_resources_absent": true,
     "resource_cleanup_complete": true,
-    "historical_proof_receipt": "ops/governed_memory/phase7c_disposable_proof_receipt.json",
-    "historical_proof_receipt_sha256": "d4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0",
-    "current_phase8f_disposable_proof_complete": false
+    "current_proof_receipt": "ops/governed_memory/phase8g_disposable_proof_receipt.json",
+    "current_proof_receipt_sha256": "9ce44ac7d3ed08970d88f9ad40df14f82c9ad677af2629a9ff2f7d2aa9385e76",
+    "attested_pre_promotion_migration_manifest_sha256": "cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c",
+    "current_promoted_migration_manifest_sha256": "831962c268fc0f0be96d19d3186f0a26e7c60cf8f49bf28e80aa5e9d63a1bf99"
   },
   "inactive_store_package": {
     "scope": "current_inactive_stores_only_package",
@@ -459,7 +459,7 @@
     "phase6e_proof_status": "historical_noncurrent_after_phase7b_source_migration_and_role_changes",
     "phase7c_runtime_build_receipt": "ops/governed_memory/history/phase7c/runtime_build_receipt.json",
     "phase7c_runtime_build_receipt_sha256": "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2",
-    "phase7c_disposable_proof_receipt": "ops/governed_memory/phase7c_disposable_proof_receipt.json",
+    "phase7c_disposable_proof_receipt": "ops/governed_memory/history/phase7c/disposable_proof_receipt.json",
     "phase7c_disposable_proof_receipt_sha256": "d4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0",
     "phase7c_proof_status": "historical_noncurrent_after_phase8f_runtime_sql_http_transport_and_deletion_contract_changes",
     "reusable_for_current_candidate": false

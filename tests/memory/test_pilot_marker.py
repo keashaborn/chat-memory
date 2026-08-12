@@ -107,11 +107,10 @@ class PilotMarkerTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["status"],
-            "phase8f_repository_candidate_disposable_revalidation_required_"
-            "not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
         self.assertTrue(package["activation"]["disposable_database_validated"])
-        self.assertFalse(
+        self.assertTrue(
             manifest["safety"]["disposable_database_execution_performed"]
         )
         self.assertFalse(

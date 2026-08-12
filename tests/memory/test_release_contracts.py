@@ -8,7 +8,7 @@ from unittest import mock
 
 from tools.governed_memory_release import release_guard
 from tools.governed_memory_release.release_guard import (
-    CURRENT_PROOF_REFUSAL_CODE,
+    CURRENT_CREATE_REFUSAL_CODE,
     EXACT_TARGETS,
     EXPECTED_HISTORICAL_PHASE7C_ARTIFACT_HASHES,
     REQUIRED_ACTIVATION_BLOCKERS,
@@ -49,12 +49,12 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
-            "governed-memory-release-artifact-verification-v4",
+            "governed-memory-release-artifact-verification-v5",
         )
         self.assertEqual(
             result["phase"],
-            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
-            "pending_activation_blocked",
+            "phase8g_current_candidate_disposable_validated_inactive_"
+            "activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
@@ -74,10 +74,10 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_migration_artifact_integrity_verified"]
         )
-        self.assertFalse(
+        self.assertTrue(
             result["current_migration_disposable_validation_complete"]
         )
-        self.assertTrue(
+        self.assertFalse(
             result["current_migration_disposable_revalidation_required"]
         )
         self.assertTrue(
@@ -93,10 +93,10 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         )
         self.assertFalse(result["synthetic_proof_executed_by_release_guard"])
         self.assertFalse(result["synthetic_proof_receipt_promoted"])
-        self.assertFalse(result["current_candidate_disposable_proof_complete"])
+        self.assertTrue(result["current_candidate_disposable_proof_complete"])
         self.assertFalse(result["release_allowed"])
         self.assertEqual(
-            result["release_refusal_code"], CURRENT_PROOF_REFUSAL_CODE
+            result["release_refusal_code"], CURRENT_CREATE_REFUSAL_CODE
         )
         self.assertFalse(result["live_installation_proof_complete"])
         self.assertFalse(result["installation_executor_packaged"])
@@ -148,14 +148,14 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             ].append(
                 "governed-memory-http.service"
             ),
-            lambda value: value["phase7c_application_validation"].update(
+            lambda value: value["disposable_validation"].update(
                 {"reusable_as_current_store_installation_proof": True}
             ),
-            lambda value: value["phase7c_application_validation"].update(
+            lambda value: value["disposable_validation"].update(
                 {"reusable_as_live_proof": True}
             ),
-            lambda value: value["phase7c_application_validation"].update(
-                {"current_phase8f_disposable_proof_complete": True}
+            lambda value: value["disposable_validation"].update(
+                {"current_proof_complete": False}
             ),
             lambda value: value["validation_runtime"].update(
                 {"current_source_bound": False}
@@ -281,13 +281,13 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         package_verify.assert_called_once_with()
         store_verify.assert_called_once_with()
 
-    def test_current_migration_proof_promotion_claim_is_rejected(self) -> None:
+    def test_current_migration_proof_regression_is_rejected(self) -> None:
         current_migration = release_guard.verify_migration_manifest.verify(
             release_guard.MIGRATION_ROOT
         )
         for key, value in (
-            ("current_disposable_validation_complete", True),
-            ("disposable_revalidation_required", False),
+            ("current_disposable_validation_complete", False),
+            ("disposable_revalidation_required", True),
             (
                 "historical_phase7c_proof_reusable_for_current_candidate",
                 True,
@@ -346,13 +346,13 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
                 ):
                     verifier(variant)
 
-    def test_phase7c_application_proof_is_closed_and_safety_bound(self) -> None:
+    def test_current_phase8g_proof_is_closed_canonical_and_safety_bound(self) -> None:
         original = json.loads(
-            (OPS / "phase7c_disposable_proof_receipt.json").read_text(
+            (OPS / "phase8g_disposable_proof_receipt.json").read_text(
                 encoding="ascii"
             )
         )
-        release_guard._verify_phase7c_application_proof(original)
+        release_guard._verify_current_phase8g_application_proof(original)
         variants = []
         outer = json.loads(json.dumps(original))
         outer["unexpected"] = True
@@ -368,9 +368,32 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         variants.append(live)
         for index, variant in enumerate(variants):
             with self.subTest(index=index), self.assertRaisesRegex(
-                ReleaseGuardError, "release_phase7c_application_proof_invalid"
+                ReleaseGuardError, "release_current_phase8g_application_proof_invalid"
             ):
-                release_guard._verify_phase7c_application_proof(variant)
+                release_guard._verify_current_phase8g_application_proof(variant)
+
+        canonical = json.loads(json.dumps(original))
+        canonical["proof_receipt_canonical_sha256"] = "0" * 64
+        with self.assertRaisesRegex(
+            ReleaseGuardError, "release_current_phase8g_application_proof_invalid"
+        ):
+            release_guard._verify_current_phase8g_application_proof(canonical)
+
+    def test_historical_phase7c_proof_is_separate_and_not_current(self) -> None:
+        historical = json.loads(
+            (OPS / "history" / "phase7c" / "disposable_proof_receipt.json")
+            .read_text(encoding="ascii")
+        )
+        release_guard._verify_historical_phase7c_application_proof(historical)
+        self.assertFalse((OPS / "phase7c_disposable_proof_receipt.json").exists())
+        self.assertNotEqual(
+            historical["proof_receipt_canonical_sha256"],
+            json.loads(
+                (OPS / "phase8g_disposable_proof_receipt.json").read_text(
+                    encoding="ascii"
+                )
+            )["proof_receipt_canonical_sha256"],
+        )
 
     def test_release_json_loader_is_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -419,11 +442,10 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         bootstrap_candidate = bootstrap["candidate_implementation_status"]
         self.assertEqual(
             bootstrap_candidate["runtime"],
-            "phase8g_current_source_bound_runtime_rebuilt_disposable_"
-            "revalidation_required_inactive",
+            "phase8g_current_source_bound_runtime_disposable_validated_inactive",
         )
         self.assertFalse(bootstrap_candidate["current_runtime_rebuild_pending"])
-        self.assertFalse(
+        self.assertTrue(
             bootstrap_candidate["current_candidate_disposable_validation_complete"]
         )
         self.assertEqual(
@@ -433,7 +455,7 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
         self.assertFalse(
             pilot["validation_state"]["current_runtime_rebuild_pending"]
         )
-        self.assertFalse(
+        self.assertTrue(
             pilot["validation_state"][
                 "current_candidate_disposable_validation_complete"
             ]
@@ -446,11 +468,14 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             "telemetry_payload_erasure_or_retention_disposition_not_decided_or_verified",
             "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
             "successor_answer_binding_chat_transaction_recovery_not_implemented",
-            "phase8f_current_candidate_disposable_revalidation_not_completed",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, blockers)
         self.assertNotIn("phase8f_current_runtime_rebuild_not_completed", blockers)
+        self.assertNotIn(
+            "phase8f_current_candidate_disposable_revalidation_not_completed",
+            blockers,
+        )
         self.assertNotIn(
             "loopback_tcp_endpoint_identity_not_proved_permissioned_unix_socket_or_mtls_required",
             blockers,
@@ -499,14 +524,14 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
             (
                 "bootstrap",
                 "current_candidate_disposable_validation_complete",
-                True,
+                False,
             ),
             ("pilot_surface", "runtime", "phase8f_runtime_rebuild_pending"),
             ("pilot_validation", "current_runtime_rebuild_pending", True),
             (
                 "pilot_validation",
                 "current_candidate_disposable_validation_complete",
-                True,
+                False,
             ),
         ):
             bootstrap = json.loads(json.dumps(original_bootstrap))
@@ -592,11 +617,11 @@ class Phase8GReleaseArtifactTests(unittest.TestCase):
 
 
 class ReleaseDecisionTests(unittest.TestCase):
-    def test_create_refuses_without_current_disposable_proof(self) -> None:
+    def test_create_refuses_without_installation_authority(self) -> None:
         result = evaluate_release_observation(observation("create", state="absent"))
         self.assertFalse(result["allowed"])
-        self.assertEqual(result["reason_code"], CURRENT_PROOF_REFUSAL_CODE)
-        self.assertFalse(result["current_candidate_disposable_proof_complete"])
+        self.assertEqual(result["reason_code"], CURRENT_CREATE_REFUSAL_CODE)
+        self.assertTrue(result["current_candidate_disposable_proof_complete"])
         self.assertEqual(result["commands_executed"], 0)
         self.assertEqual(result["exact_action_plan"], [])
 
@@ -605,8 +630,8 @@ class ReleaseDecisionTests(unittest.TestCase):
         document["targets"]["database"]["state"] = "present_exact"
         result = evaluate_release_observation(document)
         self.assertFalse(result["allowed"])
-        self.assertEqual(result["reason_code"], CURRENT_PROOF_REFUSAL_CODE)
-        self.assertFalse(result["current_candidate_disposable_proof_complete"])
+        self.assertEqual(result["reason_code"], CURRENT_CREATE_REFUSAL_CODE)
+        self.assertTrue(result["current_candidate_disposable_proof_complete"])
         self.assertEqual(result["exact_action_plan"], [])
 
     def test_cleanup_refuses_without_scoped_authorization(self) -> None:

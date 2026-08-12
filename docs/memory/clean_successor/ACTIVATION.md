@@ -2,9 +2,10 @@
 
 ## Current decision
 
-Do not install or activate the successor. Phase 8G has successfully rebuilt the
-current source-bound runtime from hash-locked offline wheels, but it has not
-produced a functioning memory service or current disposable store proof.
+Do not install or activate the successor. Phase 8G rebuilt the current
+source-bound runtime and passed its isolated disposable application, store, and
+chat-deletion proof. It has not installed or activated a functioning live
+memory service.
 
 The package still lacks a complete claim-bound live installation composition,
 live rollback executor, live activation executor, promoted live proof, and
@@ -14,11 +15,11 @@ blocker list is in
 bootstrap, pilot, and schema contracts.
 
 The current source is bound to
-`ops/governed_memory/runtime_build_receipt.json`. The Phase 7C runtime receipt is
-archived at `ops/governed_memory/history/phase7c/runtime_build_receipt.json` and
-is not reusable for the current candidate. Current disposable PostgreSQL/Qdrant
-revalidation remains pending; no Docker proof has run yet. Release therefore
-remains refused with `current_candidate_disposable_proof_missing`.
+`ops/governed_memory/runtime_build_receipt.json`; the current disposable proof
+is `ops/governed_memory/phase8g_disposable_proof_receipt.json`. Phase 7C
+receipts are archived under `ops/governed_memory/history/phase7c/` and are not
+reusable for the current candidate. Release remains refused with
+`inactive_installation_package_not_authorized`.
 
 ## Before a dormant stores-only installation
 
@@ -38,11 +39,11 @@ The live composition must close these implementation gaps before authorization:
 - lock-bound and durably anchored resource-identity ledger;
 - complete image-baseline, hardening, and external-readiness checks.
 
-After implementation, the authorized disposable live run must use fresh empty
+After implementation, a separately authorized installation proof must use fresh empty
 PostgreSQL and Qdrant resources and prove process-crash recovery, cold restart,
 empty rollback, exact cleanup, and absence of effects outside its
-invocation-owned resources. Build and synthetic proof cannot substitute for
-this.
+invocation-owned resources. The Phase 8G application proof cannot substitute
+for that installation proof.
 
 ## Before application activation
 

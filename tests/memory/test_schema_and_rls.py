@@ -1084,8 +1084,7 @@ class SchemaContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["status"],
-            "phase8f_repository_candidate_disposable_revalidation_required_"
-            "not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
         )
         self.assertEqual(self.contract["database"], "governed_memory")
         self.assertEqual(self.contract["schemas"], ["memory", "memory_private"])
@@ -1379,7 +1378,7 @@ class PackageIntegrityTests(unittest.TestCase):
         self.assertFalse(
             package["hash_bindings"]["root_migration_manifest_rebind_required"]
         )
-        self.assertFalse(package["activation"]["disposable_database_validated"])
+        self.assertTrue(package["activation"]["disposable_database_validated"])
         self.assertFalse(contract["legacy_project_rows_deleted"])
 
     def test_exact_migration_artifact_set_exists(self) -> None:
@@ -1451,28 +1450,31 @@ class PackageIntegrityTests(unittest.TestCase):
                 relative,
             )
 
-    def test_fail_closed_manifest_verifier_accepts_only_exact_phase8f_state(self) -> None:
+    def test_fail_closed_manifest_verifier_accepts_only_exact_phase8g_state(self) -> None:
         verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
         manifest = _load_json(ROOT_MANIFEST_PATH)
         self.assertEqual(
             manifest["status"],
-            "phase8f_repository_candidate_disposable_revalidation_required_"
-            "not_production_applied",
+            "isolated_candidate_disposable_validated_not_production_applied",
+        )
+        self.assertEqual(
+            sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
+            "831962c268fc0f0be96d19d3186f0a26e7c60cf8f49bf28e80aa5e9d63a1bf99",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v5",
+            "governed-memory-migration-verification-v6",
         )
         self.assertEqual(
             receipt["validation_state"],
-            "phase8f_disposable_revalidation_required",
+            "phase8g_current_candidate_disposable_validated",
         )
-        self.assertFalse(receipt["current_disposable_validation_complete"])
-        self.assertTrue(receipt["disposable_revalidation_required"])
+        self.assertTrue(receipt["current_disposable_validation_complete"])
+        self.assertFalse(receipt["disposable_revalidation_required"])
         self.assertFalse(
             receipt["historical_phase7c_proof_reusable_for_current_candidate"]
         )

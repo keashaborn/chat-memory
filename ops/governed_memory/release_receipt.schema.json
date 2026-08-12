@@ -159,7 +159,7 @@
         "proxy_group_unavailable",
         "unix_socket_identity_mismatch",
         "authorization_missing",
-        "current_candidate_disposable_proof_missing",
+        "inactive_installation_package_not_authorized",
         "durable_pilot_marker_unavailable",
         "contract_mismatch",
         "exact_empty_targets_deleted"

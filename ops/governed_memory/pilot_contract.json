@@ -4,7 +4,7 @@
   "pilot_id": "governed_memory_pilot_9a54cf123493_000001",
   "validation_state": {
     "current_runtime_rebuild_pending": false,
-    "current_candidate_disposable_validation_complete": false,
+    "current_candidate_disposable_validation_complete": true,
     "historical_phase7c_evidence_retained": true
   },
   "authority": {
@@ -44,7 +44,7 @@
     "assistant_preferences": false
   },
   "source_erasure": {
-    "status": "phase8f_repository_candidate_disposable_revalidation_required_not_routed_not_production_applied",
+    "status": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
     "historical_phase7c_status": "real_disposable_validated_inactive_not_routed_not_production_applied_not_current_candidate_proof",
     "selectors": [
       "thread",
@@ -142,7 +142,7 @@
           ],
           "validated": true,
           "delete_action": "cascade",
-          "current_disposable_revalidation_required": true
+          "current_disposable_validated": true
         }
       ]
     },
@@ -192,11 +192,11 @@
   "provider_policy": {
     "provider_calls_before_pilot_authorization": 0,
     "provider_adapter_status": "strict_fake_tested_zero_real_calls",
-    "embedding_adapter_status": "strict_3072_fake_unit_validated_durable_request_dispatch_marker_current_disposable_revalidation_required_zero_real_calls",
-    "qdrant_adapter_status": "exact_fake_unit_and_historical_phase7c_real_disposable_v1_19_0_validated_not_current_candidate_proof_not_persistent_approved",
+    "embedding_adapter_status": "strict_3072_fake_unit_and_phase8g_disposable_validated_durable_request_dispatch_marker_zero_real_calls",
+    "qdrant_adapter_status": "exact_fake_unit_and_phase8g_real_disposable_v1_19_0_validated_not_persistent_approved",
     "worker_algorithm_status": "implemented_fake_tested",
-    "worker_runtime_composition_status": "implemented_inactive_persistently_fair_three_lane_real_two_database_current_disposable_revalidation_required",
-    "deletion_coordinator_status": "phase8f_exact_chat_targets_repository_candidate_current_disposable_revalidation_required_not_routed_not_production_applied",
+    "worker_runtime_composition_status": "implemented_inactive_persistently_fair_three_lane_real_two_database_phase8g_disposable_validated",
+    "deletion_coordinator_status": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
     "context_required_runtime_policy": "fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls",
     "qdrant_unavailable_policy": "predispatch_qdrant_unavailability_retryable_post_embedding_dispatch_failure_terminal_without_embedding_resend_canonical_postgresql_claim_retained_later_same_claim_projection_blocked_explicit_projection_reconciliation_required",
     "calibration_status": "independently_bound_unapproved_retrieval_off",
@@ -215,10 +215,10 @@
     "profile_metadata_authority": false
   },
   "candidate_surfaces": {
-    "runtime": "phase8g_current_source_bound_runtime_rebuilt_disposable_revalidation_required_inactive",
-    "owner_claim_fact_detail": "implemented_candidate_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
-    "pilot_marker": "implemented_historical_phase7c_disposable_validated_current_revalidation_required_not_production_applied",
-    "deletion_coordinator": "phase8f_exact_chat_targets_repository_candidate_current_disposable_revalidation_required_not_routed_not_production_applied",
+    "runtime": "phase8g_current_source_bound_runtime_disposable_validated_inactive",
+    "owner_claim_fact_detail": "implemented_current_phase8g_disposable_validated_not_production_applied",
+    "pilot_marker": "implemented_current_phase8g_disposable_validated_not_production_applied",
+    "deletion_coordinator": "phase8g_exact_chat_targets_disposable_validated_inactive_not_routed_not_production_applied",
     "frontend": "71377a_built_undeployed_visual_qa_pending_operation_id_confirmation_semantics_unverified"
   },
   "start_blockers": [
@@ -252,7 +252,6 @@
     "conversation_erasure_auxiliary_deleted_object_counts_not_implemented_or_verified",
     "retained_legacy_chat_clean_start_empty_root_not_proved",
     "successor_answer_binding_chat_transaction_recovery_not_implemented",
-    "phase8f_current_candidate_disposable_revalidation_not_completed",
     "frontend_successor_deletion_request_idempotency_and_confirmation_binding_not_implemented_or_verified",
     "source_erasure_requester_membership_not_granted_or_verified",
     "provider_adapter_real_call_validation_not_authorized_or_completed",

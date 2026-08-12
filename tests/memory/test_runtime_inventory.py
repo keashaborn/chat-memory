@@ -41,7 +41,10 @@ HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT = (
     OPS / "history" / "phase7c" / "runtime_build_receipt.json"
 )
 DISPOSABLE_RUNNER = VALIDATION_TOOLS / "run_disposable_successor.sh"
-PHASE7C_DISPOSABLE_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
+CURRENT_PHASE8G_DISPOSABLE_PROOF = OPS / "phase8g_disposable_proof_receipt.json"
+HISTORICAL_PHASE7C_DISPOSABLE_PROOF = (
+    OPS / "history" / "phase7c" / "disposable_proof_receipt.json"
+)
 POSTGRES_BOOTSTRAP = VALIDATION_TOOLS / "postgres_bootstrap.pgsql"
 SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
 README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
@@ -68,10 +71,16 @@ EXPECTED_DISPOSABLE_RUNNER_SHA256 = (
     "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee"
 )
 EXPECTED_PROOF_EXECUTION_RUNNER_SHA256 = (
-    "bd591188d0afaf4d7a65753e54648241fc1aa5ff3289f194d76d6aa07dfe449f"
+    "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee"
+)
+EXPECTED_PHASE8G_PROOF_SHA256 = (
+    "9ce44ac7d3ed08970d88f9ad40df14f82c9ad677af2629a9ff2f7d2aa9385e76"
 )
 EXPECTED_PHASE7C_PROOF_SHA256 = (
     "d4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0"
+)
+EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256 = (
+    "831962c268fc0f0be96d19d3186f0a26e7c60cf8f49bf28e80aa5e9d63a1bf99"
 )
 EXPECTED_POSTGRES_BOOTSTRAP_SHA256 = (
     "9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb"
@@ -327,12 +336,12 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(receipt["production_state_changed"])
         self.assertFalse(receipt["legacy_environment_imported"])
 
-    def test_runtime_manifest_separates_application_and_store_evidence(self) -> None:
+    def test_runtime_manifest_separates_current_and_historical_evidence(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase8g_current_runtime_rebuilt_disposable_revalidation_"
-            "pending_activation_blocked",
+            "phase8g_current_candidate_disposable_validated_inactive_"
+            "activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
@@ -357,20 +366,20 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "enabled_timers",
         ):
             self.assertNotIn(stale_live_key, activation)
-        validation = manifest["phase7c_application_validation"]
+        validation = manifest["disposable_validation"]
         self.assertEqual(
             validation["scope"],
-            "historical_phase7c_application_runtime_and_deletion_proof",
+            "phase8g_current_candidate_successor_disposable_only",
         )
         self.assertEqual(
             validation["evidence_role"],
-            "historical_application_evidence_not_current_candidate_store_"
-            "installation_or_live_proof",
+            "current_candidate_application_and_deletion_proof_not_installation_"
+            "or_live_proof",
         )
-        self.assertTrue(validation["phase7c_proof_complete"])
+        self.assertTrue(validation["current_proof_complete"])
         self.assertFalse(validation["reusable_as_current_store_installation_proof"])
         self.assertFalse(validation["reusable_as_live_proof"])
-        self.assertTrue(validation["disposable_revalidation_required"])
+        self.assertFalse(validation["disposable_revalidation_required"])
         self.assertEqual(
             validation["runner_path"],
             "tools/governed_memory_validation/run_disposable_successor.sh",
@@ -383,32 +392,49 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             validation["proof_execution_runner_sha256"],
             EXPECTED_PROOF_EXECUTION_RUNNER_SHA256,
         )
-        self.assertFalse(
-            validation["current_runner_execution_attested_by_phase7c_proof"]
-        )
+        self.assertTrue(validation["current_runner_execution_attested_by_phase8g_proof"])
         self.assertEqual(
             validation["current_runner_post_proof_change_scope"],
-            "phase8g_current_runtime_candidate_binding_and_image_digest_"
-            "rebinding",
+            "none",
         )
-        self.assertTrue(
+        self.assertFalse(
             validation["current_runner_proof_execution_semantics_changed"]
         )
         self.assertEqual(
-            validation["historical_proof_receipt"],
-            "ops/governed_memory/phase7c_disposable_proof_receipt.json",
+            validation["current_proof_receipt"],
+            "ops/governed_memory/phase8g_disposable_proof_receipt.json",
         )
         self.assertEqual(
-            validation["historical_proof_receipt_sha256"],
-            EXPECTED_PHASE7C_PROOF_SHA256,
+            validation["current_proof_receipt_sha256"],
+            EXPECTED_PHASE8G_PROOF_SHA256,
         )
-        self.assertFalse(validation["current_phase8f_disposable_proof_complete"])
         self.assertEqual(
-            hashlib.sha256(PHASE7C_DISPOSABLE_PROOF.read_bytes()).hexdigest(),
+            validation["current_promoted_migration_manifest_sha256"],
+            EXPECTED_PROMOTED_MIGRATION_MANIFEST_SHA256,
+        )
+        self.assertEqual(
+            hashlib.sha256(CURRENT_PHASE8G_DISPOSABLE_PROOF.read_bytes()).hexdigest(),
+            EXPECTED_PHASE8G_PROOF_SHA256,
+        )
+        self.assertTrue(CURRENT_PHASE8G_DISPOSABLE_PROOF.is_file())
+        self.assertFalse(CURRENT_PHASE8G_DISPOSABLE_PROOF.is_symlink())
+        history = manifest["historical_evidence"]
+        self.assertEqual(
+            history["phase7c_disposable_proof_receipt"],
+            "ops/governed_memory/history/phase7c/disposable_proof_receipt.json",
+        )
+        self.assertEqual(
+            history["phase7c_disposable_proof_receipt_sha256"],
             EXPECTED_PHASE7C_PROOF_SHA256,
         )
-        self.assertTrue(PHASE7C_DISPOSABLE_PROOF.is_file())
-        self.assertFalse(PHASE7C_DISPOSABLE_PROOF.is_symlink())
+        self.assertEqual(
+            hashlib.sha256(
+                HISTORICAL_PHASE7C_DISPOSABLE_PROOF.read_bytes()
+            ).hexdigest(),
+            EXPECTED_PHASE7C_PROOF_SHA256,
+        )
+        self.assertNotEqual(EXPECTED_PHASE8G_PROOF_SHA256, EXPECTED_PHASE7C_PROOF_SHA256)
+        self.assertFalse((OPS / "phase7c_disposable_proof_receipt.json").exists())
         for key in (
             "postgresql_fresh_empty",
             "qdrant_fresh_empty",
@@ -719,28 +745,28 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "restores",
         )
 
-    def test_schema_scope_requires_current_phase8f_disposable_revalidation(self) -> None:
+    def test_schema_scope_records_current_phase8g_disposable_validation(self) -> None:
         schema = json.loads(SCHEMA_CONTRACT.read_text(encoding="utf-8"))
         self.assertEqual(
             schema["validation_scope"],
             {
-                "scope": "phase8f_repository_candidate",
-                "environment": "repository_only",
-                "current_candidate_disposable_validated": False,
+                "scope": "phase8g_current_candidate",
+                "environment": "disposable_postgresql_qdrant_synthetic_only",
+                "current_candidate_disposable_validated": True,
                 "historical_phase7c_disposable_proof_retained": True,
-                "disposable_revalidation_required": True,
+                "disposable_revalidation_required": False,
                 "production_data_read": False,
                 "provider_external_calls": 0,
                 "production_state_changed": False,
             },
         )
         requirements = schema["hard_requirements"]
-        self.assertFalse(requirements["current_disposable_successor_validation_complete"])
-        self.assertFalse(schema["claim_detail"]["disposable_validated"])
+        self.assertTrue(requirements["current_disposable_successor_validation_complete"])
+        self.assertTrue(schema["claim_detail"]["disposable_validated"])
         self.assertTrue(
             schema["claim_detail"]["historical_phase7c_disposable_validated"]
         )
-        self.assertFalse(schema["pilot_marker"]["disposable_validated"])
+        self.assertTrue(schema["pilot_marker"]["disposable_validated"])
         self.assertTrue(
             schema["pilot_marker"]["historical_phase7c_disposable_validated"]
         )
@@ -764,8 +790,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             self.load_manifest()["activation"]["blockers"],
         )
         erasure_contract = schema["interface_contracts"]["chat_source_erasure"]
-        self.assertIn("Phase 7C evidence is historical", erasure_contract)
-        self.assertIn("current disposable revalidation is required", erasure_contract)
+        self.assertIn("Phase 8G validated the current candidate", erasure_contract)
+        self.assertIn("did not install or activate production resources", erasure_contract)
 
     def test_route_surface_is_exact_and_owner_free(self) -> None:
         observed = [
@@ -930,16 +956,16 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
             "Phase 8G",
-            "Phase 8F",
             "Phase 8D",
             "Phase 7C",
             "phase8b/package_manifest.json",
             "structured LifeSwitch data",
-            "installed no service, activated no route",
-            "changed no live service, PostgreSQL database, or Qdrant collection",
-            "not live proof",
-            "Current disposable revalidation against fresh empty PostgreSQL and "
-            "Qdrant resources is still required",
+            "No service was installed, no route activated",
+            "production Docker inventory retained their pre-run identities",
+            "do not attest the current candidate",
+            "passed the current-candidate disposable application, PostgreSQL, "
+            "Qdrant, and chat-deletion proof",
+            "inactive_installation_package_not_authorized",
         ):
             self.assertIn(required, normalized)
         self.assertNotIn("successor remains inactive, uninstalled", normalized)
