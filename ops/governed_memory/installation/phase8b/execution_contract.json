@@ -1,0 +1,91 @@
+{
+  "schema_version": "governed-memory-phase8b-inactive-execution-package-v1",
+  "state": "inactive_execution_and_synthetic_proof_harness_packaged_proof_not_promoted_not_installed_not_authorized",
+  "server": "seebx",
+  "base_package_manifest_sha256": "907bab6516029418314611556e37423ef65c77e52afc48199dce43903bfb1607",
+  "authority_sequence": [
+    "A01_ACQUIRE_AND_VERIFY_GLOBAL_LOCK",
+    "A02_VERIFY_SIGNATURE_CLOCK_AND_CLAIM_NONCE",
+    "A03_DERIVE_EXECUTION_BINDING_AND_RECONCILE_JOURNAL"
+  ],
+  "execution_boundary": {
+    "approval_authorizes_execution": false,
+    "live_entrypoint_callable_but_not_cli_exposed": false,
+    "installation_executor_implemented": false,
+    "rollback_executor_implemented": false,
+    "activation_executor_implemented": false,
+    "host_commands_executed_in_this_phase": 0,
+    "docker_calls_in_this_phase": 0,
+    "systemd_calls_in_this_phase": 0,
+    "postgresql_calls_in_this_phase": 0,
+    "qdrant_calls_in_this_phase": 0,
+    "network_calls_in_this_phase": 0,
+    "secret_reads_or_writes_in_this_phase": 0
+  },
+  "binding_policy": {
+    "opaque_verified_package_capability_required": false,
+    "opaque_claimed_execution_capability_required": true,
+    "caller_selected_attempt_id_allowed": false,
+    "execution_id_derived_from_authority_claim": true,
+    "journal_binds_package_contract_plan_spec_resource_identity_implementation_and_exact_paths": true,
+    "resource_identity_ledger_content_or_head_bound": false,
+    "per_execution_journal_and_receipts_required": true
+  },
+  "durability_policy": {
+    "canonical_jsonl": true,
+    "file_and_directory_fsync_required": true,
+    "authority_state_anchor_compare_and_set_required": true,
+    "exact_equality_resume_allowed": true,
+    "exact_one_file_entry_ahead_repair_allowed": true,
+    "anchor_ahead_or_multi_entry_gap_refused": true,
+    "truncation_mutation_or_reorder_refused": true,
+    "same_open_instance_inode_and_directory_replacement_refused": true,
+    "cross_process_same_content_inode_or_directory_replacement_refused": false,
+    "compensation_effect_before_receipt_resume_supported": true,
+    "terminal_seal_recovery_implemented": false,
+    "composite_step_crash_recovery_implemented": false,
+    "end_to_end_crash_recovery_claimed": false
+  },
+  "host_action_policy": {
+    "typed_operation_specific_boundaries_only": false,
+    "arbitrary_argv_surface": false,
+    "shell_allowed": false,
+    "image_pull_build_load_import_or_run_allowed": false,
+    "source_postgresql_allowed": false,
+    "provider_endpoint_allowed": false,
+    "legacy_store_or_secret_path_allowed": false,
+    "separate_postgres_and_qdrant_secret_files_required_for_future_executor": true,
+    "secret_values_in_argv_output_journal_ledger_or_receipt_allowed": false
+  },
+  "proof_boundary": {
+    "harness_type": "guarded_synthetic_only",
+    "live_linux_proof": false,
+    "docker_or_systemd_proof": false,
+    "postgresql_or_qdrant_execution_proof": false,
+    "kernel_confinement_proof": false,
+    "no_argument_runner_uses_private_temporary_directory": true,
+    "direct_test_helper_accepts_caller_owned_disposable_root": true,
+    "synthetic_unit_exercise_requires_signed_authority": false,
+    "synthetic_unit_receipt_is_promotable_live_proof": false,
+    "future_live_disposable_linux_proof_requires_distinct_authority": "disposable_proof"
+  },
+  "remaining_blockers": [
+    "controller_runtime_not_built_or_receipted",
+    "opaque_verified_package_capability_and_claim_boundary_not_implemented",
+    "live_install_executor_not_implemented",
+    "terminal_seal_and_composite_step_crash_recovery_not_implemented",
+    "cross_process_durable_file_identity_or_equivalent_seal_not_implemented",
+    "full_resource_inspect_identity_and_ledger_anchor_not_implemented",
+    "atomic_attempt_bound_resource_ownership_between_preprobe_and_apply_not_implemented",
+    "external_postgresql_and_qdrant_readiness_profiles_not_implemented",
+    "image_baseline_environment_allowlist_not_promoted",
+    "separate_rollback_executor_and_authority_absent",
+    "disposable_linux_proof_not_run",
+    "images_not_staged_or_receipted",
+    "authority_substrate_and_trusted_clock_not_installed",
+    "current_live_preflight_absent",
+    "final_commit_tree_package_contract_plan_runtime_and_images_not_signed",
+    "dormant_install_execution_approval_absent",
+    "activation_not_authorized"
+  ]
+}

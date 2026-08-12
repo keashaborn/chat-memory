@@ -1,28 +1,33 @@
 {
-  "schema_version": "governed-memory-phase8b-stores-controller-plan-v2",
-  "state": "inactive_hermetic_algorithm_only_no_durable_journal_adapter_no_live_executor_not_installed_not_authorized",
+  "schema_version": "governed-memory-phase8b-stores-controller-plan-v3",
+  "state": "inactive_execution_components_and_synthetic_harness_packaged_no_complete_live_executor_not_installed_not_authorized",
   "server": "seebx",
   "candidate_id": "governed_memory_9a54cf123493_000001",
   "contract": "ops/governed_memory/installation/phase8b/contract.json",
   "execution_invariants": {
     "ordered_steps_only": true,
-    "one_effect_at_a_time": true,
+    "one_controller_step_at_a_time": true,
     "global_lock_held_for_entire_execution": true,
     "nonce_claimed_before_first_effect": true,
-    "hermetic_algorithm_only": true,
-    "durable_journal_or_anchor_adapter_packaged": false,
-    "durable_crash_recovery_proven": false,
-    "intent_ordered_before_effect_in_hermetic_model": true,
+    "execution_and_attempt_identifiers_claim_derived": true,
+    "controller_model_is_backend_injected": true,
+    "durable_journal_and_anchor_adapter_packaged": true,
+    "durable_journal_and_anchor_require_global_lock": true,
+    "durable_process_crash_recovery_proven": false,
+    "composite_step_crash_recovery_proven": false,
+    "terminal_seal_recovery_proven": false,
+    "preclaim_sequence_occurs_before_controller_journal": true,
+    "intent_ordered_before_postclaim_host_effect_in_controller_model": true,
     "exact_postcondition_before_completion": true,
     "unknown_state_or_drift_refuses": true,
-    "source_postgresql_calls": 0,
-    "provider_calls": 0,
-    "initial_postgresql_user_rows": 0,
-    "initial_qdrant_points": 0
+    "source_postgresql_calls_in_this_phase": 0,
+    "provider_calls_in_this_phase": 0,
+    "initial_postgresql_user_rows_required": 0,
+    "initial_qdrant_points_required": 0
   },
   "install_steps": [
-    {"id": "I01_LOCK_AND_VERIFY_AUTHORITY_SUBSTRATE", "effect": "verify_held_global_lock_and_authority_substrate", "rollback": "none"},
-    {"id": "I02_VERIFY_AND_CLAIM_INSTALL_AUTHORITY", "effect": "verify_and_claim_install_authority", "rollback": "retain_single_use_nonce_claim"},
+    {"id": "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK", "effect": "reverify_preclaimed_execution_lock", "rollback": "none"},
+    {"id": "I02_VERIFY_CLAIMED_EXECUTION_BINDING", "effect": "verify_claimed_execution_binding", "rollback": "retain_single_use_nonce_claim"},
     {"id": "I03_VERIFY_LIVE_PREFLIGHT", "effect": "verify_live_preflight", "rollback": "none"},
     {"id": "I04_STAGE_IMMUTABLE_CONTROLLER_RELEASE", "effect": "stage_immutable_controller_release", "rollback": "remove_immutable_controller_release"},
     {"id": "I05_GENERATE_FRESH_STORE_SECRETS", "effect": "generate_fresh_store_secrets", "rollback": "remove_fresh_store_secrets"},
@@ -60,6 +65,8 @@
     "I04_STAGE_IMMUTABLE_CONTROLLER_RELEASE"
   ],
   "later_rollback": {
+    "eligibility_verifier_packaged": true,
+    "rollback_executor_packaged": false,
     "separate_signed_operation_required": true,
     "install_authority_reuse_allowed": false,
     "pilot_ever_started_must_be": false,
@@ -73,9 +80,15 @@
     "retain_nonce_journal_anchor_ledger_and_receipts": true
   },
   "live_execution": {
+    "installation_composition_callable_packaged": false,
     "live_install_entrypoint_packaged": false,
+    "generic_docker_host_runner_primitive_packaged": true,
+    "local_image_inspect_adapter_packaged": true,
+    "claim_bound_installation_runner_composition_packaged": false,
+    "claim_bound_installation_store_effect_adapters_packaged": false,
     "live_rollback_entrypoint_packaged": false,
     "live_activation_entrypoint_packaged": false,
+    "claim_bound_installation_typed_command_boundary_packaged": false,
     "stores_supervisor_cli_packaged": true,
     "stores_supervisor_cli_docker_surface": [
       "container_inspect",
@@ -84,5 +97,12 @@
     ],
     "stores_supervisor_is_installer": false,
     "stores_supervisor_requires_preexisting_exact_ledger_container_ids": true
+  },
+  "synthetic_proof": {
+    "guarded_harness_packaged": true,
+    "sealed_backend_constructed_internally": true,
+    "live_mode_packaged": false,
+    "proof_receipt_promoted": false,
+    "live_or_durable_process_crash_claim": false
   }
 }

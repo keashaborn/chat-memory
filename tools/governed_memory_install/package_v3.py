@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Offline verifier for the current Phase 8B stores-only package.
+"""Offline verifier for the current inactive Phase 8B execution package.
 
 The verifier reads repository files only. It has no command runner, live
 executor, network client, secret reader, installation, rollback, or activation
@@ -47,18 +47,42 @@ MIGRATION_VERIFIER_RELATIVE: Final = (
 CONTROLLER_MODEL_RELATIVE: Final = (
     "tools/governed_memory_install/controller_v2.py"
 )
+EXECUTION_CONTRACT_RELATIVE: Final = (
+    "ops/governed_memory/installation/phase8b/execution_contract.json"
+)
+CONTROLLER_RUNTIME_CONTRACT_RELATIVE: Final = (
+    "ops/governed_memory/installation/phase8b/controller_runtime_contract.json"
+)
+PROOF_CONTRACT_RELATIVE: Final = (
+    "ops/governed_memory/installation/phase8b/disposable_proof_contract.json"
+)
+PROOF_SCHEMA_RELATIVE: Final = (
+    "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json"
+)
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "68b46b20a047756d13e9060079efc90e62f5e650fc832a9f24954dd8ccae83d2"
+    "a6b145e5c6e9f53aabe180d8ca78ee499ed97353c1d9d69677873ae802fa8455"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "8f0d7ad5ce48a5b2aae33c519d5c819141c29b2960a2572d3f4aac312a98b3ae"
+    "65f9be1d974bfeb6f047b6c33c3fd5a2c4df1a7eeec3df274e75488168de75e2"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
-    "10291cca7067a0817cec57f6f3d32f90e0410e4d7869826fe9ec019e28ee0c54"
+    "9fa3b1a1098fe886363ad9ce23d0fecb04cf1298a6cd78456b3af5801ce8f414"
 )
 EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
-    "cc96a5aa51dce135d0d306e079aa840d5194d7440c45995d22bdaff17790745e"
+    "601288e31fd1b485e57ef5fd4676f9477942db0c3aa3c911de1d002361c49243"
+)
+EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
+    "b092c15dbd713b74226ca08fdd98071e88808141e359960e9e7f1705bca84165"
+)
+EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
+    "f12c9e52bfd4adacaff9715ea7b9a3b097286df5bcc613344c47cb80ff84a315"
+)
+EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
+    "22b29fe079ad813cb2082af8ad3d6830127174c29dea0e1dbb3db7176bf4f1b8"
+)
+EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256: Final = (
+    "3dbc0e9a3e927ec3a17734fae67f02dd0d1567c0c4220f3ae61954a4ee301d67"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
     "a5c21c48d692040fefc13473c37d3a5e8e652455a0484cf7a72f73904bd0eac0"
@@ -67,8 +91,8 @@ EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "0068a7b9aca51c35185bad33607574c3cc108c0f3b384aa1742e09f4329102cb"
 )
 EXPECTED_CONTROLLER_STEP_IDS: Final = (
-    "I01_LOCK_AND_VERIFY_AUTHORITY_SUBSTRATE",
-    "I02_VERIFY_AND_CLAIM_INSTALL_AUTHORITY",
+    "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
+    "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
     "I03_VERIFY_LIVE_PREFLIGHT",
     "I04_STAGE_IMMUTABLE_CONTROLLER_RELEASE",
     "I05_GENERATE_FRESH_STORE_SECRETS",
@@ -106,6 +130,7 @@ EXPECTED_CONTRACT_KEYS: Final = frozenset(
         "recovery_policy",
         "identity_policy",
         "supervisor_policy",
+        "proof_harness_policy",
         "excluded_components",
         "remaining_blockers",
     }
@@ -122,12 +147,19 @@ EXPECTED_PLAN_KEYS: Final = frozenset(
         "same_attempt_compensation_order",
         "later_rollback",
         "live_execution",
+        "synthetic_proof",
     }
 )
 EXPECTED_LIVE_EXECUTION: Final = {
+    "installation_composition_callable_packaged": False,
     "live_install_entrypoint_packaged": False,
+    "generic_docker_host_runner_primitive_packaged": True,
+    "local_image_inspect_adapter_packaged": True,
+    "claim_bound_installation_runner_composition_packaged": False,
+    "claim_bound_installation_store_effect_adapters_packaged": False,
     "live_rollback_entrypoint_packaged": False,
     "live_activation_entrypoint_packaged": False,
+    "claim_bound_installation_typed_command_boundary_packaged": False,
     "stores_supervisor_cli_packaged": True,
     "stores_supervisor_cli_docker_surface": [
         "container_inspect",
@@ -164,19 +196,28 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "governed-memory-migrations/schema_contract.json",
         "ops/governed_memory/installation/phase8b/contract.json",
         "ops/governed_memory/installation/phase8b/controller_plan.json",
+        "ops/governed_memory/installation/phase8b/controller_runtime_contract.json",
+        "ops/governed_memory/installation/phase8b/disposable_proof_contract.json",
+        "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
+        "ops/governed_memory/installation/phase8b/execution_contract.json",
         "ops/governed_memory/installation/phase8b/migration_manifest.json",
         "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json",
         "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
         "ops/governed_memory/installation/store_spec.json",
+        "ops/governed_memory/controller-requirements.lock",
         "ops/governed_memory/installation/systemd/governed-memory-stores.service.in",
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
+        "tools/governed_memory_install/__init__.py",
         "tools/governed_memory_install/authority_v2.py",
         "tools/governed_memory_install/authority_state.py",
         "tools/governed_memory_install/controller_v2.py",
+        "tools/governed_memory_install/disposable_proof_harness.py",
+        "tools/governed_memory_install/durable_journal_v2.py",
         "tools/governed_memory_install/execution_authority.py",
+        "tools/governed_memory_install/execution_capability_v2.py",
         "tools/governed_memory_install/execution_lock.py",
         "tools/governed_memory_install/host_boundary.py",
         "tools/governed_memory_install/image_preflight.py",
@@ -185,7 +226,9 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/resource_identity.py",
         "tools/governed_memory_install/secure_file.py",
         "tools/governed_memory_install/store_supervisor.py",
+        "tools/governed_memory_install/synthetic_backend_v2.py",
         "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
+        "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
     }
 )
@@ -362,11 +405,11 @@ def _verify_contract(contract: dict[str, object]) -> None:
         raise PackageV3Error("phase8b_contract_semantics_invalid")
     if (
         contract.get("schema_version")
-        != "governed-memory-phase8b-inactive-stores-contract-v1"
+        != "governed-memory-phase8b-inactive-execution-contract-v2"
         or contract.get("state")
         != (
-            "phase8b_inactive_remediation_packaged_proof_pending_not_staged_"
-            "not_installed_not_authorized"
+            "phase8b_inactive_execution_and_synthetic_proof_harness_packaged_"
+            "proof_pending_not_staged_not_installed_not_authorized"
         )
         or contract.get("server") != "seebx"
     ):
@@ -376,11 +419,13 @@ def _verify_contract(contract: dict[str, object]) -> None:
         scope.get(key) is not False
         for key in (
             "current_phase_executes_live_steps",
+            "current_phase_promotes_disposable_proof_receipt",
             "current_phase_stages_images",
-            "current_phase_reads_or_writes_secrets",
+            "current_phase_reads_writes_or_generates_secrets",
             "current_phase_installs_or_activates",
             "current_approval_is_future_install_authority",
             "current_approval_is_future_rollback_authority",
+            "current_approval_is_future_live_proof_authority",
         )
     ):
         raise PackageV3Error("phase8b_contract_authority_boundary_invalid")
@@ -400,6 +445,31 @@ def _verify_contract(contract: dict[str, object]) -> None:
         is not False
     ):
         raise PackageV3Error("phase8b_contract_secret_boundary_invalid")
+    authority = contract.get("authority_policy")
+    recovery = contract.get("recovery_policy")
+    blockers = contract.get("remaining_blockers")
+    if (
+        type(authority) is not dict
+        or authority.get("opaque_verified_package_capability_required") is not False
+        or authority.get("opaque_claimed_execution_binding_required") is not True
+        or type(recovery) is not dict
+        or recovery.get("same_open_instance_inode_and_directory_replacement_refused")
+        is not True
+        or recovery.get(
+            "cross_process_same_content_inode_or_directory_replacement_refused"
+        )
+        is not False
+        or type(blockers) is not list
+        or (
+            "opaque_verified_package_capability_and_claim_boundary_not_implemented"
+            not in blockers
+        )
+        or (
+            "cross_process_durable_file_identity_or_equivalent_seal_not_implemented"
+            not in blockers
+        )
+    ):
+        raise PackageV3Error("phase8b_contract_package_claim_boundary_invalid")
 
 
 def _verify_plan(plan: dict[str, object]) -> None:
@@ -409,11 +479,11 @@ def _verify_plan(plan: dict[str, object]) -> None:
         raise PackageV3Error("phase8b_plan_semantics_invalid")
     if (
         plan.get("schema_version")
-        != "governed-memory-phase8b-stores-controller-plan-v2"
+        != "governed-memory-phase8b-stores-controller-plan-v3"
         or plan.get("state")
         != (
-            "inactive_hermetic_algorithm_only_no_durable_journal_adapter_no_"
-            "live_executor_not_installed_not_authorized"
+            "inactive_execution_components_and_synthetic_harness_packaged_"
+            "no_complete_live_executor_not_installed_not_authorized"
         )
         or plan.get("server") != "seebx"
     ):
@@ -438,6 +508,122 @@ def _verify_plan(plan: dict[str, object]) -> None:
     live = plan.get("live_execution")
     if live != EXPECTED_LIVE_EXECUTION:
         raise PackageV3Error("phase8b_plan_live_surface_invalid")
+
+
+def _verify_extension_contracts(observed: dict[str, str]) -> None:
+    execution = _load_verified_json(
+        EXECUTION_CONTRACT_RELATIVE,
+        observed[EXECUTION_CONTRACT_RELATIVE],
+    )
+    runtime = _load_verified_json(
+        CONTROLLER_RUNTIME_CONTRACT_RELATIVE,
+        observed[CONTROLLER_RUNTIME_CONTRACT_RELATIVE],
+    )
+    proof = _load_verified_json(
+        PROOF_CONTRACT_RELATIVE,
+        observed[PROOF_CONTRACT_RELATIVE],
+    )
+    proof_schema = _load_verified_json(
+        PROOF_SCHEMA_RELATIVE,
+        observed[PROOF_SCHEMA_RELATIVE],
+    )
+    exact = (
+        (execution, EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256),
+        (runtime, EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256),
+        (proof, EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256),
+        (proof_schema, EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256),
+    )
+    if any(_canonical_sha256(value) != wanted for value, wanted in exact):
+        raise PackageV3Error("phase8b_extension_contract_semantics_invalid")
+
+    boundary = execution.get("execution_boundary")
+    binding = execution.get("binding_policy")
+    durability = execution.get("durability_policy")
+    host = execution.get("host_action_policy")
+    proof_boundary = execution.get("proof_boundary")
+    build = runtime.get("build_policy")
+    entrypoint = runtime.get("entrypoint_policy")
+    proof_execution = proof.get("execution_boundary")
+    proof_claims = proof.get("claims")
+    if (
+        execution.get("schema_version")
+        != "governed-memory-phase8b-inactive-execution-package-v1"
+        or type(boundary) is not dict
+        or any(
+            boundary.get(key) is not False
+            for key in (
+                "approval_authorizes_execution",
+                "installation_executor_implemented",
+                "rollback_executor_implemented",
+                "activation_executor_implemented",
+                "live_entrypoint_callable_but_not_cli_exposed",
+            )
+        )
+        or type(binding) is not dict
+        or binding.get("opaque_verified_package_capability_required") is not False
+        or binding.get("opaque_claimed_execution_capability_required") is not True
+        or type(durability) is not dict
+        or durability.get(
+            "same_open_instance_inode_and_directory_replacement_refused"
+        )
+        is not True
+        or durability.get(
+            "cross_process_same_content_inode_or_directory_replacement_refused"
+        )
+        is not False
+        or type(execution.get("remaining_blockers")) is not list
+        or (
+            "opaque_verified_package_capability_and_claim_boundary_not_implemented"
+            not in execution["remaining_blockers"]
+        )
+        or (
+            "cross_process_durable_file_identity_or_equivalent_seal_not_implemented"
+            not in execution["remaining_blockers"]
+        )
+        or type(host) is not dict
+        or host.get("typed_operation_specific_boundaries_only") is not False
+        or type(proof_boundary) is not dict
+        or proof_boundary.get("harness_type")
+        != "guarded_synthetic_only"
+        or type(build) is not dict
+        or build.get("current_runtime_built") is not False
+        or build.get("current_runtime_installed") is not False
+        or type(entrypoint) is not dict
+        or entrypoint.get("opaque_python_capabilities_resist_hostile_same_process_code")
+        is not False
+        or type(proof_execution) is not dict
+        or any(
+            proof_execution.get(key) is not False
+            for key in (
+                "live_mode_exists",
+                "command_runner_exists",
+                "host_adapter_exists",
+                "docker_adapter_exists",
+                "systemd_adapter_exists",
+                "network_adapter_exists",
+                "secret_adapter_exists",
+                "installation_adapter_exists",
+                "activation_adapter_exists",
+            )
+        )
+        or type(proof_claims) is not dict
+        or any(
+            proof_claims.get(key) is not False
+            for key in (
+                "live_execution_proven",
+                "live_installation_proven",
+                "live_rollback_proven",
+                "durable_process_crash_recovery_proven",
+                "composite_crash_recovery_proven",
+                "docker_compatibility_proven",
+                "systemd_compatibility_proven",
+                "external_store_readiness_proven",
+                "activation_proven",
+            )
+        )
+        or proof_schema.get("additionalProperties") is not False
+    ):
+        raise PackageV3Error("phase8b_extension_contract_boundary_invalid")
 
 
 def _load_verified_module(
@@ -605,11 +791,11 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
         raise PackageV3Error("phase8b_package_manifest_shape_invalid")
     if (
         manifest.get("schema_version")
-        != "governed-memory-phase8b-inactive-stores-package-manifest-v1"
+        != "governed-memory-phase8b-inactive-execution-package-manifest-v2"
         or manifest.get("state")
         != (
-            "inactive_remediation_package_proof_pending_not_staged_"
-            "not_installed_not_authorized"
+            "inactive_execution_and_synthetic_proof_harness_packaged_proof_"
+            "pending_not_staged_not_installed_not_authorized"
         )
     ):
         raise PackageV3Error("phase8b_package_manifest_identity_invalid")
@@ -651,6 +837,7 @@ def verify() -> dict[str, object]:
     )
     _verify_contract(contract)
     _verify_plan(plan)
+    _verify_extension_contracts(observed)
 
     controller = _load_verified_controller_module(
         CONTROLLER_MODEL_RELATIVE,
@@ -665,17 +852,35 @@ def verify() -> dict[str, object]:
     migration_receipt = _verify_migration_binding(observed, migration_verifier)
 
     return {
-        "schema_version": "governed-memory-phase8b-package-verification-v2",
+        "schema_version": "governed-memory-phase8b-package-verification-v3",
         "state": str(manifest["state"]),
         "artifact_count": len(observed),
         "artifact_sha256": dict(sorted(observed.items())),
         "package_manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
         "contract_canonical_sha256": _canonical_sha256(contract),
         "plan_canonical_sha256": _canonical_sha256(plan),
+        "execution_contract_canonical_sha256": (
+            EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256
+        ),
+        "controller_runtime_contract_canonical_sha256": (
+            EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256
+        ),
+        "proof_contract_canonical_sha256": (
+            EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256
+        ),
+        "proof_schema_canonical_sha256": EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
         "controller_source_sha256": observed[CONTROLLER_MODEL_RELATIVE],
         "controller_model_sha256": controller_model_sha256,
         "migration_verifier_source_sha256": observed[MIGRATION_VERIFIER_RELATIVE],
         "migration_manifest_sha256": migration_receipt["manifest_sha256"],
+        "durable_journal_adapter_packaged": True,
+        "guarded_synthetic_proof_harness_packaged": True,
+        "synthetic_proof_executed_by_verifier": False,
+        "synthetic_proof_receipt_promoted": False,
+        "generic_docker_host_runner_primitive_packaged": True,
+        "local_image_inspect_adapter_packaged": True,
+        "claim_bound_installation_runner_composition_packaged": False,
+        "claim_bound_installation_store_effect_adapters_packaged": False,
         "installation_executor_packaged": False,
         "rollback_executor_packaged": False,
         "activation_executor_packaged": False,

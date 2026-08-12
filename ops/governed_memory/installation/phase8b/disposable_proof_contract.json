@@ -1,0 +1,112 @@
+{
+  "schema_version": "governed-memory-phase8b-disposable-proof-contract-v1",
+  "state": "inactive_synthetic_harness_packaged_unit_executable_no_promoted_receipt_no_live_execution",
+  "server_target_if_separately_authorized_later": "seebx",
+  "proof_scope": "synthetic_in_process_model_only",
+  "entrypoint": "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
+  "execution_boundary": {
+    "backend": "sealed_in_memory_synthetic_backend_v2_api_boundary",
+    "backend_is_constructed_internally": true,
+    "backend_injection_allowed": false,
+    "live_mode_exists": false,
+    "command_runner_exists": false,
+    "host_adapter_exists": false,
+    "network_adapter_exists": false,
+    "secret_adapter_exists": false,
+    "docker_adapter_exists": false,
+    "systemd_adapter_exists": false,
+    "installation_adapter_exists": false,
+    "activation_adapter_exists": false,
+    "runner_accepts_arguments": false
+  },
+  "disposable_root_policy": {
+    "no_argument_runner_creates_and_removes_private_temporary_root": true,
+    "direct_harness_function_is_test_helper_accepting_caller_owned_root": true,
+    "direct_harness_function_removes_caller_owned_root": false
+  },
+  "audit_fence": {
+    "installed_before_local_runner_imports": true,
+    "runtime_fence_also_applies_to_direct_harness_calls": true,
+    "instrumentation": "python_audit_hook_best_effort_not_kernel_confinement",
+    "kernel_confinement_claimed": false,
+    "hostile_same_process_replacement_resisted": false,
+    "configured_to_refuse_process_network_dynamic_import_environment_and_out_of_boundary_filesystem_events": true,
+    "disposable_root_must_be_empty_owned_mode_0700_non_symlink": true
+  },
+  "scenario_matrix": {
+    "scenario_count": 131,
+    "plan_step_count": 20,
+    "compensable_step_count": 15,
+    "maximum_injected_events_per_scenario": 2,
+    "maximum_interruptions_per_scenario": 1,
+    "family_counts": {
+      "happy_path": 1,
+      "ordinary_failure_before_effect": 20,
+      "ordinary_failure_after_effect": 20,
+      "interrupt_before_effect": 20,
+      "interrupt_after_effect": 20,
+      "interrupt_after_applied_journal": 20,
+      "interrupt_before_compensation": 15,
+      "interrupt_after_compensation": 15
+    },
+    "all_twenty_steps_targeted_by_each_effect_fault_family": true,
+    "all_fifteen_compensable_steps_targeted_by_each_compensation_interruption_family": true,
+    "seal_effect_interruption_is_refused_not_repaired": true,
+    "interruptions_are_baseexception_markers_in_one_process": true,
+    "compensation_interruption_scenarios_include_one_trigger_failure_and_one_interruption": true,
+    "operating_system_process_kills_performed": 0,
+    "composite_step_partial_failure_scenarios_performed": 0
+  },
+  "receipt_policy": {
+    "schema": "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
+    "content_free": true,
+    "timestamps_recorded": false,
+    "hostnames_recorded": false,
+    "filesystem_paths_recorded": false,
+    "environment_names_or_values_recorded": false,
+    "secret_names_values_or_derived_hashes_recorded": false,
+    "authorization_or_nonce_material_recorded": false,
+    "chat_account_attachment_lifeswitch_or_memory_content_recorded": false,
+    "raw_exception_messages_recorded": false,
+    "only_structural_counts_booleans_and_sha256_bindings_recorded": true
+  },
+  "claims": {
+    "synthetic_atomic_step_plan_model_exercised": true,
+    "single_interruption_resume_model_exercised": true,
+    "same_attempt_compensation_sequence_model_exercised": true,
+    "full_pre_attempt_state_restoration_proven": false,
+    "empty_rollback_proven": false,
+    "live_execution_proven": false,
+    "live_installation_proven": false,
+    "live_rollback_proven": false,
+    "durable_process_crash_recovery_proven": false,
+    "composite_crash_recovery_proven": false,
+    "docker_compatibility_proven": false,
+    "systemd_compatibility_proven": false,
+    "external_store_readiness_proven": false,
+    "activation_proven": false
+  },
+  "prohibitions": {
+    "run_docker": true,
+    "stage_or_pull_images": true,
+    "read_write_or_generate_secrets": true,
+    "install_files_or_units": true,
+    "start_stop_restart_or_enable_services": true,
+    "connect_to_postgresql_or_qdrant": true,
+    "connect_to_source_postgresql": true,
+    "touch_chat_account_attachment_lifeswitch_or_memory_data": true,
+    "activate_successor": true
+  },
+  "remaining_live_proof_requirements": [
+    "separately_authorized_exact_image_staging",
+    "separately_authorized_disposable_linux_execution",
+    "durable_fsynced_journal_and_anchor_recovery",
+    "real_process_termination_recovery",
+    "composite_crash_recovery",
+    "external_postgresql_and_qdrant_readiness",
+    "container_and_systemd_compatibility",
+    "cold_restart_and_empty_rollback",
+    "separate_install_or_rollback_authority",
+    "separate_activation_authority"
+  ]
+}

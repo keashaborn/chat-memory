@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """Hermetic Phase 8B stores-only controller state machine.
 
-This module contains no host executor or durable journal adapter.  It models an
+This module contains no host executor. It models an
 exact twenty-step plan against an injected hermetic backend so ordering,
-in-process journal interpretation, drift refusal, and compensation algorithms
-can be tested without touching a host.  It is not crash-recovery proof.
+journal interpretation, drift refusal, and compensation algorithms can be
+tested without touching a host. A separate packaged backend may supply the
+durable journal adapter. This module is not end-to-end crash-recovery proof.
 """
 
 from dataclasses import dataclass
@@ -82,6 +83,7 @@ class InstallationCompensatedError(ControllerV2Error):
 class StepState(str, Enum):
     BEFORE = "before"
     AFTER = "after"
+    RECOVERABLE = "recoverable"
     DRIFT = "drift"
 
 
@@ -116,13 +118,13 @@ class PlanStep:
 
 STORES_ONLY_PLAN: Final = (
     PlanStep(
-        "I01_LOCK_AND_VERIFY_AUTHORITY_SUBSTRATE",
-        "verify_held_global_lock_and_authority_substrate",
+        "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
+        "reverify_preclaimed_execution_lock",
         "none",
     ),
     PlanStep(
-        "I02_VERIFY_AND_CLAIM_INSTALL_AUTHORITY",
-        "verify_and_claim_install_authority",
+        "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
+        "verify_claimed_execution_binding",
         "retain_single_use_nonce_claim",
     ),
     PlanStep(
@@ -245,8 +247,8 @@ def validate_plan(plan: tuple[PlanStep, ...]) -> str:
         if position == 20 and not step.seals:
             raise PlanValidationError("phase8b_plan_seal_invalid")
     expected_noncompensable = {
-        "I01_LOCK_AND_VERIFY_AUTHORITY_SUBSTRATE": "none",
-        "I02_VERIFY_AND_CLAIM_INSTALL_AUTHORITY": (
+        "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK": "none",
+        "I02_VERIFY_CLAIMED_EXECUTION_BINDING": (
             "retain_single_use_nonce_claim"
         ),
         "I03_VERIFY_LIVE_PREFLIGHT": "none",
@@ -417,8 +419,19 @@ class Phase8BStoresController:
             for step in self.plan:
                 if step.step_id in history.applied_step_ids:
                     continue
+                self._verify_known_states(history)
+                self._verify_untouched_states(history)
                 current = step
                 if history.intent_only_step_id != step.step_id:
+                    fresh_state = self._probe(step)
+                    if fresh_state is not StepState.BEFORE:
+                        if step.seals and fresh_state is StepState.AFTER:
+                            raise CompletedStateError(
+                                "phase8b_unowned_inactive_postflight_seal_present"
+                            )
+                        raise StateDriftError(
+                            "phase8b_fresh_step_not_before:" + step.step_id
+                        )
                     self._append(attempt_id, step.step_id, JournalEvent.INTENT)
                 self._require_lock()
                 self.backend.apply(step)
@@ -430,6 +443,8 @@ class Phase8BStoresController:
                     )
                 self._append(attempt_id, step.step_id, JournalEvent.APPLIED)
                 history = self._load_history(attempt_id)
+            history = self._load_history(attempt_id)
+            self._verify_known_states(history)
             return self._receipt(attempt_id, "inactive_stores_installation_complete")
         except ControllerV2Error:
             raise
@@ -441,12 +456,23 @@ class Phase8BStoresController:
                 raise StateDriftError(
                     "phase8b_failed_step_state_drift:" + current.step_id
                 ) from cause
+            if state is StepState.RECOVERABLE:
+                raise StateDriftError(
+                    "phase8b_failed_step_recoverable_requires_exact_resume:"
+                    + current.step_id
+                ) from cause
             if current.seals and state is StepState.AFTER:
                 raise CompletedStateError(
                     "phase8b_seal_effect_present_after_failure"
                 ) from cause
             if state is StepState.AFTER:
-                self._append(attempt_id, current.step_id, JournalEvent.APPLIED)
+                refreshed = self._load_history(attempt_id)
+                if current.step_id not in refreshed.applied_step_ids:
+                    self._append(
+                        attempt_id,
+                        current.step_id,
+                        JournalEvent.APPLIED,
+                    )
             try:
                 self._append(
                     attempt_id,
@@ -635,10 +661,36 @@ class Phase8BStoresController:
             state = self._probe(step)
             if state is StepState.DRIFT:
                 raise StateDriftError("phase8b_step_state_drift:" + step.step_id)
+            if state is StepState.RECOVERABLE:
+                exact_install_intent = (
+                    not history.compensation_started
+                    and step.step_id == history.intent_only_step_id
+                )
+                exact_compensation_intent = (
+                    history.compensation_started
+                    and step.step_id == history.compensation_intent_step_id
+                )
+                if exact_install_intent or exact_compensation_intent:
+                    continue
+                raise StateDriftError(
+                    "phase8b_recoverable_without_exact_current_intent:"
+                    + step.step_id
+                )
             if step.step_id in compensated:
                 if state is not StepState.BEFORE:
                     raise StateDriftError(
                         "phase8b_compensated_step_not_before:" + step.step_id
+                    )
+            elif (
+                history.compensation_started
+                and step.step_id == history.compensation_intent_step_id
+            ):
+                # AFTER means compensation has not run; BEFORE means it ran
+                # and the crash occurred before COMPENSATED was appended.
+                if state not in {StepState.AFTER, StepState.BEFORE}:
+                    raise StateDriftError(
+                        "phase8b_compensation_intent_state_invalid:"
+                        + step.step_id
                     )
             elif step.step_id in history.applied_step_ids:
                 if state is not StepState.AFTER:
@@ -652,6 +704,14 @@ class Phase8BStoresController:
             ):
                 raise StateDriftError(
                     "phase8b_failed_unapplied_step_not_before:" + step.step_id
+                )
+            elif (
+                history.compensation_started
+                and step.step_id not in history.applied_step_ids
+                and state is not StepState.BEFORE
+            ):
+                raise StateDriftError(
+                    "phase8b_unowned_effect_during_compensation:" + step.step_id
                 )
 
     def _recover_intent_after_effect(
@@ -668,6 +728,11 @@ class Phase8BStoresController:
                 raise CompletedStateError("phase8b_unjournaled_seal_effect_present")
             self._append(attempt_id, step.step_id, JournalEvent.APPLIED)
             return self._load_history(attempt_id)
+        if state is StepState.RECOVERABLE:
+            # The exact durable intent permits the backend to re-enter only
+            # this step.  No APPLIED record is synthesized for a composite
+            # or partially observed effect.
+            return history
         if state is not StepState.BEFORE:
             raise StateDriftError("phase8b_intent_state_invalid:" + step.step_id)
         return history
@@ -696,6 +761,8 @@ class Phase8BStoresController:
     ) -> ControllerReceiptV2:
         if not history.compensation_started:
             raise CompensationBlockedError("phase8b_compensation_not_started")
+        history = self._load_history(attempt_id)
+        self._verify_known_states(history)
         seal_state = self._probe(self.plan[-1])
         if seal_state is not StepState.BEFORE:
             raise CompensationBlockedError(
@@ -704,6 +771,7 @@ class Phase8BStoresController:
         compensated = set(history.compensated_step_ids)
         step_by_id = {step.step_id: step for step in self.plan}
         for step_id in reversed(history.applied_step_ids):
+            self._verify_known_states(history)
             step = step_by_id[step_id]
             if step.seals:
                 raise CompensationBlockedError(
@@ -722,7 +790,7 @@ class Phase8BStoresController:
                 self._append(
                     attempt_id, step_id, JournalEvent.COMPENSATION_INTENT
                 )
-            if state is StepState.AFTER:
+            if state in {StepState.AFTER, StepState.RECOVERABLE}:
                 self._require_lock()
                 self.backend.compensate(step)
                 self._require_lock()
@@ -733,7 +801,10 @@ class Phase8BStoresController:
                 )
             self._append(attempt_id, step_id, JournalEvent.COMPENSATED)
             history = self._load_history(attempt_id)
+            self._verify_known_states(history)
             compensated.add(step_id)
+        history = self._load_history(attempt_id)
+        self._verify_known_states(history)
         self._append(
             attempt_id, ATTEMPT_STEP_ID, JournalEvent.COMPENSATION_COMPLETE
         )

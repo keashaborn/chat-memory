@@ -19,11 +19,11 @@ from tools.governed_memory_install.package_v3 import (  # noqa: E402
 def generate() -> dict[str, object]:
     return {
         "schema_version": (
-            "governed-memory-phase8b-inactive-stores-package-manifest-v1"
+            "governed-memory-phase8b-inactive-execution-package-manifest-v2"
         ),
         "state": (
-            "inactive_remediation_package_proof_pending_not_staged_"
-            "not_installed_not_authorized"
+            "inactive_execution_and_synthetic_proof_harness_packaged_proof_"
+            "pending_not_staged_not_installed_not_authorized"
         ),
         "artifacts": {
             relative: artifact_sha256(relative)

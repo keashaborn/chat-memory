@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from pathlib import PurePosixPath
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -30,12 +31,24 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             with patch.object(package_v3, "MANIFEST", path):
                 return package_v3.verify()
 
-    def test_current_members_verify_as_inactive_stores_only(self) -> None:
+    def test_current_members_verify_as_inactive_execution_package(self) -> None:
         receipt = self._verify_generated_manifest()
         self.assertEqual(receipt["schema_version"], (
-            "governed-memory-phase8b-package-verification-v2"
+            "governed-memory-phase8b-package-verification-v3"
         ))
-        self.assertEqual(receipt["artifact_count"], 33)
+        self.assertEqual(receipt["artifact_count"], len(package_v3.EXPECTED_ARTIFACTS))
+        self.assertTrue(receipt["durable_journal_adapter_packaged"])
+        self.assertTrue(receipt["guarded_synthetic_proof_harness_packaged"])
+        self.assertFalse(receipt["synthetic_proof_executed_by_verifier"])
+        self.assertFalse(receipt["synthetic_proof_receipt_promoted"])
+        self.assertTrue(receipt["generic_docker_host_runner_primitive_packaged"])
+        self.assertTrue(receipt["local_image_inspect_adapter_packaged"])
+        self.assertFalse(
+            receipt["claim_bound_installation_runner_composition_packaged"]
+        )
+        self.assertFalse(
+            receipt["claim_bound_installation_store_effect_adapters_packaged"]
+        )
         self.assertFalse(receipt["installation_executor_packaged"])
         self.assertFalse(receipt["rollback_executor_packaged"])
         self.assertFalse(receipt["activation_executor_packaged"])
@@ -65,6 +78,22 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             package_v3.EXPECTED_CONTROLLER_SOURCE_SHA256,
         )
         self.assertEqual(
+            receipt["execution_contract_canonical_sha256"],
+            package_v3.EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt["controller_runtime_contract_canonical_sha256"],
+            package_v3.EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt["proof_contract_canonical_sha256"],
+            package_v3.EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt["proof_schema_canonical_sha256"],
+            package_v3.EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
+        )
+        self.assertEqual(
             receipt["migration_verifier_source_sha256"],
             package_v3.EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256,
         )
@@ -73,16 +102,34 @@ class Phase8BPackageV3Tests(unittest.TestCase):
         for forbidden in package_v3.FORBIDDEN_ARTIFACT_MARKERS:
             self.assertFalse(any(forbidden in path for path in artifacts))
 
+    def test_checked_in_manifest_is_exact_generated_manifest(self) -> None:
+        checked_in = json.loads(
+            package_v3.MANIFEST.read_text(encoding="ascii")
+        )
+        self.assertEqual(checked_in, generate_phase8b_package_manifest.generate())
+        self.assertEqual(package_v3.verify()["artifact_count"], len(
+            package_v3.EXPECTED_ARTIFACTS
+        ))
+
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
     ) -> None:
         generated = generate_phase8b_package_manifest.generate()
         artifacts = generated["artifacts"]
         required = {
+            "ops/governed_memory/installation/phase8b/controller_runtime_contract.json",
+            "ops/governed_memory/installation/phase8b/disposable_proof_contract.json",
+            "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
+            "ops/governed_memory/installation/phase8b/execution_contract.json",
             "tools/governed_memory_install/package_v3.py",
+            "tools/governed_memory_install/disposable_proof_harness.py",
+            "tools/governed_memory_install/durable_journal_v2.py",
+            "tools/governed_memory_install/execution_capability_v2.py",
             "tools/governed_memory_install/secure_file.py",
+            "tools/governed_memory_install/synthetic_backend_v2.py",
             "tools/governed_memory_install/authority_v2.py",
             "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
+            "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
             "tools/governed_memory_validation/verify_store_migration_manifest.py",
             "ops/governed_memory/installation/phase8b/postgres/migration_bindings.json",
         }
@@ -93,6 +140,23 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             "governed-memory-migrations/0004_pilot_marker/package.json",
         ):
             self.assertNotIn(historical, artifacts)
+
+    def test_imported_local_package_initializers_are_manifest_bound(self) -> None:
+        required: set[str] = set()
+        for relative in package_v3.EXPECTED_ARTIFACTS:
+            if not relative.endswith(".py"):
+                continue
+            parent = PurePosixPath(relative).parent
+            while parent != PurePosixPath("."):
+                initializer = parent / "__init__.py"
+                if (ROOT / initializer.as_posix()).is_file():
+                    required.add(initializer.as_posix())
+                parent = parent.parent
+        self.assertEqual(
+            required,
+            {"tools/governed_memory_install/__init__.py"},
+        )
+        self.assertTrue(required.issubset(package_v3.EXPECTED_ARTIFACTS))
 
     def test_phase8a_historical_package_is_not_rewritten(self) -> None:
         old_manifest = ROOT / "ops/governed_memory/installation/package_manifest.json"

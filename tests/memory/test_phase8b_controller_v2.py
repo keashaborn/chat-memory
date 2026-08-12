@@ -44,12 +44,23 @@ class _HermeticBackend:
         self.fail_before_step: str | None = None
         self.fail_after_step: str | None = None
         self.fail_compensation_once_step: str | None = None
+        self.fail_after_appending_event: JournalEvent | None = None
+        self.inject_after_apply: tuple[str, str] | None = None
+        self.inject_after_compensate: tuple[str, str] | None = None
+        self.drift_after_apply: tuple[str, str] | None = None
 
     def journal_records(self) -> tuple[JournalRecord, ...]:
         return tuple(self.records)
 
     def append_journal(self, record: JournalRecord) -> None:
         self.records.append(record)
+        if record.event == (
+            self.fail_after_appending_event.value
+            if self.fail_after_appending_event is not None
+            else None
+        ):
+            self.fail_after_appending_event = None
+            raise RuntimeError("synthetic_post_journal_append_failure")
 
     def probe(self, step: PlanStep) -> StepState:
         return self.states[step.step_id]
@@ -59,7 +70,19 @@ class _HermeticBackend:
         if self.fail_before_step == step.step_id:
             self.fail_before_step = None
             raise RuntimeError("synthetic_pre_effect_failure")
+        if self.states[step.step_id] is not StepState.BEFORE:
+            raise RuntimeError("synthetic_effect_already_present")
         self.states[step.step_id] = StepState.AFTER
+        if self.inject_after_apply is not None and (
+            self.inject_after_apply[0] == step.step_id
+        ):
+            self.states[self.inject_after_apply[1]] = StepState.AFTER
+            self.inject_after_apply = None
+        if self.drift_after_apply is not None and (
+            self.drift_after_apply[0] == step.step_id
+        ):
+            self.states[self.drift_after_apply[1]] = StepState.BEFORE
+            self.drift_after_apply = None
         if self.fail_after_step == step.step_id:
             self.fail_after_step = None
             raise RuntimeError("synthetic_post_effect_failure")
@@ -70,6 +93,11 @@ class _HermeticBackend:
             self.fail_compensation_once_step = None
             raise RuntimeError("synthetic_compensation_failure")
         self.states[step.step_id] = StepState.BEFORE
+        if self.inject_after_compensate is not None and (
+            self.inject_after_compensate[0] == step.step_id
+        ):
+            self.states[self.inject_after_compensate[1]] = StepState.AFTER
+            self.inject_after_compensate = None
 
 
 class Phase8BControllerV2Tests(unittest.TestCase):
@@ -137,22 +165,28 @@ class Phase8BControllerV2Tests(unittest.TestCase):
         )
         self.assertIs(
             plan_document["execution_invariants"][
-                "durable_journal_or_anchor_adapter_packaged"
+                "durable_journal_and_anchor_adapter_packaged"
             ],
-            False,
+            True,
         )
         self.assertIs(
             plan_document["execution_invariants"][
-                "durable_crash_recovery_proven"
+                "durable_process_crash_recovery_proven"
             ],
             False,
         )
         self.assertEqual(
             plan_document["live_execution"],
             {
+                "installation_composition_callable_packaged": False,
                 "live_install_entrypoint_packaged": False,
+                "generic_docker_host_runner_primitive_packaged": True,
+                "local_image_inspect_adapter_packaged": True,
+                "claim_bound_installation_runner_composition_packaged": False,
+                "claim_bound_installation_store_effect_adapters_packaged": False,
                 "live_rollback_entrypoint_packaged": False,
                 "live_activation_entrypoint_packaged": False,
+                "claim_bound_installation_typed_command_boundary_packaged": False,
                 "stores_supervisor_cli_packaged": True,
                 "stores_supervisor_cli_docker_surface": [
                     "container_inspect",
@@ -234,6 +268,25 @@ class Phase8BControllerV2Tests(unittest.TestCase):
             JournalEvent.COMPENSATION_COMPLETE.value,
         )
 
+    def test_failure_after_applied_append_does_not_duplicate_applied(self) -> None:
+        backend = _HermeticBackend()
+        backend.fail_after_appending_event = JournalEvent.APPLIED
+        controller, backend = self._controller(backend)
+        with self.assertRaises(InstallationCompensatedError) as caught:
+            controller.run(attempt_id="post-append-failure")
+        first_step = STORES_ONLY_PLAN[0].step_id
+        applied = [
+            record
+            for record in backend.records
+            if record.step_id == first_step
+            and record.event == JournalEvent.APPLIED.value
+        ]
+        self.assertEqual(len(applied), 1)
+        self.assertEqual(
+            caught.exception.receipt.outcome,
+            "same_attempt_compensation_complete",
+        )
+
     def test_compensation_resumes_same_attempt_after_interruption(self) -> None:
         backend = _HermeticBackend()
         backend.fail_before_step = STORES_ONLY_PLAN[5].step_id
@@ -269,6 +322,60 @@ class Phase8BControllerV2Tests(unittest.TestCase):
                     controller.run(attempt_id="phase8b-drift")
                 self.assertEqual(backend.records, [])
                 self.assertEqual(backend.actions, [])
+
+    def test_unowned_effect_appearing_after_initial_scan_is_not_claimed(self) -> None:
+        backend = _HermeticBackend()
+        first = STORES_ONLY_PLAN[0].step_id
+        intervening = STORES_ONLY_PLAN[1].step_id
+        later = STORES_ONLY_PLAN[9].step_id
+        backend.inject_after_apply = (first, later)
+        controller, backend = self._controller(backend)
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "unowned_preexisting_effect:" + later,
+        ):
+            controller.run(attempt_id="late-unowned-effect")
+        self.assertIs(backend.states[later], StepState.AFTER)
+        self.assertNotIn(("apply", intervening), backend.actions)
+        self.assertNotIn(("apply", later), backend.actions)
+        self.assertNotIn(("compensate", later), backend.actions)
+        self.assertEqual(
+            [record.event for record in backend.records],
+            [JournalEvent.INTENT.value, JournalEvent.APPLIED.value],
+        )
+
+    def test_unowned_effect_during_compensation_prevents_terminal_marker(self) -> None:
+        backend = _HermeticBackend()
+        failed = STORES_ONLY_PLAN[5].step_id
+        first_compensation = STORES_ONLY_PLAN[4].step_id
+        unowned = STORES_ONLY_PLAN[9].step_id
+        backend.fail_before_step = failed
+        backend.inject_after_compensate = (first_compensation, unowned)
+        controller, backend = self._controller(backend)
+        with self.assertRaises(CompensationFailedError):
+            controller.run(attempt_id="mid-compensation-unowned-effect")
+        self.assertIs(backend.states[unowned], StepState.AFTER)
+        self.assertFalse(
+            any(
+                record.event == JournalEvent.COMPENSATION_COMPLETE.value
+                for record in backend.records
+            )
+        )
+
+    def test_prior_applied_step_drift_prevents_success_receipt(self) -> None:
+        backend = _HermeticBackend()
+        penultimate = STORES_ONLY_PLAN[-2].step_id
+        first = STORES_ONLY_PLAN[0].step_id
+        backend.drift_after_apply = (penultimate, first)
+        controller, backend = self._controller(backend)
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "applied_step_not_after:" + first,
+        ):
+            controller.run(attempt_id="late-prior-step-drift")
+        seal = STORES_ONLY_PLAN[-1].step_id
+        self.assertNotIn(("apply", seal), backend.actions)
+        self.assertFalse(any(record.step_id == seal for record in backend.records))
 
     def test_seal_effect_after_failure_blocks_compensation(self) -> None:
         backend = _HermeticBackend()
