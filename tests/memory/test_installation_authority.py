@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from tools.governed_memory_install import authority
+from tools.governed_memory_install import authority_v2
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -198,6 +199,49 @@ class InstallationAuthorityTests(unittest.TestCase):
             nonce_used=nonce_used,
         )
 
+    def _expected_bindings(self) -> authority_v2.DormantInstallExpectedBindings:
+        return authority_v2.DormantInstallExpectedBindings(
+            candidate_git_commit=str(self.scope["candidate_git_commit"]),
+            candidate_git_tree=str(self.scope["candidate_git_tree"]),
+            package_manifest_sha256=str(self.scope["package_manifest_sha256"]),
+            controller_contract_sha256=str(
+                self.scope["controller_contract_sha256"]
+            ),
+            execution_plan_sha256=str(self.scope["execution_plan_sha256"]),
+            exact_targets_sha256=str(self.scope["exact_targets_sha256"]),
+        )
+
+    def _execution_capability(
+        self,
+        *,
+        scope: dict[str, object] | None = None,
+        authorization_document: dict[str, object] | None = None,
+        expected_bindings: authority_v2.DormantInstallExpectedBindings | None = None,
+    ) -> object:
+        actual_scope = self.scope if scope is None else scope
+        actual_authorization = (
+            self.authorization
+            if authorization_document is None
+            else authorization_document
+        )
+        return authority_v2.verify_dormant_install_execution_capability(
+            self._canonical(actual_scope),
+            self._canonical(actual_authorization),
+            self._canonical(self.bundle),
+            expected_namespace=NAMESPACE,
+            expected_thread_id=THREAD_ID,
+            expected_scope_id=SCOPE_ID,
+            expected_key_id=self.key_id,
+            expected_trust_bundle_sha256=authority_v2.canonical_json_sha256(
+                self.bundle
+            ),
+            expected_bindings=(
+                self._expected_bindings()
+                if expected_bindings is None
+                else expected_bindings
+            ),
+        )
+
     def test_valid_signature_is_scope_evidence_not_execution(self) -> None:
         observed_nonces: list[str] = []
 
@@ -234,6 +278,50 @@ class InstallationAuthorityTests(unittest.TestCase):
             self.assertNotIn(forbidden, rendered.lower())
         self.assertNotIn("execute", result.__dataclass_fields__)
         self.assertNotIn("authorized", result.__dataclass_fields__)
+
+    def test_execution_capability_requires_exact_local_bindings(self) -> None:
+        capability = self._execution_capability()
+        self.assertEqual(
+            repr(capability),
+            "VerifiedDormantInstallCapability(<content-redacted>)",
+        )
+        self.assertNotIn(NONCE, repr(capability))
+
+        wrong = authority_v2.DormantInstallExpectedBindings(
+            candidate_git_commit="0" * 40,
+            candidate_git_tree="b" * 40,
+            package_manifest_sha256="c" * 64,
+            controller_contract_sha256="d" * 64,
+            execution_plan_sha256="e" * 64,
+            exact_targets_sha256="f" * 64,
+        )
+        with self.assertRaisesRegex(
+            authority_v2.AuthorityVerificationError,
+            "authority_local_binding_mismatch",
+        ):
+            self._execution_capability(expected_bindings=wrong)
+
+    def test_signature_capability_can_be_reminted_after_expiry_for_atomic_resume(
+        self,
+    ) -> None:
+        expired = self._authorization(
+            self.scope,
+            issued_at="2026-08-11T11:40:00Z",
+            not_before="2026-08-11T11:40:00Z",
+            expires_at="2026-08-11T11:50:00Z",
+        )
+        with self.assertRaisesRegex(
+            authority.AuthorityVerificationError,
+            "authorization_not_current",
+        ):
+            self._verify(authorization_document=expired)
+        capability = self._execution_capability(
+            authorization_document=expired,
+        )
+        self.assertEqual(
+            repr(capability),
+            "VerifiedDormantInstallCapability(<content-redacted>)",
+        )
 
     def test_verification_has_no_io_command_network_or_clock_dependency(self) -> None:
         with (

@@ -1,0 +1,58 @@
+{
+  "schema_version": "governed-memory-phase8b-store-migration-bindings-v1",
+  "state": "phase8b_local_execution_authority_proof_pending_not_installed_not_authorized",
+  "historical_package_descriptors_are_execution_authority": false,
+  "roles_preflight": {
+    "path": "ops/governed_memory/installation/phase8b/postgres/roles_preflight.pgsql",
+    "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e"
+  },
+  "migrations": [
+    {
+      "migration_id": "governed_memory_foundation_0001",
+      "dependencies": [
+        "phase8b_roles_preflight"
+      ],
+      "forward": {
+        "path": "0001_foundation/forward.pgsql",
+        "sha256": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91"
+      },
+      "rollback": {
+        "path": "0001_foundation/rollback.pgsql",
+        "sha256": "7d0a1473357e737518bd7de4d6f2599dac8d48ca55254925398b8c5f81b0816e",
+        "empty_only": true
+      }
+    },
+    {
+      "migration_id": "governed_memory_owner_claim_detail_0003",
+      "dependencies": [
+        "phase8b_roles_preflight",
+        "governed_memory_foundation_0001"
+      ],
+      "forward": {
+        "path": "0003_owner_claim_detail/forward.pgsql",
+        "sha256": "a8f79613f766da18131f52d5f0c0008d3b20f120c76bc1cb3ff64d81712954d5"
+      },
+      "rollback": {
+        "path": "0003_owner_claim_detail/rollback.pgsql",
+        "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68",
+        "empty_only": false,
+        "data_mutation": false
+      }
+    },
+    {
+      "migration_id": "governed_memory_pilot_marker_0004",
+      "dependencies": [
+        "governed_memory_foundation_0001"
+      ],
+      "forward": {
+        "path": "0004_pilot_marker/forward.pgsql",
+        "sha256": "90b4d1aac35a538a24444d33273e516f484252a9e4a5ea67f495a04499f6ff58"
+      },
+      "rollback": {
+        "path": "0004_pilot_marker/rollback.pgsql",
+        "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775",
+        "empty_only": true
+      }
+    }
+  ]
+}

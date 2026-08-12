@@ -1,0 +1,38 @@
+[Unit]
+Description=Governed Memory dormant PostgreSQL and Qdrant stores
+After=docker.service
+Requires=docker.service
+ConditionPathIsReadWrite=/var/lib/governed-memory-controller
+ConditionPathExists=/etc/governed-memory-controller/store_spec.json
+ConditionPathExists=/var/lib/governed-memory-controller/resource-identities.jsonl
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+WorkingDirectory=/opt/governed-memory-controller/releases/${PACKAGE_MANIFEST_SHA256}
+ExecStart=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor start --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/resource-identities.jsonl
+ExecStop=/usr/bin/python3.12 -m tools.governed_memory_install.store_supervisor stop --spec /etc/governed-memory-controller/store_spec.json --ledger /var/lib/governed-memory-controller/resource-identities.jsonl
+TimeoutStartSec=90
+TimeoutStopSec=90
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
